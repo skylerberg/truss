@@ -1,4 +1,4 @@
-fn next_index(calls: mut Int64) -> USize {
+fn next_index(calls: mut Int64) -> UInt64 {
   calls += 1
   0
 }

@@ -62,23 +62,23 @@ internal fn write_dotted(output: mut TextBuilder, first: UInt8, second: UInt8, t
   fourth.display(mut output)
 }
 
-internal fn group(octets: Array[UInt8, 16], index: USize) -> UInt16
+internal fn group(octets: Array[UInt8, 16], index: UInt64) -> UInt16
   requires index < 8
   cost time O(1)
 {
   intrinsic::convert[UInt8, UInt16](octets[2 * index]) * 256 + intrinsic::convert[UInt8, UInt16](octets[2 * index + 1])
 }
 
-internal type ZeroRun(start: USize, length: USize)
+internal type ZeroRun(start: UInt64, length: UInt64)
 
 internal fn longest_zero_run(octets: Array[UInt8, 16]) -> ZeroRun
   ensures result.start + result.length <= 8
   cost time O(1)
 {
   var best = ZeroRun(start: 0, length: 0)
-  var start: USize = 0
-  var length: USize = 0
-  let groups: USize = 8
+  var start: UInt64 = 0
+  var length: UInt64 = 0
+  let groups: UInt64 = 8
   for index in 0..groups
     invariant length <= index
     invariant length > 0 ==> start + length == index
@@ -114,7 +114,7 @@ internal fn write_groups(output: mut TextBuilder, octets: Array[UInt8, 16])
     return
   }
   let run = longest_zero_run(octets)
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < 8
     invariant index <= 8
     decreases 8 - index
@@ -143,9 +143,9 @@ impl Display for IpAddress {
   }
 }
 
-internal type ParsedOctet(value: UInt8, end: USize)
+internal type ParsedOctet(value: UInt8, end: UInt64)
 
-internal fn parse_octet(text: StringSlice, from: USize) -> Result[ParsedOctet, AddressError]
+internal fn parse_octet(text: StringSlice, from: UInt64) -> Result[ParsedOctet, AddressError]
   requires from <= text.length()
   ensures !(result is Ok(octet) && (octet.end <= from || octet.end > text.length()))
   ensures !(result is Err(error) && error.offset > text.length())
@@ -172,7 +172,7 @@ internal fn parse_octet(text: StringSlice, from: USize) -> Result[ParsedOctet, A
   Ok(ParsedOctet(value: intrinsic::convert(value), end: index))
 }
 
-internal fn expect_byte(text: StringSlice, from: USize, byte: UInt8) -> Result[USize, AddressError]
+internal fn expect_byte(text: StringSlice, from: UInt64, byte: UInt8) -> Result[UInt64, AddressError]
   requires from <= text.length()
   ensures !(result is Ok(next) && (next != from + 1 || next > text.length()))
   ensures !(result is Err(error) && error.offset > text.length())
@@ -185,9 +185,9 @@ internal fn expect_byte(text: StringSlice, from: USize, byte: UInt8) -> Result[U
   }
 }
 
-internal type ParsedQuad(octets: Array[UInt8, 4], end: USize)
+internal type ParsedQuad(octets: Array[UInt8, 4], end: UInt64)
 
-internal fn parse_dotted_quad(text: StringSlice, from: USize) -> Result[ParsedQuad, AddressError]
+internal fn parse_dotted_quad(text: StringSlice, from: UInt64) -> Result[ParsedQuad, AddressError]
   requires from <= text.length()
   ensures !(result is Ok(quad) && (quad.end <= from || quad.end > text.length()))
   ensures !(result is Err(error) && error.offset > text.length())
@@ -200,7 +200,7 @@ internal fn parse_dotted_quad(text: StringSlice, from: USize) -> Result[ParsedQu
   Ok(ParsedQuad(octets: [first.value, second.value, third.value, fourth.value], end: fourth.end))
 }
 
-internal fn is_dotted_quad_at(text: StringSlice, from: USize) -> Bool
+internal fn is_dotted_quad_at(text: StringSlice, from: UInt64) -> Bool
   requires from <= text.length()
   cost time O(1)
 {
@@ -216,9 +216,9 @@ internal fn is_dotted_quad_at(text: StringSlice, from: USize) -> Bool
   index > from && index < text.length() && text.byte(index) == 46
 }
 
-internal type Group(value: UInt16, end: USize)
+internal type Group(value: UInt16, end: UInt64)
 
-internal fn parse_group(text: StringSlice, from: USize) -> Result[Group, AddressError]
+internal fn parse_group(text: StringSlice, from: UInt64) -> Result[Group, AddressError]
   requires from <= text.length()
   ensures !(result is Ok(parsed_group) && (parsed_group.end <= from || parsed_group.end > text.length()))
   ensures !(result is Err(error) && error.offset > text.length())
@@ -246,7 +246,7 @@ internal fn parse_group(text: StringSlice, from: USize) -> Result[Group, Address
   Ok(Group(value: value, end: index))
 }
 
-internal type Ipv6Parser(groups: Array[UInt16, 8], count: USize, gap: USize, index: USize, pending: Bool)
+internal type Ipv6Parser(groups: Array[UInt16, 8], count: UInt64, gap: UInt64, index: UInt64, pending: Bool)
 
 internal fn Ipv6Parser.holds(self, text: StringSlice) -> Bool
   ensures result == (self.count <= 8 && (self.gap == 9 || self.gap <= self.count) && self.index <= text.length())
@@ -321,7 +321,7 @@ internal fn Ipv6Parser.octets(self) -> Option[Array[UInt8, 16]]
   }
   let missing = 8 - self.count
   var octets: Array[UInt8, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  let positions: USize = 8
+  let positions: UInt64 = 8
   for position in 0..positions {
     if self.gap == 9 || position < self.gap {
       octets[2 * position] = intrinsic::convert(self.groups[position] / 256)
@@ -374,7 +374,7 @@ internal fn parse_address(text: StringSlice) -> Result[IpAddress, AddressError]
   }
 }
 
-internal fn address_within(text: StringSlice, from: USize, to: USize) -> Result[IpAddress, AddressError]
+internal fn address_within(text: StringSlice, from: UInt64, to: UInt64) -> Result[IpAddress, AddressError]
   requires from <= to
   requires to <= text.length()
   ensures !(result is Err(error) && error.offset > text.length())
@@ -386,7 +386,7 @@ internal fn address_within(text: StringSlice, from: USize, to: USize) -> Result[
   }
 }
 
-internal fn parse_number(text: StringSlice, from: USize, to: USize, limit: UInt32) -> Result[UInt32, AddressError]
+internal fn parse_number(text: StringSlice, from: UInt64, to: UInt64, limit: UInt32) -> Result[UInt32, AddressError]
   requires from <= to
   requires to <= text.length()
   requires limit <= 65535
@@ -420,12 +420,12 @@ internal fn parse_number(text: StringSlice, from: USize, to: USize, limit: UInt3
   Ok(value)
 }
 
-internal fn find_byte(text: StringSlice, byte: UInt8) -> USize
+internal fn find_byte(text: StringSlice, byte: UInt8) -> UInt64
   ensures result <= text.length()
   ensures result == text.length() || text.byte(result) == byte
   cost time O(text.length())
 {
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < text.length() && text.byte(index) != byte
     invariant index <= text.length()
     decreases text.length() - index
@@ -486,7 +486,7 @@ impl text::Parse for SocketAddress {
   }
 }
 
-public type AddressError(offset: USize)
+public type AddressError(offset: UInt64)
   derives Equal
 
 impl Display for AddressError {
@@ -500,11 +500,11 @@ impl Display for AddressError {
 public opaque type IpNetwork(address: IpAddress, prefix_length: UInt8)
   derives Plain, Equal, Hash
 
-internal fn mask_octet(octet: UInt8, index: USize, prefix_length: UInt8) -> UInt8
+internal fn mask_octet(octet: UInt8, index: UInt64, prefix_length: UInt8) -> UInt8
   requires index < 16
   cost time O(1)
 {
-  let prefix_bits: USize = intrinsic::convert(prefix_length)
+  let prefix_bits: UInt64 = intrinsic::convert(prefix_length)
   if prefix_bits >= 8 * index + 8 {
     octet
   } else if prefix_bits <= 8 * index {
@@ -524,7 +524,7 @@ public fn IpNetwork.new(address: IpAddress, prefix_length: UInt8) -> Option[IpNe
         return None
       }
       var masked = octets
-      let count: USize = 4
+      let count: UInt64 = 4
       for index in 0..count {
         masked[index] = mask_octet(octets[index], index: index, prefix_length: prefix_length)
       }
@@ -535,7 +535,7 @@ public fn IpNetwork.new(address: IpAddress, prefix_length: UInt8) -> Option[IpNe
         return None
       }
       var masked = octets
-      let count: USize = 16
+      let count: UInt64 = 16
       for index in 0..count {
         masked[index] = mask_octet(octets[index], index: index, prefix_length: prefix_length)
       }
@@ -633,7 +633,7 @@ public fn Connection.set_keep_alive(mut self, idle: Option[Duration]) -> Result[
 }
 
 impl streams::Reader for Connection {
-  fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
+  fn read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError]
     uses Handles
   {
     Handles.read(self.handle, buffer: mut buffer, limit: limit)
@@ -641,13 +641,13 @@ impl streams::Reader for Connection {
 }
 
 impl streams::Duplex for Connection {
-  fn receive(self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
+  fn receive(self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError]
     uses Handles, Tasks
   {
     Handles.read(self.handle, buffer: mut buffer, limit: limit)
   }
 
-  fn send(self, bytes: Slice[UInt8]) -> Result[USize, SystemError]
+  fn send(self, bytes: Slice[UInt8]) -> Result[UInt64, SystemError]
     uses Handles, Tasks
   {
     Handles.write(self.handle, bytes: bytes)
@@ -661,7 +661,7 @@ impl streams::Duplex for Connection {
 }
 
 impl streams::Writer for Connection {
-  fn write(mut self, bytes: Slice[UInt8]) -> Result[USize, SystemError]
+  fn write(mut self, bytes: Slice[UInt8]) -> Result[UInt64, SystemError]
     uses Handles
   {
     Handles.write(self.handle, bytes: bytes)
@@ -728,7 +728,7 @@ public fn LocalConnection.shut_down(mut self, direction: Direction) -> Result[Un
 }
 
 impl streams::Reader for LocalConnection {
-  fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
+  fn read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError]
     uses Handles
   {
     Handles.read(self.handle, buffer: mut buffer, limit: limit)
@@ -736,13 +736,13 @@ impl streams::Reader for LocalConnection {
 }
 
 impl streams::Duplex for LocalConnection {
-  fn receive(self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
+  fn receive(self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError]
     uses Handles, Tasks
   {
     Handles.read(self.handle, buffer: mut buffer, limit: limit)
   }
 
-  fn send(self, bytes: Slice[UInt8]) -> Result[USize, SystemError]
+  fn send(self, bytes: Slice[UInt8]) -> Result[UInt64, SystemError]
     uses Handles, Tasks
   {
     Handles.write(self.handle, bytes: bytes)
@@ -756,7 +756,7 @@ impl streams::Duplex for LocalConnection {
 }
 
 impl streams::Writer for LocalConnection {
-  fn write(mut self, bytes: Slice[UInt8]) -> Result[USize, SystemError]
+  fn write(mut self, bytes: Slice[UInt8]) -> Result[UInt64, SystemError]
     uses Handles
   {
     Handles.write(self.handle, bytes: bytes)
@@ -785,7 +785,7 @@ public fn LocalListener.accept(mut self) -> Result[LocalConnection, SystemError]
   Ok(LocalConnection(handle: Handles.accept_local(self.handle)?))
 }
 
-public type Datagram(length: USize, from: SocketAddress)
+public type Datagram(length: UInt64, from: SocketAddress)
 
 public opaque type DatagramSocket(handle: streams::Handle, local: SocketAddress)
 
@@ -799,13 +799,13 @@ public fn DatagramSocket.local_address(self) -> SocketAddress
   self.local
 }
 
-public fn DatagramSocket.send_to(mut self, bytes: Slice[UInt8], address: SocketAddress) -> Result[USize, SystemError]
+public fn DatagramSocket.send_to(mut self, bytes: Slice[UInt8], address: SocketAddress) -> Result[UInt64, SystemError]
   uses Handles
 {
   Handles.send_to(self.handle, bytes: bytes, address: address)
 }
 
-public fn DatagramSocket.receive_from(mut self, buffer: mut List[UInt8], limit: USize) -> Result[Datagram, SystemError]
+public fn DatagramSocket.receive_from(mut self, buffer: mut List[UInt8], limit: UInt64) -> Result[Datagram, SystemError]
   uses Handles
 {
   Handles.receive_from(self.handle, buffer: mut buffer, limit: limit)

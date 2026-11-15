@@ -13,7 +13,7 @@ let standard =
     ("standard::option", "public type Option[Value] = Some(value: Value) | None\n");
     ("standard::result", "public type Result[Value, Error] = Ok(value: Value) | Err(error: Error)\n");
     ("standard::core", Fixtures.Resolve.standard_core);
-    ("standard::list", "public opaque type List[Element](length: USize)\n");
+    ("standard::list", "public opaque type List[Element](length: UInt64)\n");
   ]
 
 let setup files =

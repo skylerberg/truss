@@ -32,7 +32,7 @@ internal fn without_blocking(descriptor: Int32) -> Result[Unit, Int32] {
 
 internal fn write_fully(descriptor: Int32, bytes: intrinsic::View[UInt8]) -> Result[Unit, Int32] {
   let length = intrinsic::view_length(bytes)
-  var written: USize = 0
+  var written: UInt64 = 0
   var error: Int32 = 0
   while error == 0 && written < length {
     let ticket = watch(descriptor, writing: true)
@@ -42,7 +42,7 @@ internal fn write_fully(descriptor: Int32, bytes: intrinsic::View[UInt8]) -> Res
       count: length - written,
     )
     if wrote > 0 {
-      let count: USize = intrinsic::convert(wrote)
+      let count: UInt64 = intrinsic::convert(wrote)
       written += count
     } else if wrote == 0 {
       error = intrinsic::libc_eio()
@@ -56,9 +56,9 @@ internal fn write_fully(descriptor: Int32, bytes: intrinsic::View[UInt8]) -> Res
 internal fn read_onto_end(
   descriptor: Int32,
   buffer: mut intrinsic::Storage[UInt8],
-  count: USize,
+  count: UInt64,
   waiting: Bool = true,
-) -> Result[USize, Int32]
+) -> Result[UInt64, Int32]
   ensures !(result is Ok(got) && (got > count
     || intrinsic::storage_length(buffer) != old(intrinsic::storage_length(buffer)) + got))
   ensures !(result is Err(_) && intrinsic::storage_length(buffer) != old(intrinsic::storage_length(buffer)))
@@ -80,7 +80,7 @@ internal fn read_onto_end(
   if got < 0 {
     Err(intrinsic::libc_errno())
   } else {
-    let read: USize = intrinsic::convert(got)
+    let read: UInt64 = intrinsic::convert(got)
     intrinsic::storage_lengthen(mut buffer, by: read)
     Ok(read)
   }
@@ -97,9 +97,9 @@ fn retry_read(descriptor: Int32, ticket: UInt64, waiting: Bool) -> Bool {
 internal fn read_at_onto_end(
   descriptor: Int32,
   buffer: mut intrinsic::Storage[UInt8],
-  count: USize,
+  count: UInt64,
   offset: Int64,
-) -> Result[USize, Int32]
+) -> Result[UInt64, Int32]
   ensures !(result is Ok(got) && (got > count
     || intrinsic::storage_length(buffer) != old(intrinsic::storage_length(buffer)) + got))
   ensures !(result is Err(_) && intrinsic::storage_length(buffer) != old(intrinsic::storage_length(buffer)))
@@ -119,13 +119,13 @@ internal fn read_at_onto_end(
   if got < 0 {
     Err(intrinsic::libc_errno())
   } else {
-    let read: USize = intrinsic::convert(got)
+    let read: UInt64 = intrinsic::convert(got)
     intrinsic::storage_lengthen(mut buffer, by: read)
     Ok(read)
   }
 }
 
-internal fn write_some(descriptor: Int32, bytes: intrinsic::View[UInt8]) -> Result[USize, Int32]
+internal fn write_some(descriptor: Int32, bytes: intrinsic::View[UInt8]) -> Result[UInt64, Int32]
   ensures !(result is Ok(count) && count > intrinsic::view_length(bytes))
 {
   let length = intrinsic::view_length(bytes)
@@ -140,12 +140,12 @@ internal fn write_some(descriptor: Int32, bytes: intrinsic::View[UInt8]) -> Resu
   if wrote < 0 {
     Err(intrinsic::libc_errno())
   } else {
-    let count: USize = intrinsic::convert(wrote)
+    let count: UInt64 = intrinsic::convert(wrote)
     Ok(count)
   }
 }
 
-internal fn write_some_at(descriptor: Int32, bytes: intrinsic::View[UInt8], offset: Int64) -> Result[USize, Int32]
+internal fn write_some_at(descriptor: Int32, bytes: intrinsic::View[UInt8], offset: Int64) -> Result[UInt64, Int32]
   ensures !(result is Ok(count) && count > intrinsic::view_length(bytes))
 {
   let length = intrinsic::view_length(bytes)
@@ -158,7 +158,7 @@ internal fn write_some_at(descriptor: Int32, bytes: intrinsic::View[UInt8], offs
   if wrote < 0 {
     Err(intrinsic::libc_errno())
   } else {
-    let count: USize = intrinsic::convert(wrote)
+    let count: UInt64 = intrinsic::convert(wrote)
     Ok(count)
   }
 }
@@ -244,7 +244,7 @@ internal fn status_of_path(
   Ok(own status)
 }
 
-internal fn number_at(bytes: intrinsic::View[UInt8], offset: USize, size: USize) -> UInt64 {
+internal fn number_at(bytes: intrinsic::View[UInt8], offset: UInt64, size: UInt64) -> UInt64 {
   let length = intrinsic::view_length(bytes)
   if size > 8 || offset > length || size > length - offset {
     return 0
@@ -325,7 +325,7 @@ internal fn read_link(path: intrinsic::View[UInt8]) -> Result[intrinsic::Storage
   if got < 0 {
     return Err(intrinsic::libc_errno())
   }
-  let length: USize = intrinsic::convert(got)
+  let length: UInt64 = intrinsic::convert(got)
   intrinsic::storage_lengthen(mut target, by: length)
   Ok(own target)
 }
@@ -410,7 +410,7 @@ internal fn current_directory() -> Result[intrinsic::Storage[UInt8], Int32] {
 }
 
 internal fn host_name() -> intrinsic::Storage[UInt8] {
-  let room: USize = 256
+  let room: UInt64 = 256
   var name: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(room)
   for index in 0..room
     invariant intrinsic::storage_length(name) == index
@@ -430,7 +430,7 @@ internal fn executable() -> Result[intrinsic::Storage[UInt8], Int32] {
     if length <= 0 {
       return Err(intrinsic::libc_errno())
     }
-    let written: USize = intrinsic::convert(length)
+    let written: UInt64 = intrinsic::convert(length)
     intrinsic::storage_lengthen(mut path, by: written)
     Ok(own path)
   } else {
@@ -441,7 +441,7 @@ internal fn executable() -> Result[intrinsic::Storage[UInt8], Int32] {
 internal fn before_zero_byte(bytes: intrinsic::View[UInt8]) -> intrinsic::Storage[UInt8] {
   let length = intrinsic::view_length(bytes)
   var copy: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length)
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < length && intrinsic::view_at(bytes, index: index) != 0
     invariant index <= length
     invariant intrinsic::storage_length(copy) == index
@@ -453,7 +453,7 @@ internal fn before_zero_byte(bytes: intrinsic::View[UInt8]) -> intrinsic::Storag
   copy
 }
 
-internal fn add_number(bytes: mut intrinsic::Storage[UInt8], number: UInt64, size: USize)
+internal fn add_number(bytes: mut intrinsic::Storage[UInt8], number: UInt64, size: UInt64)
   requires size <= 8
   ensures intrinsic::storage_length(bytes) == old(intrinsic::storage_length(bytes)) + size
 {

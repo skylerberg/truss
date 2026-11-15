@@ -1,7 +1,7 @@
-fn count_cells(rows: List[List[Int64]]) -> USize
+fn count_cells(rows: List[List[Int64]]) -> UInt64
   cost time O(rows.length())
 {
-  var count: USize = 0
+  var count: UInt64 = 0
   for row in rows {
     for _ in row {
       count = count.saturating_add(1)

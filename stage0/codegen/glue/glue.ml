@@ -11,13 +11,13 @@ type debug_form = Structure | Text | Sequence
 type t = {
   env : Memory_layout.env;
   representation : Ground.ty -> Memory_layout.representation;
-  usize : Ground.ty;
+  uint64 : Ground.ty;
   debug_form : Ground.ty -> debug_form;
   mutable trivial_types : bool Types.t;
 }
 
-let create env ~representation ~usize ?(debug_form = fun _ -> Structure) () =
-  { env; representation; usize; debug_form; trivial_types = Types.empty }
+let create env ~representation ~uint64 ?(debug_form = fun _ -> Structure) () =
+  { env; representation; uint64; debug_form; trivial_types = Types.empty }
 
 let rec trivial glue ty =
   match Types.find_opt ty glue.trivial_types with
@@ -52,7 +52,7 @@ let rec trivial glue ty =
 
 open Emit_c.Builder
 
-let loop glue builder ~count body = loop builder ~index_type:(Value glue.usize) ~count body
+let loop glue builder ~count body = loop builder ~index_type:(Value glue.uint64) ~count body
 
 (* Writes a test, and gives its result, a [Bool]. *)
 let test builder rvalue =
@@ -62,10 +62,11 @@ let test builder rvalue =
 
 (* Writes a test of whether the storage at a place owns a buffer. *)
 let owns_buffer builder storage =
-  test builder (Binary (Not_equal, Copy (Storage.capacity storage), usize 0))
+  test builder (Binary (Not_equal, Copy (Storage.capacity storage), constant_uint64 0))
 
 (* Writes a test of whether the storage at a place has no elements. *)
-let is_empty builder storage = test builder (Binary (Equal, Copy (Storage.length storage), usize 0))
+let is_empty builder storage =
+  test builder (Binary (Equal, Copy (Storage.length storage), constant_uint64 0))
 
 let variant_shapes glue ty =
   match glue.representation ty with
@@ -167,7 +168,7 @@ let drop glue ty =
         fields
   | _, Shape (Array (element, count)) ->
       if not (trivial glue element) then
-        loop glue builder ~count:(usize count) (fun index ->
+        loop glue builder ~count:(constant_uint64 count) (fun index ->
             emit builder (Drop (value / Index (Copy (at index)))))
   | _, Shape (Sum variants) ->
       let after = block builder in
@@ -322,15 +323,16 @@ let copy glue ty =
          emit builder (Assign (result, Storage.empty ty));
          finish builder (Goto after);
          start builder allocate;
-         let bytes = local builder (Value glue.usize) in
+         let bytes = local builder (Value glue.uint64) in
          let buffer = local builder ~name:"buffer" (Raw (Pointer (Data element))) in
          emit builder
-           (Assign (at bytes, Binary (Multiply, Copy (Storage.length self), usize layout.size)));
+           (Assign
+              (at bytes, Binary (Multiply, Copy (Storage.length self), constant_uint64 layout.size)));
          emit builder
            (Call
               {
                 target = Intrinsic Allocate;
-                arguments = [ Copy (at bytes); usize layout.alignment ];
+                arguments = [ Copy (at bytes); constant_uint64 layout.alignment ];
                 result = Returned (at buffer);
               });
          if trivial glue element then
@@ -367,7 +369,7 @@ let copy glue ty =
          in
          emit builder (Assign (result, Build { ty; variant = None; fields }))
      | Shape (Array (element, count)) ->
-         loop glue builder ~count:(usize count) (fun index ->
+         loop glue builder ~count:(constant_uint64 count) (fun index ->
              copy_into glue builder
                ~destination:(result / Index (Copy (at index)))
                ~source:(self / Index (Copy (at index)))
@@ -457,7 +459,8 @@ let bytes builder ~elements ~length =
 let text glue builder ~output value =
   if value <> "" then
     write glue builder ~output "append" bytes_ty
-      (bytes builder ~elements:(Constant (Bytes value)) ~length:(usize (String.length value)))
+      (bytes builder ~elements:(Constant (Bytes value))
+         ~length:(constant_uint64 (String.length value)))
 
 let debug_call glue builder ~output ty (place : Lowered.place) =
   let arguments =
@@ -482,8 +485,8 @@ let scalar_debug glue builder ~output (scalar : Memory_layout.scalar) (place : L
     write glue builder ~output name (builtin wide) (at value)
   in
   match scalar with
-  | Integer (Int8 | Int16 | Int32 | Int64 | ISize) -> widened "signed" Int64
-  | Integer (UInt8 | UInt16 | UInt32 | UInt64 | USize) -> widened "unsigned" UInt64
+  | Integer (Int8 | Int16 | Int32 | Int64) -> widened "signed" Int64
+  | Integer (UInt8 | UInt16 | UInt32 | UInt64) -> widened "unsigned" UInt64
   | Float32 -> write glue builder ~output "float32" (builtin Float32) place
   | Float64 -> write glue builder ~output "float64" (builtin Float64) place
   | Bool -> write glue builder ~output "boolean" (builtin Bool) place
@@ -510,7 +513,7 @@ let debug glue ty =
     text "[";
     loop glue builder ~count (fun index ->
         let later = local builder (Raw Bool) in
-        emit builder (Assign (at later, Binary (Not_equal, Copy (at index), usize 0)));
+        emit builder (Assign (at later, Binary (Not_equal, Copy (at index), constant_uint64 0)));
         when_ builder (Copy (at later)) (fun () -> text ", ");
         debug_call element (element_at (Lowered.Copy (at index))));
     text "]"
@@ -565,7 +568,9 @@ let debug glue ty =
       | Named { path; _ }, Record fields ->
           fields_debug (Ground.path_name path) fields (fun field -> value / Field field)
       | _, Array (element, count) ->
-          list_of element ~element_at:(fun index -> value / Index index) ~count:(usize count)
+          list_of element
+            ~element_at:(fun index -> value / Index index)
+            ~count:(constant_uint64 count)
       | _, Sum variants ->
           let after = block builder in
           let cases =
@@ -585,13 +590,6 @@ let debug glue ty =
   build builder ~parameters:(Option.to_list parameter @ [ out ]) ~result:None;
   built builder
 
-(* A value's binary form, which code run while compiling writes its result
-   in and the compiler reads back as static data: a scalar as its bytes, a
-   record's fields in order, a sum's variant index as a [UInt32] and then
-   its fields, an array's elements, and storage's length as a [USize] and
-   then its elements. A value of zero size writes nothing. Each part of
-   another type is written by that type's own function, so a recursive type
-   needs nothing more. *)
 let encode_signature glue ty = debug_signature glue ty
 
 let encode_call glue builder ~output ty (place : Lowered.place) =
@@ -627,7 +625,7 @@ let encode glue ty =
       (Assign
          (at first, Convert (Address { place; writable = false }, Pointer (Data (builtin UInt8)))));
     write glue builder ~output "append" bytes_ty
-      (bytes builder ~elements:(Copy (at first)) ~length:(usize size))
+      (bytes builder ~elements:(Copy (at first)) ~length:(constant_uint64 size))
   in
   let fields place variant (fields : (string * Memory_layout.member) list) =
     List.iter
@@ -646,14 +644,14 @@ let encode glue ty =
      | Handle -> bug "a handle cannot be computed while compiling"
      | Shared _ -> bug "a shared value cannot be computed while compiling"
      | Storage element ->
-         bytes (Storage.length value) (Memory_layout.of_type glue.env glue.usize).size;
+         bytes (Storage.length value) (Memory_layout.of_type glue.env glue.uint64).size;
          loop glue builder
            ~count:(Copy (Storage.length value))
            (fun index -> encode_call element (Storage.at value (Copy (at index))))
      | Shape (Scalar _) -> bytes value (Memory_layout.of_type glue.env ty).size
      | Shape (Record members) -> fields value None members
      | Shape (Array (element, count)) ->
-         loop glue builder ~count:(usize count) (fun index ->
+         loop glue builder ~count:(constant_uint64 count) (fun index ->
              encode_call element (value / Index (Copy (at index))))
      | Shape (Sum variants) ->
          let after = block builder in

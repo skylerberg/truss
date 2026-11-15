@@ -87,7 +87,7 @@ let intrinsic_c context (intrinsic : Lowered.intrinsic) (arguments : (string * L
       let symbol, result, parameters =
         match shared with
         | Shared_allocate ->
-            ("t_runtime_shared_allocate", "void *", "t_usize size, t_usize alignment")
+            ("t_runtime_shared_allocate", "void *", "uint64_t size, uint64_t alignment")
         | Shared_retain -> ("t_runtime_shared_retain", "void ", "void *value")
         | Shared_release -> ("t_runtime_shared_release", "uint8_t ", "void *value")
         | Shared_free -> ("t_runtime_shared_free", "void ", "void *value")
@@ -107,7 +107,8 @@ let intrinsic_c context (intrinsic : Lowered.intrinsic) (arguments : (string * L
   | Environment ->
       declare_prototype context "environ" "extern char **environ;\n";
       "((void *)environ)"
-  | Terminated_length -> Printf.sprintf "((t_usize)__builtin_strlen((const char *)%s))" (argument 0)
+  | Terminated_length ->
+      Printf.sprintf "((uint64_t)__builtin_strlen((const char *)%s))" (argument 0)
   | Evidence_fill ->
       let slot = argument 0 in
       let outer =

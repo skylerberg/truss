@@ -1,4 +1,4 @@
-fn f(name: own String) -> USize {
+fn f(name: own String) -> UInt64 {
   var ports: Map[String, Int64] = ["http": 80]
   ports["ftp"] = 21
   ports[own name] = 8080

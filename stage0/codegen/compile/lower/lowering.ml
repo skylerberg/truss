@@ -332,7 +332,7 @@ let snapshot st (place : Lowered.place) =
       List.map
         (function
           | Lowered.Index (Copy index_place) ->
-              let fixed = binding st st.context.types.usize in
+              let fixed = binding st st.context.types.uint64 in
               emit st.builder (Assign (fixed, Use (Copy index_place)));
               Lowered.Index (Copy fixed)
           | projection -> projection)

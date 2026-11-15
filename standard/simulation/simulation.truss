@@ -89,12 +89,12 @@ public fn Setup.with_time(own self, now: Instant) -> Setup {
   changed
 }
 
-type Listener(local: network::SocketAddress, path: Option[Path], waiting: List[USize], timeout: Option[Duration], open: Bool)
+type Listener(local: network::SocketAddress, path: Option[Path], waiting: List[UInt64], timeout: Option[Duration], open: Bool)
 
 type Stream(
   local: network::SocketAddress,
   peer: network::SocketAddress,
-  other_end: USize,
+  other_end: UInt64,
   unread: List[UInt8],
   ended: Bool,
   receives: Bool,
@@ -109,21 +109,21 @@ type Socket(local: network::SocketAddress, packets: List[Packet], timeout: Optio
 type Endpoint =
   | Closed
   | Console(errors: Bool)
-  | Listening(listener: USize)
-  | Connected(stream: USize)
-  | Datagrams(socket: USize)
-  | ChildOutput(pipe: USize)
+  | Listening(listener: UInt64)
+  | Connected(stream: UInt64)
+  | Datagrams(socket: UInt64)
+  | ChildOutput(pipe: UInt64)
   | ChildInput
   | Child(status: processes::ExitStatus)
 
 type Blocking =
-  | Arriving(listener: USize)
-  | Reading(endpoint: USize, limit: USize)
-  | Receiving(endpoint: USize, limit: USize)
+  | Arriving(listener: UInt64)
+  | Reading(endpoint: UInt64, limit: UInt64)
+  | Receiving(endpoint: UInt64, limit: UInt64)
   | Catching(signals: List[processes::Signal])
 
 type Completion =
-  | Arrival(endpoint: USize, peer: network::SocketAddress)
+  | Arrival(endpoint: UInt64, peer: network::SocketAddress)
   | Bytes(bytes: List[UInt8])
   | Datagram(bytes: List[UInt8], from: network::SocketAddress)
   | Caught(signal: processes::Signal)
@@ -132,7 +132,7 @@ type Attempt =
   | Finished(result: Result[Completion, SystemError])
   | Waiting
 
-type BoundEndpoint(endpoint: USize, local: network::SocketAddress)
+type BoundEndpoint(endpoint: UInt64, local: network::SocketAddress)
 
 type Started(status: processes::ExitStatus, output: List[UInt8], error_output: List[UInt8])
 
@@ -160,25 +160,22 @@ type State(
 
 let world_handles: UInt64 = 4294967296
 
-let input_endpoint: USize = 0
+let input_endpoint: UInt64 = 0
 
-let output_endpoint: USize = 1
+let output_endpoint: UInt64 = 1
 
-let errors_endpoint: USize = 2
+let errors_endpoint: UInt64 = 2
 
-fn handle_of(endpoint: USize) -> streams::Handle {
-  streams::Handle.simulated(world_handles.saturating_add(UInt64.from(endpoint)))
+fn handle_of(endpoint: UInt64) -> streams::Handle {
+  streams::Handle.simulated(world_handles.saturating_add(endpoint))
 }
 
-fn endpoint_of(handle: streams::Handle) -> Option[USize] {
+fn endpoint_of(handle: streams::Handle) -> Option[UInt64] {
   let number = handle.number()
   if number < world_handles {
     return None
   }
-  match USize.try_from(number - world_handles) {
-    Ok(endpoint) => Some(endpoint)
-    Err(_) => None
-  }
+  Some(number - world_handles)
 }
 
 fn same_host(first: network::IpAddress, second: network::IpAddress) -> Bool
@@ -187,17 +184,17 @@ fn same_host(first: network::IpAddress, second: network::IpAddress) -> Bool
   first == second || first.is_unspecified() || second.is_unspecified()
 }
 
-fn take_first_bytes(bytes: mut List[UInt8], limit: USize) -> List[UInt8] {
+fn take_first_bytes(bytes: mut List[UInt8], limit: UInt64) -> List[UInt8] {
   let count = if bytes.length() < limit { bytes.length() } else { limit }
   let rest = mut bytes.split_off(count)
   map::exchange(mut bytes, value: own rest)
 }
 
-internal fn State.endpoint(self, index: USize) -> Endpoint {
+internal fn State.endpoint(self, index: UInt64) -> Endpoint {
   if index < self.endpoints.length() { self.endpoints[index] } else { Endpoint.Closed }
 }
 
-internal fn State.add_endpoint(mut self, endpoint: Endpoint) -> USize {
+internal fn State.add_endpoint(mut self, endpoint: Endpoint) -> UInt64 {
   let index = self.endpoints.length()
   mut self.endpoints.push(endpoint)
   index
@@ -265,7 +262,7 @@ internal fn State.listen(mut self, address: network::SocketAddress) -> Result[Bo
   Ok(BoundEndpoint(endpoint: mut self.add_endpoint(Endpoint.Listening(listener: listener)), local: local))
 }
 
-internal fn State.listen_local(mut self, path: own Path) -> Result[USize, SystemError] {
+internal fn State.listen_local(mut self, path: own Path) -> Result[UInt64, SystemError] {
   if self.local_listener_at(path) is Some(_) {
     return Err(SystemError.AddressInUse)
   }
@@ -275,13 +272,13 @@ internal fn State.listen_local(mut self, path: own Path) -> Result[USize, System
   Ok(mut self.add_endpoint(Endpoint.Listening(listener: listener)))
 }
 
-internal fn State.local_listener_at(self, path: Path) -> Option[USize] {
+internal fn State.local_listener_at(self, path: Path) -> Option[UInt64] {
   self.listeners.slice().find_index(fn(listener) {
     listener.open && listener.path == Some(path.copy())
   })
 }
 
-internal fn State.connect_local(mut self, path: Path) -> Result[USize, SystemError] {
+internal fn State.connect_local(mut self, path: Path) -> Result[UInt64, SystemError] {
   match mut self.next_fault(Operation.Connect) {
     Some(error) => return Err(error)
     None => {}
@@ -302,7 +299,7 @@ internal fn State.bind_datagrams(mut self, address: network::SocketAddress) -> R
   Ok(BoundEndpoint(endpoint: mut self.add_endpoint(Endpoint.Datagrams(socket: socket)), local: local))
 }
 
-internal fn State.listener_at(self, address: network::SocketAddress) -> Option[USize] {
+internal fn State.listener_at(self, address: network::SocketAddress) -> Option[UInt64] {
   self.listeners.slice().find_index(fn(listener) {
     listener.open && listener.local.port == address.port && same_host(listener.local.address, second: address.address)
   })
@@ -327,10 +324,10 @@ internal fn State.connect(mut self, address: network::SocketAddress) -> Result[B
 
 internal fn State.connect_to(
   mut self,
-  listener: USize,
+  listener: UInt64,
   local: network::SocketAddress,
   peer: network::SocketAddress,
-) -> USize {
+) -> UInt64 {
   let near = self.streams.length()
   mut self.streams.push(
     Stream(local: local, peer: peer, other_end: near + 1, unread: [], ended: false, receives: true, sends: true, timeout: None),
@@ -345,7 +342,7 @@ internal fn State.connect_to(
   mut self.add_endpoint(Endpoint.Connected(stream: near))
 }
 
-internal fn State.end_sending(mut self, stream: USize) {
+internal fn State.end_sending(mut self, stream: UInt64) {
   if stream < self.streams.length() {
     self.streams[stream].sends = false
     let other_end = self.streams[stream].other_end
@@ -355,14 +352,14 @@ internal fn State.end_sending(mut self, stream: USize) {
   }
 }
 
-internal fn State.end_receiving(mut self, stream: USize) {
+internal fn State.end_receiving(mut self, stream: UInt64) {
   if stream < self.streams.length() {
     self.streams[stream].receives = false
     self.streams[stream].unread = []
   }
 }
 
-internal fn State.shut_down(mut self, endpoint: USize, direction: network::Direction) -> Result[Unit, SystemError] {
+internal fn State.shut_down(mut self, endpoint: UInt64, direction: network::Direction) -> Result[Unit, SystemError] {
   match self.endpoint(endpoint) {
     Connected(stream) => {
       match direction {
@@ -382,7 +379,7 @@ internal fn State.shut_down(mut self, endpoint: USize, direction: network::Direc
 
 internal fn State.set_timeout(
   mut self,
-  endpoint: USize,
+  endpoint: UInt64,
   direction: network::Direction,
   timeout: Option[Duration],
 ) -> Result[Unit, SystemError] {
@@ -429,7 +426,7 @@ internal fn State.timeout_of(self, blocking: Blocking) -> Option[Duration] {
   }
 }
 
-internal fn State.close(mut self, endpoint: USize) -> Result[Unit, SystemError] {
+internal fn State.close(mut self, endpoint: UInt64) -> Result[Unit, SystemError] {
   match self.endpoint(endpoint) {
     Closed => return Err(SystemError.Closed)
     Connected(stream) => {
@@ -459,7 +456,7 @@ internal fn State.close(mut self, endpoint: USize) -> Result[Unit, SystemError] 
   Ok(Unit)
 }
 
-internal fn State.send(mut self, endpoint: USize, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
+internal fn State.send(mut self, endpoint: UInt64, bytes: Slice[UInt8]) -> Result[UInt64, SystemError] {
   match self.endpoint(endpoint) {
     Connected(stream) => {
       match mut self.next_fault(Operation.Write) {
@@ -493,10 +490,10 @@ internal fn State.send(mut self, endpoint: USize, bytes: Slice[UInt8]) -> Result
 
 internal fn State.send_to(
   mut self,
-  endpoint: USize,
+  endpoint: UInt64,
   bytes: Slice[UInt8],
   address: network::SocketAddress,
-) -> Result[USize, SystemError] {
+) -> Result[UInt64, SystemError] {
   match self.endpoint(endpoint) {
     Datagrams(socket) => {
       match mut self.next_fault(Operation.Write) {
@@ -645,9 +642,9 @@ fn begins_with(arguments: Slice[String], beginning: Slice[String]) -> Bool {
   true
 }
 
-internal fn State.program_for(self, command: processes::Command) -> Option[USize] {
-  var chosen: Option[USize] = None
-  var most: USize = 0
+internal fn State.program_for(self, command: processes::Command) -> Option[UInt64] {
+  var chosen: Option[UInt64] = None
+  var most: UInt64 = 0
   for index in 0..self.programs.length() {
     if self.programs[index].name.slice() == command.program()
       && begins_with(command.argument_list(), beginning: self.programs[index].arguments.slice())
@@ -1310,7 +1307,7 @@ fn World.arrival(self, listener: streams::Handle) -> Result[network::Accepted, S
 impl Handles for World
   uses Panic
 {
-  fn read(self, handle: streams::Handle, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError] {
+  fn read(self, handle: streams::Handle, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError] {
     match endpoint_of(handle) {
       Some(endpoint) => {
         let completion = self.perform(
@@ -1349,7 +1346,7 @@ impl Handles for World
     Ok(count)
   }
 
-  fn write(self, handle: streams::Handle, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
+  fn write(self, handle: streams::Handle, bytes: Slice[UInt8]) -> Result[UInt64, SystemError] {
     match endpoint_of(handle) {
       Some(endpoint) => {
         self.preemption_point()
@@ -1379,8 +1376,8 @@ impl Handles for World
     handle: streams::Handle,
     offset: UInt64,
     buffer: mut List[UInt8],
-    limit: USize,
-  ) -> Result[USize, SystemError] {
+    limit: UInt64,
+  ) -> Result[UInt64, SystemError] {
     self.preemption_point()
     let now = self.clock_time()
     let read = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
@@ -1402,7 +1399,7 @@ impl Handles for World
     Ok(count)
   }
 
-  fn write_at(self, handle: streams::Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
+  fn write_at(self, handle: streams::Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[UInt64, SystemError] {
     self.preemption_point()
     let now = self.clock_time()
     let written = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
@@ -1538,7 +1535,7 @@ impl Handles for World
     socket: streams::Handle,
     bytes: Slice[UInt8],
     address: network::SocketAddress,
-  ) -> Result[USize, SystemError] {
+  ) -> Result[UInt64, SystemError] {
     self.preemption_point()
     match endpoint_of(socket) {
       Some(endpoint) => {
@@ -1556,7 +1553,7 @@ impl Handles for World
     self,
     socket: streams::Handle,
     buffer: mut List[UInt8],
-    limit: USize,
+    limit: UInt64,
   ) -> Result[network::Datagram, SystemError] {
     match endpoint_of(socket) {
       Some(endpoint) => {

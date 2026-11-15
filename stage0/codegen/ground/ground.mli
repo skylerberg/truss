@@ -26,9 +26,6 @@ type ty =
 and lent = { base : ty; writable : bool; fields : lent_field list }
 and lent_field = { variant : string option; field : string; holds : holds }
 and holds = Address | Nested of lent
-
-(* A [USize] generic argument is a value, as in [Array[UInt8, 32]], and a
-   capability parameter's is the set of capabilities it stands for, sorted. *)
 and argument = Type of ty | Value of Z.t | Capabilities of Path.t list
 
 and function_type = { parameters : (mode * ty) list; result : result; uses : Path.t list }

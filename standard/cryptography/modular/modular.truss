@@ -7,7 +7,7 @@ internal type Field(modulus: List[UInt64], inverse: UInt64, r_squared: List[UInt
   invariant r_squared.length() == modulus.length()
   invariant one.length() == modulus.length()
 
-internal fn Field.length(self) -> USize {
+internal fn Field.length(self) -> UInt64 {
   self.modulus.length()
 }
 
@@ -19,11 +19,11 @@ internal fn Field.zero(self) -> List[UInt64] {
   List.filled(0, count: self.modulus.length())
 }
 
-internal fn limb_at(limbs: Slice[UInt64], index: USize) -> UInt64 {
+internal fn limb_at(limbs: Slice[UInt64], index: UInt64) -> UInt64 {
   if index < limbs.length() { limbs[index] } else { 0 }
 }
 
-internal fn limbs_from_bytes(bytes: Slice[UInt8], count: USize) -> List[UInt64] {
+internal fn limbs_from_bytes(bytes: Slice[UInt8], count: UInt64) -> List[UInt64] {
   var limbs: List[UInt64] = List.filled(0, count: count)
   for index in 0..bytes.length() {
     let from_end = bytes.length() - 1 - index
@@ -36,7 +36,7 @@ internal fn limbs_from_bytes(bytes: Slice[UInt8], count: USize) -> List[UInt64] 
   limbs
 }
 
-internal fn limbs_to_bytes(limbs: Slice[UInt64], length: USize) -> List[UInt8] {
+internal fn limbs_to_bytes(limbs: Slice[UInt64], length: UInt64) -> List[UInt8] {
   var bytes: List[UInt8] = List.with_capacity(length)
   for index in 0..length {
     let from_end = length - 1 - index
@@ -50,7 +50,7 @@ fn negated_inverse(low: UInt64) -> UInt64 {
   let two: UInt64 = 2
   let zero: UInt64 = 0
   var inverse: UInt64 = 1
-  let rounds: USize = 5
+  let rounds: UInt64 = 5
   for _ in 0..rounds {
     inverse = inverse.wrapping_multiply(two.wrapping_subtract(low.wrapping_multiply(inverse) & low_mask)) & low_mask
   }
@@ -341,7 +341,7 @@ internal fn add_plain(value: mut List[UInt64], amount: Slice[UInt64]) {
   let _ = add_in_place(mut value, amount: amount)
 }
 
-internal fn bit_length(limbs: Slice[UInt64]) -> USize {
+internal fn bit_length(limbs: Slice[UInt64]) -> UInt64 {
   var index = limbs.length()
   while index > 0
     invariant index <= limbs.length()
@@ -349,7 +349,7 @@ internal fn bit_length(limbs: Slice[UInt64]) -> USize {
     index -= 1
     let limb = limbs[index]
     if limb != 0 {
-      var bits: USize = 0
+      var bits: UInt64 = 0
       var rest = limb
       while rest != 0 && bits < 64 {
         rest = rest >> 1

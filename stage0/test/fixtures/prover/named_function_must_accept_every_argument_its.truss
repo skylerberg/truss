@@ -1,10 +1,10 @@
-fn apply(limit: USize, visit: (fn(index: USize) requires index < limit)) {
+fn apply(limit: UInt64, visit: (fn(index: UInt64) requires index < limit)) {
   if limit > 0 {
     visit(0)
   }
 }
 
-fn check(index: USize)
+fn check(index: UInt64)
   requires index < 5
 {
 }

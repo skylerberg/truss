@@ -123,7 +123,7 @@ fn text_of(value: der::Value) -> Option[String] {
   }
 }
 
-fn digits(bytes: Slice[UInt8], from: USize, count: USize) -> Option[UInt32] {
+fn digits(bytes: Slice[UInt8], from: UInt64, count: UInt64) -> Option[UInt32] {
   if from > bytes.length() || bytes.length() - from < count {
     return None
   }
@@ -142,7 +142,7 @@ fn time_of(value: der::Value) -> Option[Instant] {
   match value {
     Time(tag, bytes) => {
       let long = tag == 24
-      let year_digits: USize = if long { 4 } else { 2 }
+      let year_digits: UInt64 = if long { 4 } else { 2 }
       if bytes.length() != year_digits + 11 || bytes[bytes.length() - 1] != 90 {
         return None
       }
@@ -267,7 +267,7 @@ public fn public_key_of(info: der::Value) -> Option[PublicKey]
   }
   if is_oid(algorithm[0], expected: "2b6570") && key.length() == 32 {
     var bytes: Array[UInt8, 32] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    let width: USize = 32
+    let width: UInt64 = 32
     for index in 0..width {
       if index < key.length() {
         bytes[index] = key[index]
@@ -383,7 +383,7 @@ fn read_extensions(list: der::Value) -> Option[Extensions] {
               mut found.ip_addresses.push(network::IpAddress.Version4([bytes[0], bytes[1], bytes[2], bytes[3]]))
             } else if number == 7 && bytes.length() == 16 {
               var octets: Array[UInt8, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-              let width: USize = 16
+              let width: UInt64 = 16
               for index in 0..width {
                 if index < bytes.length() {
                   octets[index] = bytes[index]
@@ -419,7 +419,7 @@ public fn Certificate.parse(encoded: Slice[UInt8]) -> Result[Certificate, Error]
     _ => return Err(malformed("signature"))
   }
   let fields = items_of(parts[0])
-  var index: USize = 0
+  var index: UInt64 = 0
   if fields.length() > 0 && fields[0] is Tagged(number: 0, constructed: true, ..) {
     index = 1
   }
@@ -531,7 +531,7 @@ public fn parse_pem(text: StringSlice) -> Result[List[Certificate], Error]
   Ok(own certificates)
 }
 
-public fn ecdsa_signature_from_der(encoded: Slice[UInt8], size: USize) -> Option[List[UInt8]] {
+public fn ecdsa_signature_from_der(encoded: Slice[UInt8], size: UInt64) -> Option[List[UInt8]] {
   let parts = items_of(der::parse(encoded).ok()?)
   if parts.length() != 2 {
     return None
@@ -546,7 +546,7 @@ public fn ecdsa_signature_to_der(raw: Slice[UInt8]) -> List[UInt8] {
   der::encode(der::Value.Sequence(items: [der::unsigned_integer(raw[..half]), der::unsigned_integer(raw[half..])]))
 }
 
-fn curve_size(key: cryptography::EcdsaVerifyingKey) -> USize {
+fn curve_size(key: cryptography::EcdsaVerifyingKey) -> UInt64 {
   match key.curve() {
     P256 => 32
     P384 => 48
@@ -582,7 +582,7 @@ public fn PublicKey.verify(self, algorithm: SignatureAlgorithm, message: Slice[U
           0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
           0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         ]
-        let width: USize = 64
+        let width: UInt64 = 64
         for index in 0..width {
           if index < signature.length() {
             bytes[index] = signature[index]
@@ -721,7 +721,7 @@ fn verify_path(chain: Slice[Certificate], roots: Slice[Certificate], now: Instan
   let leaf = chain[0]
   var current = leaf.copy()
   var below: UInt64 = 0
-  var steps: USize = 0
+  var steps: UInt64 = 0
   while steps < 10 {
     for root in roots {
       if current.is_signed_by(root) {
@@ -866,7 +866,7 @@ public fn parse_private_key(encoded: Slice[UInt8]) -> Option[PrivateKey]
       return None
     }
     var bytes: Array[UInt8, 32] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    let width: USize = 32
+    let width: UInt64 = 32
     for index in 0..width {
       if index < seed.length() {
         bytes[index] = seed[index]

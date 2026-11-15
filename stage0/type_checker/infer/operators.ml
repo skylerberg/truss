@@ -371,7 +371,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
       register_expression state value (fun () ->
           Form.operator state value (Form.operation_of operator) [ left; right ]);
       (match resolve state right_type with
-      | Types.Literal (Integer_literal, _) -> ignore (unify state right_type (Types.builtin USize))
+      | Types.Literal (Integer_literal, _) -> ignore (unify state right_type (Types.builtin UInt64))
       | _ -> ());
       defer state (fun () ->
           match (normalize state left_type, normalize state right_type) with

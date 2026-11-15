@@ -2,7 +2,7 @@ capability Counter {
   fn bump()
 }
 
-type Tally(count: USize)
+type Tally(count: UInt64)
 
 impl Counter for Tally {
   fn bump(mut self) {

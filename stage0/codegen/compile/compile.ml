@@ -233,7 +233,7 @@ let decode compiler ty text : Lowered.static_value =
     let size = Memory_layout.integer_size kind in
     let value = unsigned (take size) in
     match kind with
-    | Int8 | Int16 | Int32 | Int64 | ISize ->
+    | Int8 | Int16 | Int32 | Int64 ->
         if Z.testbit value ((8 * size) - 1) then Z.sub value (Z.shift_left Z.one (8 * size))
         else value
     | _ -> value
@@ -245,7 +245,7 @@ let decode compiler ty text : Lowered.static_value =
       | Handle -> bug "a handle computed while compiling"
       | Shared _ -> bug "a shared value computed while compiling"
       | Storage element ->
-          let count = Z.to_int (integer USize) in
+          let count = Z.to_int (integer UInt64) in
           Static_storage
             { element; elements = List.init count (fun _ -> value element); owned = true }
       | Shape (Scalar scalar) -> Static_scalar (scalar_value scalar)

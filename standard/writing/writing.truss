@@ -144,7 +144,7 @@ fn with_digits(value: Float64, digits: Int32) -> intrinsic::Storage[UInt8]
     precision: digits,
     value: value,
   )
-  let written: USize = if length < 0 { 0 } else if length > 39 { 39 } else { intrinsic::convert(length) }
+  let written: UInt64 = if length < 0 { 0 } else if length > 39 { 39 } else { intrinsic::convert(length) }
   intrinsic::storage_lengthen(mut text, by: written)
   intrinsic::storage_push(mut text, value: 0)
   text
@@ -213,10 +213,10 @@ internal fn quoted_character(output: mut intrinsic::Storage[UInt8], value: Chara
 internal fn quoted_text(output: mut intrinsic::Storage[UInt8], text: intrinsic::View[UInt8]) {
   byte(mut output, value: 34)
   let count = intrinsic::view_length(text)
-  var at: USize = 0
+  var at: UInt64 = 0
   while at < count {
     let first: UInt32 = intrinsic::convert(intrinsic::view_at(text, index: at))
-    var length: USize = 1
+    var length: UInt64 = 1
     var code = first
     if first >= 240 {
       length = 4
@@ -228,7 +228,7 @@ internal fn quoted_text(output: mut intrinsic::Storage[UInt8], text: intrinsic::
       length = 2
       code = first & 31
     }
-    var following: USize = 1
+    var following: UInt64 = 1
     while following < length && at + following < count {
       let next: UInt32 = intrinsic::convert(intrinsic::view_at(text, index: at + following))
       code = (code << 6) | (next & 63)

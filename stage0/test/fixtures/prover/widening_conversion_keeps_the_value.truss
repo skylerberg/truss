@@ -1,7 +1,7 @@
-fn to_index(value: UInt8) -> USize
+fn to_index(value: UInt8) -> UInt64
   ensures result == value
 {
-  USize.from(value)
+  UInt64.from(value)
 }
 
 fn to_signed(value: UInt16) -> Int32

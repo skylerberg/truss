@@ -252,10 +252,10 @@ public trait IndexAssign: Index {
 public trait Iterable {
   type Element
 
-  fn count(self) -> USize
+  fn count(self) -> UInt64
     cost time finite
 
-  fn element(self, position: USize) lends Self.Element
+  fn element(self, position: UInt64) lends Self.Element
     requires position < self.count()
     cost time finite
 
@@ -315,10 +315,10 @@ public trait Iterable {
     results
   }
 
-  fn count_where(self, predicate: (fn(Self.Element) -> Bool cost time finite)) -> USize
+  fn count_where(self, predicate: (fn(Self.Element) -> Bool cost time finite)) -> UInt64
     cost time finite
   {
-    var count: USize = 0
+    var count: UInt64 = 0
     for item in self {
       if predicate(item) {
         count = count.saturating_add(1)
@@ -357,11 +357,11 @@ public trait Cursor {
     items
   }
 
-  fn count(own self) -> USize
+  fn count(own self) -> UInt64
     uses Self.Uses
   {
     var cursor = own self
-    var count: USize = 0
+    var count: UInt64 = 0
     while mut cursor.next() is Some(_) {
       count = count.saturating_add(1)
     }
@@ -405,15 +405,15 @@ public trait Cursor {
     None
   }
 
-  fn skip(own self, count: USize) -> cursors::Skip[Self] {
+  fn skip(own self, count: UInt64) -> cursors::Skip[Self] {
     cursors::Skip(source: own self, left: count)
   }
 
-  fn take(own self, count: USize) -> cursors::Take[Self] {
+  fn take(own self, count: UInt64) -> cursors::Take[Self] {
     cursors::Take(source: own self, left: count)
   }
 
-  fn step_by(own self, step: USize) -> cursors::StepBy[Self]
+  fn step_by(own self, step: UInt64) -> cursors::StepBy[Self]
     requires step > 0
   {
     cursors::StepBy(source: own self, step: step, started: false)
@@ -443,20 +443,20 @@ public trait Countable: Ordered + Plain {
   fn predecessor(self) -> Option[Self]
     cost time O(1)
 
-  fn advanced(self, by: USize) -> Option[Self]
+  fn advanced(self, by: UInt64) -> Option[Self]
     cost time O(1)
 
-  fn retreated(self, by: USize) -> Option[Self]
+  fn retreated(self, by: UInt64) -> Option[Self]
     cost time O(1)
 
-  fn steps_to(self, other: Self) -> Option[USize]
+  fn steps_to(self, other: Self) -> Option[UInt64]
     cost time O(1)
 
   law steps_to_follows_order(start: Self, stop: Self) {
     (start.steps_to(stop) is None) == (stop < start)
   }
 
-  law advanced_stays_before(start: Self, stop: Self, by: USize) {
+  law advanced_stays_before(start: Self, stop: Self, by: UInt64) {
     match start.steps_to(stop) {
       Some(count) => by >= count || (match start.advanced(by) {
         Some(value) => start <= value && value < stop
@@ -466,7 +466,7 @@ public trait Countable: Ordered + Plain {
     }
   }
 
-  law retreated_stays_within(start: Self, stop: Self, by: USize) {
+  law retreated_stays_within(start: Self, stop: Self, by: UInt64) {
     match start.steps_to(stop) {
       Some(count) => by == 0 || by > count || (match stop.retreated(by) {
         Some(value) => start <= value && value < stop
@@ -479,7 +479,7 @@ public trait Countable: Ordered + Plain {
 
 public type Range[Value](start: Value, stop: Value, inclusive: Bool)
 
-public type Indexed[Element](index: USize, element: Element)
+public type Indexed[Element](index: UInt64, element: Element)
 
 public type Pair[First, Second](first: First, second: Second)
 
@@ -543,7 +543,7 @@ impl Display for ConversionError {
 
 public type ParseIntegerError =
   | Empty
-  | InvalidDigit(offset: USize)
+  | InvalidDigit(offset: UInt64)
   | OutOfRange
   derives Equal
 
@@ -564,7 +564,7 @@ impl Display for ParseIntegerError {
 
 public type ParseFloatError =
   | Empty
-  | InvalidCharacter(offset: USize)
+  | InvalidCharacter(offset: UInt64)
   derives Equal
 
 impl Display for ParseFloatError {

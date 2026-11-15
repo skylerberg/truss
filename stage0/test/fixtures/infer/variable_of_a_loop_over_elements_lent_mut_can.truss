@@ -1,13 +1,13 @@
 trait Rows {
-  fn count(self) -> USize
-  fn element(mut self, position: USize) lends mut List[Int64]
+  fn count(self) -> UInt64
+  fn element(mut self, position: UInt64) lends mut List[Int64]
 }
 
 type Grid(cells: List[List[Int64]])
 
 impl Rows for Grid {
-  fn count(self) -> USize { self.cells.count() }
-  fn element(mut self, position: USize) lends mut List[Int64] { mut self.cells[position] }
+  fn count(self) -> UInt64 { self.cells.count() }
+  fn element(mut self, position: UInt64) lends mut List[Int64] { mut self.cells[position] }
 }
 
 fn f[Source: Rows](grid: mut Grid, source: mut Source) {

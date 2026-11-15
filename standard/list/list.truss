@@ -18,7 +18,7 @@ public type Enumerated[Element](elements: Slice[Element])
 impl Iterable for Enumerated[Element] {
   type Element = core::Indexed[Element]
 
-  fn count(self) -> USize
+  fn count(self) -> UInt64
     ensures result == self.elements.length()
     cost time O(1)
     cost allocations == 0
@@ -26,7 +26,7 @@ impl Iterable for Enumerated[Element] {
     self.elements.length()
   }
 
-  fn element(self, position: USize) lends core::Indexed[Element]
+  fn element(self, position: UInt64) lends core::Indexed[Element]
     requires position < self.count()
     ensures result.index == position
     ensures identical(result.element, self.elements.model()[position])
@@ -42,7 +42,7 @@ public type Reversed[Element](elements: Slice[Element])
 impl Iterable for Reversed[Element] {
   type Element = Element
 
-  fn count(self) -> USize
+  fn count(self) -> UInt64
     ensures result == self.elements.length()
     cost time O(1)
     cost allocations == 0
@@ -50,7 +50,7 @@ impl Iterable for Reversed[Element] {
     self.elements.length()
   }
 
-  fn element(self, position: USize) lends Element
+  fn element(self, position: UInt64) lends Element
     requires position < self.count()
     ensures identical(result, self.elements.model()[self.elements.length() - 1 - position])
     cost time O(1)
@@ -60,13 +60,13 @@ impl Iterable for Reversed[Element] {
   }
 }
 
-public type Windows[Element](elements: Slice[Element], size: USize)
+public type Windows[Element](elements: Slice[Element], size: UInt64)
   invariant size > 0
 
 impl Iterable for Windows[Element] {
   type Element = Slice[Element]
 
-  fn count(self) -> USize
+  fn count(self) -> UInt64
     ensures result <= self.elements.length()
     cost time O(1)
     cost allocations == 0
@@ -74,7 +74,7 @@ impl Iterable for Windows[Element] {
     if self.size <= self.elements.length() { self.elements.length() - self.size + 1 } else { 0 }
   }
 
-  fn element(self, position: USize) lends Slice[Element]
+  fn element(self, position: UInt64) lends Slice[Element]
     requires position < self.count()
     ensures result.length() == self.size
     cost time O(1)
@@ -84,13 +84,13 @@ impl Iterable for Windows[Element] {
   }
 }
 
-public type Chunks[Element](elements: Slice[Element], size: USize)
+public type Chunks[Element](elements: Slice[Element], size: UInt64)
   invariant size > 0
 
 impl Iterable for Chunks[Element] {
   type Element = Slice[Element]
 
-  fn count(self) -> USize
+  fn count(self) -> UInt64
     ensures result <= self.elements.length()
     cost time O(1)
     cost allocations == 0
@@ -98,7 +98,7 @@ impl Iterable for Chunks[Element] {
     if self.elements.length() == 0 { 0 } else { (self.elements.length() - 1) / self.size + 1 }
   }
 
-  fn element(self, position: USize) lends Slice[Element]
+  fn element(self, position: UInt64) lends Slice[Element]
     requires position < self.count()
     ensures result.length() <= self.size
     cost time O(1)
@@ -115,7 +115,7 @@ public type Zipped[Element, Other](first: Slice[Element], second: Slice[Other])
 impl Iterable for Zipped[Element, Other] {
   type Element = core::Pair[Element, Other]
 
-  fn count(self) -> USize
+  fn count(self) -> UInt64
     ensures result <= self.first.length()
     ensures result <= self.second.length()
     cost time O(1)
@@ -124,7 +124,7 @@ impl Iterable for Zipped[Element, Other] {
     if self.first.length() < self.second.length() { self.first.length() } else { self.second.length() }
   }
 
-  fn element(self, position: USize) lends core::Pair[Element, Other]
+  fn element(self, position: UInt64) lends core::Pair[Element, Other]
     requires position < self.count()
     ensures identical(result.first, self.first.model()[position])
     ensures identical(result.second, self.second.model()[position])
@@ -155,7 +155,7 @@ impl Model for Slice[Element] {
   }
 }
 
-public fn List[Element].with_capacity(capacity: USize) -> List[Element]
+public fn List[Element].with_capacity(capacity: UInt64) -> List[Element]
   ensures result.model().length() == 0
   cost time O(1)
 {
@@ -174,7 +174,7 @@ internal fn List[Element].elements(self) -> intrinsic::View[Element] {
   intrinsic::storage_view(self.storage)
 }
 
-public fn List[Element].length(self) -> USize
+public fn List[Element].length(self) -> UInt64
   ensures result == self.model().length()
   ensures result == (intrinsic::storage_length(self.storage))
   cost time O(1)
@@ -210,7 +210,7 @@ public fn List[Element].pop(mut self) -> Option[Element]
   if self.length() == 0 { None } else { Some(intrinsic::storage_pop(mut self.storage)) }
 }
 
-public fn List[Element].insert_at(mut self, position: USize, item: own Element)
+public fn List[Element].insert_at(mut self, position: UInt64, item: own Element)
   requires position <= self.length()
   ensures self.model().length() == old(self.model()).length() + 1
   ensures forall i in 0..position => identical(self.model()[i], old(self.model())[i])
@@ -226,7 +226,7 @@ public fn List[Element].insert_at(mut self, position: USize, item: own Element)
   intrinsic::storage_insert(mut self.storage, index: position, value: own item)
 }
 
-public fn List[Element].partition_point(self, before: (fn(Element) -> Bool cost time finite)) -> USize
+public fn List[Element].partition_point(self, before: (fn(Element) -> Bool cost time finite)) -> UInt64
   requires forall i in 0..self.length() => forall j in i..self.length() =>
     before(self.model()[j]) ==> before(self.model()[i])
   ensures result <= self.length()
@@ -245,7 +245,7 @@ public fn List[Element].slice(self) -> Slice[Element]
   Slice(elements: intrinsic::storage_view(self.storage))
 }
 
-internal fn List[Element].slice_range(self, start: USize, stop: USize) -> Slice[Element]
+internal fn List[Element].slice_range(self, start: UInt64, stop: UInt64) -> Slice[Element]
   requires start <= stop
   requires stop <= self.length()
   ensures result.length() == stop - start
@@ -257,7 +257,7 @@ internal fn List[Element].slice_range(self, start: USize, stop: USize) -> Slice[
   self.slice().slice_range(start, stop: stop)
 }
 
-internal fn List[Element].slice_from(self, start: USize) -> Slice[Element]
+internal fn List[Element].slice_from(self, start: UInt64) -> Slice[Element]
   requires start <= self.length()
   ensures result.length() == self.length() - start
   ensures forall index in 0..result.length() =>
@@ -268,7 +268,7 @@ internal fn List[Element].slice_from(self, start: USize) -> Slice[Element]
   self.slice().slice_from(start)
 }
 
-internal fn Slice[Element].slice_range(self, start: USize, stop: USize) -> Slice[Element]
+internal fn Slice[Element].slice_range(self, start: UInt64, stop: UInt64) -> Slice[Element]
   requires start <= stop
   requires stop <= self.length()
   ensures result.length() == stop - start
@@ -280,7 +280,7 @@ internal fn Slice[Element].slice_range(self, start: USize, stop: USize) -> Slice
   Slice(elements: intrinsic::view_slice(self.elements, start, stop))
 }
 
-internal fn Slice[Element].slice_from(self, start: USize) -> Slice[Element]
+internal fn Slice[Element].slice_from(self, start: UInt64) -> Slice[Element]
   requires start <= self.length()
   ensures result.length() == self.length() - start
   ensures forall index in 0..result.length() =>
@@ -294,7 +294,7 @@ internal fn Slice[Element].slice_from(self, start: USize) -> Slice[Element]
 impl Iterable for List[Element] {
   type Element = Element
 
-  fn count(self) -> USize
+  fn count(self) -> UInt64
     ensures result == self.length()
     cost time O(1)
     cost allocations == 0
@@ -302,7 +302,7 @@ impl Iterable for List[Element] {
     self.length()
   }
 
-  fn element(self, position: USize) lends Element
+  fn element(self, position: UInt64) lends Element
     requires position < self.count()
     ensures identical(result, self.model()[position])
     cost time O(1)
@@ -312,7 +312,7 @@ impl Iterable for List[Element] {
   }
 }
 
-public fn List[Element].element(mut self, position: USize) lends mut Element
+public fn List[Element].element(mut self, position: UInt64) lends mut Element
   requires position < self.count()
   ensures identical(result, old(self.model())[position])
   ensures identical(self.model(), old(self.model()).update(position, value: final(result)))
@@ -324,7 +324,7 @@ public fn List[Element].element(mut self, position: USize) lends mut Element
   mut self[position]
 }
 
-public fn List[Element].swap(mut self, first: USize, second: USize)
+public fn List[Element].swap(mut self, first: UInt64, second: UInt64)
   requires first < self.length()
   requires second < self.length()
   ensures self.length() == old(self.length())
@@ -349,7 +349,7 @@ public fn List[Element].reverse(mut self)
   cost time O(self.length())
   cost amortized time O(self.length())
 {
-  var low: USize = 0
+  var low: UInt64 = 0
   var high = self.length()
   while low + 1 < high
     invariant self.length() == old(self.length())
@@ -372,7 +372,7 @@ public fn List[Element].reverse(mut self)
 
 public opaque type ListCursor[Element](reversed: List[Element])
 
-public fn ListCursor[Element].remaining(self) -> USize
+public fn ListCursor[Element].remaining(self) -> UInt64
   ensures result == self.reversed.length()
   cost time O(1)
   cost allocations == 0
@@ -404,14 +404,14 @@ public fn List[Element].cursor(own self) -> ListCursor[Element]
   ListCursor(reversed: own reversed)
 }
 
-public fn Array[Element, count: USize].to_list(own self) -> List[Element]
+public fn Array[Element, count: UInt64].to_list(own self) -> List[Element]
   ensures identical(result.model(), self.model())
   cost time O(count)
 {
   List(storage: intrinsic::storage_from_array(own self))
 }
 
-public fn Array[Element, count: USize].cursor(own self) -> ListCursor[Element]
+public fn Array[Element, count: UInt64].cursor(own self) -> ListCursor[Element]
   ensures result.remaining() == count
   cost time O(count)
   cost amortized time O(count)
@@ -419,10 +419,10 @@ public fn Array[Element, count: USize].cursor(own self) -> ListCursor[Element]
   own self.to_list().cursor()
 }
 
-public type SliceCursor[Element: Plain](elements: Slice[Element], offset: USize)
+public type SliceCursor[Element: Plain](elements: Slice[Element], offset: UInt64)
   invariant offset <= elements.length()
 
-public fn SliceCursor[Element: Plain].remaining(self) -> USize
+public fn SliceCursor[Element: Plain].remaining(self) -> UInt64
   ensures result == self.elements.length() - self.offset
   cost time O(1)
   cost allocations == 0
@@ -466,7 +466,7 @@ public fn List[Element: Plain].cursor(self) -> SliceCursor[Element]
   self.slice().cursor()
 }
 
-public fn Array[Element: Plain, count: USize].cursor(self) -> SliceCursor[Element]
+public fn Array[Element: Plain, count: UInt64].cursor(self) -> SliceCursor[Element]
   ensures result.remaining() == count
   cost time O(1)
   cost allocations == 0
@@ -474,7 +474,7 @@ public fn Array[Element: Plain, count: USize].cursor(self) -> SliceCursor[Elemen
   self.slice().cursor()
 }
 
-public fn Slice[Element].length(self) -> USize
+public fn Slice[Element].length(self) -> UInt64
   ensures result == self.model().length()
   ensures result == (intrinsic::view_length(self.elements))
   cost time O(1)
@@ -486,7 +486,7 @@ public fn Slice[Element].length(self) -> USize
 impl Iterable for Slice[Element] {
   type Element = Element
 
-  fn count(self) -> USize
+  fn count(self) -> UInt64
     ensures result == self.length()
     cost time O(1)
     cost allocations == 0
@@ -494,7 +494,7 @@ impl Iterable for Slice[Element] {
     self.length()
   }
 
-  fn element(self, position: USize) lends Element
+  fn element(self, position: UInt64) lends Element
     requires position < self.count()
     ensures identical(result, self.model()[position])
     cost time O(1)
@@ -504,7 +504,7 @@ impl Iterable for Slice[Element] {
   }
 }
 
-public fn Slice[Element].element(mut self, position: USize) lends mut Element
+public fn Slice[Element].element(mut self, position: UInt64) lends mut Element
   requires position < self.count()
   ensures identical(result, old(self.model())[position])
   ensures identical(self.model(), old(self.model()).update(position, value: final(result)))
@@ -517,17 +517,17 @@ public fn Slice[Element].element(mut self, position: USize) lends mut Element
 }
 
 impl Index for List[Element] {
-  type Key = USize
+  type Key = UInt64
   type Output = Element
 
-  fn contains_key(self, key: USize) -> Bool
+  fn contains_key(self, key: UInt64) -> Bool
     cost time O(1)
     cost allocations == 0
   {
     key < self.length()
   }
 
-  fn at(self, key: USize) lends Element
+  fn at(self, key: UInt64) lends Element
     requires key < self.length()
     ensures identical(result, self.model()[key])
     cost time O(1)
@@ -538,7 +538,7 @@ impl Index for List[Element] {
 }
 
 impl IndexMut for List[Element] {
-  fn at(mut self, key: USize) lends mut Element
+  fn at(mut self, key: UInt64) lends mut Element
     requires key < self.length()
     ensures identical(result, old(self.model())[key])
     ensures identical(self.model(), old(self.model()).update(key, value: final(result)))
@@ -551,17 +551,17 @@ impl IndexMut for List[Element] {
 }
 
 impl Index for Slice[Element] {
-  type Key = USize
+  type Key = UInt64
   type Output = Element
 
-  fn contains_key(self, key: USize) -> Bool
+  fn contains_key(self, key: UInt64) -> Bool
     cost time O(1)
     cost allocations == 0
   {
     key < self.length()
   }
 
-  fn at(self, key: USize) lends Element
+  fn at(self, key: UInt64) lends Element
     requires key < self.length()
     ensures identical(result, self.model()[key])
     cost time O(1)
@@ -572,7 +572,7 @@ impl Index for Slice[Element] {
 }
 
 impl IndexMut for Slice[Element] {
-  fn at(mut self, key: USize) lends mut Element
+  fn at(mut self, key: UInt64) lends mut Element
     requires key < self.length()
     ensures identical(result, old(self.model())[key])
     ensures identical(self.model(), old(self.model()).update(key, value: final(result)))
@@ -592,7 +592,7 @@ impl Equal for List[Element: Equal] {
     if self.length() != other.length() {
       return false
     }
-    var index: USize = 0
+    var index: UInt64 = 0
     while index < self.length()
       invariant index <= self.length()
       invariant forall i in 0..index => self.model()[i] == other.model()[i]
@@ -607,7 +607,7 @@ impl Equal for List[Element: Equal] {
   }
 }
 
-public fn List[Element: Copyable].filled(value: Element, count: USize) -> List[Element]
+public fn List[Element: Copyable].filled(value: Element, count: UInt64) -> List[Element]
   ensures result.length() == count
   ensures forall i in 0..count => identical(result.model()[i], value)
   cost time O(count * time(Element.copy))
@@ -624,8 +624,8 @@ public fn List[Element: Copyable].filled(value: Element, count: USize) -> List[E
 }
 
 public fn List[Element].generate(
-  count: USize,
-  make: (fn(index: USize) -> Element requires index < count cost time finite),
+  count: UInt64,
+  make: (fn(index: UInt64) -> Element requires index < count cost time finite),
 ) -> List[Element]
   ensures result.length() == count
   ensures forall i in 0..count => identical(result.model()[i], make(i))
@@ -651,7 +651,7 @@ public fn List[Element].collect[Source: Cursor[Element = Element]](source: own S
   items
 }
 
-public fn List[Element].capacity(self) -> USize
+public fn List[Element].capacity(self) -> UInt64
   ensures result >= self.length()
   ensures result == (intrinsic::storage_capacity(self.storage))
   cost time O(1)
@@ -660,7 +660,7 @@ public fn List[Element].capacity(self) -> USize
   intrinsic::storage_capacity(self.storage)
 }
 
-public fn List[Element].reserve(mut self, additional: USize)
+public fn List[Element].reserve(mut self, additional: UInt64)
   ensures identical(self.model(), old(self.model()))
   ensures self.capacity() >= self.length() + additional
   cost amortized time O(additional)
@@ -687,7 +687,7 @@ public fn List[Element].clear(mut self)
   }
 }
 
-public fn List[Element].truncate(mut self, length: USize)
+public fn List[Element].truncate(mut self, length: UInt64)
   ensures self.length() == (if length < old(self.length()) { length } else { old(self.length()) })
   ensures forall i in 0..self.length() => identical(self.model()[i], old(self.model())[i])
   cost time O(old(self.length()))
@@ -704,7 +704,7 @@ public fn List[Element].truncate(mut self, length: USize)
   }
 }
 
-public fn List[Element].remove_at(mut self, index: USize) -> Element
+public fn List[Element].remove_at(mut self, index: UInt64) -> Element
   requires index < self.length()
   ensures self.length() == old(self.length()) - 1
   ensures identical(result, old(self.model())[index])
@@ -716,7 +716,7 @@ public fn List[Element].remove_at(mut self, index: USize) -> Element
   intrinsic::storage_remove(mut self.storage, index: index)
 }
 
-public fn List[Element].swap_remove(mut self, index: USize) -> Element
+public fn List[Element].swap_remove(mut self, index: UInt64) -> Element
   requires index < self.length()
   ensures self.length() == old(self.length()) - 1
   ensures identical(result, old(self.model())[index])
@@ -727,7 +727,7 @@ public fn List[Element].swap_remove(mut self, index: USize) -> Element
   intrinsic::storage_pop(mut self.storage)
 }
 
-public fn List[Element].remove_range(mut self, range: Range[USize])
+public fn List[Element].remove_range(mut self, range: Range[UInt64])
   requires range.start <= range.stop
   requires range.stop <= self.length()
   requires !range.inclusive
@@ -750,7 +750,7 @@ public fn List[Element].remove_range(mut self, range: Range[USize])
     intrinsic::storage_swap(mut self.storage, first: index - width, second: index)
     index += 1
   }
-  var removed: USize = 0
+  var removed: UInt64 = 0
   while removed < width
     invariant self.length() == old(self.length()) - removed
     invariant removed <= width
@@ -762,7 +762,7 @@ public fn List[Element].remove_range(mut self, range: Range[USize])
   }
 }
 
-public fn List[Element].split_off(mut self, at: USize) -> List[Element]
+public fn List[Element].split_off(mut self, at: UInt64) -> List[Element]
   requires at <= self.length()
   ensures self.length() == at
   ensures result.length() == old(self.length()) - at
@@ -843,7 +843,7 @@ public fn List[Element].retain(mut self, keep: (fn(Element) -> Bool cost time fi
   cost time O(old(self.length()) * time(keep))
 {
   let count = self.length()
-  var retained_count: USize = 0
+  var retained_count: UInt64 = 0
   for index in 0..count
     invariant self.length() == count
     invariant retained_count <= index
@@ -873,7 +873,7 @@ public fn List[Element: Equal].deduplicate(mut self)
   if count == 0 {
     return
   }
-  var unique_count: USize = 1
+  var unique_count: UInt64 = 1
   for index in 1..count
     invariant self.length() == count
     invariant 1 <= unique_count

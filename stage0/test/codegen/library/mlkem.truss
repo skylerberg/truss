@@ -21,7 +21,7 @@ fn same(decapsulated: Option[cryptography::SecretKey], expected: cryptography::S
 fn seed_of(first: UInt8, step: UInt8) -> Array[UInt8, 64] {
   var seed: Array[UInt8, 64] = Array.filled(0)
   var value = first
-  let width: USize = 64
+  let width: UInt64 = 64
   for index in 0..width {
     seed[index] = value
     value = value.wrapping_add(step)
@@ -32,7 +32,7 @@ fn seed_of(first: UInt8, step: UInt8) -> Array[UInt8, 64] {
 fn message_of(first: UInt8, step: UInt8) -> Array[UInt8, 32] {
   var message: Array[UInt8, 32] = Array.filled(0)
   var value = first
-  let width: USize = 32
+  let width: UInt64 = 32
   for index in 0..width {
     message[index] = value
     value = value.wrapping_add(step)

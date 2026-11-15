@@ -15,12 +15,10 @@
 type debug_form = Structure | Text | Sequence
 type t
 
-(* [usize] is the ground type [USize]. [debug_form] defaults to [Structure]
-   for every type. *)
 val create :
   Memory_layout.env ->
   representation:(Ground.ty -> Memory_layout.representation) ->
-  usize:Ground.ty ->
+  uint64:Ground.ty ->
   ?debug_form:(Ground.ty -> debug_form) ->
   unit ->
   t

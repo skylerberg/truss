@@ -9,10 +9,10 @@ internal type Chunk =
 internal type Outbound =
   | Head(stream: UInt32, status: UInt16, fields: List[hpack::Field], is_end: Bool, ack: tasks::Channel[Bool])
   | Data(stream: UInt32, bytes: List[UInt8], is_end: Bool, ack: tasks::Channel[Bool])
-  | Credit(stream: UInt32, amount: USize)
+  | Credit(stream: UInt32, amount: UInt64)
   | Frame(bytes: List[UInt8])
   | Window(stream: UInt32, increment: Int64)
-  | Settings(initial_window: Option[Int64], frame_size: Option[USize], table_size: Option[USize])
+  | Settings(initial_window: Option[Int64], frame_size: Option[UInt64], table_size: Option[UInt64])
   | Reset(stream: UInt32)
   | Goaway(last_stream: UInt32, code: UInt32)
   | Drain(last_stream: UInt32, ack: tasks::Channel[Bool])

@@ -1,6 +1,6 @@
 type Bag(items: List[String])
 
-type Numbered(index: USize, value: String)
+type Numbered(index: UInt64, value: String)
 
 fn Bag.first(self) lends Option[String] {
   if self.items.length() > 0 {
@@ -10,23 +10,23 @@ fn Bag.first(self) lends Option[String] {
   }
 }
 
-fn Bag.count(self) -> USize {
+fn Bag.count(self) -> UInt64 {
   self.items.count()
 }
 
-fn Bag.element(self, position: USize) lends Numbered {
+fn Bag.element(self, position: UInt64) lends Numbered {
   Numbered(index: position, value: self.items[position])
 }
 
 type Counters(counts: List[Int64], names: List[String])
 
-type Slot(index: USize, count: Int64, name: String)
+type Slot(index: UInt64, count: Int64, name: String)
 
-fn Counters.count(self) -> USize {
+fn Counters.count(self) -> UInt64 {
   self.counts.count()
 }
 
-fn Counters.element(mut self, position: USize) lends mut Slot {
+fn Counters.element(mut self, position: UInt64) lends mut Slot {
   Slot(index: position, count: mut self.counts[position], name: mut self.names[position])
 }
 
@@ -35,7 +35,7 @@ test "constructors of lent places" {
   if bag.first() is Some(name) {
     assert name.length() == 3
   }
-  var lengths: USize = 0
+  var lengths: UInt64 = 0
   for entry in bag {
     lengths += entry.index + entry.value.length()
   }

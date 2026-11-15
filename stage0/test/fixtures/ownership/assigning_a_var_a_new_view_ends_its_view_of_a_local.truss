@@ -1,4 +1,4 @@
-fn f(other: List[Int64]) -> USize {
+fn f(other: List[Int64]) -> UInt64 {
   var outer = other[..]
   {
     let list = make()

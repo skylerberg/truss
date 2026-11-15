@@ -77,7 +77,7 @@ and ground_function context substitution (function_type : Types.function_type) :
     uses = evidence_for context [] function_type.uses;
   }
 
-let usize = builtin USize
+let uint64 = builtin UInt64
 let types_mode : Ground.mode -> Types.mode = function Read -> Read | Mut -> Mut | Own -> Own
 
 let rec back : Ground.ty -> Types.ty = function
@@ -144,8 +144,6 @@ let rec shape context (ty : Ground.ty) : Memory_layout.shape =
       | Some UInt16, [] -> Scalar (Integer UInt16)
       | Some UInt32, [] -> Scalar (Integer UInt32)
       | Some UInt64, [] -> Scalar (Integer UInt64)
-      | Some USize, [] -> Scalar (Integer USize)
-      | Some ISize, [] -> Scalar (Integer ISize)
       | Some Float32, [] -> Scalar Float32
       | Some Float64, [] -> Scalar Float64
       | Some Bool, [] -> Scalar Bool
@@ -153,8 +151,8 @@ let rec shape context (ty : Ground.ty) : Memory_layout.shape =
       | Some Unit, [] -> Record []
       | Some Never, [] -> Sum []
       | Some Array, [ Type element; Value count ] -> Array (element, Z.to_int count)
-      | Some Storage, [ Type element ] -> Storage.shape ~usize element
-      | Some View, [ Type element ] -> Storage.view_shape ~usize element
+      | Some Storage, [ Type element ] -> Storage.shape ~uint64 element
+      | Some View, [ Type element ] -> Storage.view_shape ~uint64 element
       | Some Handle, [] -> Record [ ("descriptor", Raw (Integer Int32)) ]
       | Some Shared, [ Type _ ] -> Record [ ("value", Raw (Pointer Opaque)) ]
       | Some Integer, _ -> bug "Integer exists only in specifications"

@@ -14,7 +14,7 @@ public fn String.is_ascii(self) -> Bool
   self.slice().is_ascii()
 }
 
-public fn String.is_boundary(self, offset: USize) -> Bool
+public fn String.is_boundary(self, offset: UInt64) -> Bool
   ensures result == (self.slice().is_boundary(offset))
   cost time O(1)
 {
@@ -37,7 +37,7 @@ public fn String.characters_with_offsets(self) -> string_slice::CharactersWithOf
   self.slice().characters_with_offsets()
 }
 
-public fn String.character_count(self) -> USize
+public fn String.character_count(self) -> UInt64
   ensures result <= self.length()
   cost time O(self.length())
 {
@@ -72,7 +72,7 @@ public fn String.lines(self) -> List[StringSlice]
   self.slice().lines()
 }
 
-public fn String.substring(self, from: USize, to: USize) -> StringSlice
+public fn String.substring(self, from: UInt64, to: UInt64) -> StringSlice
   requires from <= to
   requires to <= self.length()
   requires self.is_boundary(from)
@@ -83,13 +83,13 @@ public fn String.substring(self, from: USize, to: USize) -> StringSlice
   self.slice().substring(from, to)
 }
 
-public fn String.get_substring(self, from: USize, to: USize) -> Option[StringSlice]
+public fn String.get_substring(self, from: UInt64, to: UInt64) -> Option[StringSlice]
   cost time O(1)
 {
   self.slice().get_substring(from, to)
 }
 
-public fn String.split_at(self, offset: USize) -> core::Pair[StringSlice, StringSlice]
+public fn String.split_at(self, offset: UInt64) -> core::Pair[StringSlice, StringSlice]
   requires offset <= self.length()
   requires self.is_boundary(offset)
   ensures result.first.length() == offset
@@ -106,7 +106,7 @@ public fn String.contains(self, pattern: StringSlice) -> Bool
   self.slice().contains(pattern)
 }
 
-public fn String.find(self, pattern: StringSlice) -> Option[USize]
+public fn String.find(self, pattern: StringSlice) -> Option[UInt64]
   ensures !(result is Some(offset)
     && !(offset + pattern.length() <= self.length() && self.is_boundary(offset)))
   ensures identical(result, self.slice().find(pattern))
@@ -115,7 +115,7 @@ public fn String.find(self, pattern: StringSlice) -> Option[USize]
   self.slice().find(pattern)
 }
 
-public fn String.find_last(self, pattern: StringSlice) -> Option[USize]
+public fn String.find_last(self, pattern: StringSlice) -> Option[UInt64]
   ensures !(result is Some(offset)
     && !(offset + pattern.length() <= self.length() && self.is_boundary(offset)))
   ensures identical(result, self.slice().find_last(pattern))
@@ -127,7 +127,7 @@ public fn String.find_last(self, pattern: StringSlice) -> Option[USize]
 public fn String.find_character(
   self,
   predicate: (fn(Character) -> Bool cost time finite),
-) -> Option[USize]
+) -> Option[UInt64]
   ensures match result {
     Some(offset) => offset < self.length() && self.is_boundary(offset)
     None => true
@@ -137,7 +137,7 @@ public fn String.find_character(
   self.slice().find_character(predicate)
 }
 
-public fn String.occurrences(self, pattern: StringSlice) -> USize
+public fn String.occurrences(self, pattern: StringSlice) -> UInt64
   requires pattern.length() > 0
   cost time O(self.length() + pattern.length())
 {
@@ -201,7 +201,7 @@ public fn String.split(self, separator: StringSlice) -> List[StringSlice]
   self.slice().split(separator)
 }
 
-public fn String.split_at_most(self, separator: StringSlice, parts: USize) -> List[StringSlice]
+public fn String.split_at_most(self, separator: StringSlice, parts: UInt64) -> List[StringSlice]
   requires separator.length() > 0
   requires parts > 0
   ensures result.length() <= parts
@@ -255,7 +255,7 @@ public fn String.replace_first(self, pattern: StringSlice, replacement: StringSl
   self.slice().replace_first(pattern, replacement)
 }
 
-public fn String.repeated(self, times: USize) -> String
+public fn String.repeated(self, times: UInt64) -> String
   ensures result.length() == self.length() * times
   cost time O(self.length() * times)
 {
@@ -301,13 +301,13 @@ public fn String.equal_ignoring_ascii_case(self, other: StringSlice) -> Bool
   self.slice().equal_ignoring_ascii_case(other)
 }
 
-public fn String.pad_start(self, width: USize, fill: Character = Character" ") -> String
+public fn String.pad_start(self, width: UInt64, fill: Character = Character" ") -> String
   cost time O(self.length() + width)
 {
   self.slice().pad_start(width, fill)
 }
 
-public fn String.pad_end(self, width: USize, fill: Character = Character" ") -> String
+public fn String.pad_end(self, width: UInt64, fill: Character = Character" ") -> String
   cost time O(self.length() + width)
 {
   self.slice().pad_end(width, fill)

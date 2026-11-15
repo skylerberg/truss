@@ -103,7 +103,7 @@ fn reorder(entries: mut List[UInt32])
   ensures entries.length() == old(entries.length())
   cost time finite
 {
-  var position: USize = 1
+  var position: UInt64 = 1
   while position < entries.length()
     invariant entries.length() == old(entries.length())
     decreases entries.length() - position
@@ -138,7 +138,7 @@ fn compose(entries: Slice[UInt32]) -> List[UInt32]
   cost time finite
 {
   var output: List[UInt32] = []
-  var starter: USize = 0
+  var starter: UInt64 = 0
   var has_starter = false
   var last_class: UInt32 = 0
   for position in 0..entries.length()
@@ -242,7 +242,7 @@ public fn category(character: Character) -> Category
   }
 }
 
-public fn display_width(character: Character) -> USize
+public fn display_width(character: Character) -> UInt64
   ensures result <= 2
   cost time O(1)
 {

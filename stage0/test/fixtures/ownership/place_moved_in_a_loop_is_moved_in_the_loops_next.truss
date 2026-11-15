@@ -1,4 +1,4 @@
-fn f(items: own List[Int64], count: USize) {
+fn f(items: own List[Int64], count: UInt64) {
   for i in 0..count {
     let _ = i
     keep(own items)

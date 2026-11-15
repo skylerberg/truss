@@ -97,7 +97,7 @@ let () =
         (For_testing.to_string (Memory_layout.block env (named "Tree") "Node")));
   test "an Array holds its elements in place" (fun () ->
       expect_string ~expected:"32/1 array(32 x 1/1 UInt8)" (describe (array uint8 32)));
-  test "a List holds a pointer and two 64-bit USize fields" (fun () ->
+  test "a List holds a pointer and two 64-bit UInt64 fields" (fun () ->
       expect_int ~expected:24 (layout (list int64)).size);
   test "a variant whose fields have zero size counts as having none" (fun () ->
       expect_string ~expected:"1/1 tag(UInt8: Some None) niche . 2+254" (describe (option unit)));
@@ -137,7 +137,7 @@ let () =
         Glue.create
           (create host ~shape_of:(Monomorphic.shape standard_context))
           ~representation:(Monomorphic.representation standard_context)
-          ~usize:(Monomorphic.builtin USize) ()
+          ~uint64:(Monomorphic.builtin UInt64) ()
       in
       if Glue.trivial glue (list int64) then fail "a List is trivial";
       if not (Glue.trivial glue (option int64)) then fail "an Option of an Int64 is not trivial")

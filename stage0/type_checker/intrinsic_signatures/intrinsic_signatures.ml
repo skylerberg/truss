@@ -32,7 +32,7 @@ let signature (operation : Intrinsic.operation) : Types.signature =
     }
   in
   let value = parameter_type "Value" and element = parameter_type "Element" in
-  let usize = Types.builtin USize and bool = Types.bool in
+  let uint64 = Types.builtin UInt64 and bool = Types.bool in
   let binary output =
     make ~generics:[ "Value" ] ~output:(Returns output) [ input "left" value; input "right" value ]
   in
@@ -76,13 +76,13 @@ let signature (operation : Intrinsic.operation) : Types.signature =
   | Negate | Complement | Square_root | Floor | Ceiling | Truncate | Round_to_even | Swap_bytes ->
       unary value
   | Is_nan -> unary bool
-  | Leading_zeros | Trailing_zeros | Count_ones -> unary usize
+  | Leading_zeros | Trailing_zeros | Count_ones -> unary uint64
   | Shift_left | Shift_right ->
       make ~generics:[ "Value"; "Amount" ] ~output:(Returns value)
         [ input "value" value; input "amount" (parameter_type "Amount") ]
   | Rotate_left | Rotate_right ->
       make ~generics:[ "Value" ] ~output:(Returns value)
-        [ input "value" value; input "amount" usize ]
+        [ input "value" value; input "amount" uint64 ]
   | Convert ->
       make ~generics:[ "Source"; "Target" ]
         ~output:(Returns (parameter_type "Target"))
@@ -106,26 +106,26 @@ let signature (operation : Intrinsic.operation) : Types.signature =
         [ input "left" (view (Types.builtin UInt8)); input "right" (view (Types.builtin UInt8)) ]
   | Storage_empty -> make ~generics:[ "Element" ] ~output:(Returns (storage element)) []
   | Storage_with_capacity ->
-      make ~generics:[ "Element" ] ~output:(Returns (storage element)) [ input "capacity" usize ]
-  | Storage_length | Storage_capacity -> with_storage ~output:(Returns usize) []
-  | Storage_set_capacity -> with_storage ~mode:Mut [ input "capacity" usize ]
-  | Storage_lengthen -> with_storage ~mode:Mut [ input "by" usize ]
+      make ~generics:[ "Element" ] ~output:(Returns (storage element)) [ input "capacity" uint64 ]
+  | Storage_length | Storage_capacity -> with_storage ~output:(Returns uint64) []
+  | Storage_set_capacity -> with_storage ~mode:Mut [ input "capacity" uint64 ]
+  | Storage_lengthen -> with_storage ~mode:Mut [ input "by" uint64 ]
   | Storage_shorten ->
       (* Only elements with nothing to drop can be forgotten. *)
       let plain : Types.trait_reference =
         { trait = Well_known.path Plain; trait_arguments = []; associated = [] }
       in
       {
-        (with_storage ~mode:Mut [ input "length" usize ]) with
+        (with_storage ~mode:Mut [ input "length" uint64 ]) with
         generics =
           [ { Types.generic = parameter operation "Element"; kind = Type_generic [ plain ] } ];
       }
   | Storage_push -> with_storage ~mode:Mut [ input ~mode:Own "value" element ]
   | Storage_pop -> with_storage ~mode:Mut ~output:(Returns element) []
   | Storage_insert ->
-      with_storage ~mode:Mut [ input "index" usize; input ~mode:Own "value" element ]
-  | Storage_remove -> with_storage ~mode:Mut ~output:(Returns element) [ input "index" usize ]
-  | Storage_swap -> with_storage ~mode:Mut [ input "first" usize; input "second" usize ]
+      with_storage ~mode:Mut [ input "index" uint64; input ~mode:Own "value" element ]
+  | Storage_remove -> with_storage ~mode:Mut ~output:(Returns element) [ input "index" uint64 ]
+  | Storage_swap -> with_storage ~mode:Mut [ input "first" uint64; input "second" uint64 ]
   | Storage_from_array ->
       over_array
         ~output:(fun _ -> Returns (storage element))
@@ -139,35 +139,36 @@ let signature (operation : Intrinsic.operation) : Types.signature =
   | Array_at_mut ->
       over_array
         ~output:(fun _ -> Lends (Mut, element))
-        (fun array -> [ input ~mode:Mut "array" array; input "index" usize ])
-  | Storage_at -> with_storage ~output:(Lends (Read, element)) [ input "index" usize ]
-  | Storage_at_mut -> with_storage ~mode:Mut ~output:(Lends (Mut, element)) [ input "index" usize ]
+        (fun array -> [ input ~mode:Mut "array" array; input "index" uint64 ])
+  | Storage_at -> with_storage ~output:(Lends (Read, element)) [ input "index" uint64 ]
+  | Storage_at_mut -> with_storage ~mode:Mut ~output:(Lends (Mut, element)) [ input "index" uint64 ]
   | Storage_view -> with_storage ~output:(Returns (view element)) []
   | Storage_view_mut -> with_storage ~mode:Mut ~output:(Returns (view element)) []
   | View_length ->
-      make ~generics:[ "Element" ] ~output:(Returns usize) [ input "view" (view element) ]
+      make ~generics:[ "Element" ] ~output:(Returns uint64) [ input "view" (view element) ]
   | View_at ->
       make ~generics:[ "Element" ]
         ~output:(Lends (Read, element))
-        [ input "view" (view element); input "index" usize ]
+        [ input "view" (view element); input "index" uint64 ]
   | View_at_mut ->
       make ~generics:[ "Element" ]
         ~output:(Lends (Mut, element))
-        [ input ~mode:Mut "view" (view element); input "index" usize ]
+        [ input ~mode:Mut "view" (view element); input "index" uint64 ]
   | View_swap ->
       make ~generics:[ "Element" ]
-        [ input ~mode:Mut "view" (view element); input "first" usize; input "second" usize ]
-  | Storage_take_view -> with_storage ~mode:Mut [ input "view" (view element); input "start" usize ]
+        [ input ~mode:Mut "view" (view element); input "first" uint64; input "second" uint64 ]
+  | Storage_take_view ->
+      with_storage ~mode:Mut [ input "view" (view element); input "start" uint64 ]
   | View_take_view ->
       make ~generics:[ "Element" ]
-        [ input ~mode:Mut "view" (view element); input "part" (view element); input "start" usize ]
+        [ input ~mode:Mut "view" (view element); input "part" (view element); input "start" uint64 ]
   | Array_take_view ->
       over_array (fun array ->
-          [ input ~mode:Mut "array" array; input "view" (view element); input "start" usize ])
+          [ input ~mode:Mut "array" array; input "view" (view element); input "start" uint64 ])
   | View_slice ->
       make ~generics:[ "Element" ]
         ~output:(Returns (view element))
-        [ input "view" (view element); input "start" usize; input "stop" usize ]
+        [ input "view" (view element); input "start" uint64; input "stop" uint64 ]
   | Storage_model ->
       { (with_storage ~output:(Returns (sequence element)) []) with specification_only = true }
   | Array_model ->
@@ -187,7 +188,7 @@ let signature (operation : Intrinsic.operation) : Types.signature =
         specification_only = true;
       }
   | View_address ->
-      make ~generics:[ "Element" ] ~output:(Returns usize) [ input "view" (view element) ]
+      make ~generics:[ "Element" ] ~output:(Returns uint64) [ input "view" (view element) ]
   | Crash ->
       make ~output:(Returns Types.Never)
         [ input "message" (Types.Named { path = Well_known.path String_slice; arguments = [] }) ]
@@ -202,7 +203,7 @@ let signature (operation : Intrinsic.operation) : Types.signature =
   | Run_test -> make [ input "index" (Types.builtin UInt32) ]
   | Coroutine_start ->
       {
-        (make ~output:(Returns usize) [ input ~mode:Own "work" work; input "item" work_item ]) with
+        (make ~output:(Returns uint64) [ input ~mode:Own "work" work; input "item" work_item ]) with
         stores_functions = [ "work" ];
       }
   | Tasks_spawn ->
@@ -214,7 +215,7 @@ let signature (operation : Intrinsic.operation) : Types.signature =
       }
   | Holds_invariant ->
       make ~generics:[ "Value" ] ~output:(Returns bool)
-        [ input "value" value; input "clause" usize ]
+        [ input "value" value; input "clause" uint64 ]
   | Shared_new | Shared_update | Shared_key -> (
       let storable : Types.trait_reference =
         { trait = Well_known.path Storable; trait_arguments = []; associated = [] }
@@ -256,14 +257,14 @@ let signature (operation : Intrinsic.operation) : Types.signature =
             (make ~output:(Returns (Types.builtin UInt64)) [ input "shared" shared ]) with
             generics = [ bounded "Value" ];
           })
-  | Coroutine_resume -> make ~output:(Returns bool) [ input "coroutine" usize ]
+  | Coroutine_resume -> make ~output:(Returns bool) [ input "coroutine" uint64 ]
   | Coroutine_suspend -> make []
   | Report_tests_to -> make [ input "descriptor" (Types.builtin Int32) ]
-  | Live_blocks -> make ~output:(Returns usize) []
+  | Live_blocks -> make ~output:(Returns uint64) []
   | Environment_entry ->
       make
         ~output:(Returns (view (Types.builtin UInt8)))
-        [ input "index" usize; input ~mode:Mut "is_present" bool ]
+        [ input "index" uint64; input ~mode:Mut "is_present" bool ]
   | System_is_os _ | System_is_architecture _ -> make ~output:(Returns bool) []
   | Libc function_ ->
       let { Libc.parameters; result; _ } = Libc.signature function_ in

@@ -16,10 +16,10 @@ fn joined(parts: Slice[String]) -> List[UInt8] {
   bytes_of(own text.finish().slice())
 }
 
-fn words(count: USize) -> List[UInt8] {
+fn words(count: UInt64) -> List[UInt8] {
   let vocabulary: List[String] = ["alpha ", "beta ", "gamma ", "delta ", "epsilon\n", "zeta ", "eta ", "theta "]
   var bytes: List[UInt8] = []
-  var state: USize = 7
+  var state: UInt64 = 7
   while bytes.length() < count {
     state = (state * 1103515245 + 12345) % 2147483648
     let word = vocabulary[(state >> 16) & 7].bytes()
@@ -32,7 +32,7 @@ fn words(count: USize) -> List[UInt8] {
   bytes
 }
 
-fn noise(count: USize) -> List[UInt8] {
+fn noise(count: UInt64) -> List[UInt8] {
   var bytes: List[UInt8] = []
   var state: UInt64 = 11
   for _ in 0..count {

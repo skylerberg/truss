@@ -21,12 +21,12 @@ internal fn format(instant: Instant) -> String {
   let date = moment.date
   let clock = moment.time
   var output = ""
-  let weekday: USize = intrinsic::convert(date.weekday().number_from_monday())
+  let weekday: UInt64 = intrinsic::convert(date.weekday().number_from_monday())
   mut output.push(if weekday >= 1 && weekday <= 7 { weekday_names[weekday - 1].slice() } else { "Mon".slice() })
   mut output.push(", ")
   push_two_digits(mut output, value: date.day())
   mut output.push(" ")
-  let month: USize = intrinsic::convert(date.month().number())
+  let month: UInt64 = intrinsic::convert(date.month().number())
   mut output.push(if month >= 1 && month <= 12 { month_names[month - 1].slice() } else { "Jan".slice() })
   mut output.push(" ")
   mut output.push("${date.year()}".slice())
@@ -41,7 +41,7 @@ internal fn format(instant: Instant) -> String {
 }
 
 fn month_number(name: StringSlice) -> Option[UInt8] {
-  let count: USize = 12
+  let count: UInt64 = 12
   for index in 0..count {
     if same_name(month_names[index].slice(), second: name) {
       return Some(intrinsic::convert(index + 1))

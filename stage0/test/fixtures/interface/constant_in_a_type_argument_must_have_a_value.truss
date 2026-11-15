@@ -1,5 +1,5 @@
-let first: USize = second
+let first: UInt64 = second
 
-let second: USize = first
+let second: UInt64 = first
 
 fn f(values: Array[Int64, first]) {}

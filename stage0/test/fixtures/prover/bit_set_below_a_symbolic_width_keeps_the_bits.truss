@@ -1,4 +1,4 @@
-theorem a_written_bit_keeps_the_unused_bits_clear(word: UInt64, used: USize, position: USize)
+theorem a_written_bit_keeps_the_unused_bits_clear(word: UInt64, used: UInt64, position: UInt64)
   requires used < 64
   requires position < used
   requires (word >> used) == 0
@@ -7,7 +7,7 @@ theorem a_written_bit_keeps_the_unused_bits_clear(word: UInt64, used: USize, pos
 {
 }
 
-theorem a_union_keeps_the_unused_bits_clear(first: UInt64, second: UInt64, used: USize)
+theorem a_union_keeps_the_unused_bits_clear(first: UInt64, second: UInt64, used: UInt64)
   requires used < 64
   requires (first >> used) == 0
   requires (second >> used) == 0

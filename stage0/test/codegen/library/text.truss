@@ -35,7 +35,7 @@ test "characters decodes each UTF-8 sequence" {
 }
 
 test "characters_with_offsets gives the byte offset of each character" {
-  var offsets: List[USize] = []
+  var offsets: List[UInt64] = []
   for entry in "a\u{e9}\u{20ac}z".characters_with_offsets() {
     mut offsets.push(entry.index)
   }
@@ -592,7 +592,7 @@ test "graphemes join an Indic linker to the consonant after it" {
 }
 
 test "a String gives the graphemes of its slice" {
-  var count: USize = 0
+  var count: UInt64 = 0
   let text = "e\u{301}\u{1F1FA}\u{1F1F8}!"
   for _ in text.graphemes() {
     count += 1

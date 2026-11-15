@@ -25,7 +25,7 @@ public fn factorial(number: UInt64) -> Option[UInt64]
     1, 1, 2, 6, 24, 120, 720, 5040, 40320, 362880, 3628800, 39916800, 479001600, 6227020800, 87178291200,
     1307674368000, 20922789888000, 355687428096000, 6402373705728000, 121645100408832000, 2432902008176640000,
   ]
-  if number <= 20 { Some(values[intrinsic::convert(number)]) } else { None }
+  if number <= 20 { Some(values[number]) } else { None }
 }
 
 public fn binomial(total: UInt64, chosen: UInt64) -> Option[UInt64]
@@ -284,7 +284,7 @@ fn add_magnitudes(first: Slice[UInt64], second: Slice[UInt64]) -> List[UInt64]
   let shorter = if first.length() < second.length() { first } else { second }
   var sum: List[UInt64] = List.with_capacity(longer.length().saturating_add(1))
   var carry: UInt64 = 0
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < longer.length()
     invariant index <= longer.length()
     decreases longer.length() - index
@@ -308,7 +308,7 @@ fn subtract_magnitudes(first: Slice[UInt64], second: Slice[UInt64]) -> List[UInt
 {
   var difference: List[UInt64] = List.with_capacity(first.length())
   var borrow: UInt64 = 0
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < first.length()
     invariant index <= first.length()
     decreases first.length() - index
@@ -324,12 +324,12 @@ fn subtract_magnitudes(first: Slice[UInt64], second: Slice[UInt64]) -> List[UInt
   difference
 }
 
-fn zero_limbs(count: USize) -> List[UInt64]
+fn zero_limbs(count: UInt64) -> List[UInt64]
   ensures result.length() == count
   cost time finite
 {
   var limbs: List[UInt64] = List.with_capacity(count)
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < count
     invariant index <= count
     invariant limbs.length() == index
@@ -347,12 +347,12 @@ fn multiply_magnitudes(first: Slice[UInt64], second: Slice[UInt64]) -> List[UInt
   if first.length() == 0 || second.length() == 0 {
     return []
   }
-  if first.length() > USize.maximum - second.length() {
+  if first.length() > UInt64.maximum - second.length() {
     intrinsic::crash("a big integer cannot hold that many limbs".slice())
   }
   let count = first.length() + second.length()
   var product = zero_limbs(count)
-  var outer: USize = 0
+  var outer: UInt64 = 0
   while outer < first.length()
     invariant outer <= first.length()
     invariant product.length() == count
@@ -360,7 +360,7 @@ fn multiply_magnitudes(first: Slice[UInt64], second: Slice[UInt64]) -> List[UInt
   {
     let factor = first[outer]
     var carry: UInt64 = 0
-    var inner: USize = 0
+    var inner: UInt64 = 0
     while inner < second.length()
       invariant inner <= second.length()
       invariant product.length() == count
@@ -386,7 +386,7 @@ fn multiply_add_small(limbs: mut List[UInt64], factor: UInt64, addend: UInt64)
   cost time finite
 {
   var carry = addend
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < limbs.length()
     invariant index <= limbs.length()
     invariant limbs.length() == old(limbs.length())
@@ -437,7 +437,7 @@ fn to_digits(limbs: Slice[UInt64]) -> List[UInt64]
   cost time finite
 {
   var digits: List[UInt64] = List.with_capacity(limbs.length().saturating_multiply(2))
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < limbs.length()
     invariant index <= limbs.length()
     invariant forall i in 0..digits.length() => digits.model()[i] <= 4294967295
@@ -460,7 +460,7 @@ fn from_digits(digits: Slice[UInt64]) -> List[UInt64]
   cost time finite
 {
   var limbs: List[UInt64] = List.with_capacity(digits.length() / 2 + 1)
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < digits.length()
     invariant index <= digits.length()
     decreases digits.length() - index
@@ -478,7 +478,7 @@ fn from_digits(digits: Slice[UInt64]) -> List[UInt64]
   limbs
 }
 
-fn shifted_digit(digits: Slice[UInt64], index: USize, shift: USize) -> UInt64
+fn shifted_digit(digits: Slice[UInt64], index: UInt64, shift: UInt64) -> UInt64
   requires index <= digits.length()
   requires shift <= 32
   ensures result <= 4294967295
@@ -491,7 +491,7 @@ fn shifted_digit(digits: Slice[UInt64], index: USize, shift: USize) -> UInt64
 
 type DigitDivision(quotient: List[UInt64], remainder: List[UInt64])
 
-fn subtract_multiple(remainder: mut List[UInt64], scaled: Slice[UInt64], position: USize, estimate: UInt64) -> UInt64
+fn subtract_multiple(remainder: mut List[UInt64], scaled: Slice[UInt64], position: UInt64, estimate: UInt64) -> UInt64
   requires position + scaled.length() < remainder.length()
   ensures remainder.length() == old(remainder.length())
   cost time finite
@@ -500,7 +500,7 @@ fn subtract_multiple(remainder: mut List[UInt64], scaled: Slice[UInt64], positio
   let length = remainder.length()
   var borrow: UInt64 = 0
   var carry: UInt64 = 0
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < count
     invariant index <= count
     invariant borrow <= 1
@@ -552,9 +552,9 @@ fn divide_digits(dividend: Slice[UInt64], divisor: Slice[UInt64]) -> DigitDivisi
   let count = divisor.length()
   let extra = dividend.length() - count
   let zeros = (divisor[count - 1] % half_base).leading_zeros()
-  let shift: USize = if zeros >= 32 { zeros - 32 } else { 0 }
+  let shift: UInt64 = if zeros >= 32 { zeros - 32 } else { 0 }
   var scaled: List[UInt64] = List.with_capacity(count)
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < count
     invariant index <= count
     invariant scaled.length() == index
@@ -662,7 +662,7 @@ public fn BigInteger.from_big_endian_bytes(bytes: Slice[UInt8], negative: Bool =
     invariant end <= bytes.length()
     decreases end
   {
-    let start: USize = if end >= 8 { end - 8 } else { 0 }
+    let start: UInt64 = if end >= 8 { end - 8 } else { 0 }
     var limb: UInt64 = 0
     var index = start
     while index < end
@@ -691,7 +691,7 @@ public fn BigInteger.to_big_endian_bytes(self) -> List[UInt8]
   {
     index -= 1
     let limb = self.magnitude[index]
-    var shift: USize = 64
+    var shift: UInt64 = 64
     while shift > 0
       invariant shift <= 64
       invariant shift % 8 == 0
@@ -712,7 +712,7 @@ public fn BigInteger.parse_radix(text: StringSlice, radix: UInt32) -> Result[Big
   requires 2 <= radix && radix <= 36
   cost time finite
 {
-  var index: USize = 0
+  var index: UInt64 = 0
   var negative = false
   if text.length() > 0 && (text.byte(0) == 45 || text.byte(0) == 43) {
     negative = text.byte(0) == 45
@@ -737,7 +737,7 @@ public fn BigInteger.parse_radix(text: StringSlice, radix: UInt32) -> Result[Big
   Ok(with_sign(negative, magnitude: own limbs))
 }
 
-type DigitGroup(divisor: UInt64, digits: USize)
+type DigitGroup(divisor: UInt64, digits: UInt64)
 
 fn digit_group(radix: UInt32) -> DigitGroup
   requires 2 <= radix && radix <= 36
@@ -773,7 +773,7 @@ public fn BigInteger.format(self, radix: UInt32 = 10) -> String
     decreases rounds
   {
     var part = divide_small(mut limbs, divisor: group.divisor)
-    var written: USize = 0
+    var written: UInt64 = 0
     while written < group.digits
       invariant written <= group.digits
       decreases group.digits - written
@@ -836,7 +836,7 @@ public fn BigInteger.sign(self) -> Int64
   }
 }
 
-public fn BigInteger.bit_length(self) -> USize
+public fn BigInteger.bit_length(self) -> UInt64
   ensures result > 0 || self.magnitude.length() == 0
   cost time O(1)
 {
@@ -948,13 +948,13 @@ public fn BigInteger.modular_power(self, exponent: BigInteger, modulus: BigInteg
   }
   var result = BigInteger.from_limb(1).floor_modulo(size)
   var base = self.floor_modulo(size)
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < exponent.magnitude.length()
     invariant index <= exponent.magnitude.length()
     decreases exponent.magnitude.length() - index
   {
     var bits = exponent.magnitude[index]
-    var bit: USize = 0
+    var bit: UInt64 = 0
     while bit < 64 && (bits != 0 || index + 1 < exponent.magnitude.length())
       invariant bit <= 64
       decreases 64 - bit
@@ -1031,7 +1031,7 @@ public fn BigInteger.to_float64(self) -> Float64
   if half && (inexact || top % 1024 != 0 || mantissa % 2 == 1) {
     mantissa += 1
   }
-  var exponent: UInt64 = intrinsic::convert(bits - 1)
+  var exponent: UInt64 = bits - 1
   if mantissa >= 9007199254740992 {
     mantissa = mantissa / 2
     exponent += 1
@@ -1594,7 +1594,7 @@ fn Decimal.key(self) -> DecimalKey
     count -= 1
   }
   var digits: List[UInt8] = List.with_capacity(count)
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < count
     invariant index <= count
     decreases count - index
@@ -1602,7 +1602,7 @@ fn Decimal.key(self) -> DecimalKey
     mut digits.push(bytes.byte(index))
     index += 1
   }
-  let places: Int64 = intrinsic::convert[USize, Int64](text.length())
+  let places: Int64 = intrinsic::convert[UInt64, Int64](text.length())
   DecimalKey(
     sign: self.coefficient.sign(),
     exponent: places - intrinsic::convert[Int32, Int64](self.scale),
@@ -1720,10 +1720,10 @@ impl Default for Decimal {
   }
 }
 
-fn write_zeros(output: mut TextBuilder, count: USize)
+fn write_zeros(output: mut TextBuilder, count: UInt64)
   cost time finite
 {
-  var written: USize = 0
+  var written: UInt64 = 0
   while written < count
     invariant written <= count
     decreases count - written
@@ -1748,7 +1748,7 @@ impl Display for Decimal {
       write_zeros(mut output, count: intrinsic::convert(scale_gap(0, smaller: self.scale)))
       return
     }
-    let places: USize = intrinsic::convert(scale_gap(self.scale, smaller: 0))
+    let places: UInt64 = intrinsic::convert(scale_gap(self.scale, smaller: 0))
     if digits.length() > places {
       let whole = digits.length() - places
       mut output.write(digits.slice().part(0, to: whole))
@@ -1775,15 +1775,15 @@ fn parse_decimal(text: StringSlice) -> Result[Decimal, core::ParseFloatError]
   if text.length() == 0 {
     return Err(core::ParseFloatError.Empty)
   }
-  var index: USize = 0
+  var index: UInt64 = 0
   var negative = false
   if text.byte(0) == 45 || text.byte(0) == 43 {
     negative = text.byte(0) == 45
     index = 1
   }
   var limbs: List[UInt64] = []
-  var digits: USize = 0
-  var places: USize = 0
+  var digits: UInt64 = 0
+  var places: UInt64 = 0
   var after_point = false
   while index < text.length() && (is_decimal_digit(text.byte(index)) || (text.byte(index) == 46 && !after_point))
     invariant index <= text.length()
@@ -1840,7 +1840,7 @@ fn parse_decimal(text: StringSlice) -> Result[Decimal, core::ParseFloatError]
   if places > 2147483647 {
     return Err(core::ParseFloatError.InvalidCharacter(offset: text.length()))
   }
-  let scale: Int64 = intrinsic::convert[USize, Int64](places) - exponent
+  let scale: Int64 = intrinsic::convert[UInt64, Int64](places) - exponent
   if scale < -2147483648 || scale > 2147483647 {
     return Err(core::ParseFloatError.InvalidCharacter(offset: text.length()))
   }

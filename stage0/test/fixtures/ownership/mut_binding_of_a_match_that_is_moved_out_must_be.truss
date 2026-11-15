@@ -1,4 +1,4 @@
-fn f(slot: mut Option[Holder]) -> USize {
+fn f(slot: mut Option[Holder]) -> UInt64 {
   match mut slot {
     Some(holder) => {
       let items = own holder.items

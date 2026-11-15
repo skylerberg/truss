@@ -488,7 +488,7 @@ let constant_of st ty (literal : literal) : Lowered.operand =
    [String] holds them as storage with capacity 0, and a [StringSlice] views
    them. *)
 let string_literal st (ty : Ground.ty) text ~(destination : Lowered.place) =
-  let length = usize (String.length text) in
+  let length = constant_uint64 (String.length text) in
   let build field operand =
     emit st.builder
       (Assign (destination, Build { ty; variant = None; fields = [ (field, operand) ] }))
@@ -529,7 +529,7 @@ let list_of st ty destination ~site fills =
       (Intrinsics.lower ~checks:st.context.checks st.context.env st.builder st.context.types
          operation ~type_arguments:[ element ] arguments ~destination ~site)
   in
-  lower Storage_with_capacity [ Value (usize (List.length fills)) ] (Some storage_place);
+  lower Storage_with_capacity [ Value (constant_uint64 (List.length fills)) ] (Some storage_place);
   List.iter
     (fun fill ->
       let value = temporary st element in

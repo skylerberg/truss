@@ -72,7 +72,7 @@ fn is_whitespace(byte: UInt8) -> Bool {
   byte == 32 || byte == 9 || byte == 10 || byte == 12 || byte == 13
 }
 
-fn entity_length(bytes: Slice[UInt8], at: USize) -> Option[USize]
+fn entity_length(bytes: Slice[UInt8], at: UInt64) -> Option[UInt64]
   requires at < bytes.length()
   ensures match result {
     Some(length) => length >= 1 && length <= bytes.length() - at
@@ -114,7 +114,7 @@ fn entity_length(bytes: Slice[UInt8], at: USize) -> Option[USize]
 }
 
 fn push_text_escaped(output: mut List[UInt8], bytes: Slice[UInt8], is_attribute: Bool) {
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < bytes.length()
     invariant index <= bytes.length()
     decreases bytes.length() - index
@@ -159,7 +159,7 @@ fn hex_value(byte: UInt8) -> UInt32
 
 fn decoded_url(bytes: Slice[UInt8]) -> Option[String] {
   var decoded: List[UInt8] = []
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < bytes.length()
     invariant index <= bytes.length()
     decreases bytes.length() - index
@@ -246,9 +246,9 @@ fn is_safe_url_value(bytes: Slice[UInt8]) -> Bool {
 
 type Attribute(name: String, value: List[UInt8])
 
-type Tag(name: String, attributes: List[Attribute], is_end: Bool, end: USize)
+type Tag(name: String, attributes: List[Attribute], is_end: Bool, end: UInt64)
 
-fn read_tag(bytes: Slice[UInt8], at: USize) -> Option[Tag]
+fn read_tag(bytes: Slice[UInt8], at: UInt64) -> Option[Tag]
   requires at < bytes.length()
 {
   var index = at + 1
@@ -337,7 +337,7 @@ fn read_tag(bytes: Slice[UInt8], at: USize) -> Option[Tag]
   Some(Tag(name: own name, attributes: own attributes, is_end: is_end, end: index + 1))
 }
 
-fn find_from(bytes: Slice[UInt8], start: USize, pattern: Slice[UInt8]) -> Option[USize]
+fn find_from(bytes: Slice[UInt8], start: UInt64, pattern: Slice[UInt8]) -> Option[UInt64]
   ensures match result {
     Some(found) => found <= bytes.length() && bytes.length() - found >= pattern.length()
     None => true
@@ -364,7 +364,7 @@ fn find_from(bytes: Slice[UInt8], start: USize, pattern: Slice[UInt8]) -> Option
   None
 }
 
-fn skip_dropped(bytes: Slice[UInt8], start: USize, name: StringSlice) -> USize
+fn skip_dropped(bytes: Slice[UInt8], start: UInt64, name: StringSlice) -> UInt64
   ensures result <= bytes.length()
 {
   let closing = "</${name}".slice().bytes().to_list()
@@ -422,8 +422,8 @@ public fn sanitize(input: StringSlice, policy: SanitizePolicy = SanitizePolicy()
   let bytes = input.bytes()
   var output: List[UInt8] = []
   var open: List[String] = []
-  var text_start: USize = 0
-  var index: USize = 0
+  var text_start: UInt64 = 0
+  var index: UInt64 = 0
   while index < bytes.length()
     invariant text_start <= index && index <= bytes.length()
     decreases bytes.length() - index
@@ -457,7 +457,7 @@ public fn sanitize(input: StringSlice, policy: SanitizePolicy = SanitizePolicy()
         let next = if tag.end > index && tag.end <= bytes.length() { tag.end } else { bytes.length() }
         if tag.is_end {
           var depth = open.length()
-          var position: Option[USize] = None
+          var position: Option[UInt64] = None
           while depth > 0
             decreases depth
           {

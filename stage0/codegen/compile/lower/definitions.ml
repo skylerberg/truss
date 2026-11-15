@@ -36,17 +36,17 @@ let context ?(checks = false) ~constant database system =
   and context =
     lazy
       (let env = Memory_layout.create system ~shape_of:(Monomorphic.shape monomorphic) in
-       let usize = Monomorphic.builtin USize in
+       let uint64 = Monomorphic.builtin UInt64 in
        {
          database;
          env;
          glue =
            Glue.create env
              ~representation:(Monomorphic.representation monomorphic)
-             ~usize ~debug_form ();
+             ~uint64 ~debug_form ();
          monomorphic;
          types =
-           { usize; string_slice = Named { path = Well_known.path String_slice; arguments = [] } };
+           { uint64; string_slice = Named { path = Well_known.path String_slice; arguments = [] } };
          bool = Monomorphic.builtin Bool;
          checks;
          constant = (fun path -> constant (Lazy.force context) path);

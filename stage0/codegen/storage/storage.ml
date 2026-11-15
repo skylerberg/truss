@@ -22,21 +22,21 @@ let length_field = "length"
 let capacity_field = "capacity"
 let elements_field = "elements"
 
-let shape ~usize element : Memory_layout.shape =
+let shape ~uint64 element : Memory_layout.shape =
   Record
     [
       (buffer_field, Raw (Pointer (Data element)));
-      (length_field, Typed usize);
-      (capacity_field, Typed usize);
+      (length_field, Typed uint64);
+      (capacity_field, Typed uint64);
     ]
 
-let view_shape ~usize element : Memory_layout.shape =
-  Record [ (elements_field, Raw (Pointer (Data element))); (length_field, Typed usize) ]
+let view_shape ~uint64 element : Memory_layout.shape =
+  Record [ (elements_field, Raw (Pointer (Data element))); (length_field, Typed uint64) ]
 
 let ( / ) (place : Lowered.place) projection : Lowered.place =
   { place with projections = place.projections @ [ projection ] }
 
-let usize number = Lowered.Constant (Integer (USize, Z.of_int number))
+let constant_uint64 number = Lowered.Constant (Integer (UInt64, Z.of_int number))
 let buffer storage = storage / Lowered.Field buffer_field
 let length storage = storage / Lowered.Field length_field
 let capacity storage = storage / Lowered.Field capacity_field
@@ -53,8 +53,8 @@ let owning ty ~buffer ~length ~capacity : Lowered.rvalue =
       fields = [ (buffer_field, buffer); (length_field, length); (capacity_field, capacity) ];
     }
 
-let static ty ~elements ~length = owning ty ~buffer:elements ~length ~capacity:(usize 0)
-let empty ty = static ty ~elements:(Constant (Bytes "")) ~length:(usize 0)
+let static ty ~elements ~length = owning ty ~buffer:elements ~length ~capacity:(constant_uint64 0)
+let empty ty = static ty ~elements:(Constant (Bytes "")) ~length:(constant_uint64 0)
 
 let view ty ~elements ~length : Lowered.rvalue =
   Build { ty; variant = None; fields = [ (elements_field, elements); (length_field, length) ] }

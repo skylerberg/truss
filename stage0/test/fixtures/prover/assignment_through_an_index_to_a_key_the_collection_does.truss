@@ -1,3 +1,3 @@
-fn store(samples: mut Samples, position: USize) {
+fn store(samples: mut Samples, position: UInt64) {
   samples[position] = 1
 }

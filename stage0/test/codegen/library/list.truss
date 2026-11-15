@@ -78,7 +78,7 @@ test "windows gives every run of a size, and none when the list is shorter" {
 
 test "chunks gives runs of a size, with a shorter last one" {
   let items: List[Int64] = [1, 2, 3, 4, 5]
-  var lengths: List[USize] = []
+  var lengths: List[UInt64] = []
   var firsts: List[Int64] = []
   for chunk in items.chunks(2) {
     mut lengths.push(chunk.length())
@@ -312,7 +312,7 @@ test "split_first and split_last lend one element and view the rest" {
 
 test "enumerate gives each element with its index" {
   let words: List[String] = ["a${1}", "b${2}"]
-  var seen: USize = 0
+  var seen: UInt64 = 0
   for entry in words.enumerate() {
     assert entry.index == seen
     assert entry.element.length() == 2
@@ -352,7 +352,7 @@ test "a list is made of copies of a value, or of a function's result for each in
   assert words[1] == "ab1"
   let none: List[Int64] = List.filled(7, count: 0)
   assert none.length() == 0
-  let doubles: List[USize] = List.generate(4, make: fn(index) { index * 2 })
+  let doubles: List[UInt64] = List.generate(4, make: fn(index) { index * 2 })
   assert doubles.length() == 4
   assert doubles[0] == 0
   assert doubles[3] == 6
@@ -441,7 +441,7 @@ test "a slice is repeated, and split where an element is" {
   let fixed: Array[Int64, 1] = [5]
   assert same_items(fixed.repeated(2), expected: [5, 5])
   let fields: List[Int64] = [1, 0, 2, 3, 0, 0, 4]
-  var lengths: List[USize] = []
+  var lengths: List[UInt64] = []
   var total = 0
   for part in fields.split(0) {
     mut lengths.push(part.length())

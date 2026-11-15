@@ -104,9 +104,9 @@ fn frame(kind: UInt8, flags: UInt8, stream: UInt8, payload: Slice[UInt8]) -> Lis
 
 fn frame_kinds(bytes: Slice[UInt8]) -> List[String] {
   var kinds: List[String] = []
-  var at: USize = 0
+  var at: UInt64 = 0
   while at + 9 <= bytes.length() {
-    let length = USize.from(bytes[at]) * 65536 + USize.from(bytes[at + 1]) * 256 + USize.from(bytes[at + 2])
+    let length = UInt64.from(bytes[at]) * 65536 + UInt64.from(bytes[at + 1]) * 256 + UInt64.from(bytes[at + 2])
     let kind = bytes[at + 3]
     let start = at + 9
     if start + length > bytes.length() {

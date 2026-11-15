@@ -1,10 +1,10 @@
-fn next_index(counter: mut USize) -> USize {
+fn next_index(counter: mut UInt64) -> UInt64 {
   counter += 1
   counter - 1
 }
 
 test "once" {
-  var counter: USize = 0
+  var counter: UInt64 = 0
   let items = [Some(10), Some(20), None]
   let Some(first) = items[next_index(mut counter)] else {
     return

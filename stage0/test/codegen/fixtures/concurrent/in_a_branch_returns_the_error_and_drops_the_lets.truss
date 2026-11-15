@@ -8,7 +8,7 @@ fn checked(text: own String, good: Bool) -> Result[String, Failed] {
   }
 }
 
-fn both(first: Bool, second: Bool) -> Result[USize, Failed]
+fn both(first: Bool, second: Bool) -> Result[UInt64, Failed]
   uses Tasks
 {
   concurrent {

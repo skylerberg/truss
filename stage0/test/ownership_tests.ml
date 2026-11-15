@@ -72,7 +72,7 @@ let () =
   let lends name signature body = shelf ^ "fn Shelf." ^ name ^ signature ^ " {\n" ^ body ^ "}\n" in
   test "a lent constructor lends a place without a mode keyword" (fun () ->
       fine
-        (lends "get" "(self, index: USize) lends Option[String]"
+        (lends "get" "(self, index: UInt64) lends Option[String]"
            "  if index < self.books.length() {\n\
            \    Some(self.books[index])\n\
            \  } else {\n\
@@ -89,7 +89,7 @@ let () =
            "  Tagged(tag: \"new\".copy(), book: self.books[0].copy())\n"));
   test "a `Plain` place in a lent constructor is copied, so it lends nothing" (fun () ->
       fine
-        (lends "numbered" "(self, index: USize) lends Numbered"
+        (lends "numbered" "(self, index: UInt64) lends Numbered"
            "  Numbered(index: index, title: self.books[index].copy())\n"));
   test "a local is a place that a lent constructor lends" (fun () ->
       fine
@@ -110,7 +110,7 @@ let () =
         "ownership.lent_mut_in_variant");
   test "a constructor lent `mut` lends the places passed `mut`" (fun () ->
       fine
-        (lends "numbered" "(mut self, index: USize) lends mut Numbered"
+        (lends "numbered" "(mut self, index: UInt64) lends mut Numbered"
            "  Numbered(index: index, title: mut self.books[index])\n"
         ^ Fixtures.Ownership.constructor_lent_mut_lends_the_places_marked));
   test "a place in a constructor lent `mut` needs the `mut` keyword" (fun () ->
@@ -499,7 +499,7 @@ let () =
         "ownership.not_reinitialized");
   test "a local that a value is moved into has no view of the moved place" (fun () ->
       fine Fixtures.Ownership.local_that_a_value_is_moved_into_has_no_view_of);
-  (let holder = "type Holder(items: List[Int64], count: USize)\n\n" in
+  (let holder = "type Holder(items: List[Int64], count: UInt64)\n\n" in
    let accepted name body = test name (fun () -> fine (holder ^ body)) in
    let rejected name body code = test name (fun () -> one_diagnostic (holder ^ body) code) in
    accepted "a field of a `mut` borrow can be moved out and reinitialized"

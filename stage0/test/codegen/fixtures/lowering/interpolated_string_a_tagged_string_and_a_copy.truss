@@ -1,4 +1,4 @@
-type Sum(pieces: USize, total: Int64)
+type Sum(pieces: UInt64, total: Int64)
 
 impl FromTemplate for Sum {
   type Part = Int64

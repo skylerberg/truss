@@ -1,7 +1,7 @@
 use standard::core
 use standard::intrinsic
 
-public let Int8.bits: USize = 8
+public let Int8.bits: UInt64 = 8
 
 impl core::Countable for Int8 {
   fn successor(self) -> Option[Int8]
@@ -16,13 +16,13 @@ impl core::Countable for Int8 {
     self.checked_subtract(1)
   }
 
-  fn advanced(self, by: USize) -> Option[Int8]
+  fn advanced(self, by: UInt64) -> Option[Int8]
     cost time O(1)
     ensures (result is None) == (self + by > Int8.maximum)
     ensures !(result is Some(value) && value != self + by)
   {
-    let room: USize = intrinsic::convert(Int8.maximum.absolute_difference(self))
-    let limit: USize = intrinsic::convert(Int8.maximum)
+    let room: UInt64 = intrinsic::convert(Int8.maximum.absolute_difference(self))
+    let limit: UInt64 = intrinsic::convert(Int8.maximum)
     if by > room {
       None
     } else if by <= limit {
@@ -33,13 +33,13 @@ impl core::Countable for Int8 {
     }
   }
 
-  fn retreated(self, by: USize) -> Option[Int8]
+  fn retreated(self, by: UInt64) -> Option[Int8]
     cost time O(1)
     ensures (result is None) == (self - by < Int8.minimum)
     ensures !(result is Some(value) && value != self - by)
   {
-    let room: USize = intrinsic::convert(self.absolute_difference(Int8.minimum))
-    let limit: USize = intrinsic::convert(Int8.maximum)
+    let room: UInt64 = intrinsic::convert(self.absolute_difference(Int8.minimum))
+    let limit: UInt64 = intrinsic::convert(Int8.maximum)
     if by > room {
       None
     } else if by <= limit {
@@ -50,7 +50,7 @@ impl core::Countable for Int8 {
     }
   }
 
-  fn steps_to(self, other: Int8) -> Option[USize]
+  fn steps_to(self, other: Int8) -> Option[UInt64]
     cost time O(1)
     ensures (result is None) == (other < self)
     ensures !(result is Some(steps) && steps != other - self)
@@ -59,7 +59,7 @@ impl core::Countable for Int8 {
   }
 }
 
-public let Int16.bits: USize = 16
+public let Int16.bits: UInt64 = 16
 
 impl core::Countable for Int16 {
   fn successor(self) -> Option[Int16]
@@ -74,13 +74,13 @@ impl core::Countable for Int16 {
     self.checked_subtract(1)
   }
 
-  fn advanced(self, by: USize) -> Option[Int16]
+  fn advanced(self, by: UInt64) -> Option[Int16]
     cost time O(1)
     ensures (result is None) == (self + by > Int16.maximum)
     ensures !(result is Some(value) && value != self + by)
   {
-    let room: USize = intrinsic::convert(Int16.maximum.absolute_difference(self))
-    let limit: USize = intrinsic::convert(Int16.maximum)
+    let room: UInt64 = intrinsic::convert(Int16.maximum.absolute_difference(self))
+    let limit: UInt64 = intrinsic::convert(Int16.maximum)
     if by > room {
       None
     } else if by <= limit {
@@ -91,13 +91,13 @@ impl core::Countable for Int16 {
     }
   }
 
-  fn retreated(self, by: USize) -> Option[Int16]
+  fn retreated(self, by: UInt64) -> Option[Int16]
     cost time O(1)
     ensures (result is None) == (self - by < Int16.minimum)
     ensures !(result is Some(value) && value != self - by)
   {
-    let room: USize = intrinsic::convert(self.absolute_difference(Int16.minimum))
-    let limit: USize = intrinsic::convert(Int16.maximum)
+    let room: UInt64 = intrinsic::convert(self.absolute_difference(Int16.minimum))
+    let limit: UInt64 = intrinsic::convert(Int16.maximum)
     if by > room {
       None
     } else if by <= limit {
@@ -108,7 +108,7 @@ impl core::Countable for Int16 {
     }
   }
 
-  fn steps_to(self, other: Int16) -> Option[USize]
+  fn steps_to(self, other: Int16) -> Option[UInt64]
     cost time O(1)
     ensures (result is None) == (other < self)
     ensures !(result is Some(steps) && steps != other - self)
@@ -117,7 +117,7 @@ impl core::Countable for Int16 {
   }
 }
 
-public let Int32.bits: USize = 32
+public let Int32.bits: UInt64 = 32
 
 impl core::Countable for Int32 {
   fn successor(self) -> Option[Int32]
@@ -132,13 +132,13 @@ impl core::Countable for Int32 {
     self.checked_subtract(1)
   }
 
-  fn advanced(self, by: USize) -> Option[Int32]
+  fn advanced(self, by: UInt64) -> Option[Int32]
     cost time O(1)
     ensures (result is None) == (self + by > Int32.maximum)
     ensures !(result is Some(value) && value != self + by)
   {
-    let room: USize = intrinsic::convert(Int32.maximum.absolute_difference(self))
-    let limit: USize = intrinsic::convert(Int32.maximum)
+    let room: UInt64 = intrinsic::convert(Int32.maximum.absolute_difference(self))
+    let limit: UInt64 = intrinsic::convert(Int32.maximum)
     if by > room {
       None
     } else if by <= limit {
@@ -149,13 +149,13 @@ impl core::Countable for Int32 {
     }
   }
 
-  fn retreated(self, by: USize) -> Option[Int32]
+  fn retreated(self, by: UInt64) -> Option[Int32]
     cost time O(1)
     ensures (result is None) == (self - by < Int32.minimum)
     ensures !(result is Some(value) && value != self - by)
   {
-    let room: USize = intrinsic::convert(self.absolute_difference(Int32.minimum))
-    let limit: USize = intrinsic::convert(Int32.maximum)
+    let room: UInt64 = intrinsic::convert(self.absolute_difference(Int32.minimum))
+    let limit: UInt64 = intrinsic::convert(Int32.maximum)
     if by > room {
       None
     } else if by <= limit {
@@ -166,7 +166,7 @@ impl core::Countable for Int32 {
     }
   }
 
-  fn steps_to(self, other: Int32) -> Option[USize]
+  fn steps_to(self, other: Int32) -> Option[UInt64]
     cost time O(1)
     ensures (result is None) == (other < self)
     ensures !(result is Some(steps) && steps != other - self)
@@ -175,7 +175,7 @@ impl core::Countable for Int32 {
   }
 }
 
-public let Int64.bits: USize = 64
+public let Int64.bits: UInt64 = 64
 
 impl core::Countable for Int64 {
   fn successor(self) -> Option[Int64]
@@ -190,13 +190,13 @@ impl core::Countable for Int64 {
     self.checked_subtract(1)
   }
 
-  fn advanced(self, by: USize) -> Option[Int64]
+  fn advanced(self, by: UInt64) -> Option[Int64]
     cost time O(1)
     ensures (result is None) == (self + by > Int64.maximum)
     ensures !(result is Some(value) && value != self + by)
   {
-    let room: USize = intrinsic::convert(Int64.maximum.absolute_difference(self))
-    let limit: USize = intrinsic::convert(Int64.maximum)
+    let room: UInt64 = Int64.maximum.absolute_difference(self)
+    let limit: UInt64 = intrinsic::convert(Int64.maximum)
     if by > room {
       None
     } else if by <= limit {
@@ -207,13 +207,13 @@ impl core::Countable for Int64 {
     }
   }
 
-  fn retreated(self, by: USize) -> Option[Int64]
+  fn retreated(self, by: UInt64) -> Option[Int64]
     cost time O(1)
     ensures (result is None) == (self - by < Int64.minimum)
     ensures !(result is Some(value) && value != self - by)
   {
-    let room: USize = intrinsic::convert(self.absolute_difference(Int64.minimum))
-    let limit: USize = intrinsic::convert(Int64.maximum)
+    let room: UInt64 = self.absolute_difference(Int64.minimum)
+    let limit: UInt64 = intrinsic::convert(Int64.maximum)
     if by > room {
       None
     } else if by <= limit {
@@ -224,74 +224,16 @@ impl core::Countable for Int64 {
     }
   }
 
-  fn steps_to(self, other: Int64) -> Option[USize]
+  fn steps_to(self, other: Int64) -> Option[UInt64]
     cost time O(1)
     ensures (result is None) == (other < self)
     ensures !(result is Some(steps) && steps != other - self)
   {
-    if other < self { None } else { Some(intrinsic::convert(other.absolute_difference(self))) }
+    if other < self { None } else { Some(other.absolute_difference(self)) }
   }
 }
 
-public let ISize.bits: USize = 64
-
-impl core::Countable for ISize {
-  fn successor(self) -> Option[ISize]
-    cost time O(1)
-  {
-    self.checked_add(1)
-  }
-
-  fn predecessor(self) -> Option[ISize]
-    cost time O(1)
-  {
-    self.checked_subtract(1)
-  }
-
-  fn advanced(self, by: USize) -> Option[ISize]
-    cost time O(1)
-    ensures (result is None) == (self + by > ISize.maximum)
-    ensures !(result is Some(value) && value != self + by)
-  {
-    let room: USize = intrinsic::convert(ISize.maximum.absolute_difference(self))
-    let limit: USize = intrinsic::convert(ISize.maximum)
-    if by > room {
-      None
-    } else if by <= limit {
-      Some(self + intrinsic::convert(by))
-    } else {
-      let rest: ISize = intrinsic::convert(by - limit - 1)
-      Some(self + ISize.maximum + rest + 1)
-    }
-  }
-
-  fn retreated(self, by: USize) -> Option[ISize]
-    cost time O(1)
-    ensures (result is None) == (self - by < ISize.minimum)
-    ensures !(result is Some(value) && value != self - by)
-  {
-    let room: USize = intrinsic::convert(self.absolute_difference(ISize.minimum))
-    let limit: USize = intrinsic::convert(ISize.maximum)
-    if by > room {
-      None
-    } else if by <= limit {
-      Some(self - intrinsic::convert(by))
-    } else {
-      let rest: ISize = intrinsic::convert(by - limit - 1)
-      Some(self - ISize.maximum - rest - 1)
-    }
-  }
-
-  fn steps_to(self, other: ISize) -> Option[USize]
-    cost time O(1)
-    ensures (result is None) == (other < self)
-    ensures !(result is Some(steps) && steps != other - self)
-  {
-    if other < self { None } else { Some(intrinsic::convert(other.absolute_difference(self))) }
-  }
-}
-
-public let UInt8.bits: USize = 8
+public let UInt8.bits: UInt64 = 8
 
 impl core::Countable for UInt8 {
   fn successor(self) -> Option[UInt8]
@@ -306,25 +248,25 @@ impl core::Countable for UInt8 {
     self.checked_subtract(1)
   }
 
-  fn advanced(self, by: USize) -> Option[UInt8]
+  fn advanced(self, by: UInt64) -> Option[UInt8]
     cost time O(1)
     ensures (result is None) == (self + by > UInt8.maximum)
     ensures !(result is Some(value) && value != self + by)
   {
-    let room: USize = intrinsic::convert(UInt8.maximum - self)
+    let room: UInt64 = intrinsic::convert(UInt8.maximum - self)
     if by > room { None } else { Some(self + intrinsic::convert(by)) }
   }
 
-  fn retreated(self, by: USize) -> Option[UInt8]
+  fn retreated(self, by: UInt64) -> Option[UInt8]
     cost time O(1)
     ensures (result is None) == (by > self)
     ensures !(result is Some(value) && value != self - by)
   {
-    let room: USize = intrinsic::convert(self)
+    let room: UInt64 = intrinsic::convert(self)
     if by > room { None } else { Some(self - intrinsic::convert(by)) }
   }
 
-  fn steps_to(self, other: UInt8) -> Option[USize]
+  fn steps_to(self, other: UInt8) -> Option[UInt64]
     cost time O(1)
     ensures (result is None) == (other < self)
     ensures !(result is Some(steps) && steps != other - self)
@@ -333,7 +275,7 @@ impl core::Countable for UInt8 {
   }
 }
 
-public let UInt16.bits: USize = 16
+public let UInt16.bits: UInt64 = 16
 
 impl core::Countable for UInt16 {
   fn successor(self) -> Option[UInt16]
@@ -348,25 +290,25 @@ impl core::Countable for UInt16 {
     self.checked_subtract(1)
   }
 
-  fn advanced(self, by: USize) -> Option[UInt16]
+  fn advanced(self, by: UInt64) -> Option[UInt16]
     cost time O(1)
     ensures (result is None) == (self + by > UInt16.maximum)
     ensures !(result is Some(value) && value != self + by)
   {
-    let room: USize = intrinsic::convert(UInt16.maximum - self)
+    let room: UInt64 = intrinsic::convert(UInt16.maximum - self)
     if by > room { None } else { Some(self + intrinsic::convert(by)) }
   }
 
-  fn retreated(self, by: USize) -> Option[UInt16]
+  fn retreated(self, by: UInt64) -> Option[UInt16]
     cost time O(1)
     ensures (result is None) == (by > self)
     ensures !(result is Some(value) && value != self - by)
   {
-    let room: USize = intrinsic::convert(self)
+    let room: UInt64 = intrinsic::convert(self)
     if by > room { None } else { Some(self - intrinsic::convert(by)) }
   }
 
-  fn steps_to(self, other: UInt16) -> Option[USize]
+  fn steps_to(self, other: UInt16) -> Option[UInt64]
     cost time O(1)
     ensures (result is None) == (other < self)
     ensures !(result is Some(steps) && steps != other - self)
@@ -375,7 +317,7 @@ impl core::Countable for UInt16 {
   }
 }
 
-public let UInt32.bits: USize = 32
+public let UInt32.bits: UInt64 = 32
 
 impl core::Countable for UInt32 {
   fn successor(self) -> Option[UInt32]
@@ -390,25 +332,25 @@ impl core::Countable for UInt32 {
     self.checked_subtract(1)
   }
 
-  fn advanced(self, by: USize) -> Option[UInt32]
+  fn advanced(self, by: UInt64) -> Option[UInt32]
     cost time O(1)
     ensures (result is None) == (self + by > UInt32.maximum)
     ensures !(result is Some(value) && value != self + by)
   {
-    let room: USize = intrinsic::convert(UInt32.maximum - self)
+    let room: UInt64 = intrinsic::convert(UInt32.maximum - self)
     if by > room { None } else { Some(self + intrinsic::convert(by)) }
   }
 
-  fn retreated(self, by: USize) -> Option[UInt32]
+  fn retreated(self, by: UInt64) -> Option[UInt32]
     cost time O(1)
     ensures (result is None) == (by > self)
     ensures !(result is Some(value) && value != self - by)
   {
-    let room: USize = intrinsic::convert(self)
+    let room: UInt64 = intrinsic::convert(self)
     if by > room { None } else { Some(self - intrinsic::convert(by)) }
   }
 
-  fn steps_to(self, other: UInt32) -> Option[USize]
+  fn steps_to(self, other: UInt32) -> Option[UInt64]
     cost time O(1)
     ensures (result is None) == (other < self)
     ensures !(result is Some(steps) && steps != other - self)
@@ -417,7 +359,7 @@ impl core::Countable for UInt32 {
   }
 }
 
-public let UInt64.bits: USize = 64
+public let UInt64.bits: UInt64 = 64
 
 impl core::Countable for UInt64 {
   fn successor(self) -> Option[UInt64]
@@ -432,72 +374,29 @@ impl core::Countable for UInt64 {
     self.checked_subtract(1)
   }
 
-  fn advanced(self, by: USize) -> Option[UInt64]
+  fn advanced(self, by: UInt64) -> Option[UInt64]
     cost time O(1)
     ensures (result is None) == (self + by > UInt64.maximum)
     ensures !(result is Some(value) && value != self + by)
   {
-    let room: USize = intrinsic::convert(UInt64.maximum - self)
-    if by > room { None } else { Some(self + intrinsic::convert(by)) }
+    let room: UInt64 = UInt64.maximum - self
+    if by > room { None } else { Some(self + by) }
   }
 
-  fn retreated(self, by: USize) -> Option[UInt64]
+  fn retreated(self, by: UInt64) -> Option[UInt64]
     cost time O(1)
     ensures (result is None) == (by > self)
     ensures !(result is Some(value) && value != self - by)
   {
-    let room: USize = intrinsic::convert(self)
-    if by > room { None } else { Some(self - intrinsic::convert(by)) }
+    if by > self { None } else { Some(self - by) }
   }
 
-  fn steps_to(self, other: UInt64) -> Option[USize]
+  fn steps_to(self, other: UInt64) -> Option[UInt64]
     cost time O(1)
     ensures (result is None) == (other < self)
     ensures !(result is Some(steps) && steps != other - self)
   {
-    if other < self { None } else { Some(intrinsic::convert(other - self)) }
-  }
-}
-
-public let USize.bits: USize = 64
-
-impl core::Countable for USize {
-  fn successor(self) -> Option[USize]
-    cost time O(1)
-  {
-    self.checked_add(1)
-  }
-
-  fn predecessor(self) -> Option[USize]
-    cost time O(1)
-  {
-    self.checked_subtract(1)
-  }
-
-  fn advanced(self, by: USize) -> Option[USize]
-    cost time O(1)
-    ensures (result is None) == (self + by > USize.maximum)
-    ensures !(result is Some(value) && value != self + by)
-  {
-    let room: USize = intrinsic::convert(USize.maximum - self)
-    if by > room { None } else { Some(self + intrinsic::convert(by)) }
-  }
-
-  fn retreated(self, by: USize) -> Option[USize]
-    cost time O(1)
-    ensures (result is None) == (by > self)
-    ensures !(result is Some(value) && value != self - by)
-  {
-    let room: USize = intrinsic::convert(self)
-    if by > room { None } else { Some(self - intrinsic::convert(by)) }
-  }
-
-  fn steps_to(self, other: USize) -> Option[USize]
-    cost time O(1)
-    ensures (result is None) == (other < self)
-    ensures !(result is Some(steps) && steps != other - self)
-  {
-    if other < self { None } else { Some(intrinsic::convert(other - self)) }
+    if other < self { None } else { Some(other - self) }
   }
 }
 
@@ -589,33 +488,6 @@ public fn UInt64.integer_square_root(self) -> UInt64
 {
   var result: UInt64 = 0
   var width: UInt64 = 4294967296
-  while width > 1
-    invariant width >= 1
-    invariant result + width <= 4294967296
-    invariant result * result <= self
-    invariant self < (result + width) * (result + width)
-    decreases width
-    cost time O(log(4294967295) - log(width - 1))
-  {
-    let half = width / 2
-    let candidate = result + half
-    if candidate * candidate <= self {
-      result = candidate
-      width = width - half
-    } else {
-      width = half
-    }
-  }
-  result
-}
-
-public fn USize.integer_square_root(self) -> USize
-  ensures result * result <= self
-  ensures self < (result + 1) * (result + 1)
-  cost time O(64)
-{
-  var result: USize = 0
-  var width: USize = 4294967296
   while width > 1
     invariant width >= 1
     invariant result + width <= 4294967296

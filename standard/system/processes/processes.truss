@@ -57,7 +57,7 @@ impl Processes for SystemProcesses {
 
 fn begin(command: processes::Command) -> Result[Started, SystemError] {
   var texts: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
-  var starts: intrinsic::Storage[USize] = intrinsic::storage_empty()
+  var starts: intrinsic::Storage[UInt64] = intrinsic::storage_empty()
   handles::with_file_error(add_ended_with_zero_byte(command.program.slice().bytes, texts: mut texts, starts: mut starts))?
   for argument in command.arguments
     invariant calls::ends_with_zero_byte(intrinsic::storage_view(texts))
@@ -66,7 +66,7 @@ fn begin(command: processes::Command) -> Result[Started, SystemError] {
   }
   let arguments = addresses(intrinsic::storage_view(texts), starts: intrinsic::storage_view(starts))
   var variables: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
-  var variable_starts: intrinsic::Storage[USize] = intrinsic::storage_empty()
+  var variable_starts: intrinsic::Storage[UInt64] = intrinsic::storage_empty()
   handles::with_file_error(add_variables(command, texts: mut variables, starts: mut variable_starts))?
   let environment = addresses(intrinsic::storage_view(variables), starts: intrinsic::storage_view(variable_starts))
 
@@ -163,7 +163,7 @@ fn arrange(
   }
 }
 
-fn addresses(texts: intrinsic::View[UInt8], starts: intrinsic::View[USize]) -> intrinsic::Storage[USize]
+fn addresses(texts: intrinsic::View[UInt8], starts: intrinsic::View[UInt64]) -> intrinsic::Storage[UInt64]
   ensures intrinsic::storage_length(result) > 0
   ensures intrinsic::storage_model(result)[intrinsic::storage_length(result) - 1] == 0
 {
@@ -172,7 +172,7 @@ fn addresses(texts: intrinsic::View[UInt8], starts: intrinsic::View[USize]) -> i
     assert intrinsic::view_length(texts) == 0 || first >= 1
   }
   let count = intrinsic::view_length(starts)
-  var all: intrinsic::Storage[USize] = intrinsic::storage_with_capacity(count + 1)
+  var all: intrinsic::Storage[UInt64] = intrinsic::storage_with_capacity(count + 1)
   for index in 0..count
     invariant intrinsic::storage_length(all) == index
     invariant intrinsic::storage_capacity(all) == count + 1
@@ -187,10 +187,10 @@ fn addresses(texts: intrinsic::View[UInt8], starts: intrinsic::View[USize]) -> i
 fn add_variables(
   command: processes::Command,
   texts: mut intrinsic::Storage[UInt8],
-  starts: mut intrinsic::Storage[USize],
+  starts: mut intrinsic::Storage[UInt64],
 ) -> Result[Unit, Int32] {
   if command.inherits_variables {
-    var index: USize = 0
+    var index: UInt64 = 0
     var is_present = true
     while is_present {
       let entry = intrinsic::environment_entry(index, is_present: mut is_present)
@@ -235,7 +235,7 @@ fn set_again(entry: intrinsic::View[UInt8], by: Slice[processes::Variable]) -> B
   false
 }
 
-fn named_later(variables: Slice[processes::Variable], position: USize) -> Bool
+fn named_later(variables: Slice[processes::Variable], position: UInt64) -> Bool
   requires position < variables.length()
 {
   for later in position + 1..variables.length() {
@@ -305,7 +305,7 @@ fn drain(pipe: Int32, into: mut intrinsic::Storage[UInt8]) -> Result[Bool, Int32
 fn add_ended_with_zero_byte(
   bytes: intrinsic::View[UInt8],
   texts: mut intrinsic::Storage[UInt8],
-  starts: mut intrinsic::Storage[USize],
+  starts: mut intrinsic::Storage[UInt64],
 ) -> Result[Unit, Int32]
   ensures match result {
     Ok(_) => calls::ends_with_zero_byte(intrinsic::storage_view(texts))

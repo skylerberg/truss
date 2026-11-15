@@ -109,7 +109,7 @@ and generic_parameter = generic_kind node
 
 and generic_kind =
   | Type_parameter of name * path_type list  (** [Element: Hash + Ordered] *)
-  | Value_parameter of name * type_expression  (** [count: USize] *)
+  | Value_parameter of name * type_expression
   | Capability_parameter of name  (** [capability Granted] *)
   | Generic_error
 

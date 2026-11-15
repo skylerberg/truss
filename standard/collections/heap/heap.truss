@@ -11,7 +11,7 @@ fn comes_before[Element: Ordered](first: Element, second: Element, largest_first
   }
 }
 
-fn sift_up[Element: Ordered](items: mut List[Element], position: USize, largest_first: Bool)
+fn sift_up[Element: Ordered](items: mut List[Element], position: UInt64, largest_first: Bool)
   requires 1 <= position && position <= items.length()
   ensures items.length() == old(items.length())
   decreases position
@@ -26,9 +26,9 @@ fn sift_up[Element: Ordered](items: mut List[Element], position: USize, largest_
 
 fn sift_down[Element: Ordered](
   items: mut List[Element],
-  position: USize,
-  limit: USize,
-  room: USize,
+  position: UInt64,
+  limit: UInt64,
+  room: UInt64,
   largest_first: Bool,
 )
   requires 1 <= position
@@ -98,7 +98,7 @@ public fn collections::Heap[Element: Ordered].largest_first_of(items: own List[E
   heap_of(own items, largest_first: true)
 }
 
-public fn collections::Heap[Element: Ordered].length(self) -> USize
+public fn collections::Heap[Element: Ordered].length(self) -> UInt64
   ensures result == (self.items.length())
   cost time O(1)
 {
@@ -167,7 +167,7 @@ public fn collections::Heap[Element: Ordered].clear(mut self)
   mut self.items.clear()
 }
 
-public fn collections::Heap[Element: Ordered].reserve(mut self, additional: USize)
+public fn collections::Heap[Element: Ordered].reserve(mut self, additional: UInt64)
   ensures self.length() == old(self.length())
 {
   mut self.items.reserve(additional)
@@ -204,7 +204,7 @@ public fn collections::Heap[Element: Ordered].to_sorted_list(own self) -> List[E
   items
 }
 
-public fn collections::HeapCursor[Element: Ordered].remaining(self) -> USize
+public fn collections::HeapCursor[Element: Ordered].remaining(self) -> UInt64
   ensures result == self.heap.length()
   cost time O(1)
 {

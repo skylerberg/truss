@@ -6,11 +6,11 @@ fn Cell.visit(mut self) {
   self.name = "seen"
 }
 
-fn Grid.cell(self, index: USize) lends Cell {
+fn Grid.cell(self, index: UInt64) lends Cell {
   self.cells[index]
 }
 
-fn Grid.cell(mut self, index: USize) lends mut Cell {
+fn Grid.cell(mut self, index: UInt64) lends mut Cell {
   mut self.cells[index]
 }
 

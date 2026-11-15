@@ -48,7 +48,7 @@ fn raw_session(raw: Slice[UInt8], expected: StringSlice) -> String
   let connection = network::connect("localhost", port: 8090).expect("the server accepts")
   let _ = connection.send_all(raw)
   var reply: List[UInt8] = []
-  var reads: USize = 0
+  var reads: UInt64 = 0
   while reads < 20 && !String.from_utf8_lossy(reply.slice()).slice().contains(expected) && connection.receive(mut reply, limit: 4096) is Ok(count) && count > 0 {
     reads += 1
   }

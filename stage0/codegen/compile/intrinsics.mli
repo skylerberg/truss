@@ -15,7 +15,7 @@
 type argument = Place of Lowered.place | Value of Lowered.operand
 
 (* The ground types the lowering needs. *)
-type types = { usize : Ground.ty; string_slice : Ground.ty }
+type types = { uint64 : Ground.ty; string_slice : Ground.ty }
 
 val consumed_places : Intrinsic.operation -> int list
 

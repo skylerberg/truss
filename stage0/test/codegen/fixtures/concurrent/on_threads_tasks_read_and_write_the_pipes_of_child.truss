@@ -1,17 +1,17 @@
 
-fn echoed(through: mut processes::Child, count: USize) -> USize
+fn echoed(through: mut processes::Child, count: UInt64) -> UInt64
   uses Tasks, Handles, Panic
 {
   var input = mut through.take_input().unwrap()
   var output = mut through.take_output().unwrap()
-  var got: USize = 0
+  var got: UInt64 = 0
   concurrent {
     {
       var block: List[UInt8] = []
       for _ in 0..4096 {
         mut block.push(65)
       }
-      var written: USize = 0
+      var written: UInt64 = 0
       while written < count {
         written += mut input.write(block.slice()).unwrap()
       }

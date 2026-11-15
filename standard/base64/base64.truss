@@ -4,7 +4,7 @@ public type Alphabet = Standard | UrlSafe
   derives Equal
 
 public type DecodeError =
-  | InvalidCharacter(offset: USize)
+  | InvalidCharacter(offset: UInt64)
   | InvalidLength
   | InvalidPadding
   derives Equal
@@ -70,11 +70,11 @@ public fn encode(bytes: Slice[UInt8], alphabet: Alphabet = Alphabet.Standard, pa
   cost allocations <= 1
 {
   let count = bytes.length()
-  if count > USize.maximum / 2 {
+  if count > UInt64.maximum / 2 {
     intrinsic::crash("a string cannot hold that many bytes".slice())
   }
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(4 * ((count + 2) / 3))
-  var index: USize = 0
+  var index: UInt64 = 0
   while index + 3 <= count
     invariant index <= count
     invariant index % 3 == 0
@@ -126,7 +126,7 @@ public fn encode_onto(
   mut output.write(text.slice())
 }
 
-internal fn unpadded_length(text: StringSlice) -> USize
+internal fn unpadded_length(text: StringSlice) -> UInt64
   ensures result <= text.length()
   ensures text.length() - result <= 2
   cost time O(1)
@@ -142,7 +142,7 @@ internal fn unpadded_length(text: StringSlice) -> USize
   length
 }
 
-internal fn symbol_at(text: StringSlice, index: USize, alphabet: Alphabet) -> Result[UInt8, DecodeError]
+internal fn symbol_at(text: StringSlice, index: UInt64, alphabet: Alphabet) -> Result[UInt8, DecodeError]
   requires index < text.length()
   ensures !(result is Ok(value) && value >= 64)
   cost time O(1)
@@ -154,7 +154,7 @@ internal fn symbol_at(text: StringSlice, index: USize, alphabet: Alphabet) -> Re
 
 internal fn decode_group(
   text: StringSlice,
-  index: USize,
+  index: UInt64,
   alphabet: Alphabet,
   bytes: mut intrinsic::Storage[UInt8],
 ) -> Result[Unit, DecodeError]
@@ -179,8 +179,8 @@ internal fn decode_group(
 
 internal fn decode_tail(
   text: StringSlice,
-  index: USize,
-  tail_symbols: USize,
+  index: UInt64,
+  tail_symbols: UInt64,
   alphabet: Alphabet,
   bytes: mut intrinsic::Storage[UInt8],
 ) -> Result[Unit, DecodeError]
@@ -221,9 +221,9 @@ public fn decode(text: StringSlice, alphabet: Alphabet = Alphabet.Standard) -> R
   if padded > 0 && tail_symbols + padded != 4 {
     return Err(DecodeError.InvalidPadding)
   }
-  let tail_bytes: USize = if tail_symbols == 0 { 0 } else { tail_symbols - 1 }
+  let tail_bytes: UInt64 = if tail_symbols == 0 { 0 } else { tail_symbols - 1 }
   var bytes: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(symbol_count / 4 * 3 + tail_bytes)
-  var index: USize = 0
+  var index: UInt64 = 0
   while index + 4 <= symbol_count
     invariant index <= symbol_count
     invariant index % 4 == 0

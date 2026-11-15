@@ -1,10 +1,10 @@
 type Window(rest: Slice[Int64])
 
-fn narrow(window: mut Window, count: USize) {
+fn narrow(window: mut Window, count: UInt64) {
   window.rest = window.rest[..count]
 }
 
-fn f(supplied: mut List[Int64]) -> USize {
+fn f(supplied: mut List[Int64]) -> UInt64 {
   var items: List[Int64] = [3, 1, 2]
   var part = items.slice()
   bump(mut part)

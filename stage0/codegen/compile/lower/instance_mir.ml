@@ -140,7 +140,7 @@ let change_rvalue change : Mir.rvalue -> Mir.rvalue =
   | Value_parameter parameter -> (
       match change.argument (Value (Value_parameter parameter)) with
       | Value (Known number) ->
-          Operand (Constant { value = Integer number; type_ = Types.builtin USize })
+          Operand (Constant { value = Integer number; type_ = Types.builtin UInt64 })
       | Value (Value_parameter parameter) -> Value_parameter parameter
       | _ -> bug "a value parameter that is no value")
   | Conditional _ | Cases _ | Connective _ ->
@@ -717,7 +717,7 @@ let region_entry building block =
     building.blocks;
   match !innermost with Some (entry, _) -> entry | None -> 0
 
-let int_type = Types.builtin USize
+let int_type = Types.builtin UInt64
 
 let constant_int number : Mir.operand =
   Constant { value = Integer (Z.of_int number); type_ = int_type }

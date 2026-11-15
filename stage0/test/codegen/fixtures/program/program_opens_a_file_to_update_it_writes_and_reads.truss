@@ -1,7 +1,7 @@
 use standard::files
 use standard::streams
 
-fn report(label: String, outcome: Result[USize, SystemError]) uses Console {
+fn report(label: String, outcome: Result[UInt64, SystemError]) uses Console {
   match outcome {
     Ok(count) => Console.print_line("${label} ${count}".slice())
     Err(_) => Console.print_line("${label} failed".slice())

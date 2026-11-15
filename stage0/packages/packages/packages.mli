@@ -1,8 +1,3 @@
-(** The packages of a build, as the compiler's stages see them: each package's modules, files,
-    dependencies, and width of [USize], and each file's text. The project's own packages, the
-    standard library, and registry packages are alike here. The driver's view, with the files'
-    inputs, the manifests' layout, and the registry, is {!Project}'s. *)
-
 val source : (Path.file, Source.t) Query.query
 (** A file's text, with its table of lines. Raises [Not_found] if it has no text. *)
 

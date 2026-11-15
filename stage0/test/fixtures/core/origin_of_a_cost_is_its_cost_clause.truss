@@ -1,4 +1,4 @@
-fn g(items: List[Int64]) -> USize
+fn g(items: List[Int64]) -> UInt64
   cost time O(items.length())
 {
   items.length()

@@ -157,9 +157,10 @@ and constant_c context : Lowered.constant -> string * Lowered.ty = function
   | Character code -> (Printf.sprintf "((uint32_t)0x%xU)" code, Raw Character)
   | Bytes text -> ("((void *)" ^ bytes_name context text ^ ")", Raw (Pointer Opaque))
   | Null -> ("((void *)0)", Raw (Nullable_pointer Opaque))
-  | Size_of ty -> (Printf.sprintf "((t_usize)sizeof(%s))" (value_c context ty), Raw (Integer USize))
+  | Size_of ty ->
+      (Printf.sprintf "((uint64_t)sizeof(%s))" (value_c context ty), Raw (Integer UInt64))
   | Alignment_of ty ->
-      (Printf.sprintf "((t_usize)_Alignof(%s))" (value_c context ty), Raw (Integer USize))
+      (Printf.sprintf "((uint64_t)_Alignof(%s))" (value_c context ty), Raw (Integer UInt64))
   | Symbol_address key ->
       refer context key;
       let symbol = Instance.symbol key in

@@ -335,7 +335,7 @@ let () =
                       Binary
                         ( Shift_left,
                           constant_int64 1,
-                          Lowered.Constant (Integer (USize, Z.of_int 65)) ) );
+                          Lowered.Constant (Integer (UInt64, Z.of_int 65)) ) );
                   Assign (at 1, Convert (copy 0, Integer Int32));
                 ]
                 (Return (Some (copy 1)));
@@ -374,7 +374,7 @@ let () =
                      {
                        failure = Panic;
                        message = Constant (Bytes "boom");
-                       length = Constant (Integer (USize, Z.of_int 4));
+                       length = Constant (Integer (UInt64, Z.of_int 4));
                        site = { definition = definition "entry"; line = 3; column = 5 };
                      });
               ];
@@ -493,7 +493,7 @@ let () =
 
 (* Intrinsic operations *)
 
-let intrinsic_types : Intrinsics.types = { usize; string_slice = named "StringSlice" }
+let intrinsic_types : Intrinsics.types = { uint64; string_slice = named "StringSlice" }
 
 (* An [entry] built with the builder: [body] writes its statements and
    returns the local to exit with. *)
@@ -525,8 +525,12 @@ let () =
               let popped = local builder (value int32) in
               let sum = local builder (value int32) in
               ignore (operate builder ~destination:(at storage) Storage_empty []);
-              ignore (operate builder Storage_set_capacity [ Place (at storage); Value (usize 2) ]);
-              ignore (operate builder Storage_set_capacity [ Place (at storage); Value (usize 8) ]);
+              ignore
+                (operate builder Storage_set_capacity
+                   [ Place (at storage); Value (constant_uint64 2) ]);
+              ignore
+                (operate builder Storage_set_capacity
+                   [ Place (at storage); Value (constant_uint64 8) ]);
               List.iter
                 (fun count ->
                   ignore
@@ -535,16 +539,18 @@ let () =
                 [ 1; 2; 3; 4; 5 ];
               ignore
                 (operate builder Storage_insert
-                   [ Place (at storage); Value (usize 0); Value (constant_int32 0) ]);
+                   [ Place (at storage); Value (constant_uint64 0); Value (constant_int32 0) ]);
               ignore
                 (operate builder ~destination:(at popped) Storage_remove
-                   [ Place (at storage); Value (usize 2) ]);
+                   [ Place (at storage); Value (constant_uint64 2) ]);
               ignore
                 (operate builder Storage_swap
-                   [ Place (at storage); Value (usize 0); Value (usize 4) ]);
+                   [ Place (at storage); Value (constant_uint64 0); Value (constant_uint64 4) ]);
               ignore (operate builder ~destination:(at popped) Storage_pop [ Place (at storage) ]);
               let element index weight =
-                match operate builder Storage_at [ Place (at storage); Value (usize index) ] with
+                match
+                  operate builder Storage_at [ Place (at storage); Value (constant_uint64 index) ]
+                with
                 | Some place -> Lowered.Binary (Multiply, Copy place, constant_int32 weight)
                 | None -> failwith "storage_at lends nothing"
               in
@@ -555,7 +561,7 @@ let () =
                   emit builder (Assign (at term, element index weight));
                   emit builder (Assign (at sum, Binary (Add, Copy (at sum), Copy (at term)))))
                 [ (0, 1); (1, 3); (2, 5); (3, 7) ];
-              let length = local builder (value (named "USize")) in
+              let length = local builder (value (named "UInt64")) in
               ignore
                 (operate builder ~destination:(at length) Storage_length [ Place (at storage) ]);
               let length32 = local builder (value int32) in
@@ -581,7 +587,8 @@ let () =
               let array = local builder ~name:"array" (value array_ty) in
               List.iteri
                 (fun index count ->
-                  emit builder (Assign (at array / Index (usize index), Use (constant_int32 count))))
+                  emit builder
+                    (Assign (at array / Index (constant_uint64 index), Use (constant_int32 count))))
                 [ 4; 5; 6 ];
               let storage = local builder ~name:"storage" (value storage_ty) in
               ignore
@@ -592,7 +599,7 @@ let () =
               let last = local builder (value int32) and middle = local builder (value int32) in
               ignore (operate builder ~destination:(at last) Storage_pop [ Place (at storage) ]);
               ignore (operate builder ~destination:(at middle) Storage_pop [ Place (at storage) ]);
-              let length = local builder (value (named "USize")) in
+              let length = local builder (value (named "UInt64")) in
               ignore
                 (operate builder ~destination:(at length) Storage_length [ Place (at storage) ]);
               let status = local builder (value int32) in
@@ -613,7 +620,9 @@ let () =
       let view_ty =
         Ground.Named { path = Intrinsic.builtin_path View; arguments = [ Type int32 ] }
       in
-      let extra = [ (Ground.to_string view_ty, Storage.view_shape ~usize:(named "USize") int32) ] in
+      let extra =
+        [ (Ground.to_string view_ty, Storage.view_shape ~uint64:(named "UInt64") int32) ]
+      in
       let operate builder ?destination operation arguments =
         Intrinsics.lower
           ~value_arguments:[ Z.of_int 3 ]
@@ -627,16 +636,17 @@ let () =
               let array = local builder ~name:"array" (value array_ty) in
               List.iteri
                 (fun index count ->
-                  emit builder (Assign (at array / Index (usize index), Use (constant_int32 count))))
+                  emit builder
+                    (Assign (at array / Index (constant_uint64 index), Use (constant_int32 count))))
                 [ 4; 5; 6 ];
               let view = local builder ~name:"view" (value view_ty) in
               ignore (operate builder ~destination:(at view) Array_view [ Place (at array) ]);
               let middle =
-                match operate builder View_at [ Place (at view); Value (usize 1) ] with
+                match operate builder View_at [ Place (at view); Value (constant_uint64 1) ] with
                 | Some place -> place
                 | None -> failwith "view_at lends nothing"
               in
-              let length = local builder (value (named "USize")) in
+              let length = local builder (value (named "UInt64")) in
               ignore (operate builder ~destination:(at length) View_length [ Place (at view) ]);
               let status = local builder (value int32) in
               emit builder (Assign (at status, Convert (Copy (at length), Integer Int32)));
@@ -669,7 +679,7 @@ let () =
               let storage = local builder (value storage_ty) in
               ignore
                 (operate builder ~destination:(at storage) Storage_with_capacity
-                   [ Value (usize 3) ]);
+                   [ Value (constant_uint64 3) ]);
               List.iter
                 (fun count ->
                   ignore
@@ -680,10 +690,11 @@ let () =
               ignore
                 (operate builder ~destination:(at array) Array_from_storage [ Place (at storage) ]);
               let status = local builder (value int32) in
-              emit builder (Assign (at status, Use (Copy (at array / Index (usize 0)))));
+              emit builder (Assign (at status, Use (Copy (at array / Index (constant_uint64 0)))));
               emit builder
                 (Assign
-                   (at status, Binary (Add, Copy (at status), Copy (at array / Index (usize 2)))));
+                   ( at status,
+                     Binary (Add, Copy (at status), Copy (at array / Index (constant_uint64 2))) ));
               status);
         ]
       in
@@ -764,15 +775,17 @@ let () =
                          fields =
                            [
                              ("buffer", Constant (Bytes "abcde"));
-                             ("length", usize 5);
-                             ("capacity", usize 0);
+                             ("length", constant_uint64 5);
+                             ("capacity", constant_uint64 0);
                            ];
                        } ));
               if capacity > 0 then
                 ignore
                   (checked builder Storage_set_capacity
-                     [ Place (at storage); Value (usize capacity) ]);
-              ignore (checked builder Storage_shorten [ Place (at storage); Value (usize to_) ]);
+                     [ Place (at storage); Value (constant_uint64 capacity) ]);
+              ignore
+                (checked builder Storage_shorten
+                   [ Place (at storage); Value (constant_uint64 to_) ]);
               (* The length, the capacity, and the last element kept. *)
               let status = local builder (value int32) in
               let part place =
@@ -783,7 +796,7 @@ let () =
               emit builder (Assign (at status, Use (constant_int32 0)));
               part (at storage / Field "length");
               part (at storage / Field "capacity");
-              part (at storage / Field "buffer" / Index (usize (to_ - 1)));
+              part (at storage / Field "buffer" / Index (constant_uint64 (to_ - 1)));
               status);
         ]
       in
@@ -802,7 +815,9 @@ let () =
       let view_ty =
         Ground.Named { path = Intrinsic.builtin_path View; arguments = [ Type uint8 ] }
       in
-      let extra = [ (Ground.to_string view_ty, Storage.view_shape ~usize:(named "USize") uint8) ] in
+      let extra =
+        [ (Ground.to_string view_ty, Storage.view_shape ~uint64:(named "UInt64") uint8) ]
+      in
       let anchors =
         [ { Positions.definition = definition "entry"; path = "test.truss"; first_line = 1 } ]
       in
@@ -831,11 +846,12 @@ let () =
                              fields =
                                [
                                  ("buffer", Constant (Bytes "abc"));
-                                 ("length", usize 3);
-                                 ("capacity", usize 0);
+                                 ("length", constant_uint64 3);
+                                 ("capacity", constant_uint64 0);
                                ];
                            } ));
-                  checked builder Storage_set_capacity [ Place (at storage); Value (usize 3) ];
+                  checked builder Storage_set_capacity
+                    [ Place (at storage); Value (constant_uint64 3) ];
                   let view = local builder ~name:"view" (value view_ty) in
                   checked builder ~destination:(at view) Storage_view [ Place (at storage) ];
                   operation builder ~storage ~view;
@@ -851,35 +867,39 @@ let () =
       stops "an element pushed to a storage that has no room" (fun builder ~storage ~view:_ ->
           checked builder Storage_push [ Place (at storage); Value byte ]);
       stops "an element inserted into a storage that has no room" (fun builder ~storage ~view:_ ->
-          checked builder Storage_insert [ Place (at storage); Value (usize 1); Value byte ]);
+          checked builder Storage_insert
+            [ Place (at storage); Value (constant_uint64 1); Value byte ]);
       stops index (fun builder ~storage ~view:_ ->
-          checked builder Storage_insert [ Place (at storage); Value (usize 9); Value byte ]);
+          checked builder Storage_insert
+            [ Place (at storage); Value (constant_uint64 9); Value byte ]);
       stops "a storage lengthened to more than its capacity" (fun builder ~storage ~view:_ ->
-          checked builder Storage_lengthen [ Place (at storage); Value (usize 1) ]);
+          checked builder Storage_lengthen [ Place (at storage); Value (constant_uint64 1) ]);
       stops "a storage's capacity set to less than its length" (fun builder ~storage ~view:_ ->
-          checked builder Storage_set_capacity [ Place (at storage); Value (usize 2) ]);
+          checked builder Storage_set_capacity [ Place (at storage); Value (constant_uint64 2) ]);
       stops index (fun builder ~storage ~view:_ ->
           let removed = local builder (value uint8) in
           checked builder ~destination:(at removed) Storage_remove
-            [ Place (at storage); Value (usize 3) ]);
+            [ Place (at storage); Value (constant_uint64 3) ]);
       stops index (fun builder ~storage ~view:_ ->
-          checked builder Storage_swap [ Place (at storage); Value (usize 0); Value (usize 3) ]);
+          checked builder Storage_swap
+            [ Place (at storage); Value (constant_uint64 0); Value (constant_uint64 3) ]);
       stops index (fun builder ~storage ~view:_ ->
-          checked builder Storage_at [ Place (at storage); Value (usize 3) ]);
+          checked builder Storage_at [ Place (at storage); Value (constant_uint64 3) ]);
       stops index (fun builder ~storage:_ ~view ->
-          checked builder View_at [ Place (at view); Value (usize 3) ]);
+          checked builder View_at [ Place (at view); Value (constant_uint64 3) ]);
       stops index (fun builder ~storage:_ ~view ->
-          checked builder View_swap [ Place (at view); Value (usize 3); Value (usize 0) ]);
+          checked builder View_swap
+            [ Place (at view); Value (constant_uint64 3); Value (constant_uint64 0) ]);
       stops slice (fun builder ~storage:_ ~view ->
           let part = local builder (value view_ty) in
           checked builder ~destination:(at part) View_slice
-            [ Place (at view); Value (usize 1); Value (usize 4) ]);
+            [ Place (at view); Value (constant_uint64 1); Value (constant_uint64 4) ]);
       stops slice (fun builder ~storage:_ ~view ->
           let part = local builder (value view_ty) in
           checked builder ~destination:(at part) View_slice
-            [ Place (at view); Value (usize 2); Value (usize 1) ]);
+            [ Place (at view); Value (constant_uint64 2); Value (constant_uint64 1) ]);
       stops "an element popped from an empty storage" (fun builder ~storage ~view:_ ->
-          checked builder Storage_shorten [ Place (at storage); Value (usize 0) ];
+          checked builder Storage_shorten [ Place (at storage); Value (constant_uint64 0) ];
           let popped = local builder (value uint8) in
           checked builder ~destination:(at popped) Storage_pop [ Place (at storage) ]));
   test "static storage given room is copied to the heap, where it can be pushed onto" (fun () ->
@@ -899,18 +919,18 @@ let () =
                          fields =
                            [
                              ("buffer", Constant (Bytes "abc"));
-                             ("length", usize 3);
-                             ("capacity", usize 0);
+                             ("length", constant_uint64 3);
+                             ("capacity", constant_uint64 0);
                            ];
                        } ));
               ignore
                 (operate builder ~type_arguments:[ uint8 ] Storage_set_capacity
-                   [ Place (at storage); Value (usize 4) ]);
+                   [ Place (at storage); Value (constant_uint64 4) ]);
               ignore
                 (operate builder ~type_arguments:[ uint8 ] Storage_push
                    [ Place (at storage); Value (Constant (Integer (UInt8, Z.of_int 100))) ]);
               let first = local builder (value int32) and last = local builder (value int32) in
-              let element index = at storage / Field "buffer" / Index (usize index) in
+              let element index = at storage / Field "buffer" / Index (constant_uint64 index) in
               emit builder (Assign (at first, Convert (Copy (element 0), Integer Int32)));
               emit builder (Assign (at last, Convert (Copy (element 3), Integer Int32)));
               emit builder (Assign (at first, Binary (Add, Copy (at first), Copy (at last))));
@@ -923,7 +943,9 @@ let () =
       let view_ty =
         Ground.Named { path = Intrinsic.builtin_path View; arguments = [ Type uint8 ] }
       in
-      let extra = [ (Ground.to_string view_ty, Storage.view_shape ~usize:(named "USize") uint8) ] in
+      let extra =
+        [ (Ground.to_string view_ty, Storage.view_shape ~uint64:(named "UInt64") uint8) ]
+      in
       let operate builder ?destination operation arguments =
         Intrinsics.lower (shape_env ~extra ()) builder intrinsic_types operation
           ~type_arguments:[ uint8 ] arguments ~destination
@@ -943,16 +965,17 @@ let () =
                          fields =
                            [
                              ("buffer", Constant (Bytes "abc"));
-                             ("length", usize 3);
-                             ("capacity", usize 0);
+                             ("length", constant_uint64 3);
+                             ("capacity", constant_uint64 0);
                            ];
                        } ));
               let view = local builder ~name:"view" (value view_ty) in
               ignore
                 (operate builder ~destination:(at view) Storage_view_mut [ Place (at storage) ]);
               ignore
-                (operate builder View_swap [ Place (at view); Value (usize 0); Value (usize 2) ]);
-              (match operate builder View_at_mut [ Place (at view); Value (usize 1) ] with
+                (operate builder View_swap
+                   [ Place (at view); Value (constant_uint64 0); Value (constant_uint64 2) ]);
+              (match operate builder View_at_mut [ Place (at view); Value (constant_uint64 1) ] with
               | Some middle ->
                   emit builder (Assign (middle, Use (Constant (Integer (UInt8, Z.of_int 100)))))
               | None -> failwith "view_at_mut lends nothing");
@@ -962,8 +985,8 @@ let () =
                   (Assign
                      ( at read,
                        Convert
-                         (Copy (at storage / Field "buffer" / Index (usize index)), Integer Int32)
-                     ));
+                         ( Copy (at storage / Field "buffer" / Index (constant_uint64 index)),
+                           Integer Int32 ) ));
                 Copy (at read)
               in
               let status = local builder (value int32) in
@@ -979,7 +1002,7 @@ let () =
   let open Emit_c.Builder in
   let storage_ty = named "Storage" ~arguments:[ Type uint8 ] in
   let view_ty = Ground.Named { path = Intrinsic.builtin_path View; arguments = [ Type uint8 ] } in
-  let extra = [ (Ground.to_string view_ty, Storage.view_shape ~usize:(named "USize") uint8) ] in
+  let extra = [ (Ground.to_string view_ty, Storage.view_shape ~uint64:(named "UInt64") uint8) ] in
   let operate builder ?destination operation arguments =
     Intrinsics.lower ~checks:true (shape_env ~extra ()) builder intrinsic_types operation
       ~type_arguments:[ uint8 ] arguments ~destination
@@ -1000,15 +1023,15 @@ let () =
                      fields =
                        [
                          ("buffer", Constant (Bytes "abc"));
-                         ("length", usize 3);
-                         ("capacity", usize 0);
+                         ("length", constant_uint64 3);
+                         ("capacity", constant_uint64 0);
                        ];
                    } ));
           let view = local builder ~name:"view" (value view_ty) in
           view_of builder storage view;
           ignore
             (operate builder Storage_take_view
-               [ Place (at storage); Place (at view); Value (usize 1) ]);
+               [ Place (at storage); Place (at view); Value (constant_uint64 1) ]);
           let status = local builder (value int32) in
           emit builder (Assign (at status, Use (constant_int32 7)));
           status);
@@ -1017,7 +1040,7 @@ let () =
   let slice_from builder whole view start stop =
     ignore
       (operate builder ~destination:(at view) View_slice
-         [ Place (at whole); Value (usize start); Value (usize stop) ])
+         [ Place (at whole); Value (constant_uint64 start); Value (constant_uint64 stop) ])
   in
   let anchors =
     [ { Positions.definition = definition "entry"; path = "test.truss"; first_line = 1 } ]
@@ -1035,7 +1058,9 @@ let () =
         let whole = local builder ~name:"whole" (value view_ty) in
         emit builder
           (Assign
-             (at whole, Storage.view view_ty ~elements:(Constant (Bytes "wxyz")) ~length:(usize 4)));
+             ( at whole,
+               Storage.view view_ty ~elements:(Constant (Bytes "wxyz")) ~length:(constant_uint64 4)
+             ));
         slice_from builder whole view start stop
       in
       expect_status ~extra ~anchors 101

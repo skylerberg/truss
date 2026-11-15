@@ -222,8 +222,8 @@ test "an integer is parsed in any radix from 2 to 36, in either case" {
   assert Int32.parse_radix("8", radix: 8) == Err(core::ParseIntegerError.InvalidDigit(offset: 0))
   assert Int32.parse_radix("12", radix: 2) == Err(core::ParseIntegerError.InvalidDigit(offset: 1))
   assert Int32.parse_radix("g", radix: 16) == Err(core::ParseIntegerError.InvalidDigit(offset: 0))
-  assert ISize.parse_radix("-80", radix: 16) == Ok(-128)
-  assert USize.parse_radix("777", radix: 8) == Ok(511)
+  assert Int64.parse_radix("-80", radix: 16) == Ok(-128)
+  assert UInt64.parse_radix("777", radix: 8) == Ok(511)
 }
 
 test "the integer square root of a 64-bit number is exact at the top of its range" {
@@ -233,9 +233,9 @@ test "the integer square root of a 64-bit number is exact at the top of its rang
   assert square.integer_square_root() == 4294967295
   let below: UInt64 = 18446744065119617024
   assert below.integer_square_root() == 4294967294
-  let small: USize = 17
+  let small: UInt64 = 17
   assert small.integer_square_root() == 4
-  let nothing: USize = 0
+  let nothing: UInt64 = 0
   assert nothing.integer_square_root() == 0
 }
 

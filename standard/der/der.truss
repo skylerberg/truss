@@ -16,7 +16,7 @@ public type Value =
   | Other(tag: UInt8, bytes: List[UInt8])
   derives Equal
 
-public type Error(offset: USize)
+public type Error(offset: UInt64)
   derives Equal
 
 impl Display for Error {
@@ -27,9 +27,9 @@ impl Display for Error {
   }
 }
 
-type Header(tag: UInt8, start: USize, end: USize)
+type Header(tag: UInt8, start: UInt64, end: UInt64)
 
-fn read_header(bytes: Slice[UInt8], at: USize) -> Result[Header, Error]
+fn read_header(bytes: Slice[UInt8], at: UInt64) -> Result[Header, Error]
   ensures !(result is Ok(header) && (header.start > header.end || header.end > bytes.length()))
 {
   if at >= bytes.length() || bytes.length() - at < 2 {
@@ -40,17 +40,17 @@ fn read_header(bytes: Slice[UInt8], at: USize) -> Result[Header, Error]
     return Err(Error(offset: at))
   }
   let first = bytes[at + 1]
-  var length: USize = 0
+  var length: UInt64 = 0
   var start = at + 2
   if first < 128 {
     length = intrinsic::convert(first)
   } else {
-    let count: USize = intrinsic::convert(first & 127)
+    let count: UInt64 = intrinsic::convert(first & 127)
     if count == 0 || count > 4 || bytes.length() - start < count {
       return Err(Error(offset: at))
     }
     for index in 0..count {
-      length = (length << 8) | intrinsic::convert[UInt8, USize](bytes[start + index])
+      length = (length << 8) | intrinsic::convert[UInt8, UInt64](bytes[start + index])
     }
     if (count == 1 && length < 128) || bytes[start] == 0 {
       return Err(Error(offset: at))
@@ -63,7 +63,7 @@ fn read_header(bytes: Slice[UInt8], at: USize) -> Result[Header, Error]
   Ok(Header(tag: tag, start: start, end: start + length))
 }
 
-fn read_value(bytes: Slice[UInt8], at: USize, depth: USize) -> Result[core::Pair[Value, USize], Error] {
+fn read_value(bytes: Slice[UInt8], at: UInt64, depth: UInt64) -> Result[core::Pair[Value, UInt64], Error] {
   if depth > 64 {
     return Err(Error(offset: at))
   }
@@ -138,7 +138,7 @@ public fn parse_tagged(value: Value) -> Result[Value, Error] {
   }
 }
 
-fn push_length(output: mut List[UInt8], length: USize) {
+fn push_length(output: mut List[UInt8], length: UInt64) {
   if length < 128 {
     mut output.push(intrinsic::convert(length))
     return
@@ -149,7 +149,7 @@ fn push_length(output: mut List[UInt8], length: USize) {
     mut digits.push(intrinsic::convert(rest & 255))
     rest = rest >> 8
   }
-  mut output.push(128 | intrinsic::convert[USize, UInt8](digits.length()))
+  mut output.push(128 | intrinsic::convert[UInt64, UInt8](digits.length()))
   mut digits.reverse()
   mut output.append(own digits)
 }
@@ -199,7 +199,7 @@ public fn encode(value: Value) -> List[UInt8] {
 }
 
 public fn unsigned_integer(bytes: Slice[UInt8]) -> Value {
-  var start: USize = 0
+  var start: UInt64 = 0
   while start < bytes.length() && bytes.length() - start > 1 && bytes[start] == 0
     invariant start <= bytes.length()
   {
@@ -216,10 +216,10 @@ public fn unsigned_integer(bytes: Slice[UInt8]) -> Value {
   Value.Integer(bytes: own content)
 }
 
-public fn Value.unsigned_bytes(self, length: USize) -> Option[List[UInt8]] {
+public fn Value.unsigned_bytes(self, length: UInt64) -> Option[List[UInt8]] {
   match self {
     Integer(bytes) => {
-      var start: USize = 0
+      var start: UInt64 = 0
       while start < bytes.length() && bytes[start] == 0
         invariant start <= bytes.length()
       {

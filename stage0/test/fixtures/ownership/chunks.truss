@@ -1,14 +1,14 @@
 type Chunked(chunks: List[List[Int64]])
 
-fn Chunked.count(self) -> USize {
+fn Chunked.count(self) -> UInt64 {
   self.chunks.count()
 }
 
-fn Chunked.element(self, position: USize) lends List[Int64] {
+fn Chunked.element(self, position: UInt64) lends List[Int64] {
   self.chunks[position]
 }
 
-fn Chunked.element(mut self, position: USize) lends mut List[Int64] {
+fn Chunked.element(mut self, position: UInt64) lends mut List[Int64] {
   mut self.chunks[position]
 }
 

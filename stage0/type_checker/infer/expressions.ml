@@ -346,11 +346,11 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
   match items with
   | [ Item ({ kind = Range { start; stop; _ }; _ } as range) ] -> (
       (* A slice: a view of a range of the collection. *)
-      Option.iter (fun start -> check state env start (Types.builtin USize)) start;
-      Option.iter (fun stop -> check state env stop (Types.builtin USize)) stop;
+      Option.iter (fun start -> check state env start (Types.builtin UInt64)) start;
+      Option.iter (fun stop -> check state env stop (Types.builtin UInt64)) stop;
       record state range
         (Types.Named
-           { path = Well_known.path Range; arguments = [ Types.Type (Types.builtin USize) ] });
+           { path = Well_known.path Range; arguments = [ Types.Type (Types.builtin UInt64) ] });
       register_expression state value (fun () ->
           let base = place_of (build_expression state base) in
           let start = Option.map (build_expression state) start in

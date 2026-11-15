@@ -17,7 +17,7 @@ type target =
   | Type_parameter of Types.parameter
       (** A generic type parameter, by the definition that declares it and its name. *)
   | Capability_parameter of Types.parameter  (** A generic parameter declared [capability Name]. *)
-  | Value_parameter of Types.parameter  (** A [USize] generic parameter. *)
+  | Value_parameter of Types.parameter
   | Definition of Names.named * Path.t  (** A definition, with its kind. *)
   | Variant of Path.t * string  (** A prelude variant written bare, such as [Some]. *)
   | Module of Path.module_
