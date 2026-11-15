@@ -1,6 +1,3 @@
-(* A worktree on disk: the packages in it, the modules of each, and the
-   metadata that tells whether a file changed without reading it. *)
-
 type stamp = { size : int; modified : float; inode : int }
 
 let stamp_of (stat : Unix.stats) =
@@ -8,8 +5,6 @@ let stamp_of (stat : Unix.stats) =
 
 let skipped = Registry.Content.skipped
 
-(* Every manifest and module file under the root, by path relative to it,
-   with its stamp, in order. *)
 let files root =
   let stamped = ref [] in
   let rec walk relative =

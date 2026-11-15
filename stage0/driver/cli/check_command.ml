@@ -1,14 +1,5 @@
-(* [truss check]: every diagnostic of the packages, and with [--fix], each
-   diagnostic's only fix applied. *)
-
-(* Bounds the rounds, so two fixes that undo each other cannot loop
-   forever. *)
 let rounds = 32
 
-(* Deletes the manifest entry of each unused dependency, which is that
-   problem's only fix, and returns each deletion as JSON. A grant is never
-   added: granting a capability is a decision that a reviewer must see a
-   person make. *)
 let unused_dependencies session packages =
   let root = Database.root session in
   List.filter_map
@@ -28,9 +19,6 @@ let unused_dependencies session packages =
       | Not_a_capability _ -> None)
     (Database.manifest_problems session packages)
 
-(* Writes the canonical lock file when the lock file on disk differs, which
-   is that problem's only fix. It never chooses a version: a dependency
-   without a version in the lock file or any record needs `truss add`. *)
 let lock_file session =
   match Database.lock_fix session with
   | None -> []
@@ -46,8 +34,6 @@ let lock_file session =
              ]);
       ]
 
-(* Applies fixes until none remains, and returns the fixed diagnostics as
-   JSON, each against the file text at the time of its fix. *)
 let fix session packages =
   let rec round number fixed =
     let applied =
@@ -80,10 +66,6 @@ let fix session packages =
   in
   round 1 []
 
-(* A check also lists the overlaps between this worktree's changes and those
-   of the repository's other open worktrees. An overlap is not a
-   diagnostic, since neither worktree's code has an error, so it does not
-   change the exit status. *)
 let run ~fix:fixing ~proofs =
   let session, packages = Command_packages.current () in
   let fixed = if fixing then fix session packages else [] in

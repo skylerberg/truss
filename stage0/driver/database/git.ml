@@ -1,6 +1,3 @@
-(* Reading commits from git, for sessions opened for a commit rather than a
-   directory. *)
-
 let run ?environment ~directory arguments =
   match Process.run ?environment "git" ("-C" :: directory :: arguments) with
   | 0, output, _ -> Some output
@@ -14,7 +11,6 @@ let common_directory directory =
       try Unix.realpath path with Unix.Unix_error _ -> path)
     (run ~directory [ "rev-parse"; "--git-common-dir" ])
 
-(* Where a directory is under the top of its worktree. *)
 let prefix directory = Option.map String.trim (run ~directory [ "rev-parse"; "--show-prefix" ])
 
 let resolve ~directory revision =
@@ -22,7 +18,6 @@ let resolve ~directory revision =
 
 let head ~directory = resolve ~directory "HEAD"
 
-(* The default branch: [origin/HEAD]'s target, else [main], else [master]. *)
 let default_branch ~directory =
   match run ~directory [ "symbolic-ref"; "--quiet"; "refs/remotes/origin/HEAD" ] with
   | Some reference when String.trim reference <> "" -> Some (String.trim reference)
@@ -34,8 +29,6 @@ let default_branch ~directory =
 let merge_base ~directory left right =
   Option.map String.trim (run ~directory [ "merge-base"; left; right ])
 
-(* Every manifest and module file of a commit under a directory, by its
-   path from the directory, with its text. *)
 let files ~directory commit =
   match run ~directory [ "ls-tree"; "-r"; "-z"; commit ] with
   | None -> None
@@ -66,8 +59,6 @@ let files ~directory commit =
       in
       Some texts
 
-(* Merges two commits' trees without a checkout, and gives the merged
-   tree's files; [None] when the merge has a textual conflict. *)
 let merged_files ~directory left right =
   match run ~directory [ "merge-tree"; "--write-tree"; left; right ] with
   | Some output -> (
@@ -76,12 +67,7 @@ let merged_files ~directory left right =
       | _ -> None)
   | None -> None
 
-(* A commit holding a worktree's files as they are now, tracked or not,
-   made with an index of its own so that the worktree, its index, and its
-   branches are untouched. *)
 let snapshot ~directory =
-  (* The index must not exist yet: git reads an empty file as a broken
-     index, and makes a new one only where there is none. *)
   let index = Filename.temp_file "truss-index" "" in
   (try Sys.remove index with Sys_error _ -> ());
   let environment = [ ("GIT_INDEX_FILE", index) ] in
@@ -95,8 +81,6 @@ let snapshot ~directory =
             run ~environment ~directory [ "write-tree" ] )
         with
         | Some _, Some _, Some tree ->
-            (* A snapshot is the database's own, so it names its own author
-               rather than needing the user's to be set. *)
             let author =
               [
                 ("GIT_AUTHOR_NAME", "truss");

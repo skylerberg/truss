@@ -1,6 +1,3 @@
-(* [truss references] and [truss dependencies]: a definition's dependents
-   and dependencies, by part, from the session's dependency graph. *)
-
 type direction = References | Dependencies
 
 let run ~direction ~name =

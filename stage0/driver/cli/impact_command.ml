@@ -1,19 +1,10 @@
-(* [truss impact]: the definitions that the worktree changes since a base
-   commit, and their dependents.
-
-   The worktree's session is compared with a session of the base commit.
-   Every result that depends on a changed input is updated in both and
-   compared, so a result recomputed with the same value counts as
-   unchanged. Reformatting a file, or moving a definition within its file,
-   changes nothing. *)
-
 module Names = Resolve.Names
 
 type change = {
   path : Path.t;
-  status : [ `Added | `Removed | `Changed of Query.part list ];  (** The parts that changed *)
-  before : string option;  (** The signature at the base, when it changed *)
-  after : string option;  (** The signature now *)
+  status : [ `Added | `Removed | `Changed of Query.part list ];
+  before : string option;
+  after : string option;
   dependents : Graph_types.edge list;
 }
 
@@ -28,7 +19,6 @@ let declarations context packages =
         (Query.demand context Packages.modules name))
     packages
 
-(* Each definition that changed, was added, or was removed, in order. *)
 let changes session base =
   let mine = session in
   let changed = Hashtbl.create 32 in
@@ -99,10 +89,6 @@ let changes session base =
   in
   changes @ removed
 
-(* The tests whose code changed since the base, which are the tests whose
-   key differs, each with whether a result is cached for its current key.
-   A test's key is the hash of the code it can reach. Computing keys lowers
-   code but compiles nothing, so it needs no C compiler. *)
 let tests_changed session base =
   let keys context session =
     Compile.test_keys
@@ -176,7 +162,6 @@ let run ~base =
       | Error message -> Outcome.cannot_run "%s" message
       | Ok base_session ->
           let changes = changes session base_session in
-          (* Lowering requires code without diagnostics. *)
           let tests = if Report.clean report then tests_changed session base_session else [] in
           if Output.json () then
             Json.print

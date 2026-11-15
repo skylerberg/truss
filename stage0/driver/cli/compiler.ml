@@ -1,5 +1,3 @@
-(* Code generation, configured for the commands that build programs. *)
-
 type build = Development | Release
 
 let c_flags () =
@@ -10,7 +8,6 @@ let toolchain () =
   | Ok toolchain -> toolchain
   | Error message -> Outcome.cannot_run "%s" message
 
-(* Stage0 builds programs for the system it runs on. *)
 let system () =
   match Libc.host with
   | Some system -> system
@@ -19,23 +16,16 @@ let system () =
 let want session context lowering wanted =
   Database.set session Compile.roots lowering (Compile.add_roots context lowering wanted)
 
-(* Where the results of runs are kept: the database's store. *)
 let results () : Compile.results =
   let find, add = Database.results ~kind:Store.Test_result in
   { find; add }
 
-(* A compiler that lowers code and compiles nothing, so it needs no C
-   compiler. *)
 let lowering_only session context =
   Compile.create ~want:(want session context) context (system ())
     { compiler = "cc"; identity = "lowering only" }
     (Build.cache (Database.objects_directory ()))
     { build = Development; optimization = O1; extra = c_flags () }
 
-(* A development build compiles at -O1, one C file per instance. A release
-   build compiles at -O2 with link-time optimization. A build checks every
-   fallible primitive operation at run time unless [checks] is false, which
-   is sound only when every obligation the program reaches is proven. *)
 let create ?(checks = true) session packages build =
   let toolchain = toolchain () in
   let extra = c_flags () in
@@ -49,9 +39,6 @@ let create ?(checks = true) session packages build =
           extra = Toolchain.link_time_optimization toolchain @ extra;
         }
   in
-  (* A development build names files relative to the current directory,
-     as diagnostics do. A release build names them relative to the
-     package root, so the program is identical wherever it is built. *)
   let file_name file =
     match build with
     | Development when List.mem file.Path.module_.package packages ->

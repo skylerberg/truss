@@ -1,14 +1,3 @@
-(* [truss lsp]: the language server, speaking the Language Server Protocol
-   on standard input and output.
-
-   The server holds the text of each file the editor has open. After each
-   change it requests the open files' diagnostics from [check], which runs
-   in the project's background process unless [--no-server] is given. The
-   check reads a trial session in which the open files' texts replace the
-   files on disk. The server writes no file. *)
-
-(* An LSP position counts columns in UTF-16 code units, or in bytes when
-   the client accepts UTF-8. *)
 type encoding = Utf_8 | Utf_16
 
 let encoding_name = function Utf_8 -> "utf-8" | Utf_16 -> "utf-16"
@@ -30,7 +19,6 @@ let hex_digit character =
   | 'A' .. 'F' -> Some (Char.code character - Char.code 'A' + 10)
   | _ -> None
 
-(* The absolute path a [file:] URI names, with its escapes decoded. *)
 let path_of_uri uri =
   let prefix = "file://" in
   if not (String.starts_with ~prefix uri) then None
@@ -57,8 +45,6 @@ let path_of_uri uri =
     decode 0;
     Some (Buffer.contents buffer)
 
-(* A diagnostic in the protocol's form, with its notes as related
-   information in the same file. *)
 let lsp_diagnostic encoding ~uri source (diagnostic : Diagnostic.t) =
   Json.Object
     [
@@ -81,8 +67,6 @@ let lsp_diagnostic encoding ~uri source (diagnostic : Diagnostic.t) =
              diagnostic.notes) );
     ]
 
-(* An obligation's state: its range, the proposition to prove, whether it
-   is proven, and whether its proof trusts compiled code. *)
 let lsp_state encoding source (state : Diagnostic.span Prover.state) =
   Json.Object
     [
@@ -93,11 +77,6 @@ let lsp_state encoding source (state : Diagnostic.span Prover.state) =
       ("trustsCompiledCode", Json.Bool state.trusts_compiled_code);
     ]
 
-(* The diagnostics and obligation states of each open file, with the
-   editor's text in place of the file on disk, as a JSON object with a
-   field [files]. Each file has its [uri], as the client wrote it, its
-   [diagnostics], and its [states]. A file in no package of the project has
-   no diagnostics and no states. *)
 let check ~root encoding (buffers : (string * string) list) =
   let buffers =
     List.filter_map
@@ -146,8 +125,6 @@ let check ~root encoding (buffers : (string * string) list) =
              opened) );
     ]
 
-(* Reads one message body from a stream in which a header with the length
-   precedes each body, or returns [None] at the end of the stream. *)
 let read_message input =
   let rec headers length =
     match In_channel.input_line input with
@@ -177,10 +154,9 @@ type server = {
   check : root:string -> encoding -> (string * string) list -> string option;
   mutable root : string;
   mutable encoding : encoding;
-  mutable buffers : (string * string) list;  (** Each open file's text, by its URI. *)
+  mutable buffers : (string * string) list;
   mutable shut_down : bool;
   mutable published : string list;
-      (** The URIs with published diagnostics, which are cleared when the file closes. *)
 }
 
 let notify server name params =
@@ -208,9 +184,6 @@ let publish server uri diagnostics =
   notify server "textDocument/publishDiagnostics"
     (Json.Object [ ("uri", Json.String uri); ("diagnostics", diagnostics) ])
 
-(* Checks the open files and publishes each file's diagnostics, and its
-   obligations' states as [truss/proofStates]. A closed file's diagnostics
-   are cleared. *)
 let refresh server =
   let open_uris = List.map fst server.buffers in
   List.iter
@@ -269,9 +242,6 @@ let capabilities server =
       ("serverInfo", Json.Object [ ("name", Json.String "truss") ]);
     ]
 
-(* The file's text after a change: the whole text, since the server asks
-   for full changes, or for a client that sends range edits anyway, the
-   old text with each range replaced. *)
 let changed encoding text changes =
   List.fold_left
     (fun text change ->
@@ -294,7 +264,6 @@ let changed encoding text changes =
 
 type step = Continue | Recheck | Stop of int
 
-(* The server's action for one message. *)
 let handle server message =
   let id = Json.field "id" message and params = Json.field "params" message in
   let document = Json.field "textDocument" params in
@@ -340,9 +309,6 @@ let handle server message =
       Continue
   | _ -> Continue
 
-(* Answers messages until the client sends [exit] or the input ends. A
-   check starts only when no message is waiting, so a burst of edits is
-   checked once. *)
 let create ~write ~check =
   {
     write;

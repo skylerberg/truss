@@ -1,14 +1,6 @@
-(* A command's result: an exit status, or for [truss run], a program for the
-   client to run on its terminal, since the background process that built
-   it has no terminal. *)
-
 type t = Exit of int | Run_program of { program : string; arguments : string list }
 
 exception Stop of int
-(** The command has reported why it ends, and exits with this status. *)
-
 exception Cannot_run of string
-(** The command cannot run: no manifest, a session that another process holds, or an unreadable
-    file. It exits with status 2. *)
 
 let cannot_run format = Printf.ksprintf (fun message -> raise (Cannot_run message)) format

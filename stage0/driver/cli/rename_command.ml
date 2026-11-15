@@ -1,36 +1,22 @@
-(* [truss rename]: renames a definition, a method, or a module, and every
-   reference to it in the project. Renaming a module moves its directory's
-   files.
-
-   The rename is made in a trial session and checked there first. If the
-   result has any diagnostic, such as a name that is taken, a name that
-   breaks a naming rule, or a name that shadows another, no file is
-   written. Each edit replaces only a name's tokens, so the files need no
-   formatting afterward. *)
-
 module Names = Resolve.Names
 module References = Inspect.References
 
-type target =
-  | Definition of Path.t  (** A top-level definition, or every version of a method *)
-  | Module of Path.module_
+type target = Definition of Path.t | Module of Path.module_
 
 type plan = {
   edits : (Path.file * Diagnostic.span Diagnostic.edit list) list;
-  moved : (Path.module_ * Path.module_) option;  (** A renamed module's old and new paths *)
+  moved : (Path.module_ * Path.module_) option;
 }
 
 let module_exists session packages (module_ : Path.module_) =
   List.mem module_ (Command_packages.modules session packages)
 
-(* The file after the rename: a file of a renamed module moves with it. *)
 let moved_file plan (file : Path.file) =
   match plan.moved with
   | Some (old_module, new_module) when file.module_ = old_module ->
       { file with module_ = new_module }
   | _ -> file
 
-(* The edits grouped by file, in order of file. *)
 let by_file edits =
   List.map
     (fun file ->
@@ -40,8 +26,6 @@ let by_file edits =
           edits ))
     (List.sort_uniq compare (List.map fst edits))
 
-(* The module of a project package that [from_] names, and the member
-   after it. [from_] must start with the package's name. *)
 let in_package packages from_ =
   let is_package package = List.mem package packages in
   let argument = Path_argument.parse from_ in
@@ -53,7 +37,6 @@ let in_package packages from_ =
         "Only the definitions of this project's packages can be renamed, and `%s` is not in one."
         from_
 
-(* The definition or module that [from_] names. *)
 let target_of session packages from_ =
   let { Path.package; modules = names }, member = in_package packages from_ in
   let package_name = Path.show_package package in
@@ -84,12 +67,8 @@ let target_of session packages from_ =
         else Outcome.cannot_run "Nothing named `%s` is defined in %s." from_ package_name
     | _ -> Outcome.cannot_run "Nothing named `%s` is defined in %s." from_ package_name
 
-(* The new last segment, from a full path or a bare name. A definition
-   stays in its module and a method on its type, so a full path must name
-   the same module or type. *)
 let new_name ~from_ to_ =
   let written = Path_argument.parse to_ and old = Path_argument.parse from_ in
-  (* A method's type and name, or a definition's name alone. *)
   let owner_and_name (argument : Path_argument.t) =
     let last = match List.rev argument.names with last :: _ -> last | [] -> "" in
     match argument.member with Some member -> (last, member) | None -> ("", last)
@@ -105,8 +84,6 @@ let new_name ~from_ to_ =
   if name = "" then Outcome.cannot_run "`%s` gives no new name." to_;
   name
 
-(* Every occurrence in the packages' code, each with its file and its span
-   in the file's offsets. *)
 let occurrences session packages =
   let context = Database.context session in
   List.concat_map
@@ -158,7 +135,6 @@ let plan_module session packages (old_module : Path.module_) to_ =
       (fun (file, (span : Source.span), (target : References.target)) ->
         match target with
         | Module edit_module when edit_module = old_module ->
-            (* Written as its import's name, one segment, or as a full path. *)
             let text = Source.text (Query.demand (Database.context session) Packages.source file) in
             let written = String.sub text span.start (span.stop - span.start) in
             Some (file, Diagnostic.replace span (if String.contains written ':' then full else last))
@@ -177,7 +153,6 @@ let plan_module session packages (old_module : Path.module_) to_ =
 let text_of session file =
   Source.text (Query.demand (Database.context session) Packages.source file)
 
-(* Each file, the file it becomes, and its text after the rename. *)
 let applied session packages plan =
   List.map
     (fun file ->
@@ -189,7 +164,6 @@ let applied session packages plan =
       (file, moved_file plan file, text))
     (Command_packages.files session packages)
 
-(* A module's directory, which a rename creates for a module it moves. *)
 let directory_of session packages (module_ : Path.module_) =
   if List.mem module_.package packages then
     List.fold_left Filename.concat
@@ -200,11 +174,6 @@ let directory_of session packages (module_ : Path.module_) =
 let path_of session packages (file : Path.file) =
   Filename.concat (directory_of session packages file.module_) (file.name ^ ".truss")
 
-(* A trial session of the worktree with the rename applied, for checking
-   it. It starts from the worktree's session, so only the edited files and
-   their dependents are checked, and it is discarded afterward. Each file's
-   text is placed at its path after the rename, and a moved file's old path
-   is removed. *)
 let trial session after =
   let path file = Database.file_path session file in
   let written = List.map (fun (_, file, text) -> (path file, Some text)) after in
@@ -233,8 +202,6 @@ let edits_json session packages plan =
         edits)
     plan.edits
 
-(* A rename edits every package of the worktree, regardless of the current
-   directory, since any of them may refer to the renamed definition. *)
 let run ~from_ ~to_ =
   let json = Output.json () in
   let session, packages = Command_packages.worktree () in
