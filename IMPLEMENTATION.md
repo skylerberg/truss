@@ -48,13 +48,6 @@ develop as well as make it easier to bootstrap the compiler in parts.
   longest suites runners of their own. The workflow's comments say why each
   job is laid out as it is; when the proofs' jobs become the longest again,
   add a runner to their list.
-- **A pull request that reverts a recent merge fails** before anything is
-  built (`.github/scripts/reverts.sh`). Several sessions fetch into one
-  repository, so `origin/main` can move between a branch's merge of it and a
-  squash onto it, and the squashed commit then reverts every merge its older
-  tree lacks, with no conflict. To squash safely, read `origin/main` once
-  into a variable, merge that commit, and squash onto that commit. A pull
-  request that means to revert has a title that starts with "Revert".
 
 ### Libraries
 
