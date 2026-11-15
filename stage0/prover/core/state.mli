@@ -40,12 +40,7 @@ type part = {
   inherited : bool;
 }
 
-type contract = {
-  parts : part list;
-  is_logic_function : bool;
-  result_kind : [ `Returns | `Lends ];
-  definition : (part * Mir.t) option;
-}
+type contract = { parts : part list; is_logic_function : bool; result_kind : [ `Returns | `Lends ] }
 
 type slice = {
   made_at : Invocation.site;
@@ -138,7 +133,6 @@ type context = {
   mutable instantiating : Path.t list;
   mutable axiomatizing : Logic.symbol list;
   axiom_clauses : (Logic.symbol * string * Core.origin, unit) Hashtbl.t;
-  defined_by_axiom : (Logic.symbol, bool) Hashtbl.t;
   mutable open_axioms : open_axiom list;
   axioms_of : (Logic.symbol, open_axiom) Hashtbl.t;
   disjoint : (int * int) list;

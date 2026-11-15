@@ -9,6 +9,7 @@ impl Model for Set[Element: Hash + Ordered] {
   type Value = FiniteSet[Element]
 
   fn model(self) -> FiniteSet[Element]
+    ensures identical(result, self.elements.model().elements())
     cost time finite
   {
     self.elements.model().elements()
@@ -417,7 +418,9 @@ internal fn Set[Element: Hash + Ordered].elements_included_in(self, other: Set[E
 }
 
 impl Equal for Set[Element: Hash + Ordered] {
-  fn equal(self, other: Set[Element]) -> Bool {
+  fn equal(self, other: Set[Element]) -> Bool
+    ensures result == (self.elements.length() == other.elements.length() && self.elements_included_in(other) && other.elements_included_in(self))
+  {
     self.elements.length() == other.elements.length() && self.elements_included_in(other) && other.elements_included_in(self)
   }
 }

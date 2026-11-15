@@ -145,7 +145,6 @@ module Code = struct
     | Specification_only
     | Not_in_specification
     | Not_structural
-    | Not_overridable
     | Wrong_receiver
     | Not_indexable
     | Implements_built_in
@@ -394,7 +393,6 @@ module Code = struct
     | Not_a_record -> "not_a_record"
     | Unknown_variant -> "unknown_variant"
     | Not_structural -> "not_structural"
-    | Not_overridable -> "not_overridable"
     | Specification_only -> "specification_only"
     | Not_in_specification -> "not_in_specification"
     | Wrong_receiver -> "wrong_receiver"

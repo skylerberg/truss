@@ -1314,14 +1314,14 @@ trait Ordered: Equal {
 }
 ```
 
-**A provided method can be overridden only by a method that is proven to
-return the same result.** `a != b` therefore always means `!(a == b)`, the
-prover reasons from the trait alone, and adding an `impl` never changes the
-semantics of a provided method. A type can still override a provided method
-with a faster one. This covers most uses of specialization, with no
-overlapping `impl`s. A fast path that depends only on the representation of
-a type, such as copying a list of `Plain` values at once, needs no language
-feature: the compiler knows which types are `Plain`.
+**A provided method states its result in the trait's `ensures`, and an
+override keeps it.** `Equal.not_equal` ensures `result == !self.equal(other)`,
+so `a != b` always means `!(a == b)`, the prover reasons from the trait
+alone, and generic code knows the result through a bound. A type can still
+override a provided method with a faster one. This covers most uses of
+specialization, with no overlapping `impl`s. A fast path that depends only on
+the representation of a type, such as copying a list of `Plain` values at
+once, needs no language feature: the compiler knows which types are `Plain`.
 
 **An `impl` can promise more than its trait:** a weaker precondition and a
 stronger postcondition, which is behavioral subtyping. `Index` can then say
@@ -1507,7 +1507,7 @@ the start.
 
 Rules: [Bodies and contracts in proofs](SPECIFICATION.md#bodies-and-contracts-in-proofs).
 
-**A caller's proof reads the contract of a function, never its body.** A
+**A caller's proof reads the contract of its callee, never its body.** A
 function whose body is its definition, such as `is_sorted`, states the body
 in its `ensures`:
 
@@ -1523,7 +1523,7 @@ no second function, for specifications only, to state the definition.
 
 | Rule | Reason |
 |---|---|
-| A method of a trait or of an `impl` is known by its body. | Its contract is the trait's, which says nothing about the implementing type, so the body is the definition: `Int64.compare` is the order of the integers. |
+| A method of a trait or of an `impl` is known by its contract too. | An `impl` states what it adds to the trait's contract in its own `ensures`: `Int64.compare` ensures the order of the integers. An edit to a provided body is then a change to the trait's contract, which the compatibility check compares, and an edit to an `impl`'s body re-proves that method and the `impl`'s laws alone. |
 | A clause applies only where every name it mentions is visible. | An `ensures` that reads the fields of an opaque type is a fact inside the type's package and no fact elsewhere, so `opaque` hides the representation from proofs too. |
 | A public `requires` or `cost` names only public definitions, and an `ensures` may name a private function. | The contract of a function that other packages cannot see is not compared between releases. The `ensures` lets callers inside the package know a result in terms of private helpers. |
 | A bit-level fact is requested with `assert ... by bit_vector`. | The assertion is proven alone by bit-blasting, universally over the integers and booleans it names, as Verus's `by (bit_vector)` is. Elsewhere the prover knows a bitwise operation by a few facts, and it never retries a query with bit-blasting. |
@@ -1848,7 +1848,7 @@ changes no definition.
 | Edit | Invalidates | Reason |
 |---|---|---|
 | Reformat a file, or move a definition within its file or to another file of its module | Nothing | Identity excludes the file, the position in the file, the surrounding definitions, and the layout. |
-| Edit a body, such as replacing a `todo` | The check, the proof, and the code of that body. No caller is re-checked or re-proven. | A definition names its dependencies by module path and name, never by content, and callers depend on the signature alone. |
+| Edit a body, such as replacing a `todo` | The check, the proof, and the code of that body, and the template checks that run it. No caller is re-checked or re-proven. | A definition names its dependencies by module path and name, never by content, and callers depend on the signature alone. |
 | Strengthen an `ensures` | The proofs of callers. No caller is type-checked. | A signature has two parts: the interface, which the types of callers depend on, and the contract, which only the proofs of callers depend on. |
 | Change the default of a parameter | The proofs and tests of the callers that omit the argument, and the code of the callee alone | The interface records only that the parameter has a default, and the callee applies it. |
 | Reorder the fields of a record | Nothing, unless the type derives `Ordered` | The compiler chooses the layout, and a record with more than one field is constructed with labeled arguments. |

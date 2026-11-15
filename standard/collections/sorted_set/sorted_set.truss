@@ -712,7 +712,9 @@ public fn collections::SortedSet[Element: Ordered].reversed(self) -> list::Rever
 }
 
 impl Equal for collections::SortedSet[Element: Ordered] {
-  fn equal(self, other: collections::SortedSet[Element]) -> Bool {
+  fn equal(self, other: collections::SortedSet[Element]) -> Bool
+    ensures result == (self.elements == other.elements)
+  {
     self.elements == other.elements
   }
 }

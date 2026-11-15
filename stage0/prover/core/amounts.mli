@@ -1,13 +1,3 @@
-val definition_value : State.context -> State.frame -> Mir.t -> State.frame * Logic.term
-
-val body_over :
-  State.context ->
-  State.frame ->
-  (Logic.symbol * 'a) list ->
-  Mir.t ->
-  (State.frame -> State.frame) ->
-  Logic.term option
-
 val code_value : State.context -> State.frame -> Mir.t -> type_:Types.ty -> State.frame * Logic.term
 val empty_parts : State.context -> State.frame -> Types.ty -> Logic.term
 val mentions_result : Mir.formula -> bool

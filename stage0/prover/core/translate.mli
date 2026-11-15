@@ -3,7 +3,7 @@ val definition_span : State.source -> Syntax.Span.t
 val function_ :
   ?proof:bool ->
   ?is_updating_helper:bool ->
-  ?inherited:State.part * Types.substitution * Mir.definition option ->
+  ?inherited:State.part * Types.substitution ->
   ?substitution:Types.substitution ->
   Query.context ->
   State.source ->

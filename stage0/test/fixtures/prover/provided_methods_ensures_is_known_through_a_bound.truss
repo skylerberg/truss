@@ -1,0 +1,17 @@
+trait Counted {
+  fn count(self) -> Int64
+    cost time finite
+
+  fn negated(self) -> Bool
+    ensures result == !(self.count() > 0)
+    cost time finite
+  {
+    !(self.count() > 0)
+  }
+}
+
+fn f[Item: Counted](item: Item) -> Bool
+  ensures result == !(item.count() > 0)
+{
+  item.negated()
+}

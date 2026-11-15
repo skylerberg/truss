@@ -506,7 +506,9 @@ impl Iterable for collections::BitSet {
 }
 
 impl Equal for collections::BitSet {
-  fn equal(self, other: collections::BitSet) -> Bool {
+  fn equal(self, other: collections::BitSet) -> Bool
+    ensures result == (self.length == other.length && self.words == other.words)
+  {
     self.length == other.length && self.words == other.words
   }
 }

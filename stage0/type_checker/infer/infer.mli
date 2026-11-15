@@ -40,13 +40,6 @@ type form_origin = Written of Resolve.Names.key | Generated | Inherited of Resol
 
 val form_origin : (Path.t, (form_origin * Types.substitution) option) Query.query
 val core_of_path : (Path.t, (Core.t * Types.substitution) option) Query.query
-val specification_of_path : (Path.t, (Core.t * Types.substitution) option) Query.query
-val exported_specification_of_path : (Path.t, (Core.t * Types.substitution) option) Query.query
 val evidence_packages : (Resolve.Names.key, Path.package list) Query.query
 val clean_tables : Query.context -> Resolve.Names.key -> tables option
 val is_clean : Query.context -> Resolve.Names.key -> bool
-
-module For_testing : sig
-  val specification : (Resolve.Names.key, Core.t option) Query.query
-  val exported_specification : (Resolve.Names.key, Core.t option) Query.query
-end

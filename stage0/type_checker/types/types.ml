@@ -414,12 +414,6 @@ type signature = {
   capture_free_parameters : string list;
 }
 
-let body_is_definition (signature : signature) =
-  signature.terminates && signature.uses = []
-  && (match signature.receiver with Some (Mut, _) -> false | _ -> true)
-  && List.for_all (fun (parameter : parameter_info) -> parameter.mode <> Mut) signature.parameters
-  && match signature.output with Returns _ -> true | Lends _ -> false
-
 let map_signature transform (signature : signature) =
   {
     signature with

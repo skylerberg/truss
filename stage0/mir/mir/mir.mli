@@ -17,11 +17,6 @@ val graph_of_path : (Path.t, Graph.t option) Query.query
 val defaults_of_path : (Path.t, t defaults option) Query.query
 val default_graphs_of_path : (Path.t, Graph.t defaults option) Query.query
 val contract_of_path : (Path.t, contract option) Query.query
-
-type definition = Functional of t | Not_functional
-
-val definition_of_path : (Path.t, definition option) Query.query
-val exported_definition_of_path : (Path.t, definition option) Query.query
 val laws : (Resolve.Names.key, law list) Query.query
 val type_clauses_of_path : (Path.t, type_clauses option) Query.query
 val is_generated : Query.context -> Path.t -> bool

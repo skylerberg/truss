@@ -1501,9 +1501,5 @@ let of_definition ?(is_specification = false) (definition : Core.definition) =
           Option.iter
             (fun value -> return_ builder (if returns then Some value else None) 0)
             (block builder body));
-      let finished =
-        finish builder ~parameters:locals
-          ~is_functional:(returns && is_functional (fun visit -> Core_walk.block visit body))
-      in
-      { body = finished; lambdas = lambdas builder })
+      { body = finish builder ~parameters:locals; lambdas = lambdas builder })
     code

@@ -1,0 +1,26 @@
+trait Counted {
+  fn count(self) -> Int64
+    cost time finite
+
+  fn doubled(self) -> Int64
+    cost time finite
+  {
+    2
+  }
+}
+
+type Pair(first: Int64)
+
+impl Counted for Pair {
+  fn count(self) -> Int64
+    cost time finite
+  {
+    1
+  }
+}
+
+fn f(pair: Pair) -> Int64
+  ensures result == 2
+{
+  pair.doubled()
+}

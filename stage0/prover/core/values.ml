@@ -171,10 +171,7 @@ let apply_template context frame (site : Invocation.site) ~trait ~name ~receiver
   match evidence with
   | Impl { impl; _ } -> (
       let path = Path.Method { owner = impl; name; receiver } in
-      match
-        method_contract ~reading_package:(Path.package context.current) context.database trait name
-          receiver evidence
-      with
+      match method_contract context.database trait name receiver evidence with
       | Some contract ->
           let own = List.hd contract.parts in
           let entry = part_frame frame own ~arguments:[ (0, value_) ] ~substitution:[] in

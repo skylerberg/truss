@@ -1586,7 +1586,9 @@ public fn Regex.split(self, text: StringSlice) -> List[StringSlice]
 }
 
 impl Equal for Regex {
-  fn equal(self, other: Regex) -> Bool {
+  fn equal(self, other: Regex) -> Bool
+    ensures result == (self.pattern == other.pattern)
+  {
     self.pattern == other.pattern
   }
 }

@@ -337,17 +337,19 @@ let flag_impl empty =
   Printf.sprintf
     "impl Monoid for Flag {\n\
     \  fn empty() -> Flag\n\
+    \    ensures result == Flag(on: %s)\n\
     \    cost time finite\n\
     \  {\n\
     \    Flag(on: %s)\n\
     \  }\n\n\
     \  fn combine(self, other: Flag) -> Flag\n\
+    \    ensures result == Flag(on: self.on || other.on)\n\
     \    cost time finite\n\
     \  {\n\
     \    Flag(on: self.on || other.on)\n\
     \  }\n\
      }\n"
-    empty
+    empty empty
 
 let () =
   test "an impl's methods keep its trait's law" (fun () -> proven (monoid ^ flag_impl "false"));
@@ -359,8 +361,8 @@ let () =
       proven Fixtures.Prover.law_holds_on_every_path_after_its_first_use)
 
 let () =
-  test "an impl's method keeps its trait's time clause, so its body is its definition" (fun () ->
-      proven (monoid ^ Fixtures.Prover.impls_method_keeps_its_traits_time_clause_so_its))
+  test "an impl's method keeps its trait's time clause, so a law reads its ensures" (fun () ->
+      proven (monoid ^ Fixtures.Prover.impls_method_keeps_its_traits_time_clause_so_a_law))
 
 let () =
   test "wrapping arithmetic is a remainder" (fun () ->
@@ -385,30 +387,6 @@ let () =
       proven Fixtures.Prover.unwrap_or_gives_the_held_value_or_the_default);
   test "wrapping is not exact arithmetic" (fun () ->
       not_proven Fixtures.Prover.wrapping_is_not_exact_arithmetic "prover.ensures")
-
-let doubling = Fixtures.Prover.doubling
-
-let amount_impl replacement =
-  Printf.sprintf
-    "impl Doubling for Amount {\n\
-    \  fn value(self) -> Int64\n\
-    \    cost time finite\n\
-    \  {\n\
-    \    self.cents\n\
-    \  }\n\n\
-    \  fn doubled(self) -> Bool\n\
-    \    cost time finite\n\
-    \  {\n\
-    \    %s\n\
-    \  }\n\
-     }\n"
-    replacement
-
-let () =
-  test "a replacement that gives the provided body's result" (fun () ->
-      proven (doubling ^ amount_impl "self.cents > 0"));
-  test "a replacement that gives another result" (fun () ->
-      not_proven (doubling ^ amount_impl "self.cents >= 0") "prover.ensures")
 
 let span = "type Span(low: Int64, high: Int64)\n  invariant low <= high\n\n"
 
@@ -1378,6 +1356,12 @@ let () =
       if deep > shallow then fail "written %d times nested 3 deep, %d times 6 deep" shallow deep);
   test "a callee is known by its contract, not its body" (fun () ->
       not_proven Fixtures.Prover.callee_with_an_ensures_is_known_by_its_contract "prover.ensures");
+  test "an impl's method is known by its contract, not its body" (fun () ->
+      not_proven Fixtures.Prover.impls_method_is_known_by_its_contract "prover.ensures");
+  test "a provided method is known by its contract, not its body" (fun () ->
+      not_proven Fixtures.Prover.provided_method_is_known_by_its_contract "prover.ensures");
+  test "a provided method's ensures is known through a bound" (fun () ->
+      proven Fixtures.Prover.provided_methods_ensures_is_known_through_a_bound);
   test "a contract that states the body gives what the body would" (fun () ->
       proven Fixtures.Prover.contract_that_states_the_body_gives_what_the_body)
 

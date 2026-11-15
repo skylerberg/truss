@@ -25,7 +25,6 @@ val body_run :
   type_:Types.ty ->
   (State.frame * Logic.term) option
 
-val returned_type : State.context -> State.frame -> Mir.body -> Types.ty
 val counting_of : Mir.cost -> Costs.counting
 val loop_counters : Logic.term State.Locals.t -> Mir.body -> Costs.counter list
 val facts_since : State.context -> int -> Logic.term list

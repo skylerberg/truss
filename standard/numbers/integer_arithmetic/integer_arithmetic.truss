@@ -6,12 +6,14 @@ public let Int8.bits: UInt64 = 8
 impl core::Countable for Int8 {
   fn successor(self) -> Option[Int8]
     cost time O(1)
+    ensures identical(result, self.checked_add(1))
   {
     self.checked_add(1)
   }
 
   fn predecessor(self) -> Option[Int8]
     cost time O(1)
+    ensures identical(result, self.checked_subtract(1))
   {
     self.checked_subtract(1)
   }
@@ -64,12 +66,14 @@ public let Int16.bits: UInt64 = 16
 impl core::Countable for Int16 {
   fn successor(self) -> Option[Int16]
     cost time O(1)
+    ensures identical(result, self.checked_add(1))
   {
     self.checked_add(1)
   }
 
   fn predecessor(self) -> Option[Int16]
     cost time O(1)
+    ensures identical(result, self.checked_subtract(1))
   {
     self.checked_subtract(1)
   }
@@ -122,12 +126,14 @@ public let Int32.bits: UInt64 = 32
 impl core::Countable for Int32 {
   fn successor(self) -> Option[Int32]
     cost time O(1)
+    ensures identical(result, self.checked_add(1))
   {
     self.checked_add(1)
   }
 
   fn predecessor(self) -> Option[Int32]
     cost time O(1)
+    ensures identical(result, self.checked_subtract(1))
   {
     self.checked_subtract(1)
   }
@@ -180,12 +186,14 @@ public let Int64.bits: UInt64 = 64
 impl core::Countable for Int64 {
   fn successor(self) -> Option[Int64]
     cost time O(1)
+    ensures identical(result, self.checked_add(1))
   {
     self.checked_add(1)
   }
 
   fn predecessor(self) -> Option[Int64]
     cost time O(1)
+    ensures identical(result, self.checked_subtract(1))
   {
     self.checked_subtract(1)
   }
@@ -238,12 +246,14 @@ public let UInt8.bits: UInt64 = 8
 impl core::Countable for UInt8 {
   fn successor(self) -> Option[UInt8]
     cost time O(1)
+    ensures identical(result, self.checked_add(1))
   {
     self.checked_add(1)
   }
 
   fn predecessor(self) -> Option[UInt8]
     cost time O(1)
+    ensures identical(result, self.checked_subtract(1))
   {
     self.checked_subtract(1)
   }
@@ -280,12 +290,14 @@ public let UInt16.bits: UInt64 = 16
 impl core::Countable for UInt16 {
   fn successor(self) -> Option[UInt16]
     cost time O(1)
+    ensures identical(result, self.checked_add(1))
   {
     self.checked_add(1)
   }
 
   fn predecessor(self) -> Option[UInt16]
     cost time O(1)
+    ensures identical(result, self.checked_subtract(1))
   {
     self.checked_subtract(1)
   }
@@ -322,12 +334,14 @@ public let UInt32.bits: UInt64 = 32
 impl core::Countable for UInt32 {
   fn successor(self) -> Option[UInt32]
     cost time O(1)
+    ensures identical(result, self.checked_add(1))
   {
     self.checked_add(1)
   }
 
   fn predecessor(self) -> Option[UInt32]
     cost time O(1)
+    ensures identical(result, self.checked_subtract(1))
   {
     self.checked_subtract(1)
   }
@@ -364,12 +378,14 @@ public let UInt64.bits: UInt64 = 64
 impl core::Countable for UInt64 {
   fn successor(self) -> Option[UInt64]
     cost time O(1)
+    ensures identical(result, self.checked_add(1))
   {
     self.checked_add(1)
   }
 
   fn predecessor(self) -> Option[UInt64]
     cost time O(1)
+    ensures identical(result, self.checked_subtract(1))
   {
     self.checked_subtract(1)
   }

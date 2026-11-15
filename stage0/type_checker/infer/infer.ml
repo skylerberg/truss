@@ -57,68 +57,15 @@ let form_origin =
                         (checked (Method { owner = impl.implements.trait; name; receiver })))))
       | None, _ -> None)
 
-let of_path ~written database (path : Path.t) =
-  Option.bind (Query.demand database form_origin path) (fun (origin, substitution) ->
-      Option.map
-        (fun form -> (form, substitution))
-        (match origin with
-        | Written key | Inherited key -> Query.demand database written key
-        | Generated -> Query.demand database derived path))
-
 let core_of_path =
-  Query.query ~name:"core_of_path" ~phase:Phases.bodies ~show:Path.show (of_path ~written:core)
-
-let callers_read_body database ~same_package (path : Path.t) =
-  let provided =
-    match path with
-    | Method { owner; _ } ->
-        Option.is_some (Query.demand database Interface.Environment.trait_interface owner)
-    | _ -> false
-  in
-  let is_function_or_method_of_type =
-    match path with
-    | Top _ -> Interface.Summary.kind_of database path = Some Function
-    | Method { owner = Top _ as owner; _ } -> Interface.Summary.kind_of database owner = Some Type
-    | _ -> false
-  in
-  provided
-  || (not is_function_or_method_of_type)
-     && Interface.Summary.kind_of database path <> Some Theorem
-     &&
-     match Interface.Impls.signature database path with
-     | Some signature -> Types.body_is_definition signature && same_package
-     | None -> true
-
-let without_body (form : Core.t) : Core.t =
-  match form.definition with
-  | Function { parameters; contract; body = Some _ } ->
-      { definition = Function { parameters; contract; body = None } }
-  | _ -> form
-
-let specification =
-  Query.query ~name:"specification" ~phase:Phases.bodies ~show:Resolve.Names.show_key
-    (fun database key ->
-      Option.map
-        (fun form ->
-          if callers_read_body database ~same_package:true key.path then form else without_body form)
-        (Query.demand database core key))
-
-let exported_specification =
-  Query.query ~name:"exported_specification" ~phase:Phases.bodies ~show:Resolve.Names.show_key
-    (fun database key ->
-      Option.map
-        (fun form ->
-          if callers_read_body database ~same_package:false key.path then form
-          else without_body form)
-        (Query.demand database core key))
-
-let specification_of_path =
-  Query.query ~name:"specification_of_path" ~phase:Phases.bodies ~show:Path.show
-    (of_path ~written:specification)
-
-let exported_specification_of_path =
-  Query.query ~name:"exported_specification_of_path" ~phase:Phases.bodies ~show:Path.show
-    (of_path ~written:exported_specification)
+  Query.query ~name:"core_of_path" ~phase:Phases.bodies ~show:Path.show
+    (fun database (path : Path.t) ->
+      Option.bind (Query.demand database form_origin path) (fun (origin, substitution) ->
+          Option.map
+            (fun form -> (form, substitution))
+            (match origin with
+            | Written key | Inherited key -> Query.demand database core key
+            | Generated -> Query.demand database derived path)))
 
 let evidence_packages =
   Query.query ~name:"evidence_packages" ~phase:Phases.bodies ~show:Resolve.Names.show_key
@@ -144,8 +91,3 @@ let clean_tables database key =
   | _ -> None
 
 let is_clean database key = Option.is_some (clean_tables database key)
-
-module For_testing = struct
-  let specification = specification
-  let exported_specification = exported_specification
-end

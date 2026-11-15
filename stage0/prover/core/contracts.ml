@@ -111,7 +111,7 @@ let law_unshown database (impl : Path.t) (trait : Types.trait_reference) for_typ
            (law_proofs database (Path.package impl) trait for_type)
   | None -> false
 
-let make_contract database path ~own ~others ~definition =
+let make_contract database path ~own ~others =
   let signature = Interface.Impls.signature database path in
   let is_logic_function =
     match signature with
@@ -125,27 +125,12 @@ let make_contract database path ~own ~others ~definition =
     | None -> false
   in
   let result_kind = match signature with Some { output = Lends _; _ } -> `Lends | _ -> `Returns in
-  let definition =
-    match definition with
-    | Some code when is_logic_function && result_kind = `Returns -> Some (own, code)
-    | _ -> None
-  in
-  { parts = own :: others; is_logic_function; result_kind; definition }
-
-let definition_code ~reading_package database (path : Path.t) =
-  match
-    Query.demand database
-      (if reading_package = Path.package path then Mir.definition_of_path
-       else Mir.exported_definition_of_path)
-      path
-  with
-  | Some (Functional definition) -> Some definition
-  | Some Not_functional | None -> None
+  { parts = own :: others; is_logic_function; result_kind }
 
 let function_contract database (path : Path.t) =
   Option.bind (source_at database path) (fun (callee, _, _) ->
       Option.map
-        (fun own -> make_contract database path ~own ~others:[] ~definition:None)
+        (fun own -> make_contract database path ~own ~others:[])
         (part_of database path callee))
 
 let trait_part database (trait : Path.t) name receiver =
@@ -158,18 +143,14 @@ let capability_contract database (capability : Path.t) name =
   Option.bind (source_at database path) (fun (callee, _, _) ->
       Option.map
         (fun own ->
-          {
-            (make_contract database path ~own ~others:[] ~definition:None) with
-            is_logic_function = false;
-          })
+          { (make_contract database path ~own ~others:[]) with is_logic_function = false })
         (part_of database path callee))
 
 let capability_part database (capability : Path.t) name =
   let path = Path.Method { owner = capability; name; receiver = Static } in
   Option.bind (source_at database path) (fun (callee, _, _) -> part_of database path callee)
 
-let method_contract ~reading_package database (trait : Types.trait_reference) name receiver
-    (evidence : evidence) =
+let method_contract database (trait : Types.trait_reference) name receiver (evidence : evidence) =
   let trait_side = trait_part database trait.trait name receiver in
   match evidence with
   | Impl { impl; _ } -> (
@@ -177,24 +158,16 @@ let method_contract ~reading_package database (trait : Types.trait_reference) na
       match source_at database path with
       | Some (callee, _, (Written _ | Generated)) ->
           Option.map
-            (fun own ->
-              make_contract database path ~own ~others:(Option.to_list trait_side)
-                ~definition:(definition_code ~reading_package database path))
+            (fun own -> make_contract database path ~own ~others:(Option.to_list trait_side))
             (part_of database path callee)
       | Some (_, _, Inherited _) | None ->
-          Option.map
-            (fun own ->
-              make_contract database path ~own ~others:[]
-                ~definition:
-                  (definition_code ~reading_package database
-                     (Path.Method { owner = trait.trait; name; receiver })))
-            trait_side)
+          Option.map (fun own -> make_contract database path ~own ~others:[]) trait_side)
   | Bound | Dynamic ->
       Option.map
         (fun own ->
           make_contract database
             (Path.Method { owner = trait.trait; name; receiver })
-            ~own ~others:[] ~definition:None)
+            ~own ~others:[])
         trait_side
 
 let literal (formula : Mir.formula) =

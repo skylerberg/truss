@@ -238,7 +238,7 @@ let form database (path : Path.t) : Core.t option =
           in
           let bool = Types.bool and unit = Types.unit in
           let trait_name = match trait with Top { name; _ } -> name | _ -> Path.show trait in
-          let body : Core.block =
+          let generated_body () : Core.block =
             match (trait_name, name) with
             | "Equal", "equal" ->
                 let other = other_place () in
@@ -941,13 +941,23 @@ let form database (path : Path.t) : Core.t option =
                     })
             | _ -> bug "`%s` cannot be derived" (Path.show path)
           in
+          let body = generated_body () in
+          let ensures =
+            match (trait_name, name) with
+            | "Ordered", "compare" ->
+                [
+                  node bool
+                    (Identical (node result Result, node result (Block (generated_body ()))));
+                ]
+            | _ -> []
+          in
           Some
             {
               definition =
                 Function
                   {
                     parameters;
-                    contract = { requires = []; ensures = []; decreases = []; costs = [] };
+                    contract = { requires = []; ensures; decreases = []; costs = [] };
                     body = Some body;
                   };
             }

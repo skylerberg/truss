@@ -77,6 +77,7 @@ impl Model for Array[Element, count: UInt64] {
   type Value = Sequence[Element]
 
   fn model(self) -> Sequence[Element]
+    ensures identical(result, intrinsic::array_model(self))
     cost time finite
   {
     intrinsic::array_model(self)
@@ -88,6 +89,7 @@ impl Index for Array[Element, count: UInt64] {
   type Output = Element
 
   fn contains_key(self, key: UInt64) -> Bool
+    ensures result == (key < count)
     cost time O(1)
     cost allocations == 0
   {
