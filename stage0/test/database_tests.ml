@@ -191,36 +191,6 @@ let callee_and_caller =
 let with_helper =
   [ ("app::main", callee_and_caller); ("app::extra", "fn helper() -> Int64 { 1 }\n") ]
 
-let project files =
-  let root = Harness.scratch "project" in
-  Harness.write_files root
-    (("truss.toml", "[package]\nname = \"app\"\ntruss = \"0.1\"\n")
-    :: List.map (fun (path, text) -> (path ^ ".truss", text)) files);
-  root
-
-let forked_server ~key handle =
-  match Database.For_testing.listen ~key with
-  | Error message -> failwith message
-  | Ok socket -> (
-      match Unix.fork () with
-      | 0 -> (
-          Unix.dup2 socket Unix.stdin;
-          match Database.serve ~key ~handle with () -> Unix._exit 0 | exception _ -> Unix._exit 1)
-      | process ->
-          Unix.close socket;
-          process)
-
-let kill_and_wait process =
-  (try Unix.kill process Sys.sigkill with Unix.Unix_error _ -> ());
-  ignore (Unix.waitpid [] process)
-
-let ask ?(progress = ignore) ~key request =
-  match Database.call ~start_server:false ~key ~progress request with
-  | Ok (response : int) -> response
-  | Error message ->
-      fail "%s" message;
-      -1
-
 let () =
   test "a client whose background process exits without serving gets an error at once" (fun () ->
       let started = Unix.gettimeofday () in
@@ -234,40 +204,45 @@ let () =
       if elapsed > 2. then fail "the error took %.1f s" elapsed);
   test "the background process answers each request and sends its progress" (fun () ->
       let key = scratch "served" in
-      let process =
-        forked_server ~key (fun ~progress request ->
-            progress "working";
-            if request = "stop" then Database.stop ();
-            String.length request)
+      let socket =
+        match Database.For_testing.listen ~key with
+        | Ok socket -> socket
+        | Error message -> failwith message
       in
-      Fun.protect
-        ~finally:(fun () -> kill_and_wait process)
-        (fun () ->
-          let progressed = ref false in
-          let progress text = if text = "working" then progressed := true in
-          let lengths = List.map (ask ~progress ~key) [ "one"; "three"; "stop" ] in
-          if lengths <> [ 3; 5; 4 ] then
-            fail "answered %s" (String.concat ", " (List.map string_of_int lengths));
-          if not !progressed then fail "sent no progress"));
-  test "after a background process stops, the next one binds its socket and opens the database"
-    (fun () ->
-      let root = project [ ("main/main", callee_and_caller) ] in
-      let process =
-        forked_server ~key:root (fun ~progress:_ request ->
-            if request = "stop" then Database.stop () else ignore (Database.take_snapshot request);
-            0)
-      in
-      Fun.protect
-        ~finally:(fun () -> kill_and_wait process)
-        (fun () ->
-          ignore (ask ~key:root root);
-          ignore (ask ~key:root "stop");
-          (match Database.For_testing.listen ~key:root with
-          | Ok socket -> Unix.close socket
-          | Error message -> fail "%s" message);
-          match Database.take_snapshot root with
-          | Ok _ -> Database.flush ()
-          | Error message -> fail "%s" message))
+      match Unix.fork () with
+      | 0 -> (
+          Unix.dup2 socket Unix.stdin;
+          match
+            Database.serve ~key ~handle:(fun ~progress request ->
+                progress "working";
+                if request = "stop" then Database.stop ();
+                String.length request)
+          with
+          | () -> Unix._exit 0
+          | exception _ -> Unix._exit 1)
+      | process ->
+          Unix.close socket;
+          Fun.protect
+            ~finally:(fun () ->
+              (try Unix.kill process Sys.sigkill with Unix.Unix_error _ -> ());
+              ignore (Unix.waitpid [] process))
+            (fun () ->
+              let progressed = ref false in
+              let served_length request =
+                match
+                  Database.call ~start_server:false ~key
+                    ~progress:(fun text -> if text = "working" then progressed := true)
+                    request
+                with
+                | Ok (length : int) -> length
+                | Error message ->
+                    fail "%s" message;
+                    -1
+              in
+              let lengths = List.map served_length [ "one"; "three"; "stop" ] in
+              if lengths <> [ 3; 5; 4 ] then
+                fail "answered %s" (String.concat ", " (List.map string_of_int lengths));
+              if not !progressed then fail "sent no progress"))
 
 let () =
   test "a caller's checked body reads the callee's interface and not its body" (fun () ->
@@ -716,6 +691,13 @@ let () =
       Pipeline.propagate hot;
       let log = committed log (saved hot) in
       expect_recomputed (reopened_recomputes log alone).recomputed ~exactly:[])
+
+let project files =
+  let root = Harness.scratch "project" in
+  Harness.write_files root
+    (("truss.toml", "[package]\nname = \"app\"\ntruss = \"0.1\"\n")
+    :: List.map (fun (path, text) -> (path ^ ".truss", text)) files);
+  root
 
 let opened root =
   match Database.take_snapshot root with

@@ -840,16 +840,16 @@ let flush () =
 let serve ~key ~handle =
   is_serving := true;
   Server.serve ~key
-    ~alive:(fun () -> key = "" || Sys.file_exists key)
+    ~is_alive:(fun () -> key = "" || Sys.file_exists key)
     ~collect
-    ~watched:(fun () ->
+    ~watcher_descriptors:(fun () ->
       Hashtbl.fold
         (fun _ database descriptors ->
           Option.fold ~none:descriptors
             ~some:(fun watcher -> Watcher.descriptor watcher :: descriptors)
             database.watcher)
         databases [])
-    ~changed:propagate_changes ~handle ~answered:flush
+    ~propagate:propagate_changes ~handle ~save:flush
     ~close:(fun () ->
       close_all ();
       reset ());

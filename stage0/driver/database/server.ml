@@ -150,16 +150,18 @@ type 'response message = Progress of string | Final of 'response
 let stopping = ref false
 let stop () = stopping := true
 
-let serve_on ~key ~identity ~alive ~collect ~watched ~changed ~handle ~answered ~close server_path
-    path socket =
+let serve_on ~key ~identity ~is_alive ~collect ~watcher_descriptors ~propagate ~handle ~save ~close
+    server_path path socket =
   let lock = Unix.openfile (server_path ^ ".lock") [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644 in
   Unix.lockf lock F_LOCK 0;
   served := Some key;
   Out_channel.with_open_bin (server_path ^ ".key") (fun out -> output_string out key);
   let last = ref (Unix.time ()) in
   let last_collection = ref 0. in
-  while (not !stopping) && Unix.time () -. !last < idle_limit && alive () && Sys.file_exists path do
-    match Unix.select (socket :: watched ()) [] [] 1.0 with
+  while
+    (not !stopping) && Unix.time () -. !last < idle_limit && is_alive () && Sys.file_exists path
+  do
+    match Unix.select (socket :: watcher_descriptors ()) [] [] 1.0 with
     | exception Unix.Unix_error (EINTR, _, _) -> ()
     | [], _, _ ->
         let now = Unix.time () in
@@ -168,7 +170,7 @@ let serve_on ~key ~identity ~alive ~collect ~watched ~changed ~handle ~answered 
           if executable_identity () <> identity then stopping := true;
           collect ()
         end
-    | ready, _, _ when not (List.mem socket ready) -> List.iter changed ready
+    | ready, _, _ when not (List.mem socket ready) -> List.iter propagate ready
     | _ -> (
         match Unix.accept ~cloexec:true socket with
         | exception Unix.Unix_error _ -> ()
@@ -182,7 +184,7 @@ let serve_on ~key ~identity ~alive ~collect ~watched ~changed ~handle ~answered 
                send output (Final (handle ~progress request))
              with _ -> ());
             (try Unix.close client with Unix.Unix_error _ -> ());
-            try answered () with failure -> prerr_endline (Printexc.to_string failure)))
+            try save () with failure -> prerr_endline (Printexc.to_string failure)))
   done;
   (try Unix.unlink path with Unix.Unix_error _ -> ());
   Unix.close socket;
@@ -200,15 +202,15 @@ let inherited_socket () =
       Some socket
   | _ | (exception Unix.Unix_error _) -> None
 
-let serve ~key ~alive ~collect ~watched ~changed ~handle ~answered ~close =
+let serve ~key ~is_alive ~collect ~watcher_descriptors ~propagate ~handle ~save ~close =
   Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
   let identity = executable_identity () in
   match (server_paths identity key, inherited_socket ()) with
   | Error message, _ -> prerr_endline message
   | Ok _, None -> prerr_endline "The background process was started without its socket."
   | Ok (_, server_path, path), Some socket ->
-      serve_on ~key ~identity ~alive ~collect ~watched ~changed ~handle ~answered ~close server_path
-        path socket
+      serve_on ~key ~identity ~is_alive ~collect ~watcher_descriptors ~propagate ~handle ~save
+        ~close server_path path socket
 
 let start directory program key socket =
   let log = Filename.concat directory "server.log" in

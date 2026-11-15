@@ -5,12 +5,12 @@ val listen : key:string -> (Unix.file_descr, string) result
 
 val serve :
   key:string ->
-  alive:(unit -> bool) ->
+  is_alive:(unit -> bool) ->
   collect:(unit -> unit) ->
-  watched:(unit -> Unix.file_descr list) ->
-  changed:(Unix.file_descr -> unit) ->
+  watcher_descriptors:(unit -> Unix.file_descr list) ->
+  propagate:(Unix.file_descr -> unit) ->
   handle:(progress:(string -> unit) -> 'a -> 'b) ->
-  answered:(unit -> unit) ->
+  save:(unit -> unit) ->
   close:(unit -> unit) ->
   unit
 
