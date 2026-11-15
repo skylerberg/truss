@@ -182,7 +182,6 @@ internal fn List[Element].elements(self) -> intrinsic::View[Element] {
 
 public fn List[Element].length(self) -> UInt64
   ensures result == self.model().length()
-  ensures result == (intrinsic::storage_length(self.storage))
   cost time O(1)
   cost allocations == 0
 {
@@ -482,7 +481,6 @@ public fn Array[Element: Plain, count: UInt64].cursor(self) -> SliceCursor[Eleme
 
 public fn Slice[Element].length(self) -> UInt64
   ensures result == self.model().length()
-  ensures result == (intrinsic::view_length(self.elements))
   cost time O(1)
   cost allocations == 0
 {

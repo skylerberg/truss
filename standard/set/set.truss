@@ -396,32 +396,61 @@ public fn Set[Element: Hash + Ordered].cursor(own self) -> list::ListCursor[Elem
   own self.elements.cursor()
 }
 
-internal fn Set[Element: Hash + Ordered].elements_included_in(self, other: Set[Element]) -> Bool
-  ensures result == (forall i in 0..self.elements.length() => exists j in 0..other.elements.length() =>
-    self.elements.model()[i] == other.elements.model()[j])
+internal fn Set[Element: Hash + Ordered].missing_from(self, other: Set[Element]) -> UInt64
+  ensures result <= self.elements.length()
+  ensures forall i in 0..result => other.contains(self.elements.model()[i])
+  ensures result < self.elements.length() ==> !other.contains(self.elements.model()[result])
   cost time O(self.elements.length() * (1 + other.elements.length() * time(Element.equal)))
 {
   var index: UInt64 = 0
   while index < self.elements.length()
     invariant index <= self.elements.length()
-    invariant forall i in 0..index => exists j in 0..other.elements.length() =>
-      self.elements.model()[i] == other.elements.model()[j]
+    invariant forall i in 0..index => other.contains(self.elements.model()[i])
     decreases self.elements.length() - index
     cost time O(index * (1 + other.elements.length() * time(Element.equal)))
   {
     if other.index_of(self.elements[index]) == other.elements.length() {
-      return false
+      return index
     }
     index += 1
   }
-  true
+  index
+}
+
+theorem contained_elements_keep_membership[Element: Hash + Ordered](first: Set[Element], second: Set[Element])
+  requires forall i in 0..first.elements.length() => second.contains(first.elements.model()[i])
+  ensures forall element: Element => first.contains(element) ==> second.contains(element)
+  cost time finite
+{
+}
+
+theorem missing_element_is_a_member[Element: Hash + Ordered](first: Set[Element], index: UInt64)
+  requires index < first.elements.length()
+  ensures first.contains(first.elements.model()[index])
+  cost time finite
+{
 }
 
 impl Equal for Set[Element: Hash + Ordered] {
   fn equal(self, other: Set[Element]) -> Bool
-    ensures result == (self.elements.length() == other.elements.length() && self.elements_included_in(other) && other.elements_included_in(self))
+    ensures result == (self.length() == other.length() && forall element: Element => self.contains(element) == other.contains(element))
   {
-    self.elements.length() == other.elements.length() && self.elements_included_in(other) && other.elements_included_in(self)
+    let missing_from_other = self.missing_from(other)
+    let missing_from_self = other.missing_from(self)
+    proof {
+      if missing_from_other < self.elements.length() {
+        missing_element_is_a_member(self, index: missing_from_other)
+      } else {
+        contained_elements_keep_membership(self, second: other)
+      }
+      if missing_from_self < other.elements.length() {
+        missing_element_is_a_member(other, index: missing_from_self)
+      } else {
+        contained_elements_keep_membership(other, second: self)
+      }
+    }
+    self.elements.length() == other.elements.length() && missing_from_other == self.elements.length()
+      && missing_from_self == other.elements.length()
   }
 }
 

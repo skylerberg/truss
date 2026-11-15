@@ -1,5 +1,7 @@
+use standard::intrinsic
+
 theorem t(word: UInt64)
   requires word == 0
-  ensures word.count_ones() == 0
+  ensures intrinsic::count_ones(word) == 0
 {
 }

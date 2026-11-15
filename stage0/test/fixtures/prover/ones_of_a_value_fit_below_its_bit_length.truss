@@ -1,6 +1,8 @@
+use standard::intrinsic
+
 theorem t(word: UInt64, bits: UInt64)
   requires bits < 64
   requires word < power(2, bits)
-  ensures word.count_ones() <= bits
+  ensures intrinsic::count_ones(word) <= bits
 {
 }
