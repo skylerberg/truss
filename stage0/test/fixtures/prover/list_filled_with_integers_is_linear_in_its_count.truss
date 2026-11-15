@@ -1,4 +1,4 @@
-fn zeros(count: USize) -> List[UInt64]
+fn zeros(count: UInt64) -> List[UInt64]
   cost time O(count)
 {
   List.filled(value: 0, count: count)

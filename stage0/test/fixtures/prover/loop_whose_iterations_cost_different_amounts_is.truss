@@ -1,7 +1,7 @@
-fn count_cells(rows: List[List[Int64]]) -> USize
+fn count_cells(rows: List[List[Int64]]) -> UInt64
   cost time O(rows.length() + rows.model().sum(fn(cells) { cells.length() }))
 {
-  var count: USize = 0
+  var count: UInt64 = 0
   for row in rows
     cost time O(visited.length() + visited.sum(fn(cells) { cells.length() }))
   {

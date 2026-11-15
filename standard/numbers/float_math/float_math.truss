@@ -311,7 +311,7 @@ public fn Float32.power_integer(self, exponent: Int32) -> Float32
   let magnitude = exponent.unsigned_absolute()
   var result: Float32 = 1.0
   var square = self
-  var bit: USize = 0
+  var bit: UInt64 = 0
   while bit < 32 && (magnitude >> bit) != 0
     invariant bit <= 32
     decreases 32 - bit
@@ -372,7 +372,7 @@ fn format_with(value: Float64, format: intrinsic::View[UInt8], precision: Int32)
   if length < 0 {
     return ""
   }
-  let needed: USize = intrinsic::convert(length)
+  let needed: UInt64 = intrinsic::convert(length)
   if needed < 64 {
     intrinsic::storage_lengthen(mut text, by: needed)
     return String(storage: own text)
@@ -380,7 +380,7 @@ fn format_with(value: Float64, format: intrinsic::View[UInt8], precision: Int32)
   let room = needed + 1
   var long: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(room)
   let again = intrinsic::libc_snprintf(mut long, size: room, format: format, precision: precision, value: value)
-  var written: USize = 0
+  var written: UInt64 = 0
   if again > 0 {
     written = intrinsic::convert(again)
   }
@@ -391,7 +391,7 @@ fn format_with(value: Float64, format: intrinsic::View[UInt8], precision: Int32)
   String(storage: own long)
 }
 
-fn pad_with_zeros(text: own String, count: USize) -> String
+fn pad_with_zeros(text: own String, count: UInt64) -> String
   cost time finite
 {
   var padded = own text
@@ -405,7 +405,7 @@ fn pad_with_zeros(text: own String, count: USize) -> String
   padded
 }
 
-fn format_fixed(value: Float64, decimals: USize) -> String
+fn format_fixed(value: Float64, decimals: UInt64) -> String
   cost time finite
 {
   if value.is_nan() {
@@ -414,12 +414,12 @@ fn format_fixed(value: Float64, decimals: USize) -> String
   if !value.is_finite() {
     return if value < 0.0 { "-infinity" } else { "infinity" }
   }
-  let shown: USize = if decimals > 1100 { 1100 } else { decimals }
+  let shown: UInt64 = if decimals > 1100 { 1100 } else { decimals }
   let text = format_with(value, format: "%.*f\0".slice().bytes, precision: intrinsic::convert(shown))
   pad_with_zeros(own text, count: decimals - shown)
 }
 
-fn format_scientific(value: Float64, decimals: USize) -> String
+fn format_scientific(value: Float64, decimals: UInt64) -> String
   cost time finite
 {
   if value.is_nan() {
@@ -428,7 +428,7 @@ fn format_scientific(value: Float64, decimals: USize) -> String
   if !value.is_finite() {
     return if value < 0.0 { "-infinity" } else { "infinity" }
   }
-  let shown: USize = if decimals > 800 { 800 } else { decimals }
+  let shown: UInt64 = if decimals > 800 { 800 } else { decimals }
   let text = format_with(value, format: "%.*e\0".slice().bytes, precision: intrinsic::convert(shown))
   if decimals == shown {
     return text
@@ -444,7 +444,7 @@ fn format_scientific(value: Float64, decimals: USize) -> String
   }
 }
 
-fn skip_digits(text: StringSlice, from: USize) -> USize
+fn skip_digits(text: StringSlice, from: UInt64) -> UInt64
   requires from <= text.length()
   ensures from <= result
   ensures result <= text.length()
@@ -461,7 +461,7 @@ fn skip_digits(text: StringSlice, from: USize) -> USize
   index
 }
 
-fn validate_decimal(text: StringSlice, from: USize) -> Option[core::ParseFloatError]
+fn validate_decimal(text: StringSlice, from: UInt64) -> Option[core::ParseFloatError]
   requires from <= text.length()
   cost time finite
 {
@@ -512,7 +512,7 @@ fn null_terminated(text: StringSlice) -> intrinsic::Storage[UInt8]
 }
 
 type FloatText =
-  | Decimal(from: USize)
+  | Decimal(from: UInt64)
   | Special(value: Float64)
   | Invalid(error: core::ParseFloatError)
 
@@ -524,7 +524,7 @@ fn classify_float_text(text: StringSlice) -> FloatText
     return FloatText.Invalid(error: core::ParseFloatError.Empty)
   }
   let negative = text.byte(0) == 45
-  let from: USize = if negative || text.byte(0) == 43 { 1 } else { 0 }
+  let from: UInt64 = if negative || text.byte(0) == 43 { 1 } else { 0 }
   let named = text.length() - from
   if named == 3 && text.ends_with("NaN") {
     return FloatText.Special(value: Float64.not_a_number)
@@ -551,13 +551,13 @@ internal fn parse_float64(text: StringSlice) -> Result[Float64, core::ParseFloat
   }
 }
 
-public fn Float32.to_fixed(self, decimals: USize) -> String
+public fn Float32.to_fixed(self, decimals: UInt64) -> String
   cost time finite
 {
   format_fixed(intrinsic::convert(self), decimals: decimals)
 }
 
-public fn Float32.to_scientific(self, decimals: USize) -> String
+public fn Float32.to_scientific(self, decimals: UInt64) -> String
   cost time finite
 {
   format_scientific(intrinsic::convert(self), decimals: decimals)
@@ -665,19 +665,6 @@ impl TryFrom[Float32] for Int64 {
   }
 }
 
-impl TryFrom[Float32] for ISize {
-  type Error = core::ConversionError
-
-  fn try_from(value: own Float32) -> Result[ISize, core::ConversionError]
-  {
-    if value == intrinsic::truncate(value) && intrinsic::fits[Float32, ISize](value) {
-      Ok(intrinsic::convert(value))
-    } else {
-      Err(core::ConversionError())
-    }
-  }
-}
-
 impl TryFrom[Float32] for UInt8 {
   type Error = core::ConversionError
 
@@ -723,19 +710,6 @@ impl TryFrom[Float32] for UInt64 {
   fn try_from(value: own Float32) -> Result[UInt64, core::ConversionError]
   {
     if value == intrinsic::truncate(value) && intrinsic::fits[Float32, UInt64](value) {
-      Ok(intrinsic::convert(value))
-    } else {
-      Err(core::ConversionError())
-    }
-  }
-}
-
-impl TryFrom[Float32] for USize {
-  type Error = core::ConversionError
-
-  fn try_from(value: own Float32) -> Result[USize, core::ConversionError]
-  {
-    if value == intrinsic::truncate(value) && intrinsic::fits[Float32, USize](value) {
       Ok(intrinsic::convert(value))
     } else {
       Err(core::ConversionError())
@@ -1115,7 +1089,7 @@ let four_over_pi: Array[UInt64, 20] = [
 
 internal type Reduced(octant: UInt64, angle: Float64)
 
-internal fn pi_bits(digit: USize, shift: USize) -> UInt64
+internal fn pi_bits(digit: UInt64, shift: UInt64) -> UInt64
   requires digit + 1 < 20
   requires shift < 64
   cost time O(1)
@@ -1138,8 +1112,8 @@ internal fn Float64.reduced_exactly(self) -> Reduced
     return Reduced(octant: 0, angle: self)
   }
   let mantissa = (bits & 0x000f_ffff_ffff_ffff) | 0x0010_0000_0000_0000
-  let digit: USize = intrinsic::convert(place / 64)
-  let shift: USize = intrinsic::convert(place % 64)
+  let digit: UInt64 = intrinsic::convert(place / 64)
+  let shift: UInt64 = intrinsic::convert(place % 64)
   let first = pi_bits(digit, shift: shift)
   let second = pi_bits(digit + 1, shift: shift)
   let third = pi_bits(digit + 2, shift: shift)
@@ -1159,7 +1133,7 @@ internal fn Float64.reduced_exactly(self) -> Reduced
       None => 0
     }
     let top = shifted | (low >> (64 - lift))
-    let exponent: UInt64 = intrinsic::convert(1023 - lift)
+    let exponent: UInt64 = 1023 - lift
     Float64.from_bits((top >> 12) | (exponent << 52))
   }
   if octant % 2 == 1 {
@@ -1590,7 +1564,7 @@ public fn Float64.power_integer(self, exponent: Int32) -> Float64
   let magnitude = exponent.unsigned_absolute()
   var result: Float64 = 1.0
   var square = self
-  var bit: USize = 0
+  var bit: UInt64 = 0
   while bit < 32 && (magnitude >> bit) != 0
     invariant bit <= 32
     decreases 32 - bit
@@ -1641,13 +1615,13 @@ public fn Float64.sum(items: Slice[Float64]) -> Float64
   if lost.is_finite() { total + lost } else { total }
 }
 
-public fn Float64.to_fixed(self, decimals: USize) -> String
+public fn Float64.to_fixed(self, decimals: UInt64) -> String
   cost time finite
 {
   format_fixed(self, decimals: decimals)
 }
 
-public fn Float64.to_scientific(self, decimals: USize) -> String
+public fn Float64.to_scientific(self, decimals: UInt64) -> String
   cost time finite
 {
   format_scientific(self, decimals: decimals)
@@ -1761,19 +1735,6 @@ impl TryFrom[Float64] for Int64 {
   }
 }
 
-impl TryFrom[Float64] for ISize {
-  type Error = core::ConversionError
-
-  fn try_from(value: own Float64) -> Result[ISize, core::ConversionError]
-  {
-    if value == intrinsic::truncate(value) && intrinsic::fits[Float64, ISize](value) {
-      Ok(intrinsic::convert(value))
-    } else {
-      Err(core::ConversionError())
-    }
-  }
-}
-
 impl TryFrom[Float64] for UInt8 {
   type Error = core::ConversionError
 
@@ -1819,19 +1780,6 @@ impl TryFrom[Float64] for UInt64 {
   fn try_from(value: own Float64) -> Result[UInt64, core::ConversionError]
   {
     if value == intrinsic::truncate(value) && intrinsic::fits[Float64, UInt64](value) {
-      Ok(intrinsic::convert(value))
-    } else {
-      Err(core::ConversionError())
-    }
-  }
-}
-
-impl TryFrom[Float64] for USize {
-  type Error = core::ConversionError
-
-  fn try_from(value: own Float64) -> Result[USize, core::ConversionError]
-  {
-    if value == intrinsic::truncate(value) && intrinsic::fits[Float64, USize](value) {
       Ok(intrinsic::convert(value))
     } else {
       Err(core::ConversionError())

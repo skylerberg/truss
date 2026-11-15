@@ -2,7 +2,7 @@ fn all_positive(items: List[Int64]) -> Bool {
   forall i in 0..items.length() => items[i] > 0
 }
 
-fn any_long(names: List[String], over: USize) -> Bool {
+fn any_long(names: List[String], over: UInt64) -> Bool {
   exists i in 0..names.length() => names[i].length() > over
 }
 

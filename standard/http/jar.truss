@@ -92,7 +92,7 @@ type Stored(
 
 internal type CookieJar(cookies: List[Stored], sequence: UInt64)
 
-let jar_limit: USize = 3000
+let jar_limit: UInt64 = 3000
 
 internal fn CookieJar.new() -> CookieJar {
   CookieJar(cookies: [], sequence: 0)
@@ -182,7 +182,7 @@ internal fn CookieJar.store(mut self, address: url::Url, set_cookie: StringSlice
       None => None
     }
   }
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < self.cookies.length() {
     let stored = self.cookies[index]
     if stored.name == cookie.name && stored.domain == domain && stored.path == path {
@@ -211,7 +211,7 @@ internal fn CookieJar.store(mut self, address: url::Url, set_cookie: StringSlice
 }
 
 internal fn CookieJar.header_for(mut self, address: url::Url, now: Int64) -> Option[String] {
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < self.cookies.length() {
     if self.cookies[index].expires_at is Some(moment) && moment <= now {
       let _ = mut self.cookies.remove_at(index)

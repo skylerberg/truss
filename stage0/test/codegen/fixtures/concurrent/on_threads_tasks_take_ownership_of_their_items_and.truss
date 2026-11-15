@@ -1,16 +1,16 @@
-type Sum(total: USize)
+type Sum(total: UInt64)
 
 capability Lengths {
-  fn add(length: USize)
-  fn total() -> USize
+  fn add(length: UInt64)
+  fn total() -> UInt64
 }
 
 impl Lengths for Sum {
-  fn add(mut self, length: USize) {
+  fn add(mut self, length: UInt64) {
     self.total += length
   }
 
-  fn total(self) -> USize {
+  fn total(self) -> UInt64 {
     self.total
   }
 }

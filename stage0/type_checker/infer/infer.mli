@@ -25,7 +25,7 @@ type resolution = Tables.resolution =
   | Variant_value of { type_ : Types.ty; variant : string }
       (** A variant with no fields, or one used as a function. *)
   | Type_name of Types.ty  (** A type before a [.], such as [Shape] in [Shape.Circle]. *)
-  | Value_parameter of Types.parameter  (** A [USize] generic parameter. *)
+  | Value_parameter of Types.parameter
   | Specification_value  (** [result], [old], or a specification function. *)
 
 val show_resolution : resolution -> string

@@ -16,7 +16,7 @@ impl core::Countable for Day {
     self.retreated(1)
   }
 
-  fn advanced(self, by: USize) -> Option[Day]
+  fn advanced(self, by: UInt64) -> Option[Day]
     cost time O(1)
   {
     match self.count.advanced(by: by) {
@@ -25,7 +25,7 @@ impl core::Countable for Day {
     }
   }
 
-  fn retreated(self, by: USize) -> Option[Day]
+  fn retreated(self, by: UInt64) -> Option[Day]
     cost time O(1)
   {
     match self.count.retreated(by: by) {
@@ -34,7 +34,7 @@ impl core::Countable for Day {
     }
   }
 
-  fn steps_to(self, other: Day) -> Option[USize]
+  fn steps_to(self, other: Day) -> Option[UInt64]
     cost time O(1)
   {
     self.count.steps_to(other.count)

@@ -1,13 +1,13 @@
 type Labeled(view: Slice[Int64], name: String)
 
 trait Runner {
-  fn run(self) -> USize
+  fn run(self) -> UInt64
 }
 
 type Window(view: Slice[Int64])
 
 impl Runner for Window {
-  fn run(self) -> USize {
+  fn run(self) -> UInt64 {
     self.view.length()
   }
 }
@@ -15,7 +15,7 @@ impl Runner for Window {
 type Owner(items: List[Int64])
 
 impl Runner for Owner {
-  fn run(self) -> USize {
+  fn run(self) -> UInt64 {
     self.items.length()
   }
 }

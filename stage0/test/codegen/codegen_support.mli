@@ -27,7 +27,7 @@ val shapes : (string * Memory_layout.shape) list -> Ground.ty -> Memory_layout.s
 val layout : ?extra:(string * Memory_layout.shape) list -> Ground.ty -> Memory_layout.t
 val describe : ?extra:(string * Memory_layout.shape) list -> Ground.ty -> string
 val int32 : Ground.ty
-val usize : Ground.ty
+val uint64 : Ground.ty
 
 (* A function written by hand, and an instance written as C once the
    layouts it is printed with are known. *)

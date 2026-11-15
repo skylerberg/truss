@@ -646,8 +646,8 @@ let finalize (state : state) =
    bound: those of every built-in type that implements each of them, the
    narrowest such type's. *)
 let integer_literal_range (bounds : Types.trait_reference list) =
-  let signed = Intrinsic.[ Int8; Int16; Int32; Int64; ISize ]
-  and unsigned = Intrinsic.[ UInt8; UInt16; UInt32; UInt64; USize ] in
+  let signed = Intrinsic.[ Int8; Int16; Int32; Int64 ]
+  and unsigned = Intrinsic.[ UInt8; UInt16; UInt32; UInt64 ] in
   let implementors =
     List.fold_left
       (fun found (bound : Types.trait_reference) ->

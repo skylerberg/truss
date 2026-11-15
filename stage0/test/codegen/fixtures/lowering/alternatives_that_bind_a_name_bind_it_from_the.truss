@@ -14,7 +14,7 @@ fn size(shape: Shape) -> Int64 {
   }
 }
 
-fn text_length(shape: Shape) -> USize {
+fn text_length(shape: Shape) -> UInt64 {
   match shape {
     Labelled(label: text, ..) | Named(name: text, ..) => text.length()
     _ => 0

@@ -51,7 +51,7 @@ internal fn sha256_compress(state: mut Array[UInt32, 8], block: Array[UInt8, 64]
   var f = state[5]
   var g = state[6]
   var h = state[7]
-  let rounds: USize = 64
+  let rounds: UInt64 = 64
   for round in 0..rounds
     cost allocations == 0
   {
@@ -102,7 +102,7 @@ internal fn sha512_compress(state: mut Array[UInt64, 8], block: Array[UInt8, 128
   var f = state[5]
   var g = state[6]
   var h = state[7]
-  let rounds: USize = 80
+  let rounds: UInt64 = 80
   for round in 0..rounds
     cost allocations == 0
   {
@@ -150,7 +150,7 @@ internal fn sha1_compress(state: mut Array[UInt32, 5], block: Array[UInt8, 64])
   var c = state[2]
   var d = state[3]
   var e = state[4]
-  let rounds: USize = 80
+  let rounds: UInt64 = 80
   for round in 0..rounds
     cost allocations == 0
   {
@@ -197,7 +197,7 @@ let md5_constants: Array[UInt32, 64] = [
   0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1, 0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391,
 ]
 
-let md5_rotations: Array[USize, 64] = [
+let md5_rotations: Array[UInt64, 64] = [
   25, 20, 15, 10, 25, 20, 15, 10, 25, 20, 15, 10, 25, 20, 15, 10,
   27, 23, 18, 12, 27, 23, 18, 12, 27, 23, 18, 12, 27, 23, 18, 12,
   28, 21, 16, 9, 28, 21, 16, 9, 28, 21, 16, 9, 28, 21, 16, 9,
@@ -209,7 +209,7 @@ internal fn md5_compress(state: mut Array[UInt32, 4], block: Array[UInt8, 64])
   cost allocations == 0
 {
   var words: Array[UInt32, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  let count: USize = 16
+  let count: UInt64 = 16
   for index in 0..count
     cost allocations == 0
   {
@@ -222,7 +222,7 @@ internal fn md5_compress(state: mut Array[UInt32, 4], block: Array[UInt8, 64])
   var b = state[1]
   var c = state[2]
   var d = state[3]
-  let rounds: USize = 64
+  let rounds: UInt64 = 64
   for round in 0..rounds
     cost allocations == 0
   {
@@ -250,7 +250,7 @@ internal fn md5_compress(state: mut Array[UInt32, 4], block: Array[UInt8, 64])
   state[3] = state[3].wrapping_add(d)
 }
 
-public opaque type Md5(state: Array[UInt32, 4], pending: Array[UInt8, 64], pending_length: USize, total: UInt64)
+public opaque type Md5(state: Array[UInt32, 4], pending: Array[UInt8, 64], pending_length: UInt64, total: UInt64)
   derives Copyable
   invariant pending_length < 64
 
@@ -282,7 +282,7 @@ public fn Md5.update(mut self, bytes: Slice[UInt8])
   cost time O(bytes.length())
   cost allocations == 0
 {
-  self.total = intrinsic::wrapping_add(self.total, right: intrinsic::convert(bytes.length()))
+  self.total = intrinsic::wrapping_add(self.total, right: bytes.length())
   for index in 0..bytes.length()
     invariant self.pending_length < 64
     cost allocations == 0
@@ -297,7 +297,7 @@ public fn Md5.finish(own self) -> Array[UInt8, 16]
 {
   var hasher = own self
   mut hasher.push_byte(128)
-  let most: USize = 64
+  let most: UInt64 = 64
   for _ in 0..most
     invariant hasher.pending_length < 64
     cost allocations == 0
@@ -307,7 +307,7 @@ public fn Md5.finish(own self) -> Array[UInt8, 16]
     }
   }
   let bits = intrinsic::wrapping_multiply(hasher.total, right: 8)
-  let count: USize = 8
+  let count: UInt64 = 8
   for index in 0..count
     invariant hasher.pending_length < 64
     cost allocations == 0
@@ -315,7 +315,7 @@ public fn Md5.finish(own self) -> Array[UInt8, 16]
     mut hasher.push_byte(intrinsic::convert((bits >> (8 * index)) & 255))
   }
   var digest: Array[UInt8, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  let length: USize = 16
+  let length: UInt64 = 16
   for index in 0..length
     cost allocations == 0
   {
@@ -333,7 +333,7 @@ public fn md5(bytes: Slice[UInt8]) -> Array[UInt8, 16]
   own hasher.finish()
 }
 
-internal type Sha1(state: Array[UInt32, 5], pending: Array[UInt8, 64], pending_length: USize, total: UInt64)
+internal type Sha1(state: Array[UInt32, 5], pending: Array[UInt8, 64], pending_length: UInt64, total: UInt64)
   invariant pending_length < 64
 
 internal fn Sha1.push_byte(mut self, byte: UInt8)
@@ -364,7 +364,7 @@ internal fn Sha1.update(mut self, bytes: Slice[UInt8])
   cost time O(bytes.length())
   cost allocations == 0
 {
-  self.total = intrinsic::wrapping_add(self.total, right: intrinsic::convert(bytes.length()))
+  self.total = intrinsic::wrapping_add(self.total, right: bytes.length())
   for index in 0..bytes.length()
     invariant self.pending_length < 64
     cost allocations == 0
@@ -379,7 +379,7 @@ internal fn Sha1.finish(own self) -> Array[UInt8, 20]
 {
   var hasher = own self
   mut hasher.push_byte(128)
-  let most: USize = 64
+  let most: UInt64 = 64
   for _ in 0..most
     invariant hasher.pending_length < 64
     cost allocations == 0
@@ -389,7 +389,7 @@ internal fn Sha1.finish(own self) -> Array[UInt8, 20]
     }
   }
   let bits = intrinsic::wrapping_multiply(hasher.total, right: 8)
-  let count: USize = 8
+  let count: UInt64 = 8
   for index in 0..count
     invariant hasher.pending_length < 64
     cost allocations == 0
@@ -439,7 +439,7 @@ public fn sha384(bytes: Slice[UInt8]) -> Array[UInt8, 48]
 
 fn fill_32(bytes: Slice[UInt8]) -> Array[UInt8, 32] {
   var filled: Array[UInt8, 32] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  let width: USize = 32
+  let width: UInt64 = 32
   for index in 0..width {
     if index < bytes.length() {
       filled[index] = bytes[index]
@@ -459,7 +459,7 @@ public fn sha3_512(bytes: Slice[UInt8]) -> Array[UInt8, 64] {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   ]
-  let width: USize = 64
+  let width: UInt64 = 64
   for index in 0..width {
     if index < digest.length() {
       filled[index] = digest[index]
@@ -468,11 +468,11 @@ public fn sha3_512(bytes: Slice[UInt8]) -> Array[UInt8, 64] {
   filled
 }
 
-public fn shake128(bytes: Slice[UInt8], length: USize) -> List[UInt8] {
+public fn shake128(bytes: Slice[UInt8], length: UInt64) -> List[UInt8] {
   keccak::hash(168, message: bytes, suffix: 31, count: length)
 }
 
-public fn shake256(bytes: Slice[UInt8], length: USize) -> List[UInt8] {
+public fn shake256(bytes: Slice[UInt8], length: UInt64) -> List[UInt8] {
   keccak::hash(136, message: bytes, suffix: 31, count: length)
 }
 
@@ -492,7 +492,7 @@ public fn hmac_sha1(key: Slice[UInt8], message: Slice[UInt8]) -> Array[UInt8, 20
   var padded: Array[UInt8, 64] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   if key.length() > 64 {
     let digest = sha1(key)
-    let count: USize = 20
+    let count: UInt64 = 20
     for index in 0..count
       cost allocations == 0
     {
@@ -506,7 +506,7 @@ public fn hmac_sha1(key: Slice[UInt8], message: Slice[UInt8]) -> Array[UInt8, 20
     }
   }
   var mixed: Array[UInt8, 64] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  let width: USize = 64
+  let width: UInt64 = 64
   for index in 0..width
     cost allocations == 0
   {
@@ -536,7 +536,7 @@ public fn blake3(bytes: Slice[UInt8]) -> Array[UInt8, 32]
   own hasher.finish()
 }
 
-public opaque type Sha256(state: Array[UInt32, 8], pending: Array[UInt8, 64], pending_length: USize, total: UInt64)
+public opaque type Sha256(state: Array[UInt32, 8], pending: Array[UInt8, 64], pending_length: UInt64, total: UInt64)
   derives Copyable
   invariant pending_length < 64
 
@@ -568,7 +568,7 @@ public fn Sha256.update(mut self, bytes: Slice[UInt8])
   cost time O(bytes.length())
   cost allocations == 0
 {
-  self.total = intrinsic::wrapping_add(self.total, right: intrinsic::convert(bytes.length()))
+  self.total = intrinsic::wrapping_add(self.total, right: bytes.length())
   for index in 0..bytes.length()
     invariant self.pending_length < 64
     cost allocations == 0
@@ -583,7 +583,7 @@ public fn Sha256.finish(own self) -> Array[UInt8, 32]
 {
   var hasher = own self
   mut hasher.push_byte(128)
-  let most: USize = 64
+  let most: UInt64 = 64
   for _ in 0..most
     invariant hasher.pending_length < 64
     cost allocations == 0
@@ -593,7 +593,7 @@ public fn Sha256.finish(own self) -> Array[UInt8, 32]
     }
   }
   let bits = intrinsic::wrapping_multiply(hasher.total, right: 8)
-  let count: USize = 8
+  let count: UInt64 = 8
   for index in 0..count
     invariant hasher.pending_length < 64
     cost allocations == 0
@@ -620,7 +620,7 @@ public fn Sha256.finish(own self) -> Array[UInt8, 32]
   ]
 }
 
-public opaque type Sha512(state: Array[UInt64, 8], pending: Array[UInt8, 128], pending_length: USize, total: UInt64)
+public opaque type Sha512(state: Array[UInt64, 8], pending: Array[UInt8, 128], pending_length: UInt64, total: UInt64)
   derives Copyable
   invariant pending_length < 128
 
@@ -652,7 +652,7 @@ public fn Sha512.update(mut self, bytes: Slice[UInt8])
   cost time O(bytes.length())
   cost allocations == 0
 {
-  self.total = intrinsic::wrapping_add(self.total, right: intrinsic::convert(bytes.length()))
+  self.total = intrinsic::wrapping_add(self.total, right: bytes.length())
   for index in 0..bytes.length()
     invariant self.pending_length < 128
     cost allocations == 0
@@ -676,7 +676,7 @@ internal fn Sha512.padded_state(own self) -> Array[UInt64, 8]
 {
   var hasher = own self
   mut hasher.push_byte(128)
-  let most: USize = 128
+  let most: UInt64 = 128
   for _ in 0..most
     invariant hasher.pending_length < 128
     cost allocations == 0
@@ -687,7 +687,7 @@ internal fn Sha512.padded_state(own self) -> Array[UInt64, 8]
   }
   let high = hasher.total >> 61
   let low = hasher.total << 3
-  let count: USize = 8
+  let count: UInt64 = 8
   for _ in 0..count
     invariant hasher.pending_length < 128
     cost allocations == 0
@@ -774,7 +774,7 @@ public fn Sha384.finish(own self) -> Array[UInt8, 48]
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   ]
-  let length: USize = 48
+  let length: UInt64 = 48
   for index in 0..length
     cost allocations == 0
   {
@@ -817,12 +817,12 @@ public opaque type Blake3(
   key: Array[UInt32, 8],
   flags: UInt32,
   stack: Array[UInt32, 432],
-  stack_length: USize,
+  stack_length: UInt64,
   chaining_value: Array[UInt32, 8],
   chunk_counter: UInt64,
   block: Array[UInt8, 64],
-  block_length: USize,
-  blocks_compressed: USize,
+  block_length: UInt64,
+  blocks_compressed: UInt64,
 )
   derives Copyable
   invariant stack_length <= 54
@@ -837,7 +837,7 @@ internal type Blake3Node(
   flags: UInt32,
 )
 
-internal fn blake3_mix(state: mut Array[UInt32, 16], a: USize, b: USize, c: USize, d: USize, x: UInt32, y: UInt32)
+internal fn blake3_mix(state: mut Array[UInt32, 16], a: UInt64, b: UInt64, c: UInt64, d: UInt64, x: UInt32, y: UInt32)
   requires a < 16
   requires b < 16
   requires c < 16
@@ -896,14 +896,14 @@ internal fn blake3_compress(
     intrinsic::convert(counter % 4294967296), intrinsic::convert(counter / 4294967296), block_length, flags,
   ]
   var message = block
-  let rounds: USize = 7
+  let rounds: UInt64 = 7
   for _ in 0..rounds
     cost allocations == 0
   {
     blake3_round(mut state, message: message)
     message = blake3_permute(message)
   }
-  let half: USize = 8
+  let half: UInt64 = 8
   for index in 0..half
     cost allocations == 0
   {
@@ -920,13 +920,13 @@ internal fn first_eight(words: Array[UInt32, 16]) -> Array[UInt32, 8]
   [words[0], words[1], words[2], words[3], words[4], words[5], words[6], words[7]]
 }
 
-internal fn blake3_words(block: Array[UInt8, 64], length: USize) -> Array[UInt32, 16]
+internal fn blake3_words(block: Array[UInt8, 64], length: UInt64) -> Array[UInt32, 16]
   requires length <= 64
   cost time O(1)
   cost allocations == 0
 {
   var words: Array[UInt32, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  let count: USize = 64
+  let count: UInt64 = 64
   for index in 0..count
     cost allocations == 0
   {
@@ -948,7 +948,7 @@ internal fn blake3_words(block: Array[UInt8, 64], length: USize) -> Array[UInt32
   words
 }
 
-internal fn word_byte(words: Array[UInt32, 16], offset: USize) -> UInt8
+internal fn word_byte(words: Array[UInt32, 16], offset: UInt64) -> UInt8
   requires offset < 64
   cost time O(1)
   cost allocations == 0
@@ -1015,7 +1015,7 @@ internal fn Blake3.with_key(key: Array[UInt32, 8], flags: UInt32) -> Blake3
   )
 }
 
-internal fn Blake3.stack_entry(self, index: USize) -> Array[UInt32, 8]
+internal fn Blake3.stack_entry(self, index: UInt64) -> Array[UInt32, 8]
   requires index < 54
   cost time O(1)
   cost allocations == 0
@@ -1068,7 +1068,7 @@ internal fn Blake3.end_chunk(mut self)
   var value = self.chunk_node().output_value()
   let chunks = intrinsic::wrapping_add(self.chunk_counter, right: 1)
   var remaining = chunks
-  let most: USize = 54
+  let most: UInt64 = 54
   for _ in 0..most
     invariant self.stack_length <= 54
     invariant self.block_length <= 64
@@ -1090,7 +1090,7 @@ internal fn Blake3.end_chunk(mut self)
     intrinsic::crash("BLAKE3 cannot hash that many bytes".slice())
   }
   let start = 8 * self.stack_length
-  let count: USize = 8
+  let count: UInt64 = 8
   for index in 0..count
     invariant self.stack_length < 54
     invariant self.block_length <= 64
@@ -1127,7 +1127,7 @@ internal fn Blake3.root_node(self) -> Blake3Node
 {
   var node = self.chunk_node()
   var remaining = self.stack_length
-  let most: USize = 54
+  let most: UInt64 = 54
   for _ in 0..most
     invariant remaining <= 54
     cost allocations == 0
@@ -1168,7 +1168,7 @@ internal fn little_endian_words(key: Array[UInt8, 32]) -> Array[UInt32, 8]
   cost allocations == 0
 {
   var words: Array[UInt32, 8] = [0, 0, 0, 0, 0, 0, 0, 0]
-  let count: USize = 8
+  let count: UInt64 = 8
   for index in 0..count
     cost allocations == 0
   {
@@ -1211,7 +1211,7 @@ public fn Blake3.finish(own self) -> Array[UInt8, 32]
   var digest: Array[UInt8, 32] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   ]
-  let count: USize = 32
+  let count: UInt64 = 32
   for index in 0..count
     cost allocations == 0
   {
@@ -1220,7 +1220,7 @@ public fn Blake3.finish(own self) -> Array[UInt8, 32]
   digest
 }
 
-internal fn push_output_block(output: mut intrinsic::Storage[UInt8], words: Array[UInt32, 16], length: USize)
+internal fn push_output_block(output: mut intrinsic::Storage[UInt8], words: Array[UInt32, 16], length: UInt64)
   requires intrinsic::storage_capacity(output) == length
   requires intrinsic::storage_length(output) < length
   ensures intrinsic::storage_capacity(output) == length
@@ -1229,7 +1229,7 @@ internal fn push_output_block(output: mut intrinsic::Storage[UInt8], words: Arra
   cost time O(1)
   cost allocations == 0
 {
-  let size: USize = 64
+  let size: UInt64 = 64
   for offset in 0..size
     invariant intrinsic::storage_capacity(output) == length
     invariant intrinsic::storage_length(output) <= length
@@ -1243,7 +1243,7 @@ internal fn push_output_block(output: mut intrinsic::Storage[UInt8], words: Arra
   }
 }
 
-public fn Blake3.finish_extended(own self, length: USize) -> List[UInt8]
+public fn Blake3.finish_extended(own self, length: UInt64) -> List[UInt8]
   ensures result.length() == length
   cost time O(length)
 {
@@ -1271,7 +1271,7 @@ internal fn HmacSha256.new(key: Slice[UInt8]) -> HmacSha256
   var padded: Array[UInt8, 64] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   if key.length() > 64 {
     let digest = sha256(key)
-    let count: USize = 32
+    let count: UInt64 = 32
     for index in 0..count
       cost allocations == 0
     {
@@ -1285,7 +1285,7 @@ internal fn HmacSha256.new(key: Slice[UInt8]) -> HmacSha256
     }
   }
   var mixed: Array[UInt8, 64] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  let width: USize = 64
+  let width: UInt64 = 64
   for index in 0..width
     cost allocations == 0
   {
@@ -1329,7 +1329,7 @@ internal fn HmacSha512.new(key: Slice[UInt8]) -> HmacSha512
   var padded: Array[UInt8, 128] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   if key.length() > 128 {
     let digest = sha512(key)
-    let count: USize = 64
+    let count: UInt64 = 64
     for index in 0..count
       cost allocations == 0
     {
@@ -1343,7 +1343,7 @@ internal fn HmacSha512.new(key: Slice[UInt8]) -> HmacSha512
     }
   }
   var mixed: Array[UInt8, 128] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  let width: USize = 128
+  let width: UInt64 = 128
   for index in 0..width
     cost allocations == 0
   {
@@ -1387,7 +1387,7 @@ internal fn HmacSha384.new(key: Slice[UInt8]) -> HmacSha384
   var padded: Array[UInt8, 128] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   if key.length() > 128 {
     let digest = sha384(key)
-    let count: USize = 48
+    let count: UInt64 = 48
     for index in 0..count
       cost allocations == 0
     {
@@ -1401,7 +1401,7 @@ internal fn HmacSha384.new(key: Slice[UInt8]) -> HmacSha384
     }
   }
   var mixed: Array[UInt8, 128] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  let width: USize = 128
+  let width: UInt64 = 128
   for index in 0..width
     cost allocations == 0
   {
@@ -1466,7 +1466,7 @@ public fn hmac_sha512(key: Slice[UInt8], message: Slice[UInt8]) -> Array[UInt8, 
 internal fn hkdf_block_sha256(
   key: Array[UInt8, 32],
   previous: Array[UInt8, 32],
-  index: USize,
+  index: UInt64,
   information: Slice[UInt8],
 ) -> Array[UInt8, 32]
   requires index < 255
@@ -1486,7 +1486,7 @@ internal fn hkdf_block_sha256(
 internal fn hkdf_block_sha384(
   key: Array[UInt8, 48],
   previous: Array[UInt8, 48],
-  index: USize,
+  index: UInt64,
   information: Slice[UInt8],
 ) -> Array[UInt8, 48]
   requires index < 255
@@ -1503,7 +1503,7 @@ internal fn hkdf_block_sha384(
   own code.finish()
 }
 
-internal fn append_prefix(output: mut intrinsic::Storage[UInt8], block: Slice[UInt8], limit: USize)
+internal fn append_prefix(output: mut intrinsic::Storage[UInt8], block: Slice[UInt8], limit: UInt64)
   requires intrinsic::storage_length(output) <= limit
   requires intrinsic::storage_capacity(output) == limit
   requires block.length() <= 64
@@ -1532,7 +1532,7 @@ public fn hkdf_sha256(
   secret: Slice[UInt8],
   salt: Slice[UInt8],
   information: Slice[UInt8],
-  length: USize,
+  length: UInt64,
 ) -> List[UInt8]
   requires length <= 8160
   ensures result.length() == length
@@ -1541,7 +1541,7 @@ public fn hkdf_sha256(
   let key = hmac_sha256(salt, message: secret)
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length)
   var previous: Array[UInt8, 32] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  let most: USize = 255
+  let most: UInt64 = 255
   for index in 0..most
     invariant intrinsic::storage_length(output) <= length
     invariant intrinsic::storage_length(output) == length || intrinsic::storage_length(output) == 32 * index
@@ -1559,7 +1559,7 @@ public fn hkdf_sha384(
   secret: Slice[UInt8],
   salt: Slice[UInt8],
   information: Slice[UInt8],
-  length: USize,
+  length: UInt64,
 ) -> List[UInt8]
   requires length <= 12240
   ensures result.length() == length
@@ -1568,7 +1568,7 @@ public fn hkdf_sha384(
   let key = hmac_sha384(salt, message: secret)
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length)
   var previous: Array[UInt8, 48] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  let most: USize = 255
+  let most: UInt64 = 255
   for index in 0..most
     invariant intrinsic::storage_length(output) <= length
     invariant intrinsic::storage_length(output) == length || intrinsic::storage_length(output) == 48 * index
@@ -1586,7 +1586,7 @@ public fn pbkdf2_hmac_sha256(
   password: Slice[UInt8],
   salt: Slice[UInt8],
   iterations: UInt32,
-  length: USize,
+  length: UInt64,
 ) -> List[UInt8]
   requires iterations > 0
   ensures result.length() == length
@@ -1595,7 +1595,7 @@ public fn pbkdf2_hmac_sha256(
   let keyed = HmacSha256.new(password)
   var output: List[UInt8] = []
   var block: UInt32 = 1
-  let width: USize = 32
+  let width: UInt64 = 32
   while output.length() < length
     invariant output.length() <= length
     decreases length - output.length()
@@ -1647,7 +1647,7 @@ let blake2b_initial: Array[UInt64, 8] = [
   0x9b05688c2b3e6c1f, 0x1f83d9abfb41bd6b, 0x5be0cd19137e2179,
 ]
 
-let blake2b_schedule: Array[USize, 160] = [
+let blake2b_schedule: Array[UInt64, 160] = [
   0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
   14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3,
   11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4,
@@ -1662,10 +1662,10 @@ let blake2b_schedule: Array[USize, 160] = [
 
 internal fn blake2b_mix(
   words: mut Array[UInt64, 16],
-  a: USize,
-  b: USize,
-  c: USize,
-  d: USize,
+  a: UInt64,
+  b: UInt64,
+  c: UInt64,
+  d: UInt64,
   first: UInt64,
   second: UInt64,
 )
@@ -1686,7 +1686,7 @@ internal fn blake2b_compress(state: mut Array[UInt64, 8], block: Array[UInt64, 1
   cost time O(1)
 {
   var words: Array[UInt64, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  let half: USize = 8
+  let half: UInt64 = 8
   for index in 0..half {
     words[index] = state[index]
     words[index + 8] = blake2b_initial[index]
@@ -1695,7 +1695,7 @@ internal fn blake2b_compress(state: mut Array[UInt64, 8], block: Array[UInt64, 1
   if last {
     words[14] = ~words[14]
   }
-  let rounds: USize = 12
+  let rounds: UInt64 = 12
   for round in 0..rounds {
     let row = 16 * (round % 10)
     blake2b_mix(mut words, a: 0, b: 4, c: 8, d: 12, first: block[blake2b_schedule[row] % 16], second: block[blake2b_schedule[row + 1] % 16])
@@ -1712,13 +1712,13 @@ internal fn blake2b_compress(state: mut Array[UInt64, 8], block: Array[UInt64, 1
   }
 }
 
-internal fn blake2b_block(input: Slice[UInt8], from: USize) -> Array[UInt64, 16]
+internal fn blake2b_block(input: Slice[UInt8], from: UInt64) -> Array[UInt64, 16]
   requires from <= input.length()
   cost time O(1)
 {
   var block: Array[UInt64, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   let available = input.length() - from
-  let bytes: USize = 128
+  let bytes: UInt64 = 128
   for position in 0..bytes {
     if position < available {
       let byte: UInt64 = intrinsic::convert[UInt8, UInt64](input[from + position])
@@ -1728,26 +1728,26 @@ internal fn blake2b_block(input: Slice[UInt8], from: USize) -> Array[UInt64, 16]
   block
 }
 
-internal fn blake2b(input: Slice[UInt8], output_length: USize) -> List[UInt8]
+internal fn blake2b(input: Slice[UInt8], output_length: UInt64) -> List[UInt8]
   requires 1 <= output_length && output_length <= 64
   ensures result.length() == output_length
   cost time finite
 {
   var state = blake2b_initial
-  state[0] = state[0] ^ 0x01010000 ^ intrinsic::convert(output_length)
-  var offset: USize = 0
+  state[0] = state[0] ^ 0x01010000 ^ output_length
+  var offset: UInt64 = 0
   while input.length() - offset > 128
     invariant offset <= input.length()
     decreases input.length() - offset
   {
     let block = blake2b_block(input, from: offset)
     offset += 128
-    blake2b_compress(mut state, block: block, byte_count: intrinsic::convert(offset), last: false)
+    blake2b_compress(mut state, block: block, byte_count: offset, last: false)
   }
   blake2b_compress(
     mut state,
     block: blake2b_block(input, from: offset),
-    byte_count: intrinsic::convert(input.length()),
+    byte_count: input.length(),
     last: true,
   )
   var output: List[UInt8] = []
@@ -1762,13 +1762,13 @@ internal fn blake2b(input: Slice[UInt8], output_length: USize) -> List[UInt8]
 internal fn push_little_endian_32(output: mut List[UInt8], value: UInt32)
   cost time finite
 {
-  let bytes: USize = 4
+  let bytes: UInt64 = 4
   for index in 0..bytes {
     mut output.push(intrinsic::convert((value >> (8 * index)) & 255))
   }
 }
 
-internal fn push_length_32(output: mut List[UInt8], length: USize)
+internal fn push_length_32(output: mut List[UInt8], length: UInt64)
   cost time finite
 {
   if length > 4294967295 {
@@ -1777,7 +1777,7 @@ internal fn push_length_32(output: mut List[UInt8], length: USize)
   push_little_endian_32(mut output, value: intrinsic::convert(length))
 }
 
-internal fn argon2_long_hash(input: Slice[UInt8], length: USize) -> List[UInt8]
+internal fn argon2_long_hash(input: Slice[UInt8], length: UInt64) -> List[UInt8]
   requires 1 <= length && length <= 4294967295
   cost time finite
 {
@@ -1797,7 +1797,7 @@ internal fn argon2_long_hash(input: Slice[UInt8], length: USize) -> List[UInt8]
     invariant left > 32
     decreases left
   {
-    let half: USize = 32
+    let half: UInt64 = 32
     for index in 0..half {
       mut output.push(chained[index])
     }
@@ -1828,7 +1828,7 @@ internal fn argon2_block_from_bytes(bytes: Slice[UInt8]) -> Array[UInt64, 128]
   cost time O(1)
 {
   var block = argon2_zero_block
-  let count: USize = 1024
+  let count: UInt64 = 1024
   for position in 0..count {
     if position < bytes.length() {
       let byte: UInt64 = intrinsic::convert[UInt8, UInt64](bytes[position])
@@ -1843,7 +1843,7 @@ internal fn argon2_block_to_bytes(block: Array[UInt64, 128]) -> List[UInt8]
   cost time finite
 {
   var bytes: List[UInt8] = []
-  let count: USize = 1024
+  let count: UInt64 = 1024
   for position in 0..count
     invariant bytes.length() == position
   {
@@ -1859,7 +1859,7 @@ internal fn argon2_multiply_add(first: UInt64, second: UInt64) -> UInt64
   first.wrapping_add(second).wrapping_add(intrinsic::wrapping_multiply(product, right: 2))
 }
 
-internal fn argon2_mix(words: mut Array[UInt64, 16], a: USize, b: USize, c: USize, d: USize)
+internal fn argon2_mix(words: mut Array[UInt64, 16], a: UInt64, b: UInt64, c: UInt64, d: UInt64)
   requires a < 16 && b < 16 && c < 16 && d < 16
   cost time O(1)
 {
@@ -1893,8 +1893,8 @@ internal fn argon2_compress(previous: Array[UInt64, 128], reference: Array[UInt6
 {
   let combined = argon2_xor(previous, second: reference)
   var mixed = combined
-  let groups: USize = 8
-  let width: USize = 16
+  let groups: UInt64 = 8
+  let width: UInt64 = 16
   for row in 0..groups {
     var words: Array[UInt64, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     for position in 0..width {
@@ -1918,9 +1918,9 @@ internal fn argon2_compress(previous: Array[UInt64, 128], reference: Array[UInt6
   argon2_xor(mixed, second: combined)
 }
 
-internal type Argon2Shape(lanes: USize, lane_length: USize, segment_length: USize, passes: USize)
+internal type Argon2Shape(lanes: UInt64, lane_length: UInt64, segment_length: UInt64, passes: UInt64)
 
-internal fn Argon2Shape.block_index(self, block_count: USize, lane: USize, column: USize) -> USize
+internal fn Argon2Shape.block_index(self, block_count: UInt64, lane: UInt64, column: UInt64) -> UInt64
   requires block_count > 0
   ensures result < block_count
   cost time O(1)
@@ -1930,51 +1930,51 @@ internal fn Argon2Shape.block_index(self, block_count: USize, lane: USize, colum
 
 internal fn argon2_reference_index(
   shape: Argon2Shape,
-  block_count: USize,
-  pass: USize,
-  slice: USize,
-  lane: USize,
-  index: USize,
+  block_count: UInt64,
+  pass: UInt64,
+  slice: UInt64,
+  lane: UInt64,
+  index: UInt64,
   pseudo_random: UInt64,
-) -> USize
+) -> UInt64
   requires block_count > 0
   requires shape.lanes > 0 && shape.lane_length > 0
   ensures result < block_count
   cost time O(1)
 {
-  let lanes: UInt64 = intrinsic::convert(shape.lanes)
-  let reference_lane: USize = if pass == 0 && slice == 0 {
+  let lanes: UInt64 = shape.lanes
+  let reference_lane: UInt64 = if pass == 0 && slice == 0 {
     lane
   } else {
-    intrinsic::convert((pseudo_random >> 32) % lanes)
+    (pseudo_random >> 32) % lanes
   }
   let earlier_segments = if pass == 0 {
     intrinsic::wrapping_multiply(slice, right: shape.segment_length)
   } else {
     intrinsic::wrapping_subtract(shape.lane_length, right: shape.segment_length)
   }
-  let area: USize = if reference_lane == lane {
+  let area: UInt64 = if reference_lane == lane {
     intrinsic::wrapping_subtract(intrinsic::wrapping_add(earlier_segments, right: index), right: 1)
   } else if index == 0 {
     intrinsic::wrapping_subtract(earlier_segments, right: 1)
   } else {
     earlier_segments
   }
-  let area_64: UInt64 = intrinsic::convert(area)
+  let area_64: UInt64 = area
   let low = pseudo_random & 4294967295
   let squared = intrinsic::wrapping_multiply(low, right: low) >> 32
   let relative = intrinsic::wrapping_subtract(
     intrinsic::wrapping_subtract(area_64, right: 1),
     right: intrinsic::wrapping_multiply(area_64, right: squared) >> 32,
   )
-  let start: USize = if pass != 0 && slice != 3 {
+  let start: UInt64 = if pass != 0 && slice != 3 {
     intrinsic::wrapping_multiply(intrinsic::wrapping_add(slice, right: 1), right: shape.segment_length)
   } else {
     0
   }
-  let lane_length_64: UInt64 = intrinsic::convert(shape.lane_length)
-  let start_64: UInt64 = intrinsic::convert(start)
-  let reference_column: USize = intrinsic::convert(start_64.wrapping_add(relative) % lane_length_64)
+  let lane_length_64: UInt64 = shape.lane_length
+  let start_64: UInt64 = start
+  let reference_column: UInt64 = start_64.wrapping_add(relative) % lane_length_64
   shape.block_index(block_count, lane: reference_lane, column: reference_column)
 }
 
@@ -1987,9 +1987,9 @@ internal fn argon2_addresses(input: Array[UInt64, 128]) -> Array[UInt64, 128]
 internal fn argon2_fill_segment(
   memory: mut List[Array[UInt64, 128]],
   shape: Argon2Shape,
-  pass: USize,
-  slice: USize,
-  lane: USize,
+  pass: UInt64,
+  slice: UInt64,
+  lane: UInt64,
 )
   requires memory.length() > 0
   requires shape.lanes > 0 && shape.lane_length > 0
@@ -1999,14 +1999,14 @@ internal fn argon2_fill_segment(
   let block_count = memory.length()
   let independent = pass == 0 && slice < 2
   var address_input = argon2_zero_block
-  address_input[0] = intrinsic::convert(pass)
-  address_input[1] = intrinsic::convert(lane)
-  address_input[2] = intrinsic::convert(slice)
-  address_input[3] = intrinsic::convert(block_count)
-  address_input[4] = intrinsic::convert(shape.passes)
+  address_input[0] = pass
+  address_input[1] = lane
+  address_input[2] = slice
+  address_input[3] = block_count
+  address_input[4] = shape.passes
   address_input[5] = 2
   var addresses = argon2_zero_block
-  let first: USize = if pass == 0 && slice == 0 { 2 } else { 0 }
+  let first: UInt64 = if pass == 0 && slice == 0 { 2 } else { 0 }
   if independent && first != 0 {
     address_input[6] = address_input[6].wrapping_add(1)
     addresses = argon2_addresses(address_input)
@@ -2044,7 +2044,7 @@ internal fn argon2_xor(first: Array[UInt64, 128], second: Array[UInt64, 128]) ->
   cost time O(1)
 {
   var combined = first
-  let count: USize = 128
+  let count: UInt64 = 128
   for word in 0..count {
     combined[word] = first[word] ^ second[word]
   }
@@ -2066,7 +2066,7 @@ public fn hash_password(
   var hash: Array[UInt8, 32] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   ]
-  let count: USize = 32
+  let count: UInt64 = 32
   for index in 0..count {
     if index < tag.length() {
       hash[index] = tag[index]
@@ -2079,7 +2079,7 @@ internal fn argon2id(
   password: Slice[UInt8],
   salt: Slice[UInt8],
   password_cost: PasswordCost,
-  length: USize,
+  length: UInt64,
 ) -> List[UInt8]
   requires salt.length() >= 8
   requires password_cost.parallelism >= 1 && password_cost.parallelism <= 16777215
@@ -2088,8 +2088,8 @@ internal fn argon2id(
   requires length >= 4 && length <= 1024
   cost time finite
 {
-  let lanes: USize = intrinsic::convert(password_cost.parallelism)
-  let requested: USize = intrinsic::convert(password_cost.memory_kibibytes)
+  let lanes: UInt64 = intrinsic::convert(password_cost.parallelism)
+  let requested: UInt64 = intrinsic::convert(password_cost.memory_kibibytes)
   let segment_length = requested / (4 * lanes)
   let shape = Argon2Shape(
     lanes: lanes,
@@ -2131,7 +2131,7 @@ internal fn argon2id(
       memory[shape.block_index(block_count, lane: lane, column: intrinsic::convert(column))] = block
     }
   }
-  let slices: USize = 4
+  let slices: UInt64 = 4
   for pass in 0..shape.passes
     invariant memory.length() == block_count
   {
@@ -2177,10 +2177,10 @@ public fn SecretKey.generate() -> SecretKey
   var bytes: Array[UInt8, 32] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   ]
-  let words: USize = 4
+  let words: UInt64 = 4
   for word in 0..words {
     let value = Random.next()
-    let count: USize = 8
+    let count: UInt64 = 8
     for index in 0..count {
       bytes[8 * word + index] = intrinsic::convert((value >> (8 * index)) & 255)
     }
@@ -2209,11 +2209,11 @@ public fn Nonce.generate() -> Nonce
   var bytes: Array[UInt8, 12] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   let first = Random.next()
   let second = Random.next()
-  let count: USize = 8
+  let count: UInt64 = 8
   for index in 0..count {
     bytes[index] = intrinsic::convert((first >> (8 * index)) & 255)
   }
-  let rest: USize = 4
+  let rest: UInt64 = 4
   for index in 0..rest {
     bytes[8 + index] = intrinsic::convert((second >> (8 * index)) & 255)
   }
@@ -2232,7 +2232,7 @@ impl Display for AuthenticationError {
   }
 }
 
-internal fn chacha20_quarter_round(state: mut Array[UInt32, 16], a: USize, b: USize, c: USize, d: USize)
+internal fn chacha20_quarter_round(state: mut Array[UInt32, 16], a: UInt64, b: UInt64, c: UInt64, d: UInt64)
   requires a < 16
   requires b < 16
   requires c < 16
@@ -2263,7 +2263,7 @@ internal fn chacha20_block(key: Array[UInt32, 8], counter: UInt32, nonce: Array[
     little_endian_word(nonce[8], second: nonce[9], third: nonce[10], fourth: nonce[11]),
   ]
   var state = initial
-  let double_rounds: USize = 10
+  let double_rounds: UInt64 = 10
   for _ in 0..double_rounds
     cost allocations == 0
   {
@@ -2276,7 +2276,7 @@ internal fn chacha20_block(key: Array[UInt32, 8], counter: UInt32, nonce: Array[
     chacha20_quarter_round(mut state, a: 2, b: 7, c: 8, d: 13)
     chacha20_quarter_round(mut state, a: 3, b: 4, c: 9, d: 14)
   }
-  let count: USize = 16
+  let count: UInt64 = 16
   for index in 0..count
     cost allocations == 0
   {
@@ -2318,7 +2318,7 @@ internal type Poly1305(
   pad: Array[UInt32, 4],
   h: Array[UInt64, 5],
   block: Array[UInt8, 16],
-  block_length: USize,
+  block_length: UInt64,
 )
   invariant block_length < 16
 
@@ -2357,7 +2357,7 @@ internal fn sum_of_products(carry: UInt64, values: Array[UInt64, 5], factors: Ar
   cost allocations == 0
 {
   var sum = carry
-  let count: USize = 5
+  let count: UInt64 = 5
   for index in 0..count
     cost allocations == 0
   {
@@ -2441,7 +2441,7 @@ internal fn Poly1305.pad_to_block(mut self)
   cost time O(1)
   cost allocations == 0
 {
-  let most: USize = 16
+  let most: UInt64 = 16
   for _ in 0..most
     invariant self.block_length < 16
     cost allocations == 0
@@ -2452,17 +2452,16 @@ internal fn Poly1305.pad_to_block(mut self)
   }
 }
 
-internal fn Poly1305.update_length(mut self, length: USize)
+internal fn Poly1305.update_length(mut self, length: UInt64)
   cost time O(1)
   cost allocations == 0
 {
-  let value: UInt64 = intrinsic::convert(length)
-  let count: USize = 8
+  let count: UInt64 = 8
   for index in 0..count
     invariant self.block_length < 16
     cost allocations == 0
   {
-    mut self.push_byte(intrinsic::convert((value >> (8 * index)) & 255))
+    mut self.push_byte(intrinsic::convert((length >> (8 * index)) & 255))
   }
 }
 
@@ -2515,7 +2514,7 @@ fn tag_bytes(first: UInt64, second: UInt64, third: UInt64, fourth: UInt64) -> Ar
   cost allocations == 0
 {
   var tag: Array[UInt8, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  let count: USize = 4
+  let count: UInt64 = 4
   for index in 0..count
     cost allocations == 0
   {
@@ -2555,7 +2554,7 @@ internal fn push_tag(output: mut intrinsic::Storage[UInt8], tag: Array[UInt8, 16
 {
   let start = intrinsic::storage_length(output)
   let capacity = intrinsic::storage_capacity(output)
-  let count: USize = 16
+  let count: UInt64 = 16
   for index in 0..count
     invariant intrinsic::storage_length(output) == start + index
     invariant intrinsic::storage_capacity(output) == capacity
@@ -2571,7 +2570,7 @@ internal fn chacha20_poly1305_seal(
   plaintext: Slice[UInt8],
   associated_data: Slice[UInt8],
 ) -> List[UInt8]
-  requires plaintext.length() <= USize.maximum - 16
+  requires plaintext.length() <= UInt64.maximum - 16
   ensures result.length() == plaintext.length() + 16
   cost time O(plaintext.length() + associated_data.length())
 {
@@ -2628,7 +2627,7 @@ internal fn gf256_multiply(first: UInt8, second: UInt8) -> UInt8
   var multiplicand = first
   var multiplier = second
   var product: UInt8 = 0
-  let bits: USize = 8
+  let bits: UInt64 = 8
   for _ in 0..bits
     cost allocations == 0
   {
@@ -2663,7 +2662,7 @@ internal fn aes_substitute(byte: UInt8) -> UInt8
     ^ 0x63
 }
 
-internal type AesKeys(bytes: Array[UInt8, 240], rounds: USize)
+internal type AesKeys(bytes: Array[UInt8, 240], rounds: UInt64)
   invariant rounds == 10 || rounds == 14
 
 internal fn aes128_round_keys(key: Array[UInt8, 16]) -> AesKeys
@@ -2682,14 +2681,14 @@ internal fn aes128_round_keys(key: Array[UInt8, 16]) -> AesKeys
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   ]
-  let key_length: USize = 16
+  let key_length: UInt64 = 16
   for index in 0..key_length
     cost allocations == 0
   {
     keys[index] = key[index]
   }
   var round_constant: UInt8 = 1
-  let words: USize = 40
+  let words: UInt64 = 40
   for step in 0..words
     cost allocations == 0
   {
@@ -2731,14 +2730,14 @@ internal fn aes256_round_keys(key: Array[UInt8, 32]) -> Array[UInt8, 240]
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   ]
-  let key_length: USize = 32
+  let key_length: UInt64 = 32
   for index in 0..key_length
     cost allocations == 0
   {
     keys[index] = key[index]
   }
   var round_constant: UInt8 = 1
-  let words: USize = 52
+  let words: UInt64 = 52
   for step in 0..words
     cost allocations == 0
   {
@@ -2917,11 +2916,11 @@ internal fn aes_ortho(words: Array[UInt64, 8]) -> Array[UInt64, 8]
   cost allocations == 0
 {
   var q = words
-  let pairs: Array[USize, 24] = [0, 1, 2, 3, 4, 5, 6, 7, 0, 2, 1, 3, 4, 6, 5, 7, 0, 4, 1, 5, 2, 6, 3, 7]
+  let pairs: Array[UInt64, 24] = [0, 1, 2, 3, 4, 5, 6, 7, 0, 2, 1, 3, 4, 6, 5, 7, 0, 4, 1, 5, 2, 6, 3, 7]
   let evens: Array[UInt64, 3] = [0x5555555555555555, 0x3333333333333333, 0x0f0f0f0f0f0f0f0f]
   let odds: Array[UInt64, 3] = [0xaaaaaaaaaaaaaaaa, 0xcccccccccccccccc, 0xf0f0f0f0f0f0f0f0]
   let shifts: Array[UInt64, 3] = [1, 2, 4]
-  let count: USize = 12
+  let count: UInt64 = 12
   for step in 0..count
     cost allocations == 0
   {
@@ -2973,7 +2972,7 @@ internal fn aes_sliced_shift_rows(q: Array[UInt64, 8]) -> Array[UInt64, 8]
   cost allocations == 0
 {
   var shifted = q
-  let count: USize = 8
+  let count: UInt64 = 8
   for index in 0..count
     cost allocations == 0
   {
@@ -3020,10 +3019,10 @@ internal fn aes_sliced_mix_columns(q: Array[UInt64, 8]) -> Array[UInt64, 8]
   ]
 }
 
-internal type AesSliced(words: Array[UInt64, 120], rounds: USize)
+internal type AesSliced(words: Array[UInt64, 120], rounds: UInt64)
   invariant rounds == 10 || rounds == 14
 
-internal fn aes_word(bytes: Array[UInt8, 240], at: USize) -> UInt32
+internal fn aes_word(bytes: Array[UInt8, 240], at: UInt64) -> UInt32
   requires at <= 236
   cost time O(1)
   cost allocations == 0
@@ -3046,7 +3045,7 @@ internal fn aes_slice_keys(keys: AesKeys) -> AesSliced
     let at = 16 * round
     let halves = aes_interleave_in([aes_word(keys.bytes, at: at), aes_word(keys.bytes, at: at + 4), aes_word(keys.bytes, at: at + 8), aes_word(keys.bytes, at: at + 12)])
     let sliced = aes_ortho([halves.first, halves.first, halves.first, halves.first, halves.second, halves.second, halves.second, halves.second])
-    let width: USize = 8
+    let width: UInt64 = 8
     for index in 0..width
       cost allocations == 0
     {
@@ -3056,13 +3055,13 @@ internal fn aes_slice_keys(keys: AesKeys) -> AesSliced
   AesSliced(words: words, rounds: keys.rounds)
 }
 
-internal fn aes_add_sliced_key(q: Array[UInt64, 8], keys: AesSliced, round: USize) -> Array[UInt64, 8]
+internal fn aes_add_sliced_key(q: Array[UInt64, 8], keys: AesSliced, round: UInt64) -> Array[UInt64, 8]
   requires round <= keys.rounds
   cost time O(1)
   cost allocations == 0
 {
   var added = q
-  let width: USize = 8
+  let width: UInt64 = 8
   for index in 0..width
     cost allocations == 0
   {
@@ -3089,7 +3088,7 @@ internal fn aes_block_words(block: Array[UInt8, 16]) -> Array[UInt32, 4]
   cost allocations == 0
 {
   var words: Array[UInt32, 4] = [0, 0, 0, 0]
-  let count: USize = 4
+  let count: UInt64 = 4
   for index in 0..count
     cost allocations == 0
   {
@@ -3107,7 +3106,7 @@ internal fn aes_encrypt_four(keys: AesSliced, blocks: Array[Array[UInt8, 16], 4]
   cost allocations == 0
 {
   var q: Array[UInt64, 8] = [0, 0, 0, 0, 0, 0, 0, 0]
-  let count: USize = 4
+  let count: UInt64 = 4
   for index in 0..count
     cost allocations == 0
   {
@@ -3141,7 +3140,7 @@ internal fn aes_encrypt_block(keys: AesSliced, block: Array[UInt8, 16]) -> Array
   let zero: Array[UInt8, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   let encrypted = aes_encrypt_four(keys, blocks: [block, zero, zero, zero])
   var output = zero
-  let count: USize = 16
+  let count: UInt64 = 16
   for index in 0..count
     cost allocations == 0
   {
@@ -3158,7 +3157,7 @@ internal fn Block128.from_bytes(bytes: Array[UInt8, 16]) -> Block128
 {
   var high: UInt64 = 0
   var low: UInt64 = 0
-  let count: USize = 8
+  let count: UInt64 = 8
   for index in 0..count
     cost allocations == 0
   {
@@ -3168,7 +3167,7 @@ internal fn Block128.from_bytes(bytes: Array[UInt8, 16]) -> Block128
   Block128(high: high, low: low)
 }
 
-internal fn Block128.byte(self, index: USize) -> UInt8
+internal fn Block128.byte(self, index: UInt64) -> UInt8
   requires index < 16
   cost time O(1)
   cost allocations == 0
@@ -3256,7 +3255,7 @@ internal fn gf128_multiply(first: Block128, second: Block128) -> Block128
   Block128(high: u3, low: final2)
 }
 
-internal type Ghash(key: Block128, digest: Block128, block: Array[UInt8, 16], block_length: USize)
+internal type Ghash(key: Block128, digest: Block128, block: Array[UInt8, 16], block_length: UInt64)
   invariant block_length < 16
 
 internal fn Ghash.new(key: Block128) -> Ghash
@@ -3304,7 +3303,7 @@ internal fn Ghash.pad_to_block(mut self)
   cost time O(1)
   cost allocations == 0
 {
-  let most: USize = 16
+  let most: UInt64 = 16
   for _ in 0..most
     invariant self.block_length < 16
     cost allocations == 0
@@ -3315,12 +3314,12 @@ internal fn Ghash.pad_to_block(mut self)
   }
 }
 
-internal fn Ghash.update_bit_length(mut self, length: USize)
+internal fn Ghash.update_bit_length(mut self, length: UInt64)
   cost time O(1)
   cost allocations == 0
 {
-  let bits = intrinsic::wrapping_multiply(intrinsic::convert[USize, UInt64](length), right: 8)
-  let count: USize = 8
+  let bits = intrinsic::wrapping_multiply(length, right: 8)
+  let count: UInt64 = 8
   for index in 0..count
     invariant self.block_length < 16
     cost allocations == 0
@@ -3399,7 +3398,7 @@ internal fn aes_gcm_tag(
   mut hash.update_bit_length(ciphertext.length())
   let mask = aes_encrypt_block(keys, block: aes_gcm_counter_block(nonce, counter: 1))
   var tag: Array[UInt8, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  let count: USize = 16
+  let count: UInt64 = 16
   for index in 0..count
     cost allocations == 0
   {
@@ -3414,7 +3413,7 @@ internal fn aes256_gcm_seal(
   plaintext: Slice[UInt8],
   associated_data: Slice[UInt8],
 ) -> List[UInt8]
-  requires plaintext.length() <= USize.maximum - 16
+  requires plaintext.length() <= UInt64.maximum - 16
   ensures result.length() == plaintext.length() + 16
   cost time O(plaintext.length() + associated_data.length())
 {
@@ -3462,7 +3461,7 @@ internal fn aes128_gcm_seal(
   plaintext: Slice[UInt8],
   associated_data: Slice[UInt8],
 ) -> List[UInt8]
-  requires plaintext.length() <= USize.maximum - 16
+  requires plaintext.length() <= UInt64.maximum - 16
   ensures result.length() == plaintext.length() + 16
   cost time O(plaintext.length() + associated_data.length())
 {
@@ -3514,7 +3513,7 @@ public fn seal(
   ensures result.length() == plaintext.length() + 16
   cost time O(plaintext.length() + associated_data.length())
 {
-  if plaintext.length() > USize.maximum - 16 {
+  if plaintext.length() > UInt64.maximum - 16 {
     intrinsic::crash("a list cannot hold that many bytes".slice())
   }
   match cipher {
@@ -3597,7 +3596,7 @@ internal fn field_carry(element: Array[Int64, 16]) -> Array[Int64, 16]
   cost time O(1)
 {
   var carried = element
-  let limbs: USize = 16
+  let limbs: UInt64 = 16
   for limb in 0..limbs
   {
     carried[limb] = carried[limb].wrapping_add(65536)
@@ -3617,7 +3616,7 @@ internal fn field_swap(first: mut Array[Int64, 16], second: mut Array[Int64, 16]
   cost time O(1)
 {
   let mask = ~bit.wrapping_subtract(1)
-  let limbs: USize = 16
+  let limbs: UInt64 = 16
   for limb in 0..limbs
   {
     let difference = mask & (first[limb] ^ second[limb])
@@ -3631,11 +3630,11 @@ internal fn field_to_bytes(element: Array[Int64, 16]) -> Array[UInt8, 32]
 {
   var reduced = field_carry(field_carry(field_carry(element)))
   var lowered: Array[Int64, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  let passes: USize = 2
+  let passes: UInt64 = 2
   for _ in 0..passes
   {
     lowered[0] = reduced[0].wrapping_subtract(65517)
-    let middle: USize = 14
+    let middle: UInt64 = 14
     for step in 0..middle
     {
       let limb = step + 1
@@ -3650,7 +3649,7 @@ internal fn field_to_bytes(element: Array[Int64, 16]) -> Array[UInt8, 32]
   var bytes: Array[UInt8, 32] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   ]
-  let limbs: USize = 16
+  let limbs: UInt64 = 16
   for limb in 0..limbs
   {
     bytes[2 * limb] = intrinsic::convert(reduced[limb] & 255)
@@ -3663,7 +3662,7 @@ internal fn field_from_bytes(bytes: Array[UInt8, 32]) -> Array[Int64, 16]
   cost time O(1)
 {
   var element: Array[Int64, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  let limbs: USize = 16
+  let limbs: UInt64 = 16
   for limb in 0..limbs
   {
     element[limb] = intrinsic::convert[UInt8, Int64](bytes[2 * limb]) | (intrinsic::convert[UInt8, Int64](bytes[2 * limb + 1]) << 8)
@@ -3676,7 +3675,7 @@ internal fn field_add(first: Array[Int64, 16], second: Array[Int64, 16]) -> Arra
   cost time O(1)
 {
   var sum = first
-  let limbs: USize = 16
+  let limbs: UInt64 = 16
   for limb in 0..limbs
   {
     sum[limb] = first[limb].wrapping_add(second[limb])
@@ -3688,7 +3687,7 @@ internal fn field_subtract(first: Array[Int64, 16], second: Array[Int64, 16]) ->
   cost time O(1)
 {
   var difference = first
-  let limbs: USize = 16
+  let limbs: UInt64 = 16
   for limb in 0..limbs
   {
     difference[limb] = first[limb].wrapping_subtract(second[limb])
@@ -3702,7 +3701,7 @@ internal fn field_multiply(first: Array[Int64, 16], second: Array[Int64, 16]) ->
   var wide: Array[Int64, 31] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   ]
-  let limbs: USize = 16
+  let limbs: UInt64 = 16
   for left in 0..limbs
   {
     for right in 0..limbs
@@ -3710,7 +3709,7 @@ internal fn field_multiply(first: Array[Int64, 16], second: Array[Int64, 16]) ->
       wide[left + right] = wide[left + right].wrapping_add(first[left].wrapping_multiply(second[right]))
     }
   }
-  let high: USize = 15
+  let high: UInt64 = 15
   for limb in 0..high
   {
     wide[limb] = wide[limb].wrapping_add(wide[limb + 16].wrapping_multiply(38))
@@ -3733,7 +3732,7 @@ internal fn field_invert(element: Array[Int64, 16]) -> Array[Int64, 16]
   cost time O(1)
 {
   var power = element
-  let squarings: USize = 254
+  let squarings: UInt64 = 254
   for step in 0..squarings
   {
     power = field_square(power)
@@ -3748,7 +3747,7 @@ internal fn field_power_2_252_minus_3(element: Array[Int64, 16]) -> Array[Int64,
   cost time O(1)
 {
   var power = element
-  let squarings: USize = 251
+  let squarings: UInt64 = 251
   for step in 0..squarings
   {
     power = field_square(power)
@@ -3771,7 +3770,7 @@ internal fn field_equal(first: Array[Int64, 16], second: Array[Int64, 16]) -> Bo
   let first_bytes = field_to_bytes(first)
   let second_bytes = field_to_bytes(second)
   var difference: UInt8 = 0
-  let count: USize = 32
+  let count: UInt64 = 32
   for index in 0..count
   {
     difference = difference | (first_bytes[index] ^ second_bytes[index])
@@ -3779,7 +3778,7 @@ internal fn field_equal(first: Array[Int64, 16], second: Array[Int64, 16]) -> Bo
   difference == 0
 }
 
-internal fn scalar_bit(scalar: Array[UInt8, 32], bit: USize) -> Int64
+internal fn scalar_bit(scalar: Array[UInt8, 32], bit: UInt64) -> Int64
   requires bit < 256
   cost time O(1)
 {
@@ -3804,7 +3803,7 @@ internal fn x25519(scalar: Array[UInt8, 32], point: Array[UInt8, 32]) -> Array[U
   var b = u
   var c: Array[Int64, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   var d = field_one
-  let bits: USize = 255
+  let bits: UInt64 = 255
   for step in 0..bits
   {
     let bit = scalar_bit(clamped, bit: 254 - step)
@@ -3900,7 +3899,7 @@ internal fn EdwardsPoint.multiply(self, scalar: Array[UInt8, 32]) -> EdwardsPoin
 {
   var result = EdwardsPoint.neutral()
   var addend = self
-  let bits: USize = 256
+  let bits: UInt64 = 256
   for step in 0..bits
   {
     let bit = scalar_bit(scalar, bit: 255 - step)
@@ -3945,12 +3944,12 @@ internal fn scalar_reduce(wide: Array[Int64, 64]) -> Array[UInt8, 32]
   cost time O(1)
 {
   var limbs = wide
-  let high: USize = 32
+  let high: UInt64 = 32
   for step in 0..high
   {
     let limb = 63 - step
     var carry: Int64 = 0
-    let span: USize = 20
+    let span: UInt64 = 20
     for offset in 0..span
     {
       let index = limb - 32 + offset
@@ -3964,7 +3963,7 @@ internal fn scalar_reduce(wide: Array[Int64, 64]) -> Array[UInt8, 32]
     limbs[limb] = 0
   }
   var carry: Int64 = 0
-  let low: USize = 32
+  let low: UInt64 = 32
   for index in 0..low
   {
     limbs[index] = limbs[index]
@@ -3995,7 +3994,7 @@ internal fn scalar_from_hash(hash: Array[UInt8, 64]) -> Array[UInt8, 32]
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   ]
-  let count: USize = 64
+  let count: UInt64 = 64
   for index in 0..count
   {
     wide[index] = intrinsic::convert[UInt8, Int64](hash[index])
@@ -4010,7 +4009,7 @@ internal fn scalar_multiply_add(product_of: Array[UInt8, 32], and: Array[UInt8, 
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   ]
-  let count: USize = 32
+  let count: UInt64 = 32
   for index in 0..count
   {
     wide[index] = intrinsic::convert[UInt8, Int64](plus[index])
@@ -4032,7 +4031,7 @@ internal fn scalar_is_below_order(scalar: Array[UInt8, 32]) -> Bool
 {
   var below = false
   var decided = false
-  let count: USize = 32
+  let count: UInt64 = 32
   for step in 0..count
   {
     let index = 31 - step
@@ -4060,7 +4059,7 @@ internal fn first_half(bytes: Array[UInt8, 64]) -> Array[UInt8, 32]
   var half: Array[UInt8, 32] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   ]
-  let count: USize = 32
+  let count: UInt64 = 32
   for index in 0..count
   {
     half[index] = bytes[index]
@@ -4074,7 +4073,7 @@ internal fn second_half(bytes: Array[UInt8, 64]) -> Array[UInt8, 32]
   var half: Array[UInt8, 32] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   ]
-  let count: USize = 32
+  let count: UInt64 = 32
   for index in 0..count
   {
     half[index] = bytes[index + 32]
@@ -4088,10 +4087,10 @@ internal fn random_32_bytes() -> Array[UInt8, 32]
   var bytes: Array[UInt8, 32] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   ]
-  let words: USize = 4
+  let words: UInt64 = 4
   for word in 0..words {
     let value = Random.next()
-    let count: USize = 8
+    let count: UInt64 = 8
     for index in 0..count {
       bytes[8 * word + index] = intrinsic::convert((value >> (8 * index)) & 255)
     }
@@ -4151,7 +4150,7 @@ public fn SigningKey.sign(self, message: Slice[UInt8]) -> Signature
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   ]
-  let count: USize = 32
+  let count: UInt64 = 32
   for index in 0..count {
     bytes[index] = commitment[index]
     bytes[index + 32] = response[index]
@@ -4227,7 +4226,7 @@ public fn AgreementKey.agree(own self, peer: AgreementPublicKey) -> Option[Secre
 {
   let shared = x25519(self.bytes, point: peer.bytes)
   var any_bit: UInt8 = 0
-  let count: USize = 32
+  let count: UInt64 = 32
   for index in 0..count {
     any_bit = any_bit | shared[index]
   }
@@ -4299,7 +4298,7 @@ fn deterministic_nonce(curve: Curve, elliptic_curve: elliptic::Curve, private: S
     key = keyed_hash(curve, key: key.slice(), message: input.slice())
     value = keyed_hash(curve, key: key.slice(), message: value.slice())
   }
-  var attempts: USize = 0
+  var attempts: UInt64 = 0
   while attempts < 64 {
     var stream: List[UInt8] = []
     while stream.length() < size {
@@ -4396,7 +4395,7 @@ fn random_scalar(curve: Curve) -> List[UInt8]
     var bytes: List[UInt8] = []
     while bytes.length() < size {
       let word = Random.next()
-      let count: USize = 8
+      let count: UInt64 = 8
       for index in 0..count {
         if bytes.length() < size {
           mut bytes.push(intrinsic::convert((word >> (8 * index)) & 255))
@@ -4506,7 +4505,7 @@ public fn EcdhKey.agree(own self, peer: Slice[UInt8]) -> Option[List[UInt8]]
 public type HashFunction = Sha256 | Sha384 | Sha512
   derives Equal
 
-public fn HashFunction.length(self) -> USize
+public fn HashFunction.length(self) -> UInt64
   ensures result <= 64
 {
   match self {
@@ -4540,7 +4539,7 @@ fn digest_info(function: HashFunction) -> List[UInt8] {
     Sha512 => "3051300d060960864801650304020305000440"
   }
   var bytes: List[UInt8] = []
-  var index: USize = 0
+  var index: UInt64 = 0
   let text = prefix.slice()
   while index < text.length() && text.length() - index >= 2 {
     let high = text.byte(index).digit_value()
@@ -4551,7 +4550,7 @@ fn digest_info(function: HashFunction) -> List[UInt8] {
   bytes
 }
 
-fn mask_generation(function: HashFunction, seed: Slice[UInt8], length: USize) -> List[UInt8] {
+fn mask_generation(function: HashFunction, seed: Slice[UInt8], length: UInt64) -> List[UInt8] {
   var mask: List[UInt8] = []
   var counter: UInt32 = 0
   while mask.length() < length && counter < 65536 {
@@ -4571,7 +4570,7 @@ public opaque type RsaPublicKey(modulus: List[UInt8], exponent: List[UInt8])
   derives Equal, Copyable
 
 fn trimmed(bytes: Slice[UInt8]) -> List[UInt8] {
-  var start: USize = 0
+  var start: UInt64 = 0
   while start < bytes.length() && bytes[start] == 0
     invariant start <= bytes.length()
   {
@@ -4597,7 +4596,7 @@ public fn RsaPublicKey.exponent(self) -> Slice[UInt8] {
   self.exponent.slice()
 }
 
-public fn RsaPublicKey.bits(self) -> USize {
+public fn RsaPublicKey.bits(self) -> UInt64 {
   modular::bit_length(modular::limbs_from_bytes(self.modulus.slice(), count: (self.modulus.length() + 3) / 4).slice())
 }
 
@@ -4622,7 +4621,7 @@ fn constant_equal(first: Slice[UInt8], second: Slice[UInt8]) -> Bool {
   first.length() == second.length() && constant_time_equal(first, second: second)
 }
 
-fn pkcs1_encoding(function: HashFunction, digest: Slice[UInt8], size: USize) -> Option[List[UInt8]] {
+fn pkcs1_encoding(function: HashFunction, digest: Slice[UInt8], size: UInt64) -> Option[List[UInt8]] {
   var info = digest_info(function)
   mut info.append_slice(digest)
   if size < info.length() + 11 {
@@ -4682,7 +4681,7 @@ public fn RsaPublicKey.verify_pss(self, function: HashFunction, message: Slice[U
   let masked = message_encoded[..length - hash_length - 1]
   let hashed = message_encoded[length - hash_length - 1..length - 1]
   let top_bits = (8 - encoded_bits % 8) % 8
-  let top_mask: UInt8 = if top_bits >= 8 { 0 } else { 255 >> intrinsic::convert[USize, UInt8](top_bits) }
+  let top_mask: UInt8 = if top_bits >= 8 { 0 } else { 255 >> intrinsic::convert[UInt64, UInt8](top_bits) }
   if masked.length() == 0 || (masked[0] & (255 ^ top_mask)) != 0 {
     return false
   }
@@ -4831,7 +4830,7 @@ public fn RsaPrivateKey.sign_pss(self, function: HashFunction, message: Slice[UI
   var salt: List[UInt8] = []
   while salt.length() < hash_length {
     let word = Random.next()
-    let count: USize = 8
+    let count: UInt64 = 8
     for index in 0..count {
       if salt.length() < hash_length {
         mut salt.push(intrinsic::convert((word >> (8 * index)) & 255))
@@ -4849,7 +4848,7 @@ public fn RsaPrivateKey.sign_pss(self, function: HashFunction, message: Slice[UI
   }
   let top_bits = (8 - encoded_bits % 8) % 8
   if top_bits < 8 && block.length() > 0 {
-    block[0] = block[0] & (255 >> intrinsic::convert[USize, UInt8](top_bits))
+    block[0] = block[0] & (255 >> intrinsic::convert[UInt64, UInt8](top_bits))
   }
   var encoded: List[UInt8] = List.filled(0, count: self.public_key.modulus.length().saturating_subtract(length))
   mut encoded.append(own block)

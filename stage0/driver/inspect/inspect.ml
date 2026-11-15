@@ -83,7 +83,7 @@ let holes database key =
                           ( name,
                             match value with
                             | Value_local binding -> local_type tables binding
-                            | Value_generic _ -> "USize"
+                            | Value_generic _ -> "UInt64"
                             | Value_field _ -> "a field"
                             | Value_law_parameter _ -> "a parameter of the law" ))
                         scope;

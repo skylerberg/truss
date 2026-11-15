@@ -17,7 +17,7 @@ test "ranges" {
   assert middle.length() == 3
   assert total(middle[1..]) == 12
   assert middle[2..3][0] == 8
-  var from: USize = 2
+  var from: UInt64 = 2
   from += 1
   assert total(items[from - 1..from + 1]) == 12
   assert items[5..].length() == 0

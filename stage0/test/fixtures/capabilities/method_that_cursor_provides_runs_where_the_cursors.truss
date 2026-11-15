@@ -1,4 +1,4 @@
-fn length() -> USize
+fn length() -> UInt64
   uses Meter
 {
   var cursor = readings(3)

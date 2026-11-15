@@ -19,8 +19,8 @@ test "an integer steps forward and back by a count, unless it would leave its ty
   assert byte.retreated(by: 251) is None
   let wide: Int64 = -5
   assert wide.advanced(by: 10) == Some(5)
-  assert Int64.minimum.advanced(by: USize.maximum) == Some(Int64.maximum)
-  assert Int64.maximum.retreated(by: USize.maximum) == Some(Int64.minimum)
+  assert Int64.minimum.advanced(by: UInt64.maximum) == Some(Int64.maximum)
+  assert Int64.maximum.retreated(by: UInt64.maximum) == Some(Int64.minimum)
 }
 
 test "the steps between two integers are counted, forward only" {
@@ -32,7 +32,7 @@ test "the steps between two integers are counted, forward only" {
   let byte: UInt8 = 3
   assert byte.steps_to(10) == Some(7)
   assert byte.steps_to(2) is None
-  assert Int64.minimum.steps_to(Int64.maximum) == Some(USize.maximum)
+  assert Int64.minimum.steps_to(Int64.maximum) == Some(UInt64.maximum)
 }
 
 test "a collection folds, counts, and maps its elements" {

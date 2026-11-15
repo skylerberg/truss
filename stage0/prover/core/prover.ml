@@ -49,8 +49,8 @@ let declaration database (key : Names.key) =
     (Query.demand database Names.declaration_index key.module_)
 
 let integer_implementors (bounds : Types.trait_reference list) =
-  let signed = Intrinsic.[ Int8; Int16; Int32; Int64; ISize ]
-  and unsigned = Intrinsic.[ UInt8; UInt16; UInt32; UInt64; USize ] in
+  let signed = Intrinsic.[ Int8; Int16; Int32; Int64 ]
+  and unsigned = Intrinsic.[ UInt8; UInt16; UInt32; UInt64 ] in
   List.fold_left
     (fun found (bound : Types.trait_reference) ->
       let these =

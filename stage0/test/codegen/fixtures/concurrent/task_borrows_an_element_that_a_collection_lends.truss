@@ -1,14 +1,14 @@
 type Bag(items: List[String])
 
-fn Bag.count(self) -> USize {
+fn Bag.count(self) -> UInt64 {
   self.items.count()
 }
 
-fn Bag.element(self, position: USize) lends String {
+fn Bag.element(self, position: UInt64) lends String {
   self.items[position]
 }
 
-fn total_length(words: List[String]) -> USize
+fn total_length(words: List[String]) -> UInt64
   uses Tasks
 {
   concurrent for word in words {
@@ -16,14 +16,14 @@ fn total_length(words: List[String]) -> USize
       return word.length()
     }
   }
-  var total: USize = 0
+  var total: UInt64 = 0
   for word in words {
     total += word.length()
   }
   total
 }
 
-fn first_longer(bag: Bag, limit: USize) -> String
+fn first_longer(bag: Bag, limit: UInt64) -> String
   uses Tasks
 {
   concurrent for word in bag {

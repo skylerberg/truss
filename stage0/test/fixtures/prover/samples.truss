@@ -1,17 +1,17 @@
 type Samples(values: List[Int64])
 
 impl Index for Samples {
-  type Key = USize
+  type Key = UInt64
   type Output = Int64
 
-  fn contains_key(self, key: USize) -> Bool
+  fn contains_key(self, key: UInt64) -> Bool
     ensures result == (key < self.values.length())
     cost time O(1)
   {
     key < self.values.length()
   }
 
-  fn at(self, key: USize) lends Int64
+  fn at(self, key: UInt64) lends Int64
     requires key < self.values.length()
     cost time O(1)
   {
@@ -20,14 +20,14 @@ impl Index for Samples {
 }
 
 impl IndexAssign for Samples {
-  fn accepts_key(self, key: USize) -> Bool
+  fn accepts_key(self, key: UInt64) -> Bool
     ensures result == (key < self.values.length())
     cost time O(1)
   {
     key < self.values.length()
   }
 
-  fn assign(mut self, key: own USize, value: own Int64)
+  fn assign(mut self, key: own UInt64, value: own Int64)
     requires key < self.values.length()
     ensures self.values.length() == old(self.values.length())
     cost amortized time O(1)

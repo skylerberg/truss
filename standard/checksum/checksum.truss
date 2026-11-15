@@ -79,7 +79,7 @@ internal fn crc_update(state: UInt32, bytes: Slice[UInt8], table: Array[UInt32, 
     cost allocations == 0
   {
     let byte: UInt32 = intrinsic::convert(bytes[index])
-    let entry: USize = intrinsic::convert((crc ^ byte) & 255)
+    let entry: UInt64 = intrinsic::convert((crc ^ byte) & 255)
     crc = table[entry] ^ (crc >> 8)
   }
   crc ^ 0xFFFFFFFF
@@ -143,15 +143,15 @@ let xxh_prime_3: UInt64 = 1609587929392839161
 let xxh_prime_4: UInt64 = 9650029242287828579
 let xxh_prime_5: UInt64 = 2870177450012600261
 
-fn little_endian_64(bytes: Slice[UInt8], at: USize) -> UInt64
+fn little_endian_64(bytes: Slice[UInt8], at: UInt64) -> UInt64
   requires at <= bytes.length() && bytes.length() - at >= 8
   cost time O(1)
 {
   var value: UInt64 = 0
-  let count: USize = 8
+  let count: UInt64 = 8
   for index in 0..count {
     let byte: UInt64 = intrinsic::convert(bytes[at + index])
-    value = value | (byte << (8 * intrinsic::convert[USize, UInt64](index)))
+    value = value | (byte << (8 * index))
   }
   value
 }
@@ -173,7 +173,7 @@ public fn xxh64(bytes: Slice[UInt8], seed: UInt64 = 0) -> UInt64
   cost time O(bytes.length())
 {
   let length = bytes.length()
-  var index: USize = 0
+  var index: UInt64 = 0
   var hash: UInt64 = 0
   if length >= 32 {
     var first = intrinsic::wrapping_add(intrinsic::wrapping_add(seed, right: xxh_prime_1), right: xxh_prime_2)
@@ -201,7 +201,7 @@ public fn xxh64(bytes: Slice[UInt8], seed: UInt64 = 0) -> UInt64
   } else {
     hash = intrinsic::wrapping_add(seed, right: xxh_prime_5)
   }
-  hash = intrinsic::wrapping_add(hash, right: intrinsic::convert(length))
+  hash = intrinsic::wrapping_add(hash, right: length)
   while length - index >= 8
     invariant index <= length
     decreases length - index
@@ -212,10 +212,10 @@ public fn xxh64(bytes: Slice[UInt8], seed: UInt64 = 0) -> UInt64
   }
   if length - index >= 4 {
     var word: UInt64 = 0
-    let count: USize = 4
+    let count: UInt64 = 4
     for offset in 0..count {
       let byte: UInt64 = intrinsic::convert(bytes[index + offset])
-      word = word | (byte << (8 * intrinsic::convert[USize, UInt64](offset)))
+      word = word | (byte << (8 * offset))
     }
     hash = hash ^ intrinsic::wrapping_multiply(word, right: xxh_prime_1)
     hash = intrinsic::wrapping_add(intrinsic::wrapping_multiply(intrinsic::rotate_left(hash, amount: 23), right: xxh_prime_2), right: xxh_prime_3)

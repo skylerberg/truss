@@ -270,7 +270,7 @@ and function_type cursor ~clauses:with_clauses =
   if has_requires clauses then
     begin if not (List.for_all is_named inputs) then
       Cursor.report cursor Function_type_names span
-        "A function type with `requires` names every input, as in `fn(index: USize)`, so that the \
+        "A function type with `requires` names every input, as in `fn(index: UInt64)`, so that the \
          `requires` can mention them."
     end
   else if List.exists is_named inputs then

@@ -5,7 +5,7 @@ fn converted[Value](outcome: own Result[Value, Int32]) -> Result[Value, Int64]
   todo
 }
 
-fn f(outcome: own Result[List[UInt8], Int32]) -> USize
+fn f(outcome: own Result[List[UInt8], Int32]) -> UInt64
   requires outcome is Ok(value) && value.length() == 3
   ensures result == 3
 {

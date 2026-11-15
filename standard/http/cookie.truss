@@ -135,7 +135,7 @@ public fn CookieKey.new(secret: Slice[UInt8]) -> Option[CookieKey] {
   let signing = cryptography::hkdf_sha256(secret, salt: [], information: "truss cookie signing".bytes(), length: 32)
   let sealing = cryptography::hkdf_sha256(secret, salt: [], information: "truss cookie sealing".bytes(), length: 32)
   var bytes: Array[UInt8, 32] = Array.filled(0)
-  let width: USize = 32
+  let width: UInt64 = 32
   for index in 0..width {
     if index < sealing.length() {
       bytes[index] = sealing[index]
@@ -148,10 +148,10 @@ public fn CookieKey.generate() -> CookieKey
   uses Random
 {
   var secret: List[UInt8] = []
-  let words: USize = 4
+  let words: UInt64 = 4
   for _ in 0..words {
     let word = Random.next()
-    let width: USize = 8
+    let width: UInt64 = 8
     for index in 0..width {
       mut secret.push(intrinsic::convert((word >> (8 * index)) & 255))
     }
@@ -221,7 +221,7 @@ fn open_with(key: CookieKey, name: StringSlice, value: StringSlice) -> Option[St
     return None
   }
   var nonce: Array[UInt8, 12] = Array.filled(0)
-  let width: USize = 12
+  let width: UInt64 = 12
   for index in 0..width {
     nonce[index] = bytes[index]
   }

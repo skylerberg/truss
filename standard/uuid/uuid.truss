@@ -11,7 +11,7 @@ public let Uuid.nil: Uuid = Uuid(high: 0, low: 0)
 
 public type ParseError =
   | InvalidLength
-  | InvalidCharacter(offset: USize)
+  | InvalidCharacter(offset: UInt64)
   derives Equal
 
 impl Display for ParseError {
@@ -113,7 +113,7 @@ impl Display for Uuid {
   }
 }
 
-internal fn is_hyphen_place(index: USize) -> Bool
+internal fn is_hyphen_place(index: UInt64) -> Bool
   cost time O(1)
 {
   index == 8 || index == 13 || index == 18 || index == 23
@@ -130,7 +130,7 @@ impl text::Parse for Uuid {
     }
     var high: UInt64 = 0
     var low: UInt64 = 0
-    var digits: USize = 0
+    var digits: UInt64 = 0
     for index in 0..text.length()
       invariant digits <= index
     {

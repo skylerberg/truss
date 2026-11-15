@@ -22,7 +22,7 @@ public fn contains_equal[Element: Equal](set: FiniteSet[Element], value: Element
   exists other: Element => set.contains(other) && other == value
 }
 
-public fn Set[Element: Hash + Ordered].length(self) -> USize
+public fn Set[Element: Hash + Ordered].length(self) -> UInt64
   ensures result == self.model().size()
   ensures result == (self.elements.length())
   cost time O(1)
@@ -30,14 +30,14 @@ public fn Set[Element: Hash + Ordered].length(self) -> USize
   self.elements.length()
 }
 
-internal fn Set[Element: Hash + Ordered].index_of(self, element: Element) -> USize
+internal fn Set[Element: Hash + Ordered].index_of(self, element: Element) -> UInt64
   ensures result <= self.elements.length()
   ensures result < self.elements.length() ==> self.elements.model()[result] == element
   ensures forall i in 0..self.elements.length() => i == result || !(self.elements.model()[i] == element)
   ensures (result < self.elements.length()) == contains_equal(self.model(), value: element)
   cost time O(self.elements.length() * time(Element.equal))
 {
-  var index: USize = 0
+  var index: UInt64 = 0
   var match_index = self.elements.length()
   while index < self.elements.length() && match_index == self.elements.length()
     invariant index <= self.elements.length()
@@ -114,7 +114,7 @@ public fn Set[Element: Hash + Ordered].insert(mut self, element: own Element)
   }
 }
 
-public fn Set[Element: Hash + Ordered].with_capacity(capacity: USize) -> Set[Element]
+public fn Set[Element: Hash + Ordered].with_capacity(capacity: UInt64) -> Set[Element]
   ensures result.length() == 0
   ensures forall value: Element => !result.model().contains(value)
   cost time O(1)
@@ -194,7 +194,7 @@ public fn Set[Element: Hash + Ordered].clear(mut self)
   mut self.elements.clear()
 }
 
-public fn Set[Element: Hash + Ordered].reserve(mut self, additional: USize)
+public fn Set[Element: Hash + Ordered].reserve(mut self, additional: UInt64)
   ensures identical(self.model(), old(self.model()))
   ensures self.length() == old(self.length())
 {
@@ -206,7 +206,7 @@ public fn Set[Element: Hash + Ordered].retain(mut self, keep: (fn(Element) -> Bo
   cost time O(old(self.length()) * time(keep))
 {
   let count = self.elements.length()
-  var kept_count: USize = 0
+  var kept_count: UInt64 = 0
   for index in 0..count
     invariant self.elements.length() == count
     invariant kept_count <= index
@@ -238,7 +238,7 @@ public fn Set[Element: Hash + Ordered].remove_all(mut self, other: Set[Element])
   cost time O(old(self.length()) * (1 + other.length() * time(Element.equal)))
 {
   let count = self.elements.length()
-  var kept_count: USize = 0
+  var kept_count: UInt64 = 0
   for index in 0..count
     invariant self.elements.length() == count
     invariant kept_count <= index
@@ -258,7 +258,7 @@ public fn Set[Element: Hash + Ordered].is_subset_of(self, other: Set[Element]) -
     self.model().contains(value) ==> contains_equal(other.model(), value: value))
   cost time O(self.length() * (1 + other.length() * time(Element.equal)))
 {
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < self.elements.length()
     invariant index <= self.elements.length()
     invariant forall i in 0..index => contains_equal(other.model(), value: self.elements.model()[i])
@@ -289,7 +289,7 @@ public fn Set[Element: Hash + Ordered].is_disjoint_from(self, other: Set[Element
     self.model().contains(value) ==> !contains_equal(other.model(), value: value))
   cost time O(self.length() * (1 + other.length() * time(Element.equal)))
 {
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < self.elements.length()
     invariant index <= self.elements.length()
     invariant forall i in 0..index => !contains_equal(other.model(), value: self.elements.model()[i])
@@ -372,14 +372,14 @@ public fn Set[Element: Hash + Ordered + Copyable].symmetric_difference(self, oth
 impl Iterable for Set[Element: Hash + Ordered] {
   type Element = Element
 
-  fn count(self) -> USize
+  fn count(self) -> UInt64
     ensures result == self.length()
     cost time O(1)
   {
     self.elements.length()
   }
 
-  fn element(self, position: USize) lends Element
+  fn element(self, position: UInt64) lends Element
     requires position < self.count()
     cost time O(1)
   {
@@ -400,7 +400,7 @@ internal fn Set[Element: Hash + Ordered].elements_included_in(self, other: Set[E
     self.elements.model()[i] == other.elements.model()[j])
   cost time O(self.elements.length() * (1 + other.elements.length() * time(Element.equal)))
 {
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < self.elements.length()
     invariant index <= self.elements.length()
     invariant forall i in 0..index => exists j in 0..other.elements.length() =>
@@ -431,7 +431,7 @@ impl Hash for Set[Element: Hash + Ordered] {
       combined = combined.wrapping_add(one.finish())
     }
     mut hasher.write(combined)
-    mut hasher.write(UInt64.from(self.elements.length()))
+    mut hasher.write(self.elements.length())
   }
 }
 

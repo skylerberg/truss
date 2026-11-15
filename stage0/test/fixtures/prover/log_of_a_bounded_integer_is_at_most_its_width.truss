@@ -1,10 +1,10 @@
-fn digits(value: UInt64) -> USize
+fn digits(value: UInt64) -> UInt64
   cost time O(log(value))
 {
   todo
 }
 
-fn f(value: UInt64) -> USize
+fn f(value: UInt64) -> UInt64
   cost time O(1)
 {
   digits(value)

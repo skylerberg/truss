@@ -18,7 +18,7 @@ signature carries the types, the capabilities, the contract, and the cost of
 a function, and the compiler proves that the body meets them:
 
 ```truss
-public fn binary_search(sorted: Slice[Int64], target: Int64) -> Option[USize]
+public fn binary_search(sorted: Slice[Int64], target: Int64) -> Option[UInt64]
   requires is_sorted(sorted)
   ensures match result {
     Some(index) => sorted[index] == target
@@ -262,25 +262,30 @@ Rules: [Types](SPECIFICATION.md#types).
 
 Rules: [Built-in types](SPECIFICATION.md#built-in-types).
 
-**`USize` has 64 bits on every target.** A proof about a `USize` therefore
-holds on every target, a cached proof needs no target in its key, and every
-package runs on every target. Truss builds for x86-64 and ARM64, which have
-64-bit pointers. A target with 32-bit pointers, such as 32-bit WebAssembly,
-would keep a 64-bit `USize`: a length never exceeds the address space, and
-the target's allocator would fail a size that does not fit in a pointer, as
-it fails any request it cannot meet.
+**A size, a length, and an index are `UInt64`, and an offset is `Int64`.**
+Truss has no integer type of the pointer's width. A proof about a size
+therefore holds on every target, a cached proof needs no target in its key,
+and every package runs on every target. Truss builds for x86-64 and ARM64,
+which have 64-bit pointers. A target with 32-bit pointers, such as 32-bit
+WebAssembly, would keep 64-bit sizes: a length never exceeds the address
+space, and the target's allocator would fail a size that does not fit in a
+pointer, as it fails any request it cannot meet.
 
-A `USize` of the pointer's width would need every proof to hold for both
+A size type of the pointer's width would need every proof to hold for both
 widths. Each package would then carry overflow obligations for 32-bit
 targets that most never run on, or would declare that it runs only on 64-bit
-targets and split the registry by target. A 64-bit `USize` costs a 32-bit
-target 4 more bytes per length, and a 32-bit processor two instructions for
-an addition of sizes. WebAssembly's 32-bit targets have 64-bit integers
-natively.
+targets and split the registry by target. A separate size type of 64 bits
+would need a conversion wherever a length meets another count, such as a
+file offset, and would prevent no error: an element count, a byte count, and
+an index would all have that type. A newtype, such as
+`type ByteCount(number: UInt64)`, separates two counts where an author needs
+it. 64-bit sizes cost a 32-bit target 4 more bytes per length, and a 32-bit
+processor two instructions for an addition of sizes. WebAssembly's 32-bit
+targets have 64-bit integers natively.
 
 | Rule | Reason |
 |---|---|
-| A size, a length, and an index are `USize`, and an offset is `ISize`. | A length is never negative, and a bounds check is one comparison. |
+| A size, a length, and an index are unsigned. | A length is never negative, and a bounds check is one comparison. A subtraction that may go below zero is a compile error, so an unsigned index does not wrap. |
 | A `Character` is a Unicode scalar value. | It has a fixed size, so it is `Plain`, and its definition does not change between Unicode versions. A grapheme cluster has no fixed size, and its boundaries change as Unicode adds rules, so a grapheme is a slice of its string. |
 
 ### Type definitions
@@ -531,8 +536,8 @@ A `for` loop over a collection visits it by position. The loop evaluates
 supports `for` by defining those two methods:
 
 ```truss
-fn Grid.count(self) -> USize
-fn Grid.element(self, position: USize) lends Cell
+fn Grid.count(self) -> UInt64
+fn Grid.element(self, position: UInt64) lends Cell
 ```
 
 The alternative is a generator: a method that is suspended between
@@ -662,7 +667,7 @@ cannot decide, as in `var names: List[String] = []`.
 
 A local declared from literals alone is the exception: it takes its type
 from its first use. Otherwise `let limit = 10` would fix `limit` at `Int64`,
-and code that works in `UInt8` or `USize` would annotate every such local.
+and code that works in `UInt8` or `UInt64` would annotate every such local.
 Only the type of a literal is left undecided, and it can only become a
 number type, so the declaration still tells the reader that the local is a
 number. A later use that disagrees is one error, with a note at the

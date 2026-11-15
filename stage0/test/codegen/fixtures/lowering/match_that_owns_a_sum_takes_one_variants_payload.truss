@@ -1,10 +1,10 @@
 type Problem =
   | Empty
-  | At(offset: USize)
+  | At(offset: UInt64)
 
 type Named(first: String, last: String)
 
-fn text_of(place: USize) -> Result[String, Problem] {
+fn text_of(place: UInt64) -> Result[String, Problem] {
   if place < 100 {
     return Err(Problem.At(offset: place))
   }
@@ -12,7 +12,7 @@ fn text_of(place: USize) -> Result[String, Problem] {
   Ok(own name)
 }
 
-fn named(place: USize) -> Result[Named, Problem] {
+fn named(place: UInt64) -> Result[Named, Problem] {
   if place == 0 {
     return Err(Problem.Empty)
   }
@@ -22,14 +22,14 @@ fn named(place: USize) -> Result[Named, Problem] {
   Ok(Named(first: "a${place}", last: "b"))
 }
 
-fn length_of(place: USize) -> USize {
+fn length_of(place: UInt64) -> UInt64 {
   match text_of(place) {
     Ok(text) => text.length()
     Err(_) => 0
   }
 }
 
-fn length_of_own(place: USize) -> USize {
+fn length_of_own(place: UInt64) -> UInt64 {
   let present = text_of(place)
   match own present {
     Ok(text) => text.length()
@@ -37,7 +37,7 @@ fn length_of_own(place: USize) -> USize {
   }
 }
 
-fn offset_of(place: USize) -> USize {
+fn offset_of(place: UInt64) -> UInt64 {
   match named(place) {
     Ok(name) => name.first.length() + name.last.length()
     Err(At(offset)) => offset

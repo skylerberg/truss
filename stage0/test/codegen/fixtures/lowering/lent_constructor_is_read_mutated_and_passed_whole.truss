@@ -31,7 +31,7 @@ fn evaluate(expression: Expression) -> Int64 {
   }
 }
 
-fn length_of(lookup: Option[Big]) -> USize {
+fn length_of(lookup: Option[Big]) -> UInt64 {
   match lookup {
     Some(big) => big.label.length()
     None => 0

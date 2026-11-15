@@ -1,25 +1,25 @@
 capability Counter {
-  fn next() -> USize
+  fn next() -> UInt64
 }
 
-type Tally(counts: List[USize])
+type Tally(counts: List[UInt64])
 
 impl Counter for Tally {
-  fn next(mut self) -> USize {
+  fn next(mut self) -> UInt64 {
     mut self.counts.push(1)
     self.counts.length()
   }
 }
 
-type Fixed(value: USize)
+type Fixed(value: UInt64)
 
 impl Counter for Fixed {
-  fn next(self) -> USize {
+  fn next(self) -> UInt64 {
     self.value
   }
 }
 
-fn count() -> USize
+fn count() -> UInt64
   uses Counter
 {
   Counter.next()

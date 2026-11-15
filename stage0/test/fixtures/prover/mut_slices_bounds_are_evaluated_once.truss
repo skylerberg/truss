@@ -9,7 +9,7 @@ fn f(items: mut List[Int64])
   requires items.length() >= 4
   ensures items[1] == old(items[1])
 {
-  var k: USize = 0
+  var k: UInt64 = 0
   set(mut items[{
     k += 1
     k

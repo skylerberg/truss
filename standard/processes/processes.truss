@@ -58,8 +58,8 @@ fn finish_word(words: mut List[String], word: mut String) {
 
 fn split_into_words(words: mut List[String], word: mut String, in_word: Bool, text: StringSlice) -> Bool {
   var inside = in_word
-  var start: USize = 0
-  var position: USize = 0
+  var start: UInt64 = 0
+  var position: UInt64 = 0
   while position < text.length()
     invariant start <= position
     invariant position <= text.length()
@@ -94,7 +94,7 @@ impl FromTemplate for Command {
     var words: List[String] = []
     var word = ""
     var in_word = false
-    var index: USize = 0
+    var index: UInt64 = 0
     while index < template.literals.length()
       invariant index <= template.literals.length()
       decreases template.literals.length() - index
@@ -113,7 +113,7 @@ impl FromTemplate for Command {
       return Command.new("")
     }
     var command = Command.new(words[0].slice())
-    var next: USize = 1
+    var next: UInt64 = 1
     while next < words.length()
       invariant 1 <= next
       decreases words.length() - next
@@ -132,7 +132,7 @@ public fn is_valid_command(literals: Slice[text::Literal]) -> Bool
     return false
   }
   let first = literals[0].text()
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < first.length() && is_separator(first.byte(index))
     invariant index <= first.length()
     decreases first.length() - index
@@ -323,7 +323,7 @@ public fn Child.signal(mut self, signal: Signal) -> Result[Unit, SystemError]
 public opaque type ChildInput(handle: streams::Handle)
 
 impl streams::Writer for ChildInput {
-  fn write(mut self, bytes: Slice[UInt8]) -> Result[USize, SystemError]
+  fn write(mut self, bytes: Slice[UInt8]) -> Result[UInt64, SystemError]
     uses Handles
   {
     Handles.write(self.handle, bytes: bytes)
@@ -345,7 +345,7 @@ public fn ChildInput.close(own self) -> Result[Unit, SystemError]
 public opaque type ChildOutput(handle: streams::Handle)
 
 impl streams::Reader for ChildOutput {
-  fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
+  fn read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError]
     uses Handles
   {
     Handles.read(self.handle, buffer: mut buffer, limit: limit)

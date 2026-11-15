@@ -1,7 +1,4 @@
-(* Layouts are the same on every system code is built for: each has 64-bit
-   pointers, and [USize] and [ISize] have 64 bits. *)
-
-type integer = Int8 | Int16 | Int32 | Int64 | UInt8 | UInt16 | UInt32 | UInt64 | USize | ISize
+type integer = Int8 | Int16 | Int32 | Int64 | UInt8 | UInt16 | UInt32 | UInt64
 
 (* A pointer's target, which matters only to the C that is emitted: a
    value of a type, the heap block of an [indirect] variant, code, or

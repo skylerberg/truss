@@ -17,8 +17,6 @@ type ty =
       (** [any Cursor[Element = Int64]], with every associated type fixed, sorted by name *)
   | Never
 
-(* A [USize] generic argument is a value, as in [Array[UInt8, 32]], and a
-   capability parameter's is the set of capabilities it stands for, sorted. *)
 and argument = Type of ty | Value of Z.t | Capabilities of Path.t list
 
 and function_type = { parameters : (mode * ty) list; result : result; uses : Path.t list }

@@ -1,4 +1,4 @@
-fn spoil(others: mut List[Bag]) -> USize {
+fn spoil(others: mut List[Bag]) -> UInt64 {
   mut others.push(Bag(items: []))
   0
 }

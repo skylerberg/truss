@@ -1,7 +1,7 @@
-fn f(couple: Couple) -> USize
+fn f(couple: Couple) -> UInt64
   ensures result == 2
 {
-  var seen: USize = 0
+  var seen: UInt64 = 0
   for value in couple
     invariant seen == visited.length()
   {

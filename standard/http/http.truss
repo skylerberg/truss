@@ -184,7 +184,7 @@ public fn Headers.new() -> Headers {
   Headers(entries: [])
 }
 
-public fn Headers.length(self) -> USize {
+public fn Headers.length(self) -> UInt64 {
   self.entries.length()
 }
 
@@ -309,11 +309,11 @@ public fn Request.json[Item: serialization::Deserialize](own self) -> Result[Ite
 type Credit(outbound: tasks::Channel[flow::Outbound], stream: UInt32)
 
 type Source =
-  | Memory(bytes: List[UInt8], position: USize)
+  | Memory(bytes: List[UInt8], position: UInt64)
   | Channel(chunks: tasks::Channel[flow::Chunk], is_ended: Bool, credit: Option[Credit])
   | Remote(link: Link, framing: Framing, stream: UInt32, is_reusable: Bool, is_ended: Bool)
 
-public opaque type Body(source: Source, pending: List[UInt8], limit: USize, received: USize)
+public opaque type Body(source: Source, pending: List[UInt8], limit: UInt64, received: UInt64)
 
 public fn Body.empty() -> Body {
   Body(source: Source.Memory(bytes: [], position: 0), pending: [], limit: 0, received: 0)
@@ -328,7 +328,7 @@ public fn Body.from_text(text: StringSlice) -> Body {
   Body.from_bytes(text.bytes().to_list())
 }
 
-fn channel_body(chunks: tasks::Channel[flow::Chunk], credit: own Option[Credit], limit: USize) -> Body {
+fn channel_body(chunks: tasks::Channel[flow::Chunk], credit: own Option[Credit], limit: UInt64) -> Body {
   Body(source: Source.Channel(chunks: chunks.copy(), is_ended: false, credit: own credit), pending: [], limit: limit, received: 0)
 }
 
@@ -401,7 +401,7 @@ fn next_chunk(source: mut Source) -> Result[Option[List[UInt8]], Error]
   }
 }
 
-public fn Body.read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, Error]
+public fn Body.read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, Error]
   uses Handles, Tasks
   ensures !(result is Ok(count) && (count > limit || buffer.length() != old(buffer.length()) + count))
 {
@@ -450,7 +450,7 @@ public fn Body.copy_to[Sink: streams::Writer](mut self, sink: mut Sink) -> Resul
 {
   let first = map::exchange(mut self.pending, value: [])
   system(mut sink.write_all(first.slice()))?
-  var copied: UInt64 = intrinsic::convert(first.length())
+  var copied: UInt64 = first.length()
   while true {
     match next_chunk(mut self.source)? {
       Some(piece) => {
@@ -459,7 +459,7 @@ public fn Body.copy_to[Sink: streams::Writer](mut self, sink: mut Sink) -> Resul
           return Err(Error.BodyTooLarge)
         }
         system(mut sink.write_all(piece.slice()))?
-        copied = copied.saturating_add(intrinsic::convert(piece.length()))
+        copied = copied.saturating_add(piece.length())
       }
       None => return Ok(copied)
     }
@@ -595,7 +595,7 @@ public fn Responder.write(mut self, bytes: Slice[UInt8]) -> Result[Unit, Error]
   if bytes.is_empty() {
     return Ok(Unit)
   }
-  self.bytes_sent = self.bytes_sent.saturating_add(intrinsic::convert(bytes.length()))
+  self.bytes_sent = self.bytes_sent.saturating_add(bytes.length())
   deliver(self, message: flow::Outbound.Data(stream: self.stream, bytes: bytes.to_list(), is_end: false, ack: self.ack.copy()))
 }
 
@@ -631,7 +631,7 @@ public fn Responder.send(mut self, response: own Response) -> Result[Unit, Error
   if is_end {
     return Ok(Unit)
   }
-  self.bytes_sent = self.bytes_sent.saturating_add(intrinsic::convert(response.body.length()))
+  self.bytes_sent = self.bytes_sent.saturating_add(response.body.length())
   deliver(self, message: flow::Outbound.Data(stream: self.stream, bytes: own response.body, is_end: true, ack: self.ack.copy()))
 }
 
@@ -782,7 +782,7 @@ public fn parse_date(text: StringSlice) -> Option[Instant] {
   date::parse(text)
 }
 
-public type Limits(head_bytes: USize = 65536, body_bytes: USize = 8388608)
+public type Limits(head_bytes: UInt64 = 65536, body_bytes: UInt64 = 8388608)
   derives Equal
 
 type Head(method: Method, target: String, version_one_zero: Bool, headers: Headers)
@@ -801,13 +801,13 @@ fn line_text(bytes: own List[UInt8]) -> Result[String, Error] {
   }
 }
 
-fn fill[Stream: streams::Duplex](connection: Stream, inbox: mut two::Inbox) -> Result[USize, Error]
+fn fill[Stream: streams::Duplex](connection: Stream, inbox: mut two::Inbox) -> Result[UInt64, Error]
   uses Handles, Tasks
 {
   system(connection.receive(mut inbox.bytes, limit: 16384))
 }
 
-fn take_front(inbox: mut two::Inbox, count: USize) -> List[UInt8]
+fn take_front(inbox: mut two::Inbox, count: UInt64) -> List[UInt8]
   requires count <= inbox.bytes.length()
 {
   let rest = mut inbox.bytes.split_off(count)
@@ -817,11 +817,11 @@ fn take_front(inbox: mut two::Inbox, count: USize) -> List[UInt8]
 fn read_line[Stream: streams::Duplex](
   connection: Stream,
   inbox: mut two::Inbox,
-  budget: mut USize,
+  budget: mut UInt64,
 ) -> Result[Option[String], Error]
   uses Handles, Tasks
 {
-  var searched: USize = 0
+  var searched: UInt64 = 0
   while true {
     var index = searched
     while index < inbox.bytes.length() {
@@ -866,7 +866,7 @@ fn is_token(text: StringSlice) -> Bool {
 fn read_headers[Stream: streams::Duplex](
   connection: Stream,
   inbox: mut two::Inbox,
-  budget: mut USize,
+  budget: mut UInt64,
 ) -> Result[Headers, Error]
   uses Handles, Tasks
 {
@@ -934,8 +934,8 @@ fn read_head[Stream: streams::Duplex](
   )))
 }
 
-fn content_length(headers: Headers) -> Result[Option[USize], Error] {
-  var declared: Option[USize] = None
+fn content_length(headers: Headers) -> Result[Option[UInt64], Error] {
+  var declared: Option[UInt64] = None
   for entry in headers.entries() {
     if same_name(entry.name.slice(), second: "Content-Length") {
       let digits = entry.value.slice()
@@ -948,7 +948,7 @@ fn content_length(headers: Headers) -> Result[Option[USize], Error] {
       if !digits_only {
         return Err(malformed("a Content-Length that is not a number"))
       }
-      match USize.parse(digits) {
+      match UInt64.parse(digits) {
         Ok(length) => {
           if declared is Some(other) && other != length {
             return Err(malformed("two different Content-Length headers"))
@@ -964,8 +964,8 @@ fn content_length(headers: Headers) -> Result[Option[USize], Error] {
 
 type Framing =
   | Empty
-  | Length(remaining: USize)
-  | Chunked(left: USize, needs_line_end: Bool, is_finished: Bool)
+  | Length(remaining: UInt64)
+  | Chunked(left: UInt64, needs_line_end: Bool, is_finished: Bool)
   | UntilClose
 
 fn framing_of(headers: Headers, is_response: Bool) -> Result[Framing, Error] {
@@ -993,7 +993,7 @@ fn framing_of(headers: Headers, is_response: Bool) -> Result[Framing, Error] {
   }
 }
 
-fn take_some[Stream: streams::Duplex](connection: Stream, inbox: mut two::Inbox, limit: USize) -> Result[List[UInt8], Error]
+fn take_some[Stream: streams::Duplex](connection: Stream, inbox: mut two::Inbox, limit: UInt64) -> Result[List[UInt8], Error]
   uses Handles, Tasks
 {
   if inbox.bytes.is_empty() {
@@ -1045,7 +1045,7 @@ fn next_piece[Stream: streams::Duplex](
           }
           return Ok(Some(own piece))
         }
-        var budget: USize = 4096
+        var budget: UInt64 = 4096
         if needs_line_end {
           match read_line(connection, inbox: mut inbox, budget: mut budget)? {
             Some(ending) => {
@@ -1065,12 +1065,12 @@ fn next_piece[Stream: streams::Duplex](
           Some(at) => line.slice().part(0, to: at).trim()
           None => line.slice().trim()
         }
-        let size = match USize.parse_radix(size_text, radix: 16) {
+        let size = match UInt64.parse_radix(size_text, radix: 16) {
           Ok(size) => size
           Err(_) => return Err(malformed("a chunk size that is not a hexadecimal number"))
         }
         if size == 0 {
-          var trailer_budget: USize = 65536
+          var trailer_budget: UInt64 = 65536
           let _ = read_headers(connection, inbox: mut inbox, budget: mut trailer_budget)?
           is_finished = true
           return Ok(None)
@@ -1086,13 +1086,13 @@ fn pump_body[Stream: streams::Duplex](
   inbox: mut two::Inbox,
   framing: own Framing,
   chunks: tasks::Channel[flow::Chunk],
-  limit: USize,
+  limit: UInt64,
 ) -> Bool
   uses Handles, Tasks
 {
   var remaining = own framing
   var is_listening = true
-  var drained: USize = 0
+  var drained: UInt64 = 0
   while true {
     match next_piece(connection, inbox: mut inbox, framing: mut remaining) {
       Ok(Some(piece)) => {
@@ -1294,7 +1294,7 @@ public type ServerOptions(
   grace_seconds: Int64 = 30,
   head_timeout_seconds: Int64 = 10,
   request_timeout_seconds: Int64 = 0,
-  connection_limit: USize = 1024,
+  connection_limit: UInt64 = 1024,
   trusted_proxies: List[network::IpNetwork] = [],
 )
   derives Equal
@@ -1966,7 +1966,7 @@ fn path_pieces(path: StringSlice) -> List[StringSlice]
   cost time finite
 {
   var pieces: List[StringSlice] = []
-  var start: USize = 0
+  var start: UInt64 = 0
   for index in 0..path.length() {
     if path.byte(index) == 47 {
       if start <= index {
@@ -2095,7 +2095,7 @@ public fn Request.matches(self, route: Route) -> Option[Parameters] {
   }
   var names: List[String] = []
   var values: List[String] = []
-  var index: USize = 0
+  var index: UInt64 = 0
   for segment in route.segments {
     match segment {
       Fixed(text) => {
@@ -2138,15 +2138,15 @@ public fn Request.matches(self, route: Route) -> Option[Parameters] {
   Some(Parameters(names: own names, values: own values))
 }
 
-public type RetryPolicy(attempts: USize = 1, base_milliseconds: Int64 = 100, maximum_milliseconds: Int64 = 10000)
+public type RetryPolicy(attempts: UInt64 = 1, base_milliseconds: Int64 = 100, maximum_milliseconds: Int64 = 10000)
   derives Equal
 
 public type ClientOptions(
   timeout_seconds: Int64 = 30,
   limits: Limits = Limits(head_bytes: 65536, body_bytes: 67108864),
   roots: Option[List[x509::Certificate]] = None,
-  idle_connections: USize = 8,
-  redirects: USize = 10,
+  idle_connections: UInt64 = 8,
+  redirects: UInt64 = 10,
   retry: RetryPolicy = RetryPolicy(),
   stores_cookies: Bool = false,
   proxy: Option[Proxy] = None,
@@ -2309,7 +2309,7 @@ fn is_decodable(coding: StringSlice) -> Bool {
   coding == "gzip".slice() || coding == "x-gzip".slice() || coding == "br".slice() || coding == "zstd".slice()
 }
 
-fn decoded_body(bytes: Slice[UInt8], coding: StringSlice, limit: USize) -> Result[List[UInt8], Error] {
+fn decoded_body(bytes: Slice[UInt8], coding: StringSlice, limit: UInt64) -> Result[List[UInt8], Error] {
   if coding == "br".slice() {
     return match brotli::decompress(bytes, limit: limit) {
       Ok(plain) => Ok(own plain)
@@ -2384,11 +2384,11 @@ fn authority_of(url: url::Url) -> String {
   authority
 }
 
-fn sends_length(method: Method, body_length: USize) -> Bool {
+fn sends_length(method: Method, body_length: UInt64) -> Bool {
   body_length > 0 || method == Method.Post || method == Method.Put || method == Method.Patch
 }
 
-fn request_head(method: Method, url: url::Url, headers: Headers, body_length: USize, forwarding: Option[Forwarding] = None) -> List[UInt8] {
+fn request_head(method: Method, url: url::Url, headers: Headers, body_length: UInt64, forwarding: Option[Forwarding] = None) -> List[UInt8] {
   var head: List[UInt8] = List.with_capacity(256)
   push_text(mut head, text: "${method} ".slice())
   match forwarding {
@@ -2432,7 +2432,7 @@ fn request_head(method: Method, url: url::Url, headers: Headers, body_length: US
   head
 }
 
-fn request_fields(method: Method, url: url::Url, headers: Headers, body_length: USize) -> List[hpack::Field] {
+fn request_fields(method: Method, url: url::Url, headers: Headers, body_length: UInt64) -> List[hpack::Field] {
   var fields: List[hpack::Field] = [
     hpack::Field(name: ":method", value: "${method}"),
     hpack::Field(name: ":scheme", value: url.scheme().to_string()),
@@ -2681,7 +2681,7 @@ fn take_pooled(pool: mut List[Pooled], origin: StringSlice) -> Option[Link] {
   None
 }
 
-fn keep(pool: mut List[Pooled], origin: own String, link: own Option[Link], limit: USize) {
+fn keep(pool: mut List[Pooled], origin: own String, link: own Option[Link], limit: UInt64) {
   match own link {
     Some(kept) => {
       if limit == 0 {
@@ -2737,7 +2737,7 @@ fn Client.discard(mut self, origin: own String, body: own Body)
   uses Handles, Tasks
 {
   var remaining = own body
-  var total: USize = 0
+  var total: UInt64 = 0
   while total <= 65536 {
     var buffer: List[UInt8] = []
     match mut remaining.read(mut buffer, limit: 16384) {
@@ -2790,7 +2790,7 @@ fn longest_wait(policy: RetryPolicy) -> Int64
   }
 }
 
-fn backoff_milliseconds(policy: RetryPolicy, attempt: USize) -> Int64
+fn backoff_milliseconds(policy: RetryPolicy, attempt: UInt64) -> Int64
   uses Random
   ensures result >= 0 && result <= 86400000
 {
@@ -2858,7 +2858,7 @@ public fn Client.stream[Output, capability Granted](
   var request_headers = headers.copy()
   var request_body = body.copy()
   var redirects_left = self.options.redirects
-  var attempt: USize = 1
+  var attempt: UInt64 = 1
   while true {
     let target = target_of(address)?
     var sent = request_headers.copy()
@@ -3040,7 +3040,7 @@ public opaque type WebSocketReader(
   fragments: List[UInt8],
   fragment_opcode: UInt8,
   is_fragment_compressed: Bool,
-  limit: USize,
+  limit: UInt64,
   is_server: Bool,
   is_deflate: Bool,
   sending: Sending,
@@ -3049,7 +3049,7 @@ public opaque type WebSocketReader(
 
 public opaque type WebSocketWriter(sending: Sending, compresses: Bool)
 
-let compression_minimum: USize = 256
+let compression_minimum: UInt64 = 256
 
 fn send_message(sending: mut Sending, opcode: UInt8, payload: Slice[UInt8], compresses: Bool) -> Result[Unit, Error]
   uses Tasks
@@ -3245,7 +3245,7 @@ fn new_socket(
   is_server: Bool,
   masks: own Option[random::Generator],
   protocol: own Option[String],
-  limit: USize,
+  limit: UInt64,
   deflate: Option[websocket::Deflate],
 ) -> WebSocket {
   let reader_masks = match masks {
@@ -3296,7 +3296,7 @@ public fn websocket(
   request: own Request,
   responder: mut Responder,
   protocols: Slice[String] = [],
-  message_limit: USize = 16777216,
+  message_limit: UInt64 = 16777216,
   compresses: Bool = true,
 ) -> Result[WebSocket, Error]
   uses Tasks
@@ -3404,7 +3404,7 @@ public fn EventParser.new() -> EventParser {
   EventParser(pending: [], data: "", has_data: false, name: None, id: None, retry: None, is_started: false)
 }
 
-fn line_end(bytes: Slice[UInt8]) -> Option[USize]
+fn line_end(bytes: Slice[UInt8]) -> Option[UInt64]
   ensures !(result is Some(index) && index >= bytes.length())
 {
   for index in 0..bytes.length() {
@@ -3531,7 +3531,7 @@ fn run_websocket[Stream: streams::Duplex, Output, capability Granted](
   key: StringSlice,
   protocols: Slice[String],
   limits: Limits,
-  message_limit: USize,
+  message_limit: UInt64,
   is_deflate_offered: Bool,
   seed: UInt64,
   session: (fn(mut WebSocket) -> Output uses Granted),
@@ -3559,7 +3559,7 @@ fn run_websocket[Stream: streams::Duplex, Output, capability Granted](
     Ok(agreed) => agreed
     Err(reason) => return Err(malformed(reason.slice()))
   }
-  let unlimited: USize = 18446744073709551615
+  let unlimited: UInt64 = 18446744073709551615
   let chunks = tasks::Channel[flow::Chunk].new(capacity: 16)
   let outbound = tasks::Channel[flow::Outbound].new(capacity: 16)
   concurrent {
@@ -3591,7 +3591,7 @@ public fn Client.websocket[Output, capability Granted](
   session: (fn(mut WebSocket) -> Output uses Granted),
   headers: Headers = Headers(entries: []),
   protocols: List[String] = [],
-  message_limit: USize = 16777216,
+  message_limit: UInt64 = 16777216,
   compresses: Bool = true,
 ) -> Result[Output, Error]
   uses NetworkClient, Handles, Tasks, Random, Clock, Panic, Granted
@@ -3608,7 +3608,7 @@ public fn Client.websocket[Output, capability Granted](
   var key_bytes: List[UInt8] = []
   let first = Random.next()
   let second = Random.next()
-  let width: USize = 8
+  let width: UInt64 = 8
   for index in 0..width {
     mut key_bytes.push(intrinsic::convert((first >> (8 * index)) & 255))
     mut key_bytes.push(intrinsic::convert((second >> (8 * index)) & 255))

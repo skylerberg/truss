@@ -1,5 +1,5 @@
-type Cell(index: USize)
+type Cell(index: UInt64)
 
-fn count[Cell](items: List[Cell]) -> USize {
+fn count[Cell](items: List[Cell]) -> UInt64 {
   items.length()
 }

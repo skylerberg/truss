@@ -1,4 +1,4 @@
-fn f(count: Int64) -> USize
+fn f(count: Int64) -> UInt64
   ensures result == 1
 {
   "${count}".length()

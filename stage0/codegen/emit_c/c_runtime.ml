@@ -13,7 +13,7 @@ let bug format = Compiler_bug.bug ~stage:"Emit_c" format
 let anchor_symbol definition = "t_Anchor_" ^ Instance.path_symbol definition
 
 let anchor_struct =
-  "struct t_anchor {\n  const uint8_t *path;\n  t_usize path_length;\n  uint32_t line;\n};\n"
+  "struct t_anchor {\n  const uint8_t *path;\n  uint64_t path_length;\n  uint32_t line;\n};\n"
 
 let integer_c : Memory_layout.integer -> string = function
   | Int8 -> "int8_t"
@@ -24,22 +24,17 @@ let integer_c : Memory_layout.integer -> string = function
   | UInt16 -> "uint16_t"
   | UInt32 -> "uint32_t"
   | UInt64 -> "uint64_t"
-  | USize -> "t_usize"
-  | ISize -> "t_isize"
 
 let unsigned_c : Memory_layout.integer -> string = function
   | Int8 | UInt8 -> "uint8_t"
   | Int16 | UInt16 -> "uint16_t"
   | Int32 | UInt32 -> "uint32_t"
   | Int64 | UInt64 -> "uint64_t"
-  | USize | ISize -> "t_usize"
 
 let signed : Memory_layout.integer -> bool = function
-  | Int8 | Int16 | Int32 | Int64 | ISize -> true
-  | UInt8 | UInt16 | UInt32 | UInt64 | USize -> false
+  | Int8 | Int16 | Int32 | Int64 -> true
+  | UInt8 | UInt16 | UInt32 | UInt64 -> false
 
-(* The declarations every file starts with: the fixed-width integers, from the
-   compiler's own predefined macros, [USize] and [ISize], and the runtime. *)
 let runtime_declarations =
   String.concat ""
     [
@@ -51,21 +46,19 @@ let runtime_declarations =
       "typedef __UINT16_TYPE__ uint16_t;\n";
       "typedef __UINT32_TYPE__ uint32_t;\n";
       "typedef __UINT64_TYPE__ uint64_t;\n";
-      "typedef __UINT64_TYPE__ t_usize;\n";
-      "typedef __INT64_TYPE__ t_isize;\n";
       anchor_struct;
       "struct t_site {\n\
       \  const struct t_anchor *anchor;\n\
       \  uint32_t line;\n\
       \  uint32_t column;\n\
        };\n";
-      "_Noreturn void t_runtime_panic(const uint8_t *message, t_usize length, const struct \
+      "_Noreturn void t_runtime_panic(const uint8_t *message, uint64_t length, const struct \
        t_anchor *anchor, uint32_t line, uint32_t column);\n";
-      "_Noreturn void t_runtime_assertion_failed(const uint8_t *message, t_usize length, const \
+      "_Noreturn void t_runtime_assertion_failed(const uint8_t *message, uint64_t length, const \
        struct t_anchor *anchor, uint32_t line, uint32_t column);\n";
-      "_Noreturn void t_runtime_todo(const uint8_t *message, t_usize length, const struct t_anchor \
-       *anchor, uint32_t line, uint32_t column);\n";
-      "void t_runtime_echo(const uint8_t *text, t_usize length, const struct t_anchor *anchor, \
+      "_Noreturn void t_runtime_todo(const uint8_t *message, uint64_t length, const struct \
+       t_anchor *anchor, uint32_t line, uint32_t column);\n";
+      "void t_runtime_echo(const uint8_t *text, uint64_t length, const struct t_anchor *anchor, \
        uint32_t line, uint32_t column);\n";
       "_Noreturn void t_runtime_compiler_bug(void);\n";
       "struct t_evidence {\n\
@@ -73,22 +66,23 @@ let runtime_declarations =
       \  const void *const *table;\n\
       \  const struct t_evidence *const *outer;\n\
        };\n";
-      "void *t_runtime_allocate(t_usize size, t_usize alignment);\n";
-      "void *t_runtime_reallocate(void *pointer, t_usize old_size, t_usize size, t_usize alignment);\n";
+      "void *t_runtime_allocate(uint64_t size, uint64_t alignment);\n";
+      "void *t_runtime_reallocate(void *pointer, uint64_t old_size, uint64_t size, uint64_t \
+       alignment);\n";
       "void t_runtime_free(void *pointer);\n";
       "struct t_branch {\n  void (*run)(void *environment);\n  void *environment;\n};\n";
-      "void t_runtime_parallel(const struct t_branch *branches, t_usize count);\n";
+      "void t_runtime_parallel(const struct t_branch *branches, uint64_t count);\n";
       "void t_runtime_parallel_range(void (*body)(void *environment, uint64_t first, uint64_t \
        last), void *environment, uint64_t first, uint64_t last);\n";
-      "t_usize t_runtime_coroutine_start(void (*code)(void *environment, uint64_t item), void \
+      "uint64_t t_runtime_coroutine_start(void (*code)(void *environment, uint64_t item), void \
        *environment, uint64_t item);\n";
-      "uint8_t t_runtime_coroutine_resume(t_usize coroutine);\n";
+      "uint8_t t_runtime_coroutine_resume(uint64_t coroutine);\n";
       "void t_runtime_coroutine_suspend(void);\n";
       "uint8_t t_runtime_tasks_spawn(uint64_t group, void (*code)(void *environment, uint64_t \
        item), void *environment, uint64_t item);\n";
       "void t_runtime_run_test(uint32_t index);\n";
       "void t_runtime_report_tests_to(int32_t descriptor);\n";
-      "t_usize t_runtime_live_blocks(void);\n";
+      "uint64_t t_runtime_live_blocks(void);\n";
     ]
 
 (* Small functions that generated code calls, each emitted only into the
@@ -101,7 +95,7 @@ let helpers =
   void (*drop)(void *);
   void *target;
   const void *source;
-  t_usize size;
+  uint64_t size;
 };
 struct t_lend_block {
   struct t_lend_block *next;
@@ -109,8 +103,8 @@ struct t_lend_block {
 struct t_lend {
   struct t_lend_deferred *deferred;
   struct t_lend_block *blocks;
-  t_usize used;
-  t_usize lends;
+  uint64_t used;
+  uint64_t lends;
   _Alignas(16) uint8_t storage[128];
 };
 struct t_lend_mark {
@@ -118,19 +112,19 @@ struct t_lend_mark {
   struct t_lend_deferred *deferred_after;
   struct t_lend_block *blocks_before;
   struct t_lend_block *blocks_after;
-  t_usize used_before;
-  t_usize used_after;
+  uint64_t used_before;
+  uint64_t used_after;
   uint8_t is_lent;
 };
-__attribute__((unused)) static inline void *t_lend_allocate(struct t_lend *lend, t_usize size, t_usize alignment) {
-  t_usize start = (lend->used + alignment - 1) & ~(alignment - 1);
+__attribute__((unused)) static inline void *t_lend_allocate(struct t_lend *lend, uint64_t size, uint64_t alignment) {
+  uint64_t start = (lend->used + alignment - 1) & ~(alignment - 1);
   if (alignment <= 16 && start + size <= sizeof lend->storage) {
     lend->used = start + size;
     return lend->storage + start;
   }
-  t_usize block_alignment =
+  uint64_t block_alignment =
     alignment < _Alignof(struct t_lend_block) ? _Alignof(struct t_lend_block) : alignment;
-  t_usize header = (sizeof(struct t_lend_block) + block_alignment - 1) & ~(block_alignment - 1);
+  uint64_t header = (sizeof(struct t_lend_block) + block_alignment - 1) & ~(block_alignment - 1);
   struct t_lend_block *block = t_runtime_allocate(header + size, block_alignment);
   block->next = lend->blocks;
   lend->blocks = block;
@@ -153,7 +147,7 @@ __attribute__((unused)) static inline void t_lend_defer_drop(struct t_lend *lend
   deferred->target = value;
 }
 __attribute__((unused)) static inline void t_lend_defer_write_back(struct t_lend *lend, void *destination,
-                                           const void *source, t_usize size) {
+                                           const void *source, uint64_t size) {
   struct t_lend_deferred *deferred = t_lend_defer(lend);
   deferred->target = destination;
   deferred->source = source;
@@ -218,7 +212,7 @@ __attribute__((unused)) static inline void t_lend_transfer(struct t_lend *lend, 
 |}
     );
     ( "t_compare_bytes",
-      {|static inline int32_t t_compare_bytes(const void *first, const void *second, t_usize count) {
+      {|static inline int32_t t_compare_bytes(const void *first, const void *second, uint64_t count) {
   int order = __builtin_memcmp(first, second, count);
   return (order > 0) - (order < 0);
 }

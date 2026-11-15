@@ -189,7 +189,7 @@ public fn log_requests[capability Granted](
   log::information("request", fields: own fields)
 }
 
-public fn Request.with_body_limit(own self, bytes: USize) -> Request {
+public fn Request.with_body_limit(own self, bytes: UInt64) -> Request {
   var limited = own self
   if bytes < limited.body.limit {
     limited.body.limit = bytes
@@ -197,7 +197,7 @@ public fn Request.with_body_limit(own self, bytes: USize) -> Request {
   limited
 }
 
-public type RateLimit(requests: UInt64 = 60, per_seconds: Int64 = 60, burst: UInt64 = 0, keys: USize = 10000)
+public type RateLimit(requests: UInt64 = 60, per_seconds: Int64 = 60, burst: UInt64 = 0, keys: UInt64 = 10000)
   derives Equal
 
 type Rates(milli_capacity: Int64, requests: Int64, per_seconds: Int64)

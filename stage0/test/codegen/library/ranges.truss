@@ -14,7 +14,7 @@ fn backwards(range: Range[Int64]) -> List[Int64] {
   items
 }
 
-fn stepped(range: Range[Int64], step: USize) -> List[Int64] {
+fn stepped(range: Range[Int64], step: UInt64) -> List[Int64] {
   var items: List[Int64] = []
   for value in range.step_by(step) {
     mut items.push(value)
@@ -61,12 +61,12 @@ test "a range has a length when it fits" {
   let whole: Range[UInt64] = UInt64.minimum..=UInt64.maximum
   assert whole.length() is None
   let nearly: Range[UInt64] = UInt64.minimum..UInt64.maximum
-  assert nearly.length() == Some(USize.maximum)
+  assert nearly.length() == Some(UInt64.maximum)
 }
 
 test "a range of a narrow type reaches its largest value without overflowing" {
   var total: UInt64 = 0
-  var count: USize = 0
+  var count: UInt64 = 0
   let high: Range[UInt8] = 250..=255
   for value in high {
     total += UInt64.from(value)

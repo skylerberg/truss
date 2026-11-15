@@ -1,4 +1,4 @@
-type Counted(view: Slice[Int64], count: USize)
+type Counted(view: Slice[Int64], count: UInt64)
 
 fn f(items: mut List[Int64]) {
   let _ = Counted(count: grow(mut items), view: items[..1])

@@ -1,4 +1,4 @@
-fn store(samples: mut Samples, position: USize)
+fn store(samples: mut Samples, position: UInt64)
   requires position < samples.values.length()
 {
   samples[position] = 1

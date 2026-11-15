@@ -1,10 +1,10 @@
-fn sum(first: own USize, second: USize) {}
+fn sum(first: own UInt64, second: UInt64) {}
 
-fn bump(count: mut USize) -> USize {
+fn bump(count: mut UInt64) -> UInt64 {
   count = 1
   count
 }
 
-fn f(count: mut USize) {
+fn f(count: mut UInt64) {
   sum(count, second: bump(mut count))
 }

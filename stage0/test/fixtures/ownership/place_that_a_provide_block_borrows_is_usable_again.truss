@@ -1,4 +1,4 @@
-fn f() -> USize {
+fn f() -> UInt64 {
   var tally = Tally(counts: [])
   let first = provide mut tally {
     count()

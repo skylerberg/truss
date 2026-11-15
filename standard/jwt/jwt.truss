@@ -169,7 +169,7 @@ fn verifies(key: jwk::Key, algorithm: Algorithm, input: Slice[UInt8], signature:
         return false
       }
       var bytes: Array[UInt8, 64] = Array.filled(0)
-      let width: USize = 64
+      let width: UInt64 = 64
       for index in 0..width {
         bytes[index] = signature[index]
       }

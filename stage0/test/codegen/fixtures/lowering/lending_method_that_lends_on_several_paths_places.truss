@@ -26,15 +26,15 @@ fn Names.built(self, fresh: Bool) lends String {
   }
 }
 
-type Numbered(index: USize, value: String)
+type Numbered(index: UInt64, value: String)
 
-fn Names.numbered(self, index: USize) lends Numbered {
+fn Names.numbered(self, index: UInt64) lends Numbered {
   Numbered(index: index, value: self.others[index])
 }
 
-type Slot(index: USize, name: String)
+type Slot(index: UInt64, name: String)
 
-fn Names.slot(mut self, index: USize) lends mut Slot {
+fn Names.slot(mut self, index: UInt64) lends mut Slot {
   Slot(index: index, name: mut self.others[index])
 }
 
@@ -58,7 +58,7 @@ test "more constructors of lent places" {
 
   var many = Names(first: "${1}a", second: "${2}b", others: ["${3}rd", "${4}th!", "${5}th!!"])
   assert many.both() is None
-  var total: USize = 0
+  var total: UInt64 = 0
   for index in 0..many.others.length() {
     total += many.numbered(index).index + many.numbered(index).value.length()
   }

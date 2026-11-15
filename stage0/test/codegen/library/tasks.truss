@@ -122,7 +122,7 @@ test "the messages of each sender arrive in the order it sent them" {
 }
 
 test "send waits while the channel is full and receive waits while it is empty" {
-  let capacities: List[USize] = [0, 1, 2, 64]
+  let capacities: List[UInt64] = [0, 1, 2, 64]
   let seeds: UInt64 = 24
   for seed in 0..seeds {
     for capacity in capacities {
@@ -159,12 +159,12 @@ test "a send to a channel of capacity 0 returns after a task has received the me
 }
 
 test "every message of several senders arrives once, in each sender's order" {
-  let senders: USize = 4
-  let steps: USize = 5
+  let senders: UInt64 = 4
+  let steps: UInt64 = 5
   let seeds: UInt64 = 24
   for seed in 0..seeds {
     provide tasks::SeededTasks.new(seed) {
-      let numbers = tasks::Channel[USize].new(capacity: 2)
+      let numbers = tasks::Channel[UInt64].new(capacity: 2)
       concurrent {
         {
           concurrent for sender in 0..senders {
@@ -176,7 +176,7 @@ test "every message of several senders arrives once, in each sender's order" {
         }
         let received = collect(numbers)
       }
-      var next: List[USize] = [0, 0, 0, 0]
+      var next: List[UInt64] = [0, 0, 0, 0]
       for number in received {
         let sender = number / 10
         assert sender < 4 && number % 10 == next[sender]

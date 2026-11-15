@@ -12,7 +12,7 @@ fn add_all(items: List[Int64], amount: Int64) -> List[Int64] {
   items.map(fn(item) { item + amount })
 }
 
-fn longest_over(names: List[String], least: USize) -> USize {
+fn longest_over(names: List[String], least: UInt64) -> UInt64 {
   var most = least
   let lengths = names.map(fn(name) { name.length() })
   for length in lengths {

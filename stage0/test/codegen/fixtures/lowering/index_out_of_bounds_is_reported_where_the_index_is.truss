@@ -1,6 +1,6 @@
-type Grid(cells: List[Int64], width: USize)
+type Grid(cells: List[Int64], width: UInt64)
 
-fn Grid.cell(self, row: USize, column: USize) lends Int64 {
+fn Grid.cell(self, row: UInt64, column: UInt64) lends Int64 {
   self.cells[row * self.width + column]
 }
 

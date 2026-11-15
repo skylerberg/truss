@@ -1,6 +1,6 @@
-type Reader(bytes: Slice[UInt8], position: USize)
+type Reader(bytes: Slice[UInt8], position: UInt64)
 
-fn Reader.read(mut self, buffer: mut List[UInt8], limit: USize) -> USize {
+fn Reader.read(mut self, buffer: mut List[UInt8], limit: UInt64) -> UInt64 {
   mut buffer.push(self.bytes[self.position])
   self.position = self.position + limit
   limit

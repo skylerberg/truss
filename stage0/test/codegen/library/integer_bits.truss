@@ -110,7 +110,7 @@ test "an integer counts its ones, its zeros, and the zeros at each end" {
   assert wide.leading_zeros() == 0
   assert wide.trailing_zeros() == 63
   assert wide.count_ones() == 1
-  let size: USize = 0xff00
+  let size: UInt64 = 0xff00
   assert size.count_ones() == 8
   assert size.trailing_zeros() == 8
   assert size.leading_zeros() == 48
@@ -137,7 +137,7 @@ test "zero and the signed integers count the bits of their whole width" {
   let zero: Int64 = 0
   assert zero.leading_zeros() == 64
   assert zero.trailing_zeros() == 64
-  let pointer_sized: ISize = -2
+  let pointer_sized: Int64 = -2
   assert pointer_sized.count_ones() == 63
   assert pointer_sized.trailing_zeros() == 1
 }

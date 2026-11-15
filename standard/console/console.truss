@@ -9,7 +9,7 @@ public fn Input.from_handle(handle: own streams::Handle) -> Input {
 }
 
 impl streams::Reader for Input {
-  fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
+  fn read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError]
     uses Handles
   {
     Handles.read(self.handle, buffer: mut buffer, limit: limit)
@@ -23,7 +23,7 @@ public fn Output.from_handle(handle: own streams::Handle) -> Output {
 }
 
 impl streams::Writer for Output {
-  fn write(mut self, bytes: Slice[UInt8]) -> Result[USize, SystemError]
+  fn write(mut self, bytes: Slice[UInt8]) -> Result[UInt64, SystemError]
     uses Handles
   {
     Handles.write(self.handle, bytes: bytes)
@@ -250,7 +250,7 @@ public fn Style.apply(self, text: StringSlice) -> String
   output
 }
 
-internal fn sequence_end(text: StringSlice, from: USize) -> USize
+internal fn sequence_end(text: StringSlice, from: UInt64) -> UInt64
   requires from <= text.length()
   ensures from <= result
   ensures result <= text.length()
@@ -273,7 +273,7 @@ public fn strip_styles(text: StringSlice) -> String
   cost time O(text.length())
 {
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(text.length())
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < text.length()
     invariant index <= text.length()
     invariant intrinsic::storage_length(output) <= index
@@ -291,17 +291,17 @@ public fn strip_styles(text: StringSlice) -> String
   String(storage: own output)
 }
 
-public fn display_width(text: StringSlice) -> USize
+public fn display_width(text: StringSlice) -> UInt64
   cost time O(text.length())
 {
-  var width: USize = 0
+  var width: UInt64 = 0
   for character in text.characters() {
     width = width.saturating_add(unicode::display_width(character))
   }
   width
 }
 
-public opaque type CapturedConsole(input: List[String], next_line: USize, output: String, errors: String)
+public opaque type CapturedConsole(input: List[String], next_line: UInt64, output: String, errors: String)
 
 public fn CapturedConsole.new(input: own List[String] = []) -> CapturedConsole {
   CapturedConsole(input: own input, next_line: 0, output: "", errors: "")

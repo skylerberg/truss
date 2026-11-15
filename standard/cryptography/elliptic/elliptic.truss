@@ -2,12 +2,12 @@ use standard::cryptography::modular
 
 internal type Point(x: List[UInt64], y: List[UInt64], z: List[UInt64])
 
-internal type Curve(field: modular::Field, scalars: modular::Field, b: List[UInt64], base: Point, size: USize)
+internal type Curve(field: modular::Field, scalars: modular::Field, b: List[UInt64], base: Point, size: UInt64)
   invariant size <= 64
 
-fn hex_limbs(text: StringSlice, count: USize) -> List[UInt64] {
+fn hex_limbs(text: StringSlice, count: UInt64) -> List[UInt64] {
   var bytes: List[UInt8] = []
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < text.length() && text.length() - index >= 2
     invariant index <= text.length()
   {
@@ -25,7 +25,7 @@ fn make_curve(
   b: StringSlice,
   x: StringSlice,
   y: StringSlice,
-  size: USize,
+  size: UInt64,
 ) -> Option[Curve]
   requires size <= 64
 {
@@ -63,7 +63,7 @@ internal fn Curve.p384() -> Option[Curve] {
   )
 }
 
-internal fn Curve.size(self) -> USize
+internal fn Curve.size(self) -> UInt64
   ensures result <= 64
 {
   self.size
@@ -186,7 +186,7 @@ internal fn Curve.encode(self, affine: Affine) -> List[UInt8] {
 
 internal fn Curve.decode(self, bytes: Slice[UInt8]) -> Option[Point] {
   let size = self.size
-  let first: USize = 1
+  let first: UInt64 = 1
   if bytes.length() != first + 2 * size || bytes[0] != 4 {
     return None
   }

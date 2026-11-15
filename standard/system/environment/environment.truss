@@ -12,7 +12,7 @@ impl Environment for SystemEnvironment {
 
   fn variables(self) -> List[environment::Variable] {
     var all: List[environment::Variable] = []
-    var index: USize = 0
+    var index: UInt64 = 0
     var is_present = true
     while is_present {
       let entry = intrinsic::environment_entry(index, is_present: mut is_present)
@@ -73,7 +73,7 @@ impl Environment for SystemEnvironment {
   fn local_zone(self) -> Option[String] {
     if variable("TZ".slice()) is Some(zone) && !zone.is_empty() {
       let bytes = zone.slice().bytes
-      let start: USize = if intrinsic::view_at(bytes, index: 0) == 58 { 1 } else { 0 }
+      let start: UInt64 = if intrinsic::view_at(bytes, index: 0) == 58 { 1 } else { 0 }
       return Some(calls::text_copied_from(intrinsic::view_slice(bytes, start: start, stop: intrinsic::view_length(bytes))))
     }
     match calls::read_link("/etc/localtime".slice().bytes) {
@@ -106,7 +106,7 @@ fn variable(name: StringSlice) -> Option[String] {
 
 fn variable_from(entry: intrinsic::View[UInt8]) -> environment::Variable {
   let length = intrinsic::view_length(entry)
-  var split: USize = 0
+  var split: UInt64 = 0
   while split < length && intrinsic::view_at(entry, index: split) != 61
     invariant split <= length
   {

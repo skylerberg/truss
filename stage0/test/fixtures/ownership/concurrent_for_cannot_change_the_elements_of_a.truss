@@ -1,8 +1,8 @@
-fn Pair.count(self) -> USize {
+fn Pair.count(self) -> UInt64 {
   2
 }
 
-fn Pair.element(self, position: USize) lends List[Int64] {
+fn Pair.element(self, position: UInt64) lends List[Int64] {
   if position == 0 {
     self.first
   } else {
@@ -10,7 +10,7 @@ fn Pair.element(self, position: USize) lends List[Int64] {
   }
 }
 
-fn Pair.element(mut self, position: USize) lends mut List[Int64] {
+fn Pair.element(mut self, position: UInt64) lends mut List[Int64] {
   if position == 0 {
     mut self.first
   } else {

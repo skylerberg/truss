@@ -2,14 +2,14 @@ use standard::collections
 use standard::map
 
 public fn collections::LruCache[Key: Hash + Ordered + Copyable, Value].new(
-  capacity: USize,
+  capacity: UInt64,
 ) -> collections::LruCache[Key, Value]
   requires capacity > 0
 {
   collections::LruCache(capacity: capacity, entries: [:], recency: collections::Deque.new(), clock: 0)
 }
 
-public fn collections::LruCache[Key: Hash + Ordered + Copyable, Value].length(self) -> USize {
+public fn collections::LruCache[Key: Hash + Ordered + Copyable, Value].length(self) -> UInt64 {
   self.entries.length()
 }
 
@@ -17,7 +17,7 @@ public fn collections::LruCache[Key: Hash + Ordered + Copyable, Value].is_empty(
   self.entries.is_empty()
 }
 
-public fn collections::LruCache[Key: Hash + Ordered + Copyable, Value].capacity(self) -> USize {
+public fn collections::LruCache[Key: Hash + Ordered + Copyable, Value].capacity(self) -> UInt64 {
   self.capacity
 }
 

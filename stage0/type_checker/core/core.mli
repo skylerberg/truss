@@ -162,7 +162,7 @@ and kind =
   | Function_value of { path : Path.t; type_arguments : Types.argument list }
       (** A reference to a named function or method, used as a value. A variant constructor used as
           a function is desugared to a {!Lambda}. *)
-  | Value_parameter of Types.parameter  (** A use of a [USize] generic parameter as a value. *)
+  | Value_parameter of Types.parameter
   | Lambda of {
       parameters : pattern list;
       captures : capture list;
@@ -397,7 +397,6 @@ and elements = {
       (** The {!Call} of the collection's [count], which is evaluated once, before the first
           iteration. *)
   position : pattern;
-      (** A {!Bind} of the position of the iteration: each [USize] from zero up to the count. *)
   element : place;
       (** The {!Lent} place of the {!Call} of the collection's [element] at [position]. It is lent
           for the iteration, and the loop's pattern binds it. *)

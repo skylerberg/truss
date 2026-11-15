@@ -1,4 +1,4 @@
-type Count(total: USize)
+type Count(total: UInt64)
 
 impl FromTemplate for Count {
   type Part = String

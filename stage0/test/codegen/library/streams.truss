@@ -1,10 +1,10 @@
 use standard::streams
 
-type Trickle(received: List[UInt8], step: USize)
+type Trickle(received: List[UInt8], step: UInt64)
 
 impl streams::Writer for Trickle {
-  fn write(mut self, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
-    var accepted: USize = 0
+  fn write(mut self, bytes: Slice[UInt8]) -> Result[UInt64, SystemError] {
+    var accepted: UInt64 = 0
     while accepted < self.step && accepted < bytes.length() {
       mut self.received.push(bytes[accepted])
       accepted += 1
@@ -36,11 +36,11 @@ test "write_all stops when a writer takes nothing" {
   }
 }
 
-type Drip(bytes: List[UInt8], position: USize, step: USize)
+type Drip(bytes: List[UInt8], position: UInt64, step: UInt64)
 
 impl streams::Reader for Drip {
-  fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError] {
-    var read_count: USize = 0
+  fn read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError] {
+    var read_count: UInt64 = 0
     while read_count < self.step && read_count < limit && self.position < self.bytes.length() {
       mut buffer.push(self.bytes[self.position])
       self.position += 1
@@ -50,7 +50,7 @@ impl streams::Reader for Drip {
   }
 }
 
-fn drip(text: StringSlice, step: USize) -> Drip {
+fn drip(text: StringSlice, step: UInt64) -> Drip {
   Drip(bytes: text.to_bytes(), position: 0, step: step)
 }
 
@@ -109,8 +109,8 @@ test "a buffered reader gives lines, with either line end or none at the end" {
     assert mut reader.read_line() is Ok(None)
     assert mut reader.read_line() is Ok(None)
     var counted = streams::BufferedReader.new(drip("a\nbb\nccc\n", step: 2))
-    var lengths: USize = 0
-    var lines: USize = 0
+    var lengths: UInt64 = 0
+    var lines: UInt64 = 0
     while mut counted.read_line() is Ok(Some(text)) {
       assert text.length() == lines + 1
       lines += 1

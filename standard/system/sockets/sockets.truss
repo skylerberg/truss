@@ -71,7 +71,7 @@ fn local_address_bytes(path: Path) -> Result[intrinsic::Storage[UInt8], Int32] {
   var bytes: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
   let family = unsigned(intrinsic::libc_af_unix())
   if intrinsic::libc_sockaddr_family_size() == 1 {
-    calls::add_number(mut bytes, number: intrinsic::convert((name.length() + 3) % 256), size: 1)
+    calls::add_number(mut bytes, number: ((name.length() + 3) % 256), size: 1)
     calls::add_number(mut bytes, number: family, size: 1)
   } else {
     calls::add_number(mut bytes, number: family, size: 2)
@@ -247,7 +247,7 @@ internal fn send_to(
   descriptor: Int32,
   bytes: intrinsic::View[UInt8],
   address: network::SocketAddress,
-) -> Result[USize, Int32] {
+) -> Result[UInt64, Int32] {
   let to = address_bytes(address_for(descriptor, address: address))
   var ticket = calls::watch(descriptor, writing: true)
   var sent = intrinsic::libc_sendto(
@@ -279,7 +279,7 @@ internal fn send_to(
 internal fn receive_from(
   descriptor: Int32,
   buffer: mut intrinsic::Storage[UInt8],
-  limit: USize,
+  limit: UInt64,
 ) -> Result[network::Datagram, Int32]
   ensures intrinsic::storage_length(buffer) >= old(intrinsic::storage_length(buffer))
 {
@@ -316,7 +316,7 @@ internal fn receive_from(
   if got < 0 {
     return Err(intrinsic::libc_errno())
   }
-  let received: USize = intrinsic::convert(got)
+  let received: UInt64 = intrinsic::convert(got)
   intrinsic::storage_lengthen(mut buffer, by: received)
   match address_from(intrinsic::storage_view(from)) {
     Some(sender) => Ok(network::Datagram(length: received, from: plain(sender)))
@@ -326,7 +326,7 @@ internal fn receive_from(
 
 internal fn addresses_of(host: StringSlice) -> Result[List[network::IpAddress], SystemError] {
   let name = handles::with_file_error(calls::ended_with_zero_byte(host.bytes))?
-  let room: USize = 4096
+  let room: UInt64 = 4096
   var resolved_bytes: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(room)
   let wrote = intrinsic::runtime_addresses_of_host(intrinsic::storage_view(name), addresses: mut resolved_bytes, room: room)
   if wrote == -1 {
@@ -335,11 +335,11 @@ internal fn addresses_of(host: StringSlice) -> Result[List[network::IpAddress], 
   if wrote < 0 {
     return Err(SystemError.Unreachable)
   }
-  let filled: USize = intrinsic::convert(wrote)
+  let filled: UInt64 = intrinsic::convert(wrote)
   intrinsic::storage_lengthen(mut resolved_bytes, by: filled)
   let bytes = intrinsic::storage_view(resolved_bytes)
   var addresses: List[network::IpAddress] = []
-  var start: USize = 0
+  var start: UInt64 = 0
   while start < filled
     invariant start <= filled
   {
@@ -605,7 +605,7 @@ fn address_from(bytes: intrinsic::View[UInt8]) -> Option[network::SocketAddress]
 }
 
 fn mapped(octets: Array[UInt8, 16]) -> Bool {
-  let zeros: USize = 10
+  let zeros: UInt64 = 10
   for index in 0..zeros {
     if octets[index] != 0 {
       return false

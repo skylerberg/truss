@@ -1,6 +1,6 @@
 use standard::core
 
-public opaque type Skip[Source: Cursor](source: Source, left: USize)
+public opaque type Skip[Source: Cursor](source: Source, left: UInt64)
 
 impl Cursor for Skip[Source: Cursor] {
   type Element = Source.Element
@@ -20,7 +20,7 @@ impl Cursor for Skip[Source: Cursor] {
   }
 }
 
-public opaque type Take[Source: Cursor](source: Source, left: USize)
+public opaque type Take[Source: Cursor](source: Source, left: UInt64)
 
 impl Cursor for Take[Source: Cursor] {
   type Element = Source.Element
@@ -37,7 +37,7 @@ impl Cursor for Take[Source: Cursor] {
   }
 }
 
-public opaque type StepBy[Source: Cursor](source: Source, step: USize, started: Bool)
+public opaque type StepBy[Source: Cursor](source: Source, step: UInt64, started: Bool)
 
 impl Cursor for StepBy[Source: Cursor] {
   type Element = Source.Element
@@ -50,7 +50,7 @@ impl Cursor for StepBy[Source: Cursor] {
       self.started = true
       return mut self.source.next()
     }
-    var skipped: USize = 1
+    var skipped: UInt64 = 1
     while skipped < self.step {
       match mut self.source.next() {
         Some(_) => {}
@@ -106,7 +106,7 @@ impl Cursor for Zip[First: Cursor, Second: Cursor] {
   }
 }
 
-public opaque type Enumerate[Source: Cursor](source: Source, index: USize)
+public opaque type Enumerate[Source: Cursor](source: Source, index: UInt64)
 
 impl Cursor for Enumerate[Source: Cursor] {
   type Element = core::Indexed[Source.Element]
@@ -118,7 +118,7 @@ impl Cursor for Enumerate[Source: Cursor] {
     match mut self.source.next() {
       Some(element) => {
         let index = self.index
-        if self.index < USize.maximum {
+        if self.index < UInt64.maximum {
           self.index += 1
         }
         Some(core::Indexed(index: index, element: own element))
