@@ -667,7 +667,7 @@ let type_interface lookups path =
   | Value interface -> interface
   | Failed _ | Blocked -> None
 
-let impl_methods (names : Names.lookups) impls =
+let impl_methods (names : Names.lookups) package =
   List.concat_map
     (fun (((trait : Path.t), _), (impl : Path.t)) ->
       match names.key trait with
@@ -679,13 +679,16 @@ let impl_methods (names : Names.lookups) impls =
               | _ -> None)
             (names.contained trait_key)
       | None -> [])
-    impls
+    (names.impls package)
+
+let derived_paths names package =
+  List.filter
+    (function Path.Method { owner = Derived _; _ } -> true | _ -> false)
+    (impl_methods names package)
 
 let package_parts pipeline (names : Names.lookups) package : Part.t list =
   let state = owner pipeline package in
   let declarations = names.package_declarations package in
-  let impls = names.impls package in
-  let methods = impl_methods names impls in
   let paths = List.map (fun (declaration : Names.declaration) -> declaration.path) declarations in
   let of_declaration (declaration : Names.declaration) : Part.t list =
     let key = Names.key_of declaration in
@@ -716,14 +719,13 @@ let package_parts pipeline (names : Names.lookups) package : Part.t list =
   List.concat_map of_declaration declarations
   @ List.filter_map
       (function _, (Path.Derived _ as impl) -> Some (Part.Derived_interface impl) | _ -> None)
-      impls
+      (names.impls package)
   @ List.concat_map
-      (function
-        | Path.Method { owner = Derived _; _ } as path ->
-            [ Part.Derived_form path; Generated_mir path ]
-        | _ -> [])
-      methods
-  @ List.map (fun path -> Part.Call_edges path) (List.sort_uniq Path.compare (paths @ methods))
+      (fun path -> [ Part.Derived_form path; Generated_mir path ])
+      (derived_paths names package)
+  @ List.map
+      (fun path -> Part.Call_edges path)
+      (List.sort_uniq Path.compare (paths @ impl_methods names package))
   @ List.map (fun path -> Part.Successors (path, package)) (List.sort_uniq Path.compare paths)
   @ List.map
       (fun dependency -> Part.Grant (package, dependency))
@@ -844,7 +846,7 @@ let successors pipeline note ~viewer path =
   | Value callees -> (
       match
         Mir.Call_edges.implementations (call_edge_lookups pipeline note)
-          ~visible:(fun () -> visible_packages pipeline note viewer)
+          ~visible:(visible_packages pipeline note viewer)
           path
       with
       | implementations -> Some (List.sort_uniq Path.compare (callees @ implementations))
@@ -1276,10 +1278,13 @@ let own_template_checks pipeline (key : Names.key) =
       (List.map template_check_root (proof_template_checks pipeline key))
 
 let entry_point (names : Names.lookups) package =
-  let path = Path.Top { module_ = { package; modules = [] }; name = "main" } in
-  match Option.bind (names.key path) names.declaration with
-  | Some { kind = Function; _ } -> Some path
-  | Some _ | None -> None
+  List.find_map
+    (fun (declaration : Names.declaration) ->
+      match declaration.path with
+      | Top { name = "main"; _ } when declaration.kind = Function && declaration.ordinal = 0 ->
+          Some declaration.path
+      | _ -> None)
+    (names.declarations { package; modules = [] })
 
 let own_lowering_roots pipeline (names : Names.lookups) package =
   if Option.is_some pipeline.lowering then
@@ -1399,18 +1404,6 @@ let compute_type_facts pipeline paths =
                match List.assoc_opt path facts with Some facts -> Value facts | None -> Blocked)
            | Failed _ | Blocked -> Blocked)))
     paths
-
-let check_calls pipeline (key : Instance.key) =
-  match (key, Instance_table.find_opt pipeline.lowered key) with
-  | Code { path; _ }, Some (Value (Ok lowered)) ->
-      Option.iter
-        (fun graph ->
-          Compile.check_calls
-            (interface_lookups pipeline ignore ~is_checked:true)
-            ~successors:(fun path -> Option.join (Call_graph.successors graph path))
-            key lowered)
-        (Hashtbl.find_opt pipeline.graphs (Path.package path))
-  | _ -> ()
 
 let compute_part pipeline (part : Part.t) =
   pipeline.observe (Computed part);
@@ -1645,7 +1638,6 @@ let compute_part pipeline (part : Part.t) =
                      Compiler_bug.bug ~stage:"Pipeline" "%s is defined as todo, and has a layout"
                        (Ground.to_string ty))
                key));
-      check_calls pipeline key;
       update_references pipeline key
   | Layout ty ->
       into
@@ -1964,7 +1956,6 @@ let changes pipeline other =
     parts []
 
 let update pipeline changes =
-  let listings = Hashtbl.create 4 in
   List.iter
     (fun ((file : Path.file), text) ->
       let package = file.module_.package in
@@ -1993,29 +1984,14 @@ let update pipeline changes =
             forget pipeline [ Parsed file ]);
         mark_readers pipeline (Source file);
         if Option.is_none previous || Option.is_none text then begin
-          let listed =
-            match Hashtbl.find_opt listings package with
-            | Some (_, listed) -> listed
-            | None ->
-                let listed = Hashtbl.create 8 in
-                Hashtbl.replace listings package (state, listed);
-                listed
-          in
-          Hashtbl.replace listed file (Option.is_some text)
+          let modules = state.modules in
+          list_files state
+            (List.filter (( <> ) file) state.files @ if Option.is_some text then [ file ] else []);
+          if modules <> state.modules then mark_readers pipeline (Modules package);
+          mark_stale pipeline (Namespace package)
         end
       end)
-    changes;
-  Hashtbl.iter
-    (fun package ((state : state), listed) ->
-      let modules = state.modules in
-      list_files state
-        (List.filter (fun file -> not (Hashtbl.mem listed file)) state.files
-        @ Hashtbl.fold
-            (fun file is_listed files -> if is_listed then file :: files else files)
-            listed []);
-      if modules <> state.modules then mark_readers pipeline (Modules package);
-      mark_stale pipeline (Namespace package))
-    listings
+    changes
 
 let state_parts (state : state) : Part.t list =
   let keyed table part = Hashtbl.fold (fun key _ parts -> part key :: parts) table [] in
@@ -2324,92 +2300,71 @@ let by_span_and_code diagnostics =
       compare (left.span, left.code) (right.span, right.code))
     diagnostics
 
-let require pipeline ~through packages =
-  List.iter
-    (fun package ->
-      if
-        List.exists
-          (fun stage -> Stage.drains ~through stage && has_work pipeline package stage)
-          Stage.all
-      then
-        Compiler_bug.bug ~stage:"Pipeline" "%s is read while some of its parts are stale"
-          (Path.show_package package))
-    packages
+let package_check pipeline package check =
+  Hashtbl.find_opt (owner pipeline package).package_checks check
 
-let check_outcomes pipeline package =
-  Hashtbl.fold
-    (fun _ outcome outcomes ->
-      match outcome with Value outcome -> outcome :: outcomes | Failed _ | Blocked -> outcomes)
-    (owner pipeline package).package_checks []
+let package_outcomes pipeline package =
+  List.filter_map
+    (fun check ->
+      match package_check pipeline package check with
+      | Some (Value outcome) -> Some outcome
+      | Some (Failed _ | Blocked) | None -> None)
+    (Package_checks.checks ((names_lookups pipeline).package_declarations package))
 
-let placed_checks pipeline package =
-  List.concat_map
-    (function Package_checks.Placed placed -> placed | Problems _ | Packages _ -> [])
-    (check_outcomes pipeline package)
-
-let placed_in (names : Names.lookups) (file : Path.file) key diagnostics =
-  match names.place key with
-  | Some { file = home; base } when home = file ->
-      List.map (Diagnostic.map_spans (Source.Definition_span.to_file ~base)) diagnostics
-  | Some _ | None -> []
-
-let stage_diagnostics pipeline (names : Names.lookups) ~checks (file : Path.file) stage =
+let stage_diagnostics pipeline (file : Path.file) stage =
+  let names = names_lookups pipeline in
+  let state = owner pipeline file.module_.package in
+  let placed key diagnostics =
+    match names.place key with
+    | Some { file = home; base } when home = file ->
+        List.map (Diagnostic.map_spans (Source.Definition_span.to_file ~base)) diagnostics
+    | Some _ | None -> []
+  in
   let of_definitions () =
     List.concat_map
-      (fun declaration ->
-        let key = Names.key_of declaration in
-        placed_in names file key (definition_diagnostics pipeline key stage))
-      (names.declarations_in file)
+      (fun key -> placed key (definition_diagnostics pipeline key stage))
+      (file_keys pipeline file)
   in
   by_span_and_code
     (match stage with
     | Resolve ->
-        Option.value ~default:[]
-          (Hashtbl.find_opt (owner pipeline file.module_.package).import_checks file)
-        @ of_definitions ()
+        Option.value ~default:[] (Hashtbl.find_opt state.import_checks file) @ of_definitions ()
     | Package_checks ->
         List.concat_map
-          (fun (placed : Package_checks.placed) ->
-            placed_in names file placed.key [ placed.diagnostic ])
-          checks
+          (function
+            | Package_checks.Placed diagnostics ->
+                List.concat_map
+                  (fun (diagnostic : Package_checks.placed) ->
+                    placed diagnostic.key [ diagnostic.diagnostic ])
+                  diagnostics
+            | Problems _ | Packages _ -> [])
+          (package_outcomes pipeline file.module_.package)
     | Interface | Infer | Patterns | Usage | Ownership -> of_definitions ())
 
 let stages = [ Resolve; Interface; Infer; Patterns; Usage; Ownership; Package_checks ]
 let check pipeline packages = drain pipeline ~through:Package_checks packages
 
 let tables pipeline (key : Names.key) =
-  require pipeline ~through:Checked_bodies [ key.module_.package ];
+  drain pipeline ~through:Checked_bodies [ key.module_.package ];
   match Hashtbl.find_opt (owner pipeline key.module_.package).checked_bodies key with
   | Some (Value checked) -> Some checked.tables
   | Some (Failed _ | Blocked) | None -> None
 
-let file_diagnostics pipeline files =
-  let packages =
-    List.sort_uniq Path.compare_package
-      (List.map (fun (file : Path.file) -> file.module_.package) files)
-  in
-  require pipeline ~through:Package_checks packages;
-  let names = names_lookups pipeline in
-  let checks = List.map (fun package -> (package, placed_checks pipeline package)) packages in
-  List.map
-    (fun (file : Path.file) ->
-      let checks = List.assoc file.module_.package checks in
-      ( file,
-        without_duplicates
-          ((parsed_file pipeline file).diagnostics
-          @ List.concat_map (stage_diagnostics pipeline names ~checks file) stages) ))
-    files
+let file_diagnostics pipeline (file : Path.file) =
+  drain pipeline ~through:Package_checks [ file.module_.package ];
+  without_duplicates
+    ((parsed_file pipeline file).diagnostics
+    @ List.concat_map (stage_diagnostics pipeline file) stages)
 
 let manifest_problems pipeline package =
-  require pipeline ~through:Package_checks [ package ];
-  List.sort compare
-    (List.concat_map
-       (function Package_checks.Problems problems -> problems | Placed _ | Packages _ -> [])
-       (check_outcomes pipeline package))
+  drain pipeline ~through:Package_checks [ package ];
+  List.concat_map
+    (function Package_checks.Problems problems -> problems | Placed _ | Packages _ -> [])
+    (package_outcomes pipeline package)
 
 let code_packages pipeline package =
-  require pipeline ~through:Package_checks [ package ];
-  match Hashtbl.find_opt (owner pipeline package).package_checks Code_packages with
+  drain pipeline ~through:Package_checks [ package ];
+  match package_check pipeline package Code_packages with
   | Some (Value (Packages packages)) -> Some packages
   | Some (Value (Placed _ | Problems _) | Failed _ | Blocked) | None -> None
 
@@ -2506,7 +2461,7 @@ let states verdicts file = Prover.states verdicts.lookups ~verdict:(verdict verd
 let diagnostics verdicts file = Prover.diagnostics verdicts.lookups ~verdict:(verdict verdicts) file
 
 let parsed pipeline (file : Path.file) =
-  require pipeline ~through:Parse [ file.module_.package ];
+  drain pipeline ~through:Parse [ file.module_.package ];
   parsed_file pipeline file
 
 let names pipeline packages =
@@ -2514,7 +2469,7 @@ let names pipeline packages =
   names_lookups pipeline
 
 let resolved pipeline (key : Names.key) =
-  require pipeline ~through:Resolution [ key.module_.package ];
+  drain pipeline ~through:Resolution [ key.module_.package ];
   let owner = owner pipeline key.module_.package in
   match
     List.filter
@@ -2527,10 +2482,14 @@ let resolved pipeline (key : Names.key) =
   | [] -> None
   | sections -> Resolve.whole ~sections (resolved pipeline ignore) key
 
-let require_reached pipeline parts key =
-  if not (List.for_all (is_current pipeline) parts) then
-    Compiler_bug.bug ~stage:"Pipeline" "%s is requested, and no root of lowering reaches it"
-      (Instance.to_string key)
+let request pipeline packages ~through ~needs keys =
+  drain pipeline ~through packages;
+  List.iter
+    (fun key ->
+      if not (List.for_all (is_current pipeline) (needs key)) then
+        Compiler_bug.bug ~stage:"Pipeline" "%s is requested, and no root of lowering reaches it"
+          (Instance.to_string key))
+    keys
 
 let laid_out pipeline key =
   let part = Part.Ground_types key in
@@ -2549,8 +2508,8 @@ let requested table part key =
       Compiler_bug.bug ~stage:"Pipeline" "%s is requested from code with errors" (Part.show part)
   | None -> unchecked (Part.show part)
 
-let layouts pipeline keys =
-  List.iter (fun key -> require_reached pipeline (laid_out pipeline key) key) keys;
+let layouts pipeline packages keys =
+  request pipeline packages ~through:Lowered_code ~needs:(laid_out pipeline) keys;
   let ground_types = Type_table.create 256 in
   List.iter
     (fun key ->
@@ -2565,11 +2524,22 @@ let layouts pipeline keys =
         (Ground.to_string ty);
     layout pipeline ignore ty
 
-let checked_interface pipeline = interface_lookups pipeline ignore ~is_checked:true
-
 let interface_lookups pipeline packages =
   drain pipeline ~through:Signature_checks packages;
-  checked_interface pipeline
+  interface_lookups pipeline ignore ~is_checked:true
+
+let check_calls pipeline interface viewers key = function
+  | Ok lowered ->
+      List.iter
+        (fun viewer ->
+          Option.iter
+            (fun graph ->
+              Compile.check_calls interface
+                ~successors:(fun path -> Option.join (Call_graph.successors graph path))
+                key lowered)
+            (Hashtbl.find_opt pipeline.graphs viewer))
+        viewers
+  | Error _ -> ()
 
 let reached_todo_types pipeline key =
   let blocked = function Some Blocked -> true | Some (Value _ | Failed _) | None -> false in
@@ -2596,47 +2566,48 @@ let reached_todo_types pipeline key =
   List.sort_uniq Path.compare (visit [] (Test_key key))
 
 let lowering_requests pipeline packages : Compile.requests =
-  drain pipeline ~through:Test_keys packages;
+  let interface = interface_lookups pipeline packages in
   {
     settings = lowering_settings pipeline;
     source = source pipeline;
-    interface = checked_interface pipeline;
+    interface;
+    mir = mir_lookups pipeline ignore;
     lowered =
       (fun key ->
-        require_reached pipeline [ Lowered key ] key;
-        requested pipeline.lowered (Lowered key) key);
+        request pipeline packages ~through:Lowered_code ~needs:(fun key -> [ Lowered key ]) [ key ];
+        let lowered = requested pipeline.lowered (Lowered key) key in
+        check_calls pipeline interface packages key lowered;
+        lowered);
     test_key =
       (fun key ->
-        require_reached pipeline [ Test_key key ] key;
+        request pipeline packages ~through:Test_keys ~needs:(fun key -> [ Test_key key ]) [ key ];
         requested pipeline.test_keys (Test_key key) key);
     reached_todo_types =
       (fun key ->
-        require_reached pipeline [ Test_key key ] key;
+        request pipeline packages ~through:Test_keys ~needs:(fun key -> [ Test_key key ]) [ key ];
         reached_todo_types pipeline key);
-    layouts = layouts pipeline;
+    layouts = layouts pipeline packages;
   }
 
-let callers pipeline ~viewer paths =
+let main pipeline package =
+  drain pipeline ~through:Namespaces [ package ];
+  entry_point (names_lookups pipeline) package
+
+let callers pipeline ~viewer path =
   drain pipeline ~through:Recursion_groups [ viewer ];
-  let callers_of graph path =
-    let reached = Path_table.create 64 in
-    let rec visit = function
-      | [] -> ()
-      | node :: rest when Path_table.mem reached node -> visit rest
-      | node :: rest ->
-          Path_table.replace reached node ();
-          visit (Call_graph.predecessors graph node @ rest)
-    in
-    visit [ path ];
-    Path_table.fold (fun node () nodes -> node :: nodes) reached []
-  in
-  List.map
-    (fun path ->
-      ( path,
-        match Hashtbl.find_opt pipeline.graphs viewer with
-        | Some graph -> callers_of graph path
-        | None -> [] ))
-    paths
+  match Hashtbl.find_opt pipeline.graphs viewer with
+  | None -> []
+  | Some graph ->
+      let reached = Path_table.create 64 in
+      let rec visit = function
+        | [] -> ()
+        | node :: rest when Path_table.mem reached node -> visit rest
+        | node :: rest ->
+            Path_table.replace reached node ();
+            visit (Call_graph.predecessors graph node @ rest)
+      in
+      visit [ path ];
+      Path_table.fold (fun node () nodes -> node :: nodes) reached []
 
 module For_testing = struct
   type nonrec stage = stage =
@@ -2658,10 +2629,7 @@ module For_testing = struct
       else Import_checks
     in
     drain pipeline ~through [ file.module_.package ];
-    let checks =
-      if List.mem Package_checks stages then placed_checks pipeline file.module_.package else []
-    in
-    List.concat_map (stage_diagnostics pipeline (names_lookups pipeline) ~checks file) stages
+    List.concat_map (stage_diagnostics pipeline file) stages
 
   let checked_body pipeline (key : Names.key) =
     drain pipeline ~through:Checked_bodies [ key.module_.package ];
@@ -2686,7 +2654,6 @@ module For_testing = struct
           | Generated -> derived pipeline path))
 
   let proof_lookups pipeline = proof_lookups pipeline ignore
-  let resolve pipeline packages = drain pipeline ~through:Resolution packages
 
   let mir pipeline package =
     drain pipeline ~through:Mir [ package ];

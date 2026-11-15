@@ -226,6 +226,6 @@ let implementations (lookups : lookups) ~visible (path : Path.t) =
                   let method_ = Path.Method { owner = impl; name; receiver } in
                   if writes lookups impl method_ then Some method_ else None)
                 (Interface.Impls.impls_of lookups.interface ~trait:owner package))
-            (visible ())
+            visible
       | _ -> [])
   | _ -> []

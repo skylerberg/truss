@@ -103,9 +103,9 @@ let check ~root encoding (buffers : (string * string) list) =
   in
   let pipeline = Database.pipeline trial in
   Pipeline.check pipeline packages;
-  let files = List.filter_map (fun (_, _, file) -> file) opened in
-  let proofs = Proofs.check pipeline trial packages files in
-  let diagnostics = Pipeline.file_diagnostics pipeline files in
+  let proofs =
+    Proofs.check pipeline trial packages (List.filter_map (fun (_, _, file) -> file) opened)
+  in
   Json.Object
     [
       ( "files",
@@ -116,7 +116,7 @@ let check ~root encoding (buffers : (string * string) list) =
                  match file with
                  | Some file ->
                      ( Diagnostic.shown
-                         (List.assoc file diagnostics @ Proofs.diagnostics proofs file),
+                         (Pipeline.file_diagnostics pipeline file @ Proofs.diagnostics proofs file),
                        Proofs.states proofs file )
                  | None -> ([], [])
                in

@@ -42,21 +42,22 @@ let name_at database name text occurrence =
   let source = Source.text (Support.source database file) in
   let offset = Option.get (Substring.find ~occurrence source text) in
   if offset < 0 then failwith (Printf.sprintf "no occurrence %d of %S" occurrence text);
-  let pipeline = Support.pipeline database in
-  Pipeline.For_testing.resolve pipeline [ file.module_.package ];
-  let names = Pipeline.names pipeline [ file.module_.package ] in
   let located =
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
         let key = Resolve.Names.key_of declaration in
-        match (names.definition key, names.place key, Pipeline.resolved pipeline key) with
+        match
+          ( (Support.names database key.module_.package).definition key,
+            (Support.names database key.module_.package).place key,
+            Pipeline.resolved (Support.pipeline database) key )
+        with
         | Some definition, Some { base; _ }, Some resolved ->
             let names = Syntax_walk.names definition in
             Option.map
               (fun (name : Syntax.name) -> (name, names, base, resolved))
               (List.find_opt (fun (name : Syntax.name) -> base + name.span.start = offset) names)
         | _ -> None)
-      (names.declarations_in file)
+      ((Support.names database file.module_.package).declarations_in file)
   in
   match located with
   | Some located -> located
@@ -233,14 +234,15 @@ let () =
 let bracket_of text written occurrence =
   let database = setup [ ("app::main", text) ] in
   let offset = Option.get (Substring.find ~occurrence text written) in
-  let module_ = Support.module_of "app::main" in
-  let pipeline = Support.pipeline database in
-  Pipeline.For_testing.resolve pipeline [ module_.package ];
-  let names = Pipeline.names pipeline [ module_.package ] in
+  let declarations = Support.declarations database (Support.module_of "app::main") in
   List.find_map
     (fun (declaration : Resolve.Names.declaration) ->
       let key = Resolve.Names.key_of declaration in
-      match (names.definition key, names.place key, Pipeline.resolved pipeline key) with
+      match
+        ( (Support.names database key.module_.package).definition key,
+          (Support.names database key.module_.package).place key,
+          Pipeline.resolved (Support.pipeline database) key )
+      with
       | Some definition, Some { base; _ }, Some resolved ->
           let bracket = ref None in
           Syntax_walk.definition
@@ -255,7 +257,7 @@ let bracket_of text written occurrence =
             definition;
           !bracket
       | _ -> None)
-    (names.declarations module_)
+    declarations
 
 let () =
   test "brackets after a generic function give type arguments" (fun () ->

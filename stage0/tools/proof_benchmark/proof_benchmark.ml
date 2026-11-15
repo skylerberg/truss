@@ -14,9 +14,9 @@ let () =
       (fun ((file : Path.file), _) ->
         let pipeline = Pipeline.create [ standard ] in
         Pipeline.check pipeline [ file.module_.package ];
-        match Pipeline.file_diagnostics pipeline [ file ] with
-        | [ (_, _ :: _) ] -> None
-        | _ ->
+        match Pipeline.file_diagnostics pipeline file with
+        | _ :: _ -> None
+        | [] ->
             let runs_before = Solver.queries_run solver in
             let start = Unix.gettimeofday () in
             let failed =

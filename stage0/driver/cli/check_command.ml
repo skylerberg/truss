@@ -40,7 +40,8 @@ let fix snapshot packages =
     Pipeline.check pipeline packages;
     let applied =
       List.concat_map
-        (fun (file, diagnostics) ->
+        (fun file ->
+          let diagnostics = Pipeline.file_diagnostics pipeline file in
           match Diagnostic.machine_applicable diagnostics with
           | [] -> []
           | chosen ->
@@ -55,7 +56,7 @@ let fix snapshot packages =
                 (Command_packages.path snapshot file)
                 (Diagnostic.apply_edits (Source.text source) edits);
               List.map (fun diagnostic -> Diagnostic.to_json_object source diagnostic) chosen)
-        (Pipeline.file_diagnostics pipeline (Command_packages.files snapshot packages))
+        (Command_packages.files snapshot packages)
       @ unused_dependencies snapshot pipeline packages
       @ lock_file snapshot
     in
