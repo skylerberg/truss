@@ -59,7 +59,6 @@ let new_context database ~home ~current ~terminates ~measures =
       holds_potential = Hashtbl.create 16;
       buffers = Hashtbl.create 16;
       equalities = [];
-      known_calls = [];
       decisions = [];
       entry = [];
       proving = false;
