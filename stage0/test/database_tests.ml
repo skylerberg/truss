@@ -3,6 +3,14 @@ open Harness
 let fresh = scratch
 let counter = ref 0
 
+let test_standard : (Path.file * string) list =
+  List.map
+    (fun (name, text) -> ({ Path.module_ = Path.standard_module [ name ]; name }, text))
+    Fixtures.Test_standard.
+      [ ("capabilities", capabilities); ("core", core); ("text", text); ("unused", unused) ]
+
+let () = Database.For_testing.use_standard test_standard
+
 let write directory file text =
   write_files directory [ (file, text) ];
   incr counter;
@@ -297,6 +305,21 @@ let () =
           match List.filter is_copy (Engine.For_testing.differing engine) with
           | [] -> ()
           | copies -> fail "copies %s" (String.concat "; " (List.map Engine.label copies))));
+  test "a project's state holds no result about a standard-library definition" (fun () ->
+      fresh_store ();
+      let directory = package () in
+      expect_errors directory 0;
+      match Database.For_testing.session_engine directory with
+      | None -> fail "no session"
+      | Some engine -> (
+          let about_standard node =
+            match Engine.subject node with
+            | Some { path; _ } -> Path.package path = Path.standard_package
+            | None -> false
+          in
+          match List.filter about_standard (Engine.For_testing.differing engine) with
+          | [] -> ()
+          | held -> fail "holds %s" (String.concat "; " (List.map Engine.label held))));
   test "a change to a dependency's grants resolves no name and lists no module again" (fun () ->
       fresh_store ();
       let root = fresh "project" in
@@ -429,14 +452,14 @@ let () =
         let directory = fresh "package" in
         write directory "truss.toml" (manifest "app");
         for index = 1 to 8 do
-          write directory (Printf.sprintf "part_%d.truss" index) (module_text index)
+          write directory (Printf.sprintf "part_%d/part_%d.truss" index index) (module_text index)
         done;
         directory
       in
       let first = worktree () in
       expect_errors first 0;
       let second = worktree () in
-      write second "part_3.truss"
+      write second "part_3/part_3.truss"
         (module_text 3 ^ Fixtures.Database.new_worktrees_state_is_a_difference_over_the_state);
       expect_errors second 0;
       match
@@ -490,7 +513,7 @@ let () =
       if dependencies = [] then fail "keep depends on nothing";
       List.iter
         (fun (edge : Graph_types.edge) ->
-          if contains (Path.show edge.dependency) "standard::html" then
+          if contains (Path.show edge.dependency) "standard::unused" then
             fail "keep depends on %s" (Path.show edge.dependency))
         dependencies);
   test "a root reaches its dependencies and itself" (fun () ->

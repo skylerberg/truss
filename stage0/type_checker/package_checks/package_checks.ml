@@ -548,7 +548,7 @@ let check =
         List.concat_map
           (fun name ->
             List.filter_map
-              (fun (_, impl) -> Query.demand database Environment.impl_interface impl)
+              (fun (_, impl) -> Interface.Impls.impl_interface database impl)
               (Query.demand database Interface.Impls.index name))
           (List.filter (fun name -> name <> package_name) (packages [] (standard @ direct)))
       in

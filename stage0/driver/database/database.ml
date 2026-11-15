@@ -43,7 +43,8 @@ let set_standard engine files =
     ~root:(Project.package_root Path.standard_package)
     ~name:Path.standard_package ~dependencies:[] files
 
-let load_standard engine = set_standard engine Standard_library.files
+let standard_files = ref Standard_library.files
+let load_standard engine = set_standard engine !standard_files
 
 (* The standard library, checked whole in an engine of its own. Its sources
    never change, so the engine is frozen as a fixed base, which every state
@@ -60,7 +61,7 @@ let check_standard engine =
         | diagnostics ->
             let source = Engine.get engine Packages.source file in
             List.map (Diagnostic.render source) diagnostics)
-      Standard_library.files
+      !standard_files
   in
   if rendered <> [] then
     Compiler_bug.bug ~stage:"Database" "the standard library has diagnostics:\n%s"
@@ -93,10 +94,12 @@ let project session =
   | Project project -> project
   | _ -> Compiler_bug.bug ~stage:"Database" "a session with no project"
 
-(* A package whose sources never change is checked once, written whole, and
-   found from then on by the key of its sources: for the standard library,
-   which is built into the compiler, the compiler's identity. *)
-let standard_key identity = Cbor.encode (Cbor.Array [ Cbor.Text identity; Cbor.Text "standard" ])
+let standard_key identity =
+  let sources =
+    Registry.Content.hash
+      (List.map (fun (file, text) -> (Project.file_path ~directory:"" file, text)) !standard_files)
+  in
+  Cbor.encode (Cbor.Array [ Cbor.Text identity; Cbor.Text "standard"; Cbor.Text sources ])
 
 let stored_standard () =
   let store = Session.store () and identity = Session.identity () in
@@ -611,7 +614,7 @@ let () = Session.allow_reading Compiler_version.digest
 let set_library (files : (Path.file * string) list) session =
   set_standard (Session.engine session) files
 
-let open_library ?(files = Standard_library.files) name =
+let open_library ?(files = !standard_files) name =
   match
     Session.open_ ~key:("library:" ^ name) ~pointer:(library_prefix ^ name)
       ~version:Compiler_version.digest
@@ -866,6 +869,11 @@ module For_testing = struct
   let engine = Session.engine
   let logging = Session.logging
   let standard_base = standard_base
+
+  let use_standard files =
+    standard_files := files;
+    standard := lazy (stored_standard ())
+
   let session_base () = Lazy.force !standard
   let collect_store () = Session.collect ~keep:(fun () -> [])
 
