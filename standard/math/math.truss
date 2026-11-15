@@ -844,7 +844,7 @@ public fn BigInteger.bit_length(self) -> UInt64
     return 0
   }
   let top = self.magnitude[self.magnitude.length() - 1]
-  (self.magnitude.length() - 1).saturating_multiply(64).saturating_add(64 - intrinsic::leading_zeros(top))
+  (self.magnitude.length() - 1).saturating_multiply(64).saturating_add(64 - top.leading_zeros())
 }
 
 public fn BigInteger.absolute(self) -> BigInteger

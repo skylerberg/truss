@@ -1295,13 +1295,8 @@ public fn StringSlice.to_utf16(self) -> List[UInt16]
 
 impl Ordered for StringSlice {
   fn compare(self, other: StringSlice) -> Ordering
-    ensures result == (if intrinsic::compare_bytes(self.bytes, right: other.bytes) < 0 {
-        Ordering.Less
-      } else if intrinsic::compare_bytes(self.bytes, right: other.bytes) > 0 {
-        Ordering.Greater
-      } else {
-        Ordering.Equal
-      })
+    ensures (result == Ordering.Less) == (intrinsic::compare_bytes(self.bytes, right: other.bytes) < 0)
+    ensures (result == Ordering.Equal) == identical(self.model(), other.model())
   {
     let order = intrinsic::compare_bytes(self.bytes, right: other.bytes)
     if order < 0 { Ordering.Less } else if order > 0 { Ordering.Greater } else { Ordering.Equal }

@@ -277,13 +277,8 @@ impl Equal for String {
 
 impl Ordered for String {
   fn compare(self, other: String) -> Ordering
-    ensures result == (if intrinsic::compare_bytes(intrinsic::storage_view(self.storage), right: intrinsic::storage_view(other.storage)) < 0 {
-        Ordering.Less
-      } else if intrinsic::compare_bytes(intrinsic::storage_view(self.storage), right: intrinsic::storage_view(other.storage)) > 0 {
-        Ordering.Greater
-      } else {
-        Ordering.Equal
-      })
+    ensures (result == Ordering.Less) == (intrinsic::compare_bytes(intrinsic::storage_view(self.storage), right: intrinsic::storage_view(other.storage)) < 0)
+    ensures (result == Ordering.Equal) == identical(self.model(), other.model())
   {
     let order = intrinsic::compare_bytes(intrinsic::storage_view(self.storage), right: intrinsic::storage_view(other.storage))
     if order < 0 { Ordering.Less } else if order > 0 { Ordering.Greater } else { Ordering.Equal }

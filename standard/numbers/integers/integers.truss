@@ -135,6 +135,7 @@ public trait FixedWidthInteger:
 
   fn count_ones(self) -> UInt64
     ensures result <= Self.bit_width()
+    ensures result == intrinsic::count_ones(self)
     cost time O(1)
   {
     intrinsic::count_ones(self)
@@ -149,6 +150,7 @@ public trait FixedWidthInteger:
 
   fn leading_zeros(self) -> UInt64
     ensures result <= Self.bit_width()
+    ensures result == intrinsic::leading_zeros(self)
     cost time O(1)
   {
     intrinsic::leading_zeros(self)
@@ -156,6 +158,7 @@ public trait FixedWidthInteger:
 
   fn trailing_zeros(self) -> UInt64
     ensures result <= Self.bit_width()
+    ensures result == intrinsic::trailing_zeros(self)
     cost time O(1)
   {
     intrinsic::trailing_zeros(self)
