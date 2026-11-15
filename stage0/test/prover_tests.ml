@@ -1,12 +1,11 @@
 open Harness
 
-let solver = Lazy.force Support.solver
-
-let check database module_ =
-  match Checks.diagnostics database module_ with
-  | [] -> Prover.diagnostics ~record:(Support.record database) database solver module_
+let checked pipeline file =
+  match Support.diagnostics pipeline file with
+  | [] -> Support.proof_diagnostics pipeline file
   | errors -> errors
 
+let check database = checked (Support.pipeline database)
 let proven text = Support.no_diagnostics ~check [ ("app::main", text) ]
 let not_proven text code = Support.one_diagnostic ~check text code
 
@@ -104,9 +103,7 @@ let () =
               Fixtures.Prover.contract_that_calls_its_own_function_applies_its_limited_copy );
           ]
       in
-      let caller =
-        List.hd (Query.demand database Resolve.Names.declarations (Support.module_of "app::main"))
-      in
+      let caller = List.hd (Support.declarations database (Support.module_of "app::main")) in
       let rec applies_limited (term : Logic.term) =
         match term with
         | Apply (Limited _, _) -> true
@@ -115,7 +112,10 @@ let () =
         | Forall (_, triggers, body) -> List.exists applies_limited (body :: triggers)
         | Symbol _ | Integer _ | Boolean _ | Bits _ -> false
       in
-      match Query.demand database Prover.proof (Resolve.Names.key_of caller) with
+      match
+        Support.proofs (Support.pipeline database) (Support.file_of "app::main")
+          (Resolve.Names.key_of caller)
+      with
       | Obligations { obligations = [ obligation ]; _ } ->
           if not (List.exists applies_limited obligation.query.facts) then
             fail "no fact applies the limited copy: %s" (Logic.text obligation.query)
@@ -136,6 +136,129 @@ let () =
       not_proven Fixtures.Prover.function_with_a_time_clause_cannot_call_one "prover.termination");
   test "an impl that reaches itself through a generic function cannot be shown to end" (fun () ->
       only_code Fixtures.Prover.impl_that_reaches_itself_through_a_generic "prover.termination")
+
+let () =
+  test "a proof that reads a contract that fails to check is blocked and reports nothing" (fun () ->
+      let database =
+        Support.setup
+          [
+            ("app::main", Fixtures.Prover.proof_that_reads_a_contract_that_fails_to_check);
+            ("app::main/broken", Fixtures.Prover.proof_that_reads_a_contract_that_fails_to_check_2);
+          ]
+      in
+      let main = Support.file_of "app::main" in
+      (match Support.codes (Support.diagnostics (Support.pipeline database) main) with
+      | [] -> ()
+      | codes -> fail "the caller does not check: %s" (String.concat ", " codes));
+      (match Support.codes (Support.proof_diagnostics (Support.pipeline database) main) with
+      | [] -> ()
+      | codes -> fail "the blocked proof reports %s" (String.concat ", " codes));
+      let caller =
+        List.find
+          (fun (declaration : Resolve.Names.declaration) ->
+            Path.show declaration.path = "app::main::caller")
+          (Support.declarations database (Support.module_of "app::main"))
+      in
+      match
+        Pipeline.proof
+          (Support.proven (Support.pipeline database) main)
+          (Resolve.Names.key_of caller)
+      with
+      | Some Blocked -> ()
+      | Some (Value _ | Failed _) -> fail "the proof is computed"
+      | None -> fail "the caller has no proof")
+
+let () =
+  test "a type error in a callee's body blocks no caller's proof" (fun () ->
+      let database =
+        Support.setup
+          [
+            ("app::main", Fixtures.Prover.type_error_in_a_callees_body_blocks_no_callers_proof);
+            ( "app::main/double",
+              Fixtures.Prover.type_error_in_a_callees_body_blocks_no_callers_proof_2 );
+          ]
+      in
+      let main = Support.file_of "app::main" in
+      (match Support.codes (Support.proof_diagnostics (Support.pipeline database) main) with
+      | [] -> ()
+      | codes -> fail "the caller's proof reports %s" (String.concat ", " codes));
+      let caller =
+        List.find
+          (fun (declaration : Resolve.Names.declaration) ->
+            Path.show declaration.path = "app::main::caller")
+          (Support.declarations database (Support.module_of "app::main"))
+      in
+      match
+        Pipeline.proof
+          (Support.proven (Support.pipeline database) main)
+          (Resolve.Names.key_of caller)
+      with
+      | Some (Value (Obligations _)) -> ()
+      | Some (Value (Unsupported _ | Not_proven_here)) -> fail "the caller has no obligations"
+      | Some (Failed _ | Blocked) -> fail "the proof is blocked"
+      | None -> fail "the caller has no proof");
+  test "a body that calls a broken signature blocks no caller's proof" (fun () ->
+      let database =
+        Support.setup
+          [
+            ("app::main", Fixtures.Prover.body_that_calls_a_broken_signature_blocks_no_callers_proof);
+            ( "app::main/double",
+              Fixtures.Prover.body_that_calls_a_broken_signature_blocks_no_callers_proof_2 );
+          ]
+      in
+      let main = Support.file_of "app::main" in
+      (match Support.codes (Support.proof_diagnostics (Support.pipeline database) main) with
+      | [] -> ()
+      | codes -> fail "the caller's proof reports %s" (String.concat ", " codes));
+      let caller =
+        List.find
+          (fun (declaration : Resolve.Names.declaration) ->
+            Path.show declaration.path = "app::main::caller")
+          (Support.declarations database (Support.module_of "app::main"))
+      in
+      match
+        Pipeline.proof
+          (Support.proven (Support.pipeline database) main)
+          (Resolve.Names.key_of caller)
+      with
+      | Some (Value (Obligations _)) -> ()
+      | Some (Value (Unsupported _ | Not_proven_here)) -> fail "the caller has no obligations"
+      | Some (Failed _ | Blocked) -> fail "the proof is blocked"
+      | None -> fail "the caller has no proof")
+
+let () =
+  test "a broken method of a trait blocks no call of its other methods" (fun () ->
+      let database =
+        Support.setup
+          [
+            ("app::main", Fixtures.Prover.broken_method_of_a_trait_blocks_no_call_of_its);
+            ("app::main/measured", Fixtures.Prover.broken_method_of_a_trait_blocks_no_call_of_its_2);
+          ]
+      in
+      let pipeline = Support.pipeline database in
+      let main = Support.file_of "app::main" in
+      (match
+         Support.codes (Support.diagnostics pipeline (Support.file_of "app::main/measured"))
+       with
+      | [ "resolve.unknown_name" ] -> ()
+      | codes -> fail "the trait reports %s" (String.concat ", " codes));
+      (match Support.codes (Support.diagnostics pipeline main) with
+      | [] -> ()
+      | codes -> fail "a caller does not check: %s" (String.concat ", " codes));
+      (match Support.codes (Support.proof_diagnostics pipeline main) with
+      | [] -> ()
+      | codes -> fail "a caller's proof reports %s" (String.concat ", " codes));
+      let proofs = Support.proven pipeline main in
+      List.iter
+        (fun (declaration : Resolve.Names.declaration) ->
+          match Pipeline.proof proofs (Resolve.Names.key_of declaration) with
+          | Some (Value (Obligations _)) -> ()
+          | Some (Value (Unsupported _ | Not_proven_here)) ->
+              fail "%s has no obligations" (Path.show declaration.path)
+          | Some (Failed _ | Blocked) ->
+              fail "the proof of %s is blocked" (Path.show declaration.path)
+          | None -> fail "%s has no proof" (Path.show declaration.path))
+        ((Support.names database main.module_.package).declarations_in main))
 
 let tree = Fixtures.Prover.tree
 
@@ -728,13 +851,14 @@ let () =
 
 let holes text =
   let database = Support.setup [ ("app::main", text) ] in
+  let proof = Support.proofs (Support.pipeline database) (Support.file_of "app::main") in
   List.fold_left
     (fun total declaration ->
-      match Query.demand database Prover.proof (Resolve.Names.key_of declaration) with
+      match proof (Resolve.Names.key_of declaration) with
       | Obligations outcome -> total + List.length outcome.holes
       | Unsupported _ | Not_proven_here -> total)
     0
-    (Query.demand database Resolve.Names.declarations (Support.module_of "app::main"))
+    (Support.declarations database (Support.module_of "app::main"))
 
 let () =
   test "a todo in a theorem is a hole, not a failure" (fun () ->
@@ -1100,10 +1224,7 @@ let () =
       let database =
         Support.setup [ ("app::main", Fixtures.Prover.files_proof_states_list_proven_and_unproven) ]
       in
-      let states =
-        Prover.states ~record:(Support.record database) database solver
-          (Support.file_of "app::main")
-      in
+      let states = Support.proof_states (Support.pipeline database) (Support.file_of "app::main") in
       let failed =
         List.filter (fun (state : Diagnostic.span Prover.state) -> state.failure <> None) states
       in
@@ -1260,10 +1381,11 @@ let () =
       let database =
         Support.setup [ ("app::main", Fixtures.Prover.querys_text_names_nothing_by_its_truss_name) ]
       in
-      let key =
-        List.hd (Query.demand database Resolve.Names.declarations (Support.module_of "app::main"))
-      in
-      match Query.demand database Prover.proof (Resolve.Names.key_of key) with
+      let key = List.hd (Support.declarations database (Support.module_of "app::main")) in
+      match
+        Support.proofs (Support.pipeline database) (Support.file_of "app::main")
+          (Resolve.Names.key_of key)
+      with
       | Obligations { obligations = [ obligation ]; _ } ->
           let text = Logic.text obligation.query in
           if contains text "count" then fail "the text names `count`: %s" text
@@ -1271,10 +1393,11 @@ let () =
   test "renaming a function and its parameter gives the same query" (fun () ->
       let key_of text =
         let database = Support.setup [ ("app::main", text) ] in
-        let key =
-          List.hd (Query.demand database Resolve.Names.declarations (Support.module_of "app::main"))
-        in
-        match Query.demand database Prover.proof (Resolve.Names.key_of key) with
+        let key = List.hd (Support.declarations database (Support.module_of "app::main")) in
+        match
+          Support.proofs (Support.pipeline database) (Support.file_of "app::main")
+            (Resolve.Names.key_of key)
+        with
         | Obligations { obligations = [ obligation ]; _ } -> Solver.For_testing.key obligation.query
         | _ -> "none"
       in
@@ -1321,9 +1444,12 @@ let () =
           List.find
             (fun (declaration : Resolve.Names.declaration) ->
               Path.show declaration.path = "app::main::f")
-            (Query.demand database Resolve.Names.declarations (Support.module_of "app::main"))
+            (Support.declarations database (Support.module_of "app::main"))
         in
-        match Query.demand database Prover.proof (Resolve.Names.key_of key) with
+        match
+          Support.proofs (Support.pipeline database) (Support.file_of "app::main")
+            (Resolve.Names.key_of key)
+        with
         | Obligations { obligations; _ } ->
             List.fold_left
               (fun most (obligation : Prover.State.obligation) ->
@@ -1527,100 +1653,10 @@ let () =
   test "a loop's bound that leaves out its iterations' sum does not hold" (fun () ->
       not_proven Fixtures.Prover.loops_bound_that_leaves_out_its_iterations_sum "prover.cost")
 
-let again before after =
-  let solver = Lazy.force Support.solver in
-  let database = Support.setup [ ("app::main", before) ] in
-  let file = Support.file_of "app::main" in
-  let engine = Engine.of_context database in
-  let prove () =
-    match Checks.diagnostics database file with
-    | [] -> Prover.diagnostics ~record:(Support.record database) database solver file
-    | errors -> errors
-  in
-  (match prove () with
-  | [] -> ()
-  | actual -> fail "before the edit: %s" (String.concat "; " (Support.codes actual)));
-  Database.For_testing.set_text engine file after;
-  Engine.For_testing.clear_log engine;
-  let runs_before = Solver.queries_run solver in
-  (match prove () with
-  | [] -> ()
-  | actual -> fail "after the edit: %s" (String.concat "; " (Support.codes actual)));
-  let proven =
-    List.filter_map
-      (fun (key : Resolve.Names.key) ->
-        if key.module_ = file.module_ then
-          match key.path with Top { name; _ } -> Some name | path -> Some (Path.show path)
-        else None)
-      (Engine.For_testing.computed engine Prover.proof)
-  in
-  let solved = Solver.queries_run solver - runs_before in
-  expect_results_current engine;
-  (List.sort_uniq compare proven, solved)
-
-let expect_again before after ~proven ~solved =
-  let actual, count = again before after in
-  if actual <> proven || count <> solved then
-    fail "proven again: [%s], with %d queries solved; expected [%s], with %d"
-      (String.concat ", " actual) count (String.concat ", " proven) solved
-
-let () =
-  test "editing a body proves that definition again and no other" (fun () ->
-      let text index =
-        Printf.sprintf
-          "fn last_reading(readings: List[Int32]) -> Int32\n\
-          \  requires readings.length() > 2\n\
-           {\n\
-          \  readings[%s]\n\
-           }\n\n\
-           fn next_reading(reading: UInt16) -> UInt16\n\
-          \  requires reading < 900\n\
-           {\n\
-          \  reading + 7\n\
-           }\n"
-          index
-      in
-      expect_again (text "1") (text "2") ~proven:[ "last_reading" ] ~solved:1);
-  test "renaming a local solves nothing again" (fun () ->
-      let text name =
-        Printf.sprintf
-          "fn first_sample(samples: List[Int16]) -> Int16\n\
-          \  requires samples.length() > 0\n\
-           {\n\
-          \  let %s = samples[0]\n\
-          \  %s\n\
-           }\n"
-          name name
-      in
-      expect_again (text "first") (text "head") ~proven:[ "first_sample" ] ~solved:0);
-  test "editing a callee's ensures proves its callers again" (fun () ->
-      let text ensures =
-        Printf.sprintf
-          "fn halve(amount: UInt32) -> UInt32\n\
-          \  ensures %s\n\
-           {\n\
-          \  amount / 2\n\
-           }\n\n\
-           fn halve_and_add(amount: UInt32) -> UInt32 {\n\
-          \  halve(amount) + 1\n\
-           }\n\n\
-           fn unrelated(level: UInt32) -> UInt32\n\
-          \  requires level < 10\n\
-           {\n\
-          \  level + 1\n\
-           }\n"
-          ensures
-      in
-      expect_again (text "result < 4000000000") (text "result <= amount / 2")
-        ~proven:[ "halve"; "halve_and_add" ] ~solved:2)
-
 let in_standard text =
-  let database = Engine.context (Engine.create ~log:true ()) in
-  Database.load_package (Engine.of_context database)
-    ~name:{ owner = None; name = "standard" }
-    ~dependencies:[]
-    [ (Support.file_of "standard::probe", text) ];
-  check database (Support.file_of "standard::probe")
+  checked
+    (Pipeline.create (Support.setup [ ("standard::probe", text) ]))
+    (Support.file_of "standard::probe")
 
 let proven_in_standard text =
   match in_standard text with

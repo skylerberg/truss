@@ -7,7 +7,7 @@ open State
 open Modes
 open Instantiation
 open Hooks
-open Lookups
+open Name_lookup
 open Pattern_typing
 open Statements
 

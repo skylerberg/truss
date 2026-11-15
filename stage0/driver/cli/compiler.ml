@@ -13,9 +13,6 @@ let system () =
   | Some system -> system
   | None -> Outcome.cannot_run "Stage0 builds programs only for Linux and macOS."
 
-let want session context lowering wanted =
-  Database.set session Compile.roots lowering (Compile.add_roots context lowering wanted)
-
 let results () : Compile.results =
   let find, add = Database.results ~kind:Store.Test_result in
   { find; add }
@@ -23,13 +20,15 @@ let results () : Compile.results =
 let development_settings () : Build.settings =
   { build = Development; optimization = O1; extra = c_flags () }
 
-let lowering_only session context =
-  Compile.create ~want:(want session context) context (system ())
+let lowering_only pipeline packages =
+  Compile.create
+    (Pipeline.lowering_lookups pipeline packages)
+    (system ())
     { compiler = "cc"; identity = "lowering only" }
     (Build.cache (Database.objects_directory ()))
     (development_settings ())
 
-let create ?(checks = true) session packages build =
+let create ?(checks = true) pipeline snapshot packages build =
   let toolchain = toolchain () in
   let settings : Build.settings =
     match build with
@@ -44,13 +43,13 @@ let create ?(checks = true) session packages build =
   let file_name file =
     match build with
     | Development when List.mem file.Path.module_.package packages ->
-        Shown_path.shown (Command_packages.path session file)
+        Shown_path.shown (Command_packages.path snapshot file)
     | _ -> Path.show_file file
   in
-  let own = List.map snd (Database.packages session) in
+  let own = List.map snd (Database.packages snapshot) in
   Compile.create ~checks ~file_name ~results:(results ()) ~programs:(Database.programs_directory ())
-    ~want:(want session (Database.context session))
     ~worked_on:(fun package -> List.mem package own)
-    (Database.context session) (system ()) toolchain
+    (Pipeline.lowering_lookups pipeline packages)
+    (system ()) toolchain
     (Build.cache (Database.objects_directory ()))
     settings

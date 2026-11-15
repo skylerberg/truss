@@ -1,5 +1,5 @@
 let run ~names =
-  let session, packages = Command_packages.current () in
+  let snapshot, packages = Command_packages.current () in
   let package = Command_packages.one packages in
   let wanted = List.map Upgrade_command.wanted names in
   let registry =
@@ -21,7 +21,7 @@ let run ~names =
               (Registry.Version.show version))
     wanted;
   let manifest =
-    Filename.concat (Command_packages.directory session package) Command_packages.manifest_name
+    Filename.concat (Command_packages.directory snapshot package) Command_packages.manifest_name
   in
   let written = In_channel.with_open_bin manifest In_channel.input_all in
   let with_entries =
@@ -29,21 +29,14 @@ let run ~names =
     with Manifest.Malformed { line; message } ->
       Outcome.cannot_run "%s:%d: %s" (Shown_path.shown manifest) line message
   in
-  let write text =
-    if text <> In_channel.with_open_bin manifest In_channel.input_all then begin
-      Command_packages.write_file manifest text;
-      Database.refresh session
-    end
-  in
-  write with_entries;
-  match Database.plan_lock session ~set:wanted ~all:false with
+  if with_entries <> written then Command_packages.write_file manifest with_entries;
+  match Database.plan_lock (Database.retake snapshot) ~set:wanted ~all:false with
   | Error message ->
-      write written;
+      if with_entries <> written then Command_packages.write_file manifest written;
       Outcome.cannot_run "%s" message
   | Ok plan ->
-      Command_packages.write_file (Upgrade_command.lock_file session) plan.text;
-      Database.refresh session;
+      Command_packages.write_file (Upgrade_command.lock_file snapshot) plan.text;
       Upgrade_command.report
         ~lock:(Upgrade_command.lock_changes ~before:plan.before ~after:plan.after)
-        ~signatures:[] ~broken:[];
+        ~broken:[];
       0

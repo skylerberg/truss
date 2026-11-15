@@ -15,8 +15,7 @@ let resolve_impl st ~(trait : Types.trait_reference) ~self_type ~(evidence : Cor
     | Bound -> (
         let self = st.context.monomorphic.normalize (substitute self_type) in
         match
-          Interface.Impls.implements st.context.database
-            ~bounds:(fun _ -> [])
+          Interface.Impls.implements st.context.lookups.interface ~bounds:Interface.Impls.no_bounds
             self
             (let trait = Types.substitute_trait st.frame.code.substitution trait in
              {
@@ -34,7 +33,7 @@ let resolve_impl st ~(trait : Types.trait_reference) ~self_type ~(evidence : Cor
     | Dynamic -> bug "a call through any, which reaches no one instance"
   in
   let impl_interface =
-    match Interface.Impls.impl_interface st.context.database impl with
+    match Interface.Impls.impl_interface st.context.lookups.interface impl with
     | Some position -> position
     | None -> bug "no interface for %s" (Path.show impl)
   in
@@ -73,22 +72,25 @@ let operand_as st (mode : Types.mode) ty (place : Lowered.place) (passed : Lower
 let pass st (mode : Types.mode) ty place =
   operand_as st mode ty place (Convention.parameter st.context.env (Monomorphic.mode mode) ty)
 
-let method_slot ~first ~missing (methods : Types.trait_method list) name =
+let method_slot context ~owner ~first ~missing (methods : Types.trait_method list) name =
   match
     List.find_index
       (fun (trait_method : Types.trait_method) -> trait_method.method_name = name)
       methods
   with
-  | Some index -> (first + index, (List.nth methods index).method_signature)
+  | Some index ->
+      ( first + index,
+        Interface.Definition.method_signature context.lookups.interface ~owner
+          (List.nth methods index) )
   | None -> missing ()
 
 let capability_method context capability name =
   let interface =
-    match demand context Environment.trait_interface capability with
+    match Interface.Definition.trait_interface context.lookups.interface capability with
     | Some position -> position
     | None -> bug "no interface for %s" (Path.show capability)
   in
-  method_slot ~first:0 interface.methods name ~missing:(fun () ->
+  method_slot context ~owner:capability ~first:0 interface.methods name ~missing:(fun () ->
       bug "%s has no method %s" (Path.show capability) name)
 
 let entry_signature context (signature : Types.signature) =
@@ -99,21 +101,21 @@ let entry_signature context (signature : Types.signature) =
   in
   ({ entry with parameters = Convention.evidence :: entry.parameters }, result)
 
-let callable_through_any trait (trait_method : Types.trait_method) =
+let callable_through_any context trait (trait_method : Types.trait_method) =
   trait_method.method_receiver <> Static
-  && Interface.Impls.through_any ~trait trait_method = Callable
+  && Interface.Impls.through_any context.lookups.interface ~trait trait_method = Callable
 
 let any_methods context trait =
-  match demand context Environment.trait_interface trait with
-  | Some position -> List.filter (callable_through_any trait) position.methods
+  match Interface.Definition.trait_interface context.lookups.interface trait with
+  | Some position -> List.filter (callable_through_any context trait) position.methods
   | None -> bug "no interface for %s" (Path.show trait)
 
 let dynamic_slot context trait name =
-  method_slot ~first:1 (any_methods context trait) name ~missing:(fun () ->
+  method_slot context ~owner:trait ~first:1 (any_methods context trait) name ~missing:(fun () ->
       bug "%s cannot be called through any" name)
 
 let any_substitution context ~(any : Types.trait_reference) trait : Types.substitution =
-  match demand context Environment.trait_interface trait with
+  match Interface.Definition.trait_interface context.lookups.interface trait with
   | Some interface ->
       let reference =
         if Path.equal trait any.trait then any
@@ -121,7 +123,8 @@ let any_substitution context ~(any : Types.trait_reference) trait : Types.substi
           match
             List.find_opt
               (fun (bound : Types.trait_reference) -> Path.equal bound.trait trait)
-              (Interface.Properties.bound_closure context.database ~self:(Types.Any any) any)
+              (Interface.Properties.bound_closure context.lookups.interface ~self:(Types.Any any)
+                 any)
           with
           | Some bound -> bound
           | None -> bug "%s is not a trait of %s" (Path.show trait) (Types.show (Types.Any any))
@@ -325,7 +328,7 @@ let in_type_definition st (ty : Ground.ty) nested_function =
   in
   let key = key_of st.context path in
   let interface =
-    match demand st.context Environment.type_interface path with
+    match Interface.Definition.type_interface st.context.lookups.interface path with
     | Some position -> position
     | None -> bug "no interface for %s" (Path.show path)
   in
@@ -476,7 +479,7 @@ let string_literal st (ty : Ground.ty) text ~(destination : Lowered.place) =
   | _ -> bug "a string literal of type %s" (Ground.to_string ty)
 
 let static_constant st path : Lowered.place =
-  match demand st.context Environment.constant_type path with
+  match Interface.Definition.constant_type st.context.lookups.interface path with
   | Some ty -> { root = Static { key = Constant path; ty = ground st ty }; projections = [] }
   | None -> bug "no type for the constant %s" (Path.show path)
 

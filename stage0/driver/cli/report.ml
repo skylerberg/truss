@@ -1,34 +1,54 @@
 type file = { file : Path.file; source : Source.t; diagnostics : Diagnostic.t list }
-type t = { checked : file list; proven : file list Lazy.t; problems : Project.problem list }
 
-let shown session packages file diagnostics =
+type t = {
+  checked : file list;
+  proofs : Proofs.t Lazy.t option;
+  proven : file list Lazy.t;
+  problems : Project.problem list;
+}
+
+let shown snapshot packages file diagnostics =
   match Diagnostic.shown diagnostics with
   | [] -> None
   | diagnostics ->
-      Some { file; source = Command_packages.source session packages file; diagnostics }
+      Some { file; source = Command_packages.source snapshot packages file; diagnostics }
 
-let gather ?(proofs = false) session packages =
-  let files = Command_packages.program_files session packages in
+let gather ?(proofs = false) pipeline snapshot packages =
+  let program_packages = Command_packages.program_packages snapshot packages in
+  let files = Command_packages.files snapshot program_packages in
+  Pipeline.check pipeline program_packages;
+  let proofs =
+    if proofs then Some (lazy (Proofs.check pipeline snapshot packages files)) else None
+  in
   {
     checked =
       List.filter_map
-        (fun file -> shown session packages file (Database.diagnostics session file))
+        (fun file -> shown snapshot packages file (Pipeline.file_diagnostics pipeline file))
         files;
+    proofs;
     proven =
-      (if proofs then
-         lazy
-           (let proven = Proofs.diagnostics session packages files in
-            List.filter_map (fun file -> shown session packages file (proven file)) files)
-       else Lazy.from_val []);
+      lazy
+        (match proofs with
+        | Some proofs ->
+            let proofs = Lazy.force proofs in
+            List.filter_map
+              (fun file -> shown snapshot packages file (Proofs.diagnostics proofs file))
+              files
+        | None -> []);
     problems =
-      Database.problems session
+      Database.problems snapshot
       @ List.map
           (fun (file, package, problem) ->
-            { Project.file; line = None; message = Checks.manifest_sentence ~package problem })
-          (Database.manifest_problems session packages);
+            {
+              Project.file;
+              line = None;
+              message = Package_checks.manifest_sentence ~package problem;
+            })
+          (Command_packages.manifest_problems snapshot pipeline packages);
   }
 
-let of_files files = { checked = files; proven = Lazy.from_val []; problems = [] }
+let of_files files = { checked = files; proofs = None; proven = Lazy.from_val []; problems = [] }
+let proofs report = Option.map Lazy.force report.proofs
 let files report = report.checked @ Lazy.force report.proven
 let clean report = report.problems = [] && files report = []
 

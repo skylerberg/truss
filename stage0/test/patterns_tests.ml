@@ -1,7 +1,10 @@
 open Harness
 open Support
 
-let check = Checks.For_testing.through Patterns
+let check database =
+  Pipeline.For_testing.(diagnostics [ Resolve; Interface; Infer; Patterns ])
+    (Support.pipeline database)
+
 let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]
 let priority = Fixtures.Patterns.priority

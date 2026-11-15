@@ -13,7 +13,6 @@ type context = Definitions.context
 let env (context : context) = context.env
 let glue (context : context) = context.glue
 let monomorphic (context : context) = context.monomorphic
-let constant_value (context : context) = context.constant
 let context = Definitions.context
 let test_key = Definitions.test_key
 
@@ -70,7 +69,7 @@ let code_state context ~key path =
   (enter context ~builder:(create context.env ~key) (frame_of code), code)
 
 let template_clauses context from_template : (int * Mir.Graph.t) list =
-  match demand context Mir.contract_of_path from_template with
+  match Mir.contract_of_path context.lookups.mir from_template with
   | Some contract ->
       List.concat
         (List.mapi
@@ -183,7 +182,3 @@ let instance context (key : Instance.key) : Emit_c.Builder.instance =
   | Program_main main -> program_main context key main
   | Code { path; type_arguments } -> source_code context key ~path ~type_arguments
   | _ -> bug "%s is not code from source" (Instance.to_string key)
-
-module For_testing = struct
-  let constant_value = constant_value
-end

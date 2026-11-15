@@ -1,11 +1,11 @@
 val head : Types.ty -> Path.t option
-val derivable : Path.t -> bool
-val index : (Path.package, ((Path.t * Path.t) * Path.t) list) Query.query
-val impls_for : Query.context -> Path.t -> Path.package -> (Path.t * Path.t) list
-val impls_in : (Path.t * Path.t * Path.package, Path.t list) Query.query
+val impls_for : Lookups.t -> Path.t -> Path.package -> (Path.t * Path.t) list
+val impls_in : Lookups.t -> trait:Path.t -> type_:Path.t -> Path.package -> Path.t list
+val impls_of : Lookups.t -> trait:Path.t -> Path.package -> Path.t list
 val cursor_trait : Path.t
-val impl_interface : Query.context -> Path.t -> Types.impl_interface option
-val trait_substitution : Query.context -> Path.t -> Types.substitution option
+val derived_interface : Lookups.t -> type_:Path.t -> trait:Path.t -> Types.impl_interface option
+val impl_interface : Lookups.t -> Path.t -> Types.impl_interface option
+val trait_substitution : Lookups.t -> Path.t -> Types.substitution option
 
 val match_type :
   variables:Types.parameter list ->
@@ -30,15 +30,16 @@ type evidence =
 
 type through_any = Callable | Has_generics | Names_self
 
-val through_any : trait:Path.t -> Types.trait_method -> through_any
+val through_any : Lookups.t -> trait:Path.t -> Types.trait_method -> through_any
 val copyable_path : Path.t
 
 type bounds = Types.parameter -> Types.trait_reference list
 
+val no_bounds : bounds
 val required : Types.generic list -> Types.substitution -> (Types.ty * Types.trait_reference) list
 
 val implements :
-  Query.context ->
+  Lookups.t ->
   bounds:bounds ->
   ?depth:int ->
   ?conditions:bool ->
@@ -47,7 +48,7 @@ val implements :
   evidence option
 
 val associated_type :
-  Query.context ->
+  Lookups.t ->
   bounds:bounds ->
   ?defining:Path.t list ref ->
   Types.ty ->
@@ -56,7 +57,7 @@ val associated_type :
   Types.ty option
 
 val capability_set :
-  Query.context ->
+  Lookups.t ->
   bounds:bounds ->
   ?depth:int ->
   Types.ty ->
@@ -65,12 +66,12 @@ val capability_set :
   Types.capability_set
 
 val normalize_capabilities :
-  Query.context -> bounds:bounds -> ?depth:int -> Types.capability_set -> Types.capability_set
+  Lookups.t -> bounds:bounds -> ?depth:int -> Types.capability_set -> Types.capability_set
 
-val normalize : Query.context -> bounds:bounds -> ?defining:Path.t list ref -> Types.ty -> Types.ty
-val signature : Query.context -> Path.t -> Types.signature option
-val copyable : Query.context -> bounds:bounds -> Types.ty -> bool
-val plain : Query.context -> bounds:bounds -> Types.ty -> bool
-val is_view : Query.context -> bounds:bounds -> Types.ty -> bool
-val holds_function : Query.context -> bounds:bounds -> Types.ty -> bool
-val contents : Query.context -> bounds:bounds -> Types.ty -> Properties.contents
+val normalize : Lookups.t -> bounds:bounds -> ?defining:Path.t list ref -> Types.ty -> Types.ty
+val signature : Lookups.t -> Path.t -> Types.signature option
+val copyable : Lookups.t -> bounds:bounds -> Types.ty -> bool
+val plain : Lookups.t -> bounds:bounds -> Types.ty -> bool
+val is_view : Lookups.t -> bounds:bounds -> Types.ty -> bool
+val holds_function : Lookups.t -> bounds:bounds -> Types.ty -> bool
+val contents : Lookups.t -> bounds:bounds -> Types.ty -> Properties.contents

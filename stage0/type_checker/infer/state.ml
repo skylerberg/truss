@@ -49,14 +49,14 @@ type form = {
   expression_builders : (unit -> Core.expression) option array;
   statement_builders : (unit -> Core.statement) option array;
   pattern_builders : (unit -> Core.pattern) option array;
-  mutable definition_builder : (unit -> Core.definition) option;
+  mutable definition_builder : (holds_body:bool -> Core.definition) option;
   mutable next_node_id : int;
   mutable next_synthetic_local : int;
   mutable tables_with_holes : Tables.t option;
 }
 
 type state = {
-  database : Query.context;
+  lookups : Lookups.t;
   key : Names.key;
   package : Path.package;
   definition : definition;
@@ -309,7 +309,8 @@ let signed_type state (type_ : Types.ty) =
 let bounds state parameter =
   Option.value ~default:[] (Hashtbl.find_opt state.context.bounds parameter)
 
-let normalize state type_ = Impls.normalize state.database ~bounds:(bounds state) (zonk state type_)
+let normalize state type_ =
+  Interface.Impls.normalize state.lookups.interface ~bounds:(bounds state) (zonk state type_)
 
 let unsolved state =
   match state.unsolved with
@@ -346,7 +347,7 @@ let rec final_type state type_ =
 
 and final_capabilities state capabilities =
   resolve_capabilities state
-    (Impls.normalize_capabilities state.database ~bounds:(bounds state)
+    (Interface.Impls.normalize_capabilities state.lookups.interface ~bounds:(bounds state)
        (Types.flat_map_capabilities
           (function
             | Types.Capability_projection { base; trait; name } ->
@@ -364,7 +365,8 @@ let final_argument state = function
 
 let unify state left right =
   let normalize type_ =
-    Impls.normalize state.database ~bounds:(bounds state) (Unify.zonk state.unifier type_)
+    Interface.Impls.normalize state.lookups.interface ~bounds:(bounds state)
+      (Unify.zonk state.unifier type_)
   in
   Unify.unify state.unifier (normalize left) (normalize right)
 
@@ -384,29 +386,28 @@ let normalize_trait state (trait : Types.trait_reference) : Types.trait_referenc
   }
 
 let implements state type_ trait =
-  Impls.implements state.database ~bounds:(bounds state) (normalize state type_)
+  Interface.Impls.implements state.lookups.interface ~bounds:(bounds state) (normalize state type_)
     (normalize_trait state trait)
 
-let copyable state type_ = Impls.copyable state.database ~bounds:(bounds state) (zonk state type_)
-let plain state type_ = Impls.plain state.database ~bounds:(bounds state) (zonk state type_)
-let is_view state type_ = Impls.is_view state.database ~bounds:(bounds state) (zonk state type_)
+let copyable state type_ =
+  Interface.Impls.copyable state.lookups.interface ~bounds:(bounds state) (zonk state type_)
+
+let plain state type_ =
+  Interface.Impls.plain state.lookups.interface ~bounds:(bounds state) (zonk state type_)
+
+let is_view state type_ =
+  Interface.Impls.is_view state.lookups.interface ~bounds:(bounds state) (zonk state type_)
 
 let associated state type_ (trait : Types.trait_reference) name ~(at : span) =
   let type_ = normalize state type_ and trait = normalize_trait state trait in
-  match Impls.associated_type state.database ~bounds:(bounds state) type_ trait name with
+  match
+    Interface.Impls.associated_type state.lookups.interface ~bounds:(bounds state) type_ trait name
+  with
   | Some associated_type -> associated_type
-  | None -> (
-      let of_impl =
-        match implements state type_ trait with
-        | Some (Impls.From_impl { impl; _ }) -> Interface.Check.reported state.database impl
-        | _ -> None
-      in
-      match of_impl with
-      | Some report -> Types.Error report
-      | None ->
-          error state Unknown_associated_type at
-            (Printf.sprintf "`%s` gives no `%s` as a `%s`." (Types.show type_) name
-               (Types.show_trait trait)))
+  | None ->
+      error state Unknown_associated_type at
+        (Printf.sprintf "`%s` gives no `%s` as a `%s`." (Types.show type_) name
+           (Types.show_trait trait))
 
 let evidence_of = function
   | Impls.From_impl { impl; substitution } -> Tables.Impl { impl; arguments = substitution }
@@ -564,7 +565,10 @@ let settle state frame =
       (fun id ->
         match table.(id) with
         | Some type_ -> (
-            let type_ = Impls.normalize state.database ~bounds:(bounds state) (zonk state type_) in
+            let type_ =
+              Interface.Impls.normalize state.lookups.interface ~bounds:(bounds state)
+                (zonk state type_)
+            in
             table.(id) <- Some type_;
             if List.exists is_open (Unify.unknowns state.unifier type_) then
               match parent with Some parent -> keep parent id | None -> ())
@@ -769,8 +773,7 @@ let check_resource state (resource : Syntax.resource) =
     match target state path.path.last with
     | Some (Definition (Capability, capability)) -> (
         match method_ with
-        | Some method_
-          when Query.demand state.database Names.members (capability, method_.text) = [] ->
+        | Some method_ when state.lookups.interface.names.members capability method_.text = [] ->
             report state Unknown_member method_.span
               (Printf.sprintf "`%s` has no method `%s`." shown method_.text)
         | _ -> ())

@@ -1,3 +1,0 @@
-internal fn keep(text: String) -> String {
-  text
-}

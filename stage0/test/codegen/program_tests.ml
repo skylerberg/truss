@@ -574,28 +574,26 @@ let () =
   |> List.iter (fun name ->
       List.iteri
         (fun index text ->
-          let database = Engine.context (Engine.create ~bases:[ Lazy.force checked_standard ] ()) in
-          Database.load_package (Engine.of_context database)
-            ~name:{ owner = None; name = "example" }
-            ~dependencies:[]
-            [ (example_file, text) ];
-          if Checks.diagnostics database example_file = [] then
+          let database = example_package [ (example_file, text) ] in
+          if diagnostics (pipeline database) example_file = [] then
             test
               (Printf.sprintf "%s block %d lowers, and its tests pass" name (index + 1))
               (fun () ->
                 let database, compile = load text in
+                let interface =
+                  Pipeline.interface_lookups (pipeline database) [ example_file.module_.package ]
+                in
                 List.iter
                   (fun (declaration : Resolve.Names.declaration) ->
                     match
-                      ( declaration.path,
-                        Query.demand database Interface.Environment.signature declaration.path )
+                      (declaration.path, Interface.Definition.signature interface declaration.path)
                     with
                     | Top _, Some { generics = []; specification_only = false; _ } ->
                         ignore
                           (Compile.For_testing.compiled compile
                              (Code { path = declaration.path; type_arguments = [] }))
                     | _ -> ())
-                  (Query.demand database Resolve.Names.declarations example);
+                  ((Pipeline.names (pipeline database) [ example.package ]).declarations example);
                 if tests_of database <> [] then
                   String.split_on_char '\n' (run_source text)
                   |> List.iter (fun line ->

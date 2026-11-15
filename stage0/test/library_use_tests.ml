@@ -1,10 +1,9 @@
 open Harness
 
-let solver = Lazy.force Support.solver
-
-let check database module_ =
-  match Checks.diagnostics database module_ with
-  | [] -> Prover.diagnostics ~record:(Support.record database) database solver module_
+let check database file =
+  let pipeline = Support.pipeline database in
+  match Support.diagnostics pipeline file with
+  | [] -> Support.proof_diagnostics pipeline file
   | errors -> errors
 
 let proven text = Support.no_diagnostics ~check [ ("app::main", text) ]

@@ -1,0 +1,14 @@
+let first: Int64 = 1
+let second: Int64 = first + 1
+let third: Int64 = second + 1
+let fourth: Int64 = third + 1
+let fifth: Int64 = fourth + 1
+let sixth: Int64 = fifth + 1
+let seventh: Int64 = sixth + 1
+let eighth: Int64 = seventh + 1
+let ninth: Int64 = eighth + 1
+let tenth: Int64 = ninth + 1
+
+test "chain" {
+  assert tenth == 10
+}

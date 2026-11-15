@@ -1,0 +1,27 @@
+(library
+ (name pipeline)
+ (libraries
+  compiler_bug
+  path
+  intrinsic
+  source
+  syntax
+  types
+  diagnostic
+  components
+  core
+  manifest
+  project
+  parsed
+  resolve
+  interface
+  infer
+  patterns
+  usage
+  mir
+  ownership
+  package_checks
+  compile
+  solver
+  prover
+  zarith))

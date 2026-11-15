@@ -7,9 +7,7 @@
   hashing_tests
   compiler_bug_tests
   process_tests
-  query_tests
   store_tests
-  database_tests
   resolve_tests
   standard_library_tests
   interface_tests
@@ -27,8 +25,7 @@
   registry_tests
   compatibility_tests
   prover_tests
-  library_use_tests
-  scale_tests)
+  library_use_tests)
  (libraries
   process
   harness
@@ -53,16 +50,11 @@
   reference
   cbor
   blake3
-  query
-  phases
-  engine
   database
-  graph_types
   store
   unix
   path
   well_known
-  packages
   parsed
   project
   resolve
@@ -70,13 +62,13 @@
   logic
   solver
   prover
+  pipeline
   types
   intrinsic
   interface
   infer
   ownership
   syntax_walk
-  checks
   manifest
   registry
   cli)

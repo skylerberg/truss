@@ -5,13 +5,13 @@ val function_ :
   ?is_updating_helper:bool ->
   ?inherited:State.part * Types.substitution ->
   ?substitution:Types.substitution ->
-  Query.context ->
+  Lookups.t ->
   State.source ->
   path:Path.t ->
   State.outcome
 
 val laws :
-  Query.context ->
+  Lookups.t ->
   State.source ->
   impl:Path.t ->
   trait:Types.trait_reference ->
@@ -20,7 +20,7 @@ val laws :
   at:State.span ->
   State.outcome
 
-val type_ : Query.context -> State.source -> path:Path.t -> State.outcome
-val test : Query.context -> State.source -> path:Path.t -> State.outcome
-val constant : Query.context -> State.source -> path:Path.t -> State.outcome
-val theorem : Query.context -> State.source -> path:Path.t -> State.outcome
+val type_ : Lookups.t -> State.source -> path:Path.t -> State.outcome
+val test : Lookups.t -> State.source -> path:Path.t -> State.outcome
+val constant : Lookups.t -> State.source -> path:Path.t -> State.outcome
+val theorem : Lookups.t -> State.source -> path:Path.t -> State.outcome

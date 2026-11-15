@@ -172,7 +172,7 @@ let locked_entry context (key : Instance.key) ~capability ~name : Emit_c.Builder
 
 let locked_table context (key : Instance.key) ~capability : Lowered.table =
   let interface =
-    match demand context Environment.trait_interface capability with
+    match Interface.Definition.trait_interface context.lookups.interface capability with
     | Some interface -> interface
     | None -> bug "no interface for %s" (Path.show capability)
   in
@@ -183,7 +183,10 @@ let locked_table context (key : Instance.key) ~capability : Lowered.table =
       List.map
         (fun (trait_method : Types.trait_method) ->
           ( Instance.Locked_entry { capability; name = trait_method.method_name },
-            fst (entry_signature context trait_method.method_signature) ))
+            fst
+              (entry_signature context
+                 (Interface.Definition.method_signature context.lookups.interface ~owner:capability
+                    trait_method)) ))
         interface.methods;
   }
 
@@ -192,7 +195,7 @@ let table context (key : Instance.key) : Lowered.table =
   | Table { impl; type_arguments } ->
       let interface, capability, _ = impl_capability context impl in
       let capability_interface =
-        match demand context Environment.trait_interface capability with
+        match Interface.Definition.trait_interface context.lookups.interface capability with
         | Some position -> position
         | None -> bug "no interface for %s" (Path.show capability)
       in
@@ -202,10 +205,10 @@ let table context (key : Instance.key) : Lowered.table =
             let receiver =
               match
                 List.find_opt
-                  (fun (name, _, _) -> name = trait_method.method_name)
+                  (fun (name, _) -> name = trait_method.method_name)
                   interface.impl_methods
               with
-              | Some (_, receiver, _) -> receiver
+              | Some (_, receiver) -> receiver
               | None -> bug "%s does not write %s" (Path.show impl) trait_method.method_name
             in
             let method_key =
@@ -215,7 +218,11 @@ let table context (key : Instance.key) : Lowered.table =
                   type_arguments;
                 }
             in
-            (Instance.Entry method_key, fst (entry_signature context trait_method.method_signature)))
+            ( Instance.Entry method_key,
+              fst
+                (entry_signature context
+                   (Interface.Definition.method_signature context.lookups.interface
+                      ~owner:capability trait_method)) ))
           capability_interface.methods
       in
       { table_key = key; capability = Some capability; entries }
@@ -243,7 +250,7 @@ let real_implementations st ~user capabilities =
     (fun capability ->
       let impl = real_implementation capability in
       let ty =
-        match Interface.Impls.impl_interface st.context.database impl with
+        match Interface.Impls.impl_interface st.context.lookups.interface impl with
         | Some interface -> Monomorphic.ground st.context.monomorphic [] interface.for_type
         | None ->
             unsupported "%s uses %s, which has no real implementation" user
@@ -455,10 +462,10 @@ let any_table context (key : Instance.key) : Lowered.table =
             let receiver =
               match
                 List.find_opt
-                  (fun (name, _, _) -> name = trait_method.method_name)
+                  (fun (name, _) -> name = trait_method.method_name)
                   interface.impl_methods
               with
-              | Some (_, receiver, _) -> receiver
+              | Some (_, receiver) -> receiver
               | None -> trait_method.method_receiver
             in
             let method_key =
@@ -470,7 +477,9 @@ let any_table context (key : Instance.key) : Lowered.table =
             in
             ( Instance.Any_entry method_key,
               let signature, _, _ =
-                any_entry_signature context ~any ~trait trait_method.method_signature
+                any_entry_signature context ~any ~trait
+                  (Interface.Definition.method_signature context.lookups.interface ~owner:trait
+                     trait_method)
               in
               signature ))
           (any_methods context trait)

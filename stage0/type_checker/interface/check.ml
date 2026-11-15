@@ -3,14 +3,14 @@ module Names = Resolve.Names
 open Checking
 open Impl_checks
 
-let bound_diagnostics database ~package ~bounds named =
+let bound_diagnostics lookups ~package ~bounds named =
   let diagnostic code (span : span) message = Diagnostic.make ~code span message in
   List.concat_map
     (fun ((span : span), (type_ : Types.ty)) ->
       match type_ with
       | Named { path; arguments } -> (
           match
-            Option.bind (Query.demand database Environment.type_interface path)
+            Option.bind (Definition.type_interface lookups path)
               (fun (interface : Types.type_interface) ->
                 Option.map
                   (Impls.required interface.type_generics)
@@ -19,7 +19,7 @@ let bound_diagnostics database ~package ~bounds named =
           | Some required ->
               List.concat_map
                 (fun (argument, bound) ->
-                  match Impls.implements database ~bounds argument bound with
+                  match Impls.implements lookups ~bounds argument bound with
                   | None ->
                       [
                         diagnostic (Types Unsatisfied_bound) span
@@ -29,7 +29,7 @@ let bound_diagnostics database ~package ~bounds named =
                   | Some evidence ->
                       List.map
                         (diagnostic (Capabilities Not_granted) span)
-                        (Grants.evidence_messages database ~package ~bounds evidence))
+                        (Grants.evidence_messages lookups ~package ~bounds evidence))
                 required
           | None -> [])
       | _ -> [])
@@ -37,7 +37,7 @@ let bound_diagnostics database ~package ~bounds named =
 
 let check_bounds state =
   state.diagnostics <-
-    bound_diagnostics state.database ~package:state.key.module_.package ~bounds:(bounds state)
+    bound_diagnostics state.lookups ~package:state.key.module_.package ~bounds:(bounds state)
       state.lowered.named
     @ state.diagnostics
 
@@ -57,13 +57,13 @@ and mentioned_argument = function
 let visibility_of state (path : Path.t) =
   match path with
   | Top { module_; name } -> (
-      match Query.demand state.database Names.find (module_, name) with
+      match state.lookups.names.find module_ name with
       | Some entry -> Some entry.visibility
       | None -> None)
   | _ -> None
 
-let check_private_in_public state types (span : span) =
-  if Names.is_public state.definition.visibility then
+let check_private_in_public state ~visibility types (span : span) =
+  if Names.is_public visibility then
     List.iter
       (fun path ->
         match visibility_of state path with
@@ -84,7 +84,7 @@ let check_method_location state (head : type_head) =
   in
   match owner with
   | Some (Top { module_ = owner_module; name } as owner) -> (
-      match Query.demand state.database Names.find (owner_module, name) with
+      match state.lookups.names.find owner_module name with
       | Some { kind = Type; visibility; _ } ->
           if owner_module.package <> state.key.module_.package then
             report state Method_outside_package head.span
@@ -186,7 +186,7 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
               (fun (field : Types.field) -> field.field_type)
               (Option.value ~default:[] variant.fields))
           variants
-    | Todo_type | Builtin_type _ | Error_shape _ -> []
+    | Todo_type | Builtin_type _ -> []
   in
   let derived_bounds trait parameter =
     if
@@ -207,7 +207,7 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
                   let shown = Names.spell_path written.path in
                   if
                     not
-                      (Impls.derivable trait || Well_known.is Copyable trait
+                      (Names.derivable trait || Well_known.is Copyable trait
                      || Well_known.is Plain trait)
                   then
                     report state Not_derivable written.span
@@ -233,8 +233,8 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
                         List.for_all
                           (fun type_ ->
                             if Well_known.is Plain trait then
-                              Impls.plain state.database ~bounds:(derived_bounds trait) type_
-                            else Impls.copyable state.database ~bounds:(derived_bounds trait) type_)
+                              Impls.plain state.lookups ~bounds:(derived_bounds trait) type_
+                            else Impls.copyable state.lookups ~bounds:(derived_bounds trait) type_)
                           field_types
                       in
                       let allocates =
@@ -256,7 +256,7 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
                              "`Default` is derived as each field's default, so only a record can \
                               derive it: no variant of this type is its default. Write the `impl`, \
                               which says which variant is."
-                       | Record _ | Todo_type | Builtin_type _ | Error_shape _ -> ());
+                       | Record _ | Todo_type | Builtin_type _ -> ());
                     if Well_known.is Ordered trait || Well_known.is Hash trait then
                       if not (List.exists (Well_known.is Equal) interface.derives) then
                         report state Cannot_derive written.span
@@ -279,7 +279,7 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
                         in
                         if
                           Option.is_none
-                            (Impls.implements state.database ~bounds:(derived_bounds trait) type_
+                            (Impls.implements state.lookups ~bounds:(derived_bounds trait) type_
                                wanted)
                         then
                           report state Cannot_derive written.span
@@ -315,11 +315,11 @@ let check_trait_cycle state (requires : path_type list) =
     if Path.equal path state.key.path then true
     else if List.exists (Path.equal path) seen then false
     else
-      match Query.demand state.database Summary.trait_header path with
+      match state.lookups.trait_header path with
       | Some header -> List.exists (reaches (path :: seen)) header.required
       | None -> false
   in
-  match Query.demand state.database Summary.trait_header state.key.path with
+  match state.lookups.trait_header state.key.path with
   | Some header when List.exists (reaches []) header.required -> (
       match requires with
       | first :: _ ->
@@ -335,14 +335,14 @@ let check_redeclared state (name : name) (receiver : Path.receiver) ~(trait_path
       (fun (required : Types.trait_reference) ->
         List.concat_map
           (fun (bound : Types.trait_reference) ->
-            match Query.demand state.database Environment.trait_interface bound.trait with
+            match Definition.trait_interface state.lookups bound.trait with
             | Some interface ->
                 List.map
                   (fun (method_ : Types.trait_method) ->
                     ((method_.method_name, method_.method_receiver), bound.trait))
                   interface.methods
             | None -> [])
-          (Properties.bound_closure state.database
+          (Properties.bound_closure state.lookups
              ~self:(Types.Parameter { owner = trait_path; name = "Self" })
              required))
       trait.requires
@@ -380,7 +380,7 @@ let check_proof_bounds state (written : type_head) (generics : Types.generic lis
               (fun (bound : Types.trait_reference) ->
                 if
                   Option.is_none
-                    (Impls.implements state.database ~bounds:impl_bounds
+                    (Impls.implements state.lookups ~bounds:impl_bounds
                        (Types.Parameter of_impl.generic)
                        (Types.substitute_trait renaming bound))
                 then
@@ -400,31 +400,30 @@ let check_proof_bounds state (written : type_head) (generics : Types.generic lis
   end
 
 let check state =
-  let database = state.database in
+  let lookups = state.lookups in
   let definition = state.definition in
   let broken part = Resolve.Parts.broken definition part in
   check_bounds state;
-  match Query.demand database Resolve.resolved state.key with
+  match lookups.resolved Interface state.key with
   | None -> ()
   | Some resolved -> (
       if not (broken Header) then
-        match
-          (Query.demand database Names.container state.key, definition.kind, state.lowered.interface)
-        with
+        match (lookups.names.container state.key, definition.kind, state.lowered.interface) with
         | ( Some container,
             (Function { signature; _ } | Method_declaration signature),
             Function_interface written ) -> (
             let name = Names.signature_name signature in
             match
-              ( Query.demand database Names.definition container,
+              ( lookups.names.definition container,
                 Option.map
                   (fun (lowered : Environment.lowered_interface) -> lowered.interface)
-                  (Query.demand database Environment.lowered_interface container) )
+                  (lookups.lowered_interface container) )
             with
-            | Some { kind = Trait _; _ }, Some (Trait_interface trait) ->
+            | Some { kind = Trait _; visibility; _ }, Some (Trait_interface trait) ->
                 check_redeclared state name
                   (Names.receiver signature.parameters)
-                  ~trait_path:container.path trait
+                  ~trait_path:container.path trait;
+                check_private_in_public state ~visibility (signature_types written) name.span
             | Some { kind = Impl { trait_; _ }; _ }, Some (Impl_interface impl) ->
                 check_impl_method state name
                   (Names.receiver signature.parameters)
@@ -440,10 +439,11 @@ let check state =
             let span =
               match signature.name with Plain_name name | Member_name (_, name) -> name.span
             in
-            check_private_in_public state (signature_types lowered) span
+            check_private_in_public state ~visibility:definition.visibility
+              (signature_types lowered) span
         | None, Law_proof { law; type_; _ }, Law_proof_interface { generics; trait; for_type; _ }
           -> (
-            (match Query.demand database Summary.trait_header trait.trait with
+            (match lookups.trait_header trait.trait with
             | Some header when not (List.mem law.text header.laws) ->
                 report state Unknown_member law.span
                   (Printf.sprintf "`%s` has no law `%s`." (Types.show_trait trait) law.text)
@@ -451,7 +451,7 @@ let check state =
             let arity_matches =
               match for_type with
               | Types.Named { path; _ } -> (
-                  match Query.demand database Summary.generics_of path with
+                  match Names.generics_of lookups.names path with
                   | Some expected -> List.length expected = List.length generics
                   | None -> true)
               | _ -> true
@@ -465,7 +465,7 @@ let check state =
               | Some (Impls.From_impl { impl; _ }) ->
                   Option.iter
                     (check_proof_bounds state type_ generics)
-                    (Impls.impl_interface database impl)
+                    (Impls.impl_interface lookups impl)
               | Some _ -> ())
         | None, Type_definition { name; generics; body; clauses }, Type_interface interface ->
             check_no_capability_parameter state "the type" name generics;
@@ -483,7 +483,7 @@ let check state =
             | Type_todo -> ());
             check_derives state interface clauses resolved;
             if definition.visibility = Public then
-              check_private_in_public state
+              check_private_in_public state ~visibility:definition.visibility
                 (match interface.shape with
                 | Record fields -> List.map (fun (field : Types.field) -> field.field_type) fields
                 | Sum variants ->
@@ -498,39 +498,24 @@ let check state =
         | None, Trait { name; generics; requires; _ }, Trait_interface trait ->
             check_no_capability_parameter state "the trait" name generics;
             check_trait_cycle state requires;
-            check_private_in_public state
-              (List.map (fun (bound : Types.trait_reference) -> Types.Any bound) trait.requires
-              @ List.concat_map
-                  (fun (method_ : Types.trait_method) -> signature_types method_.method_signature)
-                  trait.methods)
+            check_private_in_public state ~visibility:definition.visibility
+              (List.map (fun (bound : Types.trait_reference) -> Types.Any bound) trait.requires)
               name.span
         | None, Constant { name = Plain_name name; _ }, Constant_interface constant ->
-            check_private_in_public state [ constant.constant_type ] name.span
+            check_private_in_public state ~visibility:definition.visibility
+              [ constant.constant_type ] name.span
         | None, Impl { trait_; members; _ }, Impl_interface impl ->
             check_impl state members impl trait_
         | None, Constant { name = Member_name (head, _); _ }, _ -> check_method_location state head
         | None, _, _ -> ())
 
-let diagnostics =
-  Query.query ~name:"interface_diagnostics" ~phase:Phases.interfaces ~saved:true
-    ~show:Names.show_key (fun database key ->
-      match
-        ( Query.demand database Names.definition key,
-          Query.demand database Environment.lowered_interface key )
-      with
-      | Some definition, Some lowered ->
-          let state = { database; key; definition; lowered; diagnostics = [] } in
-          check state;
-          List.sort
-            (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
-              compare (left.span, left.code) (right.span, right.code))
-            (lowered.diagnostics @ state.diagnostics)
-      | _ -> [])
-
-let reported database (path : Path.t) =
-  match Query.demand database Summary.key path with
-  | Some key -> (
-      match Query.demand database diagnostics key with
-      | first :: _ -> Some (Diagnostic.reported first)
-      | [] -> None)
-  | None -> None
+let diagnostics (lookups : Lookups.t) key =
+  match (lookups.names.definition key, lookups.lowered_interface key) with
+  | Some definition, Some lowered ->
+      let state = { lookups; key; definition; lowered; diagnostics = [] } in
+      check state;
+      List.sort
+        (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
+          compare (left.span, left.code) (right.span, right.code))
+        state.diagnostics
+  | _ -> []

@@ -1,4 +1,9 @@
 let test = Harness.test
+
+let diagnostics pipeline (file : Path.file) =
+  Pipeline.check pipeline [ file.module_.package ];
+  Pipeline.file_diagnostics pipeline file
+
 let fail = Harness.fail
 let expect_string = Harness.expect_string
 let contains = Substring.contains
@@ -209,38 +214,46 @@ let expect_status ?extra ?anchors expected instances =
 
 let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [] }
 let example_file : Path.file = { module_ = example; name = "main" }
-let checked_standard = lazy (Database.For_testing.standard_base ())
+let standard_state = lazy (Database.For_testing.standard_state ())
+let pipeline database = Pipeline.create ~loaded:[ Lazy.force standard_state ] database
+
+let example_package files : Project.package list =
+  [ { name = { owner = None; name = "example" }; dependencies = []; files } ]
 
 let load_files ?results files =
-  let database = Engine.context (Engine.create ~bases:[ Lazy.force checked_standard ] ()) in
-  Database.load_package (Engine.of_context database)
-    ~name:{ owner = None; name = "example" }
-    ~dependencies:[] files;
+  let database = example_package files in
+  let pipeline = pipeline database in
   List.iter
-    (fun (file, _) ->
-      let source = Query.demand database Packages.source file in
-      match Checks.diagnostics database file with
-      | [] -> ignore (Core_lint.check_file database file)
+    (fun ((file : Path.file), text) ->
+      let source = Source.create ~path:(Path.show_file file) text in
+      match diagnostics pipeline file with
+      | [] ->
+          ignore
+            (Core_lint.check_file
+               (Pipeline.interface_lookups pipeline [ file.module_.package ])
+               ~core:(fun key ->
+                 Option.map
+                   (fun (checked : Infer.checked) -> checked.form)
+                   (Pipeline.For_testing.checked_body pipeline key))
+               file)
       | diagnostics ->
           fail "the source has diagnostics:\n%s"
             (String.concat "" (List.map (Diagnostic.render source) diagnostics)))
     files;
   ( database,
     Compile.create ?results
-      ~want:(fun lowering wanted ->
-        Engine.set (Engine.of_context database) Compile.roots lowering
-          (Compile.add_roots (Engine.context (Engine.of_context database)) lowering wanted))
-      database host (Lazy.force compiler) (Lazy.force cache) (Lazy.force settings) )
+      (Pipeline.lowering_lookups pipeline [ example.package ])
+      host (Lazy.force compiler) (Lazy.force cache) (Lazy.force settings) )
 
 let load ?results text = load_files ?results [ (example_file, text) ]
 
-let tests_in database module_ =
+let tests_in pipeline (module_ : Path.module_) =
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
       match declaration.path with Test _ -> Some declaration.path | _ -> None)
-    (Query.demand database Resolve.Names.declarations module_)
+    ((Pipeline.names pipeline [ module_.package ]).declarations module_)
 
-let tests_of database = tests_in database example
+let tests_of database = tests_in (pipeline database) example
 
 let run_source text =
   let database, compile = load text in
@@ -274,17 +287,12 @@ let drop_shapes =
     ("Counter", Record [ ("target", Raw (Pointer (Data int32))) ]);
   ]
 
-let standard_database =
-  lazy
-    (let database = Engine.context (Engine.create ()) in
-     Database.load_standard (Engine.of_context database);
-     database)
+let standard_interface = lazy (Pipeline.interface_lookups (pipeline []) [ Path.standard_package ])
 
 let standard_context : Monomorphic.context =
   {
     type_interface =
-      (fun path ->
-        Query.demand (Lazy.force standard_database) Interface.Environment.type_interface path);
+      (fun path -> Interface.Definition.type_interface (Lazy.force standard_interface) path);
     normalize = Fun.id;
     normalize_capabilities = Fun.id;
   }

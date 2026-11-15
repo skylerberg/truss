@@ -1,5 +1,5 @@
 type state = {
-  database : Query.context;
+  lookups : Lookups.t;
   key : Resolve.Names.key;
   definition : Syntax.definition;
   lowered : Environment.lowered_interface;

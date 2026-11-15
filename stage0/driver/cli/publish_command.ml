@@ -2,17 +2,17 @@ module Names = Resolve.Names
 module Version = Registry.Version
 module Lock = Registry.Lock
 
-let unfinished session packages =
-  let context = Database.context session in
+let unfinished snapshot pipeline packages =
+  let names = Pipeline.names pipeline packages in
   List.concat_map
     (fun file ->
-      let source = Command_packages.source session packages file in
+      let source = Command_packages.source snapshot packages file in
       List.concat_map
         (fun declaration ->
           let key = Names.key_of declaration in
-          match Query.demand context Names.base key with
-          | None -> []
-          | Some (_, base) ->
+          match (names.base key, names.definition key) with
+          | None, _ | _, None -> []
+          | Some (_, base), Some definition ->
               List.map
                 (fun ({ keyword; span; _ } : Inspect.unfinished) ->
                   let line, column =
@@ -22,28 +22,34 @@ let unfinished session packages =
                     Source.path source,
                     line,
                     column ))
-                (Query.demand context Inspect.unfinished key))
-        (Query.demand context Names.declarations_in file))
-    (Command_packages.files session packages)
+                (Inspect.unfinished definition))
+        (names.declarations_in file))
+    (Command_packages.files snapshot packages)
 
 let files directory (record : Lock.t) =
   List.filter (fun (path, _) -> path <> "truss.lock") (Registry.Content.published_files directory)
   @ if record = [] then [] else [ ("truss.lock", Lock.print record) ]
 
-let record session registry (package : Path.package) =
-  let root = Database.root session in
-  let built = Database.registry_packages session in
+let record pipeline snapshot registry (package : Path.package) =
+  let root = Database.root snapshot in
+  let built = Database.registry_packages snapshot in
   let directory_of name =
     Option.map
       (fun (relative, _) -> if relative = "" then root else Filename.concat root relative)
-      (List.find_opt (fun (_, other) -> other = name) (Database.packages session))
+      (List.find_opt (fun (_, other) -> other = name) (Database.packages snapshot))
   in
   let in_registry name = List.find_opt (fun (other, _, _) -> other = name) built in
   let dependencies ~code name =
-    let used = if code then Database.code_packages session name else [] in
+    let used =
+      if code then begin
+        Pipeline.check pipeline [ name ];
+        Option.value ~default:[] (Pipeline.code_packages pipeline name)
+      end
+      else []
+    in
     List.filter
       (fun dependency -> (not code) || List.mem dependency used)
-      (Query.demand (Database.context session) Packages.dependency_names name)
+      (Database.dependency_names snapshot name)
   in
   let problems = ref [] in
   let rec closure name : Lock.t =
@@ -85,14 +91,13 @@ let record session registry (package : Path.package) =
   let entries = closure package in
   (entries, List.sort_uniq compare !problems)
 
-let failed_tests session packages =
+let failed_tests pipeline snapshot packages =
+  let interface = Pipeline.interface_lookups pipeline packages in
   let tests =
     List.filter
       (fun (test : Test_command.test) ->
-        match Query.demand (Database.context session) Interface.Environment.interface test.path with
-        | Some (Test_interface uses) -> uses = Types.no_capabilities
-        | _ -> false)
-      (Test_command.select session packages ~paths:[] ~match_:None)
+        Interface.Definition.test_uses interface test.path = Some Types.no_capabilities)
+      (Test_command.select snapshot pipeline packages ~paths:[] ~match_:None)
   in
   List.concat
     (List.map2
@@ -103,7 +108,7 @@ let failed_tests session packages =
              Printf.sprintf "%s: %s" (Test_command.label test) (Compile.show_outcome record.outcome);
            ])
        tests
-       (Test_command.run_tests session packages tests))
+       (Test_command.run_tests pipeline snapshot packages tests))
 
 let next_name (package : Path.package) =
   let major = Version.major_of_name package in
@@ -124,12 +129,12 @@ type outcome =
   | Unchanged of Version.t
   | Refused of string list
 
-let decide session registry (package : Path.package) =
+let decide pipeline snapshot registry (package : Path.package) =
   let name = package in
-  match record session registry package with
+  match record pipeline snapshot registry package with
   | _, (_ :: _ as problems) -> Refused problems
   | record, [] -> (
-      let files = files (Command_packages.directory session package) record in
+      let files = files (Command_packages.directory snapshot package) record in
       let hash = Registry.Content.hash files in
       match Registry.Index.newest registry name with
       | None -> Published { version = Version.first name; files; grows = [] }
@@ -138,15 +143,14 @@ let decide session registry (package : Path.package) =
           match Database.published name version with
           | Error message -> Refused [ message ]
           | Ok published ->
-              let changes =
-                Compatibility.compare ~before:(Database.context published)
-                  ~after:(Database.context session) name
-              in
+              let before = Pipeline.interface_lookups (Database.pipeline published) [ name ]
+              and after = Pipeline.interface_lookups pipeline [ name ] in
+              let changes = Compatibility.compare ~before ~after name in
               let breaks =
                 List.map
                   (fun (path, description) ->
-                    let was = Signatures.of_path (Database.context published) path
-                    and now = Signatures.of_path (Database.context session) path in
+                    let was = Signatures.of_path before.names path
+                    and now = Signatures.of_path after.names path in
                     String.concat ""
                       (Printf.sprintf "%s %s." (Path.show path) description
                       ::
@@ -182,7 +186,7 @@ let decide session registry (package : Path.package) =
 
 let run () =
   let json = Output.json () in
-  let session, packages = Command_packages.current () in
+  let snapshot, packages = Command_packages.current () in
   let name = Command_packages.one packages in
   if name.owner = None then
     Outcome.cannot_run
@@ -195,7 +199,8 @@ let run () =
         Outcome.cannot_run "No registry is set. Set `%s` to the registry's directory."
           Registry.Index.variable
   in
-  let report = Report.gather ~proofs:true session packages in
+  let pipeline = Database.pipeline snapshot in
+  let report = Report.gather ~proofs:true pipeline snapshot packages in
   let refuse sentences =
     if json then
       Json.print
@@ -205,7 +210,7 @@ let run () =
     raise (Outcome.Stop 1)
   in
   if not (Report.clean report) then raise (Report.Errors report);
-  (match unfinished session packages with
+  (match unfinished snapshot pipeline packages with
   | [] -> ()
   | unfinished_code ->
       refuse
@@ -214,10 +219,10 @@ let run () =
              Printf.sprintf "%s:%d:%d: `%s` is not finished code." file line column keyword)
            unfinished_code
         @ [ "Cannot publish a package with a `todo` or an `echo`." ]));
-  (match failed_tests session packages with
+  (match failed_tests pipeline snapshot packages with
   | [] -> ()
   | failed -> refuse (failed @ [ "Cannot publish a package whose tests fail." ]));
-  match decide session registry name with
+  match decide pipeline snapshot registry name with
   | Refused sentences -> refuse sentences
   | Unchanged version ->
       if json then

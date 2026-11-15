@@ -1,8 +1,7 @@
 open Harness
 
-let solver = Lazy.force Support.solver
 let markdown_files = Harness.markdown_documents ()
-let source_of database file = Query.demand database Packages.source file
+let source_of = Support.source
 
 let excerpt_codes =
   [
@@ -20,12 +19,13 @@ let () =
         (fun index text ->
           let database = Support.setup [ ("example", text) ] in
           let file = Support.file_of "example" in
-          if (Query.demand database Parsed.file file).diagnostics = [] then
+          if Support.parse_errors database file = [] then
             test
               (Printf.sprintf "%s block %d checks and proves unless it is an excerpt" name
                  (index + 1))
               (fun () ->
-                let diagnostics = Checks.diagnostics database file in
+                let pipeline = Support.pipeline database in
+                let diagnostics = Support.diagnostics pipeline file in
                 if
                   not
                     (List.exists
@@ -34,9 +34,7 @@ let () =
                 then
                   match diagnostics with
                   | [] -> (
-                      match
-                        Prover.diagnostics ~record:(Support.record database) database solver file
-                      with
+                      match Support.proof_diagnostics pipeline file with
                       | [] -> ()
                       | unproven ->
                           fail "%s"

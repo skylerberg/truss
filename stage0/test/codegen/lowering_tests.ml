@@ -1,4 +1,3 @@
-module Lower = Compile.For_testing.Lower
 open Codegen_support
 
 let () =
@@ -155,25 +154,22 @@ let () =
 
 let folds name ~folded ~run source =
   test name (fun () ->
-      let database, _ = load source in
-      let context =
-        Lower.context ~checks:true database host ~constant:(fun context path ->
-            match Lower.constant context path with Folded data -> Some data.value | Run _ -> None)
+      let _, compile = load source in
+      let is_folded name =
+        Compile.For_testing.is_folded compile (Top { module_ = example; name })
       in
-      let value = Lower.constant_value context in
-      let constant name : Path.t = Top { module_ = example; name } in
       List.iter
-        (fun name -> if value (constant name) = None then fail "%s is run, and should fold" name)
+        (fun name -> if not (is_folded name) then fail "%s is run, and should fold" name)
         folded;
-      List.iter
-        (fun name -> if value (constant name) <> None then fail "%s folds, and should be run" name)
-        run;
+      List.iter (fun name -> if is_folded name then fail "%s folds, and should be run" name) run;
       expect_output source "test 0 passed\n")
 
 let () =
   folds "constants fold from their MIR, except a set, which is built by running"
     ~folded:[ "small"; "flag"; "names"; "rows"; "corner"; "primes" ]
-    ~run:[ "colors" ] Fixtures.Lowering.constants_fold_except_a_set_which_is_built_by
+    ~run:[ "colors" ] Fixtures.Lowering.constants_fold_except_a_set_which_is_built_by;
+  folds "a chain of ten constants, each naming the one before, folds" ~folded:[ "tenth" ] ~run:[]
+    Fixtures.Lowering.chain_of_ten_constants_each_naming_the_one_before_folds
 
 let () =
   passes "a return in an arm of a match on a lent part drops only what it holds"

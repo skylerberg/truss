@@ -10,12 +10,6 @@
    solves its queries together, one for each core, as the command line
    does. *)
 
-(* The oracles' responses, recorded in the engine, as the database does for
-   a session. *)
-let record database responses =
-  let engine = Engine.of_context database in
-  List.iter (fun (key, response) -> Engine.set engine Prover.oracle_response key response) responses
-
 let () =
   let solver =
     match Solver.find () with
@@ -24,19 +18,24 @@ let () =
         prerr_endline message;
         exit 1
   in
-  let engine = Engine.create () in
-  let database = Engine.context engine in
-  Database.load_standard engine;
+  let standard : Project.package =
+    { name = Path.standard_package; dependencies = []; files = Standard_library.files }
+  in
   let timed =
     List.filter_map
       (fun ((file : Path.file), _) ->
-        match Checks.diagnostics database file with
+        let pipeline = Pipeline.create [ standard ] in
+        Pipeline.check pipeline [ file.module_.package ];
+        match Pipeline.file_diagnostics pipeline file with
         | _ :: _ -> None
         | [] ->
             let runs_before = Solver.queries_run solver in
             let start = Unix.gettimeofday () in
             let failed =
-              List.length (Prover.diagnostics ~record:(record database) database solver file)
+              List.length
+                (Pipeline.diagnostics
+                   (Pipeline.decide solver (Pipeline.prove pipeline [ file ]))
+                   file)
             in
             Some
               ( Path.show_file file,

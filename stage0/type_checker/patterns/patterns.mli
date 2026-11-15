@@ -1,1 +1,3 @@
-val diagnostics : Query.context -> Path.file -> Diagnostic.t list
+module Lookups = Lookups
+
+val check : Lookups.t -> Resolve.Names.key -> Syntax.diagnostic list

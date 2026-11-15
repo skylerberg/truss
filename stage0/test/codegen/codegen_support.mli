@@ -1,4 +1,5 @@
 val test : string -> (unit -> unit) -> unit
+val diagnostics : Pipeline.t -> Path.file -> Diagnostic.t list
 val fail : ('a, unit, string, unit) format4 -> 'a
 val expect_string : expected:String.t -> String.t -> unit
 val contains : string -> string -> bool
@@ -90,11 +91,15 @@ val expect_status :
 
 val example : Path.module_
 val example_file : Path.file
-val checked_standard : Engine.t lazy_t
-val load_files : ?results:Compile.results -> (Path.file * string) list -> Query.context * Compile.t
-val load : ?results:Compile.results -> string -> Query.context * Compile.t
-val tests_in : Query.context -> Path.module_ -> Path.t list
-val tests_of : Query.context -> Path.t list
+val pipeline : Project.package list -> Pipeline.t
+val example_package : (Path.file * string) list -> Project.package list
+
+val load_files :
+  ?results:Compile.results -> (Path.file * string) list -> Project.package list * Compile.t
+
+val load : ?results:Compile.results -> string -> Project.package list * Compile.t
+val tests_in : Pipeline.t -> Path.module_ -> Path.t list
+val tests_of : Project.package list -> Path.t list
 val run_source : string -> string
 val expect_output : string -> String.t -> unit
 val passes : string -> string -> unit

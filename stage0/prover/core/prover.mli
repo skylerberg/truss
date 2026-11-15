@@ -1,29 +1,14 @@
 module State = State
 module Facts = Facts
 module Contracts = Contracts
+module Lookups = Lookups
 
 type proof = Obligations of State.outcome | Unsupported of Syntax.span * string | Not_proven_here
 
-val proof : (Resolve.Names.key, proof) Query.query
+val proof : Lookups.t -> Resolve.Names.key -> proof
 
 type run_result = Ran of bool | Timed_out | Not_run
-
-type evaluator = {
-  code_key : State.evaluation -> string option;
-  run : State.evaluation -> run_result;
-}
-
-type oracle_response
-
-val oracle_response : (string, oracle_response) Query.input
-
-val solve_ahead :
-  ?evaluator:evaluator ->
-  record:((string * oracle_response) list -> unit) ->
-  Query.context ->
-  Solver.t ->
-  Path.file list ->
-  unit
+type evaluator = State.evaluation -> run_result
 
 type 'span state = {
   code : Diagnostic.Code.prover;
@@ -33,18 +18,17 @@ type 'span state = {
   trusts_compiled_code : bool;
 }
 
-val states :
+type verdict = (Syntax.span state * (Resolve.Names.key * Syntax.span) option) list
+
+val verdicts :
   ?evaluator:evaluator ->
-  record:((string * oracle_response) list -> unit) ->
-  Query.context ->
+  Lookups.t ->
   Solver.t ->
-  Path.file ->
-  Diagnostic.span state list
+  (Resolve.Names.key * proof) list ->
+  (Resolve.Names.key * verdict) list
+
+val states :
+  Lookups.t -> verdict:(Resolve.Names.key -> verdict) -> Path.file -> Diagnostic.span state list
 
 val diagnostics :
-  ?evaluator:evaluator ->
-  record:((string * oracle_response) list -> unit) ->
-  Query.context ->
-  Solver.t ->
-  Path.file ->
-  Diagnostic.t list
+  Lookups.t -> verdict:(Resolve.Names.key -> verdict) -> Path.file -> Diagnostic.t list

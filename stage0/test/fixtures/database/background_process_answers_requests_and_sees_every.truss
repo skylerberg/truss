@@ -1,3 +1,0 @@
-fn broken() -> Int64 {
-  true
-}

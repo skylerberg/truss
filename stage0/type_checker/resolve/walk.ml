@@ -58,23 +58,63 @@ let no_specification =
 
 let in_specification = { no_specification with active = true }
 
-type state = {
-  database : Query.context;
-  file : Path.file;
+type section = Interface | Contract | Body
+
+type section_names = {
   names : target option array;
   brackets : bracket option array;
   mutable diagnostics : Syntax.diagnostic list;
-  mutable holes : (id * (string * value) list) list;
   mutable used_imports : string list;
 }
 
+type state = {
+  lookups : Names.lookups;
+  file : Path.file;
+  interface : section_names;
+  contract : section_names;
+  body : section_names;
+  mutable section : section;
+}
+
+let section_names size =
+  {
+    names = Array.make size None;
+    brackets = Array.make size None;
+    diagnostics = [];
+    used_imports = [];
+  }
+
+let create lookups file ~size =
+  {
+    lookups;
+    file;
+    interface = section_names size;
+    contract = section_names size;
+    body = section_names size;
+    section = Interface;
+  }
+
+let names_of state = function
+  | Interface -> state.interface
+  | Contract -> state.contract
+  | Body -> state.body
+
+let current state = names_of state state.section
+
+let in_section state section walk =
+  let enclosing = state.section in
+  state.section <- section;
+  walk ();
+  state.section <- enclosing
+
 let reported state ?fixes code (span : span) message =
   let diagnostic = Diagnostic.make ?fixes ~code:(Resolve code) span message in
-  state.diagnostics <- diagnostic :: state.diagnostics;
+  let names = current state in
+  names.diagnostics <- diagnostic :: names.diagnostics;
   Diagnostic.reported diagnostic
 
 let report state ?fixes code span message = ignore (reported state ?fixes code span message)
-let set state (name : name) target = state.names.(name.id) <- Some target
+let set state (name : name) target = (current state).names.(name.id) <- Some target
 
 let unknown state (name : name) ~expected candidates =
   let fixes =
@@ -92,7 +132,7 @@ let unknown state (name : name) ~expected candidates =
        (reported state ~fixes Unknown_name name.span
           (Printf.sprintf "Nothing named `%s` is %s." name.text expected)))
 
-let module_item state text = Query.demand state.database Names.find (state.file.module_, text)
+let module_item state text = state.lookups.find state.file.module_ text
 
 let module_of_names state (first : name) (rest : name list) =
   let failed report =
@@ -100,11 +140,11 @@ let module_of_names state (first : name) (rest : name list) =
     Error report
   in
   if
-    List.mem_assoc first.text (Query.demand state.database Names.imports state.file)
-    && not (List.mem first.text state.used_imports)
-  then state.used_imports <- first.text :: state.used_imports;
+    List.mem_assoc first.text (state.lookups.imports state.file)
+    && not (List.mem first.text (current state).used_imports)
+  then (current state).used_imports <- first.text :: (current state).used_imports;
   begin match
-    Names.lookup_module state.database ~from:state.file
+    Names.lookup_module state.lookups ~from:state.file
       (List.map (fun (name : Syntax.name) -> name.text) (first :: rest))
   with
   | Found_module (module_, `Package)
@@ -129,7 +169,7 @@ let module_of_names state (first : name) (rest : name list) =
   end
 
 let in_module state module_ (name : name) ~types =
-  match Query.demand state.database Names.find (module_, name.text) with
+  match state.lookups.find module_ name.text with
   | Some item when if types then Names.is_type_kind item.kind else Names.is_value_kind item.kind ->
       if Names.visible ~from:state.file.module_ module_ item.visibility then begin
         let path : Path.t = Top { module_; name = name.text } in
@@ -155,7 +195,7 @@ let in_module state module_ (name : name) ~types =
               && Names.visible ~from:state.file.module_ module_ item.visibility
             then Some item.name
             else None)
-          (Query.demand state.database Names.entries module_)
+          (state.lookups.entries module_)
       in
       unknown state name ~expected:("in `" ^ Path.show_module module_ ^ "`") candidates;
       None
@@ -163,7 +203,7 @@ let in_module state module_ (name : name) ~types =
 let prelude_type state text =
   match Prelude.find_type text with
   | Some module_ -> (
-      match Query.demand state.database Names.find (module_, text) with
+      match state.lookups.find module_ text with
       | Some item when Names.is_type_kind item.kind -> Some (Path.Top { module_; name = text }, item)
       | _ -> None)
   | None -> None
@@ -172,7 +212,7 @@ let type_candidates state scope =
   List.map fst (String_map.bindings scope.types)
   @ List.filter_map
       (fun (item : Names.entry) -> if Names.is_type_kind item.kind then Some item.name else None)
-      (Query.demand state.database Names.entries state.file.module_)
+      (state.lookups.entries state.file.module_)
   @ List.map fst Prelude.types
 
 let type_name state scope ?(variants = false) (path : path) =
@@ -201,7 +241,7 @@ let type_name state scope ?(variants = false) (path : path) =
                         (type_candidates state scope
                         @ if variants then List.map fst Prelude.variants else [])))))
 
-let target_of state (name : name) = state.names.(name.id)
+let target_of state (name : name) = (current state).names.(name.id)
 
 let rec type_expression state scope (type_ : type_expression) =
   match type_.kind with
@@ -342,7 +382,7 @@ and local_value state scope (name : name) =
                 @ List.filter_map
                     (fun (item : Names.entry) ->
                       if Names.is_value_kind item.kind then Some item.name else None)
-                    (Query.demand state.database Names.entries state.file.module_))
+                    (state.lookups.entries state.file.module_))
         end
 
 and name_expression state scope (path : path) =
@@ -376,9 +416,7 @@ and bracket state scope (value : expression) base items =
             Type_arguments
         | Some (Definition ((Function | Theorem), Top { module_; name })) ->
             let generic =
-              match Query.demand state.database Names.find (module_, name) with
-              | Some item -> item.generic
-              | None -> false
+              match state.lookups.find module_ name with Some item -> item.generic | None -> false
             in
             if not generic then
               report state Not_generic value.span
@@ -389,7 +427,7 @@ and bracket state scope (value : expression) base items =
             Type_arguments
         | _ -> Index)
   in
-  state.brackets.(value.id) <- Some decision;
+  (current state).brackets.(value.id) <- Some decision;
   List.iter
     (function
       | Item item -> expression state scope item
@@ -402,7 +440,7 @@ and check_place state (written : expression) (inner : expression) =
     | Member (base, _) -> head base
     | Parenthesized inner -> head inner
     | Bracket (base, _) -> (
-        match state.brackets.(value.id) with
+        match (current state).brackets.(value.id) with
         | Some (Index | Method_bracket) -> head base
         | _ -> `Not_a_place value)
     | Call ({ kind = Member (base, _); _ }, _)
@@ -433,12 +471,7 @@ and check_place state (written : expression) (inner : expression) =
 
 and expression state scope (value : expression) =
   match value.kind with
-  | Todo ->
-      state.holes <-
-        ( value.id,
-          List.map (fun (name, (value, _)) -> (name, value)) (String_map.bindings scope.values) )
-        :: state.holes
-  | Integer _ | Float _ | True | False | Unreachable | Break | Continue | Self_value
+  | Todo | Integer _ | Float _ | True | False | Unreachable | Break | Continue | Self_value
   | Self_type_value | Expression_error ->
       ()
   | String literal -> string_literal state scope literal
@@ -778,7 +811,9 @@ let parameters state scope (parameters_ : parameter list) =
       match parameter.kind with
       | Named_parameter { name; type_; default; _ } ->
           type_expression state scope type_;
-          Option.iter (expression state scope) default;
+          Option.iter
+            (fun default -> in_section state Contract (fun () -> expression state scope default))
+            default;
           declare_parameter state scope name
       | Self_parameter _ | Parameter_error -> scope)
     scope parameters_
@@ -801,6 +836,15 @@ let head state scope ~owner = function
       type_name state scope head_.path;
       generics state scope ~owner head_.generics
 
+let clauses state scope (clauses_ : clause list) =
+  List.iter
+    (fun (clause_ : clause) ->
+      match clause_.kind with
+      | Requires _ | Ensures _ | Decreases _ ->
+          in_section state Contract (fun () -> clause state scope clause_)
+      | Uses _ | Cost _ | Clause_error -> clause state scope clause_)
+    clauses_
+
 let signature state scope ~owner ~(broken : bool) (signature_ : signature) =
   if broken then None
   else begin
@@ -812,7 +856,7 @@ let signature state scope ~owner ~(broken : bool) (signature_ : signature) =
       | Some (Lends _) -> { scope with is_lending_method = true }
       | _ -> scope
     in
-    List.iter (clause state scope) signature_.clauses;
+    clauses state scope signature_.clauses;
     Some scope
   end
 
@@ -822,7 +866,9 @@ let fields state scope (fields_ : field list) =
       match field.kind with
       | Field_declaration { type_; default; _ } ->
           type_expression state scope type_;
-          Option.iter (expression state scope) default
+          Option.iter
+            (fun default -> in_section state Contract (fun () -> expression state scope default))
+            default
       | Field_error -> ())
     fields_
 
@@ -869,7 +915,8 @@ let definition state ~(path : Path.t) ?(container : (Path.t * definition) option
       if not header_broken then begin
         let scope = head state scope ~owner:path signature_.name in
         match signature state scope ~owner:path ~broken:false signature_ with
-        | Some scope -> if not body_broken then block state scope body
+        | Some scope ->
+            if not body_broken then in_section state Body (fun () -> block state scope body)
         | None -> ()
       end
   | Method_declaration signature_ ->
@@ -898,7 +945,8 @@ let definition state ~(path : Path.t) ?(container : (Path.t * definition) option
         List.iter
           (fun (clause : type_clause) ->
             match clause.kind with
-            | Type_invariant value | Potential value -> expression state clause_scope value
+            | Type_invariant value | Potential value ->
+                in_section state Contract (fun () -> expression state clause_scope value)
             | Derives traits -> List.iter (path_type state scope) traits)
           clauses
       end
@@ -915,8 +963,9 @@ let definition state ~(path : Path.t) ?(container : (Path.t * definition) option
                   let inner =
                     parameters state { scope with specification = in_specification } parameters_
                   in
-                  List.iter (expression state inner) requires;
-                  if not (broken (Member_body index)) then block state inner body
+                  in_section state Contract (fun () ->
+                      List.iter (expression state inner) requires;
+                      if not (broken (Member_body index)) then block state inner body)
               | Associated_capability _ | Trait_member_error -> ())
           members
       end
@@ -941,21 +990,21 @@ let definition state ~(path : Path.t) ?(container : (Path.t * definition) option
       if not header_broken then begin
         let scope = head state scope ~owner:path name in
         type_expression state scope type_;
-        if not body_broken then expression state scope value
+        if not body_broken then in_section state Body (fun () -> expression state scope value)
       end
   | Test { uses; body; _ } ->
       if not header_broken then begin
         List.iter (capability_reference state scope) uses;
-        if not body_broken then block state scope body
+        if not body_broken then in_section state Body (fun () -> block state scope body)
       end
-  | Theorem { generics = generics_; parameters = parameters_; clauses; body; _ } ->
+  | Theorem { generics = generics_; parameters = parameters_; clauses = clauses_; body; _ } ->
       if not header_broken then begin
         let scope =
           generics state { scope with specification = in_specification } ~owner:path generics_
         in
         let scope = parameters state scope parameters_ in
-        List.iter (clause state scope) clauses;
-        if not body_broken then block state scope body
+        clauses state scope clauses_;
+        if not body_broken then in_section state Body (fun () -> block state scope body)
       end
   | Law_proof { trait_; law; type_; body } ->
       if not header_broken then begin
@@ -963,10 +1012,9 @@ let definition state ~(path : Path.t) ?(container : (Path.t * definition) option
         let scope = generics state scope ~owner:path type_.generics in
         path_type state scope trait_;
         let law_parameters =
-          match state.names.(trait_.path.last.id) with
+          match (current state).names.(trait_.path.last.id) with
           | Some (Definition (Trait, trait)) ->
-              Option.value ~default:[]
-                (Query.demand state.database Names.law_parameters (trait, law.text))
+              Option.value ~default:[] (Names.law_parameters state.lookups trait law.text)
           | _ -> []
         in
         let values =
@@ -977,6 +1025,7 @@ let definition state ~(path : Path.t) ?(container : (Path.t * definition) option
             (List.mapi (fun index name -> (index, name)) law_parameters)
         in
         if not body_broken then
-          block state { scope with values; specification = in_specification } body
+          in_section state Body (fun () ->
+              block state { scope with values; specification = in_specification } body)
       end
   | Definition_error _ -> ()

@@ -171,8 +171,7 @@ let shape context (ty : Ground.ty) : Memory_layout.shape =
                          })
                        variants)
               | Builtin_type _ -> bug "a built-in type under a path that is not built in"
-              | Todo_type -> bug "%s is a todo, which no build reaches" (Path.show path)
-              | Error_shape _ -> bug "%s did not parse, which no build reaches" (Path.show path))))
+              | Todo_type -> bug "%s is a todo, which no build reaches" (Path.show path))))
 
 let representation context ty : Memory_layout.representation =
   match (Storage.elements_of ty, ty) with

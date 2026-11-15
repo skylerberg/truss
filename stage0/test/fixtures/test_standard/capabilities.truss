@@ -1,3 +1,0 @@
-public capability Clock {
-  fn now() -> Int64
-}

@@ -2,11 +2,7 @@ module References = References
 
 type unfinished = { keyword : [ `Todo | `Echo ]; id : Syntax.id option; span : Syntax.span }
 
-val unfinished : (Resolve.Names.key, unfinished list) Query.query
-
-type hole = { offset : int; expected : string option; scope : (string * string) list }
-
-val holes : Query.context -> Resolve.Names.key -> hole list
+val unfinished : Syntax.definition -> unfinished list
 
 type explanation = {
   text : string;

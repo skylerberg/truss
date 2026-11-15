@@ -1,7 +1,0 @@
-internal fn double(value: Int64) -> Int64 {
-  value * 2
-}
-
-test "doubling" {
-  assert double(2) == 4
-}

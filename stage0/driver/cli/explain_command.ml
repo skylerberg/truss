@@ -12,43 +12,37 @@ let parse_position text =
 let run ~position =
   let json = Output.json () in
   let file, line, column = parse_position position in
-  let session, packages = Command_packages.worktree () in
+  let snapshot, packages = Command_packages.worktree () in
   let path = Shown_path.real file in
   match
     List.find_opt
-      (fun written -> Command_packages.path session written = path)
-      (Command_packages.files session packages)
+      (fun written -> Command_packages.path snapshot written = path)
+      (Command_packages.files snapshot packages)
   with
   | None -> Outcome.cannot_run "%s is not a file of a package in this worktree." file
   | Some written -> (
-      let context = Database.context session in
+      let pipeline = Database.pipeline snapshot in
       let offset =
         Source.offset Source.Scalar_values
-          (Query.demand context Packages.source written)
+          (Database.source snapshot written)
           ~line:(line - 1) ~column:(column - 1)
       in
+      let names = Pipeline.names pipeline packages in
       let symbol_at =
         List.find_map
           (fun (declaration : Names.declaration) ->
             let key = Names.key_of declaration in
-            match (Query.demand context Names.base key, Query.demand context Names.text key) with
+            match (names.base key, names.text key) with
             | Some (_, base), Some text when base <= offset && offset <= base + String.length text
               -> (
-                match
-                  ( Query.demand context Names.definition key,
-                    Query.demand context Resolve.resolved key )
-                with
+                match (names.definition key, Pipeline.resolved pipeline key) with
                 | Some definition, Some resolved ->
-                    let tables =
-                      Option.map
-                        (fun (result : Infer.type_check_result) -> result.tables)
-                        (Query.demand context Infer.type_check_result key)
-                    in
+                    let tables = Pipeline.tables pipeline key in
                     Inspect.explain_at ~path:key.path definition resolved tables ~text
                       (offset - base)
                 | _ -> None)
             | _ -> None)
-          (Query.demand context Names.declarations_in written)
+          (names.declarations_in written)
       in
       match symbol_at with
       | None ->
@@ -58,8 +52,8 @@ let run ~position =
       | Some explanation ->
           let signature =
             Option.bind explanation.refers_to (fun path ->
-                match Query.demand context Interface.Summary.key path with
-                | Some key -> Signatures.text context ~body:false ~opaque:false key
+                match names.key path with
+                | Some key -> Signatures.text names ~body:false ~opaque:false key
                 | None -> None)
           in
           if json then

@@ -1,8 +1,16 @@
 val module_of : string -> Path.module_
 val file_of : string -> Path.file
-val top_key : string -> string -> Resolve.Names.key
-val setup : ?dependencies:(string * string) list -> (string * string) list -> Query.context
-val parse_errors : Query.context -> Path.file -> string list
+val setup : ?dependencies:(string * string) list -> (string * string) list -> Project.package list
+
+val with_dependencies :
+  Project.package list -> Path.package -> Manifest.dependency list -> Project.package list
+
+val source : Project.package list -> Path.file -> Source.t
+val parse_errors : Project.package list -> Path.file -> string list
+val pipeline : Project.package list -> Pipeline.t
+val names : Project.package list -> Path.package -> Resolve.Names.lookups
+val declarations : Project.package list -> Path.module_ -> Resolve.Names.declaration list
+val diagnostics : Pipeline.t -> Path.file -> Diagnostic.t list
 val codes : Diagnostic.t list -> string list
 
 type core_nodes = {
@@ -11,15 +19,15 @@ type core_nodes = {
   patterns : Core.pattern list;
 }
 
-val core_nodes : Query.context -> Resolve.Names.key -> core_nodes
+val core_nodes : Project.package list -> Resolve.Names.key -> core_nodes
 val first_core_nodes : string -> core_nodes
 
 val no_diagnostics :
-  check:(Query.context -> Path.file -> Diagnostic.t list) -> (string * string) list -> unit
+  check:(Project.package list -> Path.file -> Diagnostic.t list) -> (string * string) list -> unit
 
 val one_diagnostic :
-  check:(Query.context -> Path.file -> Diagnostic.t list) ->
-  ?setup:((string * string) list -> Query.context) ->
+  check:(Project.package list -> Path.file -> Diagnostic.t list) ->
+  ?setup:((string * string) list -> Project.package list) ->
   ?file:string ->
   ?others:(string * string) list ->
   ?fixed:string ->
@@ -28,5 +36,7 @@ val one_diagnostic :
   string ->
   unit
 
-val solver : Solver.t Lazy.t
-val record : Query.context -> (string * Prover.oracle_response) list -> unit
+val proven : Pipeline.t -> Path.file -> Pipeline.proofs
+val proof_diagnostics : Pipeline.t -> Path.file -> Diagnostic.t list
+val proof_states : Pipeline.t -> Path.file -> Diagnostic.span Prover.state list
+val proofs : Pipeline.t -> Path.file -> Resolve.Names.key -> Prover.proof

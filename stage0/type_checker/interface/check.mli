@@ -1,9 +1,8 @@
 val bound_diagnostics :
-  Query.context ->
+  Lookups.t ->
   package:Path.package ->
   bounds:Impls.bounds ->
   (Syntax.span * Types.ty) list ->
   Syntax.diagnostic list
 
-val diagnostics : (Resolve.Names.key, Syntax.diagnostic list) Query.query
-val reported : Query.context -> Path.t -> Diagnostic.reported option
+val diagnostics : Lookups.t -> Resolve.Names.key -> Syntax.diagnostic list

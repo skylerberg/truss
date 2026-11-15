@@ -53,28 +53,22 @@ let cut text spans =
   |> List.filter (( <> ) "")
   |> String.concat "\n"
 
-let text database ~body ~opaque (key : Resolve.Names.key) =
-  match
-    ( Query.demand database Resolve.Names.text key,
-      Query.demand database Resolve.Names.definition key )
-  with
+let text (names : Resolve.Names.lookups) ~body ~opaque (key : Resolve.Names.key) =
+  match (names.text key, names.definition key) with
   | Some text, Some definition ->
       let contained =
-        match Query.demand database Resolve.Names.base key with
+        match names.base key with
         | Some (_, base) ->
             List.concat_map
               (fun member ->
-                match
-                  ( Query.demand database Resolve.Names.base member,
-                    Query.demand database Resolve.Names.definition member )
-                with
+                match (names.base member, names.definition member) with
                 | Some (_, member_base), Some written ->
                     List.map
                       (fun (span : span) ->
                         Span.make (span.start + member_base - base) (span.stop + member_base - base))
                       (bodies ~opaque:false written)
                 | _ -> [])
-              (Query.demand database Resolve.Names.contained key)
+              (names.contained key)
         | None -> []
       in
       Some (if body then String.trim text else cut text (bodies ~opaque definition @ contained))
@@ -93,12 +87,8 @@ let kind_word : Resolve.Names.kind -> string = function
   | Test -> "test"
   | Law_proof -> "law proof"
 
-let parts : Query.part list = [ Interface; Signature; Shape ]
-
-let of_path context path =
-  match Query.demand context Interface.Summary.key path with
-  | Some key -> text context ~body:false ~opaque:false key
-  | None -> None
+let of_path (names : Resolve.Names.lookups) path =
+  match names.key path with Some key -> text names ~body:false ~opaque:false key | None -> None
 
 let labeled label signature =
   let indent = String.make (String.length label) ' ' in

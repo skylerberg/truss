@@ -1,13 +1,10 @@
 (library
  (name package_checks)
+ (modules_without_implementation lookups)
  (libraries
   manifest
-  query
-  phases
   path
-  packages
   diagnostic
-  source
   resolve
   syntax
   types
@@ -15,5 +12,4 @@
   well_known
   core
   core_walk
-  interface
-  infer))
+  interface))

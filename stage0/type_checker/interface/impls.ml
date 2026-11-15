@@ -1,101 +1,26 @@
 module Names = Resolve.Names
+open Environment
 
 let head = function Types.Named { path; _ } -> Some path | _ -> None
 
-let derivable (trait : Path.t) =
-  match Well_known.of_path trait with
-  | Some (Equal | Hash | Ordered | Default | Serialize | Deserialize) -> true
-  | _ -> false
+let impls_for (lookups : Lookups.t) (type_ : Path.t) package =
+  Option.value ~default:[] (Path.Map.find_opt type_ (lookups.names.impl_index package).by_type)
 
-let index =
-  Query.query ~name:"impl_index" ~phase:Phases.interfaces ~show:Path.show_package
-    (fun database package ->
-      List.concat_map
-        (fun (declaration : Names.declaration) ->
-          if declaration.ordinal <> 0 then []
-          else
-            match declaration.kind with
-            | Impl -> (
-                match Query.demand database Environment.impl_interface declaration.path with
-                | Some impl when not impl.impl_broken -> (
-                    match head impl.for_type with
-                    | Some type_ -> [ ((impl.implements.trait, type_), declaration.path) ]
-                    | None -> [])
-                | _ -> [])
-            | Type -> (
-                match Query.demand database Environment.type_interface declaration.path with
-                | Some type_interface ->
-                    List.filter_map
-                      (fun trait ->
-                        if derivable trait then
-                          Some
-                            ( (trait, declaration.path),
-                              (Derived { type_ = declaration.path; trait } : Path.t) )
-                        else None)
-                      type_interface.derives
-                | None -> [])
-            | _ -> [])
-        (Query.demand database Names.package_declarations package))
+let impls_in lookups ~trait ~type_ package =
+  List.filter_map
+    (fun (indexed_trait, impl) -> if Path.equal indexed_trait trait then Some impl else None)
+    (impls_for lookups type_ package)
 
-let for_type =
-  Query.query ~name:"impls_for_type" ~phase:Phases.interfaces
-    ~show:(fun (type_, package) ->
-      Printf.sprintf "%s in %s" (Path.show type_) (Path.show_package package))
-    (fun database ((type_ : Path.t), package) ->
-      let written =
-        List.concat_map
-          (fun module_ ->
-            List.filter_map
-              (fun (head, impl) ->
-                if Option.equal Path.equal head (Some type_) then Some impl else None)
-              (Query.demand database Names.impl_types module_))
-          (Query.demand database Packages.modules package)
-        |> List.fold_left
-             (fun impls impl ->
-               if List.exists (Path.equal impl) impls then impls else impl :: impls)
-             []
-        |> List.rev
-        |> List.filter_map (fun impl ->
-            match Query.demand database Environment.impl_interface impl with
-            | Some interface
-              when (not interface.impl_broken)
-                   && Option.equal Path.equal (head interface.for_type) (Some type_) ->
-                Some (interface.implements.trait, impl)
-            | _ -> None)
-      in
-      let derived =
-        if Path.package type_ <> package then []
-        else
-          match Query.demand database Environment.type_interface type_ with
-          | Some type_interface ->
-              List.filter_map
-                (fun trait ->
-                  if derivable trait then Some (trait, (Derived { type_; trait } : Path.t))
-                  else None)
-                type_interface.derives
-          | None -> []
-      in
-      written @ derived)
-
-let impls_for database (type_ : Path.t) package = Query.demand database for_type (type_, package)
-
-let impls_in =
-  Query.query ~name:"impls" ~phase:Phases.interfaces ~saved:true
-    ~show:(fun (trait, type_, package) ->
-      Printf.sprintf "%s for %s in %s" (Path.show trait) (Path.show type_)
-        (Path.show_package package))
-    (fun database ((trait : Path.t), (type_ : Path.t), package) ->
-      List.filter_map
-        (fun (indexed_trait, impl) -> if Path.equal indexed_trait trait then Some impl else None)
-        (impls_for database type_ package))
+let impls_of (lookups : Lookups.t) ~trait package =
+  List.sort_uniq Path.compare
+    (List.filter_map
+       (fun ((implemented, _), impl) -> if Path.equal implemented trait then Some impl else None)
+       (lookups.names.impl_index package).impls)
 
 let cursor_trait = Well_known.path Cursor
 
-let derived_interface database ~type_ ~trait =
-  match
-    ( Query.demand database Environment.type_interface type_,
-      Query.demand database Environment.trait_interface trait )
-  with
+let derived_interface lookups ~type_ ~trait =
+  match (Definition.type_interface lookups type_, Definition.trait_interface lookups trait) with
   | Some type_interface, Some trait_interface ->
       let trait_reference : Types.trait_reference =
         { trait; trait_arguments = []; associated = [] }
@@ -113,7 +38,6 @@ let derived_interface database ~type_ ~trait =
         Types.Named
           { path = type_; arguments = Types.generic_arguments type_interface.type_generics }
       in
-      let self : Types.substitution = [ ({ owner = trait; name = "Self" }, Types.Type for_type) ] in
       Some
         {
           Types.impl_generics;
@@ -123,27 +47,22 @@ let derived_interface database ~type_ ~trait =
           capability_sets = [];
           impl_methods =
             List.map
-              (fun (method_ : Types.trait_method) ->
-                ( method_.method_name,
-                  method_.method_receiver,
-                  Types.method_in_impl ~impl_generics ~impl_uses:Types.no_capabilities
-                    (Types.substitute_signature self method_.method_signature) ))
+              (fun (method_ : Types.trait_method) -> (method_.method_name, method_.method_receiver))
               trait_interface.methods;
-          impl_broken = false;
         }
   | _ -> None
 
-let impl_interface database (path : Path.t) =
+let impl_interface (lookups : Lookups.t) (path : Path.t) =
   match path with
-  | Derived { type_; trait } -> derived_interface database ~type_ ~trait
-  | _ -> Query.demand database Environment.impl_interface path
+  | Derived _ -> lookups.derived_interface path
+  | _ -> Definition.impl_interface lookups path
 
-let trait_substitution database (impl : Path.t) =
-  Option.bind (impl_interface database impl) (fun (interface : Types.impl_interface) ->
+let trait_substitution lookups (impl : Path.t) =
+  Option.bind (impl_interface lookups impl) (fun (interface : Types.impl_interface) ->
       Option.map
         (fun trait ->
           Properties.trait_substitution trait ~self:interface.for_type interface.implements)
-        (Query.demand database Environment.trait_interface interface.implements.trait))
+        (Definition.trait_interface lookups interface.implements.trait))
 
 let open_type = function Types.Error _ | Types.Variable _ | Types.Hole -> true | _ -> false
 
@@ -191,7 +110,7 @@ type evidence =
 
 type through_any = Callable | Has_generics | Names_self
 
-let through_any ~(trait : Path.t) (method_ : Types.trait_method) : through_any =
+let through_any lookups ~(trait : Path.t) (method_ : Types.trait_method) : through_any =
   let self : Types.parameter = { owner = trait; name = "Self" } in
   let names_self type_ =
     let mentions_self = ref false in
@@ -207,7 +126,7 @@ let through_any ~(trait : Path.t) (method_ : Types.trait_method) : through_any =
          type_);
     !mentions_self
   in
-  let signature = method_.method_signature in
+  let signature = Definition.method_signature lookups ~owner:trait method_ in
   let result = Types.result_type signature.output in
   if signature.generics <> [] then Has_generics
   else if
@@ -221,6 +140,8 @@ let plain_path = Properties.plain_trait
 
 type bounds = Types.parameter -> Types.trait_reference list
 
+let no_bounds _ = []
+
 let required (generics : Types.generic list) (substitution : Types.substitution) =
   List.concat_map
     (fun (generic : Types.generic) ->
@@ -232,7 +153,7 @@ let required (generics : Types.generic list) (substitution : Types.substitution)
       | _ -> [])
     generics
 
-let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true) (type_ : Types.ty)
+let rec implements lookups ~(bounds : bounds) ?(depth = 0) ?(conditions = true) (type_ : Types.ty)
     (wanted : Types.trait_reference) : evidence option =
   let arguments_match actual_arguments =
     List.length actual_arguments = List.length wanted.trait_arguments
@@ -241,9 +162,7 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true)
            match (wanted, actual) with
            | Types.Type wanted, Types.Type actual ->
                open_type wanted || open_type actual
-               || Types.equal
-                    (normalize database ~bounds wanted)
-                    (normalize database ~bounds actual)
+               || Types.equal (normalize lookups ~bounds wanted) (normalize lookups ~bounds actual)
            | Types.Value wanted, Types.Value actual -> wanted = actual
            | _ -> false)
          wanted.trait_arguments actual_arguments
@@ -251,12 +170,12 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true)
   let associated_match ~base fixed =
     List.for_all
       (fun (name, wanted_type) ->
-        let wanted_type = normalize database ~bounds wanted_type in
+        let wanted_type = normalize lookups ~bounds wanted_type in
         if open_type wanted_type then true
         else
           match List.assoc_opt name fixed with
           | Some defined ->
-              open_type defined || Types.equal (normalize database ~bounds defined) wanted_type
+              open_type defined || Types.equal (normalize lookups ~bounds defined) wanted_type
           | None -> (
               match (base, wanted_type) with
               | Some base, Types.Projection { base = projected; name = projected_name; _ } ->
@@ -265,8 +184,8 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true)
       wanted.associated
   in
   let broken_trait =
-    match Query.demand database Environment.interface wanted.trait with
-    | Some (Environment.Error_interface report) -> Some report
+    match Definition.interface lookups wanted.trait with
+    | Some (Error_interface report) -> Some report
     | _ -> None
   in
   if depth > 32 then None
@@ -278,13 +197,13 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true)
     in
     if
       (not conditions)
-      || Properties.has database ~bounds ~normalize:(normalize database ~bounds) property type_
+      || Properties.has lookups ~bounds ~normalize:(normalize lookups ~bounds) property type_
     then Some Built_in
     else None
   else if Path.equal wanted.trait Properties.storable_trait then
     if
       (not conditions)
-      || Properties.storable database ~bounds ~normalize:(normalize database ~bounds) type_
+      || Properties.storable lookups ~bounds ~normalize:(normalize lookups ~bounds) type_
     then Some Built_in
     else None
   else
@@ -298,7 +217,7 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true)
               Path.equal bound.trait wanted.trait
               && arguments_match bound.trait_arguments
               && associated_match ~base:(Some type_) bound.associated)
-            (Properties.known_bounds database ~bounds type_)
+            (Properties.known_bounds lookups ~bounds type_)
         then Some From_bound
         else None
     | Types.Any trait ->
@@ -310,7 +229,7 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true)
               && associated_match ~base:None
                    (if Path.equal bound.trait trait.trait then trait.associated
                     else bound.associated))
-            (Properties.bound_closure database ~self:type_ trait)
+            (Properties.bound_closure lookups ~self:type_ trait)
         then Some From_any
         else None
     | Types.Named { path; _ } ->
@@ -324,12 +243,12 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true)
         in
         let candidates =
           List.concat_map
-            (fun package -> Query.demand database impls_in (wanted.trait, path, package))
+            (fun package -> impls_in lookups ~trait:wanted.trait ~type_:path package)
             packages
         in
         List.find_map
           (fun impl_path ->
-            match impl_interface database impl_path with
+            match impl_interface lookups impl_path with
             | None -> None
             | Some impl -> (
                 let variables =
@@ -354,7 +273,7 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true)
                           || List.for_all
                                (fun (argument, bound) ->
                                  Option.is_some
-                                   (implements database ~bounds ~depth:(depth + 1) argument bound))
+                                   (implements lookups ~bounds ~depth:(depth + 1) argument bound))
                                (required impl.impl_generics substitution)
                         in
                         if conditions_hold && associated_match ~base:None associated then
@@ -362,13 +281,13 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true)
                         else None)))
           candidates
 
-and associated_type database ~bounds ?defining type_ (trait : Types.trait_reference) name =
+and associated_type lookups ~bounds ?defining type_ (trait : Types.trait_reference) name =
   match List.assoc_opt name trait.associated with
   | Some fixed -> Some fixed
   | None -> (
-      match implements database ~bounds ~conditions:false type_ trait with
+      match implements lookups ~bounds ~conditions:false type_ trait with
       | Some (From_impl { impl; substitution }) -> (
-          match impl_interface database impl with
+          match impl_interface lookups impl with
           | Some interface ->
               Option.iter (fun defining -> defining := impl :: !defining) defining;
               Option.map (Types.substitute substitution)
@@ -378,7 +297,7 @@ and associated_type database ~bounds ?defining type_ (trait : Types.trait_refere
           match
             List.find_map
               (fun (bound : Types.trait_reference) -> List.assoc_opt name bound.associated)
-              (Properties.known_bounds database ~bounds type_)
+              (Properties.known_bounds lookups ~bounds type_)
           with
           | Some fixed -> Some fixed
           | None -> Some (Types.Projection { base = type_; trait; name }))
@@ -387,24 +306,24 @@ and associated_type database ~bounds ?defining type_ (trait : Types.trait_refere
           | Types.Any any ->
               List.find_map
                 (fun (bound : Types.trait_reference) -> List.assoc_opt name bound.associated)
-                (any :: Properties.bound_closure database ~self:type_ any)
+                (any :: Properties.bound_closure lookups ~self:type_ any)
           | _ -> None)
       | Some Built_in -> None
       | Some (Accepted (Types.Variable _)) -> None
       | Some (Accepted unknown) -> Some unknown
       | None -> None)
 
-and capability_set database ~bounds ?(depth = 0) type_ (trait : Types.trait_reference) name =
+and capability_set lookups ~bounds ?(depth = 0) type_ (trait : Types.trait_reference) name =
   let projection =
     Types.capability_set [ Types.Capability_projection { base = type_; trait; name } ]
   in
   if depth > 32 then projection
   else
-    match implements database ~bounds ~conditions:false type_ trait with
+    match implements lookups ~bounds ~conditions:false type_ trait with
     | Some (From_impl { impl; substitution }) -> (
-        match impl_interface database impl with
+        match impl_interface lookups impl with
         | Some interface ->
-            normalize_capabilities database ~bounds ~depth:(depth + 1)
+            normalize_capabilities lookups ~bounds ~depth:(depth + 1)
               (Types.substitute_capabilities substitution
                  (Option.value ~default:Types.no_capabilities
                     (List.assoc_opt name interface.capability_sets)))
@@ -412,24 +331,24 @@ and capability_set database ~bounds ?(depth = 0) type_ (trait : Types.trait_refe
     | Some From_bound | Some (Accepted (Types.Variable _)) | None -> projection
     | Some (From_any | Built_in | Accepted _) -> Types.no_capabilities
 
-and normalize_capabilities database ~bounds ?depth (capabilities : Types.capability_set) =
+and normalize_capabilities lookups ~bounds ?depth (capabilities : Types.capability_set) =
   let projection = function Types.Capability_projection _ -> true | _ -> false in
   if not (List.exists projection (capabilities :> Types.capability list)) then capabilities
   else
     Types.flat_map_capabilities
       (function
         | Types.Capability_projection { base; trait; name } ->
-            (capability_set database ~bounds ?depth (normalize database ~bounds base)
+            (capability_set lookups ~bounds ?depth (normalize lookups ~bounds base)
                { trait with associated = [] } name
               :> Types.capability list)
         | capability -> [ capability ])
       capabilities
 
-and normalize database ~bounds ?defining (type_ : Types.ty) : Types.ty =
-  let normalize = normalize database ~bounds ?defining in
-  let associated_type = associated_type database ~bounds ?defining in
+and normalize lookups ~bounds ?defining (type_ : Types.ty) : Types.ty =
+  let normalize = normalize lookups ~bounds ?defining in
+  let associated_type = associated_type lookups ~bounds ?defining in
   Types.map
-    ~capabilities:(normalize_capabilities database ~bounds)
+    ~capabilities:(normalize_capabilities lookups ~bounds)
     (function
       | Types.Projection { base; trait; name } -> (
           let base = normalize base in
@@ -448,11 +367,11 @@ and normalize database ~bounds ?defining (type_ : Types.ty) : Types.ty =
       | _ -> None)
     type_
 
-let signature database (path : Path.t) =
-  match (Query.demand database Environment.signature path, path) with
+let signature lookups (path : Path.t) =
+  match (Definition.signature lookups path, path) with
   | Some signature, _ -> Some signature
   | None, Method { owner = (Impl _ | Derived _) as owner; name; receiver } -> (
-      match (impl_interface database owner, trait_substitution database owner) with
+      match (impl_interface lookups owner, trait_substitution lookups owner) with
       | Some impl, Some substitution ->
           Option.map
             (fun declared ->
@@ -461,24 +380,24 @@ let signature database (path : Path.t) =
                   (Types.substitute_signature substitution declared)
               in
               let bounds = Types.bounds_of signature.generics in
-              { signature with uses = normalize_capabilities database ~bounds signature.uses })
-            (Query.demand database Environment.signature
+              { signature with uses = normalize_capabilities lookups ~bounds signature.uses })
+            (Definition.signature lookups
                (Method { owner = impl.implements.trait; name; receiver }))
       | _ -> None)
   | None, _ -> None
 
-let has property database ~bounds type_ =
-  Properties.has database ~bounds ~normalize:(normalize database ~bounds) property type_
+let has property lookups ~bounds type_ =
+  Properties.has lookups ~bounds ~normalize:(normalize lookups ~bounds) property type_
 
 let copyable = has Copyable
 let plain = has Plain
 let is_view = has View
 let holds_function = has Holds_function
 
-let contents database ~bounds type_ =
-  Properties.contents database
+let contents lookups ~bounds type_ =
+  Properties.contents lookups
     ~normalize:(fun type_ ->
       let defining = ref [] in
-      let normalized = normalize database ~bounds ~defining type_ in
+      let normalized = normalize lookups ~bounds ~defining type_ in
       (normalized, !defining))
     type_

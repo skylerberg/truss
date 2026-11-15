@@ -1,3 +1,0 @@
-internal fn one() -> Int64 {
-  1
-}

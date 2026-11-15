@@ -83,10 +83,10 @@ let check ~root encoding (buffers : (string * string) list) =
       (fun (uri, text) -> Option.map (fun path -> (uri, path, text)) (path_of_uri uri))
       buffers
   in
-  let session, _ = Command_packages.load root in
-  let base = Database.root session in
+  let snapshot, _ = Command_packages.load root in
+  let base = Database.root snapshot in
   let trial =
-    Database.trial session
+    Database.trial snapshot
       (List.map (fun (_, path, text) -> (Shown_path.relative ~from:base path, Some text)) buffers)
   in
   let packages = List.map snd (Database.packages trial) in
@@ -101,7 +101,11 @@ let check ~root encoding (buffers : (string * string) list) =
         (uri, Source.create ~path text, file_of (Shown_path.normalize path)))
       buffers
   in
-  let proofs = Proofs.checked trial packages (List.filter_map (fun (_, _, file) -> file) opened) in
+  let pipeline = Database.pipeline trial in
+  Pipeline.check pipeline packages;
+  let proofs =
+    Proofs.check pipeline trial packages (List.filter_map (fun (_, _, file) -> file) opened)
+  in
   Json.Object
     [
       ( "files",
@@ -111,8 +115,9 @@ let check ~root encoding (buffers : (string * string) list) =
                let diagnostics, states =
                  match file with
                  | Some file ->
-                     let proven, states = proofs file in
-                     (Diagnostic.shown (Database.diagnostics trial file @ proven), states)
+                     ( Diagnostic.shown
+                         (Pipeline.file_diagnostics pipeline file @ Proofs.diagnostics proofs file),
+                       Proofs.states proofs file )
                  | None -> ([], [])
                in
                Json.Object

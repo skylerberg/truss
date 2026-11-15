@@ -10,13 +10,12 @@
   syntax
   syntax_walk
   path
-  query
-  packages
   resolve
   infer
   inspect
+  parsed
   interface
-  checks
+  package_checks
   manifest
   registry
   memory_layout
@@ -27,13 +26,13 @@
   emit_c
   unicode
   compile
+  pipeline
   solver
   prover
   evaluator
   database
   store
   project
-  graph_types
   types
   syntax_print
   ownership

@@ -1,0 +1,7 @@
+fn reveal(secret: Secrett) -> Int64 {
+  0
+}
+
+fn caller() -> Int64 {
+  reveal(true)
+}

@@ -28,18 +28,14 @@ let check_callback_requires context frame (site : Invocation.site) through (valu
 
 let calls_updating_helper context (invocation : Invocation.t) =
   match invocation.callee with
-  | Function { path; _ } -> is_updating_helper context.database path
+  | Function { path; _ } -> is_updating_helper context.lookups path
   | _ -> false
 
 let laws_of context trait =
-  match Query.demand context.database Interface.Summary.key trait with
-  | Some key -> (
-      match source_at_key context.database key with
-      | Some source ->
-          List.map
-            (fun (law : Mir.law) -> (source, law))
-            (Query.demand context.database Mir.laws key)
-      | None -> [])
+  match context.lookups.interface.names.key trait with
+  | Some key ->
+      let source = source_at_key context.lookups key in
+      List.map (fun (law : Mir.law) -> (source, law)) (context.lookups.mir.contract_part key).laws
   | None -> []
 
 let law_parameter_types ~substitution (law : Mir.law) =
@@ -112,26 +108,26 @@ let assume_laws context frame ~at (trait : Types.trait_reference) (ty : Types.ty
           if Path.equal path trait.trait then trait
           else { Types.trait = path; trait_arguments = []; associated = [] }
         in
-        let substitution = trait_substitution context.database required ty in
+        let substitution = trait_substitution context.lookups required ty in
         let impl = Option.map fst (concrete_impl context required ty) in
         List.iter
           (fun (source, (law : Mir.law)) ->
             match law_fact context frame source ~substitution law with
             | Some fact_ ->
                 (match impl with
-                | Some impl when law_unshown context.database impl required ty law.name ->
+                | Some impl when law_unshown context.lookups impl required ty law.name ->
                     context.holes <- (context.home, at) :: context.holes
                 | _ -> ());
                 fact context frame fact_
             | None -> ())
           (laws_of context path))
-      (Call_graph.traits_with_required context.database trait.trait)
+      (Mir.Call_edges.traits_with_required context.lookups.interface trait.trait)
   end
 
 let template_trait : Path.t = Well_known.path From_template
 
 let signature_terminates context path =
-  match Interface.Impls.signature context.database path with
+  match Interface.Impls.signature context.lookups.interface path with
   | Some (signature : Types.signature) -> signature.terminates
   | None -> true
 

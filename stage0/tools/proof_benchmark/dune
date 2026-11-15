@@ -1,3 +1,11 @@
 (executable
  (name proof_benchmark)
- (libraries engine database standard_library checks path solver prover unix))
+ (libraries
+  database
+  project
+  standard_library
+  path
+  solver
+  prover
+  pipeline
+  unix))

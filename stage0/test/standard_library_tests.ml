@@ -82,18 +82,26 @@ let processor_time () =
   let times = Unix.times () in
   times.tms_utime +. times.tms_stime +. times.tms_cutime +. times.tms_cstime
 
-let measure database ~record ~is_measured =
+let proven pipeline files = Pipeline.decide solver (Pipeline.prove pipeline files)
+
+let check pipeline =
+  Pipeline.check pipeline [ Path.standard_package ];
+  pipeline
+
+let measure pipeline ~is_measured =
+  let pipeline = check pipeline in
   let measured =
     List.map
       (fun (((module_ : Path.module_), files) as entry) ->
         let name = Path.show_module module_ in
         if is_measured name then begin
           let start = processor_time () in
-          List.iter
-            (fun (file, _) ->
-              if Checks.diagnostics database file = [] then
-                ignore (Prover.diagnostics ~record database solver file))
-            files;
+          ignore
+            (proven pipeline
+               (List.filter_map
+                  (fun (file, _) ->
+                    if Pipeline.file_diagnostics pipeline file = [] then Some file else None)
+                  files));
           let spent = int_of_float (Float.round ((processor_time () -. start) *. 100.)) in
           (name, max 1 spent, module_letters files)
         end
@@ -116,64 +124,46 @@ let timed label work =
     label;
   result
 
-let session =
-  match Sys.getenv_opt "TRUSS_PROOF_STATE" with
-  | None | Some "" -> None
-  | Some name -> (
-      match Database.For_testing.open_library name with
-      | Ok session -> Some session
-      | Error message ->
-          prerr_endline message;
-          exit 1)
-
 let () =
-  let database =
-    match session with
-    | Some session -> Database.context session
-    | None ->
-        let engine = Engine.create () in
-        Database.load_standard engine;
-        Engine.context engine
-  in
-  let record responses =
-    match session with
-    | Some session ->
-        List.iter
-          (fun (key, response) -> Database.set session Prover.oracle_response key response)
-          responses
-    | None -> Support.record database responses
+  let pipeline () =
+    Pipeline.create
+      [ { name = Path.standard_package; dependencies = []; files = Standard_library.files } ]
   in
   Option.iter
     (fun is_measured ->
-      measure database ~record ~is_measured;
+      measure (pipeline ()) ~is_measured;
       exit 0)
     measured_modules;
+  let pipeline = timed "type checking" (fun () -> check (pipeline ())) in
   let checked =
-    timed "type checking" (fun () ->
-        List.map
-          (fun (module_, files) ->
-            (module_, List.map (fun (file, _) -> (file, Checks.diagnostics database file)) files))
-          modules)
+    List.map
+      (fun (module_, files) ->
+        (module_, List.map (fun (file, _) -> (file, Pipeline.file_diagnostics pipeline file)) files))
+      modules
   in
-  timed "solving ahead" (fun () ->
-      Prover.solve_ahead ~record database solver
-        (List.concat_map
-           (fun (_, files) ->
-             List.filter_map (fun (file, errors) -> if errors = [] then Some file else None) files)
-           checked));
+  let verdicts =
+    timed "proving" (fun () ->
+        proven pipeline
+          (List.concat_map
+             (fun (_, files) ->
+               List.filter_map (fun (file, errors) -> if errors = [] then Some file else None) files)
+             checked))
+  in
   List.iter
     (fun ((module_ : Path.module_), files) ->
       test (test_name module_) (fun () ->
           timed (Path.show_module module_) (fun () ->
               List.iter
                 (fun (file, errors) ->
-                  let source = Query.demand database Packages.source file in
+                  let source =
+                    Source.create ~path:(Path.show_file file)
+                      (List.assoc file Standard_library.files)
+                  in
                   List.iter
                     (fun diagnostic -> fail "%s" (Diagnostic.render source diagnostic))
                     (match errors with
-                    | [] -> Prover.diagnostics ~record database solver file
+                    | [] -> Pipeline.diagnostics verdicts file
                     | errors -> errors))
                 files)))
     checked;
-  timed "saving the state" (fun () -> Option.iter Database.save_session session);
-  Option.iter (fun _ -> timed "collecting the store" Database.For_testing.collect_store) session
+  timed "collecting the store" Database.For_testing.collect_store

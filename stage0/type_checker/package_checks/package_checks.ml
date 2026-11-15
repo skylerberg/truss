@@ -1,12 +1,12 @@
+module Lookups = Lookups
 open Syntax
 module Names = Resolve.Names
-module Environment = Interface.Environment
 module Properties = Interface.Properties
 
 type placed = { file : Path.file; diagnostic : Diagnostic.t }
 
-let diagnostic_at database (key : Names.key) ?(fixes = []) code (span : span) message =
-  match Query.demand database Names.base key with
+let diagnostic_at (lookups : Lookups.t) (key : Names.key) ?(fixes = []) code (span : span) message =
+  match lookups.interface.names.base key with
   | Some (file, base) ->
       Some
         {
@@ -17,8 +17,10 @@ let diagnostic_at database (key : Names.key) ?(fixes = []) code (span : span) me
         }
   | None -> None
 
-let declarations database package = Query.demand database Names.package_declarations package
-let dependencies database package = Query.demand database Packages.dependency_names package
+let dependency_names (lookups : Lookups.t) package =
+  List.map
+    (fun (dependency : Manifest.dependency) -> dependency.package)
+    (lookups.dependencies package)
 
 let header_span (definition : definition) =
   match definition.kind with
@@ -33,43 +35,51 @@ let outer_packages (impl : Types.impl_interface) =
       (function Types.Type (Types.Named { path; _ }) -> Some (Path.package path) | _ -> None)
       impl.implements.trait_arguments
 
-let check_location database (declaration : Names.declaration) (definition : definition)
+let check_location lookups (declaration : Names.declaration) (definition : definition)
     (impl : Types.impl_interface) =
   let key = Names.key_of declaration in
   let package = declaration.file.module_.package in
-  if impl.impl_broken || List.mem package (outer_packages impl) then None
+  if List.mem package (outer_packages impl) then None
   else
-    diagnostic_at database key Impl_location (header_span definition)
+    diagnostic_at lookups key Impl_location (header_span definition)
       (Printf.sprintf
          "This `impl` must be in the package of `%s`, of `%s`, or of a type its trait's arguments \
           name, so that only one place can hold it."
          (Types.show_trait impl.implements)
          (Types.show impl.for_type))
 
-let check_sealed database (declaration : Names.declaration) (definition : definition)
-    (impl : Types.impl_interface) =
-  let implementors =
-    if Well_known.is Signed_integer impl.implements.trait then
-      Some Intrinsic.[ Int8; Int16; Int32; Int64 ]
-    else if Well_known.is Unsigned_integer impl.implements.trait then
-      Some Intrinsic.[ UInt8; UInt16; UInt32; UInt64 ]
-    else if Well_known.is Fixed_width_integer impl.implements.trait then
-      Some
-        (List.filter
-           (fun builtin -> Types.is_integer_type (Types.builtin builtin))
-           Intrinsic.builtins)
-    else None
-  in
-  match (implementors, Types.builtin_of impl.for_type) with
-  | Some builtins, Some builtin when List.mem builtin builtins -> None
-  | Some _, _ ->
-      diagnostic_at database (Names.key_of declaration) Sealed_trait_impl (header_span definition)
-        (Printf.sprintf
-           "Only the built-in integer types implement `%s`, so `%s` cannot: generic code over the \
-            trait is proven for each of them."
-           (Types.show_trait { impl.implements with associated = [] })
-           (Types.show impl.for_type))
-  | None, _ -> None
+let check_sealed (lookups : Lookups.t) (declaration : Names.declaration) =
+  let package = declaration.file.module_.package in
+  match
+    ( List.find_opt
+        (fun (_, impl) -> Path.equal impl declaration.path)
+        (lookups.interface.names.impl_index package).impls,
+      lookups.interface.names.definition (Names.key_of declaration) )
+  with
+  | Some ((trait, type_), _), Some definition -> (
+      let implementors =
+        if Well_known.is Signed_integer trait then Some Intrinsic.[ Int8; Int16; Int32; Int64 ]
+        else if Well_known.is Unsigned_integer trait then
+          Some Intrinsic.[ UInt8; UInt16; UInt32; UInt64 ]
+        else if Well_known.is Fixed_width_integer trait then
+          Some
+            (List.filter
+               (fun builtin -> Types.is_integer_type (Types.builtin builtin))
+               Intrinsic.builtins)
+        else None
+      in
+      match (implementors, Intrinsic.builtin_of_path type_) with
+      | Some builtins, Some builtin when List.mem builtin builtins -> []
+      | Some _, _ ->
+          Option.to_list
+            (diagnostic_at lookups (Names.key_of declaration) Sealed_trait_impl
+               (header_span definition)
+               (Printf.sprintf
+                  "Only the built-in integer types implement `%s`, so `%s` cannot: generic code \
+                   over the trait is proven for each of them."
+                  (Path.show trait) (Path.show type_)))
+      | None, _ -> [])
+  | _ -> []
 
 let overlap (first : Types.impl_interface) (second : Types.impl_interface) =
   let variables =
@@ -116,15 +126,15 @@ let overlap (first : Types.impl_interface) (second : Types.impl_interface) =
   && List.length first.implements.trait_arguments = List.length second.implements.trait_arguments
   && List.for_all2 argument first.implements.trait_arguments second.implements.trait_arguments
 
-let check_method_names database (declaration : Names.declaration) (definition : definition)
-    (impl : Types.impl_interface) =
+let check_method_names (lookups : Lookups.t) (declaration : Names.declaration)
+    (definition : definition) (impl : Types.impl_interface) =
   match
-    (impl.for_type, Query.demand database Environment.trait_interface impl.implements.trait)
+    (impl.for_type, Interface.Definition.trait_interface lookups.interface impl.implements.trait)
   with
   | Types.Named { path; _ }, Some trait when not trait.is_capability ->
       List.filter_map
         (fun (method_ : Types.trait_method) ->
-          let own = Query.demand database Names.members (path, method_.method_name) in
+          let own = lookups.interface.names.members path method_.method_name in
           let same_version (key : Names.key) =
             match key.path with
             | Method { receiver; _ } -> receiver = method_.method_receiver
@@ -132,12 +142,12 @@ let check_method_names database (declaration : Names.declaration) (definition : 
           in
           let written =
             List.exists
-              (fun (name, receiver, (_ : Types.signature)) ->
+              (fun (name, receiver) ->
                 name = method_.method_name && receiver = method_.method_receiver)
               impl.impl_methods
           in
           let clash message =
-            diagnostic_at database (Names.key_of declaration) Method_name_clash
+            diagnostic_at lookups (Names.key_of declaration) Method_name_clash
               (header_span definition) message
           in
           if own = [] then None
@@ -165,8 +175,8 @@ let check_method_names database (declaration : Names.declaration) (definition : 
         trait.methods
   | _ -> []
 
-let type_fields database path =
-  match Query.demand database Environment.type_interface path with
+let type_fields (lookups : Lookups.t) path =
+  match Interface.Definition.type_interface lookups.interface path with
   | Some interface ->
       let parameters =
         List.map (fun (generic : Types.generic) -> generic.generic) interface.type_generics
@@ -189,28 +199,37 @@ let type_fields database path =
 let type_arguments arguments =
   List.filter_map (function Types.Type type_ -> Some type_ | _ -> None) arguments
 
-let contained =
-  Query.query ~name:"contained_types" ~phase:Phases.interfaces ~show:Path.show (fun database path ->
-      let bounds =
-        match Query.demand database Environment.type_interface path with
-        | Some interface -> Types.bounds_of interface.type_generics
-        | None -> fun _ -> []
-      in
-      List.concat_map
-        (fun (((variant : Types.variant option), (field : Types.field)) as written) ->
-          let indirect = match variant with Some variant -> variant.indirect | None -> false in
-          List.filter_map
-            (function
-              | Types.Named { path; _ }, occurrence ->
-                  Some
-                    ( written,
-                      path,
-                      Properties.through (if indirect then Indirect else In_place) occurrence )
-              | _ -> None)
-            (Interface.Impls.contents database ~bounds field.field_type).contained)
-        (snd (type_fields database path)))
+let contained_types (lookups : Lookups.t) path =
+  let bounds =
+    match Interface.Definition.type_interface lookups.interface path with
+    | Some interface -> Types.bounds_of interface.type_generics
+    | None -> fun _ -> []
+  in
+  List.concat_map
+    (fun (((variant : Types.variant option), (field : Types.field)) as written) ->
+      let indirect = match variant with Some variant -> variant.indirect | None -> false in
+      List.filter_map
+        (function
+          | Types.Named { path; _ }, occurrence ->
+              Some
+                ( written,
+                  path,
+                  Properties.through (if indirect then Indirect else In_place) occurrence )
+          | _ -> None)
+        (Interface.Impls.contents lookups.interface ~bounds field.field_type).contained)
+    (snd (type_fields lookups path))
 
-let self_occurrences database (start : Path.t) =
+let memoized compute =
+  let table = Hashtbl.create 64 in
+  fun path ->
+    match Hashtbl.find_opt table path with
+    | Some value -> value
+    | None ->
+        let value = compute path in
+        Hashtbl.replace table path value;
+        value
+
+let self_occurrences ~contained (start : Path.t) =
   let visited = Hashtbl.create 16 in
   let rec from path occurrence =
     if Path.equal path start then [ occurrence ]
@@ -220,17 +239,17 @@ let self_occurrences database (start : Path.t) =
       Hashtbl.replace visited (path, occurrence) ();
       List.concat_map
         (fun (_, target, step) -> from target (Properties.through occurrence step))
-        (Query.demand database contained path)
+        (contained path)
     end
   in
   List.concat_map
     (fun (field, target, occurrence) ->
       List.map (fun path -> (field, path)) (from target occurrence))
-    (Query.demand database contained start)
+    (contained start)
 
-let grows database (start : Path.t) =
+let grows lookups (start : Path.t) =
   let edges (path, index) =
-    let parameters, fields = type_fields database path in
+    let parameters, fields = type_fields lookups path in
     match List.nth_opt parameters index with
     | None -> []
     | Some parameter ->
@@ -265,7 +284,7 @@ let grows database (start : Path.t) =
       List.exists (fun (target, growing) -> walk target (grown || growing)) (edges node)
     end
   in
-  let parameters, _ = type_fields database start in
+  let parameters, _ = type_fields lookups start in
   List.exists
     (fun index -> List.exists (fun (target, growing) -> walk target growing) (edges (start, index)))
     (List.init (List.length parameters) Fun.id)
@@ -294,16 +313,16 @@ let field_span (body : type_body) ((variant : Types.variant option), (field : Ty
         (fun written -> Option.bind written.fields among)
   | _ -> None
 
-let check_recursion database (declaration : Names.declaration) (definition : definition) =
+let check_recursion lookups ~contained (declaration : Names.declaration) (definition : definition) =
   match definition.kind with
-  | Type_definition _ when grows database declaration.path ->
+  | Type_definition _ when grows lookups declaration.path ->
       Option.to_list
-        (diagnostic_at database (Names.key_of declaration) Growing_type (header_span definition)
+        (diagnostic_at lookups (Names.key_of declaration) Growing_type (header_span definition)
            "This type contains itself with different type arguments, so it has no fixed set of \
             instances, and generic code is compiled once for each set of arguments.")
   | Type_definition { name; body; _ } ->
       let key = Names.key_of declaration in
-      let occurrences = self_occurrences database declaration.path in
+      let occurrences = self_occurrences ~contained declaration.path in
       let first (wanted : Properties.occurrence) =
         List.find_map
           (fun (field, occurrence) -> if occurrence = wanted then Some field else None)
@@ -323,7 +342,7 @@ let check_recursion database (declaration : Names.declaration) (definition : def
             in
             match variant_span with
             | Some span ->
-                diagnostic_at database key Needs_indirect span
+                diagnostic_at lookups key Needs_indirect span
                   ~fixes:
                     [
                       Diagnostic.fix "Declare the variant `indirect`."
@@ -332,14 +351,14 @@ let check_recursion database (declaration : Names.declaration) (definition : def
                   "This type contains itself in place, so it would be infinitely large. Declare \
                    the variant `indirect` to keep its fields on the heap."
             | None ->
-                diagnostic_at database key Needs_indirect (header_span definition)
+                diagnostic_at lookups key Needs_indirect (header_span definition)
                   "This record contains itself in place, so it would be infinitely large. A record \
                    has no variant to declare `indirect`; use a sum type with an `indirect` \
                    variant, or a collection.")
       in
       let function_input =
         Option.bind (first Function_input) (fun field ->
-            diagnostic_at database key Not_strictly_positive
+            diagnostic_at lookups key Not_strictly_positive
               (Option.value ~default:(header_span definition) (field_span body field))
               (Printf.sprintf
                  "Through this field, `%s` contains a function type that has a `time` clause and \
@@ -349,8 +368,8 @@ let check_recursion database (declaration : Names.declaration) (definition : def
       Option.to_list in_place @ Option.to_list function_input
   | _ -> []
 
-let check_associated_types database (declaration : Names.declaration) (definition : definition)
-    (impl : Types.impl_interface) =
+let check_associated_types (lookups : Lookups.t) ~contained (declaration : Names.declaration)
+    (definition : definition) (impl : Types.impl_interface) =
   let key = Names.key_of declaration in
   let bounds = Types.bounds_of impl.impl_generics in
   let written name =
@@ -369,7 +388,7 @@ let check_associated_types database (declaration : Names.declaration) (definitio
     | Types.Named { path; _ } ->
         List.exists
           (fun (_, occurrence) -> occurrence = recursion.occurrence)
-          (self_occurrences database path)
+          (self_occurrences ~contained path)
     | _ -> false
   in
   List.concat_map
@@ -379,14 +398,14 @@ let check_associated_types database (declaration : Names.declaration) (definitio
         (fun (recursive, (occurrence : Properties.occurrence)) ->
           match occurrence with
           | In_place ->
-              diagnostic_at database key Needs_indirect span
+              diagnostic_at lookups key Needs_indirect span
                 (Printf.sprintf
                    "With this definition of `%s`, `%s` contains itself in place, so it would be \
                     infinitely large. Define `%s` as a type that holds it in a collection or in an \
                     `indirect` variant."
                    name (Types.show recursive) name)
           | Function_input ->
-              diagnostic_at database key Not_strictly_positive span
+              diagnostic_at lookups key Not_strictly_positive span
                 (Printf.sprintf
                    "With this definition of `%s`, `%s` contains a function type that has a `time` \
                     clause and whose input contains `%s`. %s"
@@ -400,11 +419,11 @@ let check_associated_types database (declaration : Names.declaration) (definitio
                   && not (reported_at_definition recursion)
                 then Some (recursion.recursive, recursion.occurrence)
                 else None)
-              (Interface.Impls.contents database ~bounds type_).recursions)))
+              (Interface.Impls.contents lookups.interface ~bounds type_).recursions)))
     impl.implements.associated
 
-let instantiation_edges database (key : Names.key) =
-  match Query.demand database Infer.core key with
+let instantiation_edges (lookups : Lookups.t) (key : Names.key) =
+  match lookups.core key with
   | None -> []
   | Some form ->
       let grows = function
@@ -427,18 +446,18 @@ let instantiation_edges database (key : Names.key) =
         form.definition;
       List.rev !edges
 
-let check_instantiation database (package : Path.package) =
+let check_instantiation (lookups : Lookups.t) (package : Path.package) =
   let generic =
     List.filter
       (fun (declaration : Names.declaration) ->
         declaration.generic && declaration.ordinal = 0
         && (declaration.kind = Function || declaration.kind = Method))
-      (declarations database package)
+      (lookups.interface.names.package_declarations package)
   in
   let edges =
     List.map
       (fun (declaration : Names.declaration) ->
-        (declaration, instantiation_edges database (Names.key_of declaration)))
+        (declaration, instantiation_edges lookups (Names.key_of declaration)))
       generic
   in
   let reaches from target =
@@ -460,9 +479,9 @@ let check_instantiation database (package : Path.package) =
   List.filter_map
     (fun ((declaration : Names.declaration), outgoing) ->
       if List.exists (fun (callee, grows) -> grows && reaches callee declaration.path) outgoing then
-        match Query.demand database Names.definition (Names.key_of declaration) with
+        match lookups.interface.names.definition (Names.key_of declaration) with
         | Some definition ->
-            diagnostic_at database (Names.key_of declaration) Instantiation_cycle
+            diagnostic_at lookups (Names.key_of declaration) Instantiation_cycle
               (header_span definition)
               "This generic code instantiates itself with type arguments that grow each time \
                around, so it would be compiled without end."
@@ -470,182 +489,137 @@ let check_instantiation database (package : Path.package) =
       else None)
     edges
 
-let check_tests database (package : Path.package) =
+let check_tests (lookups : Lookups.t) (package : Path.package) =
   let tests =
     List.filter
       (fun (declaration : Names.declaration) -> declaration.kind = Test && declaration.ordinal = 0)
-      (declarations database package)
+      (lookups.interface.names.package_declarations package)
   in
   snd
     (List.fold_left
        (fun (seen, diagnostics) (declaration : Names.declaration) ->
          let name = match declaration.path with Test { name; _ } -> name | _ -> "" in
          if List.mem name seen then
-           match Query.demand database Names.definition (Names.key_of declaration) with
+           match lookups.interface.names.definition (Names.key_of declaration) with
            | Some definition ->
                ( seen,
                  diagnostics
                  @ Option.to_list
-                     (diagnostic_at database (Names.key_of declaration) Duplicate_test
+                     (diagnostic_at lookups (Names.key_of declaration) Duplicate_test
                         definition.span
                         (Printf.sprintf "Another test of this package is named %S." name)) )
            | None -> (seen, diagnostics)
          else (name :: seen, diagnostics))
        ([], []) tests)
 
-let check =
-  Query.query ~name:"package_checks" ~phase:Phases.checks ~show:Path.show_package ~saved:true
-    (fun database package_name ->
-      let package = package_name in
-      let declarations = declarations database package in
-      let impls =
-        List.filter_map
-          (fun (declaration : Names.declaration) ->
-            if declaration.kind = Impl && declaration.ordinal = 0 then
-              match
-                ( Query.demand database Environment.impl_interface declaration.path,
-                  Query.demand database Names.definition (Names.key_of declaration) )
-              with
-              | Some impl, Some definition when not impl.impl_broken ->
-                  Some (declaration, definition, impl)
-              | _ -> None
-            else None)
-          declarations
+let visible_packages (lookups : Lookups.t) package =
+  let rec packages seen = function
+    | [] -> seen
+    | name :: rest when List.mem name seen -> packages seen rest
+    | name :: rest -> packages (name :: seen) (dependency_names lookups name @ rest)
+  in
+  let standard = if package = Path.standard_package then [] else [ Path.standard_package ] in
+  List.filter
+    (fun name -> name <> package)
+    (packages [] (standard @ dependency_names lookups package))
+
+let check_overlaps (lookups : Lookups.t) (declaration : Names.declaration) definition
+    (impl : Types.impl_interface) =
+  let package = declaration.file.module_.package in
+  match Interface.Impls.head impl.for_type with
+  | Some type_ when List.mem package (outer_packages impl) ->
+      let trait = impl.implements.trait in
+      let rec before = function
+        | [] -> []
+        | ((indexed_trait, indexed_type), path) :: rest ->
+            if Path.equal path declaration.path then []
+            else if Path.equal indexed_trait trait && Path.equal indexed_type type_ then
+              path :: before rest
+            else before rest
       in
-      let location =
-        List.filter_map
-          (fun (declaration, definition, impl) ->
-            check_location database declaration definition impl)
-          impls
-      in
-      let sealed =
-        List.filter_map
-          (fun (declaration, definition, impl) -> check_sealed database declaration definition impl)
-          impls
-      in
-      let placed =
+      let earlier =
         List.filter
-          (fun ((declaration : Names.declaration), _, impl) ->
-            List.mem declaration.file.module_.package (outer_packages impl))
-          impls
+          (fun (other : Types.impl_interface) -> List.mem package (outer_packages other))
+          (List.filter_map
+             (Interface.Impls.impl_interface lookups.interface)
+             (before (lookups.interface.names.impl_index package).impls))
       in
-      let names =
-        List.concat_map
-          (fun (declaration, definition, impl) ->
-            check_method_names database declaration definition impl)
-          impls
-      in
-      let dependency_impls =
-        let rec packages seen = function
-          | [] -> seen
-          | name :: rest when List.mem name seen -> packages seen rest
-          | name :: rest -> packages (name :: seen) (dependencies database name @ rest)
-        in
-        let direct = dependencies database package in
-        let standard =
-          if package_name = Path.standard_package then [] else [ Path.standard_package ]
-        in
+      let dependencies =
         List.concat_map
           (fun name ->
             List.filter_map
-              (fun (_, impl) -> Interface.Impls.impl_interface database impl)
-              (Query.demand database Interface.Impls.index name))
-          (List.filter (fun name -> name <> package_name) (packages [] (standard @ direct)))
+              (Interface.Impls.impl_interface lookups.interface)
+              (Interface.Impls.impls_in lookups.interface ~trait ~type_ name))
+          (visible_packages lookups package)
       in
-      let group (impl : Types.impl_interface) =
-        (impl.implements.trait, Interface.Impls.head impl.for_type)
-      in
-      let grouped impls =
-        let table = Hashtbl.create 64 in
-        List.iter
-          (fun impl ->
-            let key = group impl in
-            Hashtbl.replace table key (impl :: Option.value ~default:[] (Hashtbl.find_opt table key)))
-          impls;
-        fun impl -> List.rev (Option.value ~default:[] (Hashtbl.find_opt table (group impl)))
-      in
-      let dependencies_like = grouped dependency_impls in
-      let earlier = Hashtbl.create 64 in
-      let overlaps =
-        List.concat_map
-          (fun ((declaration : Names.declaration), definition, (impl : Types.impl_interface)) ->
-            let key = group impl in
-            let before = List.rev (Option.value ~default:[] (Hashtbl.find_opt earlier key)) in
-            Hashtbl.replace earlier key
-              (impl :: Option.value ~default:[] (Hashtbl.find_opt earlier key));
-            List.filter_map
-              (fun (other : Types.impl_interface) ->
-                if overlap impl other then
-                  diagnostic_at database (Names.key_of declaration) Overlapping_impls
-                    (header_span definition)
-                    (Printf.sprintf
-                       "This `impl` overlaps another `impl` of `%s` for `%s`: a type has at most \
-                        one `impl` of a trait for each set of its arguments."
-                       (Types.show_trait other.implements)
-                       (Types.show other.for_type))
-                else None)
-              (before @ dependencies_like impl))
-          placed
-      in
-      let recursion =
-        List.concat_map
-          (fun (declaration : Names.declaration) ->
-            if declaration.kind = Type && declaration.ordinal = 0 then
-              match Query.demand database Names.definition (Names.key_of declaration) with
-              | Some definition -> check_recursion database declaration definition
-              | None -> []
-            else [])
-          declarations
-        @ List.concat_map
-            (fun (declaration, definition, impl) ->
-              check_associated_types database declaration definition impl)
-            impls
-      in
-      location @ sealed @ names @ overlaps @ recursion
-      @ check_instantiation database package
-      @ check_tests database package)
+      List.filter_map
+        (fun (other : Types.impl_interface) ->
+          if overlap impl other then
+            diagnostic_at lookups (Names.key_of declaration) Overlapping_impls
+              (header_span definition)
+              (Printf.sprintf
+                 "This `impl` overlaps another `impl` of `%s` for `%s`: a type has at most one \
+                  `impl` of a trait for each set of its arguments."
+                 (Types.show_trait other.implements)
+                 (Types.show other.for_type))
+          else None)
+        (earlier @ dependencies)
+  | _ -> []
 
-let used_packages =
-  Query.query ~name:"used_packages" ~phase:Phases.bodies ~saved:true ~show:Names.show_key
-    (fun database (key : Names.key) ->
-      let named =
-        match Query.demand database Resolve.resolved key with
-        | Some resolved ->
-            List.filter_map
-              (function
-                | Some (Resolve.Definition (_, path) | Variant (path, _)) ->
-                    Some (Path.package path)
-                | Some (Module module_) -> Some module_.package
-                | _ -> None)
-              (Array.to_list resolved.names)
-        | None -> []
-      in
-      let called = ref (Query.demand database Infer.evidence_packages key) in
-      Option.iter
-        (fun (form : Core.t) ->
-          Core_walk.definition
-            (Core_walk.callees (function
-              | Trait_method { trait; evidence; _ } ->
-                  called :=
-                    Path.package trait.trait
-                    :: (match evidence with Impl { impl; _ } -> [ Path.package impl ] | _ -> [])
-                    @ !called
-              | _ -> ()))
-            form.definition)
-        (Query.demand database Infer.core key);
-      List.sort_uniq compare (named @ !called))
+let check_impl lookups ~contained (declaration : Names.declaration) =
+  match
+    ( Interface.Impls.impl_interface lookups.Lookups.interface declaration.path,
+      lookups.interface.names.definition (Names.key_of declaration) )
+  with
+  | Some impl, Some definition ->
+      Option.to_list (check_location lookups declaration definition impl)
+      @ check_method_names lookups declaration definition impl
+      @ check_overlaps lookups declaration definition impl
+      @ check_associated_types lookups ~contained declaration definition impl
+  | _ -> []
 
-let code_packages =
-  Query.query ~name:"code_packages" ~phase:Phases.checks ~saved:true ~show:Path.show_package
-    (fun database package_name ->
-      let package = package_name in
-      List.sort_uniq compare
-        (List.concat_map
-           (fun (declaration : Names.declaration) ->
-             match declaration.path with
-             | Test _ -> []
-             | _ -> Query.demand database used_packages (Names.key_of declaration))
-           (declarations database package)))
+let check_type lookups ~contained (declaration : Names.declaration) =
+  match lookups.Lookups.interface.names.definition (Names.key_of declaration) with
+  | Some definition -> check_recursion lookups ~contained declaration definition
+  | None -> []
+
+let checks (lookups : Lookups.t) package =
+  let contained = memoized (contained_types lookups) in
+  List.concat_map
+    (fun (declaration : Names.declaration) ->
+      if declaration.ordinal <> 0 then []
+      else
+        match declaration.kind with
+        | Impl ->
+            [
+              (fun () -> check_sealed lookups declaration);
+              (fun () -> check_impl lookups ~contained declaration);
+            ]
+        | Type -> [ (fun () -> check_type lookups ~contained declaration) ]
+        | _ -> [])
+    (lookups.interface.names.package_declarations package)
+  @ [ (fun () -> check_instantiation lookups package); (fun () -> check_tests lookups package) ]
+
+let used_packages (resolved : Resolve.resolved) ~evidence_packages (form : Core.t) =
+  let named =
+    List.filter_map
+      (function
+        | Some (Resolve.Definition (_, path) | Variant (path, _)) -> Some (Path.package path)
+        | Some (Module module_) -> Some module_.package
+        | _ -> None)
+      (Array.to_list resolved.names)
+  in
+  let called = ref evidence_packages in
+  Core_walk.definition
+    (Core_walk.callees (function
+      | Trait_method { trait; evidence; _ } ->
+          called :=
+            Path.package trait.trait
+            :: (match evidence with Impl { impl; _ } -> [ Path.package impl ] | _ -> [])
+            @ !called
+      | _ -> ()))
+    form.definition;
+  List.sort_uniq compare (named @ !called)
 
 type manifest_problem =
   | Not_a_capability of { dependency : Path.package; name : string }
@@ -661,31 +635,33 @@ let manifest_sentence ~package = function
       Printf.sprintf "Nothing in `%s` uses `%s`. Delete its entry." (Path.show_package package)
         (Path.show_package dependency)
 
-let manifest_problems =
-  Query.query ~name:"manifest_problems" ~phase:Phases.checks ~saved:true ~show:Path.show_package
-    (fun database package_name ->
-      let package = package_name in
-      let keys = List.map Names.key_of (declarations database package) in
-      let checks = List.for_all (Infer.is_clean database) keys in
-      let used = List.concat_map (Query.demand database used_packages) keys in
-      List.concat_map
-        (fun (dependency : Manifest.dependency) ->
-          (match
-             Query.demand database Interface.Grants.granted (package_name, dependency.package)
-           with
-            | Some grant ->
-                List.map
-                  (fun name -> Not_a_capability { dependency = dependency.package; name })
-                  grant.unknown
-            | None -> [])
-          @
-          if checks && not (List.mem dependency.package used) then [ Unused dependency.package ]
-          else [])
-        (Query.demand database Packages.dependencies package))
+let grant_problems (lookups : Lookups.t) package =
+  List.concat_map
+    (fun (dependency : Manifest.dependency) ->
+      match lookups.interface.granted package dependency.package with
+      | Some grant ->
+          List.map
+            (fun name -> Not_a_capability { dependency = dependency.package; name })
+            grant.unknown
+      | None -> [])
+    (lookups.dependencies package)
 
-let diagnostics database (file : Path.file) =
+let used_by_declarations (lookups : Lookups.t) package =
+  List.map
+    (fun (declaration : Names.declaration) ->
+      (declaration, lookups.used_packages (Names.key_of declaration)))
+    (lookups.interface.names.package_declarations package)
+
+let unused_dependencies (lookups : Lookups.t) package =
+  let used = List.concat_map snd (used_by_declarations lookups package) in
   List.filter_map
-    (fun placed -> if placed.file = file then Some placed.diagnostic else None)
-    (Query.demand database check file.module_.package)
-  |> List.sort (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
-      compare left.span right.span)
+    (fun (dependency : Manifest.dependency) ->
+      if List.mem dependency.package used then None else Some (Unused dependency.package))
+    (lookups.dependencies package)
+
+let code_packages (lookups : Lookups.t) package =
+  List.sort_uniq compare
+    (List.concat_map
+       (fun ((declaration : Names.declaration), packages) ->
+         match declaration.path with Test _ -> [] | _ -> packages)
+       (used_by_declarations lookups package))

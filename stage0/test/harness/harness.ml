@@ -58,28 +58,6 @@ let test name body =
     if is_mine then always name body
   end
 
-let expect_results_current engine =
-  List.iter
-    (fun problem -> fail "the code database kept a stale result: %s" problem)
-    (Engine.For_testing.audit engine)
-
-let expect_not_recomputed engine ~first ~again query keys =
-  let computed step =
-    Engine.For_testing.clear_log engine;
-    step ();
-    Engine.For_testing.computed engine query
-  in
-  let before = computed first in
-  let after = computed again in
-  List.iter
-    (fun key ->
-      if not (List.mem key before) then
-        fail "%s was never computed" (Engine.For_testing.result_label query key)
-      else if List.mem key after then
-        fail "%s was computed again" (Engine.For_testing.result_label query key))
-    keys;
-  expect_results_current engine
-
 let workspace_root =
   lazy
     (let rec up directory =
@@ -129,14 +107,6 @@ let write_files root files =
       File_system.make_directory (Filename.dirname path);
       File_system.write path text)
     files
-
-let git directory arguments =
-  match
-    Process.run "git"
-      ([ "-C"; directory; "-c"; "user.name=test"; "-c"; "user.email=test@example.com" ] @ arguments)
-  with
-  | 0, _, _ -> ()
-  | _ -> fail "git %s failed" (String.concat " " arguments)
 
 let rec files_under ~suffix directory =
   Sys.readdir (workspace_path directory)

@@ -1,6 +1,6 @@
-let main_of session packages (package : Path.package) =
+let main_of snapshot pipeline packages (package : Path.package) =
   let module_ : Path.module_ = { package; modules = [] } in
-  if not (List.mem module_ (Command_packages.modules session packages)) then None
+  if not (List.mem module_ (Command_packages.modules snapshot packages)) then None
   else
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
@@ -8,13 +8,14 @@ let main_of session packages (package : Path.package) =
         | Top { name = "main"; _ } when declaration.kind = Function && declaration.ordinal = 0 ->
             Some declaration.path
         | _ -> None)
-      (Query.demand (Database.context session) Resolve.Names.declarations module_)
+      ((Pipeline.names pipeline [ package ]).declarations module_)
 
-let mains session packages = List.filter_map (main_of session packages) packages
+let mains snapshot packages =
+  List.filter_map (main_of snapshot (Database.pipeline snapshot) packages) packages
 
-let main session packages =
+let main snapshot pipeline packages =
   let package = Command_packages.one packages in
-  match main_of session packages package with
+  match main_of snapshot pipeline packages package with
   | Some main -> main
   | None ->
       Outcome.cannot_run
@@ -22,14 +23,14 @@ let main session packages =
          no program."
         (Path.show_package package)
 
-let refuse_unshippable session packages compile main =
+let refuse_unshippable snapshot packages compile main proofs =
   let in_code =
     match Compile.unshippable compile ~main with
     | Error message -> Outcome.cannot_run "%s" message
     | Ok unshippable ->
         List.map
           (fun ({ failure; file; line; column; way } : Compile.unshippable) ->
-            ( Command_packages.shown_workspace_path session packages file,
+            ( Command_packages.shown_workspace_path snapshot packages file,
               line,
               column,
               (failure :> [ `Todo | `Echo | `Proof_hole ]),
@@ -37,9 +38,15 @@ let refuse_unshippable session packages compile main =
           unshippable
   in
   let in_proofs =
-    List.map
-      (fun (definition, file, line, column) -> (file, line, column, `Proof_hole, [ definition ]))
-      (Proofs.holes_reached session packages main)
+    match Compile.reached_definitions compile ~main with
+    | Error message -> Outcome.cannot_run "%s" message
+    | Ok definitions ->
+        List.concat_map
+          (fun definition ->
+            List.map
+              (fun (file, line, column) -> (file, line, column, `Proof_hole, [ definition ]))
+              (Proofs.holes snapshot packages proofs definition))
+          definitions
   in
   match List.sort_uniq compare (in_code @ in_proofs) with
   | [] -> ()
@@ -79,28 +86,29 @@ let refuse_unshippable session packages compile main =
           refusals;
       raise (Outcome.Stop 1)
 
-let build_program ?output session packages (build : Compiler.build) =
+let build_program ?output snapshot packages (build : Compiler.build) =
   let is_release = build = Release in
-  let report = Report.gather ~proofs:is_release session packages in
+  let pipeline = Database.pipeline snapshot in
+  let report = Report.gather ~proofs:is_release pipeline snapshot packages in
   if not (Report.clean report) then raise (Report.Errors report);
-  let main = main session packages in
-  let compile = Compiler.create ~checks:(not is_release) session packages build in
-  if is_release then refuse_unshippable session packages compile main;
+  let main = main snapshot pipeline packages in
+  let compile = Compiler.create ~checks:(not is_release) pipeline snapshot packages build in
+  Option.iter (refuse_unshippable snapshot packages compile main) (Report.proofs report);
   let output = Option.value output ~default:(Compile.fresh_program compile) in
   match Compile.build_program compile ~main ~output with
   | Error message -> Outcome.cannot_run "%s" message
   | Ok () -> output
 
 let run ~release ~arguments =
-  let session, packages = Command_packages.current () in
-  let program = build_program session packages (if release then Release else Development) in
+  let snapshot, packages = Command_packages.current () in
+  let program = build_program snapshot packages (if release then Release else Development) in
   Outcome.Run_program { program; arguments }
 
 let build ~output =
-  let session, packages = Command_packages.current () in
+  let snapshot, packages = Command_packages.current () in
   let package = Command_packages.one packages in
   let output = Shown_path.normalize (Option.value output ~default:(Path.show_package package)) in
-  ignore (build_program session packages Release ~output);
+  ignore (build_program snapshot packages Release ~output);
   if Output.json () then
     Json.print (Json.document ~diagnostics:[] [ ("output", Json.String (Shown_path.shown output)) ])
   else Output.printf "Built %s.\n" (Shown_path.shown output);

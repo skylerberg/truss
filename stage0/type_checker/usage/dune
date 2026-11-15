@@ -1,13 +1,4 @@
 (library
  (name usage)
- (libraries
-  query
-  phases
-  path
-  diagnostic
-  source
-  resolve
-  syntax
-  syntax_walk
-  types
-  infer))
+ (modules_without_implementation lookups)
+ (libraries path diagnostic source resolve syntax syntax_walk types infer))

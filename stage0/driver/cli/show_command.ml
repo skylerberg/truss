@@ -7,16 +7,14 @@ type shown_definition = {
   text : string;
 }
 
-let as_module database names : Path.module_ option =
-  match Packages.split_module database names with
-  | Some module_ when Query.demand database Packages.module_exists module_ -> Some module_
+let as_module (names : Names.lookups) written : Path.module_ option =
+  match names.split_module written with
+  | Some module_ when names.module_exists module_ -> Some module_
   | Some _ | None -> None
 
-let declarations database (module_ : Path.module_) =
-  Query.demand database Names.declarations module_
+let declarations pipeline (module_ : Path.module_) =
+  (Pipeline.names pipeline [ module_.package ]).declarations module_
   |> List.filter (fun (declaration : Names.declaration) -> declaration.ordinal = 0)
-
-let package_modules database package = Query.demand database Packages.modules package
 
 let visible packages (declaration : Names.declaration) =
   List.mem declaration.file.module_.package packages || Names.is_public declaration.visibility
@@ -28,21 +26,23 @@ let owner_of : Path.t -> Path.t option = function
 let impl_of_type (path : Path.t) name =
   match path with Impl { for_type; _ } -> for_type.type_name = name | _ -> false
 
-let resolve session packages text =
-  let database = Database.context session in
+let resolve pipeline packages text =
+  let names = Pipeline.names pipeline packages in
   let argument = Path_argument.parse text in
   let in_package package =
-    List.concat_map (declarations database) (package_modules database package)
+    List.filter
+      (fun (declaration : Names.declaration) -> declaration.ordinal = 0)
+      ((Pipeline.names pipeline [ package ]).package_declarations package)
   in
-  let module_ = if argument.member = None then as_module database argument.names else None in
-  match (Packages.split_module database argument.names, module_, argument.member) with
+  let module_ = if argument.member = None then as_module names argument.names else None in
+  match (names.split_module argument.names, module_, argument.member) with
   | Some { package; modules = [] }, _, None ->
       List.filter
         (fun (declaration : Names.declaration) -> Names.is_public declaration.visibility)
         (in_package package)
-  | _, Some module_, _ -> List.filter (visible packages) (declarations database module_)
+  | _, Some module_, _ -> List.filter (visible packages) (declarations pipeline module_)
   | _, None, member -> (
-      match (as_module database (Path_argument.prefix argument), List.rev argument.names) with
+      match (as_module names (Path_argument.prefix argument), List.rev argument.names) with
       | None, _ | _, [] -> []
       | Some module_, last :: _ -> (
           match member with
@@ -51,7 +51,7 @@ let resolve session packages text =
               match
                 List.filter
                   (fun (declaration : Names.declaration) -> Path.equal declaration.path path)
-                  (declarations database module_)
+                  (declarations pipeline module_)
               with
               | [ declaration ] when declaration.kind = Type ->
                   let package = in_package module_.package in
@@ -78,7 +78,7 @@ let resolve session packages text =
                   | _ -> false)
               |> List.filter (visible packages)))
 
-let find session packages ~body text =
+let find snapshot pipeline packages ~body text =
   List.filter_map
     (fun (declaration : Names.declaration) ->
       let key = Names.key_of declaration in
@@ -86,22 +86,24 @@ let find session packages ~body text =
         declaration.visibility = Public_opaque
         && not (List.mem declaration.file.module_.package packages)
       in
-      match Signatures.text (Database.context session) ~body ~opaque key with
+      let names = Pipeline.names pipeline [ key.module_.package ] in
+      match Signatures.text names ~body ~opaque key with
       | None -> None
       | Some signature ->
           let file, line =
-            match Query.demand (Database.context session) Names.base key with
+            match names.base key with
             | Some (written, base) ->
-                let source = Command_packages.source session packages written in
+                let source = Command_packages.source snapshot packages written in
                 (Source.path source, fst (Source.position source base))
             | None -> ("", 0)
           in
           Some { declaration; file; line; text = signature })
-    (resolve session packages text)
+    (resolve pipeline packages text)
 
 let run ~paths ~body =
-  let session, packages = Command_packages.current () in
-  let results = List.map (fun path -> (path, find session packages ~body path)) paths in
+  let snapshot, packages = Command_packages.current () in
+  let pipeline = Database.pipeline snapshot in
+  let results = List.map (fun path -> (path, find snapshot pipeline packages ~body path)) paths in
   let missing = List.filter (fun (_, definitions) -> definitions = []) results in
   if Output.json () then
     Json.print

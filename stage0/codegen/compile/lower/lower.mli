@@ -10,8 +10,8 @@ val monomorphic : context -> Monomorphic.context
 
 val context :
   ?checks:bool ->
-  constant:(context -> Path.t -> Lowered.static_value option) ->
-  Query.context ->
+  constant:(Path.t -> Lowered.static_value option) ->
+  Lookups.t ->
   Libc.system ->
   context
 
@@ -33,7 +33,3 @@ val template_checked : context -> Path.t -> int list
 
 val call_evaluation :
   context -> Instance.key -> function_:Path.t -> arguments:Z.t list -> Emit_c.Builder.instance
-
-module For_testing : sig
-  val constant_value : context -> Path.t -> Lowered.static_value option
-end

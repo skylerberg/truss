@@ -12,14 +12,14 @@ open Reader
 let home source =
   match source.key with Some key -> key | None -> bug "%s has no definition key" source.name
 
-let new_context database ~home ~current ~terminates ~measures =
+let new_context (lookups : Lookups.t) ~home ~current ~terminates ~measures =
   let rec context =
     {
       run_body = (fun frame ~lambdas body -> read_body context frame ~lambdas body);
       formula_term = (fun frame formula ~arguments -> formula_term context frame formula ~arguments);
       home;
       laws_assumed = [];
-      database;
+      lookups;
       current;
       terminates;
       measures;
@@ -66,13 +66,8 @@ let new_context database ~home ~current ~terminates ~measures =
       call_targets = [];
       reading_callback = false;
       validating = [];
-      ranking =
-        terminates && measures = []
-        && Call_graph.recursive database ~package:(Path.package current) current;
-      disjoint =
-        (match Query.demand database Ownership.ownership home with
-        | Some ownership -> ownership.must_be_disjoint
-        | None -> []);
+      ranking = terminates && measures = [] && lookups.recursion_group current <> [];
+      disjoint = lookups.must_be_disjoint home;
       indexes = [];
     }
   in
@@ -130,10 +125,10 @@ let promises context (source : source) locals (costs : Mir.cost list) ~inherited
               Some { counter; clause = cost; written_in = source; inherited }))
     costs
 
-let promised_by database (source : source) =
+let promised_by (lookups : Lookups.t) (source : source) =
   match source.key with
   | Some { path = Method { owner; _ }; _ }
-    when Interface.Summary.kind_of database owner = Some Names.Capability ->
+    when Names.kind_of lookups.interface.names owner = Some Names.Capability ->
       "capability"
   | _ -> "trait"
 
@@ -157,7 +152,7 @@ let keep_promise context (frame : frame) (promise : promise) ~(at : frame) ~span
   oblige context frame Cost span
     (if promise.inherited then
        Printf.sprintf "This method may spend more than its %s's `%s` allows."
-         (promised_by context.database promise.written_in)
+         (promised_by context.lookups promise.written_in)
          (quote promise.written_in promise.clause.origin)
      else
        Printf.sprintf "This may spend more than `%s` allows."
@@ -165,9 +160,9 @@ let keep_promise context (frame : frame) (promise : promise) ~(at : frame) ~span
     goal
 
 let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substitution = [])
-    database (source : source) ~path =
+    (lookups : Lookups.t) (source : source) ~path =
   let contract =
-    match Query.demand database Mir.contract_of_path path with
+    match Mir.contract_of_path lookups.mir path with
     | Some contract -> contract
     | None -> bug "`%s` has no MIR of its contract" source.name
   in
@@ -175,7 +170,7 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
   let signature =
     Option.map
       (Types.map_signature (Types.substitute substitution))
-      (Interface.Impls.signature database path)
+      (Interface.Impls.signature lookups.interface path)
   in
   let terminates =
     proof
@@ -185,7 +180,7 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
     | None -> false
   in
   let home = home source in
-  let context = new_context database ~home ~current:path ~terminates ~measures:contract.decreases in
+  let context = new_context lookups ~home ~current:path ~terminates ~measures:contract.decreases in
   let returns_span = definition_span source in
   context.proving <- proof;
   context.callbacks <-
@@ -300,7 +295,7 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
     | None -> Logic.Boolean true
   in
   let mir =
-    match Query.demand database Mir.of_path path with
+    match Mir.code_of_path lookups.mir path with
     | Some mir -> mir
     | None -> bug "`%s` has a body and no MIR" source.name
   in
@@ -482,19 +477,18 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
               let _, term = specification_value context inside clause in
               oblige context under_trait Ensures returns_span
                 (Printf.sprintf "The %s's `%s` may not hold when this method returns."
-                   (promised_by database part.callee)
-                   (quote part.callee clause.origin))
+                   (promised_by lookups part.callee) (quote part.callee clause.origin))
                 term)
             part.ensures
       | _ -> ())
     returns;
   outcome context
 
-let laws database (source : source) ~impl ~trait ~for_type ~proofs ~at =
+let laws (lookups : Lookups.t) (source : source) ~impl ~trait ~for_type ~proofs ~at =
   let home = home source in
-  let context = new_context database ~home ~current:impl ~terminates:false ~measures:[] in
+  let context = new_context lookups ~home ~current:impl ~terminates:false ~measures:[] in
   let start = empty_frame source in
-  let substitution = trait_substitution database trait for_type in
+  let substitution = trait_substitution lookups trait for_type in
   List.iter
     (fun (law_source, (law : Mir.law)) ->
       let types = law_parameter_types ~substitution law in
@@ -516,7 +510,9 @@ let laws database (source : source) ~impl ~trait ~for_type ~proofs ~at =
           List.fold_left
             (fun start ((proof_source : source), renaming) ->
               let proof =
-                match Option.bind proof_source.key (Query.demand database Mir.mir) with
+                match
+                  Option.bind proof_source.key (fun key -> Mir.code (lookups.mir.body_part key))
+                with
                 | Some proof -> proof
                 | None -> bug "the proof `%s` has no MIR" proof_source.name
               in
@@ -563,19 +559,19 @@ let laws database (source : source) ~impl ~trait ~for_type ~proofs ~at =
     (laws_of context trait.trait);
   outcome context
 
-let type_ database (source : source) ~path =
+let type_ (lookups : Lookups.t) (source : source) ~path =
   let home = home source in
-  let context = new_context database ~home ~current:path ~terminates:false ~measures:[] in
-  (match Query.demand database Mir.type_clauses_of_path path with
+  let context = new_context lookups ~home ~current:path ~terminates:false ~measures:[] in
+  (match Mir.type_clauses_of_path lookups.mir path with
   | Some { invariants; potential } ->
       let ty =
-        match Query.demand database Interface.Environment.interface path with
+        match Interface.Definition.interface lookups.interface path with
         | Some (Interface.Environment.Type_interface interface) ->
             Types.Named { path; arguments = Types.generic_arguments interface.type_generics }
         | _ -> Types.Named { path; arguments = [] }
       in
       let start = { (empty_frame source) with self_type = Some ty } in
-      (match Query.demand database Mir.defaults_of_path path with
+      (match Mir.defaults_of_path lookups.mir path with
       | Some (Field_defaults defaults) ->
           List.iter
             (fun (default : Mir.t Mir.field_default) ->
@@ -605,21 +601,21 @@ let type_ database (source : source) ~path =
   | None -> ());
   outcome context
 
-let test database (source : source) ~path =
+let test (lookups : Lookups.t) (source : source) ~path =
   let home = home source in
-  let context = new_context database ~home ~current:path ~terminates:false ~measures:[] in
-  (match Query.demand database Mir.mir home with
+  let context = new_context lookups ~home ~current:path ~terminates:false ~measures:[] in
+  (match Mir.code (lookups.mir.body_part home) with
   | Some (mir : Mir.t) -> read_body context (empty_frame source) ~lambdas:mir.lambdas mir.body
   | None -> bug "the test `%s` has no MIR" source.name);
   outcome context
 
-let constant database (source : source) ~path =
+let constant (lookups : Lookups.t) (source : source) ~path =
   let home = home source in
-  let context = new_context database ~home ~current:path ~terminates:false ~measures:[] in
-  (match Query.demand database Mir.of_constant path with
+  let context = new_context lookups ~home ~current:path ~terminates:false ~measures:[] in
+  (match Mir.initializer_of_path lookups.mir path with
   | Some code ->
       ignore (code_value context (empty_frame source) code ~type_:(constant_type context path))
   | None -> bug "the constant `%s` has no MIR" (Path.show path));
   outcome context
 
-let theorem database source ~path = function_ ~proof:true database source ~path
+let theorem lookups source ~path = function_ ~proof:true lookups source ~path

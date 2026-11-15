@@ -1,8 +1,6 @@
 module References = References
 open Syntax
 
-type hole = { offset : int; expected : string option; scope : (string * string) list }
-
 let at table id = if id < Array.length table then table.(id) else None
 
 let show_type (tables : Infer.tables) id =
@@ -11,12 +9,9 @@ let show_type (tables : Infer.tables) id =
   | Some type_ -> Types.show type_
   | None -> "an unknown type"
 
-let local_type (tables : Infer.tables) id =
-  match at tables.local_types id with Some type_ -> Types.show type_ | None -> "an unknown type"
-
 type unfinished = { keyword : [ `Todo | `Echo ]; id : id option; span : span }
 
-let unfinished_in (definition : definition) =
+let unfinished (definition : definition) =
   let found = ref [] in
   let add keyword id (span : span) = found := { keyword; id; span } :: !found in
   let rec visit (value : expression) =
@@ -31,44 +26,6 @@ let unfinished_in (definition : definition) =
   | Type_definition { name; body = Type_todo; _ } -> add `Todo None name.span
   | _ -> ());
   List.sort (fun left right -> compare left.span.start right.span.start) !found
-
-let unfinished =
-  Query.query ~name:"unfinished" ~phase:Phases.inspection ~show:Resolve.Names.show_key
-    (fun database key ->
-      match Query.demand database Resolve.Names.definition key with
-      | Some definition -> unfinished_in definition
-      | None -> [])
-
-let holes database key =
-  match
-    (Query.demand database Resolve.resolved key, Query.demand database Infer.type_check_result key)
-  with
-  | None, _ | _, None -> []
-  | Some resolved, Some { tables; _ } ->
-      List.filter_map
-        (fun { keyword; id; span } ->
-          match (keyword, id) with
-          | `Echo, _ -> None
-          | `Todo, None -> Some { offset = span.start; expected = None; scope = [] }
-          | `Todo, Some id ->
-              Option.map
-                (fun scope ->
-                  {
-                    offset = span.start;
-                    expected = Some (show_type tables id);
-                    scope =
-                      List.map
-                        (fun (name, (value : Resolve.value)) ->
-                          ( name,
-                            match value with
-                            | Value_local binding -> local_type tables binding
-                            | Value_generic _ -> "UInt64"
-                            | Value_field _ -> "a field"
-                            | Value_law_parameter _ -> "a parameter of the law" ))
-                        scope;
-                  })
-                (List.assoc_opt id resolved.holes))
-        (Query.demand database unfinished key)
 
 type explanation = {
   text : string;

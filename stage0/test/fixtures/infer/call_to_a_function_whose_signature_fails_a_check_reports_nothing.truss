@@ -1,0 +1,9 @@
+type Secret(code: Int64)
+
+public fn reveal(secret: Secret) -> Int64 {
+  secret.code
+}
+
+fn caller() -> Int64 {
+  reveal(true)
+}

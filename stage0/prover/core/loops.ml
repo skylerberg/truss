@@ -594,7 +594,7 @@ let own_cursor_loop ~(for_loop : for_loop) context frame (cursor_access : passed
     | _ -> bug "a cursor's evidence is not an impl"
   in
   let contract =
-    match method_contract context.database trait "next" Mut evidence with
+    match method_contract context.lookups trait "next" Mut evidence with
     | Some contract -> contract
     | None ->
         unsupported span "a loop over `%s`, whose `next` the prover cannot read"

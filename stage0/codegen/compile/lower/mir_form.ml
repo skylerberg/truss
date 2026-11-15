@@ -7,12 +7,12 @@ let mir st =
   match st.frame.mir with Some mir -> mir | None -> bug "MIR lowering outside a MIR frame"
 
 let mir_of context path : Mir.Graph.t =
-  match demand context Mir.graph_of_path path with
+  match Mir.graph_of_path context.lookups.mir path with
   | Some mir -> mir
   | None -> bug "%s has no MIR" (Path.show path)
 
 let parameter_defaults context path : (int * Mir.Graph.t) list =
-  match demand context Mir.default_graphs_of_path path with
+  match Mir.default_graphs_of_path context.lookups.mir path with
   | Some (Parameter_defaults defaults) -> defaults
   | Some (Field_defaults _) | None -> bug "%s is not a function" (Path.show path)
 
@@ -22,7 +22,7 @@ let parameter_of (body : Mir.Graph.body) local =
   | _ -> bug "a parameter that is no source local"
 
 let spans st =
-  match demand st.context Names.spans st.frame.code.definition_key with
+  match st.context.lookups.interface.names.spans st.frame.code.definition_key with
   | Some spans -> spans
   | None -> bug "no spans for %s" (Path.show st.frame.code.anchor)
 
@@ -721,7 +721,7 @@ let field_default st (ty : Ground.ty) ~variant ~field : Types.ty * Mir.Graph.t =
   let path =
     match ty with Named { path; _ } -> path | _ -> bug "defaults of %s" (Ground.to_string ty)
   in
-  match demand st.context Mir.default_graphs_of_path path with
+  match Mir.default_graphs_of_path st.context.lookups.mir path with
   | Some (Field_defaults defaults) -> (
       match
         List.find_opt
@@ -1460,7 +1460,7 @@ and call_into st (call : Mir.call) destination ~origin =
 and capability_defaults st ~capability ~name (arguments : Mir.argument list) evaluated =
   if List.mem Mir.Default arguments then begin
     let receiver =
-      match demand st.context Environment.trait_interface capability with
+      match Interface.Definition.trait_interface st.context.lookups.interface capability with
       | Some interface -> (
           match
             List.find_opt
@@ -1517,7 +1517,7 @@ and holds_invariant st ~value ~clause ~destination =
   in
   let invariant =
     match
-      Option.bind (demand st.context Mir.type_clauses_of_path path)
+      Option.bind (Mir.type_clauses_of_path st.context.lookups.mir path)
         (fun (clauses : Mir.type_clauses) -> List.nth_opt clauses.invariants index)
     with
     | Some { clause; is_executable = true; _ } -> Mir.code_of_formula clause
@@ -1627,8 +1627,7 @@ and lend_part st ~(mode : Types.mode) (part : Mir.yielded) =
   let outlives =
     outlives_call ~owns
       ~is_view:(fun ty ->
-        Interface.Impls.is_view st.context.database
-          ~bounds:(fun _ -> [])
+        (Interface.Impls.is_view st.context.lookups.interface ~bounds:Interface.Impls.no_bounds)
           (Types.substitute st.frame.code.substitution ty))
       frame.body
   in

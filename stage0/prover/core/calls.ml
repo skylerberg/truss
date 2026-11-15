@@ -97,7 +97,7 @@ let named_term context ty term =
 let default_value context frame (part : part) position =
   match
     Option.bind part.callee.key (fun (key : Names.key) ->
-        Query.demand context.database Mir.defaults_of_path key.path)
+        Mir.defaults_of_path context.lookups.mir key.path)
   with
   | Some (Parameter_defaults defaults) -> (
       match (List.assoc_opt position defaults, List.nth_opt part.parameters position) with
@@ -200,10 +200,9 @@ let contract_call context frame (site : Invocation.site) (invocation : Invocatio
   if
     context.terminates && frame.makes_obligations
     && (match invocation.callee with
-      | Trait_method _ -> Call_graph.dispatched invocation.callee
+      | Trait_method _ -> Mir.Call_edges.dispatched invocation.callee
       | _ -> true)
-    && Call_graph.reaches context.database ~package:(Path.package context.current) ~from:path
-         ~target:context.current
+    && is_in_recursion_group context path
   then
     begin match (context.measures, own.decreases) with
     | [], [] when Path.equal path context.current && structural_parameters context frame own <> []
@@ -317,8 +316,8 @@ let contract_call context frame (site : Invocation.site) (invocation : Invocatio
             | Some passed -> sort_of context passed.type_
             | None ->
                 sort_of context
-                  (Interface.Impls.normalize context.database
-                     ~bounds:(fun _ -> [])
+                  ((Interface.Impls.normalize context.lookups.interface
+                      ~bounds:Interface.Impls.no_bounds)
                      (Types.substitute (substitution_of own) parameter.type_)))
           own_bound
       in
@@ -327,8 +326,7 @@ let contract_call context frame (site : Invocation.site) (invocation : Invocatio
       (match (path, own_bound) with
       | Method { name = "model"; receiver = Read; _ }, [ (self, _) ] when self.local = Self ->
           model_ranked context
-            (Interface.Impls.normalize context.database
-               ~bounds:(fun _ -> [])
+            ((Interface.Impls.normalize context.lookups.interface ~bounds:Interface.Impls.no_bounds)
                (Types.substitute (substitution_of own) self.type_))
             ~model:result_type function_symbol
       | _ -> ());
@@ -730,7 +728,7 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
     (fun (passed : passed) ->
       match passed.shape with
       | Named_function { origin; path; _ } -> (
-          match function_contract context.database path with
+          match function_contract context.lookups path with
           | Some contract ->
               check_named_callback context frame invocation passed ~origin path contract values
           | None -> ())
@@ -769,7 +767,7 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
       type_arguments
   in
   let generics_of path =
-    match Interface.Impls.signature context.database path with
+    match Interface.Impls.signature context.lookups.interface path with
     | Some (signature : Types.signature) ->
         List.map (fun (generic : Types.generic) -> generic.generic) signature.generics
     | None -> []
@@ -806,7 +804,7 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
           in
           match concrete_impl context trait (substituted context frame self_type) with
           | Some (impl, _)
-            when Interface.Impls.signature context.database
+            when Interface.Impls.signature context.lookups.interface
                    (Path.Method { owner = impl; name; receiver })
                  <> None ->
               signature_terminates context (Path.Method { owner = impl; name; receiver })
@@ -826,17 +824,11 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
         "This call may not end, since its callee has no `time` clause, so neither may this \
          function."
         (Logic.Boolean false);
-    let impls =
-      Query.demand context.database Call_graph.package_impls (Path.package context.current)
-    in
     List.iter
       (fun impl ->
         let reaches_here =
-          List.exists
-            (fun method_ ->
-              Call_graph.reaches context.database ~package:(Path.package context.current)
-                ~from:method_ ~target:context.current)
-            (Call_graph.impl_methods context.database impl)
+          List.exists (is_in_recursion_group context)
+            (Mir.Call_edges.written_methods context.lookups.interface.names impl)
         in
         if reaches_here then
           oblige context frame Termination span
@@ -846,7 +838,8 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
                 cannot be shown to end: write it as a direct call on a part."
                (Path.show impl))
             (Logic.Boolean false))
-      (Call_graph.impls_used context.database impls invocation.callee)
+      (Mir.Call_edges.impls_used context.lookups.interface (Path.package context.current)
+         invocation.callee)
   end;
   let with_contract ?(substitution_of = fun _ -> []) ?(instance = []) path = function
     | Some contract ->
@@ -865,7 +858,7 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
       with_contract
         ~substitution_of:(fun _ -> substitution)
         ~instance:arguments path
-        (function_contract context.database path)
+        (function_contract context.lookups path)
   | Trait_method { trait; name; receiver; evidence; self_type; type_arguments } -> (
       let arguments = arguments_of type_arguments in
       let self_type = substituted context frame self_type in
@@ -908,7 +901,7 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
           let trait_path = Path.Method { owner = trait.trait; name; receiver } in
           let trait_substitution =
             pair (generics_of trait_path) arguments
-              ~fixed:(trait_substitution context.database trait self_type)
+              ~fixed:(trait_substitution context.lookups trait self_type)
           in
           let path, own_substitution =
             match evidence with
@@ -929,7 +922,7 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
           with_contract ~substitution_of
             ~instance:(Types.Type self_type :: arguments)
             path
-            (method_contract context.database trait name receiver evidence))
+            (method_contract context.lookups trait name receiver evidence))
   | Indirect () ->
       check_callback_requires context frame site through values;
       let frame = havoc_mut frame in
@@ -964,7 +957,7 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
   | Capability_method { capability; name } ->
       with_contract
         (Path.Method { owner = capability; name; receiver = Static })
-        (capability_contract context.database capability name)
+        (capability_contract context.lookups capability name)
   | Intrinsic { operation; type_arguments } ->
       let frame =
         match operation with

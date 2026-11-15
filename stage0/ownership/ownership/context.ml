@@ -1,5 +1,5 @@
 type context = {
-  database : Query.context;
+  lookups : Lookups.t;
   bounds : Types.parameter -> Types.trait_reference list;
   spans : Syntax.span array;
   mode_keywords : (Core.origin, Types.mode * Core.mode_keyword) Hashtbl.t;
@@ -13,24 +13,26 @@ type context = {
   mutable must_be_disjoint : (Core.origin * Core.origin) list;
 }
 
-let plain context type_ = Interface.Impls.plain context.database ~bounds:context.bounds type_
-let copyable context type_ = Interface.Impls.copyable context.database ~bounds:context.bounds type_
-let is_view context type_ = Interface.Impls.is_view context.database ~bounds:context.bounds type_
+let plain context type_ =
+  Interface.Impls.plain context.lookups.interface ~bounds:context.bounds type_
+
+let copyable context type_ =
+  Interface.Impls.copyable context.lookups.interface ~bounds:context.bounds type_
+
+let is_view context type_ =
+  Interface.Impls.is_view context.lookups.interface ~bounds:context.bounds type_
 
 let holds_function context type_ =
-  Interface.Impls.holds_function context.database ~bounds:context.bounds type_
+  Interface.Impls.holds_function context.lookups.interface ~bounds:context.bounds type_
 
 let callee_signatures context (callee : Mir.callee) : Types.signature list =
+  let signature path = Option.to_list (Interface.Impls.signature context.lookups.interface path) in
   match callee with
-  | Function { path; _ } -> Option.to_list (Interface.Impls.signature context.database path)
+  | Function { path; _ } -> signature path
   | Trait_method { trait; name; receiver; _ } ->
-      List.map
-        (fun (method_ : Types.trait_method) -> method_.method_signature)
-        (Option.to_list (Infer.Members.trait_method context.database trait.trait name receiver))
+      signature (Method { owner = trait.trait; name; receiver })
   | Capability_method { capability; name } ->
-      List.map
-        (fun (method_ : Types.trait_method) -> method_.method_signature)
-        (Infer.Members.trait_methods context.database capability name)
+      signature (Method { owner = capability; name; receiver = Static })
   | Intrinsic _ | Indirect _ -> []
 
 let stores_function context (callee : Mir.callee) position =

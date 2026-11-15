@@ -114,7 +114,7 @@ type stated =
   | Ranked_elements of Types.ty
 
 type context = {
-  database : Query.context;
+  lookups : Lookups.t;
   current : Path.t;
   mutable terminates : bool;
   mutable callbacks : (Core.local * string * Mir.callback) list;

@@ -1,30 +1,23 @@
-module Names = Resolve.Names
+module Lookups = Lookups
 
-type lowering = { system : Libc.system; checks : bool }
+module Table = Hashtbl.Make (struct
+  type t = Instance.key
 
-let show_lowering lowering =
-  Printf.sprintf "%s%s"
-    (Libc.system_name lowering.system)
-    (if lowering.checks then ", checked" else "")
+  let equal = Instance.equal
+  let hash key = Hashtbl.hash_param 64 256 key
+end)
 
-type lowered_outcome =
+type lowered =
   | Compiled of Emit_c.fragment
   | Folded of Lowered.data
   | Evaluate of Path.t * Ground.ty
 
-let fresh_context lowered lowering database =
-  Lower.context ~checks:lowering.checks
-    ~constant:(fun _ path ->
-      match Query.demand database lowered (lowering, Instance.Constant path) with
-      | Folded data -> Some data.value
-      | Evaluate _ -> None
-      | Compiled _ -> Compiler_bug.bug ~stage:"Compile" "%s is not a constant" (Path.show path))
-    database lowering.system
+type link = { own_hash : string; references : Instance.key list }
 
 let emitted (context : Lower.context) (compiled : Emit_c.compiled) =
   Compiled (Emit_c.fragment (Lower.env context) compiled)
 
-let make (context : Lower.context) (key : Instance.key) : lowered_outcome =
+let make (context : Lower.context) (key : Instance.key) : lowered =
   let glue = Lower.glue context in
   let code instance = emitted context (Code instance) in
   match key with
@@ -48,86 +41,32 @@ let make (context : Lower.context) (key : Instance.key) : lowered_outcome =
   | Table _ -> emitted context (Table (Lower.table context key))
   | Locked_table capability -> emitted context (Table (Lower.locked_table context key ~capability))
 
-let lowered =
-  Query.recursive_query ~name:"lowered_instance" ~phase:Phases.lowering ~saved:true ~portable:true
-    ~show:(fun (lowering, key) -> show_lowering lowering ^ " " ^ Instance.to_string key)
-    (fun lowered database (lowering, key) ->
-      Compiler_bug.while_doing ~stage:"Compile"
-        ("lowering " ^ Instance.to_string key)
-        (fun () -> make (fresh_context lowered lowering database) key))
+module Path_key = struct
+  type t = Path.t
 
-let show_instance (lowering, key) = show_lowering lowering ^ " " ^ Instance.to_string key
+  let equal = Path.equal
+  let hash path = Hashtbl.hash_param 64 256 path
+  let compare = Path.compare
+end
+
+module Path_table = Hashtbl.Make (Path_key)
+module Path_components = Components.Make (Path_key)
+
+let bug format = Compiler_bug.bug ~stage:"Compile" format
 
 let evaluated_own_hash =
   Blake3.derive_key ~context:"truss 2026-11-12 evaluated constant own hash" ""
-
-let linked =
-  Query.query ~name:"linked" ~phase:Phases.linking ~show:show_instance
-    (fun database (lowering, key) ->
-      let of_fragment fragment = (Reachable.own_hash fragment, Emit_c.references fragment) in
-      match Query.demand database lowered (lowering, key) with
-      | Evaluate (path, _) -> (evaluated_own_hash, [ Instance.Evaluator path ])
-      | Compiled fragment -> of_fragment fragment
-      | Folded data ->
-          let context = fresh_context lowered lowering database in
-          of_fragment (Emit_c.fragment (Lower.env context) (Data data)))
-
-let own_hash =
-  Query.query ~name:"own_hash" ~phase:Phases.linking ~saved:true ~portable:true ~show:show_instance
-    (fun database key -> fst (Query.demand database linked key))
-
-let references =
-  Query.query ~name:"references" ~phase:Phases.linking ~saved:true ~portable:true
-    ~show:show_instance (fun database key -> snd (Query.demand database linked key))
-
-let roots : (lowering, Instance.key list) Query.input =
-  Query.input ~name:"roots" ~show:show_lowering ()
-
-let add_roots database lowering wanted =
-  List.sort_uniq Instance.compare
-    (wanted @ Option.value (Query.find database roots lowering) ~default:[])
-
-let recursion =
-  Query.query ~name:"recursion" ~phase:Phases.recursion ~show:show_lowering
-    ~equal:(Reachable.Keys.equal (List.equal Instance.equal))
-    (fun database lowering ->
-      let wanted = Option.value (Query.find database roots lowering) ~default:[] in
-      let edges key =
-        match Query.demand database references (lowering, key) with
-        | edges -> edges
-        | exception (Compiler_bug.Bug _ | Lower.Unsupported _) -> []
-      in
-      Reachable.groups ~edges wanted)
-
-let group =
-  Query.query ~name:"group" ~phase:Phases.keys ~saved:true ~portable:true ~show:show_instance
-    (fun database (lowering, key) ->
-      Reachable.Keys.find_opt key (Query.demand database recursion lowering))
-
-let reach =
-  Query.recursive_query ~name:"reach" ~phase:Phases.keys ~saved:true ~portable:true
-    ~show:show_instance (fun reach database (lowering, key) ->
-      let reach_of other = Query.demand database reach (lowering, other) in
-      match Query.demand database group (lowering, key) with
-      | None ->
-          Reachable.unit_key
-            ~own:(Query.demand database own_hash (lowering, key))
-            (List.map reach_of (Query.demand database references (lowering, key)))
-      | Some members ->
-          Reachable.group_key
-            ~link:(fun member ->
-              ( Query.demand database own_hash (lowering, member),
-                Query.demand database references (lowering, member) ))
-            ~deep:reach_of ~members key)
 
 type 'a ran = Ran of 'a | Ran_too_long
 type results = { find : string -> string option; add : string -> string -> unit }
 
 type t = {
-  database : Query.context;
-  lowering : lowering;
-  want : lowering -> Instance.key list -> unit;
+  lookups : Lookups.t;
+  system : Libc.system;
   context : Lower.context;
+  lowered : (lowered, Lower.unsupported) result Table.t;
+  links : link Table.t;
+  reach_keys : string Table.t;
   toolchain : Toolchain.t;
   cache : Build.cache;
   settings : Build.settings;
@@ -139,7 +78,98 @@ type t = {
   runs : (string, string ran) Hashtbl.t;
 }
 
-let bug format = Compiler_bug.bug ~stage:"Compile" format
+let lower compiler key =
+  let outcome =
+    match
+      Compiler_bug.while_doing ~stage:"Compile"
+        ("lowering " ^ Instance.to_string key)
+        (fun () -> make compiler.context key)
+    with
+    | lowered -> Ok lowered
+    | exception Lower.Unsupported unsupported -> Error unsupported
+  in
+  Table.replace compiler.lowered key outcome
+
+let fold_reads (lookups : Lookups.t) path =
+  let constants =
+    match Mir.initializer_graph_of_path lookups.mir path with
+    | Some graph -> Mir.constants_named graph
+    | None ->
+        let defaults =
+          match Mir.default_graphs_of_path lookups.mir path with
+          | Some (Parameter_defaults defaults) -> List.map snd defaults
+          | Some (Field_defaults _) | None -> []
+        in
+        List.concat_map Mir.constants_named
+          (Option.to_list (Mir.graph_of_path lookups.mir path) @ defaults)
+  in
+  constants @ lookups.call_edges path
+
+let fold_constants compiler root =
+  let is_lowered path = Table.mem compiler.lowered (Instance.Constant path) in
+  let is_constant path = Option.is_some (Mir.initializer_graph_of_path compiler.lookups.mir path) in
+  let known_reads = Path_table.create 64 in
+  let successors path =
+    if is_lowered path then []
+    else
+      match Path_table.find_opt known_reads path with
+      | Some paths -> paths
+      | None ->
+          let paths = fold_reads compiler.lookups path in
+          Path_table.replace known_reads path paths;
+          paths
+  in
+  List.iter
+    (function
+      | [ path ] when not (List.exists (Path.equal path) (successors path)) ->
+          if is_constant path && not (is_lowered path) then lower compiler (Instance.Constant path)
+      | cycle ->
+          if List.exists is_constant cycle then
+            bug "constants that read one another: %s"
+              (String.concat ", " (List.map Path.show cycle)))
+    (Path_components.of_graph ~successors [ root ])
+
+let lowered compiler key =
+  let outcome =
+    match Table.find_opt compiler.lowered key with
+    | Some outcome -> outcome
+    | None ->
+        (match key with Constant path -> fold_constants compiler path | _ -> lower compiler key);
+        Table.find compiler.lowered key
+  in
+  match outcome with
+  | Ok lowered -> lowered
+  | Error unsupported -> raise (Lower.Unsupported unsupported)
+
+let link compiler key =
+  match Table.find_opt compiler.links key with
+  | Some link -> link
+  | None ->
+      let of_fragment fragment =
+        { own_hash = Reachable.own_hash fragment; references = Emit_c.references fragment }
+      in
+      let link =
+        match lowered compiler key with
+        | Evaluate (path, _) ->
+            { own_hash = evaluated_own_hash; references = [ Instance.Evaluator path ] }
+        | Compiled fragment -> of_fragment fragment
+        | Folded data -> of_fragment (Emit_c.fragment (Lower.env compiler.context) (Data data))
+      in
+      Table.replace compiler.links key link;
+      link
+
+let reach compiler root =
+  if not (Table.mem compiler.reach_keys root) then
+    List.iter
+      (fun (key, reach_key) -> Table.replace compiler.reach_keys key reach_key)
+      (Reachable.reach_keys
+         ~link:(fun key ->
+           let link = link compiler key in
+           (link.own_hash, link.references))
+         ~known:(Table.find_opt compiler.reach_keys)
+         root);
+  Table.find compiler.reach_keys root
+
 let programs_built = Atomic.make 0
 
 let fresh_program compiler =
@@ -157,27 +187,21 @@ let result_key compiler root =
        (Cbor.Array
           [
             Cbor.int Emit_c.version;
-            Cbor.Text (Libc.system_name compiler.lowering.system);
-            Bytes (Query.demand compiler.database reach (compiler.lowering, root));
+            Cbor.Text (Libc.system_name compiler.system);
+            Bytes (reach compiler root);
             Cbor.Array (List.map (fun flag -> Cbor.Text flag) compiler.settings.extra);
           ]))
 
 let test_key compiler test = result_key compiler (Lower.test_key test)
 
-let run_key compiler root =
-  compiler.want compiler.lowering [ root ];
-  result_key compiler root
-
 let anchor compiler (path : Path.t) : Positions.anchor option =
-  match Query.demand compiler.database Interface.Summary.key path with
+  match compiler.lookups.interface.names.key path with
   | None -> None
   | Some key -> (
-      match Query.demand compiler.database Names.base key with
+      match compiler.lookups.interface.names.base key with
       | None -> None
       | Some (file, base) ->
-          let line, _ =
-            Source.position (Query.demand compiler.database Packages.source file) base
-          in
+          let line, _ = Source.position (compiler.lookups.source file) base in
           Some { definition = path; path = compiler.file_name file; first_line = line })
 
 let decode compiler ty text : Lowered.static_value =
@@ -319,7 +343,7 @@ and build_and_run ?input ?time_limit_ms compiler ~roots ~startup ~arguments =
 
 and run_while_compiling : 'value. t -> Instance.key -> read:(string -> 'value) -> 'value ran =
  fun compiler root ~read ->
-  let key = run_key compiler root in
+  let key = result_key compiler root in
   let ran =
     match Hashtbl.find_opt compiler.runs key with
     | Some ran -> ran
@@ -350,7 +374,7 @@ and run_while_compiling : 'value. t -> Instance.key -> read:(string -> 'value) -
 and compiled compiler key =
   let data (data : Lowered.data) = Emit_c.fragment (Lower.env compiler.context) (Data data) in
   let compiled =
-    match Query.demand compiler.database lowered (compiler.lowering, key) with
+    match lowered compiler key with
     | Compiled fragment -> fragment
     | Folded folded -> data folded
     | Evaluate (path, ty) -> (
@@ -505,9 +529,9 @@ type progress =
   | Ended of { test : int; record : record }
 
 let external_test compiler test =
-  match Query.demand compiler.database Interface.Environment.interface test with
-  | Some (Test_interface uses) when uses <> Types.no_capabilities -> true
-  | _ -> false
+  match Interface.Definition.test_uses compiler.lookups.interface test with
+  | Some uses -> uses <> Types.no_capabilities
+  | None -> false
 
 let run_tests ?(rerun = false) ?(progress = ignore) compiler ~time_limit_ms tests =
   reporting compiler @@ fun () ->
@@ -515,10 +539,6 @@ let run_tests ?(rerun = false) ?(progress = ignore) compiler ~time_limit_ms test
   let roots = List.map Lower.test_key tests in
   progress Lowering;
   let keyed test = results <> None && not (external_test compiler test) in
-  compiler.want compiler.lowering
-    (List.filter_map
-       (fun (test, root) -> if keyed test then Some root else None)
-       (List.combine tests roots));
   let known =
     List.mapi
       (fun index (test, root) ->
@@ -599,10 +619,22 @@ type unshippable = {
   way : Path.t list;
 }
 
+let reached compiler ~main =
+  Reachable.running ~lookup:(compiled compiler) [ Instance.Program_main main ]
+
+let reached_definitions compiler ~main =
+  reporting compiler @@ fun () ->
+  List.sort_uniq Path.compare
+    (List.filter_map
+       (fun (_, way) ->
+         match List.rev way with
+         | (Instance.Code { path; _ } | Constant path | Program_main path) :: _ -> Some path
+         | _ -> None)
+       (reached compiler ~main))
+
 let unshippable compiler ~main =
   reporting compiler @@ fun () ->
-  let root = Instance.Program_main main in
-  let reached = Reachable.running ~lookup:(compiled compiler) [ root ] in
+  let reached = reached compiler ~main in
   begin
     let definitions keys =
       List.fold_left
@@ -650,15 +682,6 @@ let unshippable compiler ~main =
     |> List.rev
   end
 
-let test_keys compiler tests =
-  compiler.want compiler.lowering (List.map Lower.test_key tests);
-  List.filter_map
-    (fun path ->
-      match test_key compiler path with
-      | key -> Some (path, key)
-      | exception (Compiler_bug.Bug _ | Lower.Unsupported _) -> None)
-    tests
-
 let run_program ?input compiler ~main ~arguments =
   reporting compiler @@ fun () ->
   let root = Instance.Program_main main in
@@ -686,7 +709,7 @@ let check_template compiler ~from_template ~texts =
 
 let evaluate_call compiler ~function_ ~arguments =
   reporting compiler @@ fun () ->
-  match Query.demand compiler.database Interface.Environment.signature function_ with
+  match Interface.Impls.signature compiler.lookups.interface function_ with
   | Some { output = Returns result; _ } ->
       let ty = Monomorphic.ground (Lower.monomorphic compiler.context) [] result in
       run_while_compiling compiler
@@ -694,18 +717,25 @@ let evaluate_call compiler ~function_ ~arguments =
         ~read:(decode compiler ty)
   | _ -> bug "%s has no result to evaluate" (Path.show function_)
 
-let run_key compiler root = reporting compiler @@ fun () -> run_key compiler root
-
 let create ?(checks = true) ?(file_name = Path.show_file) ?results
-    ?(evaluation_time_limit_ms = 10_000) ?(programs = Filename.get_temp_dir_name ()) ~want
-    ?(worked_on = fun package -> package <> Path.standard_package) database system toolchain cache
+    ?(evaluation_time_limit_ms = 10_000) ?(programs = Filename.get_temp_dir_name ())
+    ?(worked_on = fun package -> package <> Path.standard_package) lookups system toolchain cache
     settings =
-  let lowering = { system; checks } in
+  let lowered = Table.create 1024 in
+  let constant path =
+    match Table.find_opt lowered (Instance.Constant path) with
+    | Some (Ok (Folded data)) -> Some data.value
+    | Some (Ok (Evaluate _)) -> None
+    | Some (Error unsupported) -> raise (Lower.Unsupported unsupported)
+    | Some (Ok (Compiled _)) | None -> bug "%s is read before it is folded" (Path.show path)
+  in
   {
-    database;
-    lowering;
-    want;
-    context = fresh_context lowered lowering database;
+    lookups;
+    system;
+    context = Lower.context ~checks ~constant lookups system;
+    lowered;
+    links = Table.create 1024;
+    reach_keys = Table.create 1024;
     toolchain;
     cache;
     settings;
@@ -718,14 +748,11 @@ let create ?(checks = true) ?(file_name = Path.show_file) ?results
   }
 
 module For_testing = struct
-  module Lower = struct
-    type context = Lower.context
-    type constant = Lower.constant = Folded of Lowered.data | Run of Ground.ty
-
-    let context = Lower.context
-    let constant = Lower.constant
-    let constant_value = Lower.For_testing.constant_value
-  end
+  let is_folded compiler path =
+    match lowered compiler (Instance.Constant path) with
+    | Folded _ -> true
+    | Evaluate _ -> false
+    | Compiled _ -> bug "%s is not a constant" (Path.show path)
 
   module Intrinsics = Intrinsics
 

@@ -53,14 +53,14 @@ type form = {
   expression_builders : (unit -> Core.expression) option array;
   statement_builders : (unit -> Core.statement) option array;
   pattern_builders : (unit -> Core.pattern) option array;
-  mutable definition_builder : (unit -> Core.definition) option;
+  mutable definition_builder : (holds_body:bool -> Core.definition) option;
   mutable next_node_id : int;
   mutable next_synthetic_local : int;
   mutable tables_with_holes : Tables.t option;
 }
 
 type state = {
-  database : Query.context;
+  lookups : Lookups.t;
   key : Names.key;
   package : Path.package;
   definition : Syntax.definition;

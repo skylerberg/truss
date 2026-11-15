@@ -32,4 +32,4 @@ val instantiate :
   Types.signature ->
   instance
 
-val function_signature : state -> Path.t -> (Types.signature, Diagnostic.reported) result option
+val function_signature : state -> Path.t -> Types.signature option

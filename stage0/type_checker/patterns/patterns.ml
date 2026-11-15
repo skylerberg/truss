@@ -1,4 +1,4 @@
-module Members = Infer.Members
+module Lookups = Lookups
 
 type constructor =
   | Variant of string
@@ -11,7 +11,7 @@ type constructor =
 type space = Wild | Constructed of constructor * space list | Alternatives of space list
 
 type context = {
-  database : Query.context;
+  lookups : Lookups.t;
   spans : Syntax.span array;
   text : string;
   mutable diagnostics : Syntax.diagnostic list;
@@ -43,10 +43,23 @@ let integer_range type_ =
   | Some Character -> Some (Z.zero, Z.of_int 0x10FFFF)
   | _ -> None
 
+let fields context path arguments =
+  Option.bind (Interface.Definition.type_interface context.lookups.interface path) (fun interface ->
+      Types.fields_of interface arguments)
+
+let variants context path arguments =
+  Option.bind (Interface.Definition.type_interface context.lookups.interface path) (fun interface ->
+      Types.variants_of interface arguments)
+
+let shape context path =
+  Option.map
+    (fun (interface : Types.type_interface) -> interface.shape)
+    (Interface.Definition.type_interface context.lookups.interface path)
+
 let fields_of context type_ constructor =
   match (type_, constructor) with
   | Types.Named { path; arguments }, Variant name -> (
-      match Members.variants context.database path arguments with
+      match variants context path arguments with
       | Some variants -> (
           match
             List.find_opt (fun (variant : Types.variant) -> variant.variant_name = name) variants
@@ -55,7 +68,7 @@ let fields_of context type_ constructor =
           | None -> [])
       | None -> [])
   | Types.Named { path; arguments }, Record ->
-      Option.value ~default:[] (Members.fields context.database path arguments)
+      Option.value ~default:[] (fields context path arguments)
   | _ -> []
 
 let field_types context type_ constructor =
@@ -97,15 +110,11 @@ and constant ?(seen = []) context path =
   let opaque = Constructed (Opaque (Path.show path), []) in
   if List.exists (Path.equal path) seen then opaque
   else
-    match Query.demand context.database Interface.Constants.value_of path with
+    match context.lookups.interface.constant_value path with
     | Some value -> Constructed (Interval (value, value), [])
     | None -> (
-        match
-          Option.bind
-            (Query.demand context.database Interface.Summary.key path)
-            (Query.demand context.database Infer.core)
-        with
-        | Some { definition = Constant value; _ } ->
+        match Option.bind (context.lookups.interface.names.key path) context.lookups.core with
+        | Some { definition = Constant (Some value); _ } ->
             Option.value ~default:opaque (constant_value context (path :: seen) value)
         | _ -> opaque)
 
@@ -136,7 +145,7 @@ and range_end context (value : Core.expression) =
   match value.kind with
   | Integer value -> Ok value
   | Use (Constant { path; _ }) -> (
-      match Query.demand context.database Interface.Constants.value_of path with
+      match context.lookups.interface.constant_value path with
       | Some value -> Ok value
       | None -> Error (Path.show path))
   | _ -> Error "this bound"
@@ -156,9 +165,9 @@ type row = space list
 let constructors context type_ =
   match type_ with
   | Types.Named { path; arguments } -> (
-      match Members.shape context.database path with
+      match shape context path with
       | Some (Sum _) -> (
-          match Members.variants context.database path arguments with
+          match variants context path arguments with
           | Some variants ->
               Some
                 (List.map (fun (variant : Types.variant) -> Variant variant.variant_name) variants)
@@ -377,13 +386,11 @@ let has_error context type_ =
            let fields_fail fields =
              List.exists (fun (field : Types.field) -> contains_error seen field.field_type) fields
            in
-           match Members.shape context.database path with
-           | Some (Error_shape _) -> true
+           match shape context path with
            | Some (Record _) ->
-               fields_fail
-                 (Option.value ~default:[] (Members.fields context.database path arguments))
+               fields_fail (Option.value ~default:[] (fields context path arguments))
            | Some (Sum _) -> (
-               match Members.variants context.database path arguments with
+               match variants context path arguments with
                | Some variants ->
                    List.exists
                      (fun (variant : Types.variant) ->
@@ -539,23 +546,13 @@ let check_definition context (definition : Core.definition) =
     }
     definition
 
-let definition_diagnostics =
-  Query.query ~name:"pattern_diagnostics" ~phase:Phases.bodies ~saved:true
-    ~show:Resolve.Names.show_key (fun database key ->
-      match
-        ( Infer.is_clean database key,
-          Query.demand database Infer.core key,
-          Query.demand database Resolve.Names.spans key,
-          Query.demand database Resolve.Names.text key )
-      with
-      | true, Some form, Some spans, Some text ->
-          let context = { database; spans; text; diagnostics = [] } in
-          check_definition context form.definition;
-          List.sort
-            (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
-              compare left.span right.span)
-            context.diagnostics
-      | _ -> [])
-
-let diagnostics database file =
-  Resolve.Names.per_definition database file (Query.demand database definition_diagnostics)
+let check (lookups : Lookups.t) key =
+  match (lookups.core key, lookups.interface.names.spans key, lookups.interface.names.text key) with
+  | Some form, Some spans, Some text ->
+      let context = { lookups; spans; text; diagnostics = [] } in
+      check_definition context form.definition;
+      List.sort
+        (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
+          compare left.span right.span)
+        context.diagnostics
+  | _ -> []

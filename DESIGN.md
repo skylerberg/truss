@@ -1855,7 +1855,7 @@ changes no definition.
 | Strengthen an `ensures` | The proofs of callers. No caller is type-checked. | A signature has two parts: the interface, which the types of callers depend on, and the contract, which only the proofs of callers depend on. |
 | Change the default of a parameter | The proofs and tests of the callers that omit the argument, and the code of the callee alone | The interface records only that the parameter has a default, and the callee applies it. |
 | Reorder the fields of a record | Nothing, unless the type derives `Ordered` | The compiler chooses the layout, and a record with more than one field is constructed with labeled arguments. |
-| Add a `derives` | Nothing that exists | Each derived implementation is a definition of its own, generated from the trait, the fields of the type, and the compiler's deriving rule, and never stored. A changed field therefore re-checks, of the derived code, only the code that compares, hashes, or orders the type. |
+| Add a `derives` | Nothing that exists | Each derived implementation is a definition of its own, generated from the trait, the fields of the type, and the compiler's deriving rule. It has no source tree; its other parts are stored as any definition's are. A changed field therefore re-checks, of the derived code, only the code that compares, hashes, or orders the type. |
 | Add, remove, or rename a definition | The parts that refer to its name, whether or not a definition held the name before | Each reference names one fully qualified name, so no lookup searches (see [References to names](#references-to-names)). |
 | Rename a definition, or move it to another module | The type checks and the code of its users. Their proofs and test results are cache hits. | A user names the definition, and an object file holds the names of the functions it calls. A solver query numbers its symbols, and a test's key numbers the references of the code it reaches, so neither holds a name. |
 | Rename a local variable | One body | Local names are part of identity, because diagnostics and `echo` output show them, and a cached result would show the old name. |
@@ -1874,11 +1874,23 @@ a rebuild during editing. A release build inlines across everything.
 ### The code database
 
 The database holds, for each definition and under its fully qualified name,
-its source tree and the facts derived from it: its resolved names, its
-signature, its type facts and layout, its checked body, its MIR, its proof,
+its source tree and the facts derived from it: its header, which holds a type's
+or trait's generic parameters and bounds, the resolved names of its interface,
+of its contract, and of its body, its interface and its contract, its type
+facts and layout, its checked body, its MIR and call edges, the checks of its
+body (patterns, usage, and ownership), the packages its body uses, its proof,
 its lowered code, and its test key. Each of these is a *part*. A stage
 computes each part from the definition's earlier parts and from parts of
-other definitions.
+other definitions. A package has parts of its own: each of its package
+checks, such as an unused dependency, is one part, computed from its
+definitions' parts, so a failed definition blocks only the checks that read
+it.
+
+A part reads only what it uses, and a part blocked by a failure is one that
+read the failed part. A stage that relies on another part's success reads
+that part: a proof reads its body's ownership facts, so an ownership error
+blocks the proof, and a build reads the body checks of every definition it
+reaches.
 
 **The database is a function of the files and the compiler.** A database
 that propagated a thousand edits equals one built from the same files from
@@ -1930,8 +1942,10 @@ before the stage runs, on a cold build as on a hot one:
 
 | Part | Follows |
 |---|---|
+| A member's interface | Its container's header, which the declarations name |
 | A type's type facts and layout | Those of the types that its resolved fields name |
-| A constant's value | The lowered code of the functions that its MIR calls |
+| A derived method's checked body | Its type's checked body, for the type's invariants. The derived method's path names its type. |
+| A constant's value | The values of the constants that its MIR names, directly or in the functions it calls, and the lowered code of those functions |
 | A test key | The test keys of the instances that its lowered code refers to |
 
 A cycle in one of these relationships is a strongly connected component, and
@@ -1947,7 +1961,7 @@ of other definitions, so a change to one can travel further:
 | `Plain` and `Copyable` | The same facts of the types of its fields | The type checks of the functions that use the type |
 | Layout | The layouts of the types it stores in place | The lowered code that uses the type |
 | A value computed at compile time, by a constant or a template check | The bodies of the functions that the computation runs | The code that embeds the value, and the template check's verdict |
-| A recursion group | The call edges of the functions on a cycle, within one package | The termination proofs of its members, and test keys |
+| A recursion group | The call edges of the functions on a cycle, as one package sees them: a trait method's edges go to every implementation the package can see, including those in its dependencies | The termination proofs of its members |
 
 Adding a field of type `Text` to `Point` makes `Point` not `Plain`.
 Propagation then computes again every type that holds a `Point` in place,
@@ -1989,8 +2003,11 @@ the body's module, so an unqualified name resolves without a search. A
 method call names one entry of its type's methods:
 [Method lookup](SPECIFICATION.md#method-lookup) rules out a trait method with
 the name and mode of one of the type's own methods, and makes two traits that
-give one name an error at the call. An `impl` is named by its trait and its type, since `impl`s do
-not overlap and have one home.
+give one name an error at the call. An `impl` is named by its trait and its
+type, since `impl`s do not overlap and have one home. A law proof is named by
+its trait, its law, and its type, as `proof Ordered.transitive for Box[Item]`
+writes them, so a proof that assumes a law for a type refers to one name and
+scans no package.
 
 **A namespace is derived state.** The database keeps the definitions that
 hold each name of a module, and each method name of a type. A type's entry
@@ -2009,8 +2026,19 @@ derived from it. A part that reads it is blocked: it is not computed, and it
 reports no error of its own. Fixing the error computes the failed part and
 the parts blocked behind it, and nothing else.
 
+**A failure belongs to the part whose syntax holds it.** A resolution error
+or a type error in a body fails the body, never the interface or the
+contract, so a typo in a body blocks no caller. A trait's or an `impl`'s
+interface holds its members' names and modes, which the namespace has, and
+not their signatures. A reader of a method's signature reads the method's
+own interface, so a broken method blocks its own readers and not every use
+of its trait. The checks of a signature
+are part of it: an error that a signature check reports fails the interface
+or the contract, whichever holds its syntax.
+
 | Rule | Reason |
 |---|---|
+| A part that reads a failed part is blocked, not computed against an error value. | One broken signature reports one error, not one in each of its callers. |
 | The database keeps no earlier version of a failing part. | An earlier version would make the database depend on the order of the edits. A caller checked against an earlier signature would also report errors that the files do not hold. |
 | A build or a test run requires that no definition it reaches has errors. | No test runs code that the files do not hold, and a test whose code is correct runs while unrelated code is broken. |
 

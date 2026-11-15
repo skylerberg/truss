@@ -4,4 +4,4 @@ type file = {
   diagnostics : Diagnostic.t list;
 }
 
-val file : (Path.file, file) Query.query
+val parse : Source.t -> file

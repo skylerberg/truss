@@ -14,34 +14,41 @@ type interface =
     }
   | Error_interface of Diagnostic.reported
 
+type scope = {
+  self_type : Types.ty option;
+  self_trait : Types.trait_reference option;
+  self_associated : (string * Types.ty) list;
+  self_capabilities : (string * Types.capability_set) list;
+  bounds : (Types.parameter * Types.trait_reference list) list;
+}
+
+val empty_scope : scope
+
 type lowered_interface = {
   interface : interface;
   diagnostics : Syntax.diagnostic list;
   named : (Syntax.span * Types.ty) list;
-  bounds : (Types.parameter * Types.trait_reference list) list;
+  scope : scope;
 }
 
+type header = {
+  container_scope : scope;
+  header_generics : Types.generic list;
+  header_uses : Types.capability_set;
+}
+
+type occurrence = In_place | Indirect | Function_input
+type requirement = Never | Requires of Types.ty list
+type exposure = Always | If_any of Types.ty list
+
+type type_facts = {
+  copyable : requirement;
+  plain : requirement;
+  view : exposure;
+  holds_function : exposure;
+  contains : (Types.ty * occurrence) list;
+}
+
+type grant = { capabilities : Path.t list; unknown : string list }
+
 val is_specification : interface -> bool
-
-val lower :
-  Query.context ->
-  Resolve.Names.key ->
-  Syntax.definition ->
-  Resolve.resolved ->
-  lowered_interface * Lower.context
-
-val lowered_interface : (Resolve.Names.key, lowered_interface option) Query.query
-val interface : (Path.t, interface option) Query.query
-
-val in_declared_order :
-  Query.context -> Path.t -> variant:string option -> name:('a -> string) -> 'a list -> 'a list
-
-val type_interface : (Path.t, Types.type_interface option) Query.query
-val signature : (Path.t, Types.signature option) Query.query
-
-val signature_or_report :
-  Query.context -> Path.t -> (Types.signature, Diagnostic.reported) result option
-
-val trait_interface : (Path.t, Types.trait_interface option) Query.query
-val impl_interface : (Path.t, Types.impl_interface option) Query.query
-val constant_type : (Path.t, Types.ty option) Query.query

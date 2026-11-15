@@ -35,78 +35,65 @@ let member_targets (tables : Infer.tables) (definition : Syntax.definition) =
   Syntax_walk.definition visit definition;
   !members
 
-let occurrences =
-  Query.query ~name:"occurrences" ~phase:Phases.inspection ~show:Names.show_key
-    (fun database (key : Names.key) ->
-      match
-        (Query.demand database Names.definition key, Query.demand database Resolve.resolved key)
-      with
-      | Some definition, Some resolved ->
-          let names = Syntax_walk.names definition in
-          let occurrence span target = { span; target } in
-          let resolved_names =
-            List.concat
-              (List.mapi
-                 (fun index (name : Syntax.name) ->
-                   match
-                     if name.id < Array.length resolved.names then resolved.names.(name.id)
-                     else None
-                   with
-                   | Some (Definition (_, path)) -> [ occurrence name.span (Definition path) ]
-                   | Some (Module module_) ->
-                       let parts = Path.module_parts module_ in
-                       let written_in_full =
-                         List.length parts > 1
-                         && List.for_all Fun.id
-                              (List.mapi
-                                 (fun offset part ->
-                                   match List.nth_opt names (index + offset) with
-                                   | Some (written : Syntax.name) -> written.text = part
-                                   | None -> false)
-                                 parts)
-                       in
-                       let length = if written_in_full then List.length parts - 1 else 0 in
-                       let last =
-                         match List.nth_opt names (index + length) with
-                         | Some (last : Syntax.name) -> last
-                         | None -> name
-                       in
-                       [
-                         occurrence
-                           (Syntax.Span.make name.span.start last.span.stop)
-                           (Module module_);
-                       ]
-                   | _ -> [])
-                 names)
-          in
-          let declared =
-            match declared_name definition with
-            | Some name -> [ occurrence name.span (Definition key.path) ]
-            | None -> []
-          in
-          let members =
-            match Query.demand database Infer.type_check_result key with
-            | Some { tables; _ } ->
-                List.map
-                  (fun ((name : Syntax.name), path) -> occurrence name.span (Definition path))
-                  (member_targets tables definition)
-            | None -> []
-          in
-          List.sort
-            (fun left right -> compare left.span.start right.span.start)
-            (declared @ resolved_names @ members)
-      | _ -> [])
+let occurrences ~(path : Path.t) (definition : Syntax.definition) (resolved : Resolve.resolved)
+    (tables : Infer.tables option) =
+  let names = Syntax_walk.names definition in
+  let occurrence span target = { span; target } in
+  let resolved_names =
+    List.concat
+      (List.mapi
+         (fun index (name : Syntax.name) ->
+           match
+             if name.id < Array.length resolved.names then resolved.names.(name.id) else None
+           with
+           | Some (Definition (_, path)) -> [ occurrence name.span (Definition path) ]
+           | Some (Module module_) ->
+               let parts = Path.module_parts module_ in
+               let written_in_full =
+                 List.length parts > 1
+                 && List.for_all Fun.id
+                      (List.mapi
+                         (fun offset part ->
+                           match List.nth_opt names (index + offset) with
+                           | Some (written : Syntax.name) -> written.text = part
+                           | None -> false)
+                         parts)
+               in
+               let length = if written_in_full then List.length parts - 1 else 0 in
+               let last =
+                 match List.nth_opt names (index + length) with
+                 | Some (last : Syntax.name) -> last
+                 | None -> name
+               in
+               [ occurrence (Syntax.Span.make name.span.start last.span.stop) (Module module_) ]
+           | _ -> [])
+         names)
+  in
+  let declared =
+    match declared_name definition with
+    | Some name -> [ occurrence name.span (Definition path) ]
+    | None -> []
+  in
+  let members =
+    match tables with
+    | Some tables ->
+        List.map
+          (fun ((name : Syntax.name), path) -> occurrence name.span (Definition path))
+          (member_targets tables definition)
+    | None -> []
+  in
+  List.sort
+    (fun left right -> compare left.span.start right.span.start)
+    (declared @ resolved_names @ members)
 
-let uses =
-  Query.query ~name:"use_lines" ~phase:Phases.inspection ~show:Path.show_file
-    (fun database (file : Path.file) ->
-      List.map
-        (fun (item : Syntax.path Syntax.item) ->
-          let path = item.value in
-          let first = match path.modules with first :: _ -> first | [] -> path.last in
-          ( Names.used_module database ~from:file.module_ path,
-            Source.span (item.base + first.span.start) (item.base + path.last.span.stop) ))
-        (Query.demand database Parsed.file file).uses)
+let uses ~(used_module : Syntax.path -> Path.module_) (items : Syntax.path Syntax.item list) =
+  List.map
+    (fun (item : Syntax.path Syntax.item) ->
+      let path = item.value in
+      let first = match path.modules with first :: _ -> first | [] -> path.last in
+      ( used_module path,
+        Source.span (item.base + first.span.start) (item.base + path.last.span.stop) ))
+    items
 
 let names_definition (definition : Path.t) target =
   match (target, definition) with

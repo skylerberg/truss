@@ -44,8 +44,8 @@ let check_grant checking (origin : Core.origin) ~subject package (uses : Types.c
   List.iter
     (fun capability ->
       report checking Not_granted origin (Interface.Grants.message ~subject ~of_:package capability))
-    (Interface.Grants.missing checking.state.database ~package:checking.state.package ~of_:package
-       uses)
+    (Interface.Grants.missing checking.state.lookups.interface ~package:checking.state.package
+       ~of_:package uses)
 
 let check_callee_grants checking (origin : Core.origin) (callee : Core.callee) =
   let state = checking.state in
@@ -56,29 +56,32 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.callee) =
           check_grant checking origin
             ~subject:(Printf.sprintf "`%s`" (Path.show path))
             (Path.package path) signature.uses)
-        (Query.demand state.database Environment.signature path)
+        (Interface.Impls.signature state.lookups.interface path)
   | Trait_method { trait; name; receiver; evidence; _ } -> (
-      (match Members.trait_method state.database trait.trait name receiver with
+      (match Members.trait_method state.lookups trait.trait name receiver with
       | Some method_ ->
           check_grant checking origin
             ~subject:(Printf.sprintf "`%s.%s`" (Path.show trait.trait) name)
-            (Path.package trait.trait) method_.method_signature.uses
+            (Path.package trait.trait)
+            (Interface.Definition.method_signature state.lookups.interface ~owner:trait.trait
+               method_)
+              .uses
       | None -> ());
       match evidence with
       | Impl { impl; _ } -> (
-          match Interface.Impls.impl_interface state.database impl with
-          | Some interface ->
-              List.iter
-                (fun (method_name, method_receiver, (method_signature : Types.signature)) ->
-                  if method_name = name && method_receiver = receiver then
-                    check_grant checking origin
-                      ~subject:
-                        (Printf.sprintf "The `impl` of `%s` for `%s`"
-                           (Types.show_trait interface.implements)
-                           (Types.show interface.for_type))
-                      (Path.package impl) method_signature.uses)
-                interface.impl_methods
-          | None -> ())
+          match Interface.Impls.impl_interface state.lookups.interface impl with
+          | Some interface when List.mem (name, receiver) interface.impl_methods ->
+              Option.iter
+                (fun (signature : Types.signature) ->
+                  check_grant checking origin
+                    ~subject:
+                      (Printf.sprintf "The `impl` of `%s` for `%s`"
+                         (Types.show_trait interface.implements)
+                         (Types.show interface.for_type))
+                    (Path.package impl) signature.uses)
+                (Interface.Impls.signature state.lookups.interface
+                   (Method { owner = impl; name; receiver }))
+          | Some _ | None -> ())
       | Bound | Dynamic -> ())
   | Capability_method _ | Intrinsic _ | Indirect _ -> ()
 
@@ -147,18 +150,21 @@ let require_callee_uses checking scope (origin : Core.origin) (callee : Core.cal
   match callee with
   | Function { path; _ } ->
       require_available checking scope origin
-        (match Interface.Impls.signature state.database path with
+        (match Interface.Impls.signature state.lookups.interface path with
         | Some signature -> signature.uses
         | None -> Types.no_capabilities)
   | Trait_method { trait; name; receiver; self_type; type_arguments; _ } ->
       require_available checking scope origin
         (match
-           ( Members.trait_method state.database trait.trait name receiver,
-             Query.demand state.database Environment.trait_interface trait.trait )
+           ( Members.trait_method state.lookups trait.trait name receiver,
+             Interface.Definition.trait_interface state.lookups.interface trait.trait )
          with
         | Some method_, Some interface ->
-            let signature = method_.method_signature in
-            Impls.normalize_capabilities state.database ~bounds:(bounds state)
+            let signature =
+              Interface.Definition.method_signature state.lookups.interface ~owner:trait.trait
+                method_
+            in
+            Interface.Impls.normalize_capabilities state.lookups.interface ~bounds:(bounds state)
               (Types.substitute_capabilities
                  (Interface.Properties.trait_substitution interface ~self:self_type trait
                  @ Option.value ~default:[]
@@ -284,7 +290,7 @@ and check_provide checking scope implementations body =
       let mutates =
         List.exists
           (fun (_, (interface : Types.impl_interface)) ->
-            List.exists (fun (_, receiver, _) -> receiver = Path.Mut) interface.impl_methods)
+            List.exists (fun (_, receiver) -> receiver = Path.Mut) interface.impl_methods)
           impls
       in
       let provided_mut = implementation.mode = Mut in
@@ -389,15 +395,18 @@ let rec can_call_capability_code (state : state) ~bounds ?(seen = []) (type_ : T
     in
     List.exists
       (fun (bound : Types.trait_reference) ->
-        match Query.demand state.database Environment.trait_interface bound.trait with
+        match Interface.Definition.trait_interface state.lookups.interface bound.trait with
         | Some interface ->
             List.exists
               (fun (method_ : Types.trait_method) ->
                 List.exists can_hold_a_capability
-                  (method_.method_signature.uses :> Types.capability list))
+                  ((Interface.Definition.method_signature state.lookups.interface ~owner:bound.trait
+                      method_)
+                     .uses
+                    :> Types.capability list))
               interface.methods
         | None -> false)
-      (trait :: Interface.Properties.bound_closure state.database ~self:type_ trait)
+      (trait :: Interface.Properties.bound_closure state.lookups.interface ~self:type_ trait)
   in
   let arguments =
     List.exists (function
@@ -417,11 +426,11 @@ let rec can_call_capability_code (state : state) ~bounds ?(seen = []) (type_ : T
          &&
          let inside = can_call_capability_code state ~bounds ~seen:(path :: seen) in
          let fields = List.exists (fun (field : Types.field) -> inside field.field_type) in
-         (match Members.fields state.database path type_arguments with
+         (match Members.fields state.lookups path type_arguments with
            | Some named_fields -> fields named_fields
            | None -> false)
          ||
-         match Members.variants state.database path type_arguments with
+         match Members.variants state.lookups path type_arguments with
          | Some variants ->
              List.exists
                (fun (variant : Types.variant) -> fields (Option.value ~default:[] variant.fields))
@@ -472,11 +481,16 @@ let check_monitor_callbacks checking implementations =
       if implementation.mode = Mut then
         List.iter
           (fun ((provided : Core.provided), (_ : Types.impl_interface)) ->
-            match Query.demand state.database Environment.trait_interface provided.capability with
+            match
+              Interface.Definition.trait_interface state.lookups.interface provided.capability
+            with
             | Some capability ->
                 List.iter
                   (fun (method_ : Types.trait_method) ->
-                    let signature = method_.method_signature in
+                    let signature =
+                      Interface.Definition.method_signature state.lookups.interface
+                        ~owner:provided.capability method_
+                    in
                     let bounds = Types.bounds_of signature.generics in
                     match
                       List.find_opt
@@ -541,24 +555,25 @@ let check (state : state) (lowered : Environment.lowered_interface) (form : Core
   (match (form.definition, state.definition.kind, lowered.interface) with
   | Function { body; _ }, (Function _ | Method_declaration _), Function_interface signature ->
       let implemented_capability =
-        Option.bind (Query.demand state.database Names.container state.key) (fun container ->
-            match Query.demand state.database Environment.lowered_interface container with
+        Option.bind (state.lookups.interface.names.container state.key) (fun container ->
+            match state.lookups.interface.lowered_interface container with
             | Some { interface = Impl_interface impl; _ }
-              when Interface.Summary.kind_of state.database impl.implements.trait = Some Capability
-              ->
+              when Resolve.Names.kind_of state.lookups.interface.names impl.implements.trait
+                   = Some Capability ->
                 Some (Types.Capability impl.implements.trait)
             | _ -> None)
       in
       Option.iter
         (check_block checking
            (function_body ?implemented_capability
-              (Impls.normalize_capabilities state.database ~bounds:(bounds state) signature.uses)))
+              (Interface.Impls.normalize_capabilities state.lookups.interface ~bounds:(bounds state)
+                 signature.uses)))
         body
-  | Test body, _, Test_interface uses ->
+  | Test (Some body), _, Test_interface uses ->
       check_block checking
         (function_body (Types.capability_union uses (Types.capability_set [ panic ])))
         body
-  | Function { body = Some body; _ }, Theorem _, _ | Law_proof { body; _ }, _, _ ->
+  | Function { body = Some body; _ }, Theorem _, _ | Law_proof { body = Some body; _ }, _, _ ->
       check_block checking (no_capabilities "a proof") body
   | _ -> ());
   solve state;
