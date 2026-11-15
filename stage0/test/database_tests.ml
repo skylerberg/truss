@@ -305,6 +305,21 @@ let () =
           match List.filter is_copy (Engine.For_testing.differing engine) with
           | [] -> ()
           | copies -> fail "copies %s" (String.concat "; " (List.map Engine.label copies))));
+  test "a project's state holds no result about a standard-library definition" (fun () ->
+      fresh_store ();
+      let directory = package () in
+      expect_errors directory 0;
+      match Database.For_testing.session_engine directory with
+      | None -> fail "no session"
+      | Some engine -> (
+          let about_standard node =
+            match Engine.subject node with
+            | Some { path; _ } -> Path.package path = Path.standard_package
+            | None -> false
+          in
+          match List.filter about_standard (Engine.For_testing.differing engine) with
+          | [] -> ()
+          | held -> fail "holds %s" (String.concat "; " (List.map Engine.label held))));
   test "a change to a dependency's grants resolves no name and lists no module again" (fun () ->
       fresh_store ();
       let root = fresh "project" in
