@@ -35,3 +35,12 @@ let terminal () = !current.terminal
 let columns () = !current.columns
 let json () = !current.json
 let set_json json = !current.json <- json
+
+let listed = function
+  | [] -> ""
+  | [ only ] -> only
+  | [ first; second ] -> first ^ " and " ^ second
+  | several -> (
+      match List.rev several with
+      | last :: rest -> String.concat ", " (List.rev rest) ^ ", and " ^ last
+      | [] -> "")

@@ -1,5 +1,6 @@
 module Lock = Registry.Lock
 module Version = Registry.Version
+module Part = Pipeline.Part
 
 let wanted text =
   let written, version =
@@ -99,8 +100,51 @@ let change_json = function
           ("gained", Json.List (List.map (fun held -> Json.String held) gained));
         ]
 
-let new_errors snapshot text =
-  let trial = Database.trial snapshot [ ("truss.lock", Some text) ] in
+type signature = {
+  path : Path.t;
+  before : string option;
+  after : string option;
+  dependents : Path.t list;
+}
+
+let signatures snapshot trial =
+  let pipeline = Database.pipeline snapshot and upgraded = Database.pipeline trial in
+  let own = List.map snd (Database.packages snapshot) in
+  let is_own path = List.mem (Path.package path) own in
+  let changed =
+    List.filter
+      (fun part ->
+        Signatures.is_signature part
+        && match Part.definition part with Some path -> not (is_own path) | None -> false)
+      (Pipeline.changes pipeline upgraded)
+  in
+  let dependents = Hashtbl.create 16 in
+  List.iter
+    (fun ({ dependent; dependency } : Pipeline.read) ->
+      match (Part.definition dependent, Part.definition dependency) with
+      | Some reader, Some path when is_own reader && List.mem dependency changed ->
+          Hashtbl.replace dependents path
+            (reader :: Option.value (Hashtbl.find_opt dependents path) ~default:[])
+      | _ -> ())
+    (Pipeline.dependents pipeline
+       (List.sort_uniq Path.compare (List.filter_map Part.definition changed)));
+  let text pipeline path =
+    Signatures.of_path (Pipeline.names pipeline [ Path.package path ]) path
+  in
+  List.sort
+    (fun left right -> Path.compare left.path right.path)
+    (Hashtbl.fold
+       (fun path readers signatures ->
+         {
+           path;
+           before = text pipeline path;
+           after = text upgraded path;
+           dependents = List.sort_uniq Path.compare readers;
+         }
+         :: signatures)
+       dependents [])
+
+let new_errors snapshot trial =
   let own = List.map snd (Database.packages snapshot) in
   let diagnostics (snapshot : Database.snapshot) =
     let pipeline = Database.pipeline snapshot in
@@ -117,16 +161,37 @@ let new_errors snapshot text =
   let now = diagnostics snapshot in
   List.filter (fun diagnostic -> not (List.mem diagnostic now)) (diagnostics trial)
 
-let report ~lock ~broken =
+let signature_json (changed : signature) =
+  Json.Object
+    [
+      ("path", Json.String (Path.show changed.path));
+      ("before", Json.option (fun text -> Json.String text) changed.before);
+      ("after", Json.option (fun text -> Json.String text) changed.after);
+      ("read_by", Json.List (List.map (fun path -> Json.String (Path.show path)) changed.dependents));
+    ]
+
+let print_signature (changed : signature) =
+  Output.printf "  %s\n" (Path.show changed.path);
+  Option.iter (fun text -> Output.print_line (Signatures.labeled "was:" text)) changed.before;
+  Option.iter (fun text -> Output.print_line (Signatures.labeled "now:" text)) changed.after;
+  Output.printf "    read by: %s\n" (String.concat ", " (List.map Path.show changed.dependents))
+
+let report ~lock ~signatures ~broken =
   if Output.json () then
     Json.print
       (Json.document ~diagnostics:[]
          [
            ("changes", Json.List (List.map change_json lock));
+           ("signatures", Json.List (List.map signature_json signatures));
            ("breaks", Json.List (List.map (fun sentence -> Json.String sentence) broken));
          ])
   else begin
     List.iter (fun change -> Output.print_line (change_sentence change)) lock;
+    if signatures <> [] then begin
+      Output.print_line "";
+      Output.print_line "Signatures the project reads that change:";
+      List.iter print_signature signatures
+    end;
     if broken <> [] then begin
       Output.print_line "";
       Output.print_line "With these versions the project has errors it does not have now:";
@@ -150,8 +215,10 @@ let run ~names =
         0
       end
       else begin
-        let broken = new_errors snapshot plan.text in
+        let trial = Database.trial snapshot [ (Project.lock_file, Some plan.text) ] in
+        let signatures = signatures snapshot trial in
+        let broken = new_errors snapshot trial in
         Command_packages.write_file (lock_file snapshot) plan.text;
-        report ~lock ~broken;
+        report ~lock ~signatures ~broken;
         if broken = [] then 0 else 1
       end

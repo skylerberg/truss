@@ -97,3 +97,17 @@ let labeled label signature =
        (fun line_index line ->
          Printf.sprintf "    %s %s" (if line_index = 0 then label else indent) line)
        (String.split_on_char '\n' signature))
+
+let is_signature : Pipeline.Part.t -> bool = function
+  | Header _ | Trait_header _ | Constant_value _ | Interface _ | Derived_interface _ | Type_facts _
+  | Signature_check _ | Contract _ | Contract_mir _ ->
+      true
+  | Source _ | Parsed _ | Packages | Modules _ | Dependencies _ | Namespace _ | Entry _ | Entries _
+  | Imports _ | Declaration _ | Tree _ | Text _ | Place _ | Container _ | Contained _
+  | Module_declarations _ | File_declarations _ | Package_declarations _ | Members _
+  | Traits_declaring _ | Impl_index _ | Impls_of_type _ | Impls_of_trait _ | Law_proofs _
+  | Resolved _ | Grant _ | Checked_body _ | Derived_form _ | Body_mir _ | Generated_mir _
+  | Call_edges _ | Patterns _ | Usage _ | Ownership _ | Used_packages _ | Import_check _
+  | Package_check _ | Successors _ | Recursion_group _ | Proof _ | Ground_types _ | Layout _
+  | Lowered _ | Test_key _ ->
+      false

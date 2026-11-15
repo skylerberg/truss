@@ -16,8 +16,11 @@ type requests = {
   mir : Mir.lookups;
   lowered : Instance.key -> (lowered, unsupported) result;
   test_key : Instance.key -> (string, unsupported) result;
+  reached_todo_types : Instance.key -> Path.t list;
   layouts : Instance.key list -> Ground.ty -> Memory_layout.t;
 }
+
+exception Todo_type = Monomorphic.Todo_type
 
 let bug format = Compiler_bug.bug ~stage:"Compile" format
 
@@ -230,6 +233,15 @@ let anchor compiler (path : Path.t) : Positions.anchor option =
       | Some { file; base } ->
           let line, _ = Source.position (compiler.requests.source file) base in
           Some { definition = path; path = compiler.file_name file; first_line = line })
+
+let todo_type_position compiler (path : Path.t) =
+  let names = compiler.requests.interface.names in
+  match Option.map (fun key -> (names.place key, names.definition key)) (names.key path) with
+  | Some (Some { file; base }, Some { kind = Type_definition { name; _ }; _ }) ->
+      let line, column = Source.position (compiler.requests.source file) (base + name.span.start) in
+      (compiler.file_name file, line, column)
+  | Some _ | None ->
+      bug "%s is reached as a type defined as todo, and has no definition" (Path.show path)
 
 let decode compiler key ty text : Lowered.static_value =
   let env = env compiler [ key ] in
@@ -567,6 +579,36 @@ let external_test compiler test =
   | Some uses -> uses <> Types.no_capabilities
   | None -> false
 
+let result_key compiler test =
+  match compiler.requests.reached_todo_types (Lower.test_key test) with
+  | _ :: _ -> None
+  | [] -> (
+      match test_key compiler test with key -> Some key | exception Lower.Unsupported _ -> None)
+
+let is_cached compiler test =
+  match compiler.results with
+  | Some results ->
+      (not (external_test compiler test))
+      && Option.is_some (Option.bind (result_key compiler test) (stored results))
+  | None -> false
+
+let incomplete_record compiler todo_types =
+  {
+    outcome = Incomplete;
+    message =
+      Some
+        (String.concat "\n"
+           (List.map
+              (fun path ->
+                let file, line, column = todo_type_position compiler path in
+                Printf.sprintf "the type %s is defined as todo\n  at %s:%d:%d" (Path.show path) file
+                  line column)
+              todo_types));
+    echo = None;
+    microseconds = 0;
+    cached = false;
+  }
+
 let run_tests ?(rerun = false) ?(progress = ignore) compiler ~time_limit_ms tests =
   reporting compiler @@ fun () ->
   let results = compiler.results in
@@ -576,21 +618,24 @@ let run_tests ?(rerun = false) ?(progress = ignore) compiler ~time_limit_ms test
   let known =
     List.mapi
       (fun index (test, root) ->
-        let key = if keyed test then Some (test_key compiler test) else None in
-        let stored_record =
-          match (results, key) with
-          | Some results, Some key when not rerun -> stored results key
-          | _ -> None
-        in
-        (index, root, key, stored_record))
+        match compiler.requests.reached_todo_types root with
+        | _ :: _ as todo_types -> (index, root, None, Some (incomplete_record compiler todo_types))
+        | [] ->
+            let key = if keyed test then Some (test_key compiler test) else None in
+            let known_record =
+              match (results, key) with
+              | Some results, Some key when not rerun -> stored results key
+              | _ -> None
+            in
+            (index, root, key, known_record))
       (List.combine tests roots)
   in
   List.iter
-    (fun (index, _, _, stored_record) ->
-      Option.iter (fun record -> progress (Ended { test = index; record })) stored_record)
+    (fun (index, _, _, known_record) ->
+      Option.iter (fun record -> progress (Ended { test = index; record })) known_record)
     known;
   let missing =
-    Array.of_list (List.filter (fun (_, _, _, stored_record) -> stored_record = None) known)
+    Array.of_list (List.filter (fun (_, _, _, known_record) -> known_record = None) known)
   in
   let fresh = Array.make (Array.length missing) None in
   if Array.length missing > 0 then begin
@@ -627,8 +672,8 @@ let run_tests ?(rerun = false) ?(progress = ignore) compiler ~time_limit_ms test
   end;
   let fresh = ref (List.filter_map Fun.id (Array.to_list fresh)) in
   List.map
-    (fun (_, _, _, stored_record) ->
-      match stored_record with
+    (fun (_, _, _, known_record) ->
+      match known_record with
       | Some record -> record
       | None -> (
           match !fresh with
@@ -657,7 +702,9 @@ type unshippable = {
 }
 
 let reached compiler ~main =
-  Reachable.running ~lookup:(compiled compiler) [ Instance.Program_main main ]
+  match compiler.requests.reached_todo_types (Program_main main) with
+  | [] -> Reachable.running ~lookup:(compiled compiler) [ Instance.Program_main main ]
+  | _ :: _ -> []
 
 let reached_definitions compiler ~main =
   reporting compiler @@ fun () ->
@@ -684,23 +731,28 @@ let unshippable compiler ~main =
       |> List.rev
     in
     let reports =
-      List.concat_map
-        (fun (compiled, keys) ->
-          List.filter_map
-            (fun (failure, (site : Emit_c.site)) ->
-              match anchor compiler site.definition with
-              | None -> None
-              | Some anchor ->
-                  Some
-                    {
-                      failure = (match failure with Emit_c.Echo -> `Echo | Todo -> `Todo);
-                      file = anchor.path;
-                      line = anchor.first_line + site.line;
-                      column = site.column;
-                      way = definitions keys;
-                    })
-            (Emit_c.failures compiled))
-        reached
+      List.map
+        (fun path ->
+          let file, line, column = todo_type_position compiler path in
+          { failure = `Todo; file; line; column; way = [ main; path ] })
+        (compiler.requests.reached_todo_types (Program_main main))
+      @ List.concat_map
+          (fun (compiled, keys) ->
+            List.filter_map
+              (fun (failure, (site : Emit_c.site)) ->
+                match anchor compiler site.definition with
+                | None -> None
+                | Some anchor ->
+                    Some
+                      {
+                        failure = (match failure with Emit_c.Echo -> `Echo | Todo -> `Todo);
+                        file = anchor.path;
+                        line = anchor.first_line + site.line;
+                        column = site.column;
+                        way = definitions keys;
+                      })
+              (Emit_c.failures compiled))
+          reached
     in
     List.sort_uniq
       (fun left right ->
@@ -719,17 +771,37 @@ let unshippable compiler ~main =
     |> List.rev
   end
 
+let program_root compiler ~main =
+  let root = Instance.Program_main main in
+  match compiler.requests.reached_todo_types root with
+  | [] -> root
+  | todo_types ->
+      cannot_build "%s"
+        (String.concat "\n"
+           (List.map
+              (fun path ->
+                let file, line, column = todo_type_position compiler path in
+                Printf.sprintf
+                  "%s:%d:%d: the type %s is defined as todo, and `main` can reach it, so the \
+                   program cannot be built."
+                  file line column (Path.show path))
+              todo_types))
+
 let run_program ?input compiler ~main ~arguments =
   reporting compiler @@ fun () ->
-  let root = Instance.Program_main main in
+  let root = program_root compiler ~main in
   build_and_run ?input compiler ~roots:[ root ]
     ~startup:(Startup.program_calling (Instance.symbol root))
     ~arguments
 
 let build_program compiler ~main ~output =
   reporting compiler @@ fun () ->
-  let root = Instance.Program_main main in
+  let root = program_root compiler ~main in
   build compiler ~roots:[ root ] ~startup:(Startup.program_calling (Instance.symbol root)) ~output
+
+let reached_todo_types compiler (root : Path.t) =
+  compiler.requests.reached_todo_types
+    (match root with Test _ -> Lower.test_key root | _ -> Program_main root)
 
 let check_template compiler ~from_template ~texts =
   reporting compiler @@ fun () ->
@@ -778,7 +850,11 @@ let ground_types settings lookups key =
 
 let shape interface ty = Monomorphic.shape (Lower.monomorphic interface) ty
 let layout interface ~layout_of ty = Memory_layout.layout ~layout_of ty (shape interface ty)
-let stored_in_place interface ty = Memory_layout.stored_in_place (shape interface ty)
+
+let stored_in_place interface ty =
+  match shape interface ty with
+  | shape -> Memory_layout.stored_in_place shape
+  | exception Todo_type _ -> []
 
 module For_testing = struct
   let is_folded compiler path =

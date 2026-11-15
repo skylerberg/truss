@@ -1,3 +1,5 @@
+exception Todo_type of Ground.ty
+
 type context = {
   type_interface : Path.t -> Types.type_interface option;
   normalize : Types.ty -> Types.ty;

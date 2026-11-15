@@ -26,21 +26,29 @@ type target = Walk.target =
 type bracket = Walk.bracket = Index | Type_arguments | Method_bracket
 type section = Walk.section = Interface | Contract | Body
 
+type value = Walk.value =
+  | Value_local of Syntax.id
+  | Value_generic of Types.parameter
+  | Value_field of string
+  | Value_law_parameter of int
+
 type resolved = {
   names : target option array;
   brackets : bracket option array;
+  holes : (Syntax.id * (string * value) list) list;
   used_imports : string list;
 }
 
 let sections = [ Interface; Contract; Body ]
 
 let merge = function
-  | [] -> { names = [||]; brackets = [||]; used_imports = [] }
+  | [] -> { names = [||]; brackets = [||]; holes = []; used_imports = [] }
   | first :: _ as parts ->
       let pick select index = List.find_map (fun part -> (select part).(index)) parts in
       {
         names = Array.init (Array.length first.names) (pick (fun part -> part.names));
         brackets = Array.init (Array.length first.brackets) (pick (fun part -> part.brackets));
+        holes = List.concat_map (fun part -> part.holes) parts;
         used_imports =
           List.sort_uniq compare (List.concat_map (fun part -> part.used_imports) parts);
       }
@@ -138,6 +146,7 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
           {
             names = walked.names;
             brackets = walked.brackets;
+            holes = List.rev walked.holes;
             used_imports = List.sort compare walked.used_imports;
           }
         in

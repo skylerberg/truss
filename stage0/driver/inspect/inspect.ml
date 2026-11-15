@@ -9,6 +9,12 @@ let show_type (tables : Infer.tables) id =
   | Some type_ -> Types.show type_
   | None -> "an unknown type"
 
+let local_type (tables : Infer.tables) id =
+  match at tables.local_types id with Some type_ -> Types.show type_ | None -> "an unknown type"
+
+let from_tables (tables : Infer.tables option) show id =
+  match tables with Some tables -> show tables id | None -> "an unknown type"
+
 type unfinished = { keyword : [ `Todo | `Echo ]; id : id option; span : span }
 
 let unfinished (definition : definition) =
@@ -26,6 +32,34 @@ let unfinished (definition : definition) =
   | Type_definition { name; body = Type_todo; _ } -> add `Todo None name.span
   | _ -> ());
   List.sort (fun left right -> compare left.span.start right.span.start) !found
+
+type hole = { offset : int; expected : string option; scope : (string * string) list }
+
+let holes definition (resolved : Resolve.resolved) tables =
+  List.filter_map
+    (fun { keyword; id; span } ->
+      match (keyword, id) with
+      | `Echo, _ -> None
+      | `Todo, None -> Some { offset = span.start; expected = None; scope = [] }
+      | `Todo, Some id ->
+          Option.map
+            (fun scope ->
+              {
+                offset = span.start;
+                expected = Some (from_tables tables show_type id);
+                scope =
+                  List.map
+                    (fun (name, (value : Resolve.value)) ->
+                      ( name,
+                        match value with
+                        | Value_local binding -> from_tables tables local_type binding
+                        | Value_generic _ -> "UInt64"
+                        | Value_field _ -> "a field"
+                        | Value_law_parameter _ -> "a parameter of the law" ))
+                    scope;
+              })
+            (List.assoc_opt id resolved.holes))
+    (unfinished definition)
 
 type explanation = {
   text : string;

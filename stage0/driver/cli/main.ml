@@ -122,6 +122,13 @@ let build =
        reaches a $(b,todo) or an $(b,echo)."
     Term.(const (fun () output -> Program_command.build ~output) $ common $ output)
 
+let holes =
+  command "holes"
+    ~doc:
+      "List every $(b,todo) with its expected type, the bindings in scope, and the tests and \
+       $(b,main) that reach it."
+    Term.(const (fun () paths -> Outcome.Exit (Holes_command.run ~paths)) $ common $ paths "holes")
+
 let show =
   let paths =
     Arg.(
@@ -151,6 +158,60 @@ let explain =
        its definition."
     Term.(
       const (fun () position -> Outcome.Exit (Explain_command.run ~position)) $ common $ position)
+
+let impact =
+  let base =
+    Arg.(
+      value
+      & opt (some string) None
+      & info [ "base" ] ~docv:"REVISION"
+          ~doc:"Compare with the commit $(docv) instead of the merge base with the default branch.")
+  in
+  command "impact"
+    ~doc:"List the definitions that the worktree changes since a base commit, and their dependents."
+    Term.(const (fun () base -> Outcome.Exit (Impact_command.run ~base)) $ common $ base)
+
+let overlap =
+  let with_ =
+    Arg.(
+      value
+      & opt (some string) None
+      & info [ "with" ] ~docv:"BRANCH"
+          ~doc:"Compare with $(docv) instead of the other open worktrees.")
+  in
+  let merge =
+    Arg.(
+      value & flag
+      & info [ "merge" ] ~doc:"Also check the merge result and list the diagnostics only it has.")
+  in
+  command "overlap"
+    ~doc:"List where this worktree's changes overlap those of other worktrees or of a branch."
+    Term.(
+      const (fun () with_ merge -> Outcome.Exit (Overlap_command.run ~with_ ~merge))
+      $ common $ with_ $ merge)
+
+let name_argument =
+  Arg.(
+    required
+    & pos 0 (some string) None
+    & info [] ~docv:"NAME"
+        ~doc:
+          "A definition: its full path, or a suffix of one, such as $(b,parse) or \
+           $(b,Forecast.summary).")
+
+let dependents =
+  command "dependents"
+    ~doc:"List the parts of other definitions that read a part of a definition, by kind of part."
+    Term.(
+      const (fun () name -> Outcome.Exit (Graph_command.run ~direction:Dependents ~name))
+      $ common $ name_argument)
+
+let dependencies =
+  command "dependencies"
+    ~doc:"List the parts of other definitions that a definition's parts read, by kind of part."
+    Term.(
+      const (fun () name -> Outcome.Exit (Graph_command.run ~direction:Dependencies ~name))
+      $ common $ name_argument)
 
 let rename =
   let from_ = Arg.(required & pos 0 (some string) None & info [] ~docv:"FROM") in
@@ -229,7 +290,26 @@ let truss =
               command in its own process, and not in the background process.";
          ]
        ~doc:"Check, test, build, and change Truss code.")
-    [ check; test; run; build; show; explain; rename; add; upgrade; publish; new_; status; stop ]
+    [
+      check;
+      test;
+      run;
+      build;
+      holes;
+      show;
+      impact;
+      dependents;
+      dependencies;
+      explain;
+      overlap;
+      rename;
+      add;
+      upgrade;
+      publish;
+      new_;
+      status;
+      stop;
+    ]
 
 let evaluate arguments =
   Output.set_json false;

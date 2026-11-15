@@ -38,5 +38,5 @@ let run ~names =
       Command_packages.write_file (Upgrade_command.lock_file snapshot) plan.text;
       Upgrade_command.report
         ~lock:(Upgrade_command.lock_changes ~before:plan.before ~after:plan.after)
-        ~broken:[];
+        ~signatures:[] ~broken:[];
       0

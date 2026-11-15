@@ -524,7 +524,10 @@ let rec reached context (ty : Ground.ty) =
       ->
         [ value ]
     | Named _ | Never -> [])
-  @ Memory_layout.reaches (Monomorphic.shape context.monomorphic ty)
+  @
+  match Monomorphic.shape context.monomorphic ty with
+  | shape -> Memory_layout.reaches shape
+  | exception Monomorphic.Todo_type _ -> []
 
 and closed context types =
   let rec visit seen = function

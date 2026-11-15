@@ -736,6 +736,289 @@ let () =
       if not (contains output "means a name bound here" && contains output "has type Counter") then
         fail "wrote %s" output)
 
+let git directory arguments =
+  match
+    Process.run "git"
+      ([ "-C"; directory; "-c"; "user.name=test"; "-c"; "user.email=test@example.com" ] @ arguments)
+  with
+  | 0, _, _ -> ()
+  | _, _, error -> fail "git %s failed: %s" (String.concat " " arguments) error
+
+let committed root =
+  git root [ "init"; "-q"; "-b"; "main" ];
+  git root [ "add"; "-A" ];
+  git root [ "commit"; "-q"; "-m"; "base" ];
+  root
+
+let repository text = committed (package [ ("main.truss", text) ])
+
+let replace text part by =
+  let part_length = String.length part in
+  let rec at position =
+    if String.sub text position part_length = part then position else at (position + 1)
+  in
+  let position = at 0 in
+  String.sub text 0 position ^ by
+  ^ String.sub text (position + part_length) (String.length text - position - part_length)
+
+let strings = function
+  | Json.List items -> List.filter_map (function Json.String text -> Some text | _ -> None) items
+  | _ -> []
+
+let reads command root name = objects (Json.field "reads" (document [ command; "-C"; root; name ]))
+
+let expect_read lines ~reader ~parts ~reads ~of_ =
+  if
+    not
+      (List.exists
+         (fun line ->
+           text_field "reader" line = reader
+           && text_field "of" line = of_
+           && List.mem reads (strings (Json.field "reads" line))
+           && List.for_all (fun part -> List.mem part (strings (Json.field "parts" line))) parts)
+         lines)
+  then
+    fail "no line says that the %s of %s reads the %s of %s: [%s]" (String.concat ", " parts) reader
+      reads of_
+      (String.concat "; " (List.map Json.to_string lines))
+
+let () =
+  test "dependents say which definitions read a definition's interface, and which its contract"
+    (fun () ->
+      let lines = reads "dependents" (package [ ("main.truss", Fixtures.doubling) ]) "double" in
+      expect_read lines ~reader:"demo::four" ~parts:[ "checked body" ] ~reads:"interface"
+        ~of_:"demo::double";
+      expect_read lines ~reader:"demo::four" ~parts:[ "proof" ] ~reads:"MIR of the contract"
+        ~of_:"demo::double");
+  test "dependencies list the parts of other definitions that a definition reads" (fun () ->
+      let lines = reads "dependencies" (package [ ("main.truss", Fixtures.doubling) ]) "four" in
+      expect_read lines ~reader:"demo::four" ~parts:[ "checked body" ] ~reads:"interface"
+        ~of_:"demo::double";
+      if List.exists (fun line -> text_field "of" line = "demo::four") lines then
+        fail "four is listed as its own dependency");
+  test "a mut self method's dependents are found by its name without the receiver" (fun () ->
+      expect_read
+        (reads "dependents" (package [ ("main.truss", Fixtures.counter) ]) "Counter.bump")
+        ~reader:"demo::bumped" ~parts:[ "checked body" ] ~reads:"interface"
+        ~of_:"demo::Counter.bump(mut self)")
+
+let impact root = objects (Json.field "changes" (document [ "impact"; "-C"; root ]))
+let doubling = Fixtures.doubling
+let doubled_by_adding = replace doubling "value * 2" "value + value"
+
+let () =
+  test "a project below the top of its repository is compared with its own files at a commit"
+    (fun () ->
+      let top =
+        committed
+          (directory
+             [
+               ("services/demo/truss.toml", manifest_of "demo");
+               ("services/demo/main.truss", doubling);
+               ("tools/truss.toml", manifest_of "tools");
+               ("tools/main.truss", Fixtures.nested_repository);
+             ])
+      in
+      let root = Filename.concat top "services/demo" in
+      rewrite root "main.truss" doubled_by_adding;
+      match impact root with
+      | [ change ] ->
+          expect_string ~expected:"demo::double" (text_field "path" change);
+          if not (List.mem "checked body" (strings (Json.field "parts" change))) then
+            fail "%s" (Json.to_string change)
+      | changes -> fail "found %d changes" (List.length changes));
+  test "a change to a body alone is a change of the body, which nothing reads" (fun () ->
+      let root = repository doubling in
+      rewrite root "main.truss" doubled_by_adding;
+      match impact root with
+      | [ change ] ->
+          let parts = strings (Json.field "parts" change) in
+          if
+            objects (Json.field "read_by" change) <> []
+            || List.mem "interface" parts || List.mem "contract" parts
+            || not (List.mem "checked body" parts)
+          then fail "%s" (Json.to_string change)
+      | changes -> fail "found [%s]" (String.concat "; " (List.map Json.to_string changes)));
+  test "a changed signature is shown before and after, with its readers" (fun () ->
+      let root = repository doubling in
+      rewrite root "main.truss"
+        (replace doubling "fn double(value: Int64) -> Int64"
+           "fn double(value: Int64, by: Int64 = 2) -> Int64");
+      match
+        List.find_opt (fun change -> text_field "path" change = "demo::double") (impact root)
+      with
+      | Some change ->
+          let before = text_field "before" change and after = text_field "after" change in
+          if not (contains before "(value: Int64)" && contains after "by: Int64 = 2") then
+            fail "signatures %s, %s" before after;
+          if
+            not
+              (List.exists
+                 (fun read ->
+                   text_field "reader" read = "demo::four" && text_field "reads" read = "interface")
+                 (objects (Json.field "read_by" change)))
+          then fail "four does not read its interface"
+      | None -> fail "double did not change");
+  test "impact lists the tests a change reaches" (fun () ->
+      let root = repository doubling in
+      rewrite root "main.truss" doubled_by_adding;
+      let status, output = truss [ "impact"; "-C"; root ] in
+      if status <> 0 then fail "status %d: %s" status output;
+      if not (contains output "Tests whose code changed: 1") then fail "wrote %s" output);
+  test "moving a definition within its file changes nothing" (fun () ->
+      let one = Fixtures.one and two = Fixtures.moving_a_definition_within_its_file_changes in
+      let root = repository (one ^ "\n" ^ two) in
+      rewrite root "main.truss" (two ^ "\n" ^ one);
+      match impact root with [] -> () | changes -> fail "found %d changes" (List.length changes))
+
+let branched root branch files =
+  git root [ "checkout"; "-q"; "-b"; branch ];
+  List.iter (fun (path, text) -> rewrite root path text) files;
+  git root [ "add"; "-A" ];
+  git root [ "commit"; "-q"; "-m"; branch ];
+  git root [ "checkout"; "-q"; "main" ]
+
+let comparisons root arguments =
+  objects (Json.field "overlaps" (document ([ "overlap"; "-C"; root ] @ arguments)))
+
+let overlaps_with_branch root =
+  match comparisons root [ "--with"; "other" ] with
+  | [ comparison ] -> objects (Json.field "overlaps" comparison)
+  | found ->
+      fail "compared with %d sides" (List.length found);
+      []
+
+let place_is ~path ~part place =
+  text_field "path" place = path && List.mem part (strings (Json.field "parts" place))
+
+let expect_overlap overlaps ~kind matches =
+  if not (List.exists (fun overlap -> text_field "kind" overlap = kind && matches overlap) overlaps)
+  then fail "no %s overlap in [%s]" kind (String.concat "; " (List.map Json.to_string overlaps))
+
+let with_default =
+  replace doubling "fn double(value: Int64) -> Int64"
+    "fn double(value: Int64, by: Int64 = 2) -> Int64"
+
+let four_doubles_three = replace doubling "  double(2)\n" "  double(3)\n"
+
+let () =
+  test "a change that reads what a branch changes is an overlap" (fun () ->
+      let root = repository doubling in
+      branched root "other" [ ("main.truss", with_default) ];
+      rewrite root "main.truss" four_doubles_three;
+      expect_overlap (overlaps_with_branch root) ~kind:"reads" (fun overlap ->
+          Json.field "this_worktree" overlap = Json.Bool true
+          && place_is ~path:"demo::four" ~part:"checked body" (Json.field "change" overlap)
+          && place_is ~path:"demo::double" ~part:"interface" (Json.field "reads" overlap)));
+  test "a body that both sides change is an overlap" (fun () ->
+      let root = repository doubling in
+      branched root "other" [ ("main.truss", replace doubling "value * 2" "2 * value") ];
+      rewrite root "main.truss" doubled_by_adding;
+      expect_overlap (overlaps_with_branch root) ~kind:"both_change" (fun overlap ->
+          place_is ~path:"demo::double" ~part:"checked body" (Json.field "place" overlap)));
+  test "a merge preview lists the diagnostics that only the merge has" (fun () ->
+      let root = repository doubling in
+      branched root "other" [ ("eight.truss", "fn eight() -> Int64 {\n  double(4)\n}\n") ];
+      rewrite root "main.truss"
+        (replace
+           (replace
+              (replace doubling "fn double(value: Int64) -> Int64"
+                 "fn double(value: Int64, by: Int64) -> Int64")
+              "  double(2)\n" "  double(2, by: 2)\n")
+           "double(2) ==" "double(2, by: 2) ==");
+      match comparisons root [ "--with"; "other"; "--merge" ] with
+      | [ comparison ] -> (
+          match objects (Json.field "merged" comparison) with
+          | [] -> fail "the merge has no diagnostic of its own: %s" (Json.to_string comparison)
+          | merged ->
+              if not (List.for_all (fun found -> text_field "file" found = "eight.truss") merged)
+              then fail "%s" (Json.to_string comparison))
+      | found -> fail "compared with %d sides" (List.length found));
+  test "check reports where this worktree's changes overlap another open worktree's" (fun () ->
+      let root = repository doubling in
+      let other = Harness.scratch "worktree" in
+      git root [ "worktree"; "add"; "-q"; "-b"; "other"; other ];
+      rewrite other "main.truss" with_default;
+      rewrite root "main.truss" four_doubles_three;
+      ignore (Command_packages.load other);
+      let status, output = truss [ "check"; "-C"; root ] in
+      if status <> 0 then fail "status %d: %s" status output;
+      if
+        not
+          (contains output "Overlaps with other worktrees:"
+          && contains output "this worktree's change to demo::four")
+      then fail "wrote %s" output)
+
+let holes root = objects (Json.field "holes" (document [ "holes"; "-C"; root ]))
+
+let () =
+  test "a hole has the type it must have and the names in scope with theirs" (fun () ->
+      match holes (package [ ("main.truss", Fixtures.unfinished) ]) with
+      | [ hole ] ->
+          if text_field "type" hole <> "String" then fail "the type is not String";
+          expect_strings
+            ~expected:[ "count: Int64"; "header: String"; "title: String" ]
+            (List.map
+               (fun binding -> text_field "name" binding ^ ": " ^ text_field "type" binding)
+               (objects (Json.field "in_scope" hole)))
+      | found -> fail "found %d holes" (List.length found));
+  test "a hole blocks the tests that can reach it, and only those" (fun () ->
+      match holes (package [ ("main.truss", Fixtures.unfinished) ]) with
+      | [ hole ] ->
+          expect_strings ~expected:[ "test demo \"renders\"" ] (strings (Json.field "blocks" hole))
+      | found -> fail "found %d holes" (List.length found));
+  test "a hole whose type nothing fixes, such as one interpolated, is not decided yet" (fun () ->
+      match
+        holes (package [ ("main.truss", Fixtures.hole_whose_type_nothing_fixes_such_as_one) ])
+      with
+      | [ hole ] ->
+          if text_field "type" hole <> "not decided yet" then
+            fail "type %s" (text_field "type" hole)
+      | found -> fail "found %d holes" (List.length found));
+  test "a type defined as todo is a hole" (fun () ->
+      match holes (package [ ("main.truss", "type Session = todo\n") ]) with
+      | [ hole ] -> if text_field "kind" hole <> "type" then fail "kind %s" (text_field "kind" hole)
+      | found -> fail "found %d holes" (List.length found));
+  test "a type defined as todo blocks main and the tests that reach it, and only those" (fun () ->
+      match holes (package [ ("main.truss", Fixtures.unfinished_type) ]) with
+      | [ hole ] ->
+          expect_strings
+            ~expected:[ "main"; "test demo \"reaches\"" ]
+            (strings (Json.field "blocks" hole))
+      | found -> fail "found %d holes" (List.length found));
+  test "a test that reaches a type defined as todo is incomplete, and the others run" (fun () ->
+      let outcomes =
+        List.map
+          (fun test ->
+            ( text_field "name" test,
+              text_field "outcome" test,
+              match Json.field "message" test with Json.String message -> message | _ -> "" ))
+          (objects
+             (Json.field "tests"
+                (document [ "test"; "-C"; package [ ("main.truss", Fixtures.unfinished_type) ] ])))
+      in
+      match outcomes with
+      | [ ("reaches", "incomplete", message); ("counts", "passed", _) ]
+        when message = "the type demo::Session is defined as todo\n  at main.truss:1:6" ->
+          ()
+      | _ ->
+          fail "%s"
+            (String.concat "; "
+               (List.map
+                  (fun (name, outcome, message) -> String.concat " " [ name; outcome; message ])
+                  outcomes)));
+  test "build refuses a program whose main can reach a type defined as todo" (fun () ->
+      let status, output =
+        truss [ "build"; "-C"; package [ ("main.truss", Fixtures.unfinished_type) ] ]
+      in
+      if status <> 1 then fail "status %d: %s" status output;
+      if
+        not
+          (contains output
+             "main.truss:1:6: `todo` can be reached from `main`, so the program cannot be built.\n\
+             \    demo::main -> demo::Session")
+      then fail "%s" output)
+
 let registry_root = ref ""
 
 let registry () =
@@ -1002,17 +1285,28 @@ let () =
       if status <> 0 || not (contains output "Every package is at the version asked for") then
         fail "status %d: %s" status output;
       expect_string ~expected:before (read root "truss.lock"));
-  test "an upgrade says which code breaks" (fun () ->
+  test "an upgrade says which signatures the project reads change, and which code breaks" (fun () ->
       let registry = stocked () in
-      let root = package [ ("main.truss", Fixtures.upgrade_says_which_code_breaks) ] in
+      let root =
+        package [ ("main.truss", Fixtures.upgrade_says_which_signatures_the_project_reads) ]
+      in
       ignore (add root [ "acme::units" ]);
       publish registry "acme::units" (1, 2, 0)
-        [ ("lengths/lengths.truss", Fixtures.upgrade_says_which_code_breaks_lengths) ];
+        [
+          ("lengths/lengths.truss", Fixtures.upgrade_says_which_signatures_the_project_reads_lengths);
+        ];
       let status, output = upgrade root [ "acme::units" ] in
       if status <> 1 then fail "status %d: %s" status output;
       List.iter
         (fun part -> if not (contains output part) then fail "%s is not in: %s" part output)
-        [ "`acme::units` goes from 1.1.0 to 1.2.0"; "errors it does not have now" ]);
+        [
+          "`acme::units` goes from 1.1.0 to 1.2.0";
+          "acme::units::lengths::meter";
+          "was: public fn meter() -> Int64";
+          "now: public fn meter(scale: Int64) -> Int64";
+          "read by: demo::meter";
+          "errors it does not have now";
+        ]);
   test "an upgrade says which packages would hold a capability they did not" (fun () ->
       let registry = stocked () in
       let root = package [ uses_geometry ] in

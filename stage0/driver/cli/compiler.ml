@@ -21,7 +21,7 @@ let development_settings () : Build.settings =
   { build = Development; optimization = O1; extra = c_flags () }
 
 let lowering_only pipeline packages =
-  Compile.create (requests pipeline packages)
+  Compile.create ~results:(results ()) (requests pipeline packages)
     { compiler = "cc"; identity = "lowering only" }
     (Build.cache (Database.objects_directory ()))
     (development_settings ())

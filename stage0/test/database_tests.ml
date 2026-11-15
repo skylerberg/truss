@@ -488,6 +488,21 @@ let () =
       expect_untouched
         (propagated ~before:(program "type Shape(size: Int64)\n") ~after:(program ""))
         ~names:[ "[Shape]" ]);
+  test "a test that reaches a type defined as todo is blocked until the type is defined" (fun () ->
+      let program definition =
+        [
+          ( "app::main",
+            "type Session" ^ definition
+            ^ "\n\
+               fn none() -> Option[Session] { None }\n\
+               test \"reaches\" {\n\
+              \  assert none().is_none()\n\
+               }\n" );
+        ]
+      in
+      expect_included
+        (propagated ~before:(program " = todo") ~after:(program "(id: Int64)"))
+        ~parts:[ "layout Session"; lowered "none" ]);
   test "an edit to a constant recomputes the constants that fold it, in order" (fun () ->
       let constants first =
         [
@@ -640,7 +655,7 @@ let settled_on_disk root =
   let snapshot = opened root in
   let pipeline = Database.pipeline snapshot in
   let observed = Pipeline.For_testing.observe pipeline (fun () -> Pipeline.propagate pipeline) in
-  let cold = Database.pipeline (Database.trial snapshot []) in
+  let cold = Database.For_testing.cold_pipeline snapshot in
   Pipeline.propagate cold;
   (match Pipeline.For_testing.differences pipeline cold with
   | [] -> ()
@@ -697,4 +712,42 @@ let () =
               (String.split_on_char '\n' (File_system.read list))));
       expect_included (settled_on_disk root)
         ~parts:[ "namespace app"; "checked body app::main::caller" ];
+      Database.flush ())
+
+let expect_cold pipeline snapshot =
+  let cold = Database.For_testing.cold_pipeline snapshot in
+  Pipeline.propagate cold;
+  match Pipeline.For_testing.differences pipeline cold with
+  | [] -> ()
+  | parts -> fail "the database differs from a cold build in %s" (String.concat ", " parts)
+
+let () =
+  test "a trial is a copy of the database, propagated with the files that differ" (fun () ->
+      let root = project [ ("main/main", callee_and_caller) ] in
+      let snapshot = opened root in
+      let worktree = Database.pipeline snapshot in
+      Pipeline.propagate worktree;
+      let trial = Database.trial snapshot [ ("main/main.truss", Some edited_body) ] in
+      let pipeline = Database.pipeline trial in
+      let recomputed =
+        (Pipeline.For_testing.observe pipeline (fun () -> Pipeline.propagate pipeline)).recomputed
+      in
+      expect_included recomputed ~parts:[ "checked body app::main::callee" ];
+      expect_untouched recomputed ~names:[ "app::main::caller" ];
+      expect_cold pipeline trial;
+      expect_cold worktree snapshot;
+      Database.flush ());
+  test "a trial that renames the package leaves the worktree's database as it was" (fun () ->
+      let root = project [ ("main/main", callee_and_caller) ] in
+      let snapshot = opened root in
+      let worktree = Database.pipeline snapshot in
+      Pipeline.propagate worktree;
+      let trial =
+        Database.trial snapshot
+          [ ("truss.toml", Some "[package]\nname = \"tool\"\ntruss = \"0.1\"\n") ]
+      in
+      let pipeline = Database.pipeline trial in
+      Pipeline.propagate pipeline;
+      expect_cold pipeline trial;
+      expect_cold worktree snapshot;
       Database.flush ())

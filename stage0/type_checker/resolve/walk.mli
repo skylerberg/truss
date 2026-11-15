@@ -22,9 +22,16 @@ type target =
 type bracket = Index | Type_arguments | Method_bracket
 type section = Interface | Contract | Body
 
+type value =
+  | Value_local of Syntax.id
+  | Value_generic of Types.parameter
+  | Value_field of string
+  | Value_law_parameter of int
+
 type section_names = {
   names : target option array;
   brackets : bracket option array;
+  mutable holes : (Syntax.id * (string * value) list) list;
   mutable diagnostics : Syntax.diagnostic list;
   mutable used_imports : string list;
 }

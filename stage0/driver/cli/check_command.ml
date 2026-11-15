@@ -68,16 +68,23 @@ let fix snapshot packages =
 let run ~fix:fixing ~proofs =
   let snapshot, packages = Command_packages.current () in
   let snapshot, fixed = if fixing then fix snapshot packages else (snapshot, []) in
-  let report = Report.gather ~proofs (Database.pipeline snapshot) snapshot packages in
+  let pipeline = Database.pipeline snapshot in
+  let report = Report.gather ~proofs pipeline snapshot packages in
+  let overlaps = Overlap_command.with_other_worktrees snapshot pipeline in
   if Output.json () then
     Json.print
       (Report.document report
-         (if fixing then
-            [ ("fixed", Json.List (List.map (fun fixed_text -> Json.Raw fixed_text) fixed)) ]
-          else []))
+         ((if fixing then
+             [ ("fixed", Json.List (List.map (fun fixed_text -> Json.Raw fixed_text) fixed)) ]
+           else [])
+         @ [ ("overlaps", Overlap_command.to_json overlaps) ]))
   else begin
     if fixed <> [] then
       Output.eprintf "Fixed %s.\n" (Report.plural (List.length fixed) "error" "errors");
-    Report.print report
+    Report.print report;
+    if overlaps <> [] then begin
+      Output.print_line "Overlaps with other worktrees:";
+      Overlap_command.print overlaps
+    end
   end;
   if Report.clean report then 0 else 1

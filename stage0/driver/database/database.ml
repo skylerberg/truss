@@ -144,7 +144,11 @@ let states () =
          Printf.sprintf "%s %s" (Path.show_package package) (String.sub hash 0 16) :: lines)
        loaded_states [])
 
-type kind = Worktree of string | Published
+type kind =
+  | Worktree of string
+  | Trial of { root : string; pipeline : Pipeline.t Lazy.t }
+  | Published
+
 type snapshot = { kind : kind; files : (string * string) list; project : Project.t }
 
 let fetch name version ~hash =
@@ -254,11 +258,6 @@ let target_packages snapshot requested =
       | None -> [])
   | under_requested -> under_requested
 
-let trial snapshot changes =
-  with_files snapshot
-    (List.filter (fun (path, _) -> not (List.mem_assoc path changes)) snapshot.files
-    @ List.filter_map (fun (path, text) -> Option.map (fun text -> (path, text)) text) changes)
-
 let package snapshot name =
   List.find_opt (fun (package : Project.package) -> package.name = name) snapshot.project.packages
 
@@ -281,7 +280,7 @@ let source snapshot (file : Path.file) =
 
 let root snapshot =
   match snapshot.kind with
-  | Worktree root -> root
+  | Worktree root | Trial { root; _ } -> root
   | Published -> Compiler_bug.bug ~stage:"Database" "only a worktree's snapshot has a root"
 
 let registry_packages snapshot =
@@ -430,6 +429,7 @@ type database = {
 
 let databases : (string, database) Hashtbl.t = Hashtbl.create 4
 let is_serving = ref false
+let log_bug bug = prerr_endline (Compiler_bug.to_string bug)
 
 let commit database =
   match Pipeline.unsaved database.pipeline with
@@ -443,25 +443,12 @@ let commit database =
                (match failure with
                | Unix.Unix_error (error, _, _) -> Unix.error_message error
                | failure -> Printexc.to_string failure)))
-  | exception Compiler_bug.Bug bug -> prerr_endline (Compiler_bug.to_string bug)
+  | exception Compiler_bug.Bug bug -> log_bug bug
 
 let close database =
   Option.iter Watcher.stop database.watcher;
   Segments.close database.segments;
   Hashtbl.remove databases database.root
-
-let served snapshot =
-  match snapshot.kind with
-  | Worktree root -> (
-      match Hashtbl.find_opt databases root with
-      | Some database when database.snapshot == snapshot -> Some database
-      | Some _ | None -> None)
-  | Published -> None
-
-let pipeline ?(checks = true) snapshot =
-  match served snapshot with
-  | Some database when checks -> database.pipeline
-  | Some _ | None -> cold_pipeline ~checks snapshot
 
 let is_layout path =
   path = Project.lock_file || Filename.basename path = Filename.basename (Project.manifest_file "")
@@ -490,6 +477,112 @@ let file_changes (before : snapshot) (after : snapshot) =
             (fun file _ changes ->
               if Hashtbl.mem current file then changes else (file, None) :: changes)
             previous []))
+
+let apply_changes pipeline (after : snapshot) = function
+  | Some changes ->
+      Pipeline.update pipeline changes;
+      None
+  | None ->
+      let loaded, packages = layout after in
+      Pipeline.relayout pipeline ~loaded:(pipeline_states loaded) packages;
+      Some loaded
+
+let copied_database root (trial : snapshot) =
+  match Hashtbl.find_opt databases root with
+  | Some database ->
+      let pipeline = Pipeline.copy database.pipeline in
+      ignore (apply_changes pipeline trial (file_changes database.snapshot trial));
+      pipeline
+  | None -> cold_pipeline ~checks:true trial
+
+let over (snapshot : snapshot) files =
+  let root = root snapshot in
+  let trial = with_files snapshot files in
+  { trial with kind = Trial { root; pipeline = lazy (copied_database root trial) } }
+
+let trial snapshot changes =
+  over snapshot
+    (List.filter (fun (path, _) -> not (List.mem_assoc path changes)) snapshot.files
+    @ List.filter_map (fun (path, text) -> Option.map (fun text -> (path, text)) text) changes)
+
+let base_commit snapshot base =
+  let directory = root snapshot in
+  match base with
+  | Some revision -> Git.resolve ~directory revision
+  | None -> (
+      match (Git.head ~directory, Git.default_branch ~directory) with
+      | Some head, Some branch -> Git.merge_base ~directory head branch
+      | Some head, None -> Some head
+      | None, _ -> None)
+
+let of_commit snapshot commit =
+  match Git.files ~directory:(root snapshot) commit with
+  | Some files -> Ok (over snapshot files)
+  | None -> Error (Printf.sprintf "The files of commit %s cannot be read." commit)
+
+type side = { base : snapshot; other : snapshot; merged : unit -> (snapshot, string) result }
+
+let side snapshot ~head ~other ~mergeable =
+  let directory = root snapshot in
+  match Option.map (fun mine -> Git.merge_base ~directory mine head) (Git.head ~directory) with
+  | None -> Error "This worktree has no commit."
+  | Some None -> Error "The two have no commit in common."
+  | Some (Some merge_base) ->
+      Result.map
+        (fun base ->
+          {
+            base;
+            other;
+            merged =
+              (fun () ->
+                match (Git.snapshot ~directory, mergeable ()) with
+                | Some mine, Some theirs -> (
+                    match Git.merged_files ~directory mine theirs with
+                    | Some files -> Ok (over snapshot files)
+                    | None -> Error "The two do not merge without a textual conflict.")
+                | None, _ | _, None ->
+                    Error "The files of the two cannot be committed to merge them.");
+          })
+        (of_commit snapshot merge_base)
+
+let branch snapshot name =
+  match Git.resolve ~directory:(root snapshot) name with
+  | None -> Error (Printf.sprintf "No commit is named %s." name)
+  | Some commit ->
+      Result.bind (of_commit snapshot commit) (fun other ->
+          side snapshot ~head:commit ~other ~mergeable:(fun () -> Some commit))
+
+let other_worktree snapshot other =
+  match Git.head ~directory:other with
+  | None -> Error "The other worktree has no commit."
+  | Some head ->
+      side snapshot ~head
+        ~other:(over snapshot (Registry.Content.input_files other))
+        ~mergeable:(fun () -> Git.snapshot ~directory:other)
+
+let other_worktrees snapshot =
+  let root = root snapshot in
+  match
+    List.filter
+      (fun other -> other <> root && other <> "" && Sys.file_exists other)
+      (List.sort_uniq compare
+         (Server.serving () @ Hashtbl.fold (fun root _ roots -> root :: roots) databases []))
+  with
+  | [] -> []
+  | others -> (
+      let place directory = (Git.common_directory directory, Git.prefix directory) in
+      match place root with
+      | (Some _, Some _) as here -> List.filter (fun other -> place other = here) others
+      | _ -> [])
+
+let pipeline ?(checks = true) snapshot =
+  match snapshot.kind with
+  | Worktree root when checks -> (
+      match Hashtbl.find_opt databases root with
+      | Some database when database.snapshot == snapshot -> database.pipeline
+      | Some _ | None -> copied_database root snapshot)
+  | Trial { pipeline; _ } when checks -> Lazy.force pipeline
+  | Worktree _ | Trial _ | Published -> cold_pipeline ~checks snapshot
 
 let is_watched relative =
   List.for_all (fun part -> not (Registry.Content.skipped part)) (String.split_on_char '/' relative)
@@ -537,13 +630,10 @@ let refresh database =
       database.snapshot <- after;
       match file_changes before after with
       | Some [] -> false
-      | Some changes ->
-          Pipeline.update database.pipeline changes;
-          true
-      | None ->
-          let loaded, packages = layout after in
-          Pipeline.relayout database.pipeline ~loaded:(pipeline_states loaded) packages;
-          database.loaded <- loaded;
+      | changes ->
+          Option.iter
+            (fun loaded -> database.loaded <- loaded)
+            (apply_changes database.pipeline after changes);
           true)
 
 let open_database root =
@@ -596,16 +686,18 @@ let take_snapshot directory =
           (worktree_snapshot root)
 
 let retake snapshot =
-  match snapshot.kind with Worktree root -> worktree_snapshot root | Published -> Ok snapshot
+  match snapshot.kind with
+  | Worktree root -> worktree_snapshot root
+  | Trial _ | Published -> Ok snapshot
 
 let propagate_changes descriptor =
   Hashtbl.iter
     (fun _ database ->
       if Option.map Watcher.descriptor database.watcher = Some descriptor then
-        match if refresh database then Pipeline.propagate database.pipeline with
+        match if refresh database then Pipeline.propagate ~on_bug:log_bug database.pipeline with
         | () -> commit database
         | exception Compiler_bug.Bug bug ->
-            prerr_endline (Compiler_bug.to_string bug);
+            log_bug bug;
             close database)
     (Hashtbl.copy databases)
 
@@ -771,6 +863,7 @@ let stop = Server.stop
 
 module For_testing = struct
   let standard_state () = (Lazy.force standard_state).state
+  let cold_pipeline = cold_pipeline ~checks:true
   let collect_store = collect
 
   let interrupt_commit root =

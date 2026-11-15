@@ -12,6 +12,7 @@ module Make (Node : Node) : sig
   type update = { touched : Node.t list; removed : Node.t list }
 
   val create : tracks_blocked:bool -> t
+  val copy : t -> t
   val add_root : t -> Node.t -> bool
   val remove_root : t -> Node.t -> unit
   val successors : t -> Node.t -> Node.t list option option

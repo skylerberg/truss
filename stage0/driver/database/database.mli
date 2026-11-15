@@ -15,6 +15,14 @@ val source : snapshot -> Path.file -> Source.t
 val file_path : snapshot -> Path.file -> string
 val states : unit -> string list
 val trial : snapshot -> (string * string option) list -> snapshot
+val base_commit : snapshot -> string option -> string option
+val of_commit : snapshot -> string -> (snapshot, string) result
+
+type side = { base : snapshot; other : snapshot; merged : unit -> (snapshot, string) result }
+
+val branch : snapshot -> string -> (side, string) result
+val other_worktree : snapshot -> string -> (side, string) result
+val other_worktrees : snapshot -> string list
 val published : Path.package -> Registry.Version.t -> (snapshot, string) result
 val objects_directory : unit -> string
 val programs_directory : unit -> string
@@ -47,6 +55,7 @@ val reset : unit -> unit
 
 module For_testing : sig
   val standard_state : unit -> Pipeline.state
+  val cold_pipeline : snapshot -> Pipeline.t
   val collect_store : unit -> unit
   val interrupt_commit : string -> unit
 end

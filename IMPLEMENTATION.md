@@ -167,9 +167,6 @@ Each document has one job, and a fact is stated in one of them:
   packages, **and [DESIGN.md](DESIGN.md) says why.** They describe the
   language, whether or not stage0 builds all of it yet.
 - **This document holds the rules for working on stage0.**
-- **[DATABASE_TRANSITION.md](DATABASE_TRANSITION.md) holds the steps from
-  stage0's incremental engine to the code database,** and is deleted when
-  the last step is merged.
 
 Stage0 and the standard library have no documents of their own. Stage0's
 code and interfaces describe it, and the standard library's signatures and

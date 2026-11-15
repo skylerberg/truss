@@ -63,6 +63,7 @@ type section = Interface | Contract | Body
 type section_names = {
   names : target option array;
   brackets : bracket option array;
+  mutable holes : (id * (string * value) list) list;
   mutable diagnostics : Syntax.diagnostic list;
   mutable used_imports : string list;
 }
@@ -81,6 +82,7 @@ let section_names size =
   {
     names = Array.make size None;
     brackets = Array.make size None;
+    holes = [];
     diagnostics = [];
     used_imports = [];
   }
@@ -476,7 +478,13 @@ and check_place state (written : expression) (inner : expression) =
 
 and expression state scope (value : expression) =
   match value.kind with
-  | Todo | Integer _ | Float _ | True | False | Unreachable | Break | Continue | Self_value
+  | Todo ->
+      let names = current state in
+      names.holes <-
+        ( value.id,
+          List.map (fun (name, (value, _)) -> (name, value)) (String_map.bindings scope.values) )
+        :: names.holes
+  | Integer _ | Float _ | True | False | Unreachable | Break | Continue | Self_value
   | Self_type_value | Expression_error ->
       ()
   | String literal -> string_literal state scope literal

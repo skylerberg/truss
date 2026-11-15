@@ -1,5 +1,7 @@
 let bug format = Compiler_bug.bug ~stage:"Monomorphic" format
 
+exception Todo_type of Ground.ty
+
 type context = {
   type_interface : Path.t -> Types.type_interface option;
   normalize : Types.ty -> Types.ty;
@@ -171,7 +173,7 @@ let shape context (ty : Ground.ty) : Memory_layout.shape =
                          })
                        variants)
               | Builtin_type _ -> bug "a built-in type under a path that is not built in"
-              | Todo_type -> bug "%s is a todo, which no build reaches" (Path.show path))))
+              | Types.Todo_type -> raise (Todo_type ty))))
 
 let representation context ty : Memory_layout.representation =
   match (Storage.elements_of ty, ty) with
