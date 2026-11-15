@@ -20,7 +20,7 @@ let settings : Build.settings = { build = Development; optimization = O1; extra 
 let load text =
   let pipeline = example_pipeline text in
   Pipeline.check pipeline [ example_file.module_.package ];
-  if List.assoc example_file (Pipeline.file_diagnostics pipeline [ example_file ]) <> [] then None
+  if Pipeline.file_diagnostics pipeline example_file <> [] then None
   else
     Some
       ( pipeline,
@@ -250,8 +250,7 @@ let () =
             | None ->
                 let pipeline = example_pipeline text in
                 Pipeline.check pipeline [ example_file.module_.package ];
-                shown
-                  (List.assoc example_file (Pipeline.file_diagnostics pipeline [ example_file ]));
+                shown (Pipeline.file_diagnostics pipeline example_file);
                 false)
           (if Filename.check_suffix file ".md" then Documents.truss_blocks (File_system.read file)
            else [ File_system.read file ]))

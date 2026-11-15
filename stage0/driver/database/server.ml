@@ -92,21 +92,24 @@ let with_lock path work =
 
 let served : string option ref = ref None
 
-let is_running directory identity key =
-  !served = Some key || is_locked (server_path directory identity key ^ ".lock")
+let running key =
+  !served = Some key
+  ||
+  match servers_directory () with
+  | Ok directory -> is_locked (server_path directory (executable_identity ()) key ^ ".lock")
+  | Error _ -> false
 
 let serving () =
   match servers_directory () with
   | Error _ -> []
   | Ok directory ->
-      let identity = executable_identity () in
-      let prefix = short identity ^ "-" in
+      let prefix = short (executable_identity ()) ^ "-" in
       Array.to_list (Sys.readdir directory)
       |> List.filter_map (fun entry ->
           if String.starts_with ~prefix entry && Filename.check_suffix entry ".key" then
             let path = Filename.concat directory entry in
             match File_system.read path with
-            | key when is_running directory identity key -> Some key
+            | key when running key -> Some key
             | _ | (exception Sys_error _) -> None
           else None)
       |> List.sort compare

@@ -1,9 +1,14 @@
-let mains pipeline packages =
-  List.filter_map (Pipeline.entry_point (Pipeline.names pipeline packages)) packages
+let main_of snapshot pipeline packages (package : Path.package) =
+  if List.mem { Path.package; modules = [] } (Command_packages.modules snapshot packages) then
+    Pipeline.main pipeline package
+  else None
 
-let main pipeline packages =
+let mains snapshot packages =
+  List.filter_map (main_of snapshot (Database.pipeline snapshot) packages) packages
+
+let main snapshot pipeline packages =
   let package = Command_packages.one packages in
-  match Pipeline.entry_point (Pipeline.names pipeline packages) package with
+  match main_of snapshot pipeline packages package with
   | Some main -> main
   | None ->
       Outcome.cannot_run
@@ -12,28 +17,29 @@ let main pipeline packages =
         (Path.show_package package)
 
 let refuse_unshippable snapshot packages compile main proofs =
-  let reached =
-    match Compile.reach_program compile ~main with
-    | Error message -> Outcome.cannot_run "%s" message
-    | Ok reached -> reached
-  in
   let in_code =
-    List.map
-      (fun ({ failure; file; line; column; way } : Compile.unshippable) ->
-        ( Command_packages.shown_workspace_path snapshot packages file,
-          line,
-          column,
-          (failure :> [ `Todo | `Echo | `Proof_hole ]),
-          way ))
-      reached.unshippable
+    match Compile.unshippable compile ~main with
+    | Error message -> Outcome.cannot_run "%s" message
+    | Ok unshippable ->
+        List.map
+          (fun ({ failure; file; line; column; way } : Compile.unshippable) ->
+            ( Command_packages.shown_workspace_path snapshot packages file,
+              line,
+              column,
+              (failure :> [ `Todo | `Echo | `Proof_hole ]),
+              way ))
+          unshippable
   in
   let in_proofs =
-    List.concat_map
-      (fun definition ->
-        List.map
-          (fun (file, line, column) -> (file, line, column, `Proof_hole, [ definition ]))
-          (Proofs.holes snapshot packages proofs definition))
-      reached.definitions
+    match Compile.reached_definitions compile ~main with
+    | Error message -> Outcome.cannot_run "%s" message
+    | Ok definitions ->
+        List.concat_map
+          (fun definition ->
+            List.map
+              (fun (file, line, column) -> (file, line, column, `Proof_hole, [ definition ]))
+              (Proofs.holes snapshot packages proofs definition))
+          definitions
   in
   match List.sort_uniq compare (in_code @ in_proofs) with
   | [] -> ()
@@ -78,7 +84,7 @@ let build_program ?output snapshot packages (build : Compiler.build) =
   let pipeline = Database.pipeline ~checks:(not is_release) snapshot in
   let report = Report.gather ~proofs:is_release pipeline snapshot packages in
   if not (Report.clean report) then raise (Report.Errors report);
-  let main = main pipeline packages in
+  let main = main snapshot pipeline packages in
   let compile = Compiler.create pipeline snapshot packages build in
   Option.iter (refuse_unshippable snapshot packages compile main) (Report.proofs report);
   let output = Option.value output ~default:(Compile.fresh_program compile) in

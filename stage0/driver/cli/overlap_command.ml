@@ -103,35 +103,32 @@ let keyed_diagnostics snapshot =
   let packages = List.map snd (Database.packages snapshot) in
   Pipeline.check pipeline packages;
   List.concat_map
-    (fun (file, diagnostics) ->
+    (fun file ->
       List.map
         (fun (diagnostic : Diagnostic.t) ->
           ( ( Database.file_path snapshot file,
               Diagnostic.Code.name diagnostic.code,
               diagnostic.message ),
             diagnostic ))
-        diagnostics)
-    (Pipeline.file_diagnostics pipeline (Command_packages.files snapshot packages))
+        (Pipeline.file_diagnostics pipeline file))
+    (Command_packages.files snapshot packages)
 
-let merge_diagnostics ~own (side : Database.side) =
+let merge_diagnostics snapshot (side : Database.side) =
   Result.map
     (fun merged ->
-      let sides = List.map fst (Lazy.force own @ keyed_diagnostics side.other) in
+      let sides = List.map fst (keyed_diagnostics snapshot @ keyed_diagnostics side.other) in
       List.filter_map
         (fun (((file, _, _) as key), diagnostic) ->
           if List.mem key sides then None else Some { file; diagnostic })
         (List.sort_uniq (fun (left, _) (right, _) -> compare left right) (keyed_diagnostics merged)))
     (side.merged ())
 
-let compare_with ~own_diagnostics snapshot pipeline (other, side) =
+let compare_with ~merge snapshot pipeline (other, side) =
   match side with
   | Error message -> { other; overlaps = []; merged = []; error = Some message }
   | Ok side -> (
       let overlaps = overlaps snapshot pipeline side in
-      let merged =
-        match own_diagnostics with Some own -> merge_diagnostics ~own side | None -> Ok []
-      in
-      match merged with
+      match if merge then merge_diagnostics snapshot side else Ok [] with
       | Ok merged -> { other; overlaps; merged; error = None }
       | Error message -> { other; overlaps; merged = []; error = Some message })
 
@@ -200,7 +197,7 @@ let worktree_sides snapshot =
 let with_other_worktrees snapshot pipeline =
   List.filter
     (fun comparison -> comparison.overlaps <> [])
-    (List.map (compare_with ~own_diagnostics:None snapshot pipeline) (worktree_sides snapshot))
+    (List.map (compare_with ~merge:false snapshot pipeline) (worktree_sides snapshot))
 
 let run ~with_ ~merge =
   let snapshot, _ = Command_packages.current () in
@@ -213,8 +210,7 @@ let run ~with_ ~merge =
         | Error message -> Outcome.cannot_run "%s" message)
     | None -> worktree_sides snapshot
   in
-  let own_diagnostics = if merge then Some (lazy (keyed_diagnostics snapshot)) else None in
-  let comparisons = List.map (compare_with ~own_diagnostics snapshot pipeline) sides in
+  let comparisons = List.map (compare_with ~merge snapshot pipeline) sides in
   if Output.json () then
     Json.print (Json.document ~diagnostics:[] [ ("overlaps", to_json comparisons) ])
   else if sides = [] then

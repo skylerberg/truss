@@ -74,19 +74,6 @@ let exclusively name work =
       Unix.lockf lock F_LOCK 0;
       work ())
 
-let refuse_standard_diagnostics pipeline (package : Project.package) =
-  match
-    List.concat_map
-      (fun ((file : Path.file), diagnostics) ->
-        let source = Source.create ~path:(Path.show_file file) (List.assoc file package.files) in
-        List.map (Diagnostic.render source) diagnostics)
-      (Pipeline.file_diagnostics pipeline (List.map fst package.files))
-  with
-  | [] -> ()
-  | rendered ->
-      Compiler_bug.bug ~stage:"Database" "the standard library has diagnostics:\n%s"
-        (String.concat "" rendered)
-
 let package_state (package : Project.package) ~hash ~visible =
   let key = state_key ~hash ~visible in
   match Hashtbl.find_opt loaded_states key with
@@ -105,14 +92,13 @@ let package_state (package : Project.package) ~hash ~visible =
                 match stored () with
                 | Some state -> state
                 | None ->
-                    let pipeline =
-                      Pipeline.create
-                        ~loaded:(List.map (fun visible -> visible.state) visible)
-                        [ package ]
+                    let state =
+                      Pipeline.state
+                        (Pipeline.create
+                           ~loaded:(List.map (fun visible -> visible.state) visible)
+                           [ package ])
+                        package.name
                     in
-                    let state = Pipeline.state pipeline package.name in
-                    if package.name = Path.standard_package then
-                      refuse_standard_diagnostics pipeline package;
                     Store.add_result (store ()) ~kind:Package_state ~key
                       (Marshal.to_string state []);
                     Store.flush (store ());
@@ -127,12 +113,29 @@ let standard_package : Project.package =
 
 let standard_state =
   lazy
-    (package_state standard_package ~visible:[]
-       ~hash:
-         (Registry.Content.hash
-            (List.map
-               (fun (file, text) -> (Project.file_path ~directory:"" file, text))
-               Standard_library.files)))
+    (let standard =
+       package_state standard_package ~visible:[]
+         ~hash:
+           (Registry.Content.hash
+              (List.map
+                 (fun (file, text) -> (Project.file_path ~directory:"" file, text))
+                 Standard_library.files))
+     in
+     let pipeline = Pipeline.create ~loaded:[ standard.state ] [] in
+     let rendered =
+       List.concat_map
+         (fun ((file : Path.file), text) ->
+           match Pipeline.file_diagnostics pipeline file with
+           | [] -> []
+           | diagnostics ->
+               let source = Source.create ~path:(Path.show_file file) text in
+               List.map (Diagnostic.render source) diagnostics)
+         Standard_library.files
+     in
+     if rendered <> [] then
+       Compiler_bug.bug ~stage:"Database" "the standard library has diagnostics:\n%s"
+         (String.concat "" rendered);
+     standard)
 
 let states () =
   List.sort compare
@@ -295,19 +298,11 @@ let package_states snapshot =
       snapshot.project.places
   in
   let states = Hashtbl.create 8 in
-  let visible name =
-    let seen = Hashtbl.create 8 in
-    let rec visit name =
-      List.iter
-        (fun dependency ->
-          if List.mem_assoc dependency hashes && not (Hashtbl.mem seen dependency) then begin
-            Hashtbl.replace seen dependency ();
-            visit dependency
-          end)
-        (dependency_names snapshot name)
-    in
-    visit name;
-    List.sort Path.compare_package (Hashtbl.fold (fun name () names -> name :: names) seen [])
+  let rec visible name =
+    List.concat_map
+      (fun dependency ->
+        if List.mem_assoc dependency hashes then dependency :: visible dependency else [])
+      (dependency_names snapshot name)
   in
   let rec state_of name =
     match Hashtbl.find_opt states name with
@@ -317,7 +312,9 @@ let package_states snapshot =
           match package snapshot name with
           | Some package ->
               package_state package ~hash:(List.assoc name hashes)
-                ~visible:(standard :: List.map state_of (visible name))
+                ~visible:
+                  (standard
+                  :: List.map state_of (List.sort_uniq Path.compare_package (visible name)))
           | None -> Compiler_bug.bug ~stage:"Database" "%s has no files" (Path.show_package name)
         in
         Hashtbl.replace states name loaded;
@@ -325,7 +322,7 @@ let package_states snapshot =
   in
   standard :: List.map (fun (name, _) -> state_of name) hashes
 
-let lay_out snapshot =
+let layout snapshot =
   let loaded = package_states snapshot in
   ( loaded,
     List.filter
@@ -336,7 +333,7 @@ let lay_out snapshot =
 let pipeline_states loaded = List.map (fun (loaded : loaded) -> loaded.state) loaded
 
 let cold_pipeline ~checks snapshot =
-  let loaded, packages = lay_out snapshot in
+  let loaded, packages = layout snapshot in
   Pipeline.create ~checks ~loaded:(pipeline_states loaded) packages
 
 let database_directory = ".truss"
@@ -401,7 +398,7 @@ let project_texts snapshot =
   Hashtbl.find_opt texts
 
 let opened segments snapshot =
-  let loaded, packages = lay_out snapshot in
+  let loaded, packages = layout snapshot in
   let cold () =
     Segments.discard segments;
     Pipeline.create ~loaded:(pipeline_states loaded) packages
@@ -486,7 +483,7 @@ let apply_changes pipeline (after : snapshot) = function
       Pipeline.update pipeline changes;
       None
   | None ->
-      let loaded, packages = lay_out after in
+      let loaded, packages = layout after in
       Pipeline.relayout pipeline ~loaded:(pipeline_states loaded) packages;
       Some loaded
 
@@ -627,7 +624,6 @@ let refresh database =
   in
   match files with
   | None -> false
-  | Some files when List.sort compare files = List.sort compare database.snapshot.files -> false
   | Some files -> (
       let before = database.snapshot in
       let after = with_files before files in
@@ -817,17 +813,16 @@ let published name version =
           (Printf.sprintf "`%s` %s cannot be read: %s." (Path.show_package name)
              (Registry.Version.show version) reason)
       in
-      match fetch name version ~hash with
+      match load_published name version ~hash with
       | Error reason -> cannot reason
-      | Ok directory -> (
-          let snapshot = snapshot_of_files Published (Registry.Content.input_files directory) in
-          match (problems snapshot, snapshot.project.own.packages) with
-          | problem :: _, _ -> cannot (Project.show_problem problem)
-          | [], [ (_, package) ] when package.name = name -> Ok snapshot
-          | [], _ ->
-              cannot
-                (Printf.sprintf "its manifest does not name the package `%s`"
-                   (Path.show_package name))))
+      | Ok _ -> (
+          let snapshot =
+            snapshot_of_files Published
+              (Registry.Content.input_files (Filename.concat (packages_directory ()) hash))
+          in
+          match problems snapshot with
+          | [] -> Ok snapshot
+          | problem :: _ -> cannot (Project.show_problem problem)))
 
 let server_key directory = Option.value (root_of directory) ~default:""
 

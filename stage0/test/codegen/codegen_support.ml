@@ -2,7 +2,7 @@ let test = Harness.test
 
 let diagnostics pipeline (file : Path.file) =
   Pipeline.check pipeline [ file.module_.package ];
-  List.assoc file (Pipeline.file_diagnostics pipeline [ file ])
+  Pipeline.file_diagnostics pipeline file
 
 let fail = Harness.fail
 let expect_string = Harness.expect_string

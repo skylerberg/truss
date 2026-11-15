@@ -41,22 +41,18 @@ let record pipeline snapshot registry (package : Path.package) =
   let in_registry name = List.find_opt (fun (other, _, _) -> other = name) built in
   let dependencies ~code name =
     let used =
-      if code then Option.value ~default:[] (Pipeline.code_packages pipeline name) else []
+      if code then begin
+        Pipeline.check pipeline [ name ];
+        Option.value ~default:[] (Pipeline.code_packages pipeline name)
+      end
+      else []
     in
     List.filter
       (fun dependency -> (not code) || List.mem dependency used)
       (Database.dependency_names snapshot name)
   in
   let problems = ref [] in
-  let closures = Hashtbl.create 8 and publications = Hashtbl.create 8 in
   let rec closure name : Lock.t =
-    match Hashtbl.find_opt closures name with
-    | Some entries -> entries
-    | None ->
-        let entries = closure_of name in
-        Hashtbl.replace closures name entries;
-        entries
-  and closure_of name =
     let seen = Hashtbl.create 16 and entries = ref [] in
     let add name version hash = entries := { Lock.name; version; hash; holds = [] } :: !entries in
     let rec visit name =
@@ -87,18 +83,10 @@ let record pipeline snapshot registry (package : Path.package) =
     List.iter visit (dependencies ~code:true name);
     List.sort (fun (left : Lock.entry) right -> Path.compare_package left.name right.name) !entries
   and published_as name directory =
-    match Hashtbl.find_opt publications name with
-    | Some publication -> publication
-    | None ->
-        let hash = Registry.Content.hash (files directory (closure name)) in
-        let publication =
-          List.find_map
-            (fun (version, version_hash) ->
-              if version_hash = hash then Some (version, hash) else None)
-            (Registry.Index.versions registry name)
-        in
-        Hashtbl.replace publications name publication;
-        publication
+    let hash = Registry.Content.hash (files directory (closure name)) in
+    List.find_map
+      (fun (version, version_hash) -> if version_hash = hash then Some (version, hash) else None)
+      (Registry.Index.versions registry name)
   in
   let entries = closure package in
   (entries, List.sort_uniq compare !problems)
