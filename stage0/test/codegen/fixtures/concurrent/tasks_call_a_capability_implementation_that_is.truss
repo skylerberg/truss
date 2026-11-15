@@ -24,7 +24,7 @@ fn tallied(count: Int64) -> Int64
   Tally.total()
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn run() -> ExitCode
   uses Tasks, Console
 {
   var counter = Counter(count: 0)

@@ -15,7 +15,7 @@ impl Tally for Counter {
   }
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn run() -> ExitCode
   uses Tasks, Console
 {
   var counter = Counter(count: 0)

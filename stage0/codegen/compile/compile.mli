@@ -101,7 +101,6 @@ module For_testing : sig
 
   val run_program :
     ?input:string ->
-    ?in_order:bool ->
     t ->
     main:Path.t ->
     arguments:string list ->

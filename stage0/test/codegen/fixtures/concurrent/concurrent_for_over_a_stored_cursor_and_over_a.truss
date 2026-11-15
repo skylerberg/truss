@@ -32,7 +32,7 @@ fn cursors() -> Int64
   0
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn run() -> ExitCode
   uses Tasks, Console
 {
   Console.print_line("${cursors()}")

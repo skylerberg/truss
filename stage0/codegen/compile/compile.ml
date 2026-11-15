@@ -270,7 +270,7 @@ let small_callees ~find ~worked_on fragment =
 
 let test_runner : Instance.key = Code { path = Well_known.path Run_tests; type_arguments = [] }
 
-let rec build ?progress ?tests ?in_order ?(supplied = []) compiler ~roots ~startup ~output =
+let rec build ?progress ?tests ?(supplied = []) compiler ~roots ~startup ~output =
   let supplied =
     List.map (fun instance -> Emit_c.fragment (Lower.env compiler.context) (Code instance)) supplied
   in
@@ -295,7 +295,7 @@ let rec build ?progress ?tests ?in_order ?(supplied = []) compiler ~roots ~start
     | Release -> fun _ -> []
   in
   match
-    Build.program ?progress ?tests ?in_order ~copied compiler.toolchain compiler.cache
+    Build.program ?progress ?tests ~copied compiler.toolchain compiler.cache
       (Lower.env compiler.context) compiler.settings
       ~files:(List.map (fun unit -> [ unit ]) units)
       ~sources ~output
@@ -310,9 +310,9 @@ and build_test_program ?progress ?supplied compiler ~time_limit_ms ~roots ~outpu
          (List.map Instance.symbol roots))
     ~output
 
-and build_and_run ?input ?time_limit_ms ?(in_order = true) compiler ~roots ~startup ~arguments =
+and build_and_run ?input ?time_limit_ms compiler ~roots ~startup ~arguments =
   let output = fresh_program compiler in
-  build compiler ~in_order ~roots ~startup ~output;
+  build compiler ~roots ~startup ~output;
   let result = Process.run ?input ?time_limit_ms output arguments in
   (try Sys.remove output with Sys_error _ -> ());
   result
@@ -659,10 +659,10 @@ let test_keys compiler tests =
       | exception (Compiler_bug.Bug _ | Lower.Unsupported _) -> None)
     tests
 
-let run_program ?input ?(in_order = false) compiler ~main ~arguments =
+let run_program ?input compiler ~main ~arguments =
   reporting compiler @@ fun () ->
   let root = Instance.Program_main main in
-  build_and_run ?input ~in_order compiler ~roots:[ root ]
+  build_and_run ?input compiler ~roots:[ root ]
     ~startup:(Startup.program_calling (Instance.symbol root))
     ~arguments
 

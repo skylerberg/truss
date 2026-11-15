@@ -8,7 +8,7 @@ fn Bag.element(self, position: UInt64) lends Int64 {
   self.items[position]
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn run() -> ExitCode
   uses Tasks, Console
 {
   let bag = Bag(items: [5, 6, 7])

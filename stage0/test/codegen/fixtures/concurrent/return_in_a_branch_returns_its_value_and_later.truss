@@ -14,7 +14,7 @@ fn leaves(early: Bool) -> Int64
   1
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn run() -> ExitCode
   uses Tasks, Console
 {
   Console.print_line("${leaves(early: false)}")

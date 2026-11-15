@@ -1,6 +1,6 @@
 type Pair(first: Int64, second: Int64)
 
-fn main(arguments: List[String]) -> ExitCode
+fn run() -> ExitCode
   uses Tasks, Console
 {
   var pair = Pair(first: 0, second: 0)

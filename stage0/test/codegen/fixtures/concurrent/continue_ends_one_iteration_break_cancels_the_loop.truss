@@ -33,7 +33,7 @@ fn find(count: Int64, wanted: Int64) -> Int64
   -1
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn run() -> ExitCode
   uses Tasks, Console
 {
   skips(4)

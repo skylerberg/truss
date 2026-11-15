@@ -20,6 +20,7 @@ let headers =
 #include <sys/socket.h>
 #ifdef __linux__
 #include <sys/epoll.h>
+#include <sys/timerfd.h>
 #else
 #include <sys/event.h>
 #endif
@@ -182,7 +183,7 @@ static void t_stack_overflow(int signal) {
   t_end(t_panicked, "", 101);
 }
 
-void t_runtime_install(void) {
+static void t_install_signal_dispositions(void) {
   stack_t stack;
   memset(&stack, 0, sizeof stack);
   stack.ss_sp = t_signal_stack;
@@ -196,6 +197,12 @@ void t_runtime_install(void) {
   sigaction(SIGSEGV, &action, NULL);
   sigaction(SIGBUS, &action, NULL);
   signal(SIGPIPE, SIG_IGN);
+  sigset_t runtime;
+  sigemptyset(&runtime);
+  sigaddset(&runtime, SIGSEGV);
+  sigaddset(&runtime, SIGBUS);
+  sigaddset(&runtime, SIGURG);
+  pthread_sigmask(SIG_UNBLOCK, &runtime, NULL);
 }
 |}
 
@@ -255,8 +262,6 @@ static size_t t_stack_size(void) {
   return stack;
 }
 
-#ifndef T_IN_ORDER
-
 static void t_thread_signal_stack_install(void) {
   stack_t stack;
   memset(&stack, 0, sizeof stack);
@@ -270,8 +275,6 @@ static void t_thread_attributes(pthread_attr_t *attributes) {
   pthread_attr_init(attributes);
   pthread_attr_setstacksize(attributes, t_stack_size());
 }
-
-#endif
 
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer)
@@ -604,142 +607,10 @@ static void t_descriptors_poll(const int32_t *descriptors, size_t count) {
   free(waited);
 }
 
-#ifdef T_IN_ORDER
-
-struct t_group {
-  int cancelled;
-};
-
-uint64_t t_runtime_tasks_open(void) {
-  struct t_group *group = malloc(sizeof *group);
-  if (group == NULL) t_out_of_memory();
-  group->cancelled = 0;
-  return (uint64_t)(uintptr_t)group;
-}
-
-uint8_t t_runtime_tasks_spawn(uint64_t handle, void (*code)(void *environment, uint64_t item),
-                              void *environment, uint64_t item) {
-  struct t_group *group = (struct t_group *)(uintptr_t)handle;
-  if (group->cancelled) return 0;
-  code(environment, item);
-  return 1;
-}
-
-int32_t t_runtime_tasks_join(uint64_t handle) {
-  free((struct t_group *)(uintptr_t)handle);
-  return 0;
-}
-
-int32_t t_runtime_tasks_cancel(uint64_t handle) {
-  struct t_group *group = (struct t_group *)(uintptr_t)handle;
-  if (group->cancelled) return 0;
-  group->cancelled = 1;
-  return 1;
-}
-
-int32_t t_runtime_tasks_cancelled(void) { return 0; }
-
-uint64_t t_runtime_tasks_watch(uint64_t key) {
-  (void)key;
-  return 0;
-}
-
-int32_t t_runtime_tasks_wait(uint64_t key, uint64_t ticket) {
-  (void)key;
-  (void)ticket;
-  pthread_mutex_lock(&t_text_lock);
-  t_text_length = 0;
-  t_text_string("deadlock: a task waited for another task, which cannot run until this one ends");
-  t_end(t_panicked, "panic: ", 101);
-}
-
-int32_t t_runtime_tasks_wake(uint64_t key) {
-  (void)key;
-  return 0;
-}
-
-int32_t t_runtime_tasks_lock(uint64_t mutex) {
-  (void)mutex;
-  return 0;
-}
-
-int32_t t_runtime_tasks_unlock(uint64_t mutex) {
-  (void)mutex;
-  return 0;
-}
-
-int32_t t_runtime_tasks_yield(void) { return 0; }
-
-void t_runtime_blocking_begin(void) {}
-
-void t_runtime_blocking_end(void) {}
-
-uint64_t t_runtime_descriptor_watch(int32_t descriptor, int32_t writing) {
-  (void)descriptor;
-  (void)writing;
-  return 0;
-}
-
-int32_t t_runtime_descriptor_wait(int32_t descriptor, int32_t writing, uint64_t ticket) {
-  (void)ticket;
-  if (t_descriptor_poll(descriptor, writing)) return 1;
-  errno = EAGAIN;
-  return 0;
-}
-
-uint64_t t_runtime_descriptors_watch(void) { return 0; }
-
-int32_t t_runtime_descriptors_wait(const int32_t *descriptors, size_t count, uint64_t ticket) {
-  (void)ticket;
-  t_descriptors_poll(descriptors, count);
-  return 1;
-}
-
-int32_t t_runtime_sleep(int64_t seconds, int64_t nanoseconds) {
-  if (seconds < 0) return 0;
-  struct timespec left = {(time_t)seconds, (long)nanoseconds};
-  while (nanosleep(&left, &left) != 0 && errno == EINTR) {
-  }
-  return 0;
-}
-
-int32_t t_runtime_close(int32_t descriptor) { return close(descriptor); }
-
-int32_t t_runtime_signals_wait(const int32_t *signals, size_t count) {
-  sigset_t set;
-  sigemptyset(&set);
-  size_t added = 0;
-  for (size_t index = 0; index < count; index++)
-    if (signals[index] > 0 && sigaddset(&set, signals[index]) == 0) added += 1;
-  sigprocmask(SIG_BLOCK, &set, NULL);
-  for (;;) {
-    int arrived = 0;
-    if (added == 0)
-      sleep(3600);
-    else if (sigwait(&set, &arrived) == 0)
-      return arrived;
-  }
-}
-
-#endif
-
 struct t_branch {
   void (*run)(void *environment);
   void *environment;
 };
-
-#ifdef T_IN_ORDER
-
-void t_runtime_parallel(const struct t_branch *branches, uint64_t count) {
-  for (uint64_t index = 0; index < count; index++) branches[index].run(branches[index].environment);
-}
-
-void t_runtime_parallel_range(void (*body)(void *environment, uint64_t first, uint64_t last),
-                              void *environment, uint64_t first, uint64_t last) {
-  body(environment, first, last);
-}
-
-#else
 
 struct t_job {
   void (*run)(void *environment);
@@ -768,9 +639,12 @@ __attribute__((noinline)) static struct t_worker *t_worker_self(void) {
   __asm__ __volatile__("");
   return t_self;
 }
+static uint32_t t_requested_workers;
+static size_t t_pool_workers = 1;
 static pthread_once_t t_pool_once = PTHREAD_ONCE_INIT;
 static pthread_mutex_t t_pool_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t t_pool_wake = PTHREAD_COND_INITIALIZER;
+static pthread_mutex_t t_spare_lock = PTHREAD_MUTEX_INITIALIZER;
 static atomic_size_t t_sleepers;
 static atomic_size_t t_idle_runners;
 
@@ -868,11 +742,11 @@ static void t_rest(unsigned idle) {
   }
 }
 
-static void t_sleep(struct t_job *job, int runner) {
+static void t_sleep(atomic_int *done, int runner) {
   pthread_mutex_lock(&t_pool_lock);
   atomic_fetch_add(&t_sleepers, 1);
   if (runner) atomic_fetch_add(&t_idle_runners, 1);
-  if (!(job != NULL && atomic_load(&job->done)) && !t_any_job() &&
+  if (!(done != NULL && atomic_load(done)) && !t_any_job() &&
       !(runner && atomic_load(&t_run_count) > 0))
     pthread_cond_wait(&t_pool_wake, &t_pool_lock);
   if (runner) atomic_fetch_sub(&t_idle_runners, 1);
@@ -892,7 +766,7 @@ static void t_wait_for(struct t_worker *self, struct t_job *job) {
     } else {
       atomic_fetch_add(&t_blocked, 1);
       t_spare_ensure();
-      t_sleep(job, 0);
+      t_sleep(&job->done, 0);
       atomic_fetch_sub(&t_blocked, 1);
       idle = 0;
     }
@@ -910,13 +784,9 @@ static void t_runner_signals(void) {
   pthread_sigmask(SIG_SETMASK, &all, NULL);
 }
 
-static void *t_worker_main(void *argument) {
-  struct t_worker *self = argument;
-  t_self = self;
-  t_runner_signals();
-  t_thread_signal_stack_install();
+static void t_run_until(struct t_worker *self, atomic_int *done) {
   unsigned idle = 0;
-  for (;;) {
+  while (done == NULL || !atomic_load(done)) {
     struct t_task *task = t_run_pop();
     struct t_job *job = task == NULL ? t_find(self) : NULL;
     if (task != NULL) {
@@ -928,35 +798,43 @@ static void *t_worker_main(void *argument) {
     } else if (++idle < 40) {
       t_rest(idle);
     } else {
-      t_sleep(NULL, 1);
+      t_sleep(done, 1);
       idle = 0;
     }
   }
+}
+
+static void *t_worker_main(void *argument) {
+  struct t_worker *self = argument;
+  t_self = self;
+  t_runner_signals();
+  t_thread_signal_stack_install();
+  t_run_until(self, NULL);
   return NULL;
 }
 
 static void t_pool_start(void) {
-  long count = sysconf(_SC_NPROCESSORS_ONLN);
-  const char *asked = getenv("TRUSS_WORKERS");
-  if (asked != NULL && asked[0] != 0) count = strtol(asked, NULL, 10);
-  if (count < 1) count = 1;
+  long count = t_requested_workers;
+  if (count == 0) {
+    count = sysconf(_SC_NPROCESSORS_ONLN);
+    const char *requested = getenv("TRUSS_WORKERS");
+    if (requested != NULL && requested[0] != 0) count = strtol(requested, NULL, 10);
+  }
   if (count > T_WORKERS) count = T_WORKERS;
-  for (long index = 0; index < count; index++) t_workers[index].random = (uint64_t)index + 1;
-  atomic_store(&t_worker_count, (size_t)count);
-  if (count == 1) return;
-  t_self = &t_workers[0];
   pthread_attr_t attributes;
   t_thread_attributes(&attributes);
   pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED);
-  for (long index = 1; index < count; index++) {
+  pthread_mutex_lock(&t_spare_lock);
+  while ((long)t_pool_workers < count) {
+    size_t index = atomic_load(&t_worker_count);
+    t_workers[index].random = (uint64_t)index + 1;
     pthread_t thread;
-    if (pthread_create(&thread, &attributes, t_worker_main, &t_workers[index]) != 0) {
-      atomic_store(&t_worker_count, (size_t)index);
-      break;
-    }
+    if (pthread_create(&thread, &attributes, t_worker_main, &t_workers[index]) != 0) break;
+    atomic_store(&t_worker_count, index + 1);
+    t_pool_workers += 1;
   }
+  pthread_mutex_unlock(&t_spare_lock);
   pthread_attr_destroy(&attributes);
-  if (atomic_load(&t_worker_count) == 1) t_self = NULL;
 }
 
 static void t_fork(struct t_worker *self, const struct t_branch *branches, size_t count) {
@@ -987,16 +865,16 @@ static void t_fork(struct t_worker *self, const struct t_branch *branches, size_
 
 void t_runtime_parallel(const struct t_branch *branches, uint64_t count) {
   pthread_once(&t_pool_once, t_pool_start);
-  struct t_worker *self = t_worker_self();
-  if (self == NULL) {
+  if (t_pool_workers == 1) {
     for (uint64_t index = 0; index < count; index++) branches[index].run(branches[index].environment);
     return;
   }
+  struct t_worker *self = t_worker_self();
   while (count > 0) {
-    size_t some = count > T_FORK + 1 ? T_FORK + 1 : (size_t)count;
-    t_fork(self, branches, some);
-    branches += some;
-    count -= some;
+    size_t batch = count > T_FORK + 1 ? T_FORK + 1 : (size_t)count;
+    t_fork(self, branches, batch);
+    branches += batch;
+    count -= batch;
   }
 }
 
@@ -1069,7 +947,6 @@ struct t_group {
   struct t_group *children;
   struct t_group *next;
   struct t_task *joiner;
-  atomic_int *joined;
   struct t_group *interrupted;
 };
 
@@ -1179,7 +1056,6 @@ static void t_task_ready(struct t_task *task) {
   t_run_push(task);
 }
 
-static pthread_mutex_t t_spare_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t t_spare_wake = PTHREAD_COND_INITIALIZER;
 static int t_spares;
 static int t_spares_idle;
@@ -1318,37 +1194,15 @@ static void t_monitor_rouse(void) {
 
 void t_runtime_blocking_begin(void) {
   struct t_task *task = t_task_self();
-  if (task != NULL) {
-    atomic_store(&task->thread, pthread_self());
-    atomic_store(&task->blocking, 1);
-  }
+  atomic_store(&task->thread, pthread_self());
+  atomic_store(&task->blocking, 1);
   atomic_store(&t_caller_self()->since, atomic_load(&t_tick));
   t_spare_ensure();
 }
 
 void t_runtime_blocking_end(void) {
-  struct t_task *task = t_task_self();
   if (atomic_exchange(&t_caller_self()->since, 0) == T_COUNTED) atomic_fetch_sub(&t_blocked, 1);
-  if (task != NULL) atomic_store(&task->blocking, 0);
-}
-
-static pthread_mutex_t t_block_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t t_block_wake = PTHREAD_COND_INITIALIZER;
-
-static void t_block_until(atomic_int *done) {
-  atomic_fetch_add(&t_blocked, 1);
-  t_spare_ensure();
-  pthread_mutex_lock(&t_block_lock);
-  while (!atomic_load(done)) pthread_cond_wait(&t_block_wake, &t_block_lock);
-  pthread_mutex_unlock(&t_block_lock);
-  atomic_fetch_sub(&t_blocked, 1);
-}
-
-static void t_unblock(atomic_int *done) {
-  atomic_store(done, 1);
-  pthread_mutex_lock(&t_block_lock);
-  pthread_cond_broadcast(&t_block_wake);
-  pthread_mutex_unlock(&t_block_lock);
+  atomic_store(&t_task_self()->blocking, 0);
 }
 
 static void t_interrupt_handler(int signal) { (void)signal; }
@@ -1406,17 +1260,10 @@ static void t_interrupt_start(void) {
 
 #define T_WAIT_SLOTS 1024
 
-struct t_thread_waiter {
-  uint64_t key;
-  atomic_int woken;
-  struct t_thread_waiter *next;
-};
-
 struct t_wait_slot {
   pthread_mutex_t lock;
   atomic_uint_fast64_t wakes;
   struct t_task *parked;
-  struct t_thread_waiter *threads;
 };
 
 static struct t_wait_slot t_wait_slots[T_WAIT_SLOTS];
@@ -1432,8 +1279,7 @@ static struct t_wait_slot *t_wait_slot(uint64_t key) {
 }
 
 int32_t t_runtime_tasks_cancelled(void) {
-  struct t_task *task = t_task_self();
-  for (struct t_group *group = task == NULL ? NULL : task->group; group != NULL; group = group->parent)
+  for (struct t_group *group = t_task_self()->group; group != NULL; group = group->parent)
     if (atomic_load(&group->cancelled)) return 1;
   return 0;
 }
@@ -1444,24 +1290,16 @@ static void t_wait(uint64_t key, uint64_t ticket, int cancellable) {
   struct t_wait_slot *slot = t_wait_slot(key);
   struct t_task *task = t_task_self();
   pthread_mutex_lock(&slot->lock);
-  if (task != NULL && cancellable) atomic_store(&task->cancellable, slot);
+  if (cancellable) atomic_store(&task->cancellable, slot);
   if (atomic_load(&slot->wakes) != ticket || (cancellable && t_runtime_tasks_cancelled())) {
     pthread_mutex_unlock(&slot->lock);
-  } else if (task != NULL) {
+  } else {
     task->wait_key = key;
     task->next = slot->parked;
     slot->parked = task;
     t_task_park(task, &slot->lock);
-  } else {
-    struct t_thread_waiter waiter;
-    waiter.key = key;
-    atomic_init(&waiter.woken, 0);
-    waiter.next = slot->threads;
-    slot->threads = &waiter;
-    pthread_mutex_unlock(&slot->lock);
-    t_block_until(&waiter.woken);
   }
-  if (task != NULL && cancellable) atomic_store(&task->cancellable, NULL);
+  if (cancellable) atomic_store(&task->cancellable, NULL);
 }
 
 int32_t t_runtime_tasks_wait(uint64_t key, uint64_t ticket) {
@@ -1472,7 +1310,6 @@ int32_t t_runtime_tasks_wait(uint64_t key, uint64_t ticket) {
 int32_t t_runtime_tasks_wake(uint64_t key) {
   struct t_wait_slot *slot = t_wait_slot(key);
   struct t_task *tasks = NULL;
-  struct t_thread_waiter *threads = NULL;
   pthread_mutex_lock(&slot->lock);
   atomic_fetch_add(&slot->wakes, 1);
   for (struct t_task **link = &slot->parked; *link != NULL;) {
@@ -1485,26 +1322,11 @@ int32_t t_runtime_tasks_wake(uint64_t key) {
     task->next = tasks;
     tasks = task;
   }
-  for (struct t_thread_waiter **link = &slot->threads; *link != NULL;) {
-    struct t_thread_waiter *waiter = *link;
-    if (waiter->key != key) {
-      link = &waiter->next;
-      continue;
-    }
-    *link = waiter->next;
-    waiter->next = threads;
-    threads = waiter;
-  }
   pthread_mutex_unlock(&slot->lock);
   while (tasks != NULL) {
     struct t_task *task = tasks;
     tasks = task->next;
     t_task_ready(task);
-  }
-  while (threads != NULL) {
-    struct t_thread_waiter *waiter = threads;
-    threads = waiter->next;
-    t_unblock(&waiter->woken);
   }
   return 0;
 }
@@ -1536,11 +1358,21 @@ struct t_timer {
 };
 
 static pthread_mutex_t t_timer_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t t_timer_wake;
-static pthread_once_t t_timer_once = PTHREAD_ONCE_INIT;
 static struct t_timer **t_timers;
 static size_t t_timer_count;
 static size_t t_timer_room;
+
+#define T_TIMERS_EVENT 1
+#define T_SIGNALS_EVENT 2
+
+static int t_poller = -1;
+static pthread_once_t t_poller_once = PTHREAD_ONCE_INIT;
+static void t_poller_start(void);
+static void t_signals_arrived(void);
+
+#ifdef __linux__
+static int t_timer_descriptor = -1;
+#endif
 
 static uint64_t t_monotonic(void) {
   struct timespec now;
@@ -1581,31 +1413,28 @@ static void t_timer_remove(struct t_timer *timer) {
   t_timer_settle(index);
 }
 
-static void *t_timer_main(void *argument) {
-  (void)argument;
-  sigset_t all;
-  sigfillset(&all);
-  pthread_sigmask(SIG_SETMASK, &all, NULL);
-  pthread_mutex_lock(&t_timer_lock);
-  for (;;) {
-    if (t_timer_count == 0) {
-      pthread_cond_wait(&t_timer_wake, &t_timer_lock);
-      continue;
-    }
-    struct t_timer *first = t_timers[0];
-    uint64_t now = t_monotonic();
-    if (first->deadline > now) {
-#ifdef __APPLE__
-      uint64_t left = first->deadline - now;
-      struct timespec duration = {(time_t)(left / 1000000000u), (long)(left % 1000000000u)};
-      pthread_cond_timedwait_relative_np(&t_timer_wake, &t_timer_lock, &duration);
+static void t_timer_arm(void) {
+  uint64_t deadline = t_timers[0]->deadline;
+#ifdef __linux__
+  struct itimerspec setting;
+  memset(&setting, 0, sizeof setting);
+  setting.it_value.tv_sec = (time_t)(deadline / 1000000000u);
+  setting.it_value.tv_nsec = (long)(deadline % 1000000000u);
+  timerfd_settime(t_timer_descriptor, TFD_TIMER_ABSTIME, &setting, NULL);
 #else
-      struct timespec deadline = {(time_t)(first->deadline / 1000000000u),
-                                  (long)(first->deadline % 1000000000u)};
-      pthread_cond_timedwait(&t_timer_wake, &t_timer_lock, &deadline);
+  uint64_t now = t_monotonic();
+  struct kevent change;
+  EV_SET(&change, T_TIMERS_EVENT, EVFILT_TIMER, EV_ADD | EV_ONESHOT, NOTE_NSECONDS,
+         deadline > now ? (intptr_t)(deadline - now) : 1, NULL);
+  kevent(t_poller, &change, 1, NULL, 0, NULL);
 #endif
-      continue;
-    }
+}
+
+static void t_timers_fire(void) {
+  uint64_t now = t_monotonic();
+  pthread_mutex_lock(&t_timer_lock);
+  while (t_timer_count > 0 && t_timers[0]->deadline <= now) {
+    struct t_timer *first = t_timers[0];
     t_timer_remove(first);
     first->fired = 1;
     uint64_t key = first->key;
@@ -1613,30 +1442,12 @@ static void *t_timer_main(void *argument) {
     t_runtime_tasks_wake(key);
     pthread_mutex_lock(&t_timer_lock);
   }
-  return NULL;
-}
-
-static void t_timer_start(void) {
-#ifdef __APPLE__
-  pthread_cond_init(&t_timer_wake, NULL);
-#else
-  pthread_condattr_t clock;
-  pthread_condattr_init(&clock);
-  pthread_condattr_setclock(&clock, CLOCK_MONOTONIC);
-  pthread_cond_init(&t_timer_wake, &clock);
-  pthread_condattr_destroy(&clock);
-#endif
-  pthread_t thread;
-  pthread_attr_t attributes;
-  pthread_attr_init(&attributes);
-  pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED);
-  int failed = pthread_create(&thread, &attributes, t_timer_main, NULL);
-  pthread_attr_destroy(&attributes);
-  if (failed) t_out_of_memory();
+  if (t_timer_count > 0) t_timer_arm();
+  pthread_mutex_unlock(&t_timer_lock);
 }
 
 static void t_timer_begin(struct t_timer *timer, uint64_t nanoseconds, uint64_t key) {
-  pthread_once(&t_timer_once, t_timer_start);
+  pthread_once(&t_poller_once, t_poller_start);
   uint64_t now = t_monotonic();
   uint64_t latest = (uint64_t)INT64_MAX;
   timer->deadline = nanoseconds > latest - now ? latest : now + nanoseconds;
@@ -1651,7 +1462,7 @@ static void t_timer_begin(struct t_timer *timer, uint64_t nanoseconds, uint64_t 
   t_timer_count += 1;
   t_timer_place(timer, t_timer_count - 1);
   t_timer_settle(t_timer_count - 1);
-  if (timer->index == 0) pthread_cond_signal(&t_timer_wake);
+  if (timer->index == 0) t_timer_arm();
   pthread_mutex_unlock(&t_timer_lock);
 }
 
@@ -1693,8 +1504,6 @@ int32_t t_runtime_sleep(int64_t seconds, int64_t nanoseconds) {
 #define T_CALLERS_KEY 2
 
 static atomic_uchar t_descriptor_registered[T_DESCRIPTORS];
-static int t_poller = -1;
-static pthread_once_t t_poller_once = PTHREAD_ONCE_INIT;
 
 static uint64_t t_descriptor_key(int32_t descriptor, int32_t writing) {
   return (uint64_t)1 << 63 | (uint64_t)(uint32_t)descriptor << 1 | (uint64_t)(writing != 0);
@@ -1711,9 +1520,18 @@ static void *t_poller_main(void *argument) {
     int count = epoll_wait(t_poller, events, 64, -1);
     for (int index = 0; index < count; index++) {
       uint64_t key = events[index].data.u64;
-      uint32_t found = events[index].events;
-      if (found & (EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLERR)) t_runtime_tasks_wake(key);
-      if ((key >> 63) && (found & (EPOLLOUT | EPOLLHUP | EPOLLERR))) t_runtime_tasks_wake(key | 1);
+      uint32_t ready = events[index].events;
+      if (key == T_TIMERS_EVENT) {
+        uint64_t expirations;
+        ssize_t received = read(t_timer_descriptor, &expirations, sizeof expirations);
+        (void)received;
+        t_timers_fire();
+      } else if (key == T_SIGNALS_EVENT) {
+        t_signals_arrived();
+      } else {
+        if (ready & (EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLERR)) t_runtime_tasks_wake(key);
+        if ((key >> 63) && (ready & (EPOLLOUT | EPOLLHUP | EPOLLERR))) t_runtime_tasks_wake(key | 1);
+      }
     }
 #else
     struct kevent events[64];
@@ -1721,7 +1539,11 @@ static void *t_poller_main(void *argument) {
     for (int index = 0; index < count; index++) {
       uint64_t key = (uint64_t)(uintptr_t)events[index].udata;
       int writing = events[index].filter == EVFILT_WRITE;
-      if (key == 0)
+      if (events[index].filter == EVFILT_TIMER)
+        t_timers_fire();
+      else if (key == T_SIGNALS_EVENT)
+        t_signals_arrived();
+      else if (key == 0)
         t_runtime_tasks_wake(t_descriptor_key((int32_t)events[index].ident, writing));
       else if (!writing)
         t_runtime_tasks_wake(key);
@@ -1734,11 +1556,19 @@ static void *t_poller_main(void *argument) {
 static void t_poller_start(void) {
 #ifdef __linux__
   t_poller = epoll_create1(EPOLL_CLOEXEC);
+  if (t_poller < 0) t_out_of_memory();
+  t_timer_descriptor = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK);
+  if (t_timer_descriptor < 0) t_out_of_memory();
+  struct epoll_event event;
+  memset(&event, 0, sizeof event);
+  event.events = EPOLLIN;
+  event.data.u64 = T_TIMERS_EVENT;
+  if (epoll_ctl(t_poller, EPOLL_CTL_ADD, t_timer_descriptor, &event) != 0) t_out_of_memory();
 #else
   t_poller = kqueue();
-  if (t_poller >= 0) fcntl(t_poller, F_SETFD, FD_CLOEXEC);
-#endif
   if (t_poller < 0) t_out_of_memory();
+  fcntl(t_poller, F_SETFD, FD_CLOEXEC);
+#endif
   pthread_t thread;
   pthread_attr_t attributes;
   pthread_attr_init(&attributes);
@@ -1801,10 +1631,7 @@ int32_t t_runtime_descriptor_wait(int32_t descriptor, int32_t writing, uint64_t 
   return ready;
 }
 
-static uint64_t t_descriptors_key(void) {
-  struct t_task *task = t_task_self();
-  return (uint64_t)(uintptr_t)(task != NULL ? (void *)&task->wait_key : (void *)t_thread_context_self());
-}
+static uint64_t t_descriptors_key(void) { return (uint64_t)(uintptr_t)&t_task_self()->wait_key; }
 
 uint64_t t_runtime_descriptors_watch(void) { return t_runtime_tasks_watch(t_descriptors_key()); }
 
@@ -1833,28 +1660,28 @@ int32_t t_runtime_close(int32_t descriptor) {
   return close(descriptor);
 }
 
-uint64_t t_runtime_tasks_open(void) {
+static struct t_group *t_group_new(struct t_group *parent) {
   struct t_group *group = malloc(sizeof *group);
   if (group == NULL) t_out_of_memory();
   pthread_mutex_init(&group->lock, NULL);
   group->running = 0;
   atomic_init(&group->cancelled, 0);
-  struct t_task *task = t_task_self();
-  group->parent = task == NULL ? NULL : task->group;
+  group->parent = parent;
   group->tasks = NULL;
   group->children = NULL;
   group->next = NULL;
   group->joiner = NULL;
-  group->joined = NULL;
   group->interrupted = NULL;
-  if (group->parent != NULL) {
-    pthread_mutex_lock(&group->parent->lock);
-    group->next = group->parent->children;
-    group->parent->children = group;
-    pthread_mutex_unlock(&group->parent->lock);
+  if (parent != NULL) {
+    pthread_mutex_lock(&parent->lock);
+    group->next = parent->children;
+    parent->children = group;
+    pthread_mutex_unlock(&parent->lock);
   }
-  return (uint64_t)(uintptr_t)group;
+  return group;
 }
+
+uint64_t t_runtime_tasks_open(void) { return (uint64_t)(uintptr_t)t_group_new(t_task_self()->group); }
 
 static void t_task_entry(void) {
   struct t_task *task = t_task_self();
@@ -1864,7 +1691,6 @@ static void t_task_entry(void) {
   task->code(task->environment, task->item);
   struct t_group *group = task->group;
   struct t_task *joiner = NULL;
-  atomic_int *joined = NULL;
   pthread_mutex_lock(&group->lock);
   for (struct t_task **link = &group->tasks; *link != NULL; link = &(*link)->sibling)
     if (*link == task) {
@@ -1874,24 +1700,17 @@ static void t_task_entry(void) {
   group->running -= 1;
   if (group->running == 0) {
     joiner = group->joiner;
-    joined = group->joined;
     group->joiner = NULL;
-    group->joined = NULL;
   }
   pthread_mutex_unlock(&group->lock);
   if (joiner != NULL) t_task_ready(joiner);
-  if (joined != NULL) t_unblock(joined);
   task->finished = 1;
   t_task_switch(task);
   t_runtime_compiler_bug();
 }
 
-uint8_t t_runtime_tasks_spawn(uint64_t handle, void (*code)(void *environment, uint64_t item),
-                              void *environment, uint64_t item) {
-  struct t_group *group = (struct t_group *)(uintptr_t)handle;
-  if (atomic_load_explicit(&group->cancelled, memory_order_acquire)) return 0;
-  pthread_once(&t_pool_once, t_pool_start);
-  pthread_once(&t_interrupt_once, t_interrupt_start);
+static struct t_task *t_task_new(struct t_group *group, void (*code)(void *environment, uint64_t item),
+                                 void *environment, uint64_t item) {
   struct t_task *task = malloc(sizeof *task);
   if (task == NULL) t_out_of_memory();
   task->stack = t_stack_acquire();
@@ -1919,7 +1738,16 @@ uint8_t t_runtime_tasks_spawn(uint64_t handle, void (*code)(void *environment, u
   task->sibling = group->tasks;
   group->tasks = task;
   pthread_mutex_unlock(&group->lock);
-  t_run_push(task);
+  return task;
+}
+
+uint8_t t_runtime_tasks_spawn(uint64_t handle, void (*code)(void *environment, uint64_t item),
+                              void *environment, uint64_t item) {
+  struct t_group *group = (struct t_group *)(uintptr_t)handle;
+  if (atomic_load_explicit(&group->cancelled, memory_order_acquire)) return 0;
+  pthread_once(&t_pool_once, t_pool_start);
+  pthread_once(&t_interrupt_once, t_interrupt_start);
+  t_run_push(t_task_new(group, code, environment, item));
   return 1;
 }
 
@@ -1928,16 +1756,8 @@ int32_t t_runtime_tasks_join(uint64_t handle) {
   pthread_mutex_lock(&group->lock);
   while (group->running > 0) {
     struct t_task *task = t_task_self();
-    if (task != NULL) {
-      group->joiner = task;
-      t_task_park(task, &group->lock);
-    } else {
-      atomic_int joined;
-      atomic_init(&joined, 0);
-      group->joined = &joined;
-      pthread_mutex_unlock(&group->lock);
-      t_block_until(&joined);
-    }
+    group->joiner = task;
+    t_task_park(task, &group->lock);
     pthread_mutex_lock(&group->lock);
   }
   pthread_mutex_unlock(&group->lock);
@@ -1980,29 +1800,45 @@ int32_t t_runtime_tasks_cancel(uint64_t handle) {
   return 1;
 }
 
+struct t_root {
+  void (*code)(void *environment, uint64_t item);
+  void *environment;
+  atomic_int ended;
+};
+
+static void t_root_run(void *argument, uint64_t item) {
+  struct t_root *root = argument;
+  root->code(root->environment, item);
+  atomic_store(&root->ended, 1);
+  t_wake(1);
+}
+
+void t_runtime_main(void (*code)(void *environment, uint64_t item), void *environment,
+                    uint32_t requested_workers) {
+  t_install_signal_dispositions();
+  t_requested_workers = requested_workers;
+  t_self = &t_workers[0];
+  t_workers[0].random = 1;
+  atomic_store(&t_worker_count, 1);
+  struct t_root root = {code, environment, 0};
+  t_task_run(t_task_new(t_group_new(NULL), t_root_run, &root, 0));
+  t_run_until(&t_workers[0], &root.ended);
+}
+
 static void t_wake_one(uint64_t key) {
   struct t_wait_slot *slot = t_wait_slot(key);
-  struct t_task **task = NULL;
-  struct t_thread_waiter **thread = NULL;
+  struct t_task **link = NULL;
   pthread_mutex_lock(&slot->lock);
   atomic_fetch_add(&slot->wakes, 1);
-  for (struct t_thread_waiter **link = &slot->threads; *link != NULL; link = &(*link)->next)
-    if ((*link)->key == key) thread = link;
-  if (thread == NULL)
-    for (struct t_task **link = &slot->parked; *link != NULL; link = &(*link)->next)
-      if ((*link)->wait_key == key) task = link;
-  struct t_thread_waiter *woken_thread = NULL;
-  struct t_task *woken_task = NULL;
-  if (thread != NULL) {
-    woken_thread = *thread;
-    *thread = woken_thread->next;
-  } else if (task != NULL) {
-    woken_task = *task;
-    *task = woken_task->next;
+  for (struct t_task **parked = &slot->parked; *parked != NULL; parked = &(*parked)->next)
+    if ((*parked)->wait_key == key) link = parked;
+  struct t_task *woken = NULL;
+  if (link != NULL) {
+    woken = *link;
+    *link = woken->next;
   }
   pthread_mutex_unlock(&slot->lock);
-  if (woken_thread != NULL) t_unblock(&woken_thread->woken);
-  if (woken_task != NULL) t_task_ready(woken_task);
+  if (woken != NULL) t_task_ready(woken);
 }
 
 int32_t t_runtime_tasks_lock(uint64_t mutex) {
@@ -2024,9 +1860,7 @@ int32_t t_runtime_tasks_unlock(uint64_t mutex) {
 }
 
 int32_t t_runtime_tasks_yield(void) {
-  struct t_task *task = t_task_self();
-  if (task != NULL) t_task_switch(task);
-  else sched_yield();
+  t_task_switch(t_task_self());
   return 0;
 }
 
@@ -2044,41 +1878,44 @@ static void t_signals_handler(int signal) {
   errno = saved;
 }
 
-static void *t_signals_main(void *argument) {
-  (void)argument;
-  sigset_t all;
-  sigfillset(&all);
-  pthread_sigmask(SIG_SETMASK, &all, NULL);
-  for (;;) {
-    char byte;
-    if (read(t_signals_pipe[0], &byte, 1) != 1) continue;
-    sigset_t handled;
-    sigemptyset(&handled);
-    pthread_mutex_lock(&t_signals_lock);
-    for (int signal = 1; signal < 64; signal++)
-      if (t_signals_handled & ((uint64_t)1 << signal)) sigaddset(&handled, signal);
-    pthread_mutex_unlock(&t_signals_lock);
-    pthread_sigmask(SIG_UNBLOCK, &handled, NULL);
-    t_runtime_tasks_wake((uint64_t)(uintptr_t)&t_signals_pending);
+static void t_signals_arrived(void) {
+  char bytes[64];
+  while (read(t_signals_pipe[0], bytes, sizeof bytes) > 0) {
   }
-  return NULL;
+  sigset_t handled;
+  sigemptyset(&handled);
+  pthread_mutex_lock(&t_signals_lock);
+  for (int signal = 1; signal < 64; signal++)
+    if (t_signals_handled & ((uint64_t)1 << signal)) sigaddset(&handled, signal);
+  pthread_mutex_unlock(&t_signals_lock);
+  pthread_sigmask(SIG_UNBLOCK, &handled, NULL);
+  t_runtime_tasks_wake((uint64_t)(uintptr_t)&t_signals_pending);
 }
 
 static void t_signals_start(void) {
   if (pipe(t_signals_pipe) != 0) t_out_of_memory();
-  pthread_t thread;
-  pthread_attr_t attributes;
-  pthread_attr_init(&attributes);
-  pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED);
-  int failed = pthread_create(&thread, &attributes, t_signals_main, NULL);
-  pthread_attr_destroy(&attributes);
-  if (failed) t_out_of_memory();
+  for (int end = 0; end < 2; end++) {
+    fcntl(t_signals_pipe[end], F_SETFD, FD_CLOEXEC);
+    fcntl(t_signals_pipe[end], F_SETFL, fcntl(t_signals_pipe[end], F_GETFL) | O_NONBLOCK);
+  }
+  pthread_once(&t_poller_once, t_poller_start);
+#ifdef __linux__
+  struct epoll_event event;
+  memset(&event, 0, sizeof event);
+  event.events = EPOLLIN;
+  event.data.u64 = T_SIGNALS_EVENT;
+  if (epoll_ctl(t_poller, EPOLL_CTL_ADD, t_signals_pipe[0], &event) != 0) t_out_of_memory();
+#else
+  struct kevent change;
+  EV_SET(&change, t_signals_pipe[0], EVFILT_READ, EV_ADD, 0, 0, (void *)(uintptr_t)T_SIGNALS_EVENT);
+  if (kevent(t_poller, &change, 1, NULL, 0, NULL) != 0) t_out_of_memory();
+#endif
 }
 
 int32_t t_runtime_signals_wait(const int32_t *signals, size_t count) {
   pthread_once(&t_signals_once, t_signals_start);
   uint_fast64_t wanted = 0;
-  int added = 0;
+  int installed = 0;
   pthread_mutex_lock(&t_signals_lock);
   for (size_t index = 0; index < count; index++) {
     int32_t signal = signals[index];
@@ -2093,32 +1930,32 @@ int32_t t_runtime_signals_wait(const int32_t *signals, size_t count) {
       action.sa_flags = SA_RESTART;
       if (sigaction(signal, &action, NULL) == 0) {
         t_signals_handled |= bit;
-        added = 1;
+        installed = 1;
       }
     }
   }
   pthread_mutex_unlock(&t_signals_lock);
-  if (added) {
+  if (installed) {
     ssize_t written = write(t_signals_pipe[1], "", 1);
     (void)written;
   }
   uint64_t key = (uint64_t)(uintptr_t)&t_signals_pending;
   for (;;) {
     uint64_t ticket = t_runtime_tasks_watch(key);
-    sigset_t blocked;
-    if (sigpending(&blocked) == 0)
+    sigset_t pending_signals;
+    if (sigpending(&pending_signals) == 0)
       for (size_t index = 0; index < count; index++) {
         int32_t signal = signals[index];
-        if (signal <= 0 || signal >= 64 || sigismember(&blocked, signal) != 1) continue;
-        sigset_t one;
-        sigemptyset(&one);
-        sigaddset(&one, signal);
+        if (signal <= 0 || signal >= 64 || sigismember(&pending_signals, signal) != 1) continue;
+        sigset_t single;
+        sigemptyset(&single);
+        sigaddset(&single, signal);
 #ifdef __linux__
-        struct timespec none = {0, 0};
-        if (sigtimedwait(&one, NULL, &none) == signal) return signal;
+        struct timespec immediately = {0, 0};
+        if (sigtimedwait(&single, NULL, &immediately) == signal) return signal;
 #else
         int arrived = 0;
-        if (sigwait(&one, &arrived) == 0) return arrived;
+        if (sigwait(&single, &arrived) == 0) return arrived;
 #endif
       }
     uint_fast64_t pending = atomic_load(&t_signals_pending);
@@ -2132,8 +1969,6 @@ int32_t t_runtime_signals_wait(const int32_t *signals, size_t count) {
     t_wait(key, ticket, 1);
   }
 }
-
-#endif
 |}
 
 let resolving =
@@ -2176,11 +2011,10 @@ const t_test *t_runtime_tests;
 void t_runtime_run_test(uint32_t index) { t_runtime_tests[index](); }
 |}
 
-let runtime ~tests ~in_order =
+let runtime ~tests =
   String.concat ""
     [
       (if tests then "#define T_TESTS 1\n" else "");
-      (if in_order then "#define T_IN_ORDER 1\n" else "");
       headers;
       Emit_c.anchor_struct;
       failing;
@@ -2190,64 +2024,63 @@ let runtime ~tests ~in_order =
       (if tests then tests_table else "");
     ]
 
-let main_calling entry =
+let starting ?(before_start = "") ~declarations ~requested_workers root_call =
   Printf.sprintf
     "typedef __INT32_TYPE__ int32_t;\n\
-     void t_runtime_install(void);\n\
-     int32_t %s(void);\n\
+     typedef __UINT32_TYPE__ uint32_t;\n\
+     typedef __UINT64_TYPE__ uint64_t;\n\
+     void t_runtime_main(void (*code)(void *environment, uint64_t item), void *environment,\n\
+    \                    uint32_t requested_workers);\n\
+     %sstruct t_program {\n\
+    \  int32_t count;\n\
+    \  void *arguments;\n\
+    \  int32_t status;\n\
+     };\n\
+     static void t_program_run(void *environment, uint64_t item) {\n\
+    \  struct t_program *program = environment;\n\
+    \  (void)item;\n\
+    \  %s;\n\
+     }\n\
      int main(int count, char **arguments) {\n\
-    \  (void)count;\n\
-    \  (void)arguments;\n\
-    \  t_runtime_install();\n\
-    \  return (int)%s();\n\
+    \  struct t_program program = {(int32_t)count, (void *)arguments, 0};\n\
+     %s  t_runtime_main(t_program_run, &program, %d);\n\
+    \  return (int)program.status;\n\
      }\n"
-    entry entry
+    declarations root_call before_start requested_workers
+
+let main_calling entry =
+  starting
+    ~declarations:(Printf.sprintf "int32_t %s(void);\n" entry)
+    ~requested_workers:0
+    (Printf.sprintf "program->status = %s()" entry)
 
 let tests_calling ~time_limit_ms ~runner tests =
-  let declarations =
+  let test_declarations =
     String.concat "" (List.map (fun symbol -> Printf.sprintf "void %s(void);\n" symbol) tests)
   in
-  let table = String.concat ", " tests in
-  Printf.sprintf
-    "typedef __UINT32_TYPE__ uint32_t;\n\
-     typedef __INT32_TYPE__ int32_t;\n\
-     void t_runtime_install(void);\n\
-     typedef void (*t_test)(void);\n\
-     extern const t_test *t_runtime_tests;\n\
-     int32_t %s(uint32_t count, uint32_t time_limit_milliseconds);\n\
-     %sstatic const t_test t_tests[] = { %s };\n\
-     int main(int count, char **arguments) {\n\
-    \  (void)count;\n\
-    \  (void)arguments;\n\
-    \  t_runtime_install();\n\
-    \  t_runtime_tests = t_tests;\n\
-    \  return (int)%s(%d, %d);\n\
-     }\n"
-    runner declarations
-    (if tests = [] then "0" else table)
-    runner (List.length tests) time_limit_ms
+  starting
+    ~declarations:
+      (Printf.sprintf
+         "typedef void (*t_test)(void);\n\
+          extern const t_test *t_runtime_tests;\n\
+          int32_t %s(uint32_t count, uint32_t time_limit_milliseconds);\n\
+          %sstatic const t_test t_tests[] = { %s };\n"
+         runner test_declarations
+         (if tests = [] then "0" else String.concat ", " tests))
+    ~before_start:"  t_runtime_tests = t_tests;\n" ~requested_workers:1
+    (Printf.sprintf "program->status = %s(%d, %d)" runner (List.length tests) time_limit_ms)
 
 let evaluator_calling entry =
-  Printf.sprintf
-    "void t_runtime_install(void);\n\
-     void %s(void);\n\
-     int main(void) {\n\
-    \  t_runtime_install();\n\
-    \  %s();\n\
-    \  return 0;\n\
-     }\n"
-    entry entry
+  starting
+    ~declarations:(Printf.sprintf "void %s(void);\n" entry)
+    ~requested_workers:1
+    (Printf.sprintf "(void)program;\n  %s()" entry)
 
 let program_calling entry =
-  Printf.sprintf
-    "typedef __INT32_TYPE__ int32_t;\n\
-     void t_runtime_install(void);\n\
-     int32_t %s(int32_t count, void *arguments);\n\
-     int main(int count, char **arguments) {\n\
-    \  t_runtime_install();\n\
-    \  return (int)%s((int32_t)count, (void *)arguments);\n\
-     }\n"
-    entry entry
+  starting
+    ~declarations:(Printf.sprintf "int32_t %s(int32_t count, void *arguments);\n" entry)
+    ~requested_workers:0
+    (Printf.sprintf "program->status = %s(program->count, program->arguments)" entry)
 
 module For_testing = struct
   let main_calling = main_calling

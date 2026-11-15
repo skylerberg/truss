@@ -98,10 +98,7 @@ val tests_of : Query.context -> Path.t list
 val run_source : string -> string
 val expect_output : string -> String.t -> unit
 val passes : string -> string -> unit
-
-val run_main :
-  ?arguments:string list -> ?input:string -> ?in_order:bool -> string -> int * string * string
-
+val run_main : ?arguments:string list -> ?input:string -> string -> int * string * string
 val drop_shapes : (string * Memory_layout.shape) list
 val standard_context : Monomorphic.context
 val standard : string -> string -> ?arguments:Ground.argument list -> unit -> Ground.ty

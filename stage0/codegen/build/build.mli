@@ -7,7 +7,6 @@ type settings = { build : Emit_c.build; optimization : Toolchain.optimization; e
 val program :
   ?progress:(int -> int -> unit) ->
   ?tests:bool ->
-  ?in_order:bool ->
   ?copied:(Emit_c.fragment -> Emit_c.fragment list) ->
   Toolchain.t ->
   cache ->

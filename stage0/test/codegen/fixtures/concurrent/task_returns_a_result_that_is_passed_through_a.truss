@@ -11,7 +11,7 @@ fn big(early: Bool) -> Big
   Big(first: 5, second: 6, third: 7, fourth: 8, name: "late")
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn run() -> ExitCode
   uses Tasks, Console
 {
   let early = big(early: true)
