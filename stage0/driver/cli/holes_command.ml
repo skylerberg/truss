@@ -1,6 +1,3 @@
-(* [truss holes]: every [todo], with its expected type, the bindings in
-   scope, and the tests and [main] that reach it. *)
-
 module Names = Resolve.Names
 
 type hole = {
@@ -8,8 +5,8 @@ type hole = {
   file : string;
   line : int;
   column : int;
-  type_ : string option;  (** [None] for a type defined as [todo] *)
-  in_scope : (string * string) list;  (** Each binding in scope, with its type *)
+  type_ : string option;
+  in_scope : (string * string) list;
   mutable blocks : string list;
 }
 
@@ -43,8 +40,6 @@ let gather session packages paths =
         (Query.demand (Database.context session) Names.declarations_in file))
     (Command_packages.selected session packages paths)
 
-(* The blocked roots of each hole: [main] and every test that reaches the
-   hole's definition transitively. *)
 let fill_blocks session packages holes =
   if holes <> [] then begin
     let roots =

@@ -1,23 +1,10 @@
-(* Queries about one definition for the command line's tools: its
-   unfinished code, its holes, with each one's expected type and the
-   bindings in scope, the name or expression at a position, and the
-   occurrences of names in it. They only read the type checker's results. *)
-
 module References = References
 open Syntax
 
-type hole = {
-  offset : int;  (** Relative to the definition *)
-  expected : string option;  (** The hole's expected type, or [None] for a type defined as [todo] *)
-  scope : (string * string) list;  (** Each binding in scope with its type, sorted by name *)
-}
+type hole = { offset : int; expected : string option; scope : (string * string) list }
 
 let at table id = if id < Array.length table then table.(id) else None
 
-(* A type as the tools print it. The type checker's tables hold no
-   unsolved type variable, so an unconstrained [todo], such as an
-   interpolated one, has the error type, which is printed as not decided
-   yet. *)
 let show_type (tables : Infer.tables) id =
   match at tables.types id with
   | Some (Types.Error _ | Types.Hole) -> "not decided yet"
@@ -27,13 +14,8 @@ let show_type (tables : Infer.tables) id =
 let local_type (tables : Infer.tables) id =
   match at tables.local_types id with Some type_ -> Types.show type_ | None -> "an unknown type"
 
-(* A [todo] or an [echo] of a definition, at its span relative to the
-   definition. A [todo] expression has its id; a type defined as [todo] has
-   none and is at its name. *)
 type unfinished = { keyword : [ `Todo | `Echo ]; id : id option; span : span }
 
-(* Each [todo] and [echo] of a definition, in source order. It reads only
-   the definition's tree, so an edit to another definition changes it not. *)
 let unfinished_in (definition : definition) =
   let found = ref [] in
   let add keyword id (span : span) = found := { keyword; id; span } :: !found in
@@ -57,9 +39,6 @@ let unfinished =
       | Some definition -> unfinished_in definition
       | None -> [])
 
-(* Each [todo] of a definition, in source order. Name resolution records
-   the bindings in scope at each [todo], and the type checker's tables give
-   their types. *)
 let holes database key =
   match
     (Query.demand database Resolve.resolved key, Query.demand database Infer.type_check_result key)
@@ -92,9 +71,9 @@ let holes database key =
         (Query.demand database unfinished key)
 
 type explanation = {
-  text : string;  (** The name or expression as written *)
-  meaning : string option;  (** The meaning of a name *)
-  refers_to : Path.t option;  (** The definition a name refers to, for its signature *)
+  text : string;
+  meaning : string option;
+  refers_to : Path.t option;
   type_ : string option;
 }
 
@@ -116,8 +95,6 @@ let describe_target (target : Resolve.target) =
   | Specification_function _ -> ("a specification function", None)
   | Unknown _ -> ("nothing: the name is not known", None)
 
-(* The meaning of a name that name resolution resolved, and the
-   definition it refers to. *)
 let resolved_meaning (resolved : Resolve.resolved) (name : name) =
   match at resolved.names name.id with
   | Some target ->
@@ -128,13 +105,9 @@ let resolved_meaning (resolved : Resolve.resolved) (name : name) =
 let definition_meaning path = (Some (Printf.sprintf "the definition %s" (Path.show path)), Some path)
 let contains (span : span) offset = span.start <= offset && offset <= span.stop
 
-(* An expression's type, or [None] where the type checker recorded none,
-   as for a method call's callee. *)
 let known_type (tables : Infer.tables) id =
   Option.map (fun _ -> show_type tables id) (at tables.types id)
 
-(* The meaning of a name that is not an expression: the definition's
-   declared name, a binding, or a type or trait named in a signature. *)
 let explain_name ~(path : Path.t) (definition : definition) (resolved : Resolve.resolved)
     (tables : Infer.tables option) (name : name) =
   let is_declared =
@@ -154,8 +127,6 @@ let explain_name ~(path : Path.t) (definition : definition) (resolved : Resolve.
 let explain_at ~path (definition : definition) (resolved : Resolve.resolved)
     (tables : Infer.tables option) ~text offset =
   let innermost = ref None in
-  (* The call of each method callee, by the callee's id: the type checker
-     records the callee's path by the call's id. *)
   let calls = Hashtbl.create 8 in
   let rec visit (value : expression) =
     if contains value.span offset then begin
@@ -172,8 +143,6 @@ let explain_at ~path (definition : definition) (resolved : Resolve.resolved)
   let name_at =
     List.find_opt (fun (name : name) -> contains name.span offset) (Syntax_walk.names definition)
   in
-  (* Whether a name is written as part of an expression: a [Name]'s path,
-     or a [Member]'s member. *)
   let is_written_in (value : expression) (name : name) =
     match value.kind with
     | Name written ->

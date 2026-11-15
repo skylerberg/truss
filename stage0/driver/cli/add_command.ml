@@ -1,8 +1,3 @@
-(* [truss add]: adds registry packages as dependencies of the package the
-   command runs in. Each gets a manifest entry that grants it nothing, and
-   a lock file line at the requested version or the newest, with lines for
-   its own dependencies. *)
-
 let run ~names =
   let session, packages = Command_packages.current () in
   let package = Command_packages.one packages in
@@ -43,8 +38,6 @@ let run ~names =
   write with_entries;
   match Database.plan_lock session ~set:wanted ~all:false with
   | Error message ->
-      (* The manifest is restored, so a package that cannot be fetched
-         is not left as a dependency. *)
       write written;
       Outcome.cannot_run "%s" message
   | Ok plan ->

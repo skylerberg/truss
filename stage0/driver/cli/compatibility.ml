@@ -1,9 +1,3 @@
-(* Whether a release of a package is compatible with the previous release,
-   by comparing the two releases' public definitions. A signature's types
-   are compared after type checking, and a contract syntactically: a
-   release may remove [requires] clauses and add [ensures] and cost
-   clauses. No property is inferred from a body. *)
-
 open Syntax
 module Names = Resolve.Names
 module Environment = Interface.Environment
@@ -11,8 +5,6 @@ module Environment = Interface.Environment
 type change = Breaks of string | Grows of string
 type public_change = { path : Path.t; change : change }
 
-(* A method declared inside a trait or a capability is compared as part of
-   its trait or capability, not separately. *)
 let public (declaration : Names.declaration) =
   declaration.ordinal = 0 && declaration.container = None && Names.is_public declaration.visibility
 
@@ -137,8 +129,6 @@ let type_ ~(before : Types.type_interface) ~(after : Types.type_interface) ~befo
        else []);
     ]
 
-(* The clauses of a method declared inside a trait or a capability, which
-   is a separate definition. *)
 let member_clauses database (owner : Path.t) name receiver =
   match Interface.Summary.definition database (Method { owner; name; receiver }) with
   | Some (_, { kind = Function { signature; _ } | Method_declaration signature; _ }) ->
@@ -295,9 +285,6 @@ let compare ~before ~after package =
   in
   let old_impls = impls before package and new_impls = impls after package in
   let impl_changes =
-    (* A caller of the trait's methods on the type needs every capability
-       in an associated capability set, so adding a capability to the set
-       is incompatible. *)
     List.concat_map
       (fun (path, shown, old_sets) ->
         match List.find_opt (fun (_, other, _) -> other = shown) new_impls with

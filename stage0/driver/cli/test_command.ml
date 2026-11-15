@@ -1,10 +1,5 @@
-(* [truss test]: checks the packages, then runs the tests without a cached
-   result. *)
-
 type test = { path : Path.t; module_ : Path.module_; name : string; file : string; line : int }
 
-(* The tests defined in the selected files whose names contain [match_],
-   in package order, so each package's tests are contiguous. *)
 let select session packages ~paths ~match_ =
   List.concat_map
     (fun (file : Path.file) ->
@@ -37,7 +32,6 @@ let select session packages ~paths ~match_ =
 
 let label test = Path.show_module test.module_ ^ " " ^ Diagnostic.quote test.name
 
-(* A duration for people: [2.31s], [42ms], or [87µs]. *)
 let duration microseconds =
   if microseconds >= 1_000_000 then Printf.sprintf "%.2fs" (float microseconds /. 1e6)
   else if microseconds >= 1_000 then Printf.sprintf "%dms" (microseconds / 1_000)
@@ -51,8 +45,6 @@ let indented text =
   |> List.filter (( <> ) "")
   |> List.iter (fun line -> Output.print_line ("    " ^ line))
 
-(* The number of tests with each outcome, in the runner's order of
-   outcomes, omitting outcomes with no test. *)
 let summary (records : Compile.record list) =
   let count outcome =
     List.length (List.filter (fun (record : Compile.record) -> record.outcome = outcome) records)
@@ -134,14 +126,13 @@ let timings_json timings =
       ("total", Json.Int timings.total);
     ]
 
-(* The status line while tests build and run. *)
 type progress = {
   line : Status_line.t;
   tests : test array;
   mutable ended : int;
   mutable not_passed : int;
-  mutable running_since : int option;  (** When the first test started *)
-  running : (int, int) Hashtbl.t;  (** Each running test's start *)
+  mutable running_since : int option;
+  running : (int, int) Hashtbl.t;
 }
 
 let draw progress =
@@ -188,34 +179,17 @@ let on_progress progress ~build_ended (event : Compile.progress) =
       if record.outcome <> Passed then progress.not_passed <- progress.not_passed + 1;
       draw progress
 
-(* Runs the tests, which are in package order, as [select] gives them, each
-   package's in one test program with the package's time limit, and returns
-   each test's record in the same order. [progress] is told of each step,
-   with each test by its index among all of them. *)
-let run_tests ?(rerun = false) ?(progress = ignore) session packages tests =
-  let compile = lazy (Compiler.create session packages Development) in
-  let offset = ref 0 in
-  List.concat_map
-    (fun (package : Path.package) ->
-      let own = List.filter (fun test -> test.module_.package = package) tests in
-      let base = !offset in
-      offset := base + List.length own;
-      let shifted : Compile.progress -> Compile.progress = function
-        | Started { test } -> Started { test = test + base }
-        | Ended { test; record } -> Ended { test = test + base; record }
-        | other -> other
-      in
-      if own = [] then []
-      else
-        match
-          Compile.run_tests ~rerun
-            ~progress:(fun event -> progress (shifted event))
-            (Lazy.force compile) ~time_limit_ms:(Database.time_limit_ms session)
-            (List.map (fun test -> test.path) own)
-        with
-        | Ok records -> records
-        | Error message -> Outcome.cannot_run "%s" message)
-    packages
+let run_tests ?rerun ?progress session packages tests =
+  if tests = [] then []
+  else
+    match
+      Compile.run_tests ?rerun ?progress
+        (Compiler.create session packages Development)
+        ~time_limit_ms:(Database.time_limit_ms session)
+        (List.map (fun test -> test.path) tests)
+    with
+    | Ok records -> records
+    | Error message -> Outcome.cannot_run "%s" message
 
 let run ~paths ~match_ ~timings:show_timings ~rerun =
   let json = Output.json () in

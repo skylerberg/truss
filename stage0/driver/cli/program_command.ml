@@ -1,10 +1,3 @@
-(* [truss run] and [truss build]: build the package's program from its
-   [main]. [truss run] is [truss build] followed by running the program,
-   except that it builds for development unless told to build for
-   release. *)
-
-(* A package's program starts at the [main] of its root module, the
-   package's top directory. *)
 let main_of session packages (package : Path.package) =
   let module_ : Path.module_ = { package; modules = [] } in
   if not (List.mem module_ (Command_packages.modules session packages)) then None
@@ -19,8 +12,6 @@ let main_of session packages (package : Path.package) =
 
 let mains session packages = List.filter_map (main_of session packages) packages
 
-(* The package's [main]. A package without one is a library, which is not
-   an error in its code, so the command exits with 2. *)
 let main session packages =
   let package = Command_packages.one packages in
   match main_of session packages package with
@@ -31,9 +22,6 @@ let main session packages =
          no program."
         (Path.show_package package)
 
-(* Rejects a program whose [main] can reach a [todo] or an [echo] in code,
-   or a hole in a proof, and lists each in order of position with the
-   definitions from [main] to the one that holds it. *)
 let refuse_unshippable session packages compile main =
   let in_code =
     match Compile.unshippable compile ~main with
@@ -91,13 +79,6 @@ let refuse_unshippable session packages compile main =
           refusals;
       raise (Outcome.Stop 1)
 
-(* Builds the package's program to [output], or else to a fresh path in
-   the store's directory of programs, and returns its path. A release build requires
-   every obligation to be proven, so it omits the run-time checks that the
-   proofs replace, and it refuses a program that can reach unfinished
-   code. A development build skips the prover and keeps the checks; a
-   [todo] it reaches stops the program, and an [echo] writes to standard
-   error. *)
 let build_program ?output session packages (build : Compiler.build) =
   let is_release = build = Release in
   let report = Report.gather ~proofs:is_release session packages in
@@ -110,16 +91,11 @@ let build_program ?output session packages (build : Compiler.build) =
   | Error message -> Outcome.cannot_run "%s" message
   | Ok () -> output
 
-(* [truss run]: builds the command's one package, and returns the program
-   for the client to run on its terminal with the arguments, so it can
-   prompt and read input. *)
 let run ~release ~arguments =
   let session, packages = Command_packages.current () in
   let program = build_program session packages (if release then Release else Development) in
   Outcome.Run_program { program; arguments }
 
-(* [truss build]: builds for release to [output], or else to a file named
-   after the package in the current directory. *)
 let build ~output =
   let session, packages = Command_packages.current () in
   let package = Command_packages.one packages in

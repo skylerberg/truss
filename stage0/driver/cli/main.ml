@@ -1,16 +1,5 @@
-(* The [truss] command line: its commands and arguments, and the process
-   that runs each command.
-
-   A command that reads code runs in the process that holds its worktree's
-   session: the background process, which keeps sessions between commands
-   and starts when a command first needs it, or with [--no-server] or
-   [TRUSS_NO_SERVER=1], the client's own process. Both run the same code to
-   parse the arguments and run the command, so the result is the same. *)
-
 open Cmdliner
 
-(* The options of every command, which apply before it runs: [-C] changes
-   to a directory, as in git, and [--json] selects JSON output. *)
 let common =
   let directory =
     Arg.(
@@ -298,9 +287,6 @@ let clean =
   command "clean" ~doc:"Stop the background process and delete the store, which costs only time."
     Term.(const (fun () -> Outcome.Exit 0) $ common)
 
-(* The help of [truss lsp]. The client runs the language server itself,
-   since the server reads standard input for as long as the editor is
-   open. *)
 let lsp =
   command "lsp"
     ~doc:
@@ -347,11 +333,6 @@ let truss =
       lsp;
     ]
 
-(* Parses the arguments and runs the command, writing to [Output]'s current
-   streams. Code with errors exits with 1, after its report. A command that
-   cannot run, or a compiler bug, exits with 2; the bug's message names the
-   compiler's step when it failed. The command's sessions and the store are
-   saved when it ends, so another process can reuse their results. *)
 let evaluate arguments =
   Output.set_json false;
   let buffer_out = Buffer.create 256 and buffer_err = Buffer.create 256 in
@@ -395,10 +376,6 @@ let evaluate arguments =
   Database.save_opened ();
   outcome
 
-(* Runs a command line from [directory], or else from the current directory,
-   which it is in again afterwards. If another process evicted an input of a
-   session that the command reads, the command runs again from the files. A
-   system failure, such as an unreadable file, exits with 2. *)
 let run_command_line ?(directory = Sys.getcwd ()) arguments =
   let previous = Sys.getcwd () in
   Fun.protect
@@ -411,9 +388,6 @@ let run_command_line ?(directory = Sys.getcwd ()) arguments =
           Output.eprintf "The compiler failed: %s\n" (Printexc.to_string exception_);
           Outcome.Exit 2)
 
-(* The environment variables a command reads, which the background process
-   is given from each client. [TRUSS_CACHE] is not among them: it names the
-   store, and each store has its own background process. *)
 let forwarded =
   [
     Registry.Index.variable;
@@ -427,19 +401,14 @@ let forwarded =
 
 type request = {
   arguments : string list;
-  directory : string;  (** The client's current directory *)
+  directory : string;
   environment : (string * string) list;
-      (** The client's value of each forwarded variable, empty where it is not set *)
   terminal : bool;
   columns : int option;
 }
 
 type response = { output : string; outcome : Outcome.t }
 
-(* The background process's response to a request: it runs the command
-   from the client's directory and with the client's environment, as the
-   client would, and sends standard error as progress, so it appears while
-   the command runs. *)
 let handle ~progress request =
   let buffer = Buffer.create 1024 in
   List.iter (fun (name, value) -> Unix.putenv name value) request.environment;
@@ -458,7 +427,6 @@ let handle ~progress request =
 
 let serve key = Database.serve ~key ~handle
 
-(* The command name: the first argument that is not an option. *)
 let command_of arguments =
   List.find_opt (fun argument -> not (String.starts_with ~prefix:"-" argument)) arguments
 
@@ -466,8 +434,6 @@ let finish (outcome : Outcome.t) =
   match outcome with
   | Exit status -> status
   | Run_program { program; arguments } ->
-      (* The program runs on the client's terminal, so it can prompt and read
-         input. *)
       Fun.protect
         ~finally:(fun () -> try Sys.remove program with Sys_error _ -> ())
         (fun () -> Process.run_attached program arguments)
@@ -482,14 +448,11 @@ let request arguments =
     columns = Output.columns ();
   }
 
-(* Asks each running background process, and starts none. *)
 let ask_running arguments : (response, string) result list =
   List.map
     (fun key -> Database.call ~start_server:false ~key ~progress:Output.eprint (request arguments))
     (Database.servers ())
 
-(* [truss clean]: stops every background process, since each holds the
-   store open, and deletes the store. *)
 let clean_store () =
   ignore (ask_running [ "stop" ]);
   Database.reset ();
@@ -500,9 +463,6 @@ let clean_store () =
       Output.eprintf "Cannot delete %s: %s\n" directory (Unix.error_message error);
       2
 
-(* The command line's directory: the directory that [-C] names, relative to
-   the current directory, or else the current directory. Its project's
-   background process answers the command. *)
 let directory_of arguments =
   let rec named = function
     | "-C" :: directory :: _ -> Some directory
@@ -516,8 +476,6 @@ let directory_of arguments =
   | Some directory -> directory
   | None -> Sys.getcwd ()
 
-(* [truss lsp]: runs the language server in the client's process. It checks
-   the open files in the process where every other command runs. *)
 let language_server ~no_server =
   let check ~root encoding buffers =
     let request =
@@ -531,8 +489,6 @@ let language_server ~no_server =
   in
   Lsp_command.serve ~input:stdin ~output:stdout ~check
 
-(* Runs a command line as the client: the command in its own process, or
-   in the background process. *)
 let client argv =
   let arguments = List.tl (Arguments.prepare argv) in
   let no_server = List.mem "--no-server" arguments || Sys.getenv_opt "TRUSS_NO_SERVER" = Some "1" in

@@ -1,7 +1,3 @@
-(* [truss overlap]: the overlaps between this worktree's changes and those
-   of the repository's other open worktrees, or of a branch, and with
-   [--merge], the diagnostics that only the merge result has. *)
-
 let describe (place : Graph_types.place) =
   match place.subject with
   | Some { path; part } -> Printf.sprintf "the %s of %s" (Query.show_part part) (Path.show path)
@@ -15,9 +11,9 @@ let sentence : Graph_types.overlap -> string = function
         (describe change) (describe reads)
 
 type comparison = {
-  other : string;  (** The other worktree, relative to the current directory, or the branch *)
+  other : string;
   overlaps : Graph_types.overlap list;
-  merged : (string * string * string) list;  (** A merge's new diagnostics: file, code, message *)
+  merged : (string * string * string) list;
   error : string option;
 }
 
@@ -97,8 +93,6 @@ let compare_with ~merge session (name, other) =
   in
   { other = name; overlaps; merged; error }
 
-(* The overlaps with each other open worktree that has any, for [truss
-   check]. *)
 let with_other_worktrees session =
   List.filter_map
     (fun other ->

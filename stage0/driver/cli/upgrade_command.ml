@@ -1,12 +1,6 @@
-(* [truss upgrade]: changes the versions of the project's registry
-   packages, and reports the effect before writing the lock file. [truss
-   add] prints the same report. *)
-
 module Lock = Registry.Lock
 module Version = Registry.Version
 
-(* Parses a package argument, such as [acme::geometry], or with a version,
-   such as [acme::geometry@1.4.2]. *)
 let wanted text =
   let written, version =
     match String.index_opt text '@' with
@@ -33,13 +27,11 @@ let wanted text =
               version)
       version )
 
-(* The differences between the old lock file and the new one. *)
 type change =
   | Entered of Lock.entry
   | Left of Lock.entry
   | Moved of { name : Path.package; from : Version.t; to_ : Version.t }
   | Holds of { name : Path.package; gained : string list }
-      (** A package that would be granted capabilities it lacks now *)
 
 let lock_changes ~(before : Lock.t) ~(after : Lock.t) =
   List.concat_map
@@ -107,8 +99,6 @@ let change_json = function
           ("gained", Json.List (List.map (fun held -> Json.String held) gained));
         ]
 
-(* A signature of a registry package that the project depends on and the
-   new versions change. *)
 type signature = {
   path : Path.t;
   before : string option;
@@ -116,10 +106,6 @@ type signature = {
   dependents : Path.t list;
 }
 
-(* The effect of the new versions on the project's code, computed in a
-   trial session with those versions before any file is written: each
-   changed signature with its dependents in the project, and the
-   diagnostics that the project would have and does not have now. *)
 let consequences session text =
   let trial = Database.trial session [ ("truss.lock", Some text) ] in
   let own = List.map snd (Database.packages session) in

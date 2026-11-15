@@ -1,6 +1,3 @@
-(* Setting a root's files as inputs *)
-
-(* Replaces a root's files: each one's path and text. *)
 let set_root engine root (files : (string * string) list) =
   let old = Option.value (Query.find (Engine.observer engine) Project.tree root) ~default:[] in
   List.iter
@@ -14,7 +11,6 @@ let add_root engine root =
   let roots = Option.value (Query.find (Engine.observer engine) Project.roots ()) ~default:[] in
   if not (List.mem root roots) then Engine.set engine Project.roots () (roots @ [ root ])
 
-(* A manifest of one package, as [Manifest.parse] reads it. *)
 let manifest_text ~name ~(dependencies : Manifest.dependency list) =
   String.concat ""
     ([
@@ -46,11 +42,6 @@ let set_standard engine files =
 let standard_files = ref Standard_library.files
 let load_standard engine = set_standard engine !standard_files
 
-(* The standard library, checked whole in an engine of its own. Its sources
-   never change, so the engine is frozen as a fixed base, which every state
-   reads. The library checks cleanly, so a diagnostic in it is a compiler
-   bug, reported here: code built on it would otherwise meet a definition
-   that has no core form. *)
 let check_standard engine =
   load_standard engine;
   let rendered =
@@ -73,18 +64,14 @@ let standard_base () =
   Engine.freeze ~fixed:true engine;
   engine
 
-(* Each file's stamp, by its path: the evidence, without reading the file,
-   that it has not changed. A restart reads only the files whose stamps
-   changed. *)
 let stamps : (string, string) Query.input = Query.input ~name:"worktree_stamp" ~show:Fun.id ()
 
 type kind =
-  | Worktree of string  (** A project's root *)
+  | Worktree of string
   | Commit of { repository : string; commit : string }
-  | Library  (** The standard library as a state of its own *)
-  | Published  (** A published package with the packages it was published with *)
+  | Library
+  | Published
 
-(* The database's state for a session of the session layer. *)
 type project = { kind : kind; update : Session.t -> unit; files : Files.t; mutable retried : bool }
 type Session.attachment += Project of project
 type session = Session.t
@@ -119,7 +106,6 @@ let stored_standard () =
       Engine.freeze ~fixed:true engine;
       engine
 
-(* The standard library, a fixed base under every project's state. *)
 let standard : Engine.t Lazy.t ref = ref (lazy (stored_standard ()))
 let () = Session.on_close (fun () -> standard := lazy (stored_standard ()))
 let prepare_store () = ignore (Lazy.force !standard)
@@ -132,12 +118,9 @@ let session_name root =
 let demand session query key = Query.demand (Session.context session) query key
 let own_layout session = demand session Project.layout Project.Project
 
-(* The project's files that are inputs now. *)
 let held_files session =
   Option.value (Query.find (Session.observer session) Project.tree Project.Project) ~default:[]
 
-(* A published package's directory in the store, fetched into it from the
-   registry if it is not there yet. *)
 let fetch name version ~hash =
   let packages = Session.directory "packages" in
   let directory = Filename.concat packages hash in
@@ -150,7 +133,6 @@ let fetch name version ~hash =
           (Printf.sprintf "no registry is set; set `%s` to the registry's directory"
              Registry.Index.variable)
 
-(* A published package's manifest and record, for planning a lock file. *)
 let load_published name version ~hash =
   match fetch name version ~hash with
   | Error reason -> Error reason
@@ -219,8 +201,6 @@ let scan (files : Files.t) session =
         Engine.remove engine Project.text (Project.Project, path);
         Engine.remove engine stamps path;
         Session.note_file session path None;
-        (* A file that is gone has no diagnostics to maintain, so they
-           are no longer a root. *)
         match
           List.find_opt (fun (source : Project.source_file) -> source.path = path) was_files
         with
@@ -233,8 +213,6 @@ let scan (files : Files.t) session =
   Engine.set engine Project.roots () [ Project.Standard; Project.Project ];
   resolve_registry session ~before
 
-(* Each file's fingerprint, by which the saved state nearest to a set of
-   files is found. *)
 let fingerprints (files : Files.t) () =
   List.filter_map
     (fun (path, _) -> Option.map (fun text -> (path, Session.fingerprint text)) (files.read path))
@@ -243,9 +221,6 @@ let fingerprints (files : Files.t) () =
 let attach_project session ~kind (files : Files.t) =
   Session.attach session (Project { kind; update = scan files; files; retried = false })
 
-(* The session for a set of files: its own state if it has one, else the
-   nearest saved state, else a new one over the standard library. This is
-   the one way a project's session is opened, whatever its files are. *)
 let open_files ~key ?pointer ?home ~kind (files : Files.t) =
   match Session.find key with
   | Some session -> Ok session
@@ -289,10 +264,6 @@ let open_commit ~repository commit =
               Ok session
           | Error () -> Error (Printf.sprintf "cannot open commit %s." commit)))
 
-(* The root of the project a directory is in: the nearest directory at or
-   above it whose manifest has a [[project]] table, or with none, the
-   nearest with a manifest, which is a package that is a project by
-   itself. *)
 let root_of directory =
   let directory = try Unix.realpath directory with Unix.Unix_error _ -> directory in
   let has_project_table manifest =
@@ -319,14 +290,11 @@ let relative_to root directory =
       String.sub directory (String.length prefix) (String.length directory - String.length prefix)
     else ""
 
-(* Every package of the project: its directory and its name. *)
 let packages session =
   List.map
     (fun (directory, (package : Manifest.package)) -> (directory, package.name))
     (own_layout session).packages
 
-(* The packages a request in a directory is about: those at or under it, or
-   the one it is in. *)
 let target_packages session requested =
   let packages = packages session in
   let under (directory, _) =
@@ -353,8 +321,6 @@ let package_files session name =
   match Query.demand (Session.context session) Project.package name with
   | Some package -> package.files
   | None -> []
-
-(* Sessions as the command line sees them *)
 
 let root session =
   match (project session).kind with
@@ -400,7 +366,6 @@ let diagnostics_of session packages =
         (package_files session name))
     packages
 
-(* The sessions opened since [save_opened] last saved them. *)
 let opened = ref []
 
 let open_session directory =
@@ -418,8 +383,6 @@ let open_session directory =
             Session.touch session;
             Session.compact ~waited_for:true session;
             update session;
-            (* The state is written when the command is done, with the
-               command's results, so that a first write holds a whole state. *)
             ignore (Engine.stabilize (Session.engine session));
             if not (List.memq session !opened) then opened := session :: !opened;
             Ok (session, target_packages session (relative_to root directory)))
@@ -445,10 +408,6 @@ let save_opened () =
 let sessions () =
   List.map (fun (key, results) -> (Session.show_key key, results)) (Session.sessions ())
 
-(* Graph questions. The worktree is checked first, so that every
-   definition's results are there to read and to compare. Each file's
-   diagnostics are a root, so this is cheap after the first time. *)
-
 let check_all session = ignore (diagnostics_of session (packages session))
 
 let after_checking question session paths =
@@ -469,7 +428,6 @@ let all_declarations session =
         (package_modules session name))
     (packages session)
 
-(* Whether [name] is a path's text or the end of it after [::] or [.]. *)
 let ends_path name shown =
   shown = name
   ||
@@ -478,9 +436,6 @@ let ends_path name shown =
   && String.sub shown (shown_length - name_length) name_length = name
   && (shown.[shown_length - name_length - 1] = ':' || shown.[shown_length - name_length - 1] = '.')
 
-(* A method is written without its receiver, which [Path.show] appends for
-   [mut self] and [own self], so [Counter.bump] names every version of the
-   method and [Counter.bump(mut self)] names one. *)
 let matches name (path : Path.t) =
   ends_path name (Path.show path)
   ||
@@ -494,8 +449,6 @@ let find_definitions session name =
        (fun (candidate : Resolve.Names.declaration) ->
          if matches name candidate.path then Some candidate.path else None)
        (all_declarations session))
-
-(* Comparing a session with another, such as its base commit's *)
 
 let changes mine theirs =
   check_all mine;
@@ -512,12 +465,7 @@ let base_commit session base =
       | None, _ -> None)
 
 let open_commit_of session commit = open_commit ~repository:(root session) commit
-
-(* A commit of a worktree's files as they are, for merging. *)
 let commit_of_worktree root = Git.snapshot ~directory:root
-
-(* Where a root is in git: its repository's common directory, and its
-   place under its worktree's top. Neither changes while a process runs. *)
 let git_places : (string, string option * string option) Hashtbl.t = Hashtbl.create 8
 
 let git_place root =
@@ -590,11 +538,6 @@ let overlap_with session other =
                    (Session.engine other))))
   | _ -> Error "not a git worktree."
 
-(* A session that starts from another's state, with other files: some of
-   its files replaced, added, or, with [None], removed. It shares with the
-   session everything but the change's dependents, and is never saved, so a
-   change, such as a rename or another lock file, is tried before any file
-   is written. *)
 let trial_over session (files : Files.t) =
   let trial = Session.trial session in
   attach_project trial ~kind:(project session).kind files;
@@ -603,14 +546,9 @@ let trial_over session (files : Files.t) =
   trial
 
 let trial session changes = trial_over session (Files.with_changes (project session).files changes)
-
-(* The standard library as a state of its own *)
-
 let library_prefix = Printf.sprintf "library-%s-" (String.sub Compiler_version.digest 0 16)
 let () = Session.allow_reading Compiler_version.digest
 
-(* The inputs of the [standard] package, set from sources: its files. A file
-   that the sources no longer have is removed. *)
 let set_library (files : (Path.file * string) list) session =
   set_standard (Session.engine session) files
 
@@ -638,10 +576,6 @@ let project_manifests session =
     (fun (_, name) -> Query.demand (Session.context session) Project.package name)
     (packages session)
 
-(* The lock file a project would have with some packages at other versions:
-   each of [set] at the version given, or at its newest, and with [all],
-   every registry package of the build at its newest. The other versions
-   follow as a build's do. *)
 let plan_lock session ~set ~all =
   match Registry.Index.current () with
   | None ->
@@ -729,8 +663,6 @@ let plan_lock session ~set ~all =
             in
             Ok { text = Registry.Lock.print after; before; after })
 
-(* The package's files in the store are a project of one package, whose
-   lock file names the packages it was published with. *)
 let published name version =
   match
     Option.bind (Registry.Index.current ()) (fun registry ->
@@ -763,7 +695,6 @@ let published name version =
 let code_packages session name =
   try Engine.get (Session.engine session) Checks.code_packages name with Not_found -> []
 
-(* The diagnostics of a merge of two commits that neither has. *)
 let merge_preview session other =
   let root = root session in
   let snapshot session =
@@ -805,10 +736,6 @@ let merge_preview session other =
 let recovering = Session.recovering
 let reset = Session.reset
 
-(* Watching: each open worktree's file stamps are checked every second while
-   no request is waiting, so that results are current before they are asked
-   for. A request scans again before it is answered, so it always sees every
-   change made before it. *)
 let watch () =
   List.iter
     (fun session ->
@@ -821,7 +748,6 @@ let watch () =
       | _ -> ())
     (Session.all ())
 
-(* The standard library's state is kept when the store is collected. *)
 let standard_artifacts () =
   let identity = Session.identity () in
   Option.to_list
@@ -829,12 +755,8 @@ let standard_artifacts () =
        (fun artifact -> (identity, artifact))
        (Session.find_result ~kind:Store.Package_state ~key:(standard_key identity)))
 
-(* The name of the background process for a directory: its project's root.
-   A directory in no project is served by a process of its own. *)
 let server_key directory = Option.value (root_of directory) ~default:""
 
-(* A process serves one project, and ends when the project's directory is
-   gone. *)
 let serve ~key ~handle =
   Session.Server.serve ~key
     ~alive:(fun () -> key = "" || Sys.file_exists key)

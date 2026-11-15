@@ -1,11 +1,5 @@
-(* [truss explain FILE:LINE:COLUMN]: the name or expression at a position,
-   its meaning, its type, and the signature of the definition it refers
-   to. *)
-
 module Names = Resolve.Names
 
-(* Parses [FILE:LINE:COLUMN] from the right, so a file name may contain a
-   colon. *)
 let parse_position text =
   match List.rev (String.split_on_char ':' text) with
   | column :: line :: (_ :: _ as file) -> (
