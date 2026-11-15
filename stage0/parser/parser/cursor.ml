@@ -135,7 +135,7 @@ let accept_keyword cursor keyword =
   end
   else false
 
-let span cursor span = Source.Definition_span.of_file ~base:cursor.base span
+let definition_span cursor span = Source.Definition_span.of_file ~base:cursor.base span
 
 let previous_token cursor =
   if cursor.index > cursor.first then Some cursor.tokens.(cursor.index - 1) else None
@@ -146,9 +146,9 @@ let previous_stop cursor =
 let span_from cursor start_index =
   let start = (token_at cursor start_index).span.start in
   let stop = max start (previous_stop cursor) in
-  span cursor (Source.span start stop)
+  definition_span cursor (Source.span start stop)
 
-let absolute cursor span = Source.Definition_span.to_file ~base:cursor.base span
+let file_span cursor span = Source.Definition_span.to_file ~base:cursor.base span
 
 let rec tokens_within (tokens : Token.t array) ~first ~stop (span : Source.span) =
   let inside = ref [] and enclosing = ref None in
@@ -277,6 +277,13 @@ let skip_one cursor =
 let group cursor =
   Array.sub cursor.tokens cursor.index (closer cursor cursor.index - cursor.index + 1)
 
+let separated cursor ~separator item =
+  let rec gather items =
+    let items = item cursor :: items in
+    if accept_punctuation cursor separator then gather items else List.rev items
+  in
+  gather []
+
 let skip_piece cursor : Split.piece =
   let piece : Split.piece =
     { first = cursor.index; stop = Split.stop cursor.tokens ~first:cursor.index }
@@ -295,7 +302,7 @@ let bracketed cursor ~item ~recover =
   let opener = cursor.index in
   let closer_index = closer cursor opener in
   advance cursor;
-  let rec loop items =
+  let rec gather items =
     if cursor.index >= closer_index then List.rev items
     else
       let start = cursor.index in
@@ -304,18 +311,19 @@ let bracketed cursor ~item ~recover =
         if cursor.index < closer_index then expect_punctuation cursor Comma;
         value
       with
-      | value -> loop (value :: items)
+      | value -> gather (value :: items)
       | exception Failed ->
           while cursor.index < closer_index && peek_kind cursor <> Punctuation Comma do
             skip_one cursor
           done;
           let span =
-            span cursor (Source.span (token_at cursor start).span.start (peek cursor).span.start)
+            definition_span cursor
+              (Source.span (token_at cursor start).span.start (peek cursor).span.start)
           in
           if cursor.index < closer_index then advance cursor;
-          loop (recover span :: items)
+          gather (recover span :: items)
   in
-  let items = loop [] in
+  let items = gather [] in
   skip_to cursor (closer_index + 1);
   items
 
@@ -324,7 +332,7 @@ let lines cursor ~item ~recover =
   let opener = cursor.index in
   let closer_index = closer cursor opener in
   advance cursor;
-  let rec loop items =
+  let rec gather items =
     if cursor.index >= closer_index then List.rev items
     else
       let start = cursor.index in
@@ -349,11 +357,12 @@ let lines cursor ~item ~recover =
             recover (span_from cursor start)
       in
       if cursor.index < closer_index && peek_kind cursor = Newline then advance cursor;
-      loop (value :: items)
+      gather (value :: items)
   in
-  let items = loop [] in
+  let items = gather [] in
   cursor.after_inserted_closer <- enclosing_after_inserted_closer;
   skip_to cursor (closer_index + 1);
   items
 
-let recovered cursor = List.sort_uniq compare (List.map (span cursor) !(cursor.recoveries))
+let recovered cursor =
+  List.sort_uniq compare (List.map (definition_span cursor) !(cursor.recoveries))

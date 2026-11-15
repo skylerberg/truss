@@ -132,7 +132,9 @@ let explain_at ~path (definition : definition) (resolved : Resolve.resolved)
   in
   Syntax_walk.definition visit definition;
   let name_at =
-    List.find_opt (fun (name : name) -> contains name.span offset) (Syntax_walk.names definition)
+    List.find_opt
+      (fun (name : name) -> contains name.span offset)
+      (Syntax_walk.collect_names definition)
   in
   let is_written_in (value : expression) (name : name) =
     match value.kind with

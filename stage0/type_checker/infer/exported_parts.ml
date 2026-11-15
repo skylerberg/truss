@@ -51,7 +51,7 @@ let check (state : state) =
       clauses
   in
   if called_from_other_packages state && requires_and_costs <> [] then begin
-    let spans = Syntax_walk.spans state.definition in
+    let spans = Syntax_walk.span_table state.definition in
     let named id (path : Path.t) =
       let span = spans.(id) in
       if

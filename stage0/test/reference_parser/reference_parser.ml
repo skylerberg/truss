@@ -165,12 +165,12 @@ module Snippet = struct
         (fun (piece : Parser.For_testing.piece) ->
           let kind, diagnostics =
             if Parser.For_testing.is_use tokens piece then
-              (Use, snd (Parser.For_testing.use_line tokens piece))
+              (Use, snd (Parser.For_testing.parse_use_line tokens piece))
             else if starts_definition tokens piece then
-              match Parser.For_testing.example_definition tokens piece with
+              match Parser.For_testing.parse_example_definition tokens piece with
               | Example_definition, diagnostics -> (Definition, diagnostics)
               | Example_signature, diagnostics -> (Signature, diagnostics)
-            else (Statement, Parser.For_testing.example_statement tokens piece)
+            else (Statement, Parser.For_testing.parse_example_statement tokens piece)
           in
           ({ kind; first = piece.first; stop = piece.stop }, diagnostics))
         (Parser.For_testing.split tokens)

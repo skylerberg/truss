@@ -23,6 +23,6 @@ val signature : (Syntax.expression -> unit) -> Syntax.signature -> unit
 val definition :
   ?statement:(Syntax.statement -> unit) -> (Syntax.expression -> unit) -> Syntax.definition -> unit
 
-val spans : Syntax.definition -> Source.Definition_span.t array
-val names : Syntax.definition -> Syntax.name list
+val span_table : Syntax.definition -> Source.Definition_span.t array
+val collect_names : Syntax.definition -> Syntax.name list
 val without_positions : Syntax.definition -> Syntax.definition

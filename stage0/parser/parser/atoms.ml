@@ -28,35 +28,35 @@ let mode cursor =
   else None
 
 let name cursor (token : Token.t) text : Syntax.name =
-  { text; span = Cursor.span cursor token.span; id = Cursor.fresh_id cursor }
+  { text; span = Cursor.definition_span cursor token.span; id = Cursor.fresh_id cursor }
 
-let lower cursor expected =
+let lower_name cursor expected =
   match Cursor.peek_kind cursor with
   | Lower text -> name cursor (Cursor.next cursor) text
   | _ -> Cursor.fail cursor expected
 
-let upper cursor expected =
+let upper_name cursor expected =
   match Cursor.peek_kind cursor with
   | Upper text -> name cursor (Cursor.next cursor) text
   | _ -> Cursor.fail cursor expected
 
 let module_prefix cursor =
-  let rec loop modules =
+  let rec gather modules =
     match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
     | Lower text, Punctuation Colon_colon ->
         let module_name = name cursor (Cursor.next cursor) text in
         Cursor.advance cursor;
-        loop (module_name :: modules)
+        gather (module_name :: modules)
     | _ -> List.rev modules
   in
-  loop []
+  gather []
 
 let upper_path cursor expected : Syntax.path =
   let modules = module_prefix cursor in
-  { modules; last = upper cursor expected }
+  { modules; last = upper_name cursor expected }
 
 let text cursor (text : Token.text) : Syntax.text =
-  { value = text.value; span = Cursor.span cursor text.span }
+  { value = text.value; span = Cursor.definition_span cursor text.span }
 
 let string_literal cursor ~start ~modules (literal : Token.string_literal) ~interpolation :
     Syntax.string_literal =
@@ -64,7 +64,10 @@ let string_literal cursor ~start ~modules (literal : Token.string_literal) ~inte
   let tag =
     Option.map
       (fun (text, span) : Syntax.path ->
-        { modules; last = { text; span = Cursor.span cursor span; id = Cursor.fresh_id cursor } })
+        {
+          modules;
+          last = { text; span = Cursor.definition_span cursor span; id = Cursor.fresh_id cursor };
+        })
       literal.tag
   in
   {

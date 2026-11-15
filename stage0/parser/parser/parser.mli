@@ -7,10 +7,10 @@ module For_testing : sig
 
   val split : Token.t array -> piece list
   val is_use : Token.t array -> piece -> bool
-  val use_line : Token.t array -> piece -> Syntax.path option * Diagnostic.t list
-  val definition : Token.t array -> piece -> Syntax.top_level * Diagnostic.t list
-  val example_definition : Token.t array -> piece -> example * Diagnostic.t list
-  val example_statement : Token.t array -> piece -> Diagnostic.t list
+  val parse_use_line : Token.t array -> piece -> Syntax.path option * Diagnostic.t list
+  val parse_definition : Token.t array -> piece -> Syntax.top_level * Diagnostic.t list
+  val parse_example_definition : Token.t array -> piece -> example * Diagnostic.t list
+  val parse_example_statement : Token.t array -> piece -> Diagnostic.t list
   val begins_statement : Token.kind -> bool
-  val spelled_words : string list
+  val contextual_keywords : string list
 end

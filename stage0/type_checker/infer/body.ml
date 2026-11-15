@@ -270,7 +270,7 @@ let check_deserialized_invariants state (lowered : Environment.lowered_interface
   match (form.definition, lowered.interface) with
   | Type { invariants; _ }, Type_interface interface
     when List.exists (Well_known.is Deserialize) interface.derives ->
-      let spans = lazy (Syntax_walk.spans state.definition) in
+      let spans = lazy (Syntax_walk.span_table state.definition) in
       List.iter
         (fun (invariant : Core.condition) ->
           if not invariant.executable then
@@ -662,7 +662,7 @@ let check (lookups : Lookups.t) (key : Names.key) ~checks_body =
       let binding_spans = Hashtbl.create 64 in
       List.iter
         (fun (name : name) -> Hashtbl.replace binding_spans name.id name.span)
-        (Syntax_walk.names definition);
+        (Syntax_walk.collect_names definition);
       let state : state =
         {
           lookups;
@@ -712,7 +712,7 @@ let check (lookups : Lookups.t) (key : Names.key) ~checks_body =
       state.diagnostics <-
         Interface.Check.bound_diagnostics lookups.interface ~package:state.package
           ~bounds:(bounds state)
-          ~spans:(lazy (Syntax_walk.spans definition))
+          ~spans:(lazy (Syntax_walk.span_table definition))
           !(context.named)
         @ state.diagnostics;
       finalize state;

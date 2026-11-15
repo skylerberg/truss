@@ -38,11 +38,13 @@ let literal cursor : literal option =
   | String literal -> Some (Literal_string (string_literal cursor ~start ~modules:[] literal))
   | _ -> None
 
-let rec after_upper cursor start (path : path) =
+let rec variant_or_constant cursor start (path : path) =
   if Cursor.is_punctuation cursor Dot then begin
     Cursor.advance cursor;
-    let constant = Type_constant (path, Atoms.lower cursor "the name of a constant after `.`") in
-    range_or cursor start (End_constant constant) (Qualified_constant constant)
+    let constant =
+      Type_constant (path, Atoms.lower_name cursor "the name of a constant after `.`")
+    in
+    range_or_single cursor start (End_constant constant) (Qualified_constant constant)
   end
   else
     let fields =
@@ -50,7 +52,7 @@ let rec after_upper cursor start (path : path) =
     in
     pattern_node cursor start (Variant { name = path.last; fields })
 
-and range_or cursor start end_kind kind =
+and range_or_single cursor start end_kind kind =
   let first : range_end =
     { kind = end_kind; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor }
   in
@@ -87,7 +89,7 @@ and constant_end cursor start : range_end =
     | Upper text ->
         let path = { modules; last = Atoms.name cursor (Cursor.next cursor) text } in
         Cursor.expect_punctuation cursor Dot;
-        End_constant (Type_constant (path, Atoms.lower cursor "the name of a constant"))
+        End_constant (Type_constant (path, Atoms.lower_name cursor "the name of a constant"))
     | _ -> Cursor.fail cursor "a constant"
   in
   { kind; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor }
@@ -95,17 +97,17 @@ and constant_end cursor start : range_end =
 and primary cursor : pattern =
   let start = Cursor.index cursor in
   match literal cursor with
-  | Some literal -> range_or cursor start (End_literal literal) (Literal literal)
+  | Some literal -> range_or_single cursor start (End_literal literal) (Literal literal)
   | None -> (
       match Cursor.peek_kind cursor with
       | Underscore ->
           Cursor.advance cursor;
           pattern_node cursor start Wildcard
       | Punctuation (Open Paren) -> pattern_node cursor start (Record (pattern_fields cursor))
-      | Lower _ | Upper _ -> named cursor start
+      | Lower _ | Upper _ -> name_pattern cursor start
       | _ -> Cursor.fail cursor "a pattern")
 
-and named cursor start =
+and name_pattern cursor start =
   let modules = Atoms.module_prefix cursor in
   match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
   | Lower _, Punctuation (Dot_dot | Dot_dot_equal) when modules = [] ->
@@ -116,13 +118,13 @@ and named cursor start =
       let constant =
         Module_constant { modules; last = Atoms.name cursor (Cursor.next cursor) text }
       in
-      range_or cursor start (End_constant constant) (Qualified_constant constant)
+      range_or_single cursor start (End_constant constant) (Qualified_constant constant)
   | Upper text, _ ->
       let path = { modules; last = Atoms.name cursor (Cursor.next cursor) text } in
-      after_upper cursor start (unqualified_variant cursor start path)
+      variant_or_constant cursor start (unqualified_variant cursor start path)
   | String ({ tag = Some _; _ } as literal), _ ->
       let literal = Literal_string (string_literal cursor ~start ~modules literal) in
-      range_or cursor start (End_literal literal) (Literal literal)
+      range_or_single cursor start (End_literal literal) (Literal literal)
   | _ -> Cursor.fail cursor "a name after `::`"
 
 and unqualified_variant cursor start (path : path) =
@@ -173,7 +175,7 @@ and pattern_fields cursor =
     (fun index (field : pattern_field) ->
       if field.kind = Rest && index < List.length fields - 1 then
         Cursor.report cursor Unexpected_token
-          (Cursor.absolute cursor field.span)
+          (Cursor.file_span cursor field.span)
           "`..` must be the last field of a pattern.")
     fields;
   fields
@@ -182,12 +184,6 @@ and pattern cursor : pattern = Cursor.nested cursor alternatives
 
 and alternatives cursor : pattern =
   let start = Cursor.index cursor in
-  let first = primary cursor in
-  if Cursor.is_punctuation cursor Bar then begin
-    let rec loop alternatives =
-      if Cursor.accept_punctuation cursor Bar then loop (primary cursor :: alternatives)
-      else List.rev alternatives
-    in
-    pattern_node cursor start (Alternatives (loop [ first ]))
-  end
-  else first
+  match Cursor.separated cursor ~separator:Bar primary with
+  | [ single ] -> single
+  | alternatives -> pattern_node cursor start (Alternatives alternatives)

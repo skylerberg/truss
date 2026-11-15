@@ -14,6 +14,6 @@ val string_literal :
   Cursor.t -> start:int -> modules:Syntax.name list -> Token.string_literal -> Syntax.string_literal
 
 val opens_body : Cursor.t -> bool
-val body_opening : Cursor.t -> unit
+val expect_body_opening : Cursor.t -> unit
 val body : Cursor.t -> Syntax.block
 val statement_line : Cursor.t -> previous:Syntax.statement option -> Syntax.statement

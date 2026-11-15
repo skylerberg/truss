@@ -5,8 +5,8 @@ val begins_expression : Token.kind -> bool
 val begins_statement : Token.kind -> bool
 val mode : Cursor.t -> Syntax.mode option
 val name : Cursor.t -> Token.t -> string -> Syntax.name
-val lower : Cursor.t -> string -> Syntax.name
-val upper : Cursor.t -> string -> Syntax.name
+val lower_name : Cursor.t -> string -> Syntax.name
+val upper_name : Cursor.t -> string -> Syntax.name
 val module_prefix : Cursor.t -> Syntax.name list
 val upper_path : Cursor.t -> string -> Syntax.path
 

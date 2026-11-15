@@ -66,21 +66,21 @@ let applies_first language ~first ~second = level language first >= level langua
 type grouping = Left_first | Right_first
 
 let report cursor (span : Source.Definition_span.t) message fixes =
-  Cursor.report cursor Needs_parentheses (Cursor.absolute cursor span) message
+  Cursor.report cursor Needs_parentheses (Cursor.file_span cursor span) message
     ~fixes:(List.map (fun (title, edits) -> Diagnostic.fix title edits) fixes)
 
 let fix cursor ~fallback (whole : Source.Definition_span.t) edits =
   let insertions =
     List.map (fun (edit : Source.span Diagnostic.edit) -> (edit.span.start, edit.replacement)) edits
   in
-  match Cursor.spelling cursor ~insertions (Cursor.absolute cursor whole) with
+  match Cursor.spelling cursor ~insertions (Cursor.file_span cursor whole) with
   | Some fixed -> (Printf.sprintf "Write `%s`" fixed, edits)
   | None -> (fallback, edits)
 
 let parentheses cursor (first : Source.Definition_span.t) (last : Source.Definition_span.t) =
   [
-    Diagnostic.insert (Source.zero_width (Cursor.absolute cursor first).start) "(";
-    Diagnostic.insert (Source.zero_width (Cursor.absolute cursor last).stop) ")";
+    Diagnostic.insert (Source.zero_width (Cursor.file_span cursor first).start) "(";
+    Diagnostic.insert (Source.zero_width (Cursor.file_span cursor last).stop) ")";
   ]
 
 let is_name_or_literal (value : expression) =
@@ -189,7 +189,7 @@ let report_problem cursor ?context (whole : expression) (operand : expression) ~
         match (whole.kind, operand.kind) with
         | Binary { operator = Implies; _ }, _ -> List.rev (both ())
         | Binary _, Binary { right = middle; _ } when (not right) && is_name_or_literal middle -> (
-            let middle_span = Cursor.absolute cursor middle.span in
+            let middle_span = Cursor.file_span cursor middle.span in
             match Cursor.spelling cursor middle_span with
             | Some middle_spelling ->
                 [
@@ -220,7 +220,7 @@ let rec checked_expression ?context cursor (value : expression) =
   | Is { value = left; operator_span; _ } ->
       (match left.kind with
       | Prefix (Not, _) ->
-          let whole = Cursor.absolute cursor value.span in
+          let whole = Cursor.file_span cursor value.span in
           report cursor operator_span
             "`!` and `is` have no relative precedence. Add parentheses to say whether the test or \
              the value is negated."

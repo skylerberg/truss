@@ -691,7 +691,7 @@ let namespace lookups package
             text = written.text;
             place = { file = written.file; base = written.item.base };
             imports = file_imports written.file;
-            spans = Syntax_walk.spans written.item.value;
+            spans = Syntax_walk.span_table written.item.value;
             container =
               Option.map key_of_written
                 (Option.bind written.container (fun index ->

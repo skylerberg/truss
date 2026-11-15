@@ -17,7 +17,7 @@ val file_diagnostics : t -> Path.file -> Diagnostic.t list
 val manifest_problems : t -> Path.package -> Package_checks.manifest_problem list
 val code_packages : t -> Path.package -> Path.package list option
 val tables : t -> Resolve.Names.key -> Infer.tables option
-val parsed : t -> Path.file -> Parsed.file
+val parsed : t -> Path.file -> Parsed.t
 val names : t -> Path.package list -> Resolve.Names.lookups
 val resolved : t -> Resolve.Names.key -> Resolve.resolved option
 val interface_lookups : t -> Path.package list -> Interface.Lookups.t
