@@ -283,17 +283,6 @@ let stop =
           Outcome.Exit 0)
       $ common)
 
-let clean =
-  command "clean" ~doc:"Stop the background process and delete the store, which costs only time."
-    Term.(const (fun () -> Outcome.Exit 0) $ common)
-
-let lsp =
-  command "lsp"
-    ~doc:
-      "Run the language server on standard input and output, for an editor. It reports each open \
-       file's diagnostics, the prover's included, and the state of each obligation."
-    Term.(const (fun () -> Outcome.Exit 2) $ common)
-
 let version =
   Printf.sprintf "stage0 (Truss %s, code generation %d, Unicode %s)" Manifest.truss_version
     Emit_c.version Unicode.version
@@ -329,8 +318,6 @@ let truss =
       sync;
       status;
       stop;
-      clean;
-      lsp;
     ]
 
 let evaluate arguments =

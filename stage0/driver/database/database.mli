@@ -38,7 +38,10 @@ val find_definitions : session -> string -> Path.t list
 val changes : session -> session -> (Path.t * Query.part * Graph_types.difference) list
 val other_worktrees : session -> session list
 val overlap_with : session -> session -> (Graph_types.overlap list, string) result
-val merge_preview : session -> session -> ((string * string * string) list, string) result
+
+type merge_diagnostic = { path : string; diagnostic : Diagnostic.t }
+
+val merge_preview : session -> session -> (merge_diagnostic list, string) result
 
 type lock_plan = { text : string; before : Registry.Lock.t; after : Registry.Lock.t }
 

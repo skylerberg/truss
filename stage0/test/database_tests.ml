@@ -699,8 +699,12 @@ let () =
       match Database.merge_preview mine theirs with
       | Error message -> fail "%s" message
       | Ok actual ->
-          if not (List.exists (fun (file, _, _) -> file = "main.truss") actual) then
-            fail "no error found in the merge");
+          if
+            not
+              (List.exists
+                 (fun (merged : Database.merge_diagnostic) -> merged.path = "main.truss")
+                 actual)
+          then fail "no error found in the merge");
   test "a merge preview finds the errors the merge would have" (fun () ->
       fresh_store ();
       let root = repository () in
@@ -716,7 +720,9 @@ let () =
           if
             not
               (List.exists
-                 (fun (file, code, _) -> file = "caller.truss" && code = "types.missing_argument")
+                 (fun ({ path; diagnostic } : Database.merge_diagnostic) ->
+                   path = "caller.truss"
+                   && Diagnostic.Code.name diagnostic.code = "types.missing_argument")
                  actual)
           then fail "no error found")
 
