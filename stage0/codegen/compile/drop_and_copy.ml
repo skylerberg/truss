@@ -52,6 +52,11 @@ let make_any_copy_entry ty = (Instance.Any_copy ty, any_copy_signature)
 
 open Emit_c.Builder
 
+let free_box builder (any : Lowered.place) =
+  emit builder
+    (Call
+       { target = Intrinsic Free; arguments = [ Copy (any / Field "value") ]; result = Discarded })
+
 let box context builder ty =
   let layout = Memory_layout.of_type context.env ty in
   let box = local builder ~name:"box" (Raw (Pointer Opaque)) in
@@ -96,13 +101,7 @@ let drop context ty =
              arguments = [];
              result = Discarded;
            });
-      emit builder
-        (Call
-           {
-             target = Intrinsic Free;
-             arguments = [ Copy (value / Field "value") ];
-             result = Discarded;
-           })
+      free_box builder value
   | Handle ->
       emit builder
         (Call

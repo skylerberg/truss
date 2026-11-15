@@ -13,6 +13,7 @@ val copy_into :
 val box : t -> Emit_c.Builder.t -> Ground.ty -> Lowered.local
 val make_any_drop_entry : Ground.ty -> Instance.key * Lowered.signature
 val make_any_copy_entry : Ground.ty -> Instance.key * Lowered.signature
+val free_box : Emit_c.Builder.t -> Lowered.place -> unit
 
 module For_testing : sig
   val copy_signature : t -> Ground.ty -> Lowered.signature

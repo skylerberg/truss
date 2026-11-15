@@ -349,6 +349,8 @@ let call_through_any st ~(any_type : Types.trait_reference) ~trait ~name ~(any :
         signature = c_signature;
       }
   in
+  let is_consumed = match any_method.signature.receiver with Some (Own, _) -> true | _ -> false in
+  if is_consumed then ignore (moved st any);
   emit st.builder
     (Call
        {
@@ -357,6 +359,7 @@ let call_through_any st ~(any_type : Types.trait_reference) ~trait ~name ~(any :
          result = Convention.destination result destination;
        });
   if not c_signature.returns then unreachable_block st
+  else if is_consumed then Drop_and_copy.free_box st.builder any
 
 let in_type_definition st (ty : Ground.ty) nested_function =
   let path, arguments =

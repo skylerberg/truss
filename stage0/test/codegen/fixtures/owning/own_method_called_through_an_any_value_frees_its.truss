@@ -1,0 +1,22 @@
+trait Named {
+  fn into_name(own self) -> String
+  fn rename(mut self, tag: String)
+}
+
+type Dog(tag: String)
+
+impl Named for Dog {
+  fn into_name(own self) -> String {
+    self.tag
+  }
+
+  fn rename(mut self, tag: String) {
+    self.tag = tag.copy()
+  }
+}
+
+test "renamed, then consumed" {
+  var pet: any Named = any Dog(tag: "${1}st")
+  mut pet.rename(tag: "${2}nd")
+  assert own pet.into_name() == "2nd"
+}
