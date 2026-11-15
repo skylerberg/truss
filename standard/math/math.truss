@@ -844,7 +844,7 @@ public fn BigInteger.bit_length(self) -> UInt64
     return 0
   }
   let top = self.magnitude[self.magnitude.length() - 1]
-  (self.magnitude.length() - 1).saturating_multiply(64).saturating_add(64 - top.leading_zeros())
+  (self.magnitude.length() - 1).saturating_multiply(64).saturating_add(64 - intrinsic::leading_zeros(top))
 }
 
 public fn BigInteger.absolute(self) -> BigInteger
@@ -1146,7 +1146,7 @@ impl Add[BigInteger] for BigInteger {
   type Output = BigInteger
 
   fn add_is_defined(self, right: BigInteger) -> Bool
-    ensures result == (true)
+    ensures result
     cost time O(1)
   {
     true
@@ -1161,7 +1161,7 @@ impl Subtract[BigInteger] for BigInteger {
   type Output = BigInteger
 
   fn subtract_is_defined(self, right: BigInteger) -> Bool
-    ensures result == (true)
+    ensures result
     cost time O(1)
   {
     true
@@ -1176,7 +1176,7 @@ impl Multiply[BigInteger] for BigInteger {
   type Output = BigInteger
 
   fn multiply_is_defined(self, right: BigInteger) -> Bool
-    ensures result == (true)
+    ensures result
     cost time O(1)
   {
     true
@@ -1191,7 +1191,7 @@ impl Negate for BigInteger {
   type Output = BigInteger
 
   fn negate_is_defined(self) -> Bool
-    ensures result == (true)
+    ensures result
     cost time O(1)
   {
     true
@@ -1529,7 +1529,7 @@ impl Add[Decimal] for Decimal {
   type Output = Decimal
 
   fn add_is_defined(self, right: Decimal) -> Bool
-    ensures result == (true)
+    ensures result
     cost time O(1)
   {
     true
@@ -1545,7 +1545,7 @@ impl Subtract[Decimal] for Decimal {
   type Output = Decimal
 
   fn subtract_is_defined(self, right: Decimal) -> Bool
-    ensures result == (true)
+    ensures result
     cost time O(1)
   {
     true
@@ -1577,7 +1577,7 @@ impl Negate for Decimal {
   type Output = Decimal
 
   fn negate_is_defined(self) -> Bool
-    ensures result == (true)
+    ensures result
     cost time O(1)
   {
     true

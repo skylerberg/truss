@@ -12,13 +12,8 @@ impl Equal for Float32 {
 impl Ordered for Float32 {
   fn compare(self, other: Float32) -> Ordering
     cost time O(1)
-    ensures result == (if intrinsic::less(self, right: other) {
-        Ordering.Less
-      } else if intrinsic::equal(self, right: other) {
-        Ordering.Equal
-      } else {
-        Ordering.Greater
-      })
+    ensures (result == Ordering.Less) == intrinsic::less(self, right: other)
+    ensures (result == Ordering.Equal) == intrinsic::equal(self, right: other)
   {
     if intrinsic::less(self, right: other) {
       Ordering.Less
@@ -46,7 +41,7 @@ impl Add[Float32] for Float32 {
   type Output = Float32
 
   fn add_is_defined(self, right: Float32) -> Bool
-    ensures result == (true)
+    ensures result
     cost time O(1)
   {
     true
@@ -63,7 +58,7 @@ impl Subtract[Float32] for Float32 {
   type Output = Float32
 
   fn subtract_is_defined(self, right: Float32) -> Bool
-    ensures result == (true)
+    ensures result
     cost time O(1)
   {
     true
@@ -80,7 +75,7 @@ impl Multiply[Float32] for Float32 {
   type Output = Float32
 
   fn multiply_is_defined(self, right: Float32) -> Bool
-    ensures result == (true)
+    ensures result
     cost time O(1)
   {
     true
@@ -97,7 +92,7 @@ impl Divide[Float32] for Float32 {
   type Output = Float32
 
   fn divide_is_defined(self, right: Float32) -> Bool
-    ensures result == (true)
+    ensures result
     cost time O(1)
   {
     true
@@ -114,7 +109,7 @@ impl Remainder[Float32] for Float32 {
   type Output = Float32
 
   fn remainder_is_defined(self, right: Float32) -> Bool
-    ensures result == (true)
+    ensures result
     cost time O(1)
   {
     true
@@ -130,7 +125,7 @@ impl Negate for Float32 {
   type Output = Float32
 
   fn negate_is_defined(self) -> Bool
-    ensures result == (true)
+    ensures result
     cost time O(1)
   {
     true
@@ -193,13 +188,8 @@ impl Equal for Float64 {
 impl Ordered for Float64 {
   fn compare(self, other: Float64) -> Ordering
     cost time O(1)
-    ensures result == (if intrinsic::less(self, right: other) {
-        Ordering.Less
-      } else if intrinsic::equal(self, right: other) {
-        Ordering.Equal
-      } else {
-        Ordering.Greater
-      })
+    ensures (result == Ordering.Less) == intrinsic::less(self, right: other)
+    ensures (result == Ordering.Equal) == intrinsic::equal(self, right: other)
   {
     if intrinsic::less(self, right: other) {
       Ordering.Less
@@ -275,7 +265,7 @@ impl Add[Float64] for Float64 {
   type Output = Float64
 
   fn add_is_defined(self, right: Float64) -> Bool
-    ensures result == (true)
+    ensures result
     cost time O(1)
   {
     true
@@ -292,7 +282,7 @@ impl Subtract[Float64] for Float64 {
   type Output = Float64
 
   fn subtract_is_defined(self, right: Float64) -> Bool
-    ensures result == (true)
+    ensures result
     cost time O(1)
   {
     true
@@ -309,7 +299,7 @@ impl Multiply[Float64] for Float64 {
   type Output = Float64
 
   fn multiply_is_defined(self, right: Float64) -> Bool
-    ensures result == (true)
+    ensures result
     cost time O(1)
   {
     true
@@ -326,7 +316,7 @@ impl Divide[Float64] for Float64 {
   type Output = Float64
 
   fn divide_is_defined(self, right: Float64) -> Bool
-    ensures result == (true)
+    ensures result
     cost time O(1)
   {
     true
@@ -343,7 +333,7 @@ impl Remainder[Float64] for Float64 {
   type Output = Float64
 
   fn remainder_is_defined(self, right: Float64) -> Bool
-    ensures result == (true)
+    ensures result
     cost time O(1)
   {
     true
@@ -359,7 +349,7 @@ impl Negate for Float64 {
   type Output = Float64
 
   fn negate_is_defined(self) -> Bool
-    ensures result == (true)
+    ensures result
     cost time O(1)
   {
     true

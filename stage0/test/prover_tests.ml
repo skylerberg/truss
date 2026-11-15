@@ -1073,17 +1073,6 @@ let () =
       proven Fixtures.Prover.derived_ordering_compares_fields_in_order_for)
 
 let () =
-  test "zero has no ones" (fun () -> proven Fixtures.Prover.zero_has_no_ones);
-  test "the ones of a value fit below its bit length" (fun () ->
-      proven Fixtures.Prover.ones_of_a_value_fit_below_its_bit_length);
-  test "the lowest one is below the bit length" (fun () ->
-      proven Fixtures.Prover.lowest_one_is_below_the_bit_length);
-  test "every one below a power of two is counted" (fun () ->
-      proven Fixtures.Prover.every_one_below_a_power_of_two_is_counted);
-  test "a value may have ones" (fun () ->
-      not_proven Fixtures.Prover.value_may_have_ones "prover.ensures")
-
-let () =
   test "a proof for a generic impl names its own generic parameters" (fun () ->
       proven Fixtures.Prover.proof_for_a_generic_impl_names_its_own_generic);
   test "a law's proof names the law's parameters, where its requires hold" (fun () ->
@@ -1642,6 +1631,19 @@ let proven_in_standard text =
 let () =
   test "a view of a scalar ends within the address space and is not at zero" (fun () ->
       proven_in_standard Fixtures.Prover.view_of_a_scalar_ends_within_the_address_space_and)
+
+let () =
+  test "zero has no ones" (fun () -> proven_in_standard Fixtures.Prover.zero_has_no_ones);
+  test "the ones of a value fit below its bit length" (fun () ->
+      proven_in_standard Fixtures.Prover.ones_of_a_value_fit_below_its_bit_length);
+  test "the lowest one is below the bit length" (fun () ->
+      proven_in_standard Fixtures.Prover.lowest_one_is_below_the_bit_length);
+  test "every one below a power of two is counted" (fun () ->
+      proven_in_standard Fixtures.Prover.every_one_below_a_power_of_two_is_counted);
+  test "a value may have ones" (fun () ->
+      match Support.codes (in_standard Fixtures.Prover.value_may_have_ones) with
+      | [ "prover.ensures" ] -> ()
+      | codes -> fail "expected prover.ensures, found %s" (String.concat ", " codes))
 
 let () =
   test "an intrinsic operation has its operator's facts" (fun () ->

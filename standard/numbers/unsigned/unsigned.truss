@@ -3,7 +3,6 @@ use standard::intrinsic
 
 impl Equal for UInt8 {
   fn equal(self, other: UInt8) -> Bool
-    ensures result == (intrinsic::equal(self, right: other))
     cost time O(1)
   {
     intrinsic::equal(self, right: other)
@@ -43,15 +42,15 @@ impl Add[UInt8] for UInt8 {
   type Output = UInt8
 
   fn add_is_defined(self, right: UInt8) -> Bool
-    ensures result == (!intrinsic::add_overflows(self, right: right))
+    ensures result == (UInt8.minimum <= self + right && self + right <= UInt8.maximum)
     cost time O(1)
   {
     !intrinsic::add_overflows(self, right: right)
   }
 
   fn add(self, right: UInt8) -> UInt8
-    requires !intrinsic::add_overflows(self, right: right)
-    ensures result == (intrinsic::add(self, right))
+    requires UInt8.minimum <= self + right && self + right <= UInt8.maximum
+    ensures result == self + right
     cost time O(1)
   {
     intrinsic::add(self, right)
@@ -62,15 +61,15 @@ impl Subtract[UInt8] for UInt8 {
   type Output = UInt8
 
   fn subtract_is_defined(self, right: UInt8) -> Bool
-    ensures result == (!intrinsic::subtract_overflows(self, right: right))
+    ensures result == (UInt8.minimum <= self - right && self - right <= UInt8.maximum)
     cost time O(1)
   {
     !intrinsic::subtract_overflows(self, right: right)
   }
 
   fn subtract(self, right: UInt8) -> UInt8
-    requires !intrinsic::subtract_overflows(self, right: right)
-    ensures result == (intrinsic::subtract(self, right))
+    requires UInt8.minimum <= self - right && self - right <= UInt8.maximum
+    ensures result == self - right
     cost time O(1)
   {
     intrinsic::subtract(self, right)
@@ -81,15 +80,15 @@ impl Multiply[UInt8] for UInt8 {
   type Output = UInt8
 
   fn multiply_is_defined(self, right: UInt8) -> Bool
-    ensures result == (!intrinsic::multiply_overflows(self, right: right))
+    ensures result == (UInt8.minimum <= self * right && self * right <= UInt8.maximum)
     cost time O(1)
   {
     !intrinsic::multiply_overflows(self, right: right)
   }
 
   fn multiply(self, right: UInt8) -> UInt8
-    requires !intrinsic::multiply_overflows(self, right: right)
-    ensures result == (intrinsic::multiply(self, right))
+    requires UInt8.minimum <= self * right && self * right <= UInt8.maximum
+    ensures result == self * right
     cost time O(1)
   {
     intrinsic::multiply(self, right)
@@ -108,7 +107,7 @@ impl Divide[UInt8] for UInt8 {
 
   fn divide(self, right: UInt8) -> UInt8
     requires right != 0
-    ensures result == (intrinsic::divide(self, right))
+    ensures result == self / right
     cost time O(1)
   {
     intrinsic::divide(self, right)
@@ -127,7 +126,7 @@ impl Remainder[UInt8] for UInt8 {
 
   fn remainder(self, right: UInt8) -> UInt8
     requires right != 0
-    ensures result == (intrinsic::remainder(self, right))
+    ensures result == self % right
     cost time O(1)
   {
     intrinsic::remainder(self, right)
@@ -230,7 +229,6 @@ impl TryFrom[UInt64] for UInt8 {
 
 impl Equal for UInt16 {
   fn equal(self, other: UInt16) -> Bool
-    ensures result == (intrinsic::equal(self, right: other))
     cost time O(1)
   {
     intrinsic::equal(self, right: other)
@@ -270,15 +268,15 @@ impl Add[UInt16] for UInt16 {
   type Output = UInt16
 
   fn add_is_defined(self, right: UInt16) -> Bool
-    ensures result == (!intrinsic::add_overflows(self, right: right))
+    ensures result == (UInt16.minimum <= self + right && self + right <= UInt16.maximum)
     cost time O(1)
   {
     !intrinsic::add_overflows(self, right: right)
   }
 
   fn add(self, right: UInt16) -> UInt16
-    requires !intrinsic::add_overflows(self, right: right)
-    ensures result == (intrinsic::add(self, right))
+    requires UInt16.minimum <= self + right && self + right <= UInt16.maximum
+    ensures result == self + right
     cost time O(1)
   {
     intrinsic::add(self, right)
@@ -289,15 +287,15 @@ impl Subtract[UInt16] for UInt16 {
   type Output = UInt16
 
   fn subtract_is_defined(self, right: UInt16) -> Bool
-    ensures result == (!intrinsic::subtract_overflows(self, right: right))
+    ensures result == (UInt16.minimum <= self - right && self - right <= UInt16.maximum)
     cost time O(1)
   {
     !intrinsic::subtract_overflows(self, right: right)
   }
 
   fn subtract(self, right: UInt16) -> UInt16
-    requires !intrinsic::subtract_overflows(self, right: right)
-    ensures result == (intrinsic::subtract(self, right))
+    requires UInt16.minimum <= self - right && self - right <= UInt16.maximum
+    ensures result == self - right
     cost time O(1)
   {
     intrinsic::subtract(self, right)
@@ -308,15 +306,15 @@ impl Multiply[UInt16] for UInt16 {
   type Output = UInt16
 
   fn multiply_is_defined(self, right: UInt16) -> Bool
-    ensures result == (!intrinsic::multiply_overflows(self, right: right))
+    ensures result == (UInt16.minimum <= self * right && self * right <= UInt16.maximum)
     cost time O(1)
   {
     !intrinsic::multiply_overflows(self, right: right)
   }
 
   fn multiply(self, right: UInt16) -> UInt16
-    requires !intrinsic::multiply_overflows(self, right: right)
-    ensures result == (intrinsic::multiply(self, right))
+    requires UInt16.minimum <= self * right && self * right <= UInt16.maximum
+    ensures result == self * right
     cost time O(1)
   {
     intrinsic::multiply(self, right)
@@ -335,7 +333,7 @@ impl Divide[UInt16] for UInt16 {
 
   fn divide(self, right: UInt16) -> UInt16
     requires right != 0
-    ensures result == (intrinsic::divide(self, right))
+    ensures result == self / right
     cost time O(1)
   {
     intrinsic::divide(self, right)
@@ -354,7 +352,7 @@ impl Remainder[UInt16] for UInt16 {
 
   fn remainder(self, right: UInt16) -> UInt16
     requires right != 0
-    ensures result == (intrinsic::remainder(self, right))
+    ensures result == self % right
     cost time O(1)
   {
     intrinsic::remainder(self, right)
@@ -454,7 +452,6 @@ impl TryFrom[UInt64] for UInt16 {
 
 impl Equal for UInt32 {
   fn equal(self, other: UInt32) -> Bool
-    ensures result == (intrinsic::equal(self, right: other))
     cost time O(1)
   {
     intrinsic::equal(self, right: other)
@@ -494,15 +491,15 @@ impl Add[UInt32] for UInt32 {
   type Output = UInt32
 
   fn add_is_defined(self, right: UInt32) -> Bool
-    ensures result == (!intrinsic::add_overflows(self, right: right))
+    ensures result == (UInt32.minimum <= self + right && self + right <= UInt32.maximum)
     cost time O(1)
   {
     !intrinsic::add_overflows(self, right: right)
   }
 
   fn add(self, right: UInt32) -> UInt32
-    requires !intrinsic::add_overflows(self, right: right)
-    ensures result == (intrinsic::add(self, right))
+    requires UInt32.minimum <= self + right && self + right <= UInt32.maximum
+    ensures result == self + right
     cost time O(1)
   {
     intrinsic::add(self, right)
@@ -513,15 +510,15 @@ impl Subtract[UInt32] for UInt32 {
   type Output = UInt32
 
   fn subtract_is_defined(self, right: UInt32) -> Bool
-    ensures result == (!intrinsic::subtract_overflows(self, right: right))
+    ensures result == (UInt32.minimum <= self - right && self - right <= UInt32.maximum)
     cost time O(1)
   {
     !intrinsic::subtract_overflows(self, right: right)
   }
 
   fn subtract(self, right: UInt32) -> UInt32
-    requires !intrinsic::subtract_overflows(self, right: right)
-    ensures result == (intrinsic::subtract(self, right))
+    requires UInt32.minimum <= self - right && self - right <= UInt32.maximum
+    ensures result == self - right
     cost time O(1)
   {
     intrinsic::subtract(self, right)
@@ -532,15 +529,15 @@ impl Multiply[UInt32] for UInt32 {
   type Output = UInt32
 
   fn multiply_is_defined(self, right: UInt32) -> Bool
-    ensures result == (!intrinsic::multiply_overflows(self, right: right))
+    ensures result == (UInt32.minimum <= self * right && self * right <= UInt32.maximum)
     cost time O(1)
   {
     !intrinsic::multiply_overflows(self, right: right)
   }
 
   fn multiply(self, right: UInt32) -> UInt32
-    requires !intrinsic::multiply_overflows(self, right: right)
-    ensures result == (intrinsic::multiply(self, right))
+    requires UInt32.minimum <= self * right && self * right <= UInt32.maximum
+    ensures result == self * right
     cost time O(1)
   {
     intrinsic::multiply(self, right)
@@ -559,7 +556,7 @@ impl Divide[UInt32] for UInt32 {
 
   fn divide(self, right: UInt32) -> UInt32
     requires right != 0
-    ensures result == (intrinsic::divide(self, right))
+    ensures result == self / right
     cost time O(1)
   {
     intrinsic::divide(self, right)
@@ -578,7 +575,7 @@ impl Remainder[UInt32] for UInt32 {
 
   fn remainder(self, right: UInt32) -> UInt32
     requires right != 0
-    ensures result == (intrinsic::remainder(self, right))
+    ensures result == self % right
     cost time O(1)
   {
     intrinsic::remainder(self, right)
@@ -675,7 +672,6 @@ impl TryFrom[UInt64] for UInt32 {
 
 impl Equal for UInt64 {
   fn equal(self, other: UInt64) -> Bool
-    ensures result == (intrinsic::equal(self, right: other))
     cost time O(1)
   {
     intrinsic::equal(self, right: other)
@@ -715,15 +711,15 @@ impl Add[UInt64] for UInt64 {
   type Output = UInt64
 
   fn add_is_defined(self, right: UInt64) -> Bool
-    ensures result == (!intrinsic::add_overflows(self, right: right))
+    ensures result == (UInt64.minimum <= self + right && self + right <= UInt64.maximum)
     cost time O(1)
   {
     !intrinsic::add_overflows(self, right: right)
   }
 
   fn add(self, right: UInt64) -> UInt64
-    requires !intrinsic::add_overflows(self, right: right)
-    ensures result == (intrinsic::add(self, right))
+    requires UInt64.minimum <= self + right && self + right <= UInt64.maximum
+    ensures result == self + right
     cost time O(1)
   {
     intrinsic::add(self, right)
@@ -734,15 +730,15 @@ impl Subtract[UInt64] for UInt64 {
   type Output = UInt64
 
   fn subtract_is_defined(self, right: UInt64) -> Bool
-    ensures result == (!intrinsic::subtract_overflows(self, right: right))
+    ensures result == (UInt64.minimum <= self - right && self - right <= UInt64.maximum)
     cost time O(1)
   {
     !intrinsic::subtract_overflows(self, right: right)
   }
 
   fn subtract(self, right: UInt64) -> UInt64
-    requires !intrinsic::subtract_overflows(self, right: right)
-    ensures result == (intrinsic::subtract(self, right))
+    requires UInt64.minimum <= self - right && self - right <= UInt64.maximum
+    ensures result == self - right
     cost time O(1)
   {
     intrinsic::subtract(self, right)
@@ -753,15 +749,15 @@ impl Multiply[UInt64] for UInt64 {
   type Output = UInt64
 
   fn multiply_is_defined(self, right: UInt64) -> Bool
-    ensures result == (!intrinsic::multiply_overflows(self, right: right))
+    ensures result == (UInt64.minimum <= self * right && self * right <= UInt64.maximum)
     cost time O(1)
   {
     !intrinsic::multiply_overflows(self, right: right)
   }
 
   fn multiply(self, right: UInt64) -> UInt64
-    requires !intrinsic::multiply_overflows(self, right: right)
-    ensures result == (intrinsic::multiply(self, right))
+    requires UInt64.minimum <= self * right && self * right <= UInt64.maximum
+    ensures result == self * right
     cost time O(1)
   {
     intrinsic::multiply(self, right)
@@ -780,7 +776,7 @@ impl Divide[UInt64] for UInt64 {
 
   fn divide(self, right: UInt64) -> UInt64
     requires right != 0
-    ensures result == (intrinsic::divide(self, right))
+    ensures result == self / right
     cost time O(1)
   {
     intrinsic::divide(self, right)
@@ -799,7 +795,7 @@ impl Remainder[UInt64] for UInt64 {
 
   fn remainder(self, right: UInt64) -> UInt64
     requires right != 0
-    ensures result == (intrinsic::remainder(self, right))
+    ensures result == self % right
     cost time O(1)
   {
     intrinsic::remainder(self, right)
