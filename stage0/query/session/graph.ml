@@ -1,16 +1,7 @@
-(* Graph questions about a state. Every answer names definitions and parts;
-   the engine's nodes stay inside. *)
-
 open Graph_types
 
 let part_of (subject : Query.subject) = Option.value subject.part ~default:""
 
-(* An edge runs from a node about a definition, the dependent, along a path
-   of reads to the first node about another definition. The path continues
-   through a node about no definition or about the dependent, but not
-   through a fixed base's node, so that a definition does not depend on
-   everything the standard library's own queries read. Without
-   [dependent], a node about a definition does not continue the path. *)
 let passes_through ?dependent node =
   (not (Engine.is_fixed node))
   &&
@@ -52,9 +43,6 @@ let dependencies engine paths =
     (Engine.nodes engine)
   |> List.sort_uniq compare
 
-(* The edges to the definitions, found by walking each path of reads in
-   reverse, from a node about a definition through its readers. A path's
-   dependent is the first reader about a definition. *)
 let dependents engine paths =
   let paths = Path.Set.of_list paths in
   let edges = Hashtbl.create 64 in
@@ -100,9 +88,6 @@ let dependents engine paths =
     (Engine.nodes_including_fixed engine);
   List.sort_uniq compare (Hashtbl.fold (fun edge () edges -> edge :: edges) edges [])
 
-(* The definitions each root reaches through edges, the root included.
-   A definition's dependencies do not depend on the root that reaches it,
-   so roots share them. *)
 let reachable engine roots =
   let nodes_about = Hashtbl.create 1024 in
   List.iter
@@ -132,10 +117,6 @@ let reachable engine roots =
   in
   List.map (reach Path.Set.empty) roots
 
-(* Every node of [mine] that may differ from the same node in [theirs],
-   with how it compares. A state holds only its differences from its bases, or
-   possible ones, so where the two share a base these are the nodes either holds
-   itself; a base that only one has is compared whole. *)
 let compare_nodes mine theirs =
   let differs node =
     match Engine.current_in node theirs with
@@ -157,8 +138,6 @@ let compare_nodes mine theirs =
     (Engine.unshared theirs mine);
   List.rev_map (fun node -> (node, differs node)) !differing
 
-(* Every part of a definition that a change between two states could reach,
-   in the first, with how it compares with the same part in the second. *)
 let changes mine theirs =
   List.filter_map
     (fun (node, difference) ->

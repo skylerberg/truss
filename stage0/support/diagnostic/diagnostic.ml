@@ -563,8 +563,6 @@ let edit_distance left right =
   done;
   table.(rows - 1).(columns - 1)
 
-(* The visible name closest to [text], if one is near enough to be a typo:
-   at most a third of the name's letters away, and at least one. *)
 let closest text candidates =
   let limit = max 1 (String.length text / 3) in
   let best =
@@ -601,7 +599,6 @@ let map_spans convert diagnostic =
   }
 
 let apply_edits text (edits : span edit list) =
-  (* Edits at the same offset apply in the order they are listed. *)
   let edits =
     List.stable_sort
       (fun (left : span edit) (right : span edit) -> compare left.span.start right.span.start)
@@ -673,8 +670,6 @@ module Collector = struct
       (Dynarray.to_list collector)
 end
 
-(* The first [limit], then a count of the rest, placed after the last one
-   shown. *)
 let shown diagnostics =
   let rec take count last = function
     | [] -> []
@@ -691,8 +686,6 @@ let location source offset =
   let line, column = Source.position source offset in
   Printf.sprintf "%s:%d:%d" (Source.path source) line column
 
-(* Calls [valid] with each valid UTF-8 sequence of [text] and [invalid] with
-   each byte that does not start one. *)
 let iter_utf8 text ~valid ~invalid =
   let rec loop index =
     if index < String.length text then begin
@@ -735,8 +728,6 @@ let render source diagnostic =
   Printf.bprintf buffer "%s: error[%s]: %s\n"
     (location source diagnostic.span.start)
     (Code.name diagnostic.code) diagnostic.message;
-  (* The line holding the start of the span, with the part of the span on that
-     line marked. *)
   let start = diagnostic.span.start in
   let line_start = Source.line_start source start in
   let line_end = Source.line_end source start in
@@ -752,7 +743,6 @@ let render source diagnostic =
   in
   if is_printable && String.length line <= 200 then begin
     Printf.bprintf buffer "  | %s\n" line;
-    (* Keep tabs, so that the marker lines up under the span. *)
     let leading = Buffer.create 16 in
     for index = line_start to start - 1 do
       match text.[index] with

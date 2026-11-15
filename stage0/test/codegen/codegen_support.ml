@@ -245,7 +245,7 @@ let tests_of database = tests_in database example
 
 let run_source text =
   let database, compile = load text in
-  match Compile.run_tests compile ~time_limit:2000 (tests_of database) with
+  match Compile.run_tests compile ~time_limit_ms:2000 (tests_of database) with
   | Ok records -> render_records records
   | Error message -> failwith message
 

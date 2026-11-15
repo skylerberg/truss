@@ -132,10 +132,10 @@ let write_files root files =
 
 let git directory arguments =
   match
-    Process.output "git"
+    Process.run "git"
       ([ "-C"; directory; "-c"; "user.name=test"; "-c"; "user.email=test@example.com" ] @ arguments)
   with
-  | 0, _ -> ()
+  | 0, _, _ -> ()
   | _ -> fail "git %s failed" (String.concat " " arguments)
 
 let rec files_under ~suffix directory =

@@ -11,7 +11,23 @@ let () =
       let missing =
         List.filter (fun word -> not (List.mem word listed)) Parser.For_testing.spelled_words
       in
-      if missing <> [] then fail "not listed: %s" (String.concat ", " missing))
+      if missing <> [] then fail "not listed: %s" (String.concat ", " missing));
+  test "SPECIFICATION.md lists every conflict that a precedence declaration resolves" (fun () ->
+      let rec section = function
+        | [] -> []
+        | "## Ambiguities in the grammar" :: rest -> rest
+        | _ :: rest -> section rest
+      in
+      let rec entries count = function
+        | line :: rest when not (String.starts_with ~prefix:"#" line) ->
+            entries (if String.starts_with ~prefix:"- " line then count + 1 else count) rest
+        | _ -> count
+      in
+      let listed = entries 0 (section (String.split_on_char '\n' (document "SPECIFICATION.md"))) in
+      if listed <> Reference.conflicts_resolved_by_precedence then
+        fail
+          "Menhir resolves %d conflicts by precedence, and \"Ambiguities in the grammar\" lists %d"
+          Reference.conflicts_resolved_by_precedence listed)
 
 let markdown_files = Harness.markdown_documents ()
 

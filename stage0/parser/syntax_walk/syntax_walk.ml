@@ -5,7 +5,7 @@ let rec type_expression on_expression (type_ : type_expression) =
   | Path_type path -> path_type on_expression path
   | Any_type path -> path_type on_expression path
   | Function_type { inputs; output; clauses; _ } ->
-      List.iter (fun (_, input) -> type_expression on_expression input) inputs;
+      List.iter (fun (input : function_input) -> type_expression on_expression input.type_) inputs;
       Option.iter (type_expression on_expression) output;
       List.iter (clause on_expression) clauses
   | Self_type _ | Associated _ | Type_error -> ()
@@ -327,7 +327,6 @@ let spans (definition_ : definition) : span array =
   definition ~statement expression definition_;
   spans
 
-(* Visits names in expressions, patterns, types, clauses, and heads. *)
 let walk_names ~on_name:add (definition_ : definition) =
   let path (written : path) =
     List.iter add written.modules;
@@ -342,7 +341,7 @@ let walk_names ~on_name:add (definition_ : definition) =
         add base;
         add key
     | Function_type { inputs; output; clauses; _ } ->
-        List.iter (fun (_, input) -> type_ input) inputs;
+        List.iter (fun (input : function_input) -> type_ input.type_) inputs;
         Option.iter type_ output;
         List.iter clause_ clauses
     | Type_error -> ()

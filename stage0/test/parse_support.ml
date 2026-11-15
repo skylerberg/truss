@@ -7,7 +7,14 @@ let parse text =
   let source = source text in
   let tokens, lexer_diagnostics = Lexer.lex source in
   let file, parser_diagnostics = Parser.parse source tokens in
-  (file, lexer_diagnostics @ parser_diagnostics)
+  let diagnostics = lexer_diagnostics @ parser_diagnostics in
+  if
+    diagnostics = []
+    && List.exists
+         (fun (item : Syntax.definition Syntax.item) -> item.value.recovered <> [])
+         file.definitions
+  then fail "the parser recovered in %S with no error" text;
+  (file, diagnostics)
 
 let codes diagnostics =
   List.map (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code) diagnostics

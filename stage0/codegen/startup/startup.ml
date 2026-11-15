@@ -2614,7 +2614,7 @@ let main_calling entry =
      }\n"
     entry entry
 
-let tests_calling ~time_limit ~runner tests =
+let tests_calling ~time_limit_ms ~runner tests =
   let declarations =
     String.concat "" (List.map (fun symbol -> Printf.sprintf "void %s(void);\n" symbol) tests)
   in
@@ -2636,7 +2636,7 @@ let tests_calling ~time_limit ~runner tests =
      }\n"
     runner declarations
     (if tests = [] then "0" else table)
-    runner (List.length tests) time_limit
+    runner (List.length tests) time_limit_ms
 
 (* The startup of code run while compiling: it runs the evaluator, which
    writes its result. *)

@@ -1,5 +1,3 @@
-(* The parser's entry point. *)
-
 open Token
 
 type piece = Split.piece = { first : int; stop : int }
@@ -18,8 +16,6 @@ let piece_text source (tokens : Token.t array) piece =
   let base = tokens.(piece.first).span.start in
   String.sub (Source.text source) base (tokens.(piece.stop - 1).span.stop - base)
 
-(* Parses a piece with a cursor of its own, whose collector holds only the
-   piece's diagnostics. *)
 let with_cursor source (tokens : Token.t array) piece parse =
   let diagnostics = Diagnostic.Collector.create () in
   let base = tokens.(piece.first).span.start in
@@ -34,7 +30,7 @@ let item (cursor : Cursor.t) value : _ Syntax.item =
     text = cursor.text;
     blank_line_before = cursor.tokens.(cursor.first).blank_line_before;
     value;
-    container = None;
+    container_index = None;
   }
 
 let parsed cursor value diagnostics =
@@ -44,8 +40,6 @@ let parsed cursor value diagnostics =
       List.map (Diagnostic.map_spans (Syntax.Span.of_source ~base:cursor.base)) diagnostics;
   }
 
-(* Removes each parser fix that, applied and parsed again by [unchecked],
-   adds an error. *)
 let checked_fixes ~unchecked source (tokens : Token.t array) piece (diagnostics : Diagnostic.t list)
     =
   let has_parser_fix (diagnostic : Diagnostic.t) =
@@ -98,13 +92,10 @@ let checked_fixes ~unchecked source (tokens : Token.t array) piece (diagnostics 
             else diagnostic)
           diagnostics
 
-(* Runs the checks that need a definition's whole tree. *)
 let check cursor definition =
   Operators.definition cursor definition;
   Check.definition cursor definition
 
-(* The definition that [parse] builds from a piece, or a
-   [Definition_error] when its header does not parse. *)
 let rec one_definition ?(checks_fixes = true) source tokens piece parse =
   let value, cursor, diagnostics =
     with_cursor source tokens piece (fun cursor ->
@@ -136,11 +127,7 @@ let rec one_definition ?(checks_fixes = true) source tokens piece parse =
   in
   (parsed cursor value diagnostics, List.rev !(cursor.methods))
 
-(* A definition, and the methods declared inside it when it is a trait, an
-   [impl], or a capability. Each method is a separate definition, with its
-   own tokens, base, and node ids, so that an edit to one method changes no
-   other definition's tree. *)
-let methods ?(checks_fixes = true) source tokens (container : Syntax.definition) token_ranges =
+let methods ?(checks_fixes = true) source tokens (container : Syntax.definition) pieces =
   let kind : Parse_definition.container option =
     match container.kind with
     | Trait _ -> Some In_trait
@@ -151,22 +138,21 @@ let methods ?(checks_fixes = true) source tokens (container : Syntax.definition)
   match kind with
   | Some kind ->
       List.map
-        (fun (first, stop) ->
+        (fun piece ->
           fst
-            (one_definition ~checks_fixes source tokens { first; stop }
+            (one_definition ~checks_fixes source tokens piece
                (Parse_definition.method_ ~container:kind ~visibility:container.visibility)))
-        token_ranges
+        pieces
   | None -> []
 
 let parse_definition ~checks_fixes source tokens piece =
-  let parsed, token_ranges =
+  let parsed, method_pieces =
     one_definition ~checks_fixes source tokens piece Parse_definition.definition
   in
-  (parsed, methods ~checks_fixes source tokens parsed.value.value token_ranges)
+  (parsed, methods ~checks_fixes source tokens parsed.value.value method_pieces)
 
 let definition source tokens piece = parse_definition ~checks_fixes:true source tokens piece
 
-(* [use standard::file_system]. *)
 let use_path cursor : Syntax.path option =
   match
     Cursor.expect_keyword cursor Use;
@@ -186,8 +172,6 @@ let use_line source tokens piece =
   let value, cursor, diagnostics = with_cursor source tokens piece use_path in
   parsed cursor value diagnostics
 
-(* A [use] line after a definition moves up, to [destination]: after the
-   other [use] lines, or above the first definition. *)
 let use_after_definition source (line : _ Syntax.item) ~destination =
   let text = Source.text source in
   let stop_offset = line.base + String.length line.text in
@@ -208,9 +192,6 @@ let use_after_definition source (line : _ Syntax.item) ~destination =
 
 let rec parse_file ~checks_fixes source tokens =
   let text = Source.text source in
-  (* Where a [use] line found after a definition moves to: the start of the
-     line after the last [use] line before any definition, or else the
-     start of the first definition's line. *)
   let rec gather pieces ~uses ~definitions ~diagnostics ~destination =
     match pieces with
     | [] -> (List.rev uses, List.rev definitions, List.concat (List.rev diagnostics))
@@ -243,10 +224,12 @@ let rec parse_file ~checks_fixes source tokens =
           | [], None -> Some (Source.line_start source parsed.value.base)
           | _ -> destination
         in
-        let container = Some (List.length definitions) in
+        let container_index = Some (List.length definitions) in
         gather rest ~uses
           ~definitions:
-            (List.rev_map (fun (method_ : _ parsed) -> { method_.value with container }) methods
+            (List.rev_map
+               (fun (method_ : _ parsed) -> { method_.value with container_index })
+               methods
             @ (parsed.value :: definitions))
           ~diagnostics:
             (List.rev_map diagnostics_in_file methods @ (diagnostics_in_file parsed :: diagnostics))
@@ -255,8 +238,6 @@ let rec parse_file ~checks_fixes source tokens =
   let uses, definitions, diagnostics =
     gather (split tokens) ~uses:[] ~definitions:[] ~diagnostics:[] ~destination:None
   in
-  (* A [use] line's move, made over the whole file, keeps its fix only if the
-     moved file, lexed and parsed again, adds no error. *)
   let diagnostics =
     if not checks_fixes then diagnostics
     else
@@ -303,8 +284,6 @@ let rec parse_example_definition ~checks_fixes source tokens piece =
             (Example_signature, None)
         | exception Cursor.Failed -> (Example_definition, None))
   in
-  (* The methods declared inside a trait, an [impl], or a capability are
-     separate definitions, so their diagnostics are not the container's. *)
   let method_diagnostics =
     match container with
     | Some container ->

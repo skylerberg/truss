@@ -346,7 +346,7 @@ and function_type_ context (written : function_type) : Types.function_type =
   {
     inputs =
       List.map
-        (fun (written_mode, input) -> (mode written_mode, type_ context input))
+        (fun (input : function_input) -> (mode input.mode, type_ context input.type_))
         written.inputs;
     output =
       Types.Returns

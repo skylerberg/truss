@@ -39,7 +39,7 @@ let () =
         List.concat_map (fun ((file : Path.file), _) -> tests_in database file.module_) files
         |> List.filter (fun path -> wanted (name_of path))
       in
-      match Compile.run_tests compile ~time_limit:10000 tests with
+      match Compile.run_tests compile ~time_limit_ms:10000 tests with
       | exception Compiler_bug.Bug bug -> not_built (Compiler_bug.to_string bug)
       | Error message -> not_built message
       | Ok records ->

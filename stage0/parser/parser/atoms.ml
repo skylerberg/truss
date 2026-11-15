@@ -1,7 +1,3 @@
-(* Functions that the other parsing modules share: constructors for tree
-   nodes, parsers for names, module prefixes, string literals, and modes,
-   and the first sets of expressions and statements. *)
-
 open Token
 open Syntax
 
@@ -13,7 +9,6 @@ let type_node cursor start kind : type_expression =
 
 let error_expression cursor start : expression = expression_node cursor start Expression_error
 
-(* Whether a token is in the first set of an expression. *)
 let begins_expression = function
   | Upper _ | Lower _ | Integer _ | Float _ | String _ -> true
   | Punctuation (Open _ | Minus | Bang | Tilde | Dot_dot | Dot_dot_equal) -> true
@@ -23,8 +18,6 @@ let begins_expression = function
       true
   | _ -> false
 
-(* Whether a token is in the first set of a statement: of a statement that
-   is not an expression, or of an expression. *)
 let begins_statement = function
   | Keyword (Let | Var | For | While | Parallel | Concurrent | Proof | Assert) -> true
   | kind -> begins_expression kind
@@ -47,8 +40,6 @@ let upper cursor expected =
   | Upper text -> name cursor (Cursor.next cursor) text
   | _ -> Cursor.fail cursor expected
 
-(* The modules of a path, [standard::json::] in [standard::json::parse]:
-   each lowercase name followed by [::]. *)
 let module_prefix cursor =
   let rec loop modules =
     match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
@@ -60,7 +51,6 @@ let module_prefix cursor =
   in
   loop []
 
-(* A path to an uppercase name, with optional modules: [geometry::Shape]. *)
 let upper_path cursor expected : Syntax.path =
   let modules = module_prefix cursor in
   { modules; last = upper cursor expected }
@@ -68,9 +58,6 @@ let upper_path cursor expected : Syntax.path =
 let text cursor (text : Token.text) : Syntax.text =
   { value = text.value; span = Cursor.span cursor text.span }
 
-(* A string literal whose token is the current one, after [modules], the
-   module path written before its tag. Its interpolations are parsed by
-   [interpolation]. *)
 let string_literal cursor ~start ~modules (literal : Token.string_literal) ~interpolation :
     Syntax.string_literal =
   Cursor.advance cursor;

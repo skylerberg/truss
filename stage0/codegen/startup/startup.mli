@@ -44,7 +44,7 @@ val runtime : tests:bool -> in_order:bool -> string
    block of the test's echo output, give their length in bytes and then the
    bytes. Results come in the order tests end, which depends on the
    workers. The program exits with 1 if any test did not pass. *)
-val tests_calling : time_limit:int -> runner:string -> string list -> string
+val tests_calling : time_limit_ms:int -> runner:string -> string list -> string
 
 (* A C [main] that installs the stack-overflow handler and calls [entry]
    with the program's arguments, the generated Truss side of startup, and
