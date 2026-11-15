@@ -2046,7 +2046,7 @@ or the contract, whichever holds its syntax.
 |---|---|
 | A part that reads a failed part is blocked, not computed against an error value. | One broken signature reports one error, not one in each of its callers. |
 | The database keeps no earlier version of a failing part. | An earlier version would make the database depend on the order of the edits. A caller checked against an earlier signature would also report errors that the files do not hold. |
-| A build or a test run requires that no definition it reaches has errors. | No test runs code that the files do not hold, and a test whose code is correct runs while unrelated code is broken. |
+| A build, a test run, or a template check requires that no definition it reaches has errors. A template check that reaches one, or a type defined as `todo`, is not run, and the solver proves its clauses. | No run executes code that the files do not hold, and a test whose code is correct runs while unrelated code is broken. |
 
 ### Caches
 

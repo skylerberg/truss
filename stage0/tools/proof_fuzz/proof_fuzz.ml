@@ -122,7 +122,7 @@ let run_mutant ~samples text =
       incr checked;
       let states =
         Pipeline.states
-          (Pipeline.decide (Lazy.force solver) (Pipeline.prove pipeline [ example_file ]))
+          (Pipeline.decide ~runs:[] (Lazy.force solver) (Pipeline.prove pipeline [ example_file ]))
           example_file
       in
       let candidates =
@@ -167,12 +167,12 @@ let run_mutant ~samples text =
                     Hashtbl.replace tried arguments ();
                     incr runs;
                     match call candidate.path arguments with
-                    | Error message when Substring.contains message "ended with status" ->
+                    | Ok (Stopped report) ->
                         incr failures;
                         Printf.printf "PROVEN BUT FAILS: %s (%s)\n%s\n%s\n\n"
                           (Path.show candidate.path)
                           (String.concat ", " (List.map Z.to_string arguments))
-                          message text
+                          report text
                     | _ -> ()
                   end)
                 (List.init samples (fun sample ->
@@ -241,7 +241,8 @@ let () =
             | Some (pipeline, _) ->
                 let unproven =
                   Pipeline.diagnostics
-                    (Pipeline.decide (Lazy.force solver) (Pipeline.prove pipeline [ example_file ]))
+                    (Pipeline.decide ~runs:[] (Lazy.force solver)
+                       (Pipeline.prove pipeline [ example_file ]))
                     example_file
                 in
                 shown unproven;

@@ -6,16 +6,20 @@ let solver () =
 
 type t = { proofs : Pipeline.proofs; verdicts : Pipeline.verdicts Lazy.t }
 
+let runs pipeline snapshot packages proofs =
+  match Pipeline.template_checks proofs with
+  | [] -> []
+  | checks ->
+      Pipeline.run_template_checks (Compiler.create pipeline snapshot packages Development) checks
+
 let check pipeline snapshot packages files =
   let proofs = Pipeline.prove pipeline files in
   {
     proofs;
     verdicts =
       lazy
-        (Pipeline.decide
-           ~evaluator:
-             (Evaluator.of_compiler (lazy (Compiler.create pipeline snapshot packages Development)))
-           (solver ()) proofs);
+        (let solver = solver () in
+         Pipeline.decide ~runs:(runs pipeline snapshot packages proofs) solver proofs);
   }
 
 let diagnostics checked file = Pipeline.diagnostics (Lazy.force checked.verdicts) file

@@ -51,6 +51,7 @@ val bind : Types.generic list -> Ground.argument list -> Types.substitution
 val impl_interface : context -> Path.t -> Types.impl_interface
 val signature_of : context -> Path.t -> Types.signature
 val code_of : context -> Path.t -> Ground.argument list -> code
+val template_clauses : context -> Path.t -> int list -> Mir.Graph.t list
 val panic_path : Path.t
 val evidence_for : context -> Types.substitution -> Types.capability_set -> Path.t list
 val result_of : context -> Types.substitution -> Types.result -> Convention.result * bool

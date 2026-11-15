@@ -12,7 +12,7 @@ val apply_template :
   name:string ->
   receiver:Path.receiver ->
   evidence:Core.evidence ->
-  texts:string list ->
+  literals:string list ->
   Logic.term ->
   State.frame * Logic.term
 

@@ -7,9 +7,6 @@ type proof = Obligations of State.outcome | Unsupported of Syntax.span * string 
 
 val proof : Lookups.t -> Resolve.Names.key -> proof
 
-type run_result = Ran of bool | Timed_out | Not_run
-type evaluator = State.evaluation -> run_result
-
 type 'span state = {
   code : Diagnostic.Code.prover;
   span : 'span;
@@ -21,7 +18,7 @@ type 'span state = {
 type verdict = (Syntax.span state * (Resolve.Names.key * Core.origin) option) list
 
 val verdicts :
-  ?evaluator:evaluator ->
+  runs:(State.template_check * (bool list, string) result) list ->
   Lookups.t ->
   Solver.t ->
   (Resolve.Names.key * proof) list ->

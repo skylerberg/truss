@@ -94,6 +94,7 @@ val example : Path.module_
 val example_file : Path.file
 val pipeline : Project.package list -> Pipeline.t
 val example_package : (Path.file * string) list -> Project.package list
+val compile : ?results:Compile.results -> ?evaluation_time_limit_ms:int -> Pipeline.t -> Compile.t
 
 val load_files :
   ?results:Compile.results ->

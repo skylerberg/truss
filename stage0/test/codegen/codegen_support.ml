@@ -224,6 +224,11 @@ let pipeline database = Pipeline.create ~loaded:[ Lazy.force standard_state ] da
 let example_package files : Project.package list =
   [ { name = { owner = None; name = "example" }; dependencies = []; files } ]
 
+let compile ?results ?evaluation_time_limit_ms pipeline =
+  Compile.create ?results ?evaluation_time_limit_ms
+    (Pipeline.lowering_requests pipeline [ example.package ])
+    (Lazy.force compiler) (Lazy.force cache) (Lazy.force settings)
+
 let load_files ?results ?(roots = []) files =
   let database = example_package files in
   let pipeline = pipeline database in
@@ -245,10 +250,7 @@ let load_files ?results ?(roots = []) files =
           fail "the source has diagnostics:\n%s"
             (String.concat "" (List.map (Diagnostic.render source) diagnostics)))
     files;
-  ( pipeline,
-    Compile.create ?results
-      (Pipeline.lowering_requests pipeline [ example.package ])
-      (Lazy.force compiler) (Lazy.force cache) (Lazy.force settings) )
+  (pipeline, compile ?results pipeline)
 
 let load ?results ?roots text = load_files ?results ?roots [ (example_file, text) ]
 

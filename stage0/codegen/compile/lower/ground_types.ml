@@ -448,17 +448,10 @@ let rec walk_key walk (key : Instance.key) =
       walk_constant walk path;
       walk_signature walk Constants.write_fully []
   | Drop ty | Copy ty | Debug ty | Any_drop ty | Encode ty -> add walk ty
-  | Template_check { from_template; _ } ->
+  | Template_check { from_template; clauses; _ } ->
       walk_signature walk Constants.write_fully [];
       walk_signature walk from_template [];
-      Option.iter
-        (fun (contract : Mir.contract) ->
-          List.iter
-            (fun (requirement : Mir.requirement) ->
-              if requirement.is_executable then
-                walk_graph walk [] (Mir.code_of_formula requirement.clause))
-            contract.requires)
-        (Mir.contract_of_path walk.context.lookups.mir from_template)
+      List.iter (walk_graph walk []) (template_clauses walk.context from_template clauses)
   | Call_evaluation { function_; _ } ->
       walk_signature walk Constants.write_fully [];
       walk_signature walk function_ []

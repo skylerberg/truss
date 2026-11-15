@@ -1832,7 +1832,7 @@ let pattern = Regex"[a-z]+@${domain}"
 - A tag's `from_template` states the rules for valid literal text with
   `requires`. The literal text is known when the code is compiled, so the
   compiler proves the `requires` by running the check, as compiled code. `Regex"[a-z"` is an
-  error.
+  error, and so is a check that panics, reaches `todo`, or runs past the time limit.
 - `from_template` is the one method whose `requires` may be stronger than its
   trait's, and a call of it through a bound or `any` is an error.
 

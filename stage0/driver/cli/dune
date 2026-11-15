@@ -25,7 +25,6 @@
   pipeline
   solver
   prover
-  evaluator
   database
   store
   project

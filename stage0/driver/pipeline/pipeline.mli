@@ -37,10 +37,21 @@ type proofs
 val prove : t -> Path.file list -> proofs
 val proof : proofs -> Resolve.Names.key -> Prover.proof part option
 val holes : proofs -> Path.t -> (Path.file * int) list
+val template_checks : proofs -> Prover.State.template_check list
+
+val run_template_checks :
+  Compile.t ->
+  Prover.State.template_check list ->
+  (Prover.State.template_check * (bool list, string) result) list
 
 type verdicts
 
-val decide : ?evaluator:Prover.evaluator -> Solver.t -> proofs -> verdicts
+val decide :
+  runs:(Prover.State.template_check * (bool list, string) result) list ->
+  Solver.t ->
+  proofs ->
+  verdicts
+
 val states : verdicts -> Path.file -> Diagnostic.span Prover.state list
 val diagnostics : verdicts -> Path.file -> Diagnostic.t list
 

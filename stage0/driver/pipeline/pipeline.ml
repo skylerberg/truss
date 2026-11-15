@@ -1265,19 +1265,24 @@ let lowering_settings pipeline =
   | Some settings -> settings
   | None -> Compiler_bug.bug ~stage:"Pipeline" "this host has no lowering settings"
 
+let proof_template_checks pipeline (key : Names.key) =
+  match Hashtbl.find_opt (owner pipeline key.module_.package).proofs key with
+  | Some (Value (Obligations { obligations; _ })) ->
+      List.filter_map
+        (fun (obligation : Prover.State.obligation) ->
+          Option.map
+            (fun (template_clause : Prover.State.template_clause) -> template_clause.check)
+            obligation.template_clause)
+        obligations
+  | Some (Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked) | None -> []
+
+let template_check_root ({ from_template; literals; clauses } : Prover.State.template_check) =
+  Instance.Template_check { from_template; literals; clauses }
+
 let own_template_checks pipeline (key : Names.key) =
   if Option.is_some pipeline.lowering then
     own_roots pipeline (Proof key)
-      (match Hashtbl.find_opt (owner pipeline key.module_.package).proofs key with
-      | Some (Value (Obligations { obligations; _ })) ->
-          List.filter_map
-            (fun (obligation : Prover.State.obligation) ->
-              Option.map
-                (fun ({ from_template; texts; _ } : Prover.State.evaluation) ->
-                  Instance.Template_check { from_template; texts })
-                obligation.evaluation)
-            obligations
-      | Some (Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked) | None -> [])
+      (List.map template_check_root (proof_template_checks pipeline key))
 
 let entry_point (names : Names.lookups) package =
   List.find_map
@@ -2420,14 +2425,35 @@ let holes proofs path =
         holes
   | Some (Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked) | None -> []
 
+let template_checks (proofs : proofs) =
+  let pipeline = proofs.pipeline in
+  match List.sort_uniq compare (List.concat_map (proof_template_checks pipeline) proofs.keys) with
+  | [] -> []
+  | checks ->
+      drain pipeline ~through:Test_keys
+        (List.sort_uniq Path.compare_package
+           (List.map (fun (key : Names.key) -> key.module_.package) proofs.keys));
+      List.filter
+        (fun check ->
+          match Instance_table.find_opt pipeline.test_keys (template_check_root check) with
+          | Some Blocked -> false
+          | Some (Value _ | Failed _) | None -> true)
+        checks
+
+let run_template_checks compiler checks =
+  List.map
+    (fun ({ from_template; literals; clauses } as check : Prover.State.template_check) ->
+      (check, Compile.run_template_check compiler ~from_template ~literals ~clauses))
+    checks
+
 type verdicts = { lookups : Prover.Lookups.t; verdicts : (Names.key, Prover.verdict) Hashtbl.t }
 
-let decide ?evaluator solver (proofs : proofs) =
+let decide ~runs solver (proofs : proofs) =
   let lookups = proof_lookups proofs.pipeline ignore in
   let verdicts = Hashtbl.create (List.length proofs.keys) in
   List.iter
     (fun (key, verdict) -> Hashtbl.replace verdicts key verdict)
-    (Prover.verdicts ?evaluator lookups solver
+    (Prover.verdicts ~runs lookups solver
        (List.filter_map
           (fun key ->
             match proof proofs key with

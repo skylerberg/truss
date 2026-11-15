@@ -7,7 +7,7 @@ type key =
   | Any_drop of Ground.ty
   | Encode of Ground.ty
   | Evaluator of Path.t
-  | Template_check of { from_template : Path.t; texts : string list }
+  | Template_check of { from_template : Path.t; literals : string list; clauses : int list }
   | Call_evaluation of { function_ : Path.t; arguments : Z.t list }
   | Adapter of { function_ : key; ty : Ground.function_type }
   | Entry of key

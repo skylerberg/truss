@@ -220,9 +220,9 @@ let truss_of_goal context term =
   in
   if !named then printed else None
 
-let rec oblige ?evaluation ?cited ?(fixes = []) context frame code span message goal =
+let rec oblige ?template_clause ?cited ?(fixes = []) context frame code span message goal =
   match
-    obligation_at ?evaluation context frame code span message
+    obligation_at ?template_clause context frame code span message
       (with_quantifier_facts
          ~binders:(List.map (fun (name, _, _) -> name) frame.binders)
          context goal)
@@ -245,10 +245,10 @@ let rec oblige ?evaluation ?cited ?(fixes = []) context frame code span message 
       assume context frame goal
   | None -> ()
 
-and obligation_at ?evaluation context frame code span message goal =
+and obligation_at ?template_clause context frame code span message goal =
   if not frame.makes_obligations then None
   else if not (Logic.mentions frame.bound goal || Logic.mentions frame.bound frame.condition) then
-    Some (make_obligation ?evaluation context frame code span message goal)
+    Some (make_obligation ?template_clause context frame code span message goal)
   else
     let names = List.map (fun (name, _, _) -> name) frame.binders in
     let goal =
@@ -259,12 +259,12 @@ and obligation_at ?evaluation context frame code span message goal =
     match closed_over_binders frame (Logic.( ==> ) frame.condition goal) with
     | Some closed ->
         Some
-          (make_obligation ?evaluation context
+          (make_obligation ?template_clause context
              { frame with condition = Logic.Boolean true }
              code span message closed)
     | None -> None
 
-and make_obligation ?evaluation context frame code span message goal =
+and make_obligation ?template_clause context frame code span message goal =
   let query =
     Logic.prune
       {
@@ -295,7 +295,7 @@ and make_obligation ?evaluation context frame code span message goal =
         | Some (Logic.Symbol symbol) when not (List.mem_assoc symbol context.values) ->
             [ (symbol, "result") ]
         | _ -> []);
-    evaluation;
+    template_clause;
   }
 
 let span_of (source : source) origin =

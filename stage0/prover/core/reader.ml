@@ -1116,7 +1116,7 @@ and read_statement context frame run (statement : Mir.statement) =
                 origin = call.origin;
                 type_ = target_type context frame run destination;
               }
-              ~trait ~name ~receiver ~evidence ~texts:literals
+              ~trait ~name ~receiver ~evidence ~literals
               (read_operand context frame run template)
           in
           Some (write_place context frame run destination tagged)

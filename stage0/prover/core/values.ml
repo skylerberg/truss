@@ -154,17 +154,17 @@ let reads_only_literals (parameter : Core.local) (clause : Mir.formula) =
     | Source { local = core; _ } -> core = parameter
     | Temporary | Lent _ -> false
   in
-  let fine = ref true in
+  let is_literal_only = ref true in
   Mir.iter_places_read
     (fun (place : Mir.place) ->
       match place with
       | { root = Local local; projections = Field "literals" :: _ } when is_parameter local -> ()
-      | { root = Local local; _ } when is_parameter local -> fine := false
+      | { root = Local local; _ } when is_parameter local -> is_literal_only := false
       | _ -> ())
     clause.value;
-  !fine
+  !is_literal_only
 
-let apply_template context frame (site : Invocation.site) ~trait ~name ~receiver ~evidence ~texts
+let apply_template context frame (site : Invocation.site) ~trait ~name ~receiver ~evidence ~literals
     value_ =
   let span = span_of frame.source site.origin in
   let tag_type = substituted context frame site.type_ in
@@ -175,26 +175,39 @@ let apply_template context frame (site : Invocation.site) ~trait ~name ~receiver
       | Some contract ->
           let own = List.hd contract.parts in
           let entry = part_frame frame own ~arguments:[ (0, value_) ] ~substitution:[] in
-          let evaluable (clause : Mir.formula) =
+          let is_evaluable (requirement : Mir.requirement) =
             match (evidence, own.parameters) with
             | Impl { arguments = []; _ }, [ parameter ] ->
-                reads_only_literals parameter.local clause
+                requirement.is_executable && reads_only_literals parameter.local requirement.clause
             | _ -> false
           in
+          let template_check =
+            {
+              from_template = path;
+              literals;
+              clauses =
+                List.filter_map Fun.id
+                  (List.mapi
+                     (fun index requirement ->
+                       if is_evaluable requirement then Some index else None)
+                     own.requires);
+            }
+          in
           List.iteri
-            (fun index (requirement : Mir.formula) ->
-              let evaluation =
-                if evaluable requirement then Some { from_template = path; texts; clause = index }
+            (fun index (requirement : Mir.requirement) ->
+              let template_clause =
+                if List.mem index template_check.clauses then
+                  Some { check = template_check; clause = index }
                 else None
               in
-              oblige ?evaluation context frame Requires span
+              oblige ?template_clause context frame Requires span
                 [
                   Text "This template may not meet `";
-                  quote own.callee requirement.origin;
+                  quote own.callee requirement.clause.origin;
                   Text "`, which its tag requires.";
                 ]
-                (snd (specification_value context entry requirement)))
-            (clauses own.requires);
+                (snd (specification_value context entry requirement.clause)))
+            own.requires;
           let result = arrive context frame "tagged" tag_type in
           assume_valid context frame tag_type result;
           List.iter
