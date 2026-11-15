@@ -1520,6 +1520,18 @@ let compute_type_facts pipeline paths =
            | Failed _ | Blocked -> Blocked)))
     paths
 
+let check_lowered_calls pipeline (key : Instance.key) =
+  match (key, Instance_table.find_opt pipeline.lowered key) with
+  | Code { path; _ }, Some (Value (Ok lowered)) ->
+      Option.iter
+        (fun graph ->
+          Compile.check_calls
+            (interface_lookups pipeline ignore ~is_checked:true)
+            ~successors:(fun path -> Option.join (Call_graph.successors graph path))
+            key lowered)
+        (Hashtbl.find_opt pipeline.graphs (Path.package path))
+  | _ -> ()
+
 let compute_part pipeline (part : Part.t) =
   pipeline.observe (Computed part);
   let state = owner pipeline (Part.package part) in
@@ -1755,6 +1767,7 @@ let compute_part pipeline (part : Part.t) =
                      Compiler_bug.bug ~stage:"Pipeline" "%s is defined as todo, and has a layout"
                        (Ground.to_string ty))
                key));
+      check_lowered_calls pipeline key;
       update_references pipeline key
   | Layout ty ->
       into
@@ -2637,16 +2650,12 @@ let resolved pipeline (key : Names.key) =
   | [] -> None
   | sections -> Resolve.whole ~sections (resolved pipeline ignore) key
 
-let request pipeline packages ~through ~needs keys =
-  drain pipeline ~through packages;
-  List.iter
-    (fun key ->
-      if not (List.for_all (is_current pipeline) (needs key)) then
-        Compiler_bug.bug ~stage:"Pipeline" "%s is requested, and no root of lowering reaches it"
-          (Instance.to_string key))
-    keys
+let require_reached pipeline parts key =
+  if not (List.for_all (is_current pipeline) parts) then
+    Compiler_bug.bug ~stage:"Pipeline" "%s is requested, and no root of lowering reaches it"
+      (Instance.to_string key)
 
-let laid_out pipeline key =
+let list_layout_parts pipeline key =
   let part = Part.Ground_types key in
   part
   ::
@@ -2656,21 +2665,21 @@ let laid_out pipeline key =
      | Some (Failed _ | Blocked) | None -> []
    else [])
 
-let requested table part key =
+let read_instance_value table part key =
   match Instance_table.find_opt table key with
   | Some (Value value) -> value
   | Some (Failed _ | Blocked) ->
       Compiler_bug.bug ~stage:"Pipeline" "%s is requested from code with errors" (Part.show part)
   | None -> unchecked (Part.show part)
 
-let layouts pipeline packages keys =
-  request pipeline packages ~through:Lowered_code ~needs:(laid_out pipeline) keys;
+let read_layouts pipeline keys =
+  List.iter (fun key -> require_reached pipeline (list_layout_parts pipeline key) key) keys;
   let ground_types = Type_table.create 256 in
   List.iter
     (fun key ->
       List.iter
         (fun ty -> Type_table.replace ground_types ty ())
-        (requested pipeline.ground_types (Ground_types key) key).types)
+        (read_instance_value pipeline.ground_types (Ground_types key) key).types)
     keys;
   fun ty ->
     if not (Type_table.mem ground_types ty) then
@@ -2682,19 +2691,6 @@ let layouts pipeline packages keys =
 let interface_lookups pipeline packages =
   drain pipeline ~through:Signature_checks packages;
   interface_lookups pipeline ignore ~is_checked:true
-
-let check_calls pipeline interface viewers key = function
-  | Ok lowered ->
-      List.iter
-        (fun viewer ->
-          Option.iter
-            (fun graph ->
-              Compile.check_calls interface
-                ~successors:(fun path -> Option.join (Call_graph.successors graph path))
-                key lowered)
-            (Hashtbl.find_opt pipeline.graphs viewer))
-        viewers
-  | Error _ -> ()
 
 let reached_todo_types pipeline key =
   let blocked = function Some Blocked -> true | Some (Value _ | Failed _) | None -> false in
@@ -2721,27 +2717,23 @@ let reached_todo_types pipeline key =
   List.sort_uniq Path.compare (visit [] (Test_key key))
 
 let lowering_requests pipeline packages : Compile.requests =
-  let interface = interface_lookups pipeline packages in
+  drain pipeline ~through:Test_keys packages;
+  let read_reached table part key =
+    require_reached pipeline [ part ] key;
+    read_instance_value table part key
+  in
   {
     settings = lowering_settings pipeline;
     source = source pipeline;
-    interface;
+    interface = interface_lookups pipeline packages;
     mir = mir_lookups pipeline ignore;
-    lowered =
-      (fun key ->
-        request pipeline packages ~through:Lowered_code ~needs:(fun key -> [ Lowered key ]) [ key ];
-        let lowered = requested pipeline.lowered (Lowered key) key in
-        check_calls pipeline interface packages key lowered;
-        lowered);
-    test_key =
-      (fun key ->
-        request pipeline packages ~through:Test_keys ~needs:(fun key -> [ Test_key key ]) [ key ];
-        requested pipeline.test_keys (Test_key key) key);
+    lowered = (fun key -> read_reached pipeline.lowered (Lowered key) key);
+    test_key = (fun key -> read_reached pipeline.test_keys (Test_key key) key);
     reached_todo_types =
       (fun key ->
-        request pipeline packages ~through:Test_keys ~needs:(fun key -> [ Test_key key ]) [ key ];
+        require_reached pipeline [ Test_key key ] key;
         reached_todo_types pipeline key);
-    layouts = layouts pipeline packages;
+    layouts = read_layouts pipeline;
   }
 
 let main pipeline package =
