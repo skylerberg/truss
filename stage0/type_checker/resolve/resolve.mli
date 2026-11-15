@@ -26,9 +26,16 @@ type target = Walk.target =
 type bracket = Walk.bracket = Index | Type_arguments | Method_bracket
 type section = Walk.section = Interface | Contract | Body
 
+type value = Walk.value =
+  | Value_local of Syntax.id
+  | Value_generic of Types.parameter
+  | Value_field of string
+  | Value_law_parameter of int
+
 type resolved = {
   names : target option array;
   brackets : bracket option array;
+  holes : (Syntax.id * (string * value) list) list;
   used_imports : string list;
 }
 

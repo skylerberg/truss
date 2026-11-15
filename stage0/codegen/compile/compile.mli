@@ -11,8 +11,11 @@ type requests = {
   mir : Mir.lookups;
   lowered : Instance.key -> (lowered, unsupported) result;
   test_key : Instance.key -> (string, unsupported) result;
+  reached_todo_types : Instance.key -> Path.t list;
   layouts : Instance.key list -> Ground.ty -> Memory_layout.t;
 }
+
+exception Todo_type of Ground.ty
 
 type t
 type results = { find : string -> string option; add : string -> string -> unit }
@@ -49,6 +52,9 @@ type progress =
   | Started of { test : int }
   | Ended of { test : int; record : record }
 
+val result_key : t -> Path.t -> string option
+val is_cached : t -> Path.t -> bool
+
 val run_tests :
   ?rerun:bool ->
   ?progress:(progress -> unit) ->
@@ -67,6 +73,7 @@ type unshippable = {
 
 val unshippable : t -> main:Path.t -> (unshippable list, string) result
 val reached_definitions : t -> main:Path.t -> (Path.t list, string) result
+val reached_todo_types : t -> Path.t -> Path.t list
 val fresh_program : t -> string
 val build_program : t -> main:Path.t -> output:string -> (unit, string) result
 

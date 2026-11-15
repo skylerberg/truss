@@ -38,6 +38,33 @@ module Make (Node : Node) = struct
       next_id = 0;
     }
 
+  let copy graph =
+    let by_id = Hashtbl.create 256 in
+    let copied (component : component) =
+      match Hashtbl.find_opt by_id component.id with
+      | Some copied -> copied
+      | None ->
+          let copied =
+            { id = component.id; members = component.members; is_blocked = component.is_blocked }
+          in
+          Hashtbl.replace by_id component.id copied;
+          copied
+    in
+    let predecessors = Table.copy graph.predecessors in
+    Table.filter_map_inplace (fun _ nodes -> Some (Table.copy nodes)) predecessors;
+    let components = Table.copy graph.components in
+    Table.filter_map_inplace (fun _ component -> Some (copied component)) components;
+    {
+      successors = Table.copy graph.successors;
+      reflected = Table.copy graph.reflected;
+      predecessors;
+      components;
+      roots = Table.copy graph.roots;
+      unreachable_candidates = Table.copy graph.unreachable_candidates;
+      tracks_blocked = graph.tracks_blocked;
+      next_id = graph.next_id;
+    }
+
   let keys table = Table.fold (fun key _ keys -> key :: keys) table []
   let is_node graph node = Table.mem graph.components node
   let component_of graph node = Table.find graph.components node

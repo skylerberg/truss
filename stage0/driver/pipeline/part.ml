@@ -210,3 +210,124 @@ let show part =
   | Lowered instance -> "lowered " ^ Instance.to_string instance
   | Test_key instance -> "test key " ^ Instance.to_string instance
   | Layout ty -> "layout " ^ Ground.to_string ty
+
+let type_definition : Ground.ty -> Path.t option = function
+  | Named { path; _ } -> Some path
+  | Any { trait; _ } -> Some trait
+  | Function _ | Never -> None
+
+let rec instance_definition : Instance.key -> Path.t option = function
+  | Code { path; _ }
+  | Constant path
+  | Evaluator path
+  | Template_check { from_template = path; _ }
+  | Call_evaluation { function_ = path; _ }
+  | Table { impl = path; _ }
+  | Any_table { impl = path; _ }
+  | Program_main path
+  | Locked_entry { capability = path; _ }
+  | Locked_table path ->
+      Some path
+  | Drop ty | Copy ty | Debug ty | Any_drop ty | Encode ty -> type_definition ty
+  | Adapter { function_ = key; _ } | Entry key | Any_entry key -> instance_definition key
+
+let definition = function
+  | Source _ | Parsed _ | Packages | Modules _ | Dependencies _ | Namespace _ | Entries _
+  | Module_declarations _ | File_declarations _ | Package_declarations _ | Traits_declaring _
+  | Impl_index _ | Grant _ | Import_check _
+  | Package_check (_, (Instantiations | Tests | Grants | Dependencies | Code_packages)) ->
+      None
+  | Entry (module_, name) -> Some (Path.Top { module_; name })
+  | Imports key
+  | Declaration key
+  | Tree key
+  | Text key
+  | Place key
+  | Container key
+  | Contained key
+  | Resolved (key, _)
+  | Trait_header key
+  | Header key
+  | Interface key
+  | Signature_check key
+  | Contract key
+  | Checked_body key
+  | Body_mir key
+  | Contract_mir key
+  | Patterns key
+  | Usage key
+  | Ownership key
+  | Used_packages key
+  | Proof key
+  | Package_check (_, (Sealed key | Impl key | Type key)) ->
+      Some key.path
+  | Members (path, _)
+  | Impls_of_type (_, path)
+  | Impls_of_trait (_, path)
+  | Law_proofs (_, { trait = path; _ })
+  | Constant_value path
+  | Derived_interface path
+  | Type_facts path
+  | Derived_form path
+  | Generated_mir path
+  | Call_edges path
+  | Successors (path, _)
+  | Recursion_group path ->
+      Some path
+  | Ground_types key | Lowered key | Test_key key -> instance_definition key
+  | Layout ty -> type_definition ty
+
+let kind_name = function
+  | Source _ -> "source"
+  | Parsed _ -> "parsed file"
+  | Packages -> "packages"
+  | Modules _ -> "modules"
+  | Dependencies _ -> "dependencies"
+  | Namespace _ -> "namespace"
+  | Entry _ -> "namespace entry"
+  | Entries _ -> "namespace entries of its module"
+  | Imports _ -> "imports"
+  | Declaration _ -> "declaration"
+  | Tree _ -> "source tree"
+  | Text _ -> "text"
+  | Place _ -> "place"
+  | Container _ -> "container"
+  | Contained _ -> "members"
+  | Module_declarations _ -> "declarations of a module"
+  | File_declarations _ -> "declarations of a file"
+  | Package_declarations _ -> "declarations of a package"
+  | Members (_, name) -> Printf.sprintf "members named %s" name
+  | Traits_declaring (_, name) -> Printf.sprintf "traits that declare %s" name
+  | Impl_index _ -> "impls of a package"
+  | Impls_of_type _ -> "impls"
+  | Impls_of_trait _ -> "impls"
+  | Law_proofs (_, { law; type_head; _ }) ->
+      Printf.sprintf "proofs of the law %s for %s" law (Path.show type_head)
+  | Resolved (_, Interface) -> "resolved names of the interface"
+  | Resolved (_, Contract) -> "resolved names of the contract"
+  | Resolved (_, Body) -> "resolved names of the body"
+  | Trait_header _ -> "trait header"
+  | Constant_value _ -> "value"
+  | Header _ -> "header"
+  | Interface _ | Derived_interface _ -> "interface"
+  | Type_facts _ -> "type facts"
+  | Grant _ -> "grant"
+  | Signature_check _ -> "signature check"
+  | Contract _ -> "contract"
+  | Checked_body _ | Derived_form _ -> "checked body"
+  | Body_mir _ | Generated_mir _ -> "MIR of the body"
+  | Contract_mir _ -> "MIR of the contract"
+  | Call_edges _ -> "call edges"
+  | Patterns _ -> "pattern check"
+  | Usage _ -> "usage check"
+  | Ownership _ -> "ownership check"
+  | Used_packages _ -> "used packages"
+  | Import_check _ -> "import check"
+  | Package_check _ -> "package check"
+  | Successors _ -> "successors"
+  | Recursion_group _ -> "recursion group"
+  | Proof _ -> "proof"
+  | Ground_types _ -> "ground types"
+  | Layout _ -> "layout"
+  | Lowered _ -> "lowered code"
+  | Test_key _ -> "test key"

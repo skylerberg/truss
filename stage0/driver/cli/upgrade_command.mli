@@ -10,6 +10,9 @@ type change =
   | Holds of { name : Path.package; gained : string list }
 
 val lock_changes : before:Lock.t -> after:Lock.t -> change list
-val report : lock:change list -> broken:string list -> unit
+
+type signature
+
+val report : lock:change list -> signatures:signature list -> broken:string list -> unit
 val lock_file : Database.snapshot -> string
 val run : names:string list -> int

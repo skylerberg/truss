@@ -1,3 +1,4 @@
+module Part = Part
 module Names = Resolve.Names
 module Environment = Interface.Environment
 
@@ -245,6 +246,76 @@ let create ?(loaded = []) ?(checks = true) (packages : Project.package list) =
       mark_stale pipeline (Namespace package.name))
     packages;
   pipeline
+
+let copy_state (state : state) =
+  {
+    name = state.name;
+    dependencies = state.dependencies;
+    modules = state.modules;
+    files = state.files;
+    sources = Hashtbl.copy state.sources;
+    parsed = Hashtbl.copy state.parsed;
+    namespace = state.namespace;
+    resolved_names = Hashtbl.copy state.resolved_names;
+    import_checks = Hashtbl.copy state.import_checks;
+    trait_headers = Hashtbl.copy state.trait_headers;
+    constant_values = Path_table.copy state.constant_values;
+    headers = Hashtbl.copy state.headers;
+    interfaces = Hashtbl.copy state.interfaces;
+    derived_interfaces = Path_table.copy state.derived_interfaces;
+    type_facts = Path_table.copy state.type_facts;
+    grants = Hashtbl.copy state.grants;
+    signature_checks = Hashtbl.copy state.signature_checks;
+    contracts = Hashtbl.copy state.contracts;
+    checked_bodies = Hashtbl.copy state.checked_bodies;
+    derived_forms = Path_table.copy state.derived_forms;
+    body_parts = Hashtbl.copy state.body_parts;
+    contract_parts = Hashtbl.copy state.contract_parts;
+    generated_parts = Path_table.copy state.generated_parts;
+    call_edges = Path_table.copy state.call_edges;
+    patterns = Hashtbl.copy state.patterns;
+    usage = Hashtbl.copy state.usage;
+    ownership = Hashtbl.copy state.ownership;
+    used_packages = Hashtbl.copy state.used_packages;
+    package_checks = Hashtbl.copy state.package_checks;
+    recursion_groups = Path_table.copy state.recursion_groups;
+    proofs = Hashtbl.copy state.proofs;
+  }
+
+let copy pipeline =
+  let states = Hashtbl.copy pipeline.states in
+  Hashtbl.filter_map_inplace
+    (fun name state -> Some (if List.mem name pipeline.project then copy_state state else state))
+    states;
+  let readers = Part_table.copy pipeline.readers in
+  Part_table.filter_map_inplace (fun _ parts -> Some (Part_table.copy parts)) readers;
+  let stale = Hashtbl.copy pipeline.stale in
+  Hashtbl.filter_map_inplace (fun _ parts -> Some (Part_table.copy parts)) stale;
+  let graphs = Hashtbl.copy pipeline.graphs in
+  Hashtbl.filter_map_inplace (fun _ graph -> Some (Call_graph.copy graph)) graphs;
+  let holders = Type_table.copy pipeline.holders in
+  Type_table.filter_map_inplace (fun _ instances -> Some (Instance_table.copy instances)) holders;
+  {
+    states;
+    project = pipeline.project;
+    absent = Hashtbl.copy pipeline.absent;
+    reads = Part_table.copy pipeline.reads;
+    readers;
+    stale;
+    implied = Hashtbl.copy pipeline.implied;
+    graphs;
+    lowering = pipeline.lowering;
+    ground_types = Instance_table.copy pipeline.ground_types;
+    layouts = Type_table.copy pipeline.layouts;
+    holders;
+    lowered = Instance_table.copy pipeline.lowered;
+    test_keys = Instance_table.copy pipeline.test_keys;
+    references = References.copy pipeline.references;
+    owners = Instance_table.copy pipeline.owners;
+    owned = Part_table.copy pipeline.owned;
+    unsaved = Entry_table.create 64;
+    observe = ignore;
+  }
 
 let add_reads pipeline part read_parts =
   Part_table.replace pipeline.reads part read_parts;
@@ -1554,12 +1625,20 @@ let compute_part pipeline (part : Part.t) =
       update_references pipeline key
   | Lowered key ->
       into (instance_slot pipeline.lowered key) (fun note ->
+          let layout_of = instance_layout pipeline note key in
           Some
             (computed
-               (Compile.lower (lowering_settings pipeline)
-                  (stage_lowering_lookups pipeline note)
-                  ~layout_of:(instance_layout pipeline note key)
-                  ~lowered:(lowered pipeline note))
+               (fun key ->
+                 match
+                   Compile.lower (lowering_settings pipeline)
+                     (stage_lowering_lookups pipeline note)
+                     ~layout_of ~lowered:(lowered pipeline note) key
+                 with
+                 | lowered -> lowered
+                 | exception Compile.Todo_type ty ->
+                     ignore (layout_of ty);
+                     Compiler_bug.bug ~stage:"Pipeline" "%s is defined as todo, and has a layout"
+                       (Ground.to_string ty))
                key));
       update_references pipeline key
   | Layout ty ->
@@ -1571,11 +1650,14 @@ let compute_part pipeline (part : Part.t) =
         }
         (fun note ->
           Some
-            (computed
-               (Compile.layout
-                  (interface_lookups pipeline note ~is_checked:true)
-                  ~layout_of:(layout pipeline note))
-               ty))
+            (match
+               Compile.layout
+                 (interface_lookups pipeline note ~is_checked:true)
+                 ~layout_of:(layout pipeline note) ty
+             with
+            | layout -> Value layout
+            | exception Reads_failed_part -> Blocked
+            | exception Compile.Todo_type _ -> Failed []))
   | Source _ | Packages | Modules _ | Dependencies _ | Derived_interface _ | Entry _ | Entries _
   | Imports _ | Declaration _ | Tree _ | Text _ | Place _ | Container _ | Contained _
   | Module_declarations _ | File_declarations _ | Package_declarations _ | Members _
@@ -1720,11 +1802,10 @@ let has_work pipeline package (stage : Stage.t) =
       | Some parts -> Part_table.length parts > 0
       | None -> false)
 
-let drain_stage pipeline (stage : Stage.t) packages =
+let drain_stage pipeline ~is_drained ~on_raise (stage : Stage.t) packages =
   match stage with
   | Recursion_groups -> List.iter (update_groups pipeline) packages
   | stage -> (
-      let is_drained = is_drained pipeline in
       let closure = Part_table.create 64 in
       let rec close part =
         if not (Part_table.mem closure part) then begin
@@ -1749,9 +1830,9 @@ let drain_stage pipeline (stage : Stage.t) packages =
               List.iter (unmark pipeline) unit;
               match compute pipeline unit with
               | () -> ()
-              | exception failure ->
+              | exception raised ->
                   List.iter (mark_stale pipeline) unit;
-                  raise failure
+                  on_raise unit raised
             end)
       in
       let parts_where keep =
@@ -1771,20 +1852,29 @@ let drain_stage pipeline (stage : Stage.t) packages =
                    (parts_where (fun part -> Part.package part = package))))
             packages)
 
-let drain_where pipeline ~drains requested =
+let drain_where ?on_bug pipeline ~drains requested =
   let packages = in_dependency_order pipeline requested in
+  let broken = Part_table.create 0 in
+  let is_drained part = is_drained pipeline part && not (Part_table.mem broken part) in
+  let on_raise unit raised =
+    match (on_bug, raised) with
+    | Some on_bug, Compiler_bug.Bug bug ->
+        List.iter (fun part -> Part_table.replace broken part ()) unit;
+        on_bug bug
+    | _ -> raise raised
+  in
   let has_drained_work stage =
     List.exists
       (fun package ->
         has_work pipeline package stage
-        && ((not (Stage.is_lowering stage))
-           || List.exists (is_drained pipeline) (stale_parts pipeline package stage)))
+        && ((Part_table.length broken = 0 && not (Stage.is_lowering stage))
+           || List.exists is_drained (stale_parts pipeline package stage)))
       packages
   in
   let rec next () =
     match List.find_opt (fun stage -> drains stage && has_drained_work stage) Stage.all with
     | Some stage ->
-        drain_stage pipeline stage packages;
+        drain_stage pipeline ~is_drained ~on_raise stage packages;
         next ()
     | None -> ()
   in
@@ -1793,7 +1883,79 @@ let drain_where pipeline ~drains requested =
 let drain pipeline ~through requested =
   drain_where pipeline ~drains:(Stage.drains ~through) requested
 
-let propagate pipeline = drain_where pipeline ~drains:(fun _ -> true) pipeline.project
+let propagate ?on_bug pipeline =
+  drain_where ?on_bug pipeline ~drains:(fun _ -> true) pipeline.project
+
+type read = { dependent : Part.t; dependency : Part.t }
+
+let definition_set paths =
+  let set = Path_table.create 8 in
+  List.iter (fun path -> Path_table.replace set path ()) paths;
+  set
+
+let is_of_other definition part =
+  match Part.definition part with Some other -> not (Path.equal other definition) | None -> false
+
+let drain_checks pipeline = drain pipeline ~through:Proofs pipeline.project
+let is_checked part = not (Stage.is_lowering (Stage.of_part part))
+
+let dependencies pipeline paths =
+  drain_checks pipeline;
+  let wanted = definition_set paths in
+  Part_table.fold
+    (fun dependent dependencies found ->
+      match Part.definition dependent with
+      | Some definition when is_checked dependent && Path_table.mem wanted definition ->
+          List.fold_left
+            (fun found dependency ->
+              if is_of_other definition dependency then { dependent; dependency } :: found
+              else found)
+            found dependencies
+      | Some _ | None -> found)
+    pipeline.reads []
+
+let dependents pipeline paths =
+  drain_checks pipeline;
+  let wanted = definition_set paths in
+  Part_table.fold
+    (fun dependency readers found ->
+      match Part.definition dependency with
+      | Some definition when Path_table.mem wanted definition ->
+          Part_table.fold
+            (fun dependent () found ->
+              if is_checked dependent && is_of_other definition dependent then
+                { dependent; dependency } :: found
+              else found)
+            readers found
+      | Some _ | None -> found)
+    pipeline.readers []
+
+let changes pipeline other =
+  drain_checks pipeline;
+  drain_checks other;
+  let parts = Part_table.create 1024 in
+  let add part =
+    match Stage.of_part part with
+    | Input | Namespaces -> ()
+    | _ ->
+        if is_checked part && Option.is_some (Part.definition part) then
+          Part_table.replace parts part ()
+  in
+  List.iter
+    (fun pipeline ->
+      Part_table.iter (fun part _ -> add part) pipeline.reads;
+      Part_table.iter (fun part _ -> add part) pipeline.readers;
+      List.iter
+        (fun package ->
+          Path_table.iter
+            (fun path _ -> add (Recursion_group path))
+            (owner pipeline package).recursion_groups)
+        pipeline.project)
+    [ pipeline; other ];
+  Part_table.fold
+    (fun part () changed ->
+      if (stored pipeline part).is_equal_in other then changed else part :: changed)
+    parts []
 
 let update pipeline changes =
   List.iter
@@ -2359,6 +2521,30 @@ let check_calls pipeline interface viewers key = function
         viewers
   | Error _ -> ()
 
+let reached_todo_types pipeline key =
+  let blocked = function Some Blocked -> true | Some (Value _ | Failed _) | None -> false in
+  let is_blocked (part : Part.t) =
+    match part with
+    | Test_key key -> blocked (Instance_table.find_opt pipeline.test_keys key)
+    | Lowered key -> blocked (Instance_table.find_opt pipeline.lowered key)
+    | Layout ty -> blocked (Type_table.find_opt pipeline.layouts ty)
+    | _ -> false
+  in
+  let visited = Part_table.create 16 in
+  let rec visit todo_types (part : Part.t) =
+    if Part_table.mem visited part then todo_types
+    else begin
+      Part_table.replace visited part ();
+      match part with
+      | Layout (Named { path; _ }) when (stored pipeline part).is_failed -> path :: todo_types
+      | _ when is_blocked part ->
+          List.fold_left visit todo_types
+            (Option.value (Part_table.find_opt pipeline.reads part) ~default:[])
+      | _ -> todo_types
+    end
+  in
+  List.sort_uniq Path.compare (visit [] (Test_key key))
+
 let lowering_requests pipeline packages : Compile.requests =
   let interface = interface_lookups pipeline packages in
   {
@@ -2376,12 +2562,32 @@ let lowering_requests pipeline packages : Compile.requests =
       (fun key ->
         request pipeline packages ~through:Test_keys ~needs:(fun key -> [ Test_key key ]) [ key ];
         requested pipeline.test_keys (Test_key key) key);
+    reached_todo_types =
+      (fun key ->
+        request pipeline packages ~through:Test_keys ~needs:(fun key -> [ Test_key key ]) [ key ];
+        reached_todo_types pipeline key);
     layouts = layouts pipeline packages;
   }
 
 let main pipeline package =
   drain pipeline ~through:Namespaces [ package ];
   entry_point (names_lookups pipeline) package
+
+let callers pipeline ~viewer path =
+  drain pipeline ~through:Recursion_groups [ viewer ];
+  match Hashtbl.find_opt pipeline.graphs viewer with
+  | None -> []
+  | Some graph ->
+      let reached = Path_table.create 64 in
+      let rec visit = function
+        | [] -> ()
+        | node :: rest when Path_table.mem reached node -> visit rest
+        | node :: rest ->
+            Path_table.replace reached node ();
+            visit (Call_graph.predecessors graph node @ rest)
+      in
+      visit [ path ];
+      Path_table.fold (fun node () nodes -> node :: nodes) reached []
 
 module For_testing = struct
   type nonrec stage = stage =
