@@ -19,33 +19,6 @@ let argument_at_index (values : passed list) index =
   | Some term -> term
   | None -> Logic.Boolean false
 
-let note_known_call context (invocation : Invocation.t) path term arguments =
-  let direct =
-    match invocation.callee with
-    | Function { type_arguments = []; _ } -> true
-    | Trait_method { evidence = Impl { arguments = []; _ }; type_arguments = []; _ } -> true
-    | _ -> false
-  in
-  let literal = function
-    | Logic.Integer value -> Some value
-    | Logic.Boolean value -> Some (if value then Z.one else Z.zero)
-    | _ -> None
-  in
-  let values = List.filter_map literal arguments in
-  match Interface.Impls.signature context.database path with
-  | Some
-      ({ specification_only = false; generics = []; output = Returns result; _ } : Types.signature)
-    when direct
-         && Path.package path = Path.package context.current
-         && List.length values = List.length arguments
-         && (is_numeric result || is_bool result)
-         && not (Types.equal result Types.Integer) ->
-      if not (List.exists (fun (known : known_call) -> known.term = term) context.known_calls) then
-        context.known_calls <-
-          { function_ = path; arguments = values; term; result_is_bool = is_bool result }
-          :: context.known_calls
-  | _ -> ()
-
 let requires_fix context frame (part : part) (requirement : Mir.requirement) term
     (values : passed list) =
   let clause = requirement.clause in
@@ -397,7 +370,6 @@ let contract_call context frame (site : Invocation.site) (invocation : Invocatio
                    in_range result_type
                      (Logic.Apply (symbol, List.map (fun (name, _) -> Logic.Symbol name) parameters))
                  )));
-      note_known_call context invocation path term own_arguments;
       term
     end
     else arrive context after "result" result_type

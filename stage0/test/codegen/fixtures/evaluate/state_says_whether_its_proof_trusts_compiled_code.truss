@@ -1,8 +1,6 @@
 
-fn f() -> UInt8
-  ensures result == 7
-{
-  count_up(7)
+fn f(name: String) -> Shout {
+  Shout"hey ${name.copy()}!"
 }
 
 fn g(value: UInt8) -> UInt8

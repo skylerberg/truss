@@ -920,32 +920,23 @@ let across library program =
   in
   check database (Support.file_of "app::main")
 
-let public_doubling ensures =
-  Printf.sprintf
-    "public fn double(limit_count: Int64) -> Int64\n\
-    \  requires limit_count < 1000 && limit_count > -1000\n\
-     %s  cost time O(1)\n\
-     {\n\
-    \  limit_count * 2\n\
-     }\n"
-    ensures
+let public_doubling =
+  "public fn double(limit_count: Int64) -> Int64\n\
+  \  requires limit_count < 1000 && limit_count > -1000\n\
+  \  ensures result == limit_count * 2\n\
+  \  cost time O(1)\n\
+   {\n\
+  \  limit_count * 2\n\
+   }\n"
 
 let () =
   test "a caller in another package reads its callee's contract" (fun () ->
-      match
-        across
-          (public_doubling "  ensures result == limit_count * 2\n")
-          Fixtures.Prover.caller_in_another_package_reads_its_callees
-      with
+      match across public_doubling Fixtures.Prover.caller_in_another_package_reads_its_callees with
       | [] -> ()
       | actual ->
           fail "%s"
             (String.concat "; "
-               (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)));
-  test "a call in another package is not run" (fun () ->
-      match across (public_doubling "") Fixtures.Prover.call_in_another_package_is_not_run with
-      | [ _ ] -> ()
-      | actual -> fail "%d diagnostics" (List.length actual))
+               (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)))
 
 let () =
   test "a recursive function proves a plain and an amortized bound, each by its own counting"

@@ -6,9 +6,13 @@ type proof = Obligations of State.outcome | Unsupported of Syntax.span * string 
 
 val proof : (Resolve.Names.key, proof) Query.query
 
-type run = Template_check of State.evaluation | Call of State.known_call
-type run_result = Returned of Z.t | Timed_out | Not_run
-type evaluator = { code_key : run -> string option; run : run -> run_result }
+type run_result = Ran of bool | Timed_out | Not_run
+
+type evaluator = {
+  code_key : State.evaluation -> string option;
+  run : State.evaluation -> run_result;
+}
+
 type oracle_response
 
 val oracle_response : (string, oracle_response) Query.input

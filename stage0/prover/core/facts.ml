@@ -270,13 +270,6 @@ and make_obligation ?evaluation context frame code span message goal =
         goal = Logic.( ==> ) frame.condition goal;
       }
   in
-  let known_calls =
-    List.filter
-      (fun (known : known_call) ->
-        let mentioned term = occurs known.term term in
-        mentioned query.goal || List.exists mentioned query.facts)
-      context.known_calls
-  in
   {
     code;
     span;
@@ -300,15 +293,7 @@ and make_obligation ?evaluation context frame code span message goal =
             [ (symbol, "result") ]
         | _ -> []);
     evaluation;
-    known_calls;
   }
-
-and occurs part term =
-  term = part
-  ||
-  match term with
-  | Logic.Forall (_, _, body) | Logic.Exists (_, body) -> occurs part body
-  | term -> List.exists (occurs part) (Logic.arguments term)
 
 let span_of (source : source) origin =
   let spans = Lazy.force source.spans in

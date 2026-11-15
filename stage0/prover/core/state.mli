@@ -7,13 +7,6 @@ module Locals = Locals
 type span = Syntax.span
 type evaluation = { from_template : Path.t; texts : string list; clause : int }
 
-type known_call = {
-  function_ : Path.t;
-  arguments : Z.t list;
-  term : Logic.term;
-  result_is_bool : bool;
-}
-
 type obligation = {
   code : Code.prover;
   span : span;
@@ -24,7 +17,6 @@ type obligation = {
   values : (Logic.symbol * string) list;
   locals : (Logic.symbol * string) list;
   evaluation : evaluation option;
-  known_calls : known_call list;
   decisions : (string * string option * Logic.term * Logic.term) list;
 }
 
@@ -169,7 +161,6 @@ type context = {
   holds_potential : (Types.ty, bool) Hashtbl.t;
   buffers : (Types.ty, (Types.ty * (Logic.term -> Logic.term)) option) Hashtbl.t;
   mutable equalities : Logic.term list;
-  mutable known_calls : known_call list;
   mutable decisions : (string * string option * Logic.term * Logic.term) list;
   mutable entry : Logic.symbol list;
   mutable proving : bool;
