@@ -220,6 +220,20 @@ let () =
         (List.map Path.show_module (modules (Command_packages.load root)));
       expect_strings ~expected:[ "hello" ]
         (names (Command_packages.load (Filename.concat root "examples"))));
+  test "a project manifest with a mistake is still the root of the packages under it" (fun () ->
+      let root =
+        directory
+          [
+            ("truss.toml", "[project]\n\n[test]\ntime_limit = \"ten\"\n");
+            ("app/truss.toml", manifest_of "app");
+            ("app/main.truss", "");
+          ]
+      in
+      let project = Command_packages.load (Filename.concat root "app") in
+      expect_strings ~expected:[ "app" ] (names project);
+      let problems = Database.problems (fst project) in
+      if not (List.exists (String.starts_with ~prefix:"truss.toml:4:") problems) then
+        fail "problems: %s" (String.concat "; " problems));
   test "under a package that is a project by itself, a directory with a manifest is no part of it"
     (fun () ->
       let root =
@@ -270,6 +284,16 @@ let () =
       expect_problem
         [ ("truss.toml", "[package]\nname = \"demo\"\ntruss = \"99.0\"\n") ]
         "`demo` is written for Truss 99.0, and this toolchain is Truss 0.1");
+  test "a package name that is another package's owner is a problem" (fun () ->
+      expect_problem
+        [
+          ("truss.toml", "[project]\n");
+          ("acme/truss.toml", manifest_of "acme");
+          ("acme/main.truss", "");
+          ("geometry/truss.toml", manifest_of "acme::geometry");
+          ("geometry/vector/vector.truss", "");
+        ]
+        "The package name `acme` is the owner in `acme::geometry`");
   test "a package cannot depend on itself" (fun () ->
       expect_problem
         [ ("truss.toml", manifest_of "demo" ^ "[dependencies]\ndemo = []\n") ]
@@ -394,7 +418,7 @@ let () =
       then fail "problems: %s" (String.concat "; " (Database.problems (fst project))));
   test "a time limit of 0 is malformed, at its line" (fun () ->
       match Manifest.parse "[package]\nname = \"a\"\n[test]\ntime_limit = 0\n" with
-      | exception Manifest.Malformed (4, _) -> ()
+      | exception Manifest.Malformed { line = 4; _ } -> ()
       | _ -> fail "accepted")
 
 (* Checking and fixing *)
@@ -1008,12 +1032,20 @@ let () =
       if add root [ "acme::nothing" ] <> 2 then fail "added";
       expect_string ~expected:before (read root "truss.toml");
       if Sys.file_exists (Filename.concat root "truss.lock") then fail "wrote a lock file");
-  test "a dependency with no line in the lock file is a problem that says to add it" (fun () ->
+  test "a dependency with no line in the lock file is reported once, by the lock file" (fun () ->
       let _ = stocked () in
       let root =
         directory [ ("truss.toml", manifest_of "demo" ^ "[dependencies]\n\"acme::units\" = []\n") ]
       in
-      expect_problem_in root "Run `truss add acme::units`");
+      let problems = report_problems (gather (Command_packages.load root)) in
+      match
+        List.filter (fun problem -> contains problem "not a package of this project") problems
+      with
+      | [ problem ]
+        when String.starts_with ~prefix:"truss.lock: " problem
+             && contains problem "Run `truss add acme::units`" ->
+          ()
+      | _ -> fail "problems: [%s]" (String.concat "; " problems));
   test "a lock file that is not the one the manifests give is a problem, which check --fix fixes"
     (fun () ->
       let _ = stocked () in
@@ -1183,7 +1215,7 @@ let () =
       if not (contains output "Published `acme::angles` 1.0.0") then fail "said %s" output;
       expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0" ];
       let files =
-        Registry.Content.files ~all:true
+        Registry.Content.all_files
           (version_directory { Path.owner = Some "acme"; name = "angles" } (1, 0, 0))
       in
       expect_strings ~expected:[ "degrees/degrees.truss"; "truss.toml" ] (List.map fst files));

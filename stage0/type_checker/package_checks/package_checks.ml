@@ -26,11 +26,7 @@ let diagnostic_at database (key : Names.key) ?(fixes = []) code (span : span) me
   | None -> None
 
 let declarations database package = Query.demand database Names.package_declarations package
-
-let dependencies database package =
-  List.map
-    (fun (dependency : Manifest.dependency) -> dependency.package)
-    (Query.demand database Packages.dependencies package)
+let dependencies database package = Query.demand database Packages.dependency_names package
 
 let header_span (definition : definition) =
   match definition.kind with

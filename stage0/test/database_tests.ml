@@ -257,6 +257,46 @@ let () =
       expect_errors directory 0;
       Database.reset ();
       expect_errors directory 0);
+  test "a project's state holds no copy of a result of the standard library's base" (fun () ->
+      fresh_store ();
+      let directory = package () in
+      expect_errors directory 0;
+      match Database.For_testing.session_engine directory with
+      | None -> fail "no session"
+      | Some engine -> (
+          let in_base = Hashtbl.create 4096 in
+          List.iter
+            (fun node -> Hashtbl.replace in_base (Engine.identity node) ())
+            (Engine.nodes (Database.For_testing.session_base ()));
+          let is_copy node =
+            (not (Engine.is_input node)) && Hashtbl.mem in_base (Engine.identity node)
+          in
+          match List.filter is_copy (Engine.For_testing.differing engine) with
+          | [] -> ()
+          | copies -> fail "copies %s" (String.concat "; " (List.map Engine.label copies))));
+  test "a change to a dependency's grants resolves no name and lists no module again" (fun () ->
+      fresh_store ();
+      let root = fresh "project" in
+      let app grant = manifest "app" ^ Printf.sprintf "\n[dependencies]\nhelper = [%s]\n" grant in
+      write root "truss.toml" project;
+      write root "app/truss.toml" (app "");
+      write root "app/main.truss" Fixtures.Database.change_to_a_dependencys_grants_resolves_no_name;
+      write root "helper/truss.toml" (manifest "helper");
+      write root "helper/numbers/numbers.truss"
+        Fixtures.Database.change_to_a_dependencys_grants_resolves_no_name_2;
+      expect_errors root 0;
+      let imports () = computed root Resolve.Names.imports in
+      let module_files () = computed root Packages.files in
+      let module_exists () = computed root Packages.module_exists in
+      if imports () = [] || module_files () = [] || module_exists () = [] then
+        fail "never resolved the imports or listed the modules";
+      clear root;
+      write root "app/truss.toml" (app "\"Clock\"");
+      expect_errors root 0;
+      if computed root Packages.dependencies = [] then fail "the grant was not read again";
+      if imports () <> [] then fail "resolved the imports again";
+      if module_files () <> [] then fail "listed a module's files again";
+      if module_exists () <> [] then fail "looked up a module again");
   test "a file that cannot be read is not there, and a change beside it is still seen" (fun () ->
       fresh_store ();
       let directory = package () in

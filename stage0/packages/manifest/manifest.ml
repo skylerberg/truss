@@ -1,28 +1,13 @@
-(* Reading a manifest, [truss.toml], in the part of TOML a manifest is
-   written in: tables, and keys whose values are a string, a whole number,
-   or a list of strings.
-
-     [package]
-     name = "weather"
-     truss = "0.1"
-
-     [dependencies]
-     forecast = []
-     "truss::http" = ["NetworkClient", "Clock"]
-
-     [test]
-     time_limit = 10 *)
-
 type dependency = { package : Path.package; capabilities : string list }
 type package = { name : Path.package; truss : string option; dependencies : dependency list }
-type t = { package : package option; project : bool; time_limit : int option }
+type t = { package : package option; time_limit : int option }
 
 let default_time_limit = 10
 
-exception Malformed of int * string
+exception Malformed of { line : int; message : string }
 
 let malformed line format =
-  Printf.ksprintf (fun message -> raise (Malformed (line, message))) format
+  Printf.ksprintf (fun message -> raise (Malformed { line; message })) format
 
 let is_lower_snake_case name =
   name <> ""
@@ -52,7 +37,6 @@ let is_bare = function
   | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' | '.' | ':' -> true
   | _ -> false
 
-(* Each token with its line, counting from 1. *)
 let tokens text =
   let length = String.length text in
   let lexed = ref [] in
@@ -309,14 +293,10 @@ let parse text =
               "`[dependencies]` are a package's, and this manifest has no `[package]`."
         | None -> None)
   in
-  let project = table "project" <> None in
-  if package = None && not project then
+  if package = None && table "project" = None then
     malformed 1 "A manifest has a `[package]` table, a `[project]` table, or both.";
-  { package; project; time_limit = !time_limit }
+  { package; time_limit = !time_limit }
 
-(* Whether a manifest's text has a [[project]] table, told without reading
-   the rest, so that a manifest with a mistake elsewhere still says where
-   its project's root is. *)
 let has_project_table text =
   List.exists
     (fun line ->

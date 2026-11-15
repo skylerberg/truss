@@ -1,24 +1,8 @@
-(** A lock file, [truss.lock]: the version and content of each registry package a project's packages
-    use. A published package's lock file records its dependencies at publication, and has no
-    [holds]. *)
-
-type entry = {
-  name : Path.package;
-  version : Version.t;
-  hash : string;  (** Of the package's files, as {!Content.hash} gives it *)
-  holds : string list;  (** The capabilities its users in the build grant it, as grants name them *)
-}
-
+type entry = { name : Path.package; version : Version.t; hash : string; holds : string list }
 type t = entry list
-(** In order of name. *)
 
-exception Malformed of int * string
-(** The line, counting from 1, and its error, as whole sentences. *)
+exception Malformed of { line : int; message : string }
 
 val parse : string -> t
-(** Raises {!Malformed}. A text with nothing in it is a lock file with no package. *)
-
 val print : t -> string
-(** The one way a lock file is written, which {!parse} reads back as the same entries. *)
-
 val find : t -> Path.package -> entry option

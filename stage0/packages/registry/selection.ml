@@ -28,6 +28,19 @@ let sentence problem =
          has one content, so one of the two is wrong."
         (show recorded_by) (show name) (Version.show version)
 
+let manifest_and_record ~read name =
+  match
+    ( Option.map Manifest.parse (read "truss.toml"),
+      Lock.parse (Option.value ~default:"" (read "truss.lock")) )
+  with
+  | exception Manifest.Malformed { line; message } ->
+      Error (Printf.sprintf "its manifest cannot be read: line %d: %s" line message)
+  | exception Lock.Malformed { line; message } ->
+      Error (Printf.sprintf "its lock file cannot be read: line %d: %s" line message)
+  | Some { package = Some manifest; _ }, record when manifest.name = name -> Ok (manifest, record)
+  | _ ->
+      Error (Printf.sprintf "its manifest does not name the package `%s`" (Path.show_package name))
+
 let choose ~lock ~roots ~local ~load =
   let chosen = Hashtbl.create 16 in
   List.iter
@@ -60,9 +73,6 @@ let choose ~lock ~roots ~local ~load =
             | Ok ((manifest : Manifest.package), record) ->
                 selected := { name; version; hash; manifest; record } :: !selected;
                 List.iter (record_of ~recorded_by:name) record;
-                (* A dependency that a package's record does not name is one
-                   only its tests use, which a build that uses the package
-                   does not take on. *)
                 List.iter
                   (fun (dependency : Manifest.dependency) ->
                     if Lock.find record dependency.package <> None then
@@ -71,8 +81,6 @@ let choose ~lock ~roots ~local ~load =
       end
     in
     List.iter (fun (wanted_by, name) -> visit wanted_by name) roots;
-    (* A version that a record raised may have another record, so the walk
-       is made again until none is raised. Versions only rise, so it ends. *)
     if !changed then pass ()
     else
       ( List.sort (fun left right -> Path.compare_package left.name right.name) !selected,

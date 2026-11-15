@@ -15,11 +15,9 @@ let is_hash text =
 let is_input name =
   name = "truss.toml" || name = "truss.lock" || Filename.check_suffix name ".truss"
 
-let published name = is_input name || Filename.check_suffix name ".md"
-
-let files ?(all = false) directory =
+let walk ~enters_directory ~keeps_file directory =
   let files = ref [] in
-  let rec walk relative =
+  let rec visit relative =
     let absolute = if relative = "" then directory else Filename.concat directory relative in
     let entries = try Sys.readdir absolute with Sys_error _ -> [||] in
     Array.sort String.compare entries;
@@ -29,15 +27,25 @@ let files ?(all = false) directory =
         let full = Filename.concat directory path in
         match (Unix.lstat full).st_kind with
         | exception Unix.Unix_error _ -> ()
-        | S_DIR ->
-            (* A directory with a manifest of its own is another package. *)
-            if all || not (skipped entry || Sys.file_exists (Filename.concat full "truss.toml"))
-            then walk path
+        | S_DIR -> if enters_directory ~entry ~full then visit path
         | S_REG ->
-            if all || (published entry && (entry <> "truss.lock" || relative = "")) then
-              files := (path, File_system.read full) :: !files
+            if keeps_file ~relative ~entry then files := (path, File_system.read full) :: !files
         | _ -> ())
       entries
   in
-  walk "";
+  visit "";
   List.rev !files
+
+let is_other_package directory = Sys.file_exists (Filename.concat directory "truss.toml")
+let is_published name = is_input name || Filename.check_suffix name ".md"
+
+let published_files =
+  walk
+    ~enters_directory:(fun ~entry ~full -> not (skipped entry || is_other_package full))
+    ~keeps_file:(fun ~relative ~entry ->
+      is_published entry && (entry <> "truss.lock" || relative = ""))
+
+let all_files =
+  walk
+    ~enters_directory:(fun ~entry:_ ~full:_ -> true)
+    ~keeps_file:(fun ~relative:_ ~entry:_ -> true)

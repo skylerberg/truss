@@ -34,3 +34,17 @@ let rec remove path =
       Array.iter (fun entry -> remove (Filename.concat path entry)) (Sys.readdir path);
       Unix.rmdir path
   | _ -> Sys.remove path
+
+let write_directory path files =
+  List.iter
+    (fun (file, bytes) ->
+      let target = Filename.concat path file in
+      make_directory (Filename.dirname target);
+      write target bytes)
+    files
+
+let write_directory_atomically path files =
+  let temporary = Printf.sprintf "%s.%d.partial" path (Unix.getpid ()) in
+  remove temporary;
+  write_directory temporary files;
+  try Sys.rename temporary path with Sys_error _ -> remove temporary

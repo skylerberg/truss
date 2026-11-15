@@ -68,13 +68,12 @@ let project_dependencies session packages =
   let seen = Hashtbl.create 8 in
   let rec visit name =
     List.iter
-      (fun (dependency : Manifest.dependency) ->
-        if List.mem dependency.package project_packages && not (Hashtbl.mem seen dependency.package)
-        then begin
-          Hashtbl.replace seen dependency.package ();
-          visit dependency.package
+      (fun dependency ->
+        if List.mem dependency project_packages && not (Hashtbl.mem seen dependency) then begin
+          Hashtbl.replace seen dependency ();
+          visit dependency
         end)
-      (Query.demand (Database.context session) Packages.dependencies name)
+      (Query.demand (Database.context session) Packages.dependency_names name)
   in
   List.iter visit packages;
   List.filter (fun name -> Hashtbl.mem seen name && not (List.mem name packages)) project_packages

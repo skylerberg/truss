@@ -35,7 +35,7 @@ let unfinished session packages =
 (* The files to publish: the package's own, with its published lock file
    in place of the project's. *)
 let files directory (record : Lock.t) =
-  List.filter (fun (path, _) -> path <> "truss.lock") (Registry.Content.files directory)
+  List.filter (fun (path, _) -> path <> "truss.lock") (Registry.Content.published_files directory)
   @ if record = [] then [] else [ ("truss.lock", Lock.print record) ]
 
 (* The published lock file's entries: each registry package that the
@@ -55,10 +55,9 @@ let record session registry (package : Path.package) =
   let in_registry name = List.find_opt (fun (other, _, _) -> other = name) built in
   let dependencies ~code name =
     let used = if code then Database.code_packages session name else [] in
-    List.filter_map
-      (fun (dependency : Manifest.dependency) ->
-        if (not code) || List.mem dependency.package used then Some dependency.package else None)
-      (Query.demand (Database.context session) Packages.dependencies name)
+    List.filter
+      (fun dependency -> (not code) || List.mem dependency used)
+      (Query.demand (Database.context session) Packages.dependency_names name)
   in
   let problems = ref [] in
   let rec closure name : Lock.t =

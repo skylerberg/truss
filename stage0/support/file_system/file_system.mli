@@ -20,3 +20,6 @@ val make_directory : string -> unit
 val remove : string -> unit
 (** Removes a file, or a directory and everything in it. A path that does not exist is not an error.
 *)
+
+val write_directory : string -> (string * string) list -> unit
+val write_directory_atomically : string -> (string * string) list -> unit
