@@ -13,13 +13,10 @@
   database
   resolve
   types
-  intrinsic
   interface
   mir
   solver
   prover
-  instance
-  memory_layout
   toolchain
   build
   compile

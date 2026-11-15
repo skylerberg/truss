@@ -5,7 +5,6 @@
  (modules_without_implementation lookups)
  (libraries
   compiler_bug
-  components
   path
   well_known
   resolve

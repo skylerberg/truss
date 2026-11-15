@@ -64,16 +64,10 @@
   solver
   prover
   pipeline
-  compile
-  instance
-  libc
-  ground
-  memory_layout
   types
   intrinsic
   interface
   infer
-  ownership
   syntax_walk
   manifest
   registry
