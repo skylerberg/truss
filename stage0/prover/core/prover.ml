@@ -7,9 +7,6 @@ module Symbol = Logic.Symbol
 
 type proof = Obligations of State.outcome | Unsupported of span * string | Not_proven_here
 
-let provided_body database (trait : Path.t) name receiver =
-  Query.demand database Mir.definition_of_path (Path.Method { owner = trait; name; receiver })
-
 let inherited database (path : Path.t) =
   match path with
   | Method { owner = impl; name; receiver } -> (
@@ -20,10 +17,10 @@ let inherited database (path : Path.t) =
             Option.value ~default:[] (Interface.Impls.trait_substitution database impl)
           in
           match Contracts.trait_part database implemented name receiver with
-          | Some part -> Some (part, substitution, provided_body database implemented name receiver)
+          | Some part -> Some (part, substitution)
           | None ->
               Option.map
-                (fun part -> (part, substitution, None))
+                (fun part -> (part, substitution))
                 (Contracts.capability_part database implemented name))
       | _ -> None)
   | _ -> None

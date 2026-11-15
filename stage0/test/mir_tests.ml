@@ -744,7 +744,6 @@ let () =
           if chooses statement.kind then incr chosen;
           match statement.kind with Jump jump -> jumps := jump :: !jumps | _ -> ())
         built;
-      if not built.body.is_functional then fail "the body is not functional";
       if !chosen = 0 then fail "the body holds no value that chooses between blocks";
       (match !jumps with
       | [ Return (Some _) ] -> ()
@@ -1013,16 +1012,9 @@ let () =
           | Some _ -> fail "the loop's condition is another comparison"
           | None -> fail "the loop's condition is no comparison")
       | loops -> fail "%d `while` loops with one invariant" (List.length loops));
-      (match !proofs with
+      match !proofs with
       | [ proof ] -> validate "the proof block" (Mir.For_testing.expanded proof).body
       | proofs -> fail "%d proof blocks" (List.length proofs));
-      let doubled : Path.t =
-        Method { owner = Top { module_; name = "Shape" }; name = "doubled"; receiver = Read }
-      in
-      if Query.demand database Mir.definition_of_path doubled = None then
-        fail "the functional body of `doubled` is no definition";
-      if Query.demand database Mir.definition_of_path g <> None then
-        fail "the body of `g`, which has a loop, is a definition");
   test "an early exit from concurrent code ends the tasks it leaves" (fun () ->
       let mir = mir_of_g Fixtures.Mir.early_exit_from_concurrent_code_ends_the_tasks_it_leaves in
       let blocks = mir.body.blocks in

@@ -754,9 +754,6 @@ let () =
         "types.not_structural");
   test "a constant of a derived type of integers in a pattern" (fun () ->
       fine Fixtures.Infer.constant_of_a_derived_type_of_integers_in_a);
-  test "a provided method without a time clause cannot be replaced" (fun () ->
-      Support.one_diagnostic ~check:Checks.diagnostics
-        Fixtures.Infer.provided_method_without_a_time_clause_cannot_be "types.not_overridable");
   test "a loop's cost bound is checked" (fun () ->
       one_diagnostic Fixtures.Infer.loops_cost_bound_is_checked "resolve.unknown_name")
 

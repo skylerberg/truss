@@ -1,0 +1,13 @@
+impl Monoid for Int64 {
+  fn empty() -> Int64
+    ensures result == 0
+  {
+    0
+  }
+
+  fn combine(self, other: Int64) -> Int64
+    ensures result == self.wrapping_add(other)
+  {
+    self.wrapping_add(other)
+  }
+}

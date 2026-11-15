@@ -114,7 +114,6 @@ type signature = {
   capture_free_parameters : string list;
 }
 
-val body_is_definition : signature -> bool
 val map_signature : (ty -> ty) -> signature -> signature
 val substitute_signature : substitution -> signature -> signature
 

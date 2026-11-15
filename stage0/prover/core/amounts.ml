@@ -8,35 +8,6 @@ open Models
 open Lambdas
 open Intrinsics
 
-let definition_value context frame (definition : Mir.t) =
-  match
-    body_run context frame ~lambdas:definition.lambdas definition.body
-      ~type_:(returned_type context frame definition.body)
-  with
-  | Some read -> read
-  | None -> raise (Foreign_unsupported "a definition that never returns")
-
-let body_over context frame bound (definition : Mir.t) bind =
-  let mark = context.fresh in
-  let saved_counters = context.counters in
-  context.counters <- [];
-  Fun.protect
-    ~finally:(fun () -> context.counters <- saved_counters)
-    (fun () ->
-      try
-        let inside =
-          bind
-            {
-              frame with
-              bound = List.map fst bound @ frame.bound;
-              makes_obligations = false;
-              result = None;
-            }
-        in
-        let _, defined = definition_value context inside definition in
-        if mentions_fresh_after context mark defined then None else Some defined
-      with Unsupported _ | Foreign_unsupported _ -> None)
-
 let code_value context frame (code : Mir.t) ~type_ =
   match body_run context frame ~lambdas:code.lambdas code.body ~type_ with
   | Some returned -> returned
@@ -586,9 +557,7 @@ let method_time_bound context (method_ : Path.t) self_type =
               | None -> false
             in
             match
-              method_contract ~reading_package:(Path.package context.current) context.database
-                reference name receiver
-                (Impl { impl; arguments })
+              method_contract context.database reference name receiver (Impl { impl; arguments })
             with
             | Some contract when makes_no_potential ->
                 List.find_map

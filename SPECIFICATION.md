@@ -1901,9 +1901,8 @@ trait Ordered: Equal {
   redeclare a method of a trait it requires, but can add an overload in
   another mode. Traits cannot require each other in a cycle.
 - **A method with a body** is provided to every implementation. An `impl` can
-  override it only with a method proven to return the same result, and only
-  where the prover reads the body as a definition (see
-  [Bodies and contracts in proofs](#bodies-and-contracts-in-proofs)).
+  override it with a method that keeps the trait's contract for it, as it
+  keeps the contract of every other method.
 
 ### Implementations
 
@@ -2109,15 +2108,13 @@ proof Ordered.transitive for Box[Item: Ordered] {
 
 ### Bodies and contracts in proofs
 
-- A function or a method of a type is known to its callers' proofs by its
-  `requires` and `ensures`, in every package. A function whose body is its
+- Every callee is known to its callers' proofs by its `requires` and
+  `ensures`, in every package: a function, a method of a type, a trait's
+  method, and an `impl`'s method alike. A callee whose body is its
   definition states the body in its `ensures`:
   `ensures result == (forall index in 1..items.length() => items[index - 1] <= items[index])`.
-- A method of a trait or an `impl` is known by its body, where the body is
-  functional: `let`, `if`, `match`, `is`, calls, fields, building values,
-  `with`, operators, and quantifiers, with no `var`, assignment, or loop, and
-  nothing passed `mut` or `own`. A trait's provided method is read in every
-  package, and a method an `impl` writes in the `impl`'s package.
+- An `impl`'s laws are proven from the contracts of its methods.
+- A derived `Ordered` states its comparison in its `ensures`.
 - A clause applies only where every name that it mentions is visible.
 - A function with a `requires` is defined only where it holds.
 

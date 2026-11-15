@@ -42,7 +42,6 @@ let new_context database ~home ~current ~terminates ~measures =
       open_axioms = [];
       axioms_of = Hashtbl.create 16;
       axiom_clauses = Hashtbl.create 16;
-      defined_by_axiom = Hashtbl.create 16;
       yielded_part = None;
       yield_ensures = None;
       callbacks = [];
@@ -247,7 +246,7 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
   in
   let paired terms =
     match (inherited, parameters, terms) with
-    | Some ((part : part), _, _), { local = Self; _ } :: _, _ :: rest
+    | Some ((part : part), _), { local = Self; _ } :: _, _ :: rest
       when not
              (List.exists
                 (fun (parameter : Mir.parameter) -> parameter.local = Self)
@@ -259,8 +258,7 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
   let own_terms = values_of start in
   let trait_frame (at : frame) ~result =
     match inherited with
-    | Some ((part : part), substitution, _) when List.length part.parameters = List.length own_terms
-      ->
+    | Some ((part : part), substitution) when List.length part.parameters = List.length own_terms ->
         let locals, types, self, old_locals =
           List.fold_left2
             (fun (locals, types, self, old_locals) (parameter : Mir.parameter) (entry, exit_) ->
@@ -487,21 +485,7 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
                    (promised_by database part.callee)
                    (quote part.callee clause.origin))
                 term)
-            part.ensures;
-          begin match (inherited, returned) with
-          | Some (_, _, Some (Mir.Functional provided)), Some returned ->
-              let _, defined = definition_value context inside provided in
-              oblige context frame Ensures returns_span
-                "This method overrides its trait's default body, so it must return the same value, \
-                 and it may not."
-                (Logic.equal returned defined)
-          | Some (_, _, Some Not_functional), Some _ ->
-              oblige context frame Ensures returns_span
-                "This method overrides its trait's default body, which is not functional, so there \
-                 is no definition to prove it equal to."
-                (Logic.Boolean false)
-          | _ -> ()
-          end
+            part.ensures
       | _ -> ())
     returns;
   outcome context

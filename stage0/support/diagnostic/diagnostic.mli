@@ -145,7 +145,6 @@ module Code : sig
     | Specification_only
     | Not_in_specification
     | Not_structural
-    | Not_overridable
     | Wrong_receiver
     | Not_indexable
     | Implements_built_in

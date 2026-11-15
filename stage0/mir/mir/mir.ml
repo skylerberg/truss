@@ -4,8 +4,6 @@ include Walk
 open Builder
 open Expansion
 
-type definition = Functional of t | Not_functional
-
 let code_of_formula = code_of_formula
 
 let mir =
@@ -155,33 +153,6 @@ let contract_of_path =
   Query.query ~name:"mir_contract_of_path" ~phase:Phases.bodies ~show:Path.show
     (fun database path ->
       by_form_origin database path ~of_written:contract ~of_generated:contract_of)
-
-let definition_of (definition : Core.definition) ~(code : t option) =
-  match (definition, code) with
-  | Function { body = Some _; _ }, Some code ->
-      Some (if code.body.is_functional then Functional code else Not_functional)
-  | (Function _ | Type _ | Trait _ | Constant _ | Test _ | Law_proof _ | Empty), _ -> None
-
-let definition =
-  Query.query ~name:"mir_definition" ~phase:Phases.bodies ~show:Resolve.Names.show_key
-    (fun database key ->
-      Option.bind (Query.demand database Infer.core key) (fun (form : Core.t) ->
-          definition_of form.definition ~code:(Query.demand database mir key)))
-
-let definition_in_readable_form ~readable_form database path =
-  match Query.demand database readable_form path with
-  | Some (({ definition = Function { body = Some _; _ }; _ } : Core.t), _) ->
-      by_form_origin database path ~of_written:definition ~of_generated:(fun definition ->
-          definition_of definition ~code:(of_definition definition))
-  | Some _ | None -> None
-
-let definition_of_path =
-  Query.query ~name:"mir_definition_of_path" ~phase:Phases.bodies ~show:Path.show
-    (definition_in_readable_form ~readable_form:Infer.specification_of_path)
-
-let exported_definition_of_path =
-  Query.query ~name:"mir_exported_definition_of_path" ~phase:Phases.bodies ~show:Path.show
-    (definition_in_readable_form ~readable_form:Infer.exported_specification_of_path)
 
 let laws =
   Query.query ~name:"mir_laws" ~phase:Phases.bodies ~show:Resolve.Names.show_key

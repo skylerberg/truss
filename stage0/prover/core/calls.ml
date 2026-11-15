@@ -452,52 +452,6 @@ let contract_call context frame (site : Invocation.site) (invocation : Invocatio
           (stated, Logic.conjunction (kept !facts), axiom))
     in
     let record_axiom symbol axiom = Hashtbl.add context.axioms_of symbol axiom in
-    let definition_axiom ~is_triggered symbol sorts (part : part) body =
-      match Hashtbl.find_opt context.defined_by_axiom symbol with
-      | Some is_defined -> is_defined
-      | None -> (
-          Hashtbl.replace context.defined_by_axiom symbol false;
-          let parameters = parameters_of "defined" sorts in
-          let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
-          let arguments = List.mapi (fun index input -> (index, input)) inputs in
-          let outside = { after with bound = []; binders = []; condition = Logic.Boolean true } in
-          let mark = context.fresh in
-          let stated, facts, axiom =
-            axiomatizing symbol parameters (fun () ->
-                let inside =
-                  part_frame
-                    { outside with bound = List.map fst parameters; makes_obligations = false }
-                    part ~arguments ~substitution:(substitution_of part)
-                in
-                let guard =
-                  List.map
-                    (fun requirement -> readable_clause mark requirement inside)
-                    (clauses part.requires)
-                in
-                let valid = parameters_valid inside inputs in
-                if List.mem None guard || mentions_fresh_after context mark valid then None
-                else
-                  Option.map
-                    (fun defined ->
-                      (Logic.conjunction (valid :: List.filter_map Fun.id guard), defined))
-                    (body_over context outside parameters body (fun inside ->
-                         part_frame inside part ~arguments ~substitution:(substitution_of part))))
-          in
-          match stated with
-          | Some (guard, defined) ->
-              let applied = Logic.Apply (symbol, inputs) in
-              record_axiom symbol axiom;
-              add_fact context
-                (Logic.forall
-                   ~trigger:(if is_triggered then [ applied ] else [])
-                   ( parameters,
-                     Logic.(
-                       guard &&& conjunction axiom.hypotheses ==> (facts &&& equal applied defined))
-                   ));
-              Hashtbl.replace context.defined_by_axiom symbol true;
-              true
-          | None -> false)
-    in
     let contract_axiom ~is_triggered symbol sorts =
       once context (Contract_of symbol) (fun () ->
           let parameters = parameters_of "ensured" sorts in
@@ -577,38 +531,12 @@ let contract_call context frame (site : Invocation.site) (invocation : Invocatio
                                    (Logic.conjunction (List.map snd ensures)))
                                parts)) )))
     in
-    let unfold (part : part) body =
-      let unfolding =
-        if in_quantifier then
-          { (entry_frame part) with condition = Logic.Boolean true; bound = []; binders = [] }
-        else { (entry_frame part) with condition = after.condition }
-      in
-      try
-        let _, defined = definition_value context unfolding body in
-        state (Logic.( ==> ) required (Logic.equal result defined))
-      with Unsupported _ | Foreign_unsupported _ -> ()
-    in
     (match (!is_limited_call, axiom_symbol, !applied_as) with
     | true, _, _ -> ()
-    | false, Some (symbol, sorts), _ ->
-        let is_defined =
-          match contract.definition with
-          | Some (part, body) -> definition_axiom ~is_triggered:true symbol sorts part body
-          | None -> false
-        in
-        (match contract.definition with
-        | Some (part, body) when (not is_defined) && not is_on_bound_values -> unfold part body
-        | _ -> ());
-        contract_axiom ~is_triggered:true symbol sorts
+    | false, Some (symbol, sorts), _ -> contract_axiom ~is_triggered:true symbol sorts
     | false, None, Some (symbol, sorts) when is_on_bound_values ->
-        (match contract.definition with
-        | Some (part, body) -> ignore (definition_axiom ~is_triggered:false symbol sorts part body)
-        | None -> ());
         contract_axiom ~is_triggered:false symbol sorts
-    | false, None, _ -> (
-        match contract.definition with
-        | Some (part, body) when not is_on_bound_values -> unfold part body
-        | _ -> ()));
+    | false, None, _ -> ());
     let in_axiom (part : part) (clause : Mir.formula) =
       match axiom_symbol with
       | Some (symbol, _) ->
@@ -1001,8 +929,7 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
           with_contract ~substitution_of
             ~instance:(Types.Type self_type :: arguments)
             path
-            (method_contract ~reading_package:(Path.package context.current) context.database trait
-               name receiver evidence))
+            (method_contract context.database trait name receiver evidence))
   | Indirect () ->
       check_callback_requires context frame site through values;
       let frame = havoc_mut frame in

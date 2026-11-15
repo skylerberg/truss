@@ -23,7 +23,6 @@ val capability_contract : Query.context -> Path.t -> string -> State.contract op
 val capability_part : Query.context -> Path.t -> string -> State.part option
 
 val method_contract :
-  reading_package:Path.package ->
   Query.context ->
   Types.trait_reference ->
   string ->
