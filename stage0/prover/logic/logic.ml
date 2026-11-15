@@ -1,36 +1,40 @@
-type sort = Int | Bool | Float of int * int | Uninterpreted of string
+type sort = Int | Bool | Float of int * int | Type_sort of Types.ty | Function_sort of int
 
 module Symbol = struct
   type 'term t =
     | Variable of { label : string; numbers : int list }
-    | Function of { callee : Path.t; instance : string list }
-    | Limited of { callee : Path.t; instance : string list }
-    | Function_value of { callee : Path.t; instance : string list }
+    | Function of { callee : Path.t; instance : Types.argument list }
+    | Limited of { callee : Path.t; instance : Types.argument list }
+    | Function_value of { callee : Path.t; instance : Types.argument list }
     | Constant of Path.t
     | Generic_value of { owner : Path.t; name : string }
-    | Text_literal of { type_key : string; text : string }
+    | Text_literal of { type_ : Types.ty; text : string }
     | Named_term of 'term
     | Lambda of { sorts : sort list; definition : 'term }
     | Lifted of 'term t
-    | Constructor of { type_key : string; type_name : string; variant : string option }
-    | Field of { type_key : string; variant : string option; field : string }
+    | Constructor of { type_ : Types.ty; variant : string option }
+    | Field of { type_ : Types.ty; variant : string option; field : string }
     | Unit
     | Apply of sort list
-    | Equal of string
-    | Valid of string
-    | Rank of string
-    | Capacity of string
-    | Model of string
-    | Slack of string
-    | Potential of string
-    | Potential_measure of string
-    | Block_bytes of { type_key : string; variant : string option }
+    | Equal of Types.ty
+    | Valid of Types.ty
+    | Rank of Types.ty
+    | Capacity of Types.ty
+    | Model of Types.ty
+    | Slack of Types.ty
+    | Potential of Types.ty
+    | Potential_measure of Types.ty
+    | Block_bytes of { type_ : Types.ty; variant : string option }
     | Time of sort
-    | Method_time of { method_ : Path.t; self_type : string }
-    | Opaque_operation of { operation : string; type_key : string; integer : (int * bool) option }
-    | Bit_count of { count : string; width : int }
-    | System of string
-    | Libc_number of string
+    | Method_time of { method_ : Path.t; self_type : Types.ty }
+    | Opaque_operation of {
+        operation : Intrinsic.operation;
+        type_ : Types.ty;
+        integer : (int * bool) option;
+      }
+    | Bit_count of { count : Intrinsic.operation; width : int }
+    | System of Intrinsic.operation
+    | Libc_number of Libc.number
     | Handle_descriptor
     | Compare_bytes_order
     | Cost_most
@@ -56,7 +60,7 @@ and symbol = term Symbol.t
 type declaration =
   | Constant of symbol * sort
   | Function of symbol * sort list * sort
-  | Datatype of string * (symbol * (symbol * sort) list) list
+  | Datatype of Types.ty * (symbol * (symbol * sort) list) list
 
 type query = { declarations : declaration list; facts : term list; goal : term }
 
@@ -71,9 +75,13 @@ let sort_text = function
   | Int -> "Int"
   | Bool -> "Bool"
   | Float (exponent, significand) -> Printf.sprintf "Float%d_%d" exponent significand
-  | Uninterpreted name -> name
+  | Type_sort ty -> Types.show ty
+  | Function_sort arity -> Printf.sprintf "function/%d" arity
 
-let instance_text = function [] -> "" | keys -> "[" ^ String.concat ", " keys ^ "]"
+let instance_text = function
+  | [] -> ""
+  | arguments -> "[" ^ String.concat ", " (List.map Types.show_argument arguments) ^ "]"
+
 let variant_text = Option.value ~default:"record"
 
 let rec show_symbol : symbol -> string = function
@@ -83,32 +91,32 @@ let rec show_symbol : symbol -> string = function
   | Function_value { callee; instance } -> "named." ^ Path.show callee ^ instance_text instance
   | Constant path -> "constant." ^ Path.show path
   | Generic_value { owner; name } -> Printf.sprintf "generic.%s.%s" (Path.show owner) name
-  | Text_literal { type_key; text } -> Printf.sprintf "text_literal.%s.%S" type_key text
+  | Text_literal { type_; text } -> Printf.sprintf "text_literal.%s.%S" (Types.show type_) text
   | Named_term term -> "named_term(" ^ show_term term ^ ")"
   | Lambda { definition; _ } -> "lambda(" ^ show_term definition ^ ")"
   | Lifted symbol -> show_symbol symbol ^ ".lifted"
-  | Constructor { type_key; variant; _ } -> "constructor." ^ type_key ^ "." ^ variant_text variant
-  | Field { type_key; variant; field } ->
-      "field." ^ type_key ^ "." ^ variant_text variant ^ "." ^ field
+  | Constructor { type_; variant } -> "constructor." ^ Types.show type_ ^ "." ^ variant_text variant
+  | Field { type_; variant; field } ->
+      "field." ^ Types.show type_ ^ "." ^ variant_text variant ^ "." ^ field
   | Unit -> "Unit.unit"
   | Apply sorts -> String.concat "." ("apply" :: List.map sort_text sorts)
-  | Equal type_key -> "equal." ^ type_key
-  | Valid type_key -> "valid." ^ type_key
-  | Rank type_key -> "rank." ^ type_key
-  | Capacity type_key -> "capacity." ^ type_key
-  | Model type_key -> "model." ^ type_key
-  | Slack type_key -> "slack." ^ type_key
-  | Potential type_key -> "potential." ^ type_key
-  | Potential_measure type_key -> "potential.measure." ^ type_key
-  | Block_bytes { type_key; variant } -> "bytes." ^ type_key ^ "." ^ variant_text variant
+  | Equal ty -> "equal." ^ Types.show ty
+  | Valid ty -> "valid." ^ Types.show ty
+  | Rank ty -> "rank." ^ Types.show ty
+  | Capacity ty -> "capacity." ^ Types.show ty
+  | Model ty -> "model." ^ Types.show ty
+  | Slack ty -> "slack." ^ Types.show ty
+  | Potential ty -> "potential." ^ Types.show ty
+  | Potential_measure ty -> "potential.measure." ^ Types.show ty
+  | Block_bytes { type_; variant } -> "bytes." ^ Types.show type_ ^ "." ^ variant_text variant
   | Time sort -> "time." ^ sort_text sort
   | Method_time { method_; self_type } ->
-      Printf.sprintf "time.method.%s[%s]" (Path.show method_) self_type
-  | Opaque_operation { operation; type_key; _ } ->
-      Printf.sprintf "operation.%s.%s" operation type_key
-  | Bit_count { count; width } -> Printf.sprintf "bits.%s.%d" count width
-  | System operation -> "system." ^ operation
-  | Libc_number number -> "libc.number." ^ number
+      Printf.sprintf "time.method.%s[%s]" (Path.show method_) (Types.show self_type)
+  | Opaque_operation { operation; type_; _ } ->
+      Printf.sprintf "operation.%s.%s" (Intrinsic.operation_name operation) (Types.show type_)
+  | Bit_count { count; width } -> Printf.sprintf "bits.%s.%d" (Intrinsic.operation_name count) width
+  | System operation -> "system." ^ Intrinsic.operation_name operation
+  | Libc_number number -> "libc.number." ^ Libc.number_name number
   | Handle_descriptor -> "handle.descriptor"
   | Compare_bytes_order -> "compare_bytes.order"
   | Cost_most -> "cost.most"
@@ -138,7 +146,7 @@ and show_term term =
       | Bool -> "Bool"
       | Float (exponent, significand) ->
           Printf.sprintf "(_ FloatingPoint %d %d)" exponent significand
-      | Uninterpreted name -> name
+      | (Type_sort _ | Function_sort _) as sort -> sort_text sort
     in
     Printf.sprintf "(%s (%s) %s)" word
       (String.concat " "
@@ -481,27 +489,27 @@ let prune query =
 
 type numbering = {
   declared : (symbol, declaration) Hashtbl.t;
-  datatypes : (string, (symbol * (symbol * sort) list) list) Hashtbl.t;
-  member_of : (symbol, string * string) Hashtbl.t;
+  datatypes : (sort, (symbol * (symbol * sort) list) list) Hashtbl.t;
+  member_of : (symbol, sort * string) Hashtbl.t;
   triggering : symbol -> bool;
   symbol_names : (symbol, string) Hashtbl.t;
   symbol_order : symbol Dynarray.t;
-  sort_names : (string, string) Hashtbl.t;
-  sort_order : string Dynarray.t;
+  sort_names : (sort, string) Hashtbl.t;
+  sort_order : sort Dynarray.t;
 }
 
 let rec sort_name numbering = function
   | Int -> "Int"
   | Bool -> "Bool"
   | Float (exponent, significand) -> Printf.sprintf "(_ FloatingPoint %d %d)" exponent significand
-  | Uninterpreted name -> (
-      match Hashtbl.find_opt numbering.sort_names name with
+  | (Type_sort _ | Function_sort _) as sort -> (
+      match Hashtbl.find_opt numbering.sort_names sort with
       | Some canonical -> canonical
       | None ->
           let canonical = Printf.sprintf "S%d" (Hashtbl.length numbering.sort_names) in
-          Hashtbl.replace numbering.sort_names name canonical;
-          Dynarray.add_last numbering.sort_order name;
-          (match Hashtbl.find_opt numbering.datatypes name with
+          Hashtbl.replace numbering.sort_names sort canonical;
+          Dynarray.add_last numbering.sort_order sort;
+          (match Hashtbl.find_opt numbering.datatypes sort with
           | Some constructors ->
               List.iter
                 (fun (_, fields) ->
@@ -530,7 +538,7 @@ let symbol_name numbering name =
 
 let member_name numbering name =
   Option.map
-    (fun (datatype, suffix) -> sort_name numbering (Uninterpreted datatype) ^ suffix)
+    (fun (datatype, suffix) -> sort_name numbering datatype ^ suffix)
     (Hashtbl.find_opt numbering.member_of name)
 
 let function_name numbering name =
@@ -619,15 +627,16 @@ let numbering query =
     (fun declaration ->
       match declaration with
       | Constant (name, _) | Function (name, _, _) -> Hashtbl.replace declared name declaration
-      | Datatype (name, constructors) ->
-          Hashtbl.replace datatypes name constructors;
+      | Datatype (ty, constructors) ->
+          let sort = Type_sort ty in
+          Hashtbl.replace datatypes sort constructors;
           List.iteri
             (fun index (constructor, fields) ->
               let suffix = Printf.sprintf "_c%d" index in
-              Hashtbl.replace member_of constructor (name, suffix);
+              Hashtbl.replace member_of constructor (sort, suffix);
               List.iteri
                 (fun field (selector, _) ->
-                  Hashtbl.replace member_of selector (name, Printf.sprintf "%s_f%d" suffix field))
+                  Hashtbl.replace member_of selector (sort, Printf.sprintf "%s_f%d" suffix field))
                 fields)
             constructors)
     query.declarations;

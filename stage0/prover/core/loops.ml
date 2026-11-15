@@ -684,7 +684,7 @@ let own_cursor_loop ~(for_loop : for_loop) context frame (cursor_access : passed
           ~substitution_of:(fun _ ->
             impl_arguments
             @ [ ({ Types.owner = cursor_trait; name = "Self" }, Types.Type cursor_type) ])
-          ~instance:[ type_key cursor_type ]
+          ~instance:[ Types.Type cursor_type ]
       in
       let has_another = Logic.Is (constructor_name option_type (Some "Some"), pulled) in
       let element = Logic.Apply (selector_name option_type (Some "Some") "value", [ pulled ]) in

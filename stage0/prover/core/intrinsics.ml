@@ -119,7 +119,7 @@ let handle_descriptor context handle =
   Logic.Apply (Symbol.Handle_descriptor, [ handle ])
 
 let libc_number context frame (number : Libc.number) =
-  let symbol = Symbol.Libc_number (Libc.number_name number) in
+  let symbol = Symbol.Libc_number number in
   declare context (Logic.Constant (symbol, Logic.Int));
   let term = Logic.Symbol symbol in
   assume context frame
@@ -130,7 +130,7 @@ let buffer_capacity context element term =
   let ty =
     Types.Named { path = Intrinsic.builtin_path Storage; arguments = [ Types.Type element ] }
   in
-  let symbol = Symbol.Capacity (type_key ty) in
+  let symbol = Symbol.Capacity ty in
   declare context (Logic.Function (symbol, [ sort_of context ty ], Logic.Int));
   Logic.Apply (symbol, [ term ])
 
@@ -138,7 +138,7 @@ let buffer_model context (builtin : Intrinsic.builtin) element term =
   let ty =
     Types.Named { path = Intrinsic.builtin_path builtin; arguments = [ Types.Type element ] }
   in
-  let symbol = Symbol.Model (type_key ty) in
+  let symbol = Symbol.Model ty in
   declare context
     (Logic.Function (symbol, [ sort_of context ty ], sort_of context (sequence_type element)));
   Logic.Apply (symbol, [ term ])
@@ -244,7 +244,7 @@ let measure_type element : Types.function_type =
 
 let sequence_sum context element term measure =
   let path = Path.Method { owner = sequence_path; name = "sum"; receiver = Read } in
-  let symbol = Symbol.Function { callee = path; instance = [ type_key element ] } in
+  let symbol = Symbol.Function { callee = path; instance = [ Types.Type element ] } in
   declare context
     (Logic.Function
        ( symbol,
@@ -567,7 +567,7 @@ let intrinsic context frame ~(site : Invocation.site) (operation : Intrinsic.ope
       libc_call context frame ~site function_ operands ~changed (Lazy.force known)
   | Libc_number number, _ -> libc_number context frame number
   | (System_is_os _ | System_is_architecture _), _ ->
-      let symbol operation = Symbol.System (Intrinsic.operation_name operation) in
+      let symbol operation = Symbol.System operation in
       let kind =
         List.filter
           (fun (other : Intrinsic.operation) ->

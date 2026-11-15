@@ -45,7 +45,7 @@ let sequence_type element = Types.Named { path = sequence_path; arguments = [ Ty
 
 let sequence_length context element term =
   let path = Path.Method { owner = sequence_path; name = "length"; receiver = Read } in
-  let symbol = Symbol.Function { callee = path; instance = [ type_key element ] } in
+  let symbol = Symbol.Function { callee = path; instance = [ Types.Type element ] } in
   declare context (Logic.Function (symbol, [ sort_of context (sequence_type element) ], Logic.Int));
   Logic.Apply (symbol, [ term ])
 
@@ -59,14 +59,12 @@ let rec sequence_at context element term index =
   with
   | impl :: _ ->
       let path = Path.Method { owner = impl; name = "at"; receiver = Read } in
-      let symbol = Symbol.Function { callee = path; instance = [ type_key sequence ] } in
+      let symbol = Symbol.Function { callee = path; instance = [ Types.Type sequence ] } in
       declare context
         (Logic.Function (symbol, [ sort_of context sequence; Logic.Int ], sort_of context element));
       let at sequence index = Logic.Apply (symbol, [ sequence; index ]) in
       if context.ranking && constructors context element <> None then
-        once context
-          (Ranked_elements (type_key sequence))
-          (fun () ->
+        once context (Ranked_elements sequence) (fun () ->
             let each = Symbol.Variable { label = "ranked.sequence"; numbers = [] }
             and index = Symbol.Variable { label = "ranked.index"; numbers = [] } in
             let ranked = Logic.Symbol each and position = Logic.Symbol index in
@@ -85,7 +83,7 @@ let rec sequence_at context element term index =
   | [] -> None
 
 and rank context ty term =
-  let symbol = Symbol.Rank (type_key ty) in
+  let symbol = Symbol.Rank ty in
   declare context (Logic.Function (symbol, [ sort_of context ty ], Logic.Int));
   (match ty with
   | Types.Named { path; arguments = [ Types.Type element ] }
@@ -99,10 +97,7 @@ let finite_function context (ty : Types.ty) name output inputs =
   | Types.Named { path; arguments } ->
       let symbol =
         Symbol.Function
-          {
-            callee = Path.Method { owner = path; name; receiver = Read };
-            instance = List.map argument_key arguments;
-          }
+          { callee = Path.Method { owner = path; name; receiver = Read }; instance = arguments }
       in
       declare context (Logic.Function (symbol, sort_of context ty :: List.map snd inputs, output));
       fun term -> Logic.Apply (symbol, term :: List.map fst inputs)
@@ -146,7 +141,7 @@ let find_model_function context (ty : Types.ty) ~(model : Types.ty) =
   with
   | impl :: _ ->
       let path = Path.Method { owner = impl; name = "model"; receiver = Read } in
-      let symbol = Symbol.Function { callee = path; instance = [ type_key ty ] } in
+      let symbol = Symbol.Function { callee = path; instance = [ Types.Type ty ] } in
       declare context (Logic.Function (symbol, [ sort_of context ty ], sort_of context model));
       model_ranked context ty ~model symbol;
       (match ty with
@@ -166,7 +161,7 @@ let find_model_function context (ty : Types.ty) ~(model : Types.ty) =
   | [] -> None
 
 let model_function context (ty : Types.ty) ~(model : Types.ty) =
-  let key = type_key ty ^ " " ^ type_key model in
+  let key = (ty, model) in
   match Hashtbl.find_opt context.models key with
   | Some model_fn -> model_fn
   | None ->

@@ -31,8 +31,6 @@ let calls_updating_helper context (invocation : Invocation.t) =
   | Function { path; _ } -> is_updating_helper context.database path
   | _ -> false
 
-let laws_key (trait : Types.trait_reference) ty = Types.show_trait trait ^ " for " ^ type_key ty
-
 let laws_of context trait =
   match Query.demand context.database Interface.Summary.key trait with
   | Some key -> (
@@ -105,7 +103,7 @@ let law_fact context frame source ~substitution (law : Mir.law) =
   end
 
 let assume_laws context frame ~at (trait : Types.trait_reference) (ty : Types.ty) =
-  let key = laws_key trait ty in
+  let key = (trait, ty) in
   if not (List.mem key context.laws_assumed) then begin
     context.laws_assumed <- key :: context.laws_assumed;
     List.iter

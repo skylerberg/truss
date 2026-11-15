@@ -268,7 +268,8 @@ let truss_value members text =
   in
   let constructor : Logic.symbol -> string = function
     | Constructor { variant = Some variant; _ } -> variant
-    | Constructor { type_name; variant = None; _ } -> type_name
+    | Constructor { type_ = Named { path = Top { name; _ }; _ }; variant = None } -> name
+    | Constructor { type_; variant = None } -> Types.show type_
     | other -> Logic.show_symbol other
   in
   let field : Logic.symbol -> string = function

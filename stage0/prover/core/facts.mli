@@ -59,8 +59,6 @@ val bounds : Types.ty -> (Z.t * Z.t) option
 val is_numeric : Types.ty -> bool
 val float_format : Types.ty -> (int * int) option
 val is_bool : Types.ty -> bool
-val type_key : Types.ty -> string
-val argument_key : Types.argument -> string
 val constructor_name : Types.ty -> string option -> 'a Symbol.t
 val selector_name : Types.ty -> string option -> string -> 'a Symbol.t
 val is_standard_equal : Path.t -> bool

@@ -124,7 +124,7 @@ type stated =
   | Exclusive of Logic.symbol
   | Array_length of Logic.symbol
   | Ranked_model of Logic.symbol
-  | Ranked_elements of string
+  | Ranked_elements of Types.ty
 
 type context = {
   database : Query.context;
@@ -134,7 +134,7 @@ type context = {
   measures : Mir.formula list;
   mutable declarations : Logic.declaration list;
   declared : (Logic.symbol, unit) Hashtbl.t;
-  datatypes : (string, unit) Hashtbl.t;
+  datatypes : (Types.ty, unit) Hashtbl.t;
   stated : (stated, unit) Hashtbl.t;
   mutable facts : Logic.term list;
   mutable obligations : obligation list;
@@ -155,7 +155,7 @@ type context = {
   mutable yielded_part : Types.ty option;
   mutable yield_ensures : (Mir.formula list * Mir.formula list) option;
   home : Names.key;
-  mutable laws_assumed : string list;
+  mutable laws_assumed : (Types.trait_reference * Types.ty) list;
   mutable counters : Costs.counter list;
   mutable own_bounds : Costs.counter list;
   fresh_order : (Logic.symbol, int) Hashtbl.t;
@@ -165,9 +165,9 @@ type context = {
   mutable lambda_captures : (Logic.term * Core.local list) list;
   lambda_definitions : (Logic.symbol, Logic.term) Hashtbl.t;
   mutable potentials : Logic.term list;
-  models : (string, (Logic.term -> Logic.term) option) Hashtbl.t;
-  holds_potential : (string, bool) Hashtbl.t;
-  buffers : (string, (Types.ty * (Logic.term -> Logic.term)) option) Hashtbl.t;
+  models : (Types.ty * Types.ty, (Logic.term -> Logic.term) option) Hashtbl.t;
+  holds_potential : (Types.ty, bool) Hashtbl.t;
+  buffers : (Types.ty, (Types.ty * (Logic.term -> Logic.term)) option) Hashtbl.t;
   mutable equalities : Logic.term list;
   mutable known_calls : known_call list;
   mutable decisions : (string * string option * Logic.term * Logic.term) list;

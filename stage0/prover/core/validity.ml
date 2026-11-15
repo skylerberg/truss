@@ -114,7 +114,7 @@ let rec validity context frame ~assuming ?(deep = true) ?(own = true) ?(seen = [
       match invariants_of context ty with
       | _ when not own -> Logic.Boolean true
       | Some _ when constructors context ty = None ->
-          let symbol = Symbol.Valid (type_key ty) in
+          let symbol = Symbol.Valid ty in
           declare context (Logic.Function (symbol, [ sort_of context ty ], Logic.Bool));
           Logic.Apply (symbol, [ term ])
       | Some (source, written) -> (

@@ -267,7 +267,7 @@ let apply_map_literal context frame ~(ty : Types.ty) ~span terms =
 let literal_bytes_limit = 256
 
 let text_value context frame (ty : Types.ty) text =
-  let symbol = Symbol.Text_literal { type_key = type_key ty; text } in
+  let symbol = Symbol.Text_literal { type_ = ty; text } in
   let literal = Logic.Symbol symbol in
   once context (Value_of symbol) (fun () ->
       declare context (Logic.Constant (symbol, sort_of context ty));
@@ -398,9 +398,7 @@ let named_function context frame (site : Invocation.site) path type_arguments co
           (clauses own.requires)
       end
   | _ -> ());
-  let instance =
-    List.map argument_key (List.map (Types.substitute_argument frame.substitution) type_arguments)
-  in
+  let instance = List.map (Types.substitute_argument frame.substitution) type_arguments in
   let symbol = Symbol.Function_value { callee = path; instance } in
   declare context (Logic.Constant (symbol, sort_of context ty));
   let term = Logic.Symbol symbol in
@@ -541,7 +539,7 @@ let construct_amount context frame (ty : Types.ty) variant (counter : Costs.coun
   | Allocations -> Logic.int 1
   | Allocated_bytes when counter.counting = Units -> Logic.int 1
   | Allocated_bytes ->
-      let symbol = Symbol.Block_bytes { type_key = type_key ty; variant } in
+      let symbol = Symbol.Block_bytes { type_ = ty; variant } in
       declare context (Logic.Constant (symbol, Logic.Int));
       fact context frame (Logic.Operation ("<=", [ Logic.int 1; Logic.Symbol symbol ]));
       Logic.Symbol symbol
