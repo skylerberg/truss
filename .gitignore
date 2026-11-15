@@ -1,2 +1,3 @@
 _build/
 stage0/tools/unicode/data/
+compile_commands.json

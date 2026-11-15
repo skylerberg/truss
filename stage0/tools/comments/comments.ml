@@ -1,4 +1,4 @@
-type syntax = Ocaml | Markers of string list | Hash_at_word_start | Truss | Json | Generated
+type syntax = Ocaml | Markers of string list | Hash_at_word_start | Truss | Generated
 
 let syntax path =
   match (Filename.basename path, Filename.extension path) with
@@ -11,7 +11,6 @@ let syntax path =
   | (".gitignore" | ".ocamlformat" | ".ocamlformat-ignore"), _ | _, (".sh" | ".yml" | ".txt") ->
       Some Hash_at_word_start
   | _, ".truss" -> Some Truss
-  | _, ".json" -> Some Json
   | _, ".opam" -> Some Generated
   | _ -> None
 
@@ -56,7 +55,7 @@ let comment_lines path syntax =
       matching_lines
         (fun index line -> has_hash_at_word_start line && not (is_shebang index line))
         text
-  | Truss | Json | Generated -> []
+  | Truss | Generated -> []
 
 let () =
   let failures =
