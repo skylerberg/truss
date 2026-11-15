@@ -151,7 +151,7 @@ let () =
       ] ->
           if value.span.start <> 12 then fail "interpolation span %d" value.span.start
       | _ -> fail "wrong tree");
-  test "nesting deeper than the limit is one error" (fun () ->
+  test "nesting deeper than the limit is one error, not a stack overflow" (fun () ->
       let text = "fn f() { " ^ String.make 300 '(' ^ "1" ^ String.make 300 ')' ^ " }" in
       if codes (snd (parse text)) <> [ "parser.nesting_too_deep" ] then
         fail "got [%s]" (String.concat "; " (codes (snd (parse text)))))
@@ -188,6 +188,23 @@ let () =
         ^ "}"
       in
       if deep text <> [ "parser.nesting_too_deep" ] then fail "no nesting error");
+  test "nested types count toward the limit" (fun () ->
+      let text =
+        "fn f(value: "
+        ^ String.concat "" (List.init 300 (fun _ -> "List["))
+        ^ "Int64" ^ String.make 300 ']' ^ ") {}"
+      in
+      if deep text <> [ "parser.nesting_too_deep" ] then fail "no nesting error");
+  test "nested patterns count toward the limit" (fun () ->
+      let text =
+        "fn f() {\n  match x {\n    "
+        ^ String.concat "" (List.init 300 (fun _ -> "Some("))
+        ^ "y" ^ String.make 300 ')' ^ " => todo\n  }\n}"
+      in
+      if deep text <> [ "parser.nesting_too_deep" ] then fail "no nesting error");
+  test "nested prefix operators count toward the limit" (fun () ->
+      let text = "fn f() {\n  let x = " ^ String.make 300 '!' ^ "y\n}" in
+      if deep text <> [ "parser.nesting_too_deep" ] then fail "no nesting error");
   let chain ~first ~link ~last =
     first ^ String.concat "" (List.init 10_001 (fun _ -> link)) ^ last
   in
@@ -223,8 +240,8 @@ let () =
       let file, _ = parse text in
       match file.definitions with
       | [ impl_item; method_ ] ->
-          if impl_item.container <> None then fail "the impl is inside something";
-          if method_.container <> Some 0 then fail "the method is not inside the impl";
+          if impl_item.container_index <> None then fail "the impl is inside something";
+          if method_.container_index <> Some 0 then fail "the method is not inside the impl";
           if method_.text <> "fn now(self) -> Instant {\n    todo\n  }" then
             fail "the method's text is %S" method_.text;
           if method_.base <> 25 then fail "the method starts at %d" method_.base

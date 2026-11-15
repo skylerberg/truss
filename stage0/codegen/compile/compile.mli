@@ -27,7 +27,7 @@ val create :
   ?checks:bool ->
   ?file_name:(Path.file -> string) ->
   ?results:results ->
-  ?evaluation_time_limit:int ->
+  ?evaluation_time_limit_ms:int ->
   ?programs:string ->
   want:(lowering -> Instance.key list -> unit) ->
   ?worked_on:(Path.package -> bool) ->
@@ -70,7 +70,7 @@ val run_tests :
   ?rerun:bool ->
   ?progress:(progress -> unit) ->
   t ->
-  time_limit:int ->
+  time_limit_ms:int ->
   Path.t list ->
   (record list, string) result
 
@@ -148,7 +148,7 @@ module For_testing : sig
 
   val build_supplied_tests :
     t ->
-    time_limit:int ->
+    time_limit_ms:int ->
     (Memory_layout.env -> Emit_c.Builder.instance) list ->
     output:string ->
     (unit, string) result

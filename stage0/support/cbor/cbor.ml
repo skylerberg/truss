@@ -1,5 +1,3 @@
-(* Deterministic CBOR. *)
-
 type t =
   | Integer of Z.t
   | Bytes of string
@@ -14,8 +12,6 @@ type t =
 let int value = Integer (Z.of_int value)
 let two_64 = Z.shift_left Z.one 64
 
-(* The head of an item: its major type, and an argument in the fewest bytes
-   that hold it. *)
 let head buffer major (argument : Z.t) =
   let major = major lsl 5 in
   let bytes count =
@@ -41,7 +37,6 @@ let head buffer major (argument : Z.t) =
 
 let head_int buffer major argument = head buffer major (Z.of_int argument)
 
-(* The big-endian bytes of a non-negative integer, with no leading zero. *)
 let magnitude value =
   let rec bytes value acc =
     if Z.equal value Z.zero then acc
@@ -50,14 +45,12 @@ let magnitude value =
   let list = bytes value [] in
   String.init (List.length list) (List.nth list)
 
-(* The bits of [value] as a 16-bit float, if it is exactly one. *)
 let half_bits value =
   let magnitude = Float.abs value in
   let sign = if Float.sign_bit value then 0x8000 else 0 in
   if magnitude = 0.0 then Some sign
   else if Float.is_finite magnitude = false then Some (sign lor 0x7c00)
   else if magnitude < Float.ldexp 1.0 (-14) then
-    (* Subnormal: a multiple of 2^-24 below 2^-14. *)
     let scaled = Float.ldexp magnitude 24 in
     if Float.is_integer scaled then Some (sign lor int_of_float scaled) else None
   else

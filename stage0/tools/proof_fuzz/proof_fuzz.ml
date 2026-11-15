@@ -57,7 +57,7 @@ let load text =
     Some
       ( database,
         lazy
-          (Compile.create ~evaluation_time_limit:2000
+          (Compile.create ~evaluation_time_limit_ms:2000
              ~want:(fun lowering wanted ->
                Engine.set engine Compile.roots lowering
                  (Compile.add_roots (Engine.context engine) lowering wanted))

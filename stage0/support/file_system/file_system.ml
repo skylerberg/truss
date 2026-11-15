@@ -8,24 +8,31 @@ let write_all descriptor text =
   in
   from 0
 
-let write_durably path text =
-  let descriptor = Unix.openfile path [ O_WRONLY; O_CLOEXEC; O_CREAT; O_TRUNC ] 0o644 in
-  Fun.protect
-    ~finally:(fun () -> Unix.close descriptor)
-    (fun () ->
-      write_all descriptor text;
-      Unix.fsync descriptor)
-
 let write_atomically ?(durable = false) path text =
-  let temporary = Printf.sprintf "%s.%d.partial" path (Unix.getpid ()) in
-  if durable then write_durably temporary text else write temporary text;
+  let temporary, channel =
+    Filename.open_temp_file ~mode:[ Open_binary ] ~perms:0o666 ~temp_dir:(Filename.dirname path)
+      (Filename.basename path) ".partial"
+  in
+  Fun.protect
+    ~finally:(fun () -> close_out channel)
+    (fun () ->
+      output_string channel text;
+      flush channel;
+      if durable then Unix.fsync (Unix.descr_of_out_channel channel));
   Sys.rename temporary path
 
-let rec make_directory path =
-  if not (Sys.file_exists path) then begin
-    make_directory (Filename.dirname path);
-    try Sys.mkdir path 0o755 with Sys_error _ when Sys.file_exists path -> ()
-  end
+let make_directory path =
+  let create path =
+    match Unix.mkdir path 0o755 with () | (exception Unix.Unix_error (EEXIST, _, _)) -> ()
+  in
+  let rec make path =
+    match create path with
+    | () -> ()
+    | exception Unix.Unix_error (ENOENT, _, _) when Filename.dirname path <> path ->
+        make (Filename.dirname path);
+        create path
+  in
+  make path
 
 let rec remove path =
   match (Unix.lstat path).st_kind with

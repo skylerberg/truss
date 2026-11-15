@@ -1,7 +1,5 @@
 val is_clause_keyword : Token.kind -> bool
-
-type operator = Binary_operator of Syntax.binary | Is_operator | Range_operator of bool
-
+val binary_level : Syntax.binary -> int
 val angle_closer : Cursor.t -> int option
 val type_expression : Cursor.t -> Syntax.type_expression
 val path_type : Cursor.t -> Syntax.path_type

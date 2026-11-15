@@ -238,12 +238,17 @@ let rec type_expression state scope (type_ : type_expression) =
   | Any_type path -> path_type state scope path
   | Self_type _ -> ()
   | Associated (base, member) -> associated_base state scope base member "type"
-  | Function_type { inputs; input_names; output; clauses } ->
-      List.iter (fun (_, input) -> type_expression state scope input) inputs;
+  | Function_type { inputs; output; clauses } ->
+      List.iter (fun (input : function_input) -> type_expression state scope input.type_) inputs;
       Option.iter (type_expression state scope) output;
       (* The names of the inputs are in scope in the type's own [requires],
          after the parameters before it in a signature. *)
-      let named = List.fold_left (declare_parameter state) scope input_names in
+      let named =
+        List.fold_left
+          (fun scope (input : function_input) ->
+            Option.fold ~none:scope ~some:(declare_parameter state scope) input.name)
+          scope inputs
+      in
       List.iter (clause state named) clauses
   | Type_error -> ()
 

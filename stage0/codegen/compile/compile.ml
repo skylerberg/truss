@@ -154,7 +154,7 @@ type t = {
           into another's file *)
   results : results option;
       (** Where the results of runs are kept, by the key of the code that ran *)
-  evaluation_time_limit : int;  (** In milliseconds, for each run of code while compiling *)
+  evaluation_time_limit_ms : int;
   programs : string;  (** The directory each built program is written to *)
   runs : (string, string ran) Hashtbl.t;
       (** The output of each run of code while compiling, in this build, by the key of the code that
@@ -346,21 +346,21 @@ let rec build ?progress ?tests ?in_order ?(supplied = []) compiler ~roots ~start
 
 (* Builds the program that runs the tests at [roots], in that order, with
    the standard library's runner. *)
-and build_test_program ?progress ?supplied compiler ~time_limit ~roots ~output =
+and build_test_program ?progress ?supplied compiler ~time_limit_ms ~roots ~output =
   build ?progress ?supplied compiler ~tests:true ~roots:(test_runner :: roots)
     ~startup:
-      (Startup.tests_calling ~time_limit ~runner:(Instance.symbol test_runner)
+      (Startup.tests_calling ~time_limit_ms ~runner:(Instance.symbol test_runner)
          (List.map Instance.symbol roots))
     ~output
 
 (* Builds the instances the roots reach into a program and runs it with
    [arguments], then removes it. *)
-and build_and_run ?input ?time_limit ?(in_order = true) compiler ~roots ~startup ~arguments =
+and build_and_run ?input ?time_limit_ms ?(in_order = true) compiler ~roots ~startup ~arguments =
   let output = fresh_program compiler in
   (* Code run while compiling starts no threads, so it is linked with the
      in-order runtime unless the caller asks for the threaded one. *)
   build compiler ~in_order ~roots ~startup ~output;
-  let result = Process.run ?input ?time_limit output arguments in
+  let result = Process.run ?input ?time_limit_ms output arguments in
   (try Sys.remove output with Sys_error _ -> ());
   result
 
@@ -376,7 +376,8 @@ and run_while_compiling : 'value. t -> Instance.key -> read:(string -> 'value) -
           | Some output -> Ran output
           | None -> (
               match
-                build_and_run compiler ~time_limit:compiler.evaluation_time_limit ~roots:[ root ]
+                build_and_run compiler ~time_limit_ms:compiler.evaluation_time_limit_ms
+                  ~roots:[ root ]
                   ~startup:(Startup.evaluator_calling (Instance.symbol root))
                   ~arguments:[]
               with
@@ -408,7 +409,7 @@ and compiled compiler key =
         | Ran value -> data { data_key = Constant path; ty; value }
         | Ran_too_long ->
             cannot_build "Evaluating %s ran past the time limit of %d ms." (Path.show path)
-              compiler.evaluation_time_limit)
+              compiler.evaluation_time_limit_ms)
   in
   if not (Instance.equal (Emit_c.key compiled) key) then
     bug "%s compiled to %s" (Instance.to_string key) (Instance.to_string (Emit_c.key compiled));
@@ -570,7 +571,7 @@ let external_test compiler test =
   | Some (Test_interface uses) when uses <> Types.no_capabilities -> true
   | _ -> false
 
-let run_tests ?(rerun = false) ?(progress = ignore) compiler ~time_limit tests =
+let run_tests ?(rerun = false) ?(progress = ignore) compiler ~time_limit_ms tests =
   reporting compiler @@ fun () ->
   let results = compiler.results in
   let roots = List.map Lower.test_key tests in
@@ -605,7 +606,7 @@ let run_tests ?(rerun = false) ?(progress = ignore) compiler ~time_limit tests =
   if Array.length missing > 0 then begin
     let roots = Array.to_list (Array.map (fun (_, root, _, _) -> root) missing) in
     let output = fresh_program compiler in
-    build_test_program compiler ~time_limit ~roots ~output ~progress:(fun compiled total ->
+    build_test_program compiler ~time_limit_ms ~roots ~output ~progress:(fun compiled total ->
         progress (Compiling { compiled; total }));
     progress (Running { tests = Array.length missing });
     let index_of number =
@@ -647,10 +648,10 @@ let run_tests ?(rerun = false) ?(progress = ignore) compiler ~time_limit tests =
           | [] -> bug "fewer results than tests"))
     known
 
-let build_supplied_tests compiler ~time_limit supplied ~output =
+let build_supplied_tests compiler ~time_limit_ms supplied ~output =
   reporting compiler @@ fun () ->
   let supplied = List.map (fun instance -> instance (Lower.env compiler.context)) supplied in
-  build_test_program compiler ~supplied ~time_limit
+  build_test_program compiler ~supplied ~time_limit_ms
     ~roots:(List.map Emit_c.Builder.instance_key supplied)
     ~output
 
@@ -763,8 +764,8 @@ let evaluate_call compiler ~function_ ~arguments =
 
 let run_key compiler root = reporting compiler @@ fun () -> run_key compiler root
 
-let create ?(checks = true) ?(file_name = Path.show_file) ?results ?(evaluation_time_limit = 10_000)
-    ?(programs = Filename.get_temp_dir_name ()) ~want
+let create ?(checks = true) ?(file_name = Path.show_file) ?results
+    ?(evaluation_time_limit_ms = 10_000) ?(programs = Filename.get_temp_dir_name ()) ~want
     ?(worked_on = fun package -> package <> Path.standard_package) database system toolchain cache
     settings =
   let lowering = { system; checks } in
@@ -779,7 +780,7 @@ let create ?(checks = true) ?(file_name = Path.show_file) ?results ?(evaluation_
     file_name;
     worked_on;
     results;
-    evaluation_time_limit;
+    evaluation_time_limit_ms;
     programs;
     runs = Hashtbl.create 8;
   }

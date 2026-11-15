@@ -130,18 +130,20 @@ let check_function_type_requires state env (written : parameter list) (signature
   List.iter
     (fun (parameter : parameter) ->
       match parameter.kind with
-      | Named_parameter { name; type_ = { kind = Function_type { input_names; clauses; _ }; _ }; _ }
-        when input_names <> [] -> (
+      | Named_parameter { name; type_ = { kind = Function_type { inputs; clauses; _ }; _ }; _ }
+        when List.exists (fun (input : function_input) -> Option.is_some input.name) inputs -> (
           match
             List.find_opt
               (fun (info : Types.parameter_info) -> info.name = name.text)
               signature.parameters
           with
-          | Some { type_ = Types.Function lowered; _ }
-            when List.length lowered.inputs = List.length input_names ->
+          | Some { type_ = Types.Function lowered; _ } ->
               List.iter2
-                (fun (input : name) (mode, type_) -> declare state input type_ ~is_var:false ~mode)
-                input_names lowered.inputs;
+                (fun (input : function_input) (mode, type_) ->
+                  Option.iter
+                    (fun input_name -> declare state input_name type_ ~is_var:false ~mode)
+                    input.name)
+                inputs lowered.inputs;
               List.iter
                 (fun (clause : clause) ->
                   match clause.kind with
@@ -234,13 +236,19 @@ let core_parameters state (written : parameter list) (signature : Types.signatur
                 default;
                 callback_contract =
                   (match type_.kind with
-                  | Function_type { input_names = _ :: _ as inputs; clauses; _ } ->
+                  | Function_type { inputs = _ :: _ as inputs; clauses; _ }
+                    when List.for_all
+                           (fun (input : function_input) -> Option.is_some input.name)
+                           inputs ->
                       Some
                         {
                           inputs =
-                            List.map
-                              (fun (input : name) : (Core.local * string) ->
-                                (Named input.id, input.text))
+                            List.filter_map
+                              (fun (input : function_input) ->
+                                Option.map
+                                  (fun (input_name : name) : (Core.local * string) ->
+                                    (Named input_name.id, input_name.text))
+                                  input.name)
                               inputs;
                           requires =
                             List.filter_map

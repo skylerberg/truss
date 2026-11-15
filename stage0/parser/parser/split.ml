@@ -1,19 +1,7 @@
-(* Splits a file into pieces, its [use] lines and definitions, before they
-   are parsed, and finds where a method inside a trait, an [impl], or a
-   capability ends.
-
-   The lexer balances brackets, so this needs no parsing: a [Newline] outside
-   every bracket ends a piece, unless a [{] follows it, which opens a body
-   that starts on a line of its own. No piece starts with [{], so the rule
-   never splits a definition in two. *)
-
 open Token
 
-(* The indexes of a piece's first token and one past its last. *)
 type piece = { first : int; stop : int }
 
-(* One past the last token of the piece that starts at [first]: the end of
-   its line, the closer of the enclosing bracket, or the end of the tokens. *)
 let stop (tokens : Token.t array) ~first =
   let rec scan index depth =
     if index >= Array.length tokens then index

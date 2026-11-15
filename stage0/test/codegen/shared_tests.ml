@@ -33,7 +33,7 @@ let loaded =
 let () =
   test "shared values are updated, copied, and dropped without a leak" (fun () ->
       let database, compile = Lazy.force loaded in
-      match Compile.run_tests compile ~time_limit:2000 (tests_in database probe.module_) with
+      match Compile.run_tests compile ~time_limit_ms:2000 (tests_in database probe.module_) with
       | Ok records ->
           expect_string
             ~expected:(String.concat "" (List.init 5 (Printf.sprintf "test %d passed\n")))
