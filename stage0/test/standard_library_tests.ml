@@ -54,7 +54,7 @@ let modules =
       List.filter (fun entry -> List.memq entry mine) library
 
 let solver =
-  let find, add = Database.results ~kind:"solver" in
+  let find, add = Database.results ~kind:Store.Solver_answer in
   match Solver.find ~cache:{ find; add } () with
   | Ok solver -> solver
   | Error message ->

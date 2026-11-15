@@ -25,10 +25,10 @@ let record_fact engine store (node : node) reads =
           match parts with
           | None | Some [] -> ()
           | Some parts ->
-              store.add ~kind:"fact" ~key:(fact_key store node parts) value;
+              store.add_fact (fact_key store node parts) value;
               let key = reads_key store node in
-              if query.portable && store.find ~kind:"reads" ~key = None then
-                store.add ~kind:"reads" ~key
+              if query.portable && store.find_reads key = None then
+                store.add_reads key
                   (Marshal.to_string
                      (List.map (fun (read, _) -> (name read, key_bytes read)) parts)
                      []))

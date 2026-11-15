@@ -1,8 +1,16 @@
 type attachment = ..
 type attachment += Nothing
 
+type key =
+  | Worktree of string
+  | Commit of { repository : string; commit : string }
+  | Library of string
+  | Published of { package : Path.package; hash : string }
+  | Snapshot of string
+  | Trial of key
+
 type t = {
-  key : string;
+  key : key;
   mutable engine : Engine.t;
   pointer : Store.pointer option;
   version : string;
@@ -14,7 +22,7 @@ type t = {
   snapshot_of : string option;
 }
 
-type state = { store : Store.t; identity : string; sessions : (string, t) Hashtbl.t }
+type state = { store : Store.t; identity : string; sessions : (key, t) Hashtbl.t }
 
 val logging : bool ref
 val on_close : (unit -> unit) -> unit
@@ -23,13 +31,14 @@ val identity : unit -> string
 val engine : t -> Engine.t
 val context : t -> Query.context
 val observer : t -> Query.context
-val key : t -> string
+val key : t -> key
+val show_key : key -> string
 val attachment : t -> attachment
 val attach : t -> attachment -> unit
 val touch : t -> unit
 val set : t -> ('a, 'b) Query.input -> 'a -> 'b -> unit
 val remove : t -> ('a, 'b) Query.input -> 'a -> unit
-val find : string -> t option
+val find : key -> t option
 val allow_reading : string -> unit
 
 type record = { version : string; artifact : string; files : (string * string) list }
@@ -44,7 +53,7 @@ val note_file : t -> string -> string option -> unit
 type start = Own | Near | New
 
 val open_ :
-  key:string ->
+  key:key ->
   ?pointer:string ->
   ?home:string ->
   version:string ->
@@ -56,15 +65,15 @@ val open_ :
 val trial : t -> t
 
 val snapshot :
-  key:string -> pointer:string -> version:string -> bases:(unit -> Engine.t list) -> t option
+  key:key -> pointer:string -> version:string -> bases:(unit -> Engine.t list) -> t option
 
 val homes : unit -> (string * string) list
-val sessions : unit -> (string * int) list
+val sessions : unit -> (key * int) list
 val all : unit -> t list
 val directory : string -> string
 val cache_directory : string -> string
-val results : kind:string -> (string -> string option) * (string -> string -> unit)
-val find_result : kind:string -> key:string -> string option
+val results : kind:Store.result_kind -> (string -> string option) * (string -> string -> unit)
+val find_result : kind:Store.result_kind -> key:string -> string option
 val flush : unit -> unit
 val reset : unit -> unit
 val recovering : (unit -> 'a) -> 'a

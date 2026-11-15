@@ -358,8 +358,17 @@ let put store bytes =
 let get store key = if String.length key <> key_width then None else lookup store key
 let derive_result_key = Blake3.derive_key ~context:"truss 2026-11-12 store result"
 
+type result_kind = Package_state | Test_result | Solver_answer | Fact | Reads
+
+let result_tag = function
+  | Package_state -> "package"
+  | Test_result -> "tests"
+  | Solver_answer -> "solver"
+  | Fact -> "fact"
+  | Reads -> "reads"
+
 let result_key ~kind ~key =
-  derive_result_key (Cbor.encode (Cbor.Array [ Cbor.Text kind; Cbor.Bytes key ]))
+  derive_result_key (Cbor.encode (Cbor.Array [ Cbor.Text (result_tag kind); Cbor.Bytes key ]))
 
 let find_result store ~kind ~key =
   let name = result_key ~kind ~key in

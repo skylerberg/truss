@@ -105,7 +105,7 @@ let stored_standard () =
   let store = Session.store () and identity = Session.identity () in
   let stored =
     Option.bind
-      (Store.find_result store ~kind:"package" ~key:(standard_key identity))
+      (Store.find_result store ~kind:Store.Package_state ~key:(standard_key identity))
       (Engine.open_base store ~version:identity ~bases:[])
   in
   match stored with
@@ -114,7 +114,7 @@ let stored_standard () =
       let engine = Engine.create () in
       Engine.attach engine store ~version:identity;
       check_standard engine;
-      Store.add_result store ~kind:"package" ~key:(standard_key identity)
+      Store.add_result store ~kind:Store.Package_state ~key:(standard_key identity)
         (Engine.write ~full:true ~stores_every_value:true engine);
       Engine.freeze ~fixed:true engine;
       engine
@@ -130,11 +130,11 @@ let session_name root =
     (Blake3.hex_digest ~digits:16 root)
 
 let demand session query key = Query.demand (Session.context session) query key
-let own_layout session = demand session Project.layout Project.project_root
+let own_layout session = demand session Project.layout Project.Project
 
 (* The project's files that are inputs now. *)
 let held_files session =
-  Option.value (Query.find (Session.observer session) Project.tree Project.project_root) ~default:[]
+  Option.value (Query.find (Session.observer session) Project.tree Project.Project) ~default:[]
 
 (* A published package's directory in the store, fetched into it from the
    registry if it is not there yet. *)
@@ -174,7 +174,7 @@ let resolve_registry session ~before =
           (fun (name, version, hash) ->
             match fetch name version ~hash with
             | Ok directory ->
-                set_root engine (Project.registry_root hash) (Registry.Content.all_files directory)
+                set_root engine (Project.Registry hash) (Registry.Content.all_files directory)
             | Error reason -> Engine.set engine Project.unavailable hash reason)
           missing;
         fetch_missing ()
@@ -184,7 +184,7 @@ let resolve_registry session ~before =
   List.iter
     (fun ((_, _, hash) as was) ->
       if not (List.mem was selected) then begin
-        let root = Project.registry_root hash in
+        let root = Project.Registry hash in
         let files =
           Option.value (Query.find (Session.observer session) Project.tree root) ~default:[]
         in
@@ -208,7 +208,7 @@ let scan (files : Files.t) session =
           match files.read path with
           | Some text ->
               Hashtbl.replace present path ();
-              Engine.set engine Project.text (Project.project_root, path) text;
+              Engine.set engine Project.text (Project.Project, path) text;
               Engine.set engine stamps path stamp;
               Session.note_file session path (Some (Session.fingerprint text))
           | None -> ()))
@@ -216,7 +216,7 @@ let scan (files : Files.t) session =
   List.iter
     (fun path ->
       if not (Hashtbl.mem present path) then begin
-        Engine.remove engine Project.text (Project.project_root, path);
+        Engine.remove engine Project.text (Project.Project, path);
         Engine.remove engine stamps path;
         Session.note_file session path None;
         (* A file that is gone has no diagnostics to maintain, so they
@@ -228,9 +228,9 @@ let scan (files : Files.t) session =
         | None -> ()
       end)
     was;
-  Engine.set engine Project.tree Project.project_root
+  Engine.set engine Project.tree Project.Project
     (List.sort compare (Hashtbl.fold (fun path () paths -> path :: paths) present []));
-  Engine.set engine Project.roots () [ Project.standard_root; Project.project_root ];
+  Engine.set engine Project.roots () [ Project.Standard; Project.Project ];
   resolve_registry session ~before
 
 (* Each file's fingerprint, by which the saved state nearest to a set of
@@ -271,11 +271,11 @@ let open_directory root =
         "%s is open in another process of this compiler, such as its background process; leave out \
          --no-server, or stop that process with `truss stop`."
         root)
-    (open_files ~key:root ~pointer:(session_name root) ~home:root ~kind:(Worktree root)
-       (Files.of_directory root))
+    (open_files ~key:(Session.Worktree root) ~pointer:(session_name root) ~home:root
+       ~kind:(Worktree root) (Files.of_directory root))
 
 let open_commit ~repository commit =
-  let key = Printf.sprintf "commit:%s:%s" repository commit in
+  let key = Session.Commit { repository; commit } in
   match Session.find key with
   | Some session -> Ok session
   | None -> (
@@ -379,8 +379,7 @@ let manifest_problems session names =
 
 let file_path session (file : Path.file) =
   match demand session Project.place file.module_.package with
-  | Some { root; directory; _ } when root = Project.project_root ->
-      Project.file_path ~directory file
+  | Some { root; directory; _ } when root = Project.Project -> Project.file_path ~directory file
   | _ -> Path.show_file file
 
 let time_limit_ms session = (own_layout session).time_limit_ms
@@ -443,7 +442,8 @@ let save_opened () =
   opened := [];
   Session.flush ()
 
-let sessions = Session.sessions
+let sessions () =
+  List.map (fun (key, results) -> (Session.show_key key, results)) (Session.sessions ())
 
 (* Graph questions. The worktree is checked first, so that every
    definition's results are there to read and to compare. Each file's
@@ -539,7 +539,7 @@ let other_worktrees session =
       (fun other ->
         match Session.attachment other with
         | Project { kind = Worktree other_root; _ } ->
-            Session.key other = other_root && same_project other_root
+            Session.key other = Session.Worktree other_root && same_project other_root
         | _ -> false)
       (Session.all ())
   in
@@ -548,7 +548,7 @@ let other_worktrees session =
     List.filter_map
       (fun (other_root, name) ->
         if
-          List.mem other_root held
+          List.mem (Session.Worktree other_root) held
           || (not (same_project other_root))
           || (not (String.equal name (session_name other_root)))
           || (not (Sys.file_exists other_root))
@@ -561,7 +561,7 @@ let other_worktrees session =
               update snapshot;
               ignore (Engine.stabilize (Session.engine snapshot));
               snapshot)
-            (Session.snapshot ~key:("snapshot:" ^ other_root) ~pointer:name
+            (Session.snapshot ~key:(Session.Snapshot other_root) ~pointer:name
                ~version:(Session.identity ()) ~bases:(fun () -> [ Lazy.force !standard ])))
       (List.sort_uniq compare (Session.homes ()))
   in
@@ -616,7 +616,7 @@ let set_library (files : (Path.file * string) list) session =
 
 let open_library ?(files = !standard_files) name =
   match
-    Session.open_ ~key:("library:" ^ name) ~pointer:(library_prefix ^ name)
+    Session.open_ ~key:(Session.Library name) ~pointer:(library_prefix ^ name)
       ~version:Compiler_version.digest
       ~bases:(fun () -> [])
       ~fingerprints:(fun () -> [])
@@ -654,7 +654,7 @@ let plan_lock session ~set ~all =
           Registry.Lock.parse
             (Option.value ~default:""
                (Query.find (Session.observer session) Project.text
-                  (Project.project_root, Project.lock_file)))
+                  (Project.Project, Project.lock_file)))
         with Registry.Lock.Malformed _ -> []
       in
       let set =
@@ -750,13 +750,15 @@ let published name version =
       | Error reason -> cannot reason
       | Ok _ -> (
           let directory = Filename.concat (Session.directory "packages") hash in
-          let key = Printf.sprintf "published:%s:%s" (Path.show_package name) hash in
+          let key = Session.Published { package = name; hash } in
           match open_files ~key ~kind:Published (Files.of_directory directory) with
           | Error () -> cannot "its state is open in another process"
           | Ok session -> (
               update session;
               ignore (Engine.stabilize (Session.engine session));
-              match problems session with [] -> Ok session | problem :: _ -> cannot problem)))
+              match problems session with
+              | [] -> Ok session
+              | problem :: _ -> cannot (Project.show_problem problem))))
 
 let code_packages session name =
   try Engine.get (Session.engine session) Checks.code_packages name with Not_found -> []
@@ -825,7 +827,7 @@ let standard_artifacts () =
   Option.to_list
     (Option.map
        (fun artifact -> (identity, artifact))
-       (Session.find_result ~kind:"package" ~key:(standard_key identity)))
+       (Session.find_result ~kind:Store.Package_state ~key:(standard_key identity)))
 
 (* The name of the background process for a directory: its project's root.
    A directory in no project is served by a process of its own. *)
@@ -878,5 +880,6 @@ module For_testing = struct
   let collect_store () = Session.collect ~keep:(fun () -> [])
 
   let session_engine directory =
-    Option.bind (root_of directory) (fun root -> Option.map Session.engine (Session.find root))
+    Option.bind (root_of directory) (fun root ->
+        Option.map Session.engine (Session.find (Session.Worktree root)))
 end

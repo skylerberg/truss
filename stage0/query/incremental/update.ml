@@ -153,7 +153,7 @@ and adopt :
           in
           if is_settled_by_candidates then true
           else
-            match store.find ~kind:"fact" ~key:(fact_key store node parts) with
+            match store.find_fact (fact_key store node parts) with
             | None -> false
             | Some stored_fingerprint ->
                 let unchanged = had_result && fingerprint engine node = Some stored_fingerprint in
@@ -178,7 +178,7 @@ and adopt_new : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_
  fun engine query cell ->
   match engine.store with
   | Some store when query.saved && query.portable -> (
-      match store.find ~kind:"reads" ~key:(reads_key store cell.node) with
+      match store.find_reads (reads_key store cell.node) with
       | None -> false
       | Some bytes ->
           let named : (string * string) list = unmarshal bytes in

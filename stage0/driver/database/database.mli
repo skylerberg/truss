@@ -30,7 +30,7 @@ val set : session -> ('key, 'value) Query.input -> 'key -> 'value -> unit
     the solver's answers. This is the one way a driver sets an input: the project's own inputs, its
     packages and their modules' text, follow from the session's files. *)
 
-val problems : session -> string list
+val problems : session -> Project.problem list
 (** The errors in the project's manifests, each as its file and sentences: one that could not be
     read, a package name used twice, a dependency that is no package of the project. *)
 
@@ -87,9 +87,7 @@ val objects_directory : unit -> string
 val programs_directory : unit -> string
 (** Where programs built to be run are put, in the store. *)
 
-val results : kind:string -> (string -> string option) * (string -> string -> unit)
-(** Finding and keeping the results of one kind of expensive step, such as ["tests"], each under the
-    key of exactly the input that made it. *)
+val results : kind:Store.result_kind -> (string -> string option) * (string -> string -> unit)
 
 val flush_store : unit -> unit
 (** Writes the store's in-memory contents to disk. *)

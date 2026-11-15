@@ -1,8 +1,16 @@
 type attachment = ..
 type attachment += Nothing
 
+type key =
+  | Worktree of string
+  | Commit of { repository : string; commit : string }
+  | Library of string
+  | Published of { package : Path.package; hash : string }
+  | Snapshot of string
+  | Trial of key
+
 type t = {
-  key : string;
+  key : key;
   mutable engine : Engine.t;
   pointer : Store.pointer option;
   version : string;
@@ -14,7 +22,7 @@ type t = {
   snapshot_of : string option;
 }
 
-type state = { store : Store.t; identity : string; sessions : (string, t) Hashtbl.t }
+type state = { store : Store.t; identity : string; sessions : (key, t) Hashtbl.t }
 
 let state : state option ref = ref None
 let logging = ref false
@@ -40,6 +48,15 @@ let engine session = session.engine
 let context session = Engine.context session.engine
 let observer session = Engine.observer session.engine
 let key session = session.key
+
+let rec show_key = function
+  | Worktree root -> root
+  | Commit { repository; commit } -> Printf.sprintf "commit %s of %s" commit repository
+  | Library name -> "library " ^ name
+  | Published { package; hash } -> Printf.sprintf "%s %s" (Path.show_package package) hash
+  | Snapshot root -> "snapshot of " ^ root
+  | Trial key -> show_key key ^ " (trial)"
+
 let attachment session = session.attachment
 let attach session attachment = session.attachment <- attachment
 let touch session = session.used <- Unix.time ()
@@ -272,7 +289,7 @@ let trial session =
     | None -> new_engine state ~version:session.version ~bases:session.bases
   in
   {
-    key = session.key ^ " (trial)";
+    key = Trial session.key;
     engine;
     pointer = None;
     version = session.version;

@@ -159,7 +159,7 @@ let consequences session text =
       changed
   in
   let diagnostics (session : Database.session) =
-    Database.problems session
+    List.map Project.show_problem (Database.problems session)
     @ List.concat_map
         (fun file ->
           List.map

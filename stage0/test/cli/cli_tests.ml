@@ -157,12 +157,14 @@ let () =
           ]
       in
       let project = Command_packages.load (Filename.concat root "one") in
+      let problems = Database.problems (fst project) in
       if
         not
           (List.exists
-             (fun problem -> contains problem "`two` is not a package of this project")
-             (Database.problems (fst project)))
-      then fail "problems: %s" (String.concat "; " (Database.problems (fst project)));
+             (fun (problem : Project.problem) ->
+               contains problem.message "`two` is not a package of this project")
+             problems)
+      then fail "problems: %s" (String.concat "; " (List.map Project.show_problem problems));
       match Command_packages.load root with
       | exception Outcome.Cannot_run _ -> ()
       | _ -> fail "found a project above the two");
@@ -206,8 +208,13 @@ let () =
       let project = Command_packages.load (Filename.concat root "app") in
       expect_strings ~expected:[ "app" ] (names project);
       let problems = Database.problems (fst project) in
-      if not (List.exists (String.starts_with ~prefix:"truss.toml:4:") problems) then
-        fail "problems: %s" (String.concat "; " problems));
+      if
+        not
+          (List.exists
+             (fun (problem : Project.problem) ->
+               problem.file = "truss.toml" && problem.line = Some 4)
+             problems)
+      then fail "problems: %s" (String.concat "; " (List.map Project.show_problem problems)));
   test "under a package that is a project by itself, a directory with a manifest is no part of it"
     (fun () ->
       let root =
@@ -236,10 +243,14 @@ let report_problems report =
       List.filter_map (function Json.String problem -> Some problem | _ -> None) problems
   | _ -> []
 
-let expect_problem files part =
+let expect_problem ?file files message =
   let problems_reported = problems files in
-  if not (List.exists (fun problem -> contains problem part) problems_reported) then
-    fail "problems: [%s]" (String.concat "; " problems_reported)
+  let is_expected (problem : Project.problem) =
+    contains problem.message message
+    && match file with Some file -> problem.file = file | None -> true
+  in
+  if not (List.exists is_expected problems_reported) then
+    fail "problems: [%s]" (String.concat "; " (List.map Project.show_problem problems_reported))
 
 let expect_problem_in root part =
   let problems_reported = report_problems (gather (Command_packages.load root)) in
@@ -248,23 +259,13 @@ let expect_problem_in root part =
 
 let () =
   test "a package that does not say which Truss it is written for has a problem" (fun () ->
-      expect_problem
+      expect_problem ~file:"truss.toml"
         [ ("truss.toml", "[package]\nname = \"demo\"\n") ]
-        "truss.toml: `[package]` needs `truss = \"0.1\"`");
+        "`[package]` needs `truss = \"0.1\"`");
   test "a package written for a newer Truss than the toolchain's has a problem" (fun () ->
       expect_problem
         [ ("truss.toml", "[package]\nname = \"demo\"\ntruss = \"99.0\"\n") ]
         "`demo` is written for Truss 99.0, and this toolchain is Truss 0.1");
-  test "a package name that is another package's owner is a problem" (fun () ->
-      expect_problem
-        [
-          ("truss.toml", "[project]\n");
-          ("acme/truss.toml", manifest_of "acme");
-          ("acme/main.truss", "");
-          ("geometry/truss.toml", manifest_of "acme::geometry");
-          ("geometry/vector/vector.truss", "");
-        ]
-        "The package name `acme` is the owner in `acme::geometry`");
   test "a package cannot depend on itself" (fun () ->
       expect_problem
         [ ("truss.toml", manifest_of "demo" ^ "[dependencies]\ndemo = []\n") ]
@@ -287,13 +288,13 @@ let () =
         ]
         "The package name `acme` is the owner in `acme::geometry`");
   test "two packages of a project cannot have one name" (fun () ->
-      expect_problem
+      expect_problem ~file:"two/truss.toml"
         [
           ("truss.toml", "[project]\n");
           ("one/truss.toml", manifest_of "same");
           ("two/truss.toml", manifest_of "same");
         ]
-        "two/truss.toml: The package name `same` is already used by one/truss.toml")
+        "The package name `same` is already used by one/truss.toml")
 
 let () =
   test "a dependency nothing uses is a problem, which check --fix fixes by deleting its entry"
@@ -376,13 +377,15 @@ let () =
           ]
       in
       let project = Command_packages.load root in
+      let problems = Database.problems (fst project) in
       if
         not
           (List.exists
-             (fun problem ->
-               contains problem "one/truss.toml: A test's time limit is its project's")
-             (Database.problems (fst project)))
-      then fail "problems: %s" (String.concat "; " (Database.problems (fst project))));
+             (fun (problem : Project.problem) ->
+               problem.file = "one/truss.toml"
+               && contains problem.message "A test's time limit is its project's")
+             problems)
+      then fail "problems: %s" (String.concat "; " (List.map Project.show_problem problems)));
   test "a time limit of 0 is malformed, at its line" (fun () ->
       match Manifest.parse "[package]\nname = \"a\"\n[test]\ntime_limit = 0\n" with
       | exception Manifest.Malformed { line = 4; _ } -> ()
@@ -970,15 +973,17 @@ let () =
       let root =
         directory [ ("truss.toml", manifest_of "demo" ^ "[dependencies]\n\"acme::units\" = []\n") ]
       in
-      let problems = report_problems (gather (Command_packages.load root)) in
+      let problems = Database.problems (fst (Command_packages.load root)) in
       match
-        List.filter (fun problem -> contains problem "not a package of this project") problems
+        List.filter
+          (fun (problem : Project.problem) ->
+            contains problem.message "not a package of this project")
+          problems
       with
-      | [ problem ]
-        when String.starts_with ~prefix:"truss.lock: " problem
-             && contains problem "Run `truss add acme::units`" ->
+      | [ { file = "truss.lock"; message; _ } ] when contains message "Run `truss add acme::units`"
+        ->
           ()
-      | _ -> fail "problems: [%s]" (String.concat "; " problems));
+      | _ -> fail "problems: [%s]" (String.concat "; " (List.map Project.show_problem problems)));
   test "a lock file that is not the one the manifests give is a problem, which check --fix fixes"
     (fun () ->
       let _ = stocked () in

@@ -8,8 +8,11 @@ val put : t -> string -> string
 val get : t -> string -> string option
 val refresh : t -> unit
 val flush : t -> unit
-val find_result : t -> kind:string -> key:string -> string option
-val add_result : t -> kind:string -> key:string -> string -> unit
+
+type result_kind = Package_state | Test_result | Solver_answer | Fact | Reads
+
+val find_result : t -> kind:result_kind -> key:string -> string option
+val add_result : t -> kind:result_kind -> key:string -> string -> unit
 val files : t -> string -> string
 val cache_files : t -> string -> string
 

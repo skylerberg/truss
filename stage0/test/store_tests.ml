@@ -67,9 +67,10 @@ let () =
       if Store.get again name <> None then fail "a damaged value was got");
   test "a result is found by its kind and key" (fun () ->
       let store = Store.open_ (fresh_directory ()) in
-      Store.add_result store ~kind:"tests" ~key:"k" "passed";
-      if Store.find_result store ~kind:"tests" ~key:"k" <> Some "passed" then fail "not found";
-      if Store.find_result store ~kind:"proofs" ~key:"k" <> None then fail "found as another kind")
+      Store.add_result store ~kind:Test_result ~key:"k" "passed";
+      if Store.find_result store ~kind:Test_result ~key:"k" <> Some "passed" then fail "not found";
+      if Store.find_result store ~kind:Solver_answer ~key:"k" <> None then
+        fail "found as another kind")
 
 let () =
   test "a pointer reads the value it was last set to" (fun () ->
@@ -161,7 +162,7 @@ let () =
         List.init 40 (fun index ->
             let writer = Store.open_ directory in
             let name = Store.put writer (Printf.sprintf "value %d" index) in
-            Store.add_result writer ~kind:"kind" ~key:(string_of_int index) "result";
+            Store.add_result writer ~kind:Test_result ~key:(string_of_int index) "result";
             Store.close writer;
             name)
       in
@@ -175,8 +176,8 @@ let () =
         (fun index name ->
           if Store.get again name <> Some (Printf.sprintf "value %d" index) then
             fail "value %d is gone" index;
-          if Store.find_result again ~kind:"kind" ~key:(string_of_int index) <> Some "result" then
-            fail "result %d is gone" index)
+          if Store.find_result again ~kind:Test_result ~key:(string_of_int index) <> Some "result"
+          then fail "result %d is gone" index)
         names);
   test "a few small segments are left as they are" (fun () ->
       let directory = fresh_directory () in

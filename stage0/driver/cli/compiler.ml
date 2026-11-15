@@ -21,7 +21,7 @@ let want session context lowering wanted =
 
 (* Where the results of runs are kept: the database's store. *)
 let results () : Compile.results =
-  let find, add = Database.results ~kind:"tests" in
+  let find, add = Database.results ~kind:Store.Test_result in
   { find; add }
 
 (* A compiler that lowers code and compiles nothing, so it needs no C
