@@ -48,6 +48,7 @@ let encode env ty =
   (match Storage.representation env ty with
   | Handle -> bug "a handle cannot be computed while compiling"
   | Shared _ -> bug "a shared value cannot be computed while compiling"
+  | Any -> bug "an any value cannot be computed while compiling"
   | Storage element ->
       append_bytes (Storage.length value) (Memory_layout.integer_size UInt64);
       loop builder
@@ -125,6 +126,7 @@ let decode env ty encoded : Lowered.static_value =
       match Storage.representation env ty with
       | Handle -> bug "a handle computed while compiling"
       | Shared _ -> bug "a shared value computed while compiling"
+      | Any -> bug "an any value computed while compiling"
       | Storage element ->
           let count = Z.to_int (integer reader UInt64) in
           Static_storage

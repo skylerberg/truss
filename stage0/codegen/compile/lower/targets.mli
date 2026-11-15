@@ -24,7 +24,8 @@ val entry_signature :
   Definitions.context -> Types.signature -> Lowered.signature * Convention.result
 
 val any_methods : Definitions.context -> Path.t -> Types.trait_method list
-val dynamic_slot : Definitions.context -> Path.t -> string -> int * Types.signature
+val dynamic_method : Definitions.context -> Path.t -> string -> int * Types.signature
+val is_copyable_any : Definitions.context -> Types.trait_reference -> bool
 
 val any_entry_signature :
   Definitions.context ->

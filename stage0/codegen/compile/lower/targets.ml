@@ -109,9 +109,14 @@ let any_methods context trait =
   | Some position -> List.filter (callable_through_any context trait) position.methods
   | None -> bug "no interface for %s" (Path.show trait)
 
-let dynamic_slot context trait name =
-  method_slot context ~owner:trait ~first:1 (any_methods context trait) name ~missing:(fun () ->
+let dynamic_method context trait name =
+  method_slot context ~owner:trait ~first:0 (any_methods context trait) name ~missing:(fun () ->
       bug "%s cannot be called through any" name)
+
+let is_copyable_any context (any : Types.trait_reference) =
+  Interface.Properties.has context.lookups.interface
+    ~bounds:(fun _ -> [])
+    ~normalize:context.monomorphic.normalize Interface.Properties.Copyable (Types.Any any)
 
 let any_substitution context ~(any : Types.trait_reference) trait : Types.substitution =
   match Interface.Definition.trait_interface context.lookups.interface trait with
@@ -295,7 +300,10 @@ let call_indirect st ~(function_type : Ground.function_type) ~(value : Lowered.p
 
 let call_through_any st ~(any_type : Types.trait_reference) ~trait ~name ~(any : Lowered.place)
     ~(arguments : (Types.mode * Ground.ty * Lowered.place) list) ?(lending = []) destination =
-  let slot, signature = dynamic_slot st.context trait name in
+  let index, signature = dynamic_method st.context trait name in
+  let slot =
+    Drop_and_copy.first_method_slot ~is_copyable:(is_copyable_any st.context any_type) + index
+  in
   let c_signature, result, capabilities =
     any_entry_signature st.context ~any:any_type ~trait signature
   in
@@ -364,18 +372,10 @@ let echo st place ty ~site =
     (Echo { text = Copy (Storage.buffer output); length = Copy (Storage.length output); site })
 
 let any_into st ~any_ty ~inner_ty ~impl ~type_arguments ~(value : Lowered.place) destination =
-  let block = local st.builder (Raw (Pointer Opaque)) in
-  if is_zero_size st inner_ty then emit st.builder (Assign (at block, Use (Constant (Bytes ""))))
-  else begin
-    emit st.builder
-      (Call
-         {
-           target = Intrinsic Allocate;
-           arguments = [ Constant (Size_of inner_ty); Constant (Alignment_of inner_ty) ];
-           result = Returned (at block);
-         });
+  let box = Drop_and_copy.box st.context.drop_and_copy st.builder inner_ty in
+  if not (is_zero_size st inner_ty) then begin
     let typed = local st.builder (Pointer { target = Value inner_ty; writable = true }) in
-    emit st.builder (Assign (at typed, Use (Copy (at block))));
+    emit st.builder (Assign (at typed, Use (Copy (at box))));
     emit st.builder
       (Assign ({ root = Local typed; projections = [ Deref ] }, Use (owned st value inner_ty)))
   end;
@@ -388,7 +388,7 @@ let any_into st ~any_ty ~inner_ty ~impl ~type_arguments ~(value : Lowered.place)
              variant = None;
              fields =
                [
-                 ("value", Copy (at block));
+                 ("value", Copy (at box));
                  ("vtable", Constant (Symbol_address (Any_table { impl; type_arguments })));
                ];
            } ))

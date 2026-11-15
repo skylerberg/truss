@@ -22,6 +22,7 @@ type representation =
   | Storage of Ground.ty
   | Handle
   | Shared of Ground.ty
+  | Any
 
 let representation env (ty : Ground.ty) =
   match (elements_of ty, ty) with
@@ -30,6 +31,7 @@ let representation env (ty : Ground.ty) =
   | None, Named { path; arguments = [ Type value ] }
     when Intrinsic.builtin_of_path path = Some Shared ->
       Shared value
+  | None, Any _ -> Any
   | None, _ -> Shape (Memory_layout.shape env ty)
 
 let buffer_field = "buffer"

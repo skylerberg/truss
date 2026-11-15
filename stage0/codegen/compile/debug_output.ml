@@ -115,18 +115,19 @@ let debug env ty =
       storage_or_view field_ty (value / Field field) ~as_text:(form ty = Text)
   | _, Handle -> text "Handle"
   | _, Shared _ -> text "Shared"
+  | _, Any -> text "any"
   | _, Storage element ->
       list_of element ~element_at:(Storage.at value) ~count:(Copy (Storage.length value))
   | _, Shape shape -> (
       match (ty, shape) with
       | Never, _ -> ()
       | Function _, _ -> text "fn"
-      | Any _, _ -> text "any"
       | _, Scalar scalar -> scalar_debug env builder ~output scalar value
       | Named { path; _ }, Record [] ->
           text (if Ground.path_name path = "Unit" then "Unit" else Ground.path_name path ^ "()")
       | Named { path; _ }, Record fields ->
           fields_debug (Ground.path_name path) fields (fun field -> value / Field field)
+      | _, Record _ -> bug "%s has the shape of a record and no name" (Ground.to_string ty)
       | _, Array (element, count) ->
           list_of element
             ~element_at:(fun index -> value / Index index)

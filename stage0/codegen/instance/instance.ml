@@ -5,6 +5,7 @@ type key =
   | Copy of Ground.ty
   | Debug of Ground.ty
   | Any_drop of Ground.ty
+  | Any_copy of Ground.ty
   | Encode of Ground.ty
   | Evaluator of Path.t
   | Template_check of { from_template : Path.t; literals : string list; clauses : int list }
@@ -107,6 +108,7 @@ let rec mangle = function
   | Debug ty -> marker "Debug" ^ mangle_ty ty
   | Encode ty -> marker "Encode" ^ mangle_ty ty
   | Any_drop ty -> marker "AnyDrop" ^ mangle_ty ty
+  | Any_copy ty -> marker "AnyCopy" ^ mangle_ty ty
   | Evaluator instance_path -> marker "Evaluator" ^ path instance_path
   | Template_check { from_template; literals; clauses } ->
       marker "Check" ^ path from_template
@@ -150,6 +152,7 @@ let rec to_string = function
   | Debug ty -> "debug " ^ Ground.to_string ty
   | Encode ty -> "encode " ^ Ground.to_string ty
   | Any_drop ty -> "any drop " ^ Ground.to_string ty
+  | Any_copy ty -> "any copy " ^ Ground.to_string ty
   | Evaluator path -> "evaluator " ^ Path.show path
   | Template_check { from_template; literals; clauses } ->
       "template check " ^ Path.show from_template ^ " of "

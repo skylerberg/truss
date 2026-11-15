@@ -447,7 +447,7 @@ let rec walk_key walk (key : Instance.key) =
   | Evaluator path ->
       walk_constant walk path;
       walk_signature walk Constants.write_fully []
-  | Drop ty | Copy ty | Any_drop ty -> add walk ty
+  | Drop ty | Copy ty | Any_drop ty | Any_copy ty -> add walk ty
   | Debug ty ->
       add walk ty;
       List.iter (add walk) Debug_output.ground_types

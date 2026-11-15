@@ -39,6 +39,7 @@ let make (context : Lower.context) (key : Instance.key) : lowered =
   | Drop ty -> code (Drop_and_copy.drop drop_and_copy ty)
   | Copy ty -> code (Drop_and_copy.copy drop_and_copy ty)
   | Any_drop ty -> code (Drop_and_copy.any_drop drop_and_copy ty)
+  | Any_copy ty -> code (Drop_and_copy.any_copy drop_and_copy ty)
   | Debug ty -> code (Debug_output.debug env ty)
   | Encode ty -> code (Encoding.encode env ty)
   | Evaluator path -> code (Lower.evaluator context path)

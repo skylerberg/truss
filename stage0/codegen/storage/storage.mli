@@ -8,6 +8,7 @@ type representation =
   | Storage of Ground.ty
   | Handle
   | Shared of Ground.ty
+  | Any
 
 val representation : Memory_layout.env -> Ground.ty -> representation
 val shape : uint64:Ground.ty -> Ground.ty -> Memory_layout.shape
