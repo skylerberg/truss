@@ -47,7 +47,11 @@ let () =
   passes "a parameter left out takes its default"
     Fixtures.Source.parameter_left_out_takes_its_default;
   passes "an any value calls its implementation's method"
-    Fixtures.Source.any_value_calls_its_implementations_method
+    Fixtures.Source.any_value_calls_its_implementations_method;
+  passes "an any value calls the methods of its trait's supertraits"
+    Fixtures.Source.any_value_calls_the_methods_of_its_traits_supertraits;
+  passes "an any value calls a derived method of its trait's supertrait"
+    Fixtures.Source.any_value_calls_a_derived_method_of_its_traits
 
 let () =
   passes "a constant that compares constants is folded"

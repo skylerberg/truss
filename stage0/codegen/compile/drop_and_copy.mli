@@ -11,8 +11,8 @@ val copy_into :
   t -> Emit_c.Builder.t -> destination:Lowered.place -> source:Lowered.place -> Ground.ty -> unit
 
 val box : t -> Emit_c.Builder.t -> Ground.ty -> Lowered.local
-val any_entries : Ground.ty -> is_copyable:bool -> (Instance.key * Lowered.signature) list
-val first_method_slot : is_copyable:bool -> int
+val make_any_drop_entry : Ground.ty -> Instance.key * Lowered.signature
+val make_any_copy_entry : Ground.ty -> Instance.key * Lowered.signature
 
 module For_testing : sig
   val copy_signature : t -> Ground.ty -> Lowered.signature

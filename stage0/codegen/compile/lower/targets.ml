@@ -104,40 +104,74 @@ let callable_through_any context trait (trait_method : Types.trait_method) =
   trait_method.method_receiver <> Static
   && Interface.Impls.through_any context.lookups.interface ~trait trait_method = Callable
 
-let any_methods context trait =
-  match Interface.Definition.trait_interface context.lookups.interface trait with
-  | Some position -> List.filter (callable_through_any context trait) position.methods
-  | None -> bug "no interface for %s" (Path.show trait)
-
-let dynamic_method context trait name =
-  method_slot context ~owner:trait ~first:0 (any_methods context trait) name ~missing:(fun () ->
-      bug "%s cannot be called through any" name)
-
 let is_copyable_any context (any : Types.trait_reference) =
   Interface.Properties.has context.lookups.interface
     ~bounds:(fun _ -> [])
     ~normalize:context.monomorphic.normalize Interface.Properties.Copyable (Types.Any any)
 
-let any_substitution context ~(any : Types.trait_reference) trait : Types.substitution =
-  match Interface.Definition.trait_interface context.lookups.interface trait with
-  | Some interface ->
-      let reference =
-        if Path.equal trait any.trait then any
-        else
-          match
-            List.find_opt
-              (fun (bound : Types.trait_reference) -> Path.equal bound.trait trait)
-              (Interface.Properties.bound_closure context.lookups.interface ~self:(Types.Any any)
-                 any)
-          with
-          | Some bound -> bound
-          | None -> bug "%s is not a trait of %s" (Path.show trait) (Types.show (Types.Any any))
-      in
-      Interface.Properties.trait_substitution interface ~self:(Types.Any any) reference
-  | None -> bug "no interface for %s" (Path.show trait)
+type any_method = {
+  trait : Types.trait_reference;
+  trait_method : Types.trait_method;
+  signature : Types.signature;
+  substitution : Types.substitution;
+}
 
-let any_entry_signature context ~any ~trait (signature : Types.signature) =
-  let substitution = any_substitution context ~any trait in
+type any_slot = Drop_slot | Copy_slot | Method_slot of any_method
+
+let lay_out_any_vtable context (any : Types.trait_reference) =
+  let traits =
+    List.fold_left
+      (fun traits (bound : Types.trait_reference) ->
+        if
+          List.exists
+            (fun (trait : Types.trait_reference) -> Path.equal trait.trait bound.trait)
+            traits
+        then traits
+        else traits @ [ bound ])
+      []
+      (Interface.Properties.bound_closure context.lookups.interface ~self:(Types.Any any) any)
+  in
+  let lay_out_methods (trait : Types.trait_reference) =
+    match Interface.Definition.trait_interface context.lookups.interface trait.trait with
+    | Some interface ->
+        let substitution =
+          Interface.Properties.trait_substitution interface ~self:(Types.Any any) trait
+        in
+        List.filter_map
+          (fun trait_method ->
+            if callable_through_any context trait.trait trait_method then
+              Some
+                (Method_slot
+                   {
+                     trait;
+                     trait_method;
+                     signature =
+                       Interface.Definition.method_signature context.lookups.interface
+                         ~owner:trait.trait trait_method;
+                     substitution;
+                   })
+            else None)
+          interface.methods
+    | None -> bug "no interface for %s" (Path.show trait.trait)
+  in
+  (Drop_slot :: (if is_copyable_any context any then [ Copy_slot ] else []))
+  @ List.concat_map lay_out_methods traits
+
+let find_any_method context ~(any : Types.trait_reference) trait name =
+  match
+    List.find_mapi
+      (fun slot -> function
+        | Method_slot any_method
+          when Path.equal any_method.trait.trait trait && any_method.trait_method.method_name = name
+          ->
+            Some (slot, any_method)
+        | Drop_slot | Copy_slot | Method_slot _ -> None)
+      (lay_out_any_vtable context any)
+  with
+  | Some found -> found
+  | None -> bug "%s cannot be called through any %s" name (Path.show any.trait)
+
+let make_any_entry_signature context ~substitution (signature : Types.signature) =
   let entry, result =
     c_signature context substitution
       ~parameters:(interface_parameters { signature with receiver = None })
@@ -300,12 +334,9 @@ let call_indirect st ~(function_type : Ground.function_type) ~(value : Lowered.p
 
 let call_through_any st ~(any_type : Types.trait_reference) ~trait ~name ~(any : Lowered.place)
     ~(arguments : (Types.mode * Ground.ty * Lowered.place) list) ?(lending = []) destination =
-  let index, signature = dynamic_method st.context trait name in
-  let slot =
-    Drop_and_copy.first_method_slot ~is_copyable:(is_copyable_any st.context any_type) + index
-  in
+  let slot, any_method = find_any_method st.context ~any:any_type trait name in
   let c_signature, result, capabilities =
-    any_entry_signature st.context ~any:any_type ~trait signature
+    make_any_entry_signature st.context ~substitution:any_method.substitution any_method.signature
   in
   let passed = List.filter_map (fun (mode, ty, place) -> pass st mode ty place) arguments in
   let evidence = List.map (evidence_of st) capabilities in

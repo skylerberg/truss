@@ -47,12 +47,8 @@ let box_signature result : Lowered.signature =
 
 let any_drop_signature = box_signature None
 let any_copy_signature = box_signature (Some (Raw (Pointer Opaque)))
-
-let any_entries ty ~is_copyable =
-  (Instance.Any_drop ty, any_drop_signature)
-  :: (if is_copyable then [ (Instance.Any_copy ty, any_copy_signature) ] else [])
-
-let first_method_slot ~is_copyable = if is_copyable then any_copy_slot + 1 else any_drop_slot + 1
+let make_any_drop_entry ty = (Instance.Any_drop ty, any_drop_signature)
+let make_any_copy_entry ty = (Instance.Any_copy ty, any_copy_signature)
 
 open Emit_c.Builder
 

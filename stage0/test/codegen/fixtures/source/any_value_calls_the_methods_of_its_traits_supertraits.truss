@@ -1,0 +1,49 @@
+trait Labeled {
+  fn label(self) -> String
+}
+
+trait Named: Labeled {
+  fn name(self) -> String
+}
+
+trait Counted {
+  fn count(self) -> Int64
+}
+
+trait Greeter: Named + Counted + Copyable {
+  fn greeting(self) -> String
+}
+
+type Dog(tag: String)
+
+impl Labeled for Dog {
+  fn label(self) -> String {
+    "dog"
+  }
+}
+
+impl Named for Dog {
+  fn name(self) -> String {
+    self.tag.copy()
+  }
+}
+
+impl Counted for Dog {
+  fn count(self) -> Int64 {
+    4
+  }
+}
+
+impl Greeter for Dog {
+  fn greeting(self) -> String {
+    "woof"
+  }
+}
+
+test "the methods of an any value's trait and its supertraits" {
+  let pet: any Greeter = any Dog(tag: "rex")
+  assert pet.greeting() == "woof"
+  assert pet.name() == "rex"
+  assert pet.count() == 4
+  assert pet.label() == "dog"
+}

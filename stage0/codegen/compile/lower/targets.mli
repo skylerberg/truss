@@ -23,14 +23,23 @@ val capability_method : Definitions.context -> Path.t -> string -> int * Types.s
 val entry_signature :
   Definitions.context -> Types.signature -> Lowered.signature * Convention.result
 
-val any_methods : Definitions.context -> Path.t -> Types.trait_method list
-val dynamic_method : Definitions.context -> Path.t -> string -> int * Types.signature
-val is_copyable_any : Definitions.context -> Types.trait_reference -> bool
+type any_method = {
+  trait : Types.trait_reference;
+  trait_method : Types.trait_method;
+  signature : Types.signature;
+  substitution : Types.substitution;
+}
 
-val any_entry_signature :
+type any_slot = Drop_slot | Copy_slot | Method_slot of any_method
+
+val lay_out_any_vtable : Definitions.context -> Types.trait_reference -> any_slot list
+
+val find_any_method :
+  Definitions.context -> any:Types.trait_reference -> Path.t -> string -> int * any_method
+
+val make_any_entry_signature :
   Definitions.context ->
-  any:Types.trait_reference ->
-  trait:Path.t ->
+  substitution:Types.substitution ->
   Types.signature ->
   Lowered.signature * Convention.result * Path.t list
 
@@ -74,9 +83,6 @@ val call_through_any :
   ?lending:Lowered.operand list ->
   Lowered.place ->
   unit
-
-val any_substitution :
-  Definitions.context -> any:Types.trait_reference -> Path.t -> Types.substitution
 
 val in_type_definition : Lowering.state -> Ground.ty -> (unit -> 'a) -> 'a
 val begin_output : Lowering.state -> Lowered.place

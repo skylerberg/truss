@@ -190,10 +190,23 @@ let locked_table context (key : Instance.key) ~capability : Lowered.table =
         interface.methods;
   }
 
+let make_impl_method_key context ~impl ~type_arguments (trait_method : Types.trait_method) =
+  let receiver =
+    match
+      List.find_opt
+        (fun (name, _) -> name = trait_method.method_name)
+        (impl_interface context impl).impl_methods
+    with
+    | Some (_, receiver) -> receiver
+    | None -> trait_method.method_receiver
+  in
+  Instance.Code
+    { path = Method { owner = impl; name = trait_method.method_name; receiver }; type_arguments }
+
 let table context (key : Instance.key) : Lowered.table =
   match key with
   | Table { impl; type_arguments } ->
-      let interface, capability, _ = impl_capability context impl in
+      let _, capability, _ = impl_capability context impl in
       let capability_interface =
         match Interface.Definition.trait_interface context.lookups.interface capability with
         | Some position -> position
@@ -202,23 +215,7 @@ let table context (key : Instance.key) : Lowered.table =
       let entries =
         List.map
           (fun (trait_method : Types.trait_method) ->
-            let receiver =
-              match
-                List.find_opt
-                  (fun (name, _) -> name = trait_method.method_name)
-                  interface.impl_methods
-              with
-              | Some (_, receiver) -> receiver
-              | None -> bug "%s does not write %s" (Path.show impl) trait_method.method_name
-            in
-            let method_key =
-              Instance.Code
-                {
-                  path = Method { owner = impl; name = trait_method.method_name; receiver };
-                  type_arguments;
-                }
-            in
-            ( Instance.Entry method_key,
+            ( Instance.Entry (make_impl_method_key context ~impl ~type_arguments trait_method),
               fst
                 (entry_signature context
                    (Interface.Definition.method_signature context.lookups.interface
@@ -394,12 +391,13 @@ let any_entry context (key : Instance.key) (method_key : Instance.key) : Emit_c.
     | _ -> bug "an any entry"
   in
   let interface = impl_interface context impl in
-  let trait = interface.implements.trait in
-  let _, trait_signature = dynamic_method context trait name in
   let method_signature = signature_of context path in
   let substitution = bind method_signature.generics type_arguments in
   let any = Types.substitute_trait substitution interface.implements in
-  let _, result, capabilities = any_entry_signature context ~any ~trait trait_signature in
+  let _, any_method = find_any_method context ~any interface.implements.trait name in
+  let _, result, capabilities =
+    make_any_entry_signature context ~substitution:any_method.substitution any_method.signature
+  in
   let st = generated_state context ~key ~anchor:impl ~substitution in
   let builder = st.builder in
   let value = local builder ~name:"value" (Raw (Pointer Opaque)) in
@@ -449,42 +447,32 @@ let any_table context (key : Instance.key) : Lowered.table =
   match key with
   | Any_table { impl; type_arguments } ->
       let interface = impl_interface context impl in
-      let trait = interface.implements.trait in
       let substitution = bind interface.impl_generics type_arguments in
       let self_ty = Monomorphic.ground context.monomorphic substitution interface.for_type in
       let any = Types.substitute_trait substitution interface.implements in
-      let entries =
-        List.map
-          (fun (trait_method : Types.trait_method) ->
-            let receiver =
-              match
-                List.find_opt
-                  (fun (name, _) -> name = trait_method.method_name)
-                  interface.impl_methods
-              with
-              | Some (_, receiver) -> receiver
-              | None -> trait_method.method_receiver
+      let make_entry = function
+        | Drop_slot -> Drop_and_copy.make_any_drop_entry self_ty
+        | Copy_slot -> Drop_and_copy.make_any_copy_entry self_ty
+        | Method_slot any_method ->
+            let owner_impl, owner_arguments =
+              if Path.equal any_method.trait.trait interface.implements.trait then
+                (impl, type_arguments)
+              else
+                resolve_impl context substitution ~trait:any_method.trait
+                  ~self_type:interface.for_type ~evidence:Bound
             in
-            let method_key =
-              Instance.Code
-                {
-                  path = Method { owner = impl; name = trait_method.method_name; receiver };
-                  type_arguments;
-                }
+            let entry_signature, _, _ =
+              make_any_entry_signature context ~substitution:any_method.substitution
+                any_method.signature
             in
-            ( Instance.Any_entry method_key,
-              let signature, _, _ =
-                any_entry_signature context ~any ~trait
-                  (Interface.Definition.method_signature context.lookups.interface ~owner:trait
-                     trait_method)
-              in
-              signature ))
-          (any_methods context trait)
+            ( Instance.Any_entry
+                (make_impl_method_key context ~impl:owner_impl ~type_arguments:owner_arguments
+                   any_method.trait_method),
+              entry_signature )
       in
       {
         table_key = key;
         capability = None;
-        entries =
-          Drop_and_copy.any_entries self_ty ~is_copyable:(is_copyable_any context any) @ entries;
+        entries = List.map make_entry (lay_out_any_vtable context any);
       }
   | _ -> bug "not an any table: %s" (Instance.to_string key)

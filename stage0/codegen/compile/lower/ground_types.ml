@@ -499,18 +499,20 @@ let rec walk_key walk (key : Instance.key) =
 
 and walk_any_methods walk impl type_arguments ~only =
   let interface = impl_interface walk.context impl in
-  let trait = interface.implements.trait in
   let substitution = bind interface.impl_generics type_arguments in
   add_type walk substitution interface.for_type;
   let any = Types.substitute_trait substitution interface.implements in
-  let any_substitution = Targets.any_substitution walk.context ~any trait in
-  List.iter
-    (fun (trait_method : Types.trait_method) ->
-      if Option.fold ~none:true ~some:(String.equal trait_method.method_name) only then
-        signature_types ~receiver:false walk any_substitution
-          (Interface.Definition.method_signature walk.context.lookups.interface ~owner:trait
-             trait_method))
-    (Targets.any_methods walk.context trait)
+  let walk_method (any_method : Targets.any_method) =
+    signature_types ~receiver:false walk any_method.substitution any_method.signature
+  in
+  match only with
+  | Some name ->
+      walk_method (snd (Targets.find_any_method walk.context ~any interface.implements.trait name))
+  | None ->
+      List.iter
+        (function
+          | Targets.Method_slot any_method -> walk_method any_method | Drop_slot | Copy_slot -> ())
+        (Targets.lay_out_any_vtable walk.context any)
 
 let rec reached context (ty : Ground.ty) =
   (match ty with

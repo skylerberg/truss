@@ -1605,10 +1605,10 @@ and lend ?(forwards = 0) st part (call : Mir.call) ~origin =
               | Types.Any reference -> reference
               | receiver -> bug "a call through any on %s" (Types.show receiver)
             in
-            let _, signature = dynamic_method st.context trait.trait name in
+            let _, any_method = find_any_method st.context ~any:any_type trait.trait name in
             match List.map (argument_place st) call.arguments with
             | (_, _, any) :: arguments ->
-                lent_place signature.output (any_substitution st.context ~any:any_type trait.trait)
+                lent_place any_method.signature.output any_method.substitution
                   (fun ~lending destination ->
                     call_through_any st ~any_type ~trait:trait.trait ~name ~any ~arguments ~lending
                       destination)
