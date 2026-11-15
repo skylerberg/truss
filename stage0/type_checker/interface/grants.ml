@@ -24,14 +24,13 @@ let written (path : Path.t) =
   | Top { module_; name } when Resolve.Prelude.find_type name = Some module_ -> name
   | _ -> Path.show path
 
-let grant lookups ~package (entry : Manifest.dependency) : Environment.grant =
-  let resolved_entries =
-    List.map (fun name -> (name, capability lookups ~package name)) entry.capabilities
+let grant lookups ~package written_capabilities : Environment.grant =
+  let resolved =
+    List.map (fun name -> (name, capability lookups ~package name)) written_capabilities
   in
   {
-    capabilities = List.filter_map snd resolved_entries;
-    unknown =
-      List.filter_map (fun (name, path) -> if path = None then Some name else None) resolved_entries;
+    capabilities = List.filter_map snd resolved;
+    unknown = List.filter_map (fun (name, path) -> if path = None then Some name else None) resolved;
   }
 
 let missing (lookups : Lookups.t) ~package ~of_ (uses : Types.capability_set) =

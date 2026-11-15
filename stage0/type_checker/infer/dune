@@ -2,7 +2,6 @@
  (name infer)
  (modules_without_implementation lookups)
  (libraries
-  manifest
   compiler_bug
   path
   well_known
@@ -15,6 +14,5 @@
   resolve
   interface
   diagnostic
-  source
   syntax_walk
   zarith))

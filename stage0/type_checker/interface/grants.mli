@@ -1,4 +1,4 @@
-val grant : Lookups.t -> package:Path.package -> Manifest.dependency -> Environment.grant
+val grant : Lookups.t -> package:Path.package -> string list -> Environment.grant
 
 val missing :
   Lookups.t -> package:Path.package -> of_:Path.package -> Types.capability_set -> Path.t list

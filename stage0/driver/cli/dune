@@ -8,17 +8,13 @@
   source
   diagnostic
   syntax
-  syntax_walk
   path
   resolve
-  infer
   inspect
-  parsed
   interface
   package_checks
   manifest
   registry
-  memory_layout
   libc
   toolchain
   process
@@ -35,5 +31,4 @@
   project
   types
   syntax_print
-  ownership
   file_system))

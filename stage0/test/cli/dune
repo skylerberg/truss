@@ -9,7 +9,6 @@
   source
   diagnostic
   database
-  build
   manifest
   registry
   project

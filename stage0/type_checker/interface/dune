@@ -2,7 +2,6 @@
  (name interface)
  (modules_without_implementation lookups)
  (libraries
-  manifest
   compiler_bug
   path
   well_known

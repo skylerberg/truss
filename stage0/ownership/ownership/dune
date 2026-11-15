@@ -2,7 +2,6 @@
  (name ownership)
  (modules_without_implementation lookups)
  (libraries
-  compiler_bug
   path
   well_known
   types
@@ -12,5 +11,4 @@
   interface
   resolve
   syntax
-  diagnostic
-  source))
+  diagnostic))

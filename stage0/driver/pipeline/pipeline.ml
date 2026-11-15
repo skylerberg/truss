@@ -1422,7 +1422,7 @@ let compute_part pipeline (part : Part.t) =
           Some
             (Interface.Grants.grant
                (interface_lookups pipeline note ~is_checked:false)
-               ~package entry))
+               ~package entry.capabilities))
   | Signature_check key ->
       into (keyed state.signature_checks key) (fun note ->
           read pipeline note (Interface key);
