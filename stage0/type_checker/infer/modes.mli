@@ -1,6 +1,3 @@
-(** A call's lent places, which places may be mutated, and whether each argument is passed in the
-    mode its parameter takes. *)
-
 open State
 
 val note_lending : state -> Syntax.expression -> Types.result -> unit

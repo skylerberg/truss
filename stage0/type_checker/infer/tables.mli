@@ -25,8 +25,7 @@ type callee =
 type argument = {
   expression : Syntax.id;
   mode_keyword : Core.mode_keyword option;
-      (** The argument's [mut] or [own], where it is written with one. *)
-  parameter_index : int;
+  core_argument_index : int;
   mode : Types.mode;
 }
 
@@ -54,7 +53,7 @@ type literal = Integer_value of Z.t | Float_value of float
 type loop =
   | Integer_range of { element : Types.ty; inclusive : bool }
   | Elements of { count : call; element : call; lends : Types.mode }
-  | Pulled of { cursor : Types.ty; made_by : call option; remaining : call option }
+  | Pulled of { cursor : Types.ty; cursor_call : call option; remaining : call option }
 
 type pattern =
   | Variant_pattern of { type_ : Types.ty; variant : string }

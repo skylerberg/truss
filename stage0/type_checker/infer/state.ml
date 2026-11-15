@@ -1,7 +1,3 @@
-(* The state of the type checker while it checks one definition, and the
-   helpers that every part of the checker uses: reporting diagnostics,
-   recording types, unification, and places. *)
-
 open Syntax
 module Names = Resolve.Names
 module Environment = Interface.Environment
@@ -10,95 +6,45 @@ module Lower = Interface.Lower
 
 type local = { type_ : Types.ty; is_var : bool; mode : Types.mode }
 
-(* The context of the code that is being checked. *)
 type env = {
   output : Types.result option;
-      (** The result of the enclosing function or lambda. A [return], and the part a lending method
-          lends, are checked against it. *)
   specification : bool;
-      (** The code is a specification: a contract, a [proof] block, or the body of a function for
-          specifications only. *)
-  self : Types.ty option;  (** The type of [self]. *)
-  self_mode : Types.mode;  (** The mode of [self]. Only [mut self] can be mutated. *)
+  self : Types.ty option;
+  self_mode : Types.mode;
   loop_element : Types.ty option;
-      (** In the clauses of a [for] loop: the type of the loop's elements. [yielded] is a sequence
-          of them. *)
   compile_time : bool;
-      (** The expression is a constant expression, which the compiler evaluates: the value of a
-          constant, or a default. *)
   in_quantifier : bool;
-      (** In a quantifier's body, which the prover reads as a formula in code as in a specification.
-      *)
 }
 
-(* Whether an expression runs in the compiled program. A specification
-   does not run, and the compiler evaluates a constant expression. Only
-   code that runs moves values, so only there must a value be owned. *)
 let runs (env : env) = not (env.specification || env.compile_time)
 
-(* A constraint between two capability sets: every capability in [subset]
-   must be in [superset]. Either set may contain capability variables.
-
-   Constraints are collected while a definition is checked and solved at
-   the end. Solving grows each variable in a
-   [superset] until the constraint holds. If a constraint still fails after
-   solving (because its [superset] has no variable to grow), the solver
-   calls [report_missing] with the capabilities that [superset] lacks. *)
 type subset_constraint = {
   subset : Types.capability_set;
   superset : Types.capability_set;
   report_missing : Types.capability_set -> unit;
 }
 
-(* The state of the check of one statement. Types are inferred one
-   statement at a time. *)
 type frame = {
-  start : int;  (** The first inference variable created for the statement. *)
-  mutable nodes : int list;  (** The expressions whose types were recorded for the statement. *)
+  first_variable : int;
+  mutable recorded_expressions : int list;
   mutable bindings : int list;
-      (** The locals whose types the statement finishes: those it declares, and those of inner
-          statements whose types were not solved there. *)
-  mutable declared : int list;  (** The locals that the statement itself declares. *)
-  mutable pending : (unit -> bool) list;
-      (** Deferred checks that need a type that is not inferred yet. Each returns whether it is
-          done. *)
-  mutable unmet : (Types.ty * Types.trait_reference) list;
-      (** The trait bounds already reported as not satisfied, with their types, so that each is
-          reported once per statement. *)
+  mutable declared : int list;
+  mutable deferred_checks : (unit -> bool) list;
+  mutable reported_unmet_bounds : (Types.ty * Types.trait_reference) list;
   frame_specification : bool;
   span : span;
 }
 
-(* A literal type in the type of a local that the local's declaration left
-   undecided, as in [let limit = 10]. It is undecided past the declaration,
-   so a later statement may decide it, as in [count < limit] with a [UInt8]
-   count. The enclosing statement of the declaration owns it, and gives it
-   its default type if no statement in between decides it. *)
-type undecided_literal = {
-  index : int;  (** The index of the [Literal] variable. *)
-  kind : Types.literal_kind;
-  local : id;
-  owner : frame;
-}
+type undecided_literal = { index : int; kind : Types.literal_kind; local : id; owner : frame }
 
-(* How a statement after a local's declaration decided the literal type of
-   the local. *)
 type literal_decision = {
   decided_local : id;
   decided_type : Types.ty;
-  decided_at : span;  (** The statement that decided it. *)
+  decided_at : span;
   is_default : bool;
-      (** A method call on the local gave it its default type, because method lookup needs the type
-          of the receiver. *)
   mutable decision_report : Diagnostic.reported option;
-      (** The mismatch reported for the decision. Every later mismatch of the local reuses it. *)
 }
 
-(* The core form under construction. Each array is indexed by syntax id
-   and holds a function that builds the core node for that syntax node.
-   The checker registers a builder when it checks the syntax node. The
-   builders run after the whole definition is checked, when every type is
-   final. *)
 type form = {
   expression_builders : (unit -> Core.expression) option array;
   statement_builders : (unit -> Core.statement) option array;
@@ -107,10 +53,6 @@ type form = {
   mutable next_node_id : int;
   mutable next_synthetic_local : int;
   mutable tables_with_holes : Tables.t option;
-      (** Set while the builders run, if a type in the definition is a hole. The core form has no
-          hole type: a [todo] whose type is not inferred has the type [Never] there. So while the
-          builders run, [state.tables] is a copy in which every hole is [Never], and this field
-          holds the tables as the checker recorded them. *)
 }
 
 type state = {
@@ -120,43 +62,27 @@ type state = {
   definition : definition;
   resolved : Resolve.resolved;
   context : Lower.context;
-  text : string;  (** The definition's source text, for fixes. *)
+  text : string;
   mutable tables : Tables.t;
   form : form;
   mutable diagnostics : Syntax.diagnostic list;
   unifier : Unify.t;
   locals : (id, local) Hashtbl.t;
   mutable law_parameters : (string * Types.ty) list;
-      (** In a law's proof, the law's parameters, with [Self] and the trait's parameters replaced by
-          the proof's type and trait arguments. *)
   mutable frames : frame list;
-  mutable references : id list;  (** Locals read, newest first, for lambdas' captures. *)
+  mutable locals_read : id list;
   mutable receiver_modes : (id * Types.mode) list;
-      (** Method calls whose receiver a mode keyword applies to. *)
   yielded : (id, Types.mode) Hashtbl.t;
-      (** The part that a lending method lends, and each field of a constructor that is in this
-          table, with the mode the method lends with. A field in this table that is a place is lent
-          to the lent value instead of moved into it. *)
   lent_tails : (id, unit) Hashtbl.t;
-      (** In a lending method, the expressions whose value is the part the method lends: the tail
-          expressions of its body and of the values of its [return]s, which have not been checked
-          yet. *)
   binding_spans : (id, span) Hashtbl.t;
-      (** Where each name of the definition is, for lambdas' captures. *)
-  mutable lambdas : span list;  (** The lambdas being checked, innermost first. *)
+  mutable lambdas : span list;
   mutable unsolved : Diagnostic.reported option;
-      (** The report of the first statement whose types could not be inferred. *)
   mutable capability_constraints : subset_constraint list;
   mutable capability_solution : (int, Types.capability_set) Hashtbl.t option;
-      (** The set each capability variable was solved to. [None] until the constraints are solved. A
-          variable with no entry is the empty set. *)
-  mutable evidence : Path.package list;  (** The packages whose [impl]s met a bound here. *)
+  mutable evidence_packages : Path.package list;
   mutable undecided : undecided_literal list;
   decisions : (int, literal_decision) Hashtbl.t;
-      (** Keyed by the [index] of the [undecided_literal]. *)
   annotatable : (id, unit) Hashtbl.t;
-      (** The locals that an unannotated [let] or [for] declares by a plain name, where a fix can
-          add a type after the name. *)
 }
 
 let reported state ?notes ?(fixes = []) code (span : span) message =
@@ -165,11 +91,6 @@ let reported state ?notes ?(fixes = []) code (span : span) message =
   Diagnostic.reported diagnostic
 
 let report state ?fixes code span message = ignore (reported state ?fixes code span message)
-
-(* Whether the code is read as a formula: a specification, a proof, the
-   body of a function for specifications only, or a quantifier's body. A
-   formula states a fact, so it holds no loop, [var], or early exit, and
-   mutates nothing, which would have no meaning in the prover's logic. *)
 let is_formula env = env.specification || env.in_quantifier
 
 let reject_in_formula state env span what =
@@ -180,13 +101,7 @@ let reject_in_formula state env span what =
           the prover reads as formulas: they are built from `let`, `if`, `match`, and calls."
          what)
 
-(* Raises a compiler bug. Used where an earlier stage guarantees that a
-   case cannot happen. *)
 let bug format = Compiler_bug.bug ~stage:"Infer" format
-
-(* Reports a diagnostic and returns the error type that carries the
-   report. Every operation on an error type is accepted, so one mistake is
-   reported once. *)
 let error state ?fixes code span message = Types.Error (reported state ?fixes code span message)
 
 let source state (span : span) =
@@ -199,14 +114,9 @@ let fresh_node_id state =
   state.form.next_node_id <- id + 1;
   id
 
-(* A core expression that desugaring introduces. It has no syntax node, so
-   the caller supplies its origin and type. *)
 let synthetic_expression state ~origin type_ kind : Core.expression =
   { id = fresh_node_id state; origin; type_; kind }
 
-(* Registers the builder for an expression's core node. [kind] computes
-   the node's kind. The node's type is the type the checker recorded for
-   the expression. *)
 let register_expression state (value : expression) kind =
   state.form.expression_builders.(value.id) <-
     Some
@@ -216,46 +126,20 @@ let register_expression state (value : expression) kind =
         | Some type_ -> { Core.id; origin = value.id; type_; kind = kind () }
         | None -> bug "`%s` has a node and no type" (source state value.span))
 
-(* Holes
-
-   A [todo] with no expected type has a hole type, and so does everything
-   computed from it. The checker accepts any operation on a hole without
-   resolving it. Evaluating a hole never returns, because the [todo] it
-   comes from stops the program. The core form uses that:
-
-   - a hole type is [Never];
-   - a use of a local whose type is a hole is a [Todo];
-   - a pattern that matches a hole is a [Wildcard];
-   - an expression with an operand whose type is a hole is a block that
-     evaluates the operands in order and ends in a [Todo];
-   - a [for] loop over a hole, or an assignment to one, only evaluates the
-     hole.
-
-   So the form holds no operation that the checker did not resolve. *)
-
-(* Whether the checker recorded a hole as the type of an entry of one of
-   its tables. *)
 let was_hole state (table : Tables.t -> Types.ty option array) (id : id) =
   match state.form.tables_with_holes with
   | Some tables -> (table tables).(id) = Some Types.Hole
   | None -> false
 
-(* The sub-expressions that an expression evaluates before it does
-   anything else. A part that has no core node of its own, such as the
-   [receiver.name] of a method call or the range of a slice, is replaced
-   by its own operands. *)
 let rec operands state (value : expression) : expression list =
   let checked (part : expression) =
     if Option.is_some state.form.expression_builders.(part.id) then [ part ]
     else operands state part
   in
   match value.kind with
-  (* The guards and bodies run after the patterns bind their names. *)
   | Match { scrutinees; _ } -> List.concat_map checked scrutinees
   | Quantified { binder = Binder_in (_, collection); _ } -> checked collection
   | Quantified { binder = Binder_type _; _ } -> []
-  (* A branch runs only if the condition holds, and the condition is a
-     [Bool]. An alias evaluates nothing itself. *)
   | If _ | Parenthesized _ | Mode _ -> []
   | _ ->
       let checked_parts = ref [] in
@@ -274,8 +158,6 @@ let rec build_expression state (value : expression) : Core.expression =
   then begin
     let evaluate (operand : expression) : Core.statement option =
       match operand.kind with
-      (* Creating a closure has no effect, and the checker did not resolve
-         the parameters of a lambda that is passed to a hole. *)
       | Lambda _ -> None
       | _ ->
           let node = build_expression state operand in
@@ -339,8 +221,6 @@ let build_statement state (written : statement) : Core.statement =
       | Some build -> build ()
       | None -> bug "`%s` has no node in the core form" (source state written.span))
 
-(* Registers the builder for a pattern's core node. The node's type is
-   the type of the value the pattern matches. *)
 let register_pattern state (written : pattern) kind =
   state.form.pattern_builders.(written.id) <-
     Some
@@ -358,16 +238,9 @@ let build_pattern state (written : pattern) : Core.pattern =
     | Some build -> build ()
     | None -> bug "`%s` has no node in the core form" (source state written.span)
 
-(* Makes an expression's core node the core node of [inner]. Used for
-   parentheses and for a mode marker such as [mut value]. *)
 let alias_expression state (value : expression) (inner : expression) =
   state.form.expression_builders.(value.id) <- Some (fun () -> build_expression state inner)
 
-(* Records in [state.lent_tails] the tail expressions of [value]: the
-   expressions whose value is the value of [value]. The value of an [if], a
-   [match], or a block is the value of one of its branches, so its tails
-   are theirs. A [return] checks its own value, and a [todo] or an
-   [unreachable] has none. *)
 let rec mark_lent_tails state (value : expression) =
   match value.kind with
   | Parenthesized inner -> mark_lent_tails state inner
@@ -390,9 +263,6 @@ and mark_lent_block state (body : block) =
   | { kind = Expression value; _ } :: _ -> mark_lent_tails state value
   | _ -> ()
 
-(* The place a core expression denotes. A [Use] denotes the place it
-   reads. Any other expression is a value, which is stored in a
-   [Temporary]. *)
 let place_of (node : Core.expression) : Core.place =
   match node.kind with Use place -> place | _ -> Temporary node
 
@@ -408,19 +278,19 @@ let current_frame state = match state.frames with frame :: _ -> Some frame | [] 
 
 let record state (value : expression) type_ =
   state.tables.types.(value.id) <- Some type_;
-  match current_frame state with Some frame -> frame.nodes <- value.id :: frame.nodes | None -> ()
+  match current_frame state with
+  | Some frame -> frame.recorded_expressions <- value.id :: frame.recorded_expressions
+  | None -> ()
 
 let defer state check =
   match current_frame state with
-  | Some frame -> if not (check ()) then frame.pending <- check :: frame.pending
+  | Some frame -> if not (check ()) then frame.deferred_checks <- check :: frame.deferred_checks
   | None -> ignore (check ())
 
 let resolve state type_ = Unify.resolve state.unifier type_
 let zonk state type_ = Unify.zonk state.unifier type_
 let fresh state = Unify.fresh state.unifier
 
-(* Whether a type is a built-in integer type, or a type parameter that an
-   integer trait bounds, which only those types implement. *)
 let integer_type state (type_ : Types.ty) =
   Types.is_integer_type type_
   ||
@@ -428,8 +298,6 @@ let integer_type state (type_ : Types.ty) =
   | Parameter _ | Projection _ -> state.unifier.integer_range type_ <> None
   | _ -> false
 
-(* Whether a type is a signed integer type, a built-in one or a parameter
-   that [SignedInteger] bounds. *)
 let signed_type state (type_ : Types.ty) =
   Types.is_signed type_
   ||
@@ -443,9 +311,6 @@ let bounds state parameter =
 
 let normalize state type_ = Impls.normalize state.database ~bounds:(bounds state) (zonk state type_)
 
-(* The error type for an inference variable that no statement solved. The
-   first unsolved variable is reported, and later ones reuse that report,
-   so an unsolved type is never stored without a diagnostic. *)
 let unsolved state =
   match state.unsolved with
   | Some report -> Types.Error report
@@ -459,8 +324,6 @@ let unsolved state =
       state.unsolved <- Some report;
       Types.Error report
 
-(* Replaces each capability variable in a set by its solution. Returns
-   the set unchanged if the variables are not solved yet. *)
 let resolve_capabilities state (capabilities : Types.capability_set) =
   match state.capability_solution with
   | Some solution when Types.has_capability_variable capabilities ->
@@ -473,10 +336,6 @@ let resolve_capabilities state (capabilities : Types.capability_set) =
         capabilities
   | _ -> capabilities
 
-(* The final form of a type: inference variables replaced by their
-   solutions, projections normalized, and capability variables replaced
-   by their solutions. An unsolved inference variable becomes an error.
-   While the core form is built, a hole becomes [Never]. *)
 let rec final_type state type_ =
   Types.map ~capabilities:(final_capabilities state)
     (function
@@ -485,9 +344,6 @@ let rec final_type state type_ =
       | _ -> None)
     (normalize state type_)
 
-(* The final form of a set of capabilities: each associated capability set
-   replaced by the capabilities that the [impl] of its type defines, and
-   each capability variable replaced by its solution. *)
 and final_capabilities state capabilities =
   resolve_capabilities state
     (Impls.normalize_capabilities state.database ~bounds:(bounds state)
@@ -506,26 +362,17 @@ let final_argument state = function
       | value -> Types.Value value)
   | Types.Capabilities capabilities -> Types.Capabilities (final_capabilities state capabilities)
 
-(* Unifies two types. Projections are normalized first, so [Tables.Key] unifies
-   with the type that the [impl] assigns to [Key]. *)
 let unify state left right =
   let normalize type_ =
     Impls.normalize state.database ~bounds:(bounds state) (Unify.zonk state.unifier type_)
   in
   Unify.unify state.unifier (normalize left) (normalize right)
 
-(* Unifies a call's result type with the expected type before the call's
-   arguments are checked, so that the type arguments inferred here are known
-   while the arguments are checked. Capability sets are excluded: a function
-   value may be widened to a type with more [uses], and [convert] compares
-   the capability sets when it checks the value. *)
 let unify_as_hint state actual expected =
   let deferred_capability_equalities = state.unifier.deferred_capability_equalities in
   ignore (unify state actual expected);
   state.unifier.deferred_capability_equalities <- deferred_capability_equalities
 
-(* Normalizes the type arguments and the associated types of a trait
-   reference, as [normalize] does for a type. *)
 let normalize_trait state (trait : Types.trait_reference) : Types.trait_reference =
   {
     trait with
@@ -544,9 +391,6 @@ let copyable state type_ = Impls.copyable state.database ~bounds:(bounds state) 
 let plain state type_ = Impls.plain state.database ~bounds:(bounds state) (zonk state type_)
 let is_view state type_ = Impls.is_view state.database ~bounds:(bounds state) (zonk state type_)
 
-(* The associated type [name] of a trait for a type. If the [impl] does
-   not define it, the [impl] already has a diagnostic, and this returns an
-   error type that carries that report. *)
 let associated state type_ (trait : Types.trait_reference) name ~(at : span) =
   let type_ = normalize state type_ and trait = normalize_trait state trait in
   match Impls.associated_type state.database ~bounds:(bounds state) type_ trait name with
@@ -576,8 +420,6 @@ let trait_reference ?(arguments = []) trait : Types.trait_reference =
 let string_type = Types.Named { path = Well_known.path String; arguments = [] }
 let undecided_type (undecided : undecided_literal) = Types.Literal (undecided.kind, undecided.index)
 
-(* Records the decision of each undecided literal that a statement, or a
-   method call at [at], has decided since the last check. *)
 let decide_literals state ~(at : span) ~is_default =
   state.undecided <-
     List.filter
@@ -596,16 +438,7 @@ let decide_literals state ~(at : span) ~is_default =
             false)
       state.undecided
 
-(* Finishes the inference of a statement. An unsolved literal variable
-   takes its default type, except one in the type of a local that the
-   statement declares: that one is left for later statements to decide, and
-   the enclosing statement gives it its default type. Any other unsolved
-   variable that the statement created is an error. A type that mentions a
-   variable of an enclosing statement is left for that statement. *)
 let settle state frame =
-  (* Unification deferred these equalities between capability sets because
-     one side had a capability variable. An equality is two subset
-     constraints. *)
   List.iter
     (fun (left, right) ->
       let report_missing _ =
@@ -627,17 +460,16 @@ let settle state frame =
       let left = List.filter (fun check -> not (check ())) pending in
       if List.length left < List.length pending then loop left else left
     in
-    frame.pending <- loop frame.pending
+    frame.deferred_checks <- loop frame.deferred_checks
   in
   run_pending ();
   let parent = match state.frames with _ :: parent :: _ -> Some parent | _ -> None in
   decide_literals state ~at:frame.span ~is_default:false;
   let types_of ids table = List.filter_map (fun id -> table.(id)) ids in
   let all_types () =
-    types_of frame.nodes state.tables.types @ types_of frame.bindings state.tables.local_types
+    types_of frame.recorded_expressions state.tables.types
+    @ types_of frame.bindings state.tables.local_types
   in
-  (* The type arguments of each call are checked too. A type argument that
-     no parameter or result mentions is in no expression's type. *)
   let call_arguments () =
     List.concat_map
       (fun id ->
@@ -653,16 +485,12 @@ let settle state frame =
             } ->
             type_arguments
         | _ -> [])
-      frame.nodes
+      frame.recorded_expressions
   in
   let unknowns () =
     List.concat_map (Unify.unknowns state.unifier) (all_types ())
     @ List.concat_map (Unify.argument_unknowns state.unifier) (call_arguments ())
   in
-  (* A literal variable in the type of a local that the statement declares
-     stays undecided, for a later statement to decide. A specification
-     defaults a literal to [Integer] and code to [Int64], so a literal stays
-     undecided only within one or the other. *)
   (match parent with
   | Some parent when parent.frame_specification = frame.frame_specification ->
       List.iter
@@ -671,7 +499,7 @@ let settle state frame =
           | Some type_ ->
               List.iter
                 (function
-                  | Unify.Unknown_literal (kind, index) when index >= frame.start ->
+                  | Unify.Unknown_literal (kind, index) when index >= frame.first_variable ->
                       if not frame.frame_specification then
                         Hashtbl.replace state.unifier.code_literals index ();
                       state.undecided <- { index; kind; local; owner = parent } :: state.undecided
@@ -680,7 +508,6 @@ let settle state frame =
           | None -> ())
         frame.declared
   | _ -> ());
-  (* The literal variables that an enclosing statement owns. *)
   let undecided =
     List.filter_map
       (fun (undecided : undecided_literal) ->
@@ -692,12 +519,11 @@ let settle state frame =
       state.undecided
   in
   let is_undecided index = List.mem index undecided in
-  (* Any other unsolved literal variable of the statement takes its default
-     type: [Int64] or [Float64], or [Integer] in a specification. *)
   List.iter
     (function
-      | Unify.Unknown_literal (kind, index) when index >= frame.start && not (is_undecided index) ->
-          Hashtbl.replace state.unifier.types index
+      | Unify.Unknown_literal (kind, index)
+        when index >= frame.first_variable && not (is_undecided index) ->
+          Hashtbl.replace state.unifier.type_solutions index
             (match kind with
             | Integer_literal ->
                 if frame.frame_specification then Types.Integer else Types.builtin Int64
@@ -708,11 +534,10 @@ let settle state frame =
   let unsolved =
     List.filter
       (function
-        | Unify.Unknown_type index | Unknown_value index -> index >= frame.start
-        | Unknown_literal (_, index) -> index >= frame.start && not (is_undecided index))
+        | Unify.Unknown_type index | Unknown_value index -> index >= frame.first_variable
+        | Unknown_literal (_, index) -> index >= frame.first_variable && not (is_undecided index))
       (unknowns ())
   in
-  (* The literals that the statement owns now have their types. *)
   state.undecided <-
     List.filter (fun (undecided : undecided_literal) -> undecided.owner != frame) state.undecided;
   if unsolved <> [] then begin
@@ -722,23 +547,17 @@ let settle state frame =
          the call type arguments, such as `var names: List[String] = []`."
     in
     if Option.is_none state.unsolved then state.unsolved <- Some report;
-    (* Each unsolved variable is bound to the error type, so it is reported
-       once. *)
     List.iter
       (function
         | Unify.Unknown_type index | Unknown_literal (_, index) ->
-            Hashtbl.replace state.unifier.types index (Types.Error report)
+            Hashtbl.replace state.unifier.type_solutions index (Types.Error report)
         | Unknown_value _ -> ())
       unsolved;
-    (* The deferred checks wait on types that are now errors, so they are
-       dropped. *)
-    frame.pending <- []
+    frame.deferred_checks <- []
   end;
-  (* A type that mentions a variable of an enclosing statement, or an
-     undecided literal, is finished again by the enclosing statement. *)
   let is_open = function
-    | Unify.Unknown_type index | Unknown_value index -> index < frame.start
-    | Unknown_literal (_, index) -> index < frame.start || is_undecided index
+    | Unify.Unknown_type index | Unknown_value index -> index < frame.first_variable
+    | Unknown_literal (_, index) -> index < frame.first_variable || is_undecided index
   in
   let finish table ids keep =
     List.iter
@@ -752,20 +571,23 @@ let settle state frame =
         | None -> ())
       ids
   in
-  finish state.tables.types frame.nodes (fun parent id -> parent.nodes <- id :: parent.nodes);
+  finish state.tables.types frame.recorded_expressions (fun parent id ->
+      parent.recorded_expressions <- id :: parent.recorded_expressions);
   finish state.tables.local_types frame.bindings (fun parent id ->
       parent.bindings <- id :: parent.bindings);
-  match parent with Some parent -> parent.pending <- frame.pending @ parent.pending | None -> ()
+  match parent with
+  | Some parent -> parent.deferred_checks <- frame.deferred_checks @ parent.deferred_checks
+  | None -> ()
 
 let in_statement state env (span : span) body =
   let frame =
     {
-      start = state.unifier.next + 1;
-      nodes = [];
+      first_variable = state.unifier.next + 1;
+      recorded_expressions = [];
       bindings = [];
       declared = [];
-      pending = [];
-      unmet = [];
+      deferred_checks = [];
+      reported_unmet_bounds = [];
       frame_specification = env.specification;
       span;
     }
@@ -776,8 +598,6 @@ let in_statement state env (span : span) body =
   state.frames <- List.tl state.frames;
   result
 
-(* Whether a statement diverges: its expression has type [Never], or it
-   is a [while true] loop with no [break]. *)
 let rec statement_diverges state (written : statement) =
   match written.kind with
   | Expression value -> (
@@ -785,12 +605,9 @@ let rec statement_diverges state (written : statement) =
       | Some type_ -> resolve state type_ = Types.Never
       | None -> false)
   | While { condition = { kind = True; _ }; body; _ } -> not (Syntax_walk.contains_break body)
-  (* A [parallel] or [concurrent] block ends only when every branch does. *)
   | Parallel body | Concurrent body -> List.exists (statement_diverges state) body.statements
   | _ -> false
 
-(* Builds the core node of a block. The last expression is the block's
-   value if the checker checked it as a value and not as a statement. *)
 let build_block state (written : block) : Core.block =
   let rec build_statements (statements : statement list) =
     match statements with
@@ -817,11 +634,6 @@ let declare state (name : name) type_ ~is_var ~mode =
 
 let target state (name : name) = state.resolved.names.(name.id)
 
-(* A literal used as a receiver takes its default type, as in
-   [5.wrapping_add(3)], because the method lookup needs the receiver's
-   type. So does a local whose type is an undecided literal, and the
-   method call at [at] decides it. The literals that the statement decided
-   before the call are recorded first, as decided by their uses. *)
 let default_literal state ~at type_ =
   let decide default =
     (match current_frame state with
@@ -836,10 +648,8 @@ let default_literal state ~at type_ =
   | Types.Literal (Float_literal, _) -> decide (Types.builtin Float64)
   | _ -> type_
 
-(* The referent of a name expression, as name resolution decided. *)
 let head state (value : expression) = Resolve.head state.resolved value
 
-(* A member name that starts with a capital letter is a variant. *)
 let names_variant (member : name) =
   member.text <> "" && member.text.[0] >= 'A' && member.text.[0] <= 'Z'
 
@@ -851,16 +661,11 @@ let literal_decision state type_ =
     | Literal (_, index) | Variable index -> (
         match Hashtbl.find_opt state.decisions index with
         | Some decision -> Some decision
-        | None -> Option.bind (Hashtbl.find_opt state.unifier.types index) follow)
+        | None -> Option.bind (Hashtbl.find_opt state.unifier.type_solutions index) follow)
     | _ -> None
   in
   follow type_
 
-(* Reports a mismatch. If one side, [decided], is a local whose literal type
-   an earlier statement decided, the report names that statement, because
-   the mistake is the decision rather than this use. Each later mismatch of
-   the local reuses the report, so one decision is one error. [wanted] is
-   the type that the other side needs, which a fix can give the local. *)
 let reported_mismatch state ?(fixes = []) code (span : span) ~(sides : (Types.ty * Types.ty) list)
     message =
   let other_fixes = fixes in
@@ -928,15 +733,11 @@ let mismatched state (span : span) ~expected ~actual =
 
 let mismatch state span ~expected ~actual = ignore (mismatched state span ~expected ~actual)
 
-(* Whether an expression is a constant that a type declares, such as
-   [UInt8.maximum]. *)
 let is_member_constant state (value : expression) =
   match state.tables.resolutions.(value.id) with
   | Some (Global { path = Member_constant _; _ }) -> true
   | _ -> false
 
-(* Whether an expression is a place: a local, a parameter, [self], or a
-   constant, followed by fields and indexes. *)
 let rec is_place state (value : expression) =
   match value.kind with
   | Name path -> (
@@ -954,9 +755,6 @@ let rec is_place state (value : expression) =
   | Parenthesized inner -> is_place state inner
   | _ -> false
 
-(* In an expression with a mode keyword, such as [mut config.servers.sort()], the keyword
-   applies to the receiver of the first method call whose receiver is a
-   place. Returns the id of that call. *)
 let rec call_with_mode_keyword state (value : expression) =
   match value.kind with
   | Call ({ kind = Member (base, _); _ }, _)
@@ -965,8 +763,6 @@ let rec call_with_mode_keyword state (value : expression) =
   | Member (base, _) | Bracket (base, _) | Try base -> call_with_mode_keyword state base
   | _ -> None
 
-(* Checks the target of a [calls] clause: a function-typed parameter, a
-   capability, or a method of a capability. *)
 let check_resource state (resource : Syntax.resource) =
   let capability (path : path_type) (method_ : name option) =
     let shown = Names.spell_path path.path in
@@ -1008,10 +804,6 @@ let check_resource state (resource : Syntax.resource) =
                 capability, and `%s` is neither."
                name.text))
 
-(* A slice expression, [base[start..stop]], of the type [viewed]. The node holds the call that
-   creates the view: the base type's [slice_range], or its [slice_from]
-   when the stop is missing, so that the base appears once. A missing
-   start is [0], and an inclusive stop is [stop + 1]. *)
 let slice state ~origin ~viewed (base : Core.place) ~start ~stop ~inclusive : Core.kind =
   let make = synthetic_expression state ~origin in
   let usize = Types.builtin USize in
@@ -1049,30 +841,8 @@ let slice state ~origin ~viewed (base : Core.place) ~start ~stop ~inclusive : Co
 
 type conversion = From_never | Owned_to_view | Function_widening | To_integer | From_integer
 
-(* Checks a value of type [found] where [expected] is expected, and wraps
-   the expression's core node in the implicit conversion, if one applies.
-   This is the only place where a type converts to another:
-
-   - [Never] converts to any type.
-   - A function value converts to a function type with more [uses] or
-     weaker costs (widening). The expected type may lack a capability that
-     the value uses only if the expected type has a capability variable,
-     which the capability check solves. If the constants in the two types
-     do not show that the costs are weaker, the prover must show it: at the
-     call, for an argument, and as an obligation on [expression] otherwise.
-   - An argument that is an owned collection converts to its view: a list
-     passed to a [mut] parameter to a [Slice] of all of it, which the
-     callee may mutate, and otherwise to a call of the collection's
-     [slice]. [argument] is the parameter's mode. In a
-     specification, an argument that is a built-in integer converts to
-     [Integer], and an [Integer] converts to a built-in integer that it
-     fits.
-
-   In every other case, [actual] must unify with [expected]. *)
 let convert state env ?argument ?expression (span : span) ~actual ~expected =
   let is_argument = Option.is_some argument in
-  (* Wraps the expression's core node in the conversion. The wrapped node
-     has the expected type. *)
   let converted (conversion : conversion option) =
     match (conversion, expression) with
     | Some conversion, Some id ->
@@ -1088,14 +858,10 @@ let convert state env ?argument ?expression (span : span) ~actual ~expected =
               in
               match conversion with
               | From_never -> inner
-              (* If the value's type equals the expected type after the
-                 capability variables are solved, there is no widening. *)
               | Function_widening ->
                   if Types.equal inner.type_ expected then inner else convert Widen
               | To_integer -> convert To_integer
               | From_integer -> convert From_integer
-              (* An owned list passed [mut] converts to a mutable view of
-                 all of it, as [mut items[..]] does. *)
               | Owned_to_view when argument = Some Types.Mut && Types.is_well_known List inner.type_
                 ->
                   let base : Core.place =
@@ -1104,8 +870,6 @@ let convert state env ?argument ?expression (span : span) ~actual ~expected =
                   synthetic_expression state ~origin:id expected
                     (slice state ~origin:id ~viewed:expected base ~start:None ~stop:None
                        ~inclusive:false)
-              (* Otherwise an owned collection converts to its view by a
-                 call of its [slice], which borrows the collection. *)
               | Owned_to_view -> (
                   match inner.type_ with
                   | Types.Named { path; arguments } ->
@@ -1160,19 +924,13 @@ let convert state env ?argument ?expression (span : span) ~actual ~expected =
       Some Owned_to_view
   | Types.Integer, _, Some _ when is_argument && env.specification && integer_type state wanted ->
       Some From_integer
-  (* A local of code whose literal type is undecided converts to [Integer]
-     as a built-in integer does. *)
   | Types.Literal (Integer_literal, index), Types.Integer, _
     when env.specification && Hashtbl.mem state.unifier.code_literals index ->
       Some To_integer
-  (* In a specification, a built-in integer converts to [Integer]. *)
   | _, Types.Integer, _ when env.specification && integer_type state actual_type -> Some To_integer
   | Types.Function actual_function, Types.Function wanted_function, _
     when not (Types.same_clauses actual_function wanted_function) ->
       let unlisted = Types.capability_difference actual_function.uses wanted_function.uses in
-      (* If either set is not known yet, the check waits until the
-         definition is checked: a subset constraint requires the value's
-         [uses] to be within the expected type's. *)
       let unknown =
         Types.capabilities_unsolved actual_function.uses
         || Types.capabilities_unsolved wanted_function.uses

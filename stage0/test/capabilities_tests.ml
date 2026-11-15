@@ -398,6 +398,8 @@ let () =
         (later ^ Fixtures.Capabilities.calls_result_must_fit_the_function_type_that_it_is)
         "types.mismatch";
       fine (later ^ Fixtures.Capabilities.calls_result_must_fit_the_function_type_that_it_is_2));
+  test "a call's result may widen to more `uses` without requiring them at the call" (fun () ->
+      fine (ticks ^ Fixtures.Capabilities.calls_result_may_widen_to_more_uses_without_requiring));
   test "a variable that is assigned a second function has the capabilities of both" (fun () ->
       one_diagnostic
         (later ^ Fixtures.Capabilities.variable_that_is_assigned_a_second_function_has)

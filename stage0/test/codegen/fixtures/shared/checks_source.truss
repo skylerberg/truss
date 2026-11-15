@@ -2,6 +2,8 @@ use standard::intrinsic
 
 capability Ticker {
   fn next() -> Int64
+  fn key_in_a_lambda() -> UInt64
+  fn key_in_a_parallel_branch() -> UInt64
 }
 
 type Clockwork(ticks: intrinsic::Shared[Int64])
@@ -12,6 +14,18 @@ impl Ticker for Clockwork {
       ticks += by
       ticks
     })
+  }
+
+  fn key_in_a_lambda(self) -> UInt64 {
+    let key: fn() -> UInt64 = fn() { intrinsic::shared_key(self.ticks) }
+    key()
+  }
+
+  fn key_in_a_parallel_branch(self) -> UInt64 {
+    parallel {
+      let key = intrinsic::shared_key(self.ticks)
+    }
+    key
   }
 }
 

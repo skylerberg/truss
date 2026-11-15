@@ -1,8 +1,5 @@
 module Names = Resolve.Names
 
-(* The capability a grant's entry names: a prelude capability by its name,
-   and any other by its full path, which must be one the package granting
-   it can see. *)
 let capability database ~package written : Path.t option =
   let visible_capability (module_ : Path.module_) name =
     match Query.demand database Names.find (module_, name) with
@@ -20,7 +17,6 @@ let capability database ~package written : Path.t option =
       | None -> None)
   | Some [] | None -> None
 
-(* A capability as a grant writes it. *)
 let written (path : Path.t) =
   match path with
   | Top { module_; name } when Resolve.Prelude.find_type name = Some module_ -> name

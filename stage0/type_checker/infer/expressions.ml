@@ -1,21 +1,3 @@
-(* The type checking algorithm for bodies: bidirectional, one statement at a
-   time.
-
-   An expression is either checked against an expected type, which comes
-   from an annotation, a parameter, or an operator, or its type is inferred.
-   A type that is not known yet is an inference variable. At the end of a
-   statement, unsolved literal variables take their default types, every
-   other variable that the statement created must be solved, and the
-   recorded types are final. The exception is a literal variable in the type
-   of a local that the statement declares: later statements may decide it,
-   and the enclosing statement gives it its default type. Variables are numbered across the definition,
-   so a statement inside a lambda leaves the variables of the enclosing
-   statement for that statement to solve. *)
-
-(* The dispatch on the kind of an expression, and the checks of literals,
-   names, members, and brackets. A module that comes earlier in the build
-   calls this one through [Hooks], which this file sets. *)
-
 open Syntax
 module Names = Resolve.Names
 module Environment = Interface.Environment
@@ -39,9 +21,6 @@ let rec expression state env ?expected (value : expression) : Types.ty =
   record state value type_;
   type_
 
-(* A tail expression of a lending method: the part the method lends. A
-   place in it is lent, not moved or copied, and a part lent [mut] is
-   mutated, so an index in it uses the [mut self] overload of [at]. *)
 and lent_part state env (value : expression) : Types.ty =
   Hashtbl.remove state.lent_tails value.id;
   match env.output with
@@ -76,8 +55,6 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
       register_expression state value (fun () -> Form.numeric_literal state value.id);
       let type_ = literal_type state ~expected Float_literal in
       let significand = number.significand and exponent = number.exponent in
-      (* The literal is rounded once, from its exact decimal value, to the
-         type that the statement infers. *)
       defer state (fun () ->
           match resolve state type_ with
           | Types.Literal _ | Types.Variable _ -> false
@@ -119,9 +96,7 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
       register_expression state value (fun () -> kind);
       Types.Never
   | Self_value -> (
-      (* A lambda that reads [self] captures it. In the list of references,
-         [self] is the definition's own id. *)
-      state.references <- state.definition.id :: state.references;
+      state.locals_read <- state.definition.id :: state.locals_read;
       register_expression state value (fun () -> Use (Form.self_local state env ~origin:value.id));
       match env.self with
       | Some self -> self
@@ -155,8 +130,6 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
   | Any inner -> any_ state env ?expected value inner
   | Binary { operator; left; right; _ } -> binary state env ?expected value operator left right
   | Is { value = tested; pattern = written; _ } ->
-      (* The type of the tested value is inferred before the pattern is
-         checked, as for the scrutinees of a [match]. *)
       let tested_type =
         in_statement state env tested.span (fun () -> expression state env tested)
       in
@@ -238,7 +211,6 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
       register_expression state value (fun () ->
           match (inner, env.output) with
           | Some inner, Some (Lends (mode, _)) ->
-              (* A lending method lends the value and then returns. *)
               let returned =
                 synthetic_expression state ~origin:value.id Types.Never (Return None)
               in
@@ -279,7 +251,6 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
       block_value state env ?expected body
   | Expression_error -> Types.Error (Resolve.Parts.recovery_report value.span)
 
-(* [receiver.name] used as a value: a field, or a static member of a type. *)
 and member_value state env (value : expression) (base : expression) (member : name) =
   match static_ state base with
   | Some (Static_type type_) -> static_member state value type_ member
@@ -305,13 +276,10 @@ and member_value state env (value : expression) (base : expression) (member : na
 and bracket state env ?expected (value : expression) (base : expression) items =
   match state.resolved.brackets.(value.id) with
   | Some Type_arguments -> (
-      (* A name with type arguments, used as a value. *)
       match head state value with
       | Some resolution -> named state env value resolution
       | None -> bug "type arguments are written after an expression that is not a name")
   | Some Method_bracket -> (
-      (* Name resolution cannot tell a field from a method before the dot. A
-         field followed by brackets is an index expression. *)
       match base.kind with
       | Member (inner, member)
         when Option.is_none (static_ state inner) && is_field state env inner member ->
@@ -336,7 +304,6 @@ and is_field state env (inner : expression) (member : name) =
   | _ -> false
 
 and index state env ?expected:_ (value : expression) (base : expression) items =
-  (* An assignment through an index has already checked the collection. *)
   let base_type =
     normalize state
       (match state.tables.types.(base.id) with
@@ -345,7 +312,6 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
   in
   match items with
   | [ Item ({ kind = Range { start; stop; _ }; _ } as range) ] -> (
-      (* A slice: a view of a range of the collection. *)
       Option.iter (fun start -> check state env start (Types.builtin USize)) start;
       Option.iter (fun stop -> check state env stop (Types.builtin USize)) stop;
       record state range
@@ -385,7 +351,6 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
             | Some evidence ->
                 let associated name = associated state base_type index_trait name ~at:value.span in
                 let key_type = associated "Key" and output = associated "Output" in
-                (* The key is an argument for the parameter of [at]. *)
                 let actual = expression state env ~expected:key_type key in
                 coerce state env ~argument:Read key ~actual ~expected:key_type;
                 state.tables.calls.(value.id) <-
@@ -405,13 +370,13 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
                         [
                           {
                             expression = base.id;
-                            parameter_index = 0;
+                            core_argument_index = 0;
                             mode = Read;
                             mode_keyword = None;
                           };
                           {
                             expression = key.id;
-                            parameter_index = 1;
+                            core_argument_index = 1;
                             mode = Read;
                             mode_keyword = None;
                           };

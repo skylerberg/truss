@@ -2,11 +2,6 @@ open Syntax
 
 type part = Header | Body | Member_header of int | Member_body of int
 
-(* The spans of a definition's parts. A member's header runs from the
-   member's start to its body's start, and a member without a body is all
-   header. A trait's, an [impl]'s, or a capability's own header runs to the
-   first member it holds itself. The methods written inside it are
-   definitions of their own, and no part of it. *)
 let spans (definition : definition) =
   let split header body (whole : span) (body_span : span) =
     [ (header, Span.make whole.start body_span.start); (body, body_span) ]

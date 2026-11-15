@@ -20,8 +20,6 @@ let rec bound_closure database ?(seen = []) ~self (bound : Types.trait_reference
     in
     bound :: List.concat_map (bound_closure database ~seen:(bound :: seen) ~self) required
 
-(* The declared bounds of an associated type, for a base type: the [Key:
-   Hash] in [trait Keyed { type Key: Hash }]. *)
 let associated_bounds database ~base (trait : Types.trait_reference) name =
   match Query.demand database Environment.trait_interface trait.trait with
   | Some interface -> (
@@ -61,25 +59,17 @@ let through outer inner =
   | In_place, In_place -> In_place
   | _ -> Indirect
 
-(* The facts that a type definition gives about every instantiation of it,
-   as conditions on its type arguments. They are computed once per
-   definition. A query about [Option[Option[List[Int64]]]] instantiates
-   [Option]'s condition with its argument. It never traverses fields, so a
-   type nested in itself cannot be mistaken for a recursive type. A
-   condition is a parameter or an associated type, and it is decided where
-   the parameter's instantiation is known. *)
-type requirement = Never | Requires of Types.ty list  (** Each of the types has the property. *)
-type exposure = Always | If_any of Types.ty list  (** One of the types has the property. *)
+type requirement = Never | Requires of Types.ty list
+type exposure = Always | If_any of Types.ty list
 
 type facts = {
   copyable : requirement;
   plain : requirement;
   view : exposure;
   holds_function : exposure;
-  contains : (Types.ty * occurrence) list;  (** The types that a value contains. *)
+  contains : (Types.ty * occurrence) list;
 }
 
-(* The facts of a type with no fields. *)
 let empty =
   {
     copyable = Requires [];
@@ -103,15 +93,12 @@ let conditions_of facts = function
 let type_arguments arguments =
   List.filter_map (function Types.Type type_ -> Some type_ | _ -> None) arguments
 
-(* A definition's conditions, instantiated with the given type arguments and
-   normalized by [resolve]. *)
 let instantiate ~resolve (interface : Types.type_interface) arguments conditions =
   let substitution =
     Option.value ~default:[] (Types.substitution_of interface.type_generics arguments)
   in
   List.map (fun condition -> resolve (Types.substitute substitution condition)) conditions
 
-(* The conditions of all of some types. [None] if any of them gives [None]. *)
 let all conditions types =
   List.fold_left
     (fun collected type_ ->
@@ -120,33 +107,14 @@ let all conditions types =
       | _ -> None)
     (Some []) types
 
-(* A depth limit. No program nests types this deeply or has a condition this
-   large. Past the limit a query gets the conservative answer, which
-   terminates a query about types whose arguments grow as they contain each
-   other. *)
 let limit = 64
 
-(* The conditions under which a type has a property. For [Copyable] and
-   [Plain]: the types that must have it. For [View]: the types of which any
-   one makes the type a view. [None] if the type never has the first two, or
-   always is a view. [leaf] decides a parameter and an associated type,
-   [facts_of] gives a definition's facts, and [resolve] normalizes a
-   definition's condition for its arguments.
-
-   Computing a condition can reach a type whose answer is being computed,
-   when an associated type is that type. [in_progress] holds the types in
-   progress. A type that is reached again adds no condition: a recursive
-   type has a property unless another part of it prevents that, and is a
-   view only if another part of it is. *)
 let rec conditions database ~facts_of ~resolve ~leaf ?(in_progress = []) property (type_ : Types.ty)
     =
   let each = all (conditions database ~facts_of ~resolve ~leaf ~in_progress property) in
   match type_ with
   | Types.Error _ | Types.Hole | Types.Variable _ | Types.Never | Types.Literal _ | Types.Integer ->
       Some []
-  (* A function value may be a capturing lambda, which views its captures.
-     The type does not state whether the function captures, so every
-     function type is a view type. *)
   | Types.Function _ -> (
       match property with View | Holds_function -> None | Copyable | Plain -> Some [])
   | Types.Parameter _ | Types.Projection _ -> leaf type_
@@ -159,15 +127,11 @@ let rec conditions database ~facts_of ~resolve ~leaf ?(in_progress = []) propert
       match property with
       | Copyable -> if requires [ copyable_trait; plain_trait ] then Some [] else None
       | Plain -> None
-      (* The type does not name the type of the value that it holds, so an
-         [any] is a view type unless its trait requires [Storable]. *)
       | View -> if requires [ storable_trait ] then Some [] else None
       | Holds_function -> None)
   | Types.Named { path; arguments } -> (
       match (Intrinsic.builtin_of_path path, property) with
       | Some Storage, Plain | Some View, View | Some Handle, (Copyable | Plain) -> None
-      (* Every copy of a [Shared] refers to one value, so copying it copies
-         no value. It holds a view only if its value does. *)
       | Some Shared, Copyable -> Some []
       | Some Shared, Plain -> None
       | Some Shared, View | Some (Shared | View), Holds_function -> each (type_arguments arguments)
@@ -188,21 +152,11 @@ let rec conditions database ~facts_of ~resolve ~leaf ?(in_progress = []) propert
                        ~in_progress:(type_ :: in_progress) property)
                     (instantiate ~resolve interface arguments arguments_conditions))))
 
-type recursion = {
-  recursive : Types.ty;
-  occurrence : occurrence;  (** How the type occurs in itself. *)
-  defining : Path.t list;
-}
-
+type recursion = { recursive : Types.ty; occurrence : occurrence; defining : Path.t list }
 type contents = { contained : (Types.ty * occurrence) list; recursions : recursion list }
 
-(* [resolve] normalizes a type and gives the [impl]s whose definitions
-   replaced its associated types. *)
 let contents database ~facts_of ~resolve (type_ : Types.ty) =
   let contained = ref [] and recursions = ref [] in
-  (* [enclosing] has each named type whose arguments are being read, with
-     the occurrence in it of the type being visited and the [impl]s whose
-     definitions were read on the way. *)
   let rec visit ~enclosing occurrence (type_ : Types.ty) =
     let inside ?named ?(defining = []) step =
       visit
@@ -246,8 +200,6 @@ let contents database ~facts_of ~resolve (type_ : Types.ty) =
                     let condition, defining = resolve (Types.substitute substitution condition) in
                     inside ~named:type_ ~defining step condition)
                   (facts_of path).contains
-            (* A type without fields can hold its arguments: the specification
-               type [Sequence] holds its elements. *)
             | None, Some { shape = Todo_type | Builtin_type _ | Error_shape _; _ } ->
                 List.iter (inside Indirect) (type_arguments arguments)
             | None, _ -> ()))
@@ -266,10 +218,6 @@ let size type_ =
        type_);
   !count
 
-(* A definition's facts, derived from its shape and from the facts of its
-   field types. The definition's parameters are uninstantiated here, so each
-   parameter that a fact depends on is a condition, and so is each
-   associated type. *)
 let facts_from database ~facts_of (interface : Types.type_interface) =
   let small type_ = size type_ <= limit in
   let conditions property types =
@@ -332,11 +280,6 @@ let facts_from database ~facts_of (interface : Types.type_interface) =
                fields);
       }
 
-(* A type's group of mutually recursive types: the types that name each
-   other in their fields, including itself. Packages cannot depend on each
-   other in a cycle, so a group is within one package, and it is among the
-   types the type reaches through its fields. Each group is sorted, so every
-   member computes the same list. *)
 let group =
   Query.query ~name:"type_group" ~phase:Phases.interfaces ~show:Path.show (fun database path ->
       let package = Path.package path in
@@ -370,14 +313,6 @@ let group =
            (List.exists (Path.equal path))
            (Components.of_graph ~compare:Path.compare ~successors [ path ])))
 
-(* The facts of a group of mutually recursive types, keyed by the group's
-   first member. A recursive type is [Copyable] and [Plain] unless a part of
-   it prevents that, and is a view, or contains a type, only if a part
-   of it does. So the facts are a fixed point: the iteration starts from the
-   facts of the types without fields, and each round recomputes every
-   member's facts from the others' facts of the previous round, until none
-   changes. A round only adds conditions, and the set of possible conditions
-   is finite, so the iteration terminates. *)
 let rec group_facts =
   lazy
     (Query.query ~name:"type_group_facts" ~phase:Phases.interfaces ~saved:true ~show:Path.show
@@ -412,15 +347,9 @@ and facts_of database path =
     (Path.Map.find_opt path
        (Query.demand database (Lazy.force group_facts) (List.hd (Query.demand database group path))))
 
-(* Declared when the module is initialized, not when first read: a state
-   opened before a query is declared leaves out every result that read
-   it. *)
 let () = ignore (Lazy.force group_facts)
 let facts = Query.query ~name:"type_facts" ~phase:Phases.interfaces ~show:Path.show facts_of
 
-(* Whether the base of an associated type is a generic parameter or a type
-   that is not inferred yet, so that the projection cannot be normalized
-   here. *)
 let rec is_open = function
   | Types.Parameter _ | Types.Variable _ | Types.Hole | Types.Error _ -> true
   | Types.Projection { base; _ } -> is_open base
@@ -434,8 +363,6 @@ let has database ~bounds ~normalize property type_ =
       | Copyable -> bounded copyable_trait || bounded plain_trait
       | Plain -> bounded plain_trait
       | View -> is_open type_
-      (* A parameter is a type that the code cannot name, so no function
-         value can be stored where it is expected. *)
       | Holds_function -> true
     in
     if adds_nothing then Some [] else None

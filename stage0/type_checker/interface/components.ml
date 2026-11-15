@@ -1,7 +1,3 @@
-(* The strongly connected components of a graph, by Tarjan's algorithm. A
-   recursive definition is computed one component at a time. Each component
-   is sorted, and a component comes after every component that it reaches.
-   [successors] returns only nodes of the graph. *)
 let of_graph ~compare ~successors nodes =
   let index = Hashtbl.create 64 and low = Hashtbl.create 64 and on_stack = Hashtbl.create 64 in
   let stack = ref [] and next = ref 0 and components = ref [] in

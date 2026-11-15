@@ -3,8 +3,6 @@ module Names = Resolve.Names
 open Checking
 open Impl_checks
 
-(* Bounds on the arguments of a written type *)
-
 let bound_diagnostics database ~package ~bounds named =
   let diagnostic code (span : span) message = Diagnostic.make ~code span message in
   List.concat_map
@@ -64,9 +62,6 @@ let visibility_of state (path : Path.t) =
       | None -> None)
   | _ -> None
 
-(* A public signature cannot mention a private or [internal] type, and nor
-   can a public type's visible fields: callers in other packages could never
-   name it. *)
 let check_private_in_public state types (span : span) =
   if Names.is_public state.definition.visibility then
     List.iter
@@ -107,8 +102,6 @@ let check_method_location state (head : type_head) =
       | _ -> ())
   | _ -> ()
 
-(* Every type a signature mentions: its parameters, its result, and the
-   bounds of its generic parameters. *)
 let signature_types (signature : Types.signature) =
   Types.result_type signature.output
   :: List.map (fun (parameter : Types.parameter_info) -> parameter.type_) signature.parameters
@@ -160,8 +153,6 @@ let field_names (fields : field list) =
       match field.kind with Field_declaration { name; _ } -> Some name | Field_error -> None)
     fields
 
-(* The edit that removes one trait from a [derives] clause, or the whole
-   clause when it is the only one. *)
 let remove_derived (clause : type_clause) (traits : path_type list) (written : path_type) =
   let delete start stop = Diagnostic.delete (Span.make start stop) in
   match traits with
@@ -197,8 +188,6 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
           variants
     | Todo_type | Builtin_type _ | Error_shape _ -> []
   in
-  (* The conditions of a derived [impl]: each type parameter bounded by the
-     trait, as [impl Equal for Option[Value: Equal]]. *)
   let derived_bounds trait parameter =
     if
       List.exists
@@ -260,8 +249,6 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
                              shown)
                     end
                   else begin
-                    (* A derived [Default] is each field's, which only a
-                       record has: no variant of a sum is its default. *)
                     (if Well_known.is Default trait then
                        match interface.shape with
                        | Sum _ ->
@@ -276,9 +263,6 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
                           (Printf.sprintf
                              "Deriving `%s` needs `Equal` to be derived too, so that the two agree."
                              shown);
-                    (* A derived [Default] builds a field that has a default
-                       from that default, so only the other fields' types
-                       need [Default]. *)
                     let needed =
                       match interface.shape with
                       | Record fields when Well_known.is Default trait ->
@@ -310,10 +294,6 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
       | _ -> ())
     clauses
 
-(* A type argument is a type or a [USize] value, so no argument can be
-   written for a capability parameter of a type or of a trait. A signature
-   or a field could then not name the type with the capabilities that its
-   value uses. *)
 let check_no_capability_parameter state definition_kind (name : name)
     (generics : generic_parameter list) =
   List.iter
@@ -348,9 +328,6 @@ let check_trait_cycle state (requires : path_type list) =
       | [] -> ())
   | _ -> ()
 
-(* A method is its name and how it takes [self], so a trait may add a
-   overload of a method that a trait it requires declares, and may not
-   declare the same overload again. *)
 let check_redeclared state (name : name) (receiver : Path.receiver) ~(trait_path : Path.t)
     (trait : Types.trait_interface) =
   let inherited =
@@ -379,12 +356,6 @@ let check_redeclared state (name : name) (receiver : Path.receiver) ~(trait_path
            (Path.show from) name.text (Path.show_receiver receiver))
   | None -> ()
 
-(* The prover checks a law once, for every instantiation of the [impl]'s
-   generic parameters, and reads the proof for all of them. So the proof
-   can assume of a parameter only the [impl]'s bounds on it: with a
-   bound that the [impl] lacks, the law would be taken as proven for types
-   that the proof's reasoning does not cover. The proof's parameters are
-   the [impl]'s by position. *)
 let check_proof_bounds state (written : type_head) (generics : Types.generic list)
     (impl : Types.impl_interface) =
   if List.length generics = List.length impl.impl_generics then begin
@@ -440,8 +411,6 @@ let check state =
         match
           (Query.demand database Names.container state.key, definition.kind, state.lowered.interface)
         with
-        (* A method written inside a trait or an [impl] is checked against
-           the method that the enclosing declaration inherits or implements. *)
         | ( Some container,
             (Function { signature; _ } | Method_declaration signature),
             Function_interface written ) -> (
@@ -472,8 +441,6 @@ let check state =
               match signature.name with Plain_name name | Member_name (_, name) -> name.span
             in
             check_private_in_public state (signature_types lowered) span
-        (* A law's proof is of a law its trait has, as a type that
-           implements the trait keeps it. *)
         | None, Law_proof { law; type_; _ }, Law_proof_interface { generics; trait; for_type; _ }
           -> (
             (match Query.demand database Summary.trait_header trait.trait with

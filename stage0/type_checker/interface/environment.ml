@@ -24,8 +24,6 @@ type lowered_interface = {
   bounds : (Types.parameter * Types.trait_reference list) list;
 }
 
-(* The type a head names, and the generic parameters it declares, which
-   are in scope after it whether or not the type is known. *)
 let head_type context owner (head : type_head) =
   let generics = Lower.generics context owner head.generics in
   match Lower.target context head.path.last with
@@ -57,9 +55,6 @@ let head_type context owner (head : type_head) =
 
 let trait_self_parameter trait : Types.parameter = { owner = trait; name = "Self" }
 
-(* The fields of a shape, in the order of their names. The order of
-   declaration is not part of a shape, so reordering a type's fields changes
-   no result that reads the shape. *)
 let fields context (written : field list) =
   List.stable_sort
     (fun (left : Types.field) (right : Types.field) ->
@@ -77,8 +72,6 @@ let fields context (written : field list) =
          | Field_error -> None)
        written)
 
-(* The header of a trait, an [impl], or a capability: its own declarations,
-   without the methods written inside it. *)
 type container =
   | Trait_parts of {
       trait_generics : Types.generic list;
@@ -95,11 +88,8 @@ type container =
       impl_uses : Types.capability_set;
       capability_sets : (string * Types.capability_set) list;
     }
-  | Broken of Diagnostic.reported  (** An [impl] whose trait name does not resolve to a trait. *)
+  | Broken of Diagnostic.reported
 
-(* The header of a trait, an [impl], or a capability, and the context in
-   which its members are lowered: the meaning of [Self] and of its
-   associated types, and the bounds of its generic parameters. *)
 let lower_container (context : Lower.context) (path : Path.t) (definition : definition) =
   match definition.kind with
   | Trait { generics; requires; members; _ } ->
@@ -180,8 +170,6 @@ let lower_container (context : Lower.context) (path : Path.t) (definition : defi
               self_associated = associated;
             }
           in
-          (* A set can name the sets defined before it. A set that named
-             itself, or a set defined after it, would have no value. *)
           let capability_sets =
             List.fold_left
               (fun sets (line : impl_member line) ->
@@ -238,10 +226,6 @@ let lower_container (context : Lower.context) (path : Path.t) (definition : defi
             context ))
   | _ -> (Capability_parts, context)
 
-(* The context that a trait, an [impl], or a capability gives to each method
-   written inside it. It is a report instead when the header of the
-   enclosing declaration did not parse, or when it is an [impl] whose trait
-   name does not resolve to a trait. *)
 type header = {
   self_type : Types.ty option;
   self_trait : Types.trait_reference option;
@@ -249,9 +233,7 @@ type header = {
   self_capabilities : (string * Types.capability_set) list;
   header_bounds : (Types.parameter * Types.trait_reference list) list;
   header_generics : Types.generic list;
-      (** The generic parameters of an [impl], which precede those of a method written inside it. A
-          trait's parameters are supplied at each call of its method, with [Self]. *)
-  header_uses : Types.capability_set;  (** An [impl]'s [uses], which are each of its methods' too. *)
+  header_uses : Types.capability_set;
 }
 
 let bounds_of (context : Lower.context) =
@@ -290,15 +272,10 @@ let header =
                        })))
       | _ -> None)
 
-(* [interface_of] returns the interface of a method written inside the
-   definition, by its key. *)
 let lower_definition database ~interface_of (key : Names.key) (definition : definition)
     (resolved : Resolve.resolved) =
   let context = Lower.create database resolved in
   let path = key.path in
-  (* The methods written inside a trait, an [impl], or a capability, each
-     with its name, its receiver, its interface, and whether it has a
-     body. *)
   let methods () =
     List.filter_map
       (fun (member : Names.key) ->
@@ -334,9 +311,6 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
         match interface with Error_interface report -> Some (name, report) | _ -> None)
       (methods ())
   in
-  (* Lowers each kind of definition to its interface and to the context in
-     which its bodies are checked: the meaning of [Self] and of its
-     associated types. *)
   let interface, context =
     match
       ( Resolve.Parts.reported definition Header,
@@ -344,9 +318,6 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
     with
     | Some report, _ | None, Some (Error report) -> (Error_interface report, context)
     | None, Some (Ok container) -> (
-        (* A method written inside a trait, an [impl], or a capability:
-           [Self], its associated types, and the generic parameters around
-           it are that one's. *)
         List.iter
           (fun (parameter, bounds) -> Hashtbl.replace context.bounds parameter bounds)
           container.header_bounds;
@@ -367,8 +338,6 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
                 (Lower.signature context ~owner:path ~head:[] ~self_type:container.self_type
                    signature)
             in
-            (* An [impl]'s method ends when its trait's does, since it keeps the
-               trait's [time] clause. *)
             let terminates =
               lowered.terminates
               ||
@@ -527,11 +496,6 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
     },
     context )
 
-(* The lowered interface of a definition, with lowering's diagnostics. The
-   interface of a trait, an [impl], or a capability is assembled from its
-   header and from the interface of each method written inside it. Each
-   method's interface reads only the header, so neither query depends on
-   the other. *)
 let rec lowered_interface =
   lazy
     (Query.query ~name:"lowered_interface" ~phase:Phases.interfaces ~show:Names.show_key
@@ -565,9 +529,6 @@ let interface =
             (Query.demand database lowered_interface key)
       | None -> None)
 
-(* The names of a type's fields in declaration order: of a record under
-   [None], and of each variant of a sum type under its name. A derived
-   [Ordered] compares fields in this order, and nothing else reads it. *)
 let declared_fields =
   Query.query ~name:"declared_fields" ~phase:Phases.interfaces ~show:Path.show (fun database path ->
       let names (written : field list) =

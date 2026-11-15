@@ -1,11 +1,3 @@
-(* The prelude: the names in scope in every file without a [use]. It holds
-   only UpperCamelCase names, so it can clash only with types. It is fixed for
-   a language version, so it is a table here, naming the module of the
-   standard library that defines each name: the built-in types, [Option] and
-   [Result], the core collections and traits, and the standard capabilities
-   with the types their methods take and return. *)
-
-(* Types, traits, and capabilities, each with the module that defines it. *)
 let types =
   List.filter_map
     (fun (builtin : Intrinsic.builtin) ->
@@ -75,7 +67,6 @@ let types =
         ([ "files" ], [ "Path" ]);
       ]
 
-(* The variants written bare everywhere, with the type they belong to. *)
 let variants = [ ("Some", "Option"); ("None", "Option"); ("Ok", "Result"); ("Err", "Result") ]
 let find_type name = List.assoc_opt name types
 

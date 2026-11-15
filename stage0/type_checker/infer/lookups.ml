@@ -1,7 +1,3 @@
-(* Lookups that the expression checker makes: names, fields, and members;
-   trait methods and the [impl]s that provide them; the [each] method of a
-   collection; and the final record of a call. *)
-
 open Syntax
 module Names = Resolve.Names
 module Environment = Interface.Environment
@@ -12,18 +8,13 @@ open State
 open Modes
 open Instantiation
 
-(* One overload of a method: a method of the type, or a trait method. *)
 type overload =
   | Type_overload of Path.t
   | Trait_overload of Types.trait_reference * Types.trait_method
 
-(* The overload of a method that a receiver selects: the overload its mode keyword
-   names, or the read-only overload if it has no mode keyword. *)
 let marked_receiver (receiver : expression) : Path.receiver =
   match receiver.kind with Mode (Mut, _) -> Mut | Mode (Own, _) -> Own | _ -> Read
 
-(* Checks a value of type [found] against an expected type, and records the
-   conversion in the core form. *)
 let rec coerce state env ?argument (value : expression) ~actual ~expected =
   convert state env ?argument ~expression:value.id value.span ~actual ~expected
 
@@ -32,12 +23,11 @@ and literal_type state ~expected kind =
   | Some expected when Unify.literal_fits state.unifier kind expected -> expected
   | _ -> Unify.fresh_literal state.unifier kind
 
-(* The type of a name that is used as a value, according to its referent. *)
 and named state env (value : expression) ({ name; target; type_arguments } : Resolve.head) =
   let text = name.text in
   match target with
   | Local id -> (
-      state.references <- id :: state.references;
+      state.locals_read <- id :: state.locals_read;
       state.tables.resolutions.(value.id) <- Some (Local_value id);
       register_expression state value (fun () -> Form.local_use state ~origin:value.id id);
       match Hashtbl.find_opt state.locals id with
@@ -124,7 +114,6 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
       error state Not_a_value value.span
         (Printf.sprintf "`%s` is applied to its subject, as in `%s(...)`." text text)
   | Visited -> (
-      (* The sequence of the values of the loop's iterations before. *)
       state.tables.resolutions.(value.id) <- Some Specification_value;
       register_expression state value (fun () -> Yielded);
       match env.loop_element with
@@ -134,9 +123,6 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
   | Unknown report -> Types.Error report
   | Binding | Module _ -> bug "the name `%s` is not resolved" text
 
-(* A variant used as a value. A variant without fields is a value. A variant
-   with one field is a function that constructs it. A variant with more
-   fields is not a function, because its fields have no order. *)
 and variant_value state (value : expression) type_path variant ~arguments =
   let type_ = Types.Named { path = type_path; arguments } in
   state.tables.resolutions.(value.id) <- Some (Variant_value { type_; variant });
@@ -220,8 +206,6 @@ and field state (value : expression) base_type (member : name) =
               else unknown []))
   | _ -> unknown []
 
-(* [Type.name] used as a value: a variant, a constant of the type, or a
-   method as a function value. *)
 and static_member state (value : expression) type_ (member : name) =
   match type_ with
   | Types.Named { path; arguments } ->
@@ -260,9 +244,6 @@ and static_member state (value : expression) type_ (member : name) =
       error state Unknown_member member.span
         (Printf.sprintf "`%s` has no member `%s`." (show state type_) member.text)
 
-(* Explicit type arguments are for the function's own generic parameters, in
-   order, after the parameters of a method's type. There must be exactly one
-   for each parameter, of the parameter's kind. *)
 and explicit_type_arguments ?(head = 0) state (value : expression) instance items =
   if items <> [] then begin
     let written =
@@ -315,8 +296,6 @@ and check_specification_call state env (value : expression) (signature : Types.s
     report state Specification_only value.span
       "This function mentions `Integer`, so it can be called only in specifications."
 
-(* Whether a type could implement a trait for some type arguments of the
-   trait. The call's arguments determine them later. *)
 and could_implement state type_ trait =
   let arguments =
     match Query.demand state.database Environment.trait_interface trait with
@@ -344,9 +323,6 @@ and trait_static_method state path name receiver =
         (Query.demand state.database Names.traits_declaring (package, name)))
     (Members.visible_packages state.database state.package)
 
-(* Finds the [impl] that a trait method call resolves to. The search is
-   deferred until the types are inferred, which may be at the end of the
-   statement. *)
 and resolve_evidence state (value : expression) self_type (reference : Types.trait_reference) =
   defer state (fun () ->
       let self_type = zonk state self_type
@@ -379,8 +355,6 @@ and resolve_evidence state (value : expression) self_type (reference : Types.tra
         true
       end)
 
-(* The traits that declare a method with the given name and that the type
-   could implement. *)
 and trait_candidates state receiver_type name =
   let with_method (trait : Types.trait_reference) =
     match
@@ -429,12 +403,6 @@ and trait_candidates state receiver_type name =
                (Query.demand state.database Names.traits_declaring (package, name)))
            (Members.visible_packages state.database state.package))
 
-(* Whether the traits that declare a method of the same name are related:
-   each requires, or is required by, another trait in the list. Only then
-   are their methods overloads of one method (such as a [self] overload and a
-   [mut self] overload). Unrelated traits that share a method name stay
-   ambiguous, whatever receiver each method takes. Otherwise a trait added
-   later could take over a call on a temporary without an error. *)
 and one_family state (traits : Types.trait_reference list) =
   let requires (first : Types.trait_reference) (second : Types.trait_reference) =
     List.exists
@@ -452,11 +420,6 @@ and one_family state (traits : Types.trait_reference list) =
   in
   match traits with [] -> true | first :: rest -> grow [ first ] rest
 
-(* The overloads of a method name on a type, by receiver mode: the methods of
-   the type together with the methods of the related traits that declare the
-   name. [Error] with the traits if they are not related. If the type and a
-   trait both declare an overload with the same receiver, the type's overload
-   is used; the clash is reported at the [impl]. *)
 and overloads state receiver_type name :
     ((Path.receiver * overload) list, Types.trait_reference list) Result.t =
   let candidates = trait_candidates state receiver_type name in
@@ -488,8 +451,6 @@ and overloads state receiver_type name :
              (List.assoc_opt receiver (own @ from_traits)))
          [ Read; Mut; Own ])
 
-(* The callee of the overload of a method of a type that takes [self] with
-   [receiver], and the method's signature as a call instantiates it. *)
 and method_version state (span : span) type_ name (receiver : Path.receiver) :
     (Tables.callee * Types.signature) option =
   let found = match overloads state type_ name with Ok found -> found | Error _ -> [] in
@@ -534,10 +495,6 @@ and method_version state (span : span) type_ name (receiver : Path.receiver) :
 and argumentless_call callee (signature : Types.signature) result : Tables.call =
   { callee; arguments = []; omitted_defaults = []; uses = signature.uses; callee_result = result }
 
-(* The calls that a [for] loop over a collection makes to visit its
-   elements by position: of its [count], and of the overload of its
-   [element] that takes [self] with the loop's mode. The loop, the type of
-   its elements, and the mode it binds each with. *)
 and elements_calls state (span : span) type_ (mode : Types.mode) =
   let receiver : Path.receiver = match mode with Read -> Read | Mut -> Mut | Own -> Own in
   let is_usize type_ = Types.is_builtin USize (normalize state type_) in
@@ -562,9 +519,6 @@ and elements_calls state (span : span) type_ (mode : Types.mode) =
       | _ -> None)
   | _ -> None
 
-(* The call of a collection's [cursor] that a [for] loop makes to consume
-   the collection: the overload that takes [self] as [own], whose result is
-   a [Cursor]. The loop and the type of its elements. *)
 and consuming_cursor state (span : span) type_ =
   match method_version state span type_ "cursor" Own with
   | Some (callee, ({ parameters = []; output = Returns cursor; _ } as signature)) -> (
@@ -576,16 +530,13 @@ and consuming_cursor state (span : span) type_ =
             ( Tables.Pulled
                 {
                   cursor;
-                  made_by = Some (argumentless_call callee signature cursor);
+                  cursor_call = Some (argumentless_call callee signature cursor);
                   remaining = remaining_call state span cursor;
                 },
               associated state cursor trait "Element" ~at:span )
       | None -> None)
   | _ -> None
 
-(* The call of a cursor's [remaining], if its type has one that takes
-   [self] read-only and gives a [USize]: a bound on the values the cursor
-   has left. *)
 and remaining_call state (span : span) cursor =
   match method_version state span cursor "remaining" Read with
   | Some (callee, ({ parameters = []; output = Returns bound; _ } as signature))

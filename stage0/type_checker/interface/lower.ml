@@ -4,7 +4,7 @@ type context = {
   database : Query.context;
   resolved : Resolve.resolved;
   bounds : (Types.parameter, Types.trait_reference list) Hashtbl.t;
-  self_type : Types.ty option;  (** The meaning of [Self] here. *)
+  self_type : Types.ty option;
   self_trait : Types.trait_reference option;
   self_associated : (string * Types.ty) list;
   self_capabilities : (string * Types.capability_set) list;
@@ -62,8 +62,6 @@ let rec type_ context (written : type_expression) : Types.ty =
   | Any_type path -> (
       match trait_reference context path with
       | Ok (trait : Types.trait_reference) ->
-          (* A method that mentions an associated type could not be called
-             through [any] otherwise. *)
           let open_names =
             List.concat_map
               (fun trait_path ->
@@ -85,8 +83,6 @@ let rec type_ context (written : type_expression) : Types.ty =
   | Function_type function_type -> Types.Function (function_type_ context function_type)
   | Type_error -> Types.Error (Resolve.Parts.recovery_report written.span)
 
-(* The meaning of [Self], which only lowering knows: resolution cannot tell a
-   method of a type from a function. *)
 and self context (span : span) =
   match context.self_type with
   | Some self -> Ok self
@@ -111,8 +107,6 @@ and self_associated context (span : span) (key : name) =
           match List.assoc_opt key.text trait.associated with
           | Some fixed -> fixed
           | None -> (
-              (* The projection goes through the trait that declares the
-                 name, which may be one this trait requires. *)
               match declaring context trait.trait key.text with
               | Some declaring_trait ->
                   let trait =
@@ -125,8 +119,6 @@ and self_associated context (span : span) (key : name) =
                     (Printf.sprintf "`%s` declares no associated type `%s`."
                        (Types.show_trait trait) key.text))))
 
-(* The trait that declares an associated type, or with [capability] an
-   associated capability set: the trait itself, or one that it requires. *)
 and declaring ?(capability = false) context trait name =
   List.find_opt
     (fun path ->
@@ -135,7 +127,6 @@ and declaring ?(capability = false) context trait name =
       | None -> false)
     (Summary.trait_closure context.database trait)
 
-(* [Items.Element]: the associated type of a generic parameter's bound. *)
 and associated context base parameter (key : name) =
   let bounds = Option.value ~default:[] (Hashtbl.find_opt context.bounds parameter) in
   let associated_type =
@@ -204,8 +195,6 @@ and check_arity context (path : path_type) shown expected =
              argument_count
              (if argument_count = 1 then "is" else "are"))
       else
-        (* Each argument must be of its parameter's kind: a type, or a
-           [USize] value. *)
         let written = List.filter (function Constraint _ -> false | _ -> true) path.arguments in
         List.iter2
           (fun argument (name, kind) ->
@@ -298,9 +287,6 @@ and capability_path context (path : path_type) : Types.capability list =
   | Some (Unknown _) -> []
   | _ -> bug "`%s` is not resolved as a capability" shown
 
-(* The associated capability set of a type whose [impl] is not known here:
-   the projection through the first of [traits] that declares the set, or
-   that requires the trait that does. *)
 and capability_projection context base traits (key : name) =
   List.find_map
     (fun (bound : Types.trait_reference) ->
@@ -375,9 +361,6 @@ and uses context clauses =
        (fun (clause : clause) -> match clause.kind with Uses written -> written | _ -> [])
        clauses)
 
-(* A function type's cost clauses. There [calls] counts a
-   capability's calls: a type cannot name a parameter, whose calls a
-   function's own clauses count. *)
 and costs context clauses =
   let counted (path : path_type) (method_ : name option) : Types.resource option =
     let shown = show_path path.path in
@@ -460,8 +443,6 @@ let generics context owner (written : generic_parameter list) : Types.generic li
       | `Capability -> { Types.generic = parameter; kind = Capability_generic })
     declared
 
-(* The types that exist only in specifications: [Integer], and the
-   mathematical collections of [standard::specification]. *)
 let specification_type (path : Path.t) =
   match path with Top { module_; _ } -> module_ = Well_known.specification | _ -> false
 
@@ -471,8 +452,6 @@ let mentions_integer =
     | Types.Named { path; _ } -> specification_type path
     | _ -> false)
 
-(* A signature, given the generics of the head before it and the type of
-   [self]. *)
 let terminates (clauses : clause list) =
   List.exists
     (fun (clause : clause) ->
@@ -522,12 +501,11 @@ let signature context ~owner ~head ~self_type (written : signature) : Types.sign
     uses = uses context written.clauses;
     terminates;
     specification_only =
-      (* [Model]'s method returns a mathematical value. *)
       Well_known.is Model owner || mentions_integer result_type
       || List.exists
            (fun (parameter : Types.parameter_info) -> mentions_integer parameter.type_)
            parameters;
-    stores_functions =
+    capture_free_parameters =
       List.filter_map
         (fun (parameter : Types.parameter_info) ->
           match (parameter.mode, parameter.type_) with

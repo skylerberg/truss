@@ -2,43 +2,26 @@ open Syntax
 open State
 module Environment = Interface.Environment
 
-(* A bound that an [impl] satisfies makes this definition depend on the
-   [impl]'s code. Checks that the capabilities the [impl] uses are granted
-   to its package, and records the package. *)
 let check_evidence_grants state (span : span) evidence =
   let impls = Interface.Grants.evidence_uses state.database ~bounds:(bounds state) evidence in
-  state.evidence <- List.map (fun (impl, _, _) -> Path.package impl) impls @ state.evidence;
+  state.evidence_packages <-
+    List.map (fun (impl, _, _) -> Path.package impl) impls @ state.evidence_packages;
   List.iter
     (fun message ->
       state.diagnostics <-
         Diagnostic.make ~code:(Capabilities Not_granted) span message :: state.diagnostics)
     (Interface.Grants.messages state.database ~package:state.package impls)
 
-(* The error type for an expression that is not valid where it is used.
-   If resolution already reported the expression's name as unknown, this
-   reuses that report instead of adding a second one. *)
 let error_at state ?fixes code (value : expression) message =
   match head state value with
   | Some { target = Unknown report; _ } -> Types.Error report
   | _ -> error state ?fixes code value.span message
 
-(* An expression before a [.] or a [(] that names a type, a trait, or a
-   capability instead of a value. *)
 type static_ =
   | Static_type of Types.ty
   | Static_trait of Path.t * Types.argument list option
-      (** The trait's type arguments, if they are written. *)
   | Static_capability of Path.t
 
-(* Requires a type to satisfy a trait bound. The check is deferred until
-   the type is inferred. The type must implement the trait, and each
-   associated type that the bound fixes must unify with the one the [impl]
-   defines, which can infer other types of the statement.
-
-   [unmet] reports a failure: with [None] if the type does not implement
-   the trait, and with the name of an associated type and the type the
-   [impl] defines if those differ. A capability that the [impl] uses and
-   that its package is not granted is reported at [at]. *)
 let require state ~(at : span) type_ (bound : Types.trait_reference) ~unmet =
   let trait = { bound with associated = [] } in
   defer state (fun () ->
@@ -61,9 +44,6 @@ let require state ~(at : span) type_ (bound : Types.trait_reference) ~unmet =
         true
       end)
 
-(* Requires the type arguments of an instantiation to satisfy the bounds
-   of their generic parameters. [of_type] is the type that declares the
-   parameters. Without it, the parameters are a callee's. *)
 let require_bounds state (span : span) ?of_type generics substitution =
   List.iter
     (fun (argument, bound) ->
@@ -72,8 +52,8 @@ let require_bounds state (span : span) ?of_type generics substitution =
           let reported =
             match current_frame state with
             | Some frame ->
-                let reported = List.mem (argument, bound) frame.unmet in
-                frame.unmet <- (argument, bound) :: frame.unmet;
+                let reported = List.mem (argument, bound) frame.reported_unmet_bounds in
+                frame.reported_unmet_bounds <- (argument, bound) :: frame.reported_unmet_bounds;
                 reported
             | None -> false
           in
@@ -114,8 +94,6 @@ let require_type_bounds state span path arguments =
         (Types.substitution_of interface.type_generics arguments)
   | None -> ()
 
-(* Fresh inference variables for the generic parameters of a type, each
-   required to satisfy the bounds of its parameter. *)
 let instantiate_type state span path =
   let arguments = fresh_arguments state path in
   require_type_bounds state span path arguments;
@@ -137,8 +115,6 @@ let rec static_ state (value : expression) : static_ option =
   | Parenthesized inner, None -> static_ state inner
   | _ -> None
 
-(* A type named in an expression, with the type arguments written after
-   it, or with fresh inference variables if none are written. *)
 and named_type state (value : expression) path type_arguments =
   let type_ arguments =
     match Intrinsic.builtin_of_path path with
@@ -162,7 +138,6 @@ and named_type state (value : expression) path type_arguments =
       | _ -> require_type_bounds state value.span path arguments);
       type_ arguments
 
-(* Type arguments written in an expression, as in [List[String].new()]. *)
 and written_arguments state items =
   List.filter_map
     (function
@@ -201,8 +176,6 @@ type instance = {
   type_arguments : Types.argument list;
 }
 
-(* Instantiates a signature at a use: its generic parameters are replaced
-   by fresh inference variables, each required to satisfy its bounds. *)
 let instantiate state (span : span) ?(extra = []) (signature : Types.signature) =
   let substitution =
     List.map
@@ -229,8 +202,6 @@ let instantiate state (span : span) ?(extra = []) (signature : Types.signature) 
 let intrinsic_signature path =
   Option.map Intrinsic_signatures.signature (Intrinsic.operation_of_path path)
 
-(* The signature of a function. [Error] with the report if the function's
-   header did not parse. *)
 let function_signature state (path : Path.t) =
   match intrinsic_signature path with
   | Some signature -> Some (Ok signature)

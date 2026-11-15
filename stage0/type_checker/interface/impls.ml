@@ -37,10 +37,6 @@ let index =
             | _ -> [])
         (Query.demand database Names.package_declarations package))
 
-(* A package's impls for a type, each with its trait: the impls whose head
-   names the type, and, in the type's own package, the impls it derives.
-   Only the interfaces of those impls are read, so an edit to another impl
-   of the package changes none of the type's. *)
 let for_type =
   Query.query ~name:"impls_for_type" ~phase:Phases.interfaces
     ~show:(fun (type_, package) ->
@@ -95,9 +91,6 @@ let impls_in =
 
 let cursor_trait = Well_known.path Cursor
 
-(* The interface of a derived [impl]: the type's generic parameters, each
-   bound by the trait, as [impl Equal for Option[Value: Equal]], and the
-   trait's methods with [Self] replaced. *)
 let derived_interface database ~type_ ~trait =
   match
     ( Query.demand database Environment.type_interface type_,
@@ -255,9 +248,6 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true)
            | _ -> false)
          wanted.trait_arguments actual_arguments
   in
-  (* The associated types that the [impl] defines must equal the ones that
-     the wanted trait reference fixes. An associated type that the reference
-     leaves open is the projection on the type. *)
   let associated_match ~base fixed =
     List.for_all
       (fun (name, wanted_type) ->
@@ -399,11 +389,7 @@ and associated_type database ~bounds ?defining type_ (trait : Types.trait_refere
                 (fun (bound : Types.trait_reference) -> List.assoc_opt name bound.associated)
                 (any :: Properties.bound_closure database ~self:type_ any)
           | _ -> None)
-      (* [Copyable] and [Plain] have no associated types. *)
       | Some Built_in -> None
-      (* An associated type of an [Error] or a [Hole] is an [Error] or a
-         [Hole] too. An associated type of a type that is not inferred yet
-         is unknown. *)
       | Some (Accepted (Types.Variable _)) -> None
       | Some (Accepted unknown) -> Some unknown
       | None -> None)
@@ -481,8 +467,6 @@ let signature database (path : Path.t) =
       | _ -> None)
   | None, _ -> None
 
-(* Whether a type is [Copyable], [Plain], or a view, with each associated
-   type that its definition's facts depend on normalized. *)
 let has property database ~bounds type_ =
   Properties.has database ~bounds ~normalize:(normalize database ~bounds) property type_
 

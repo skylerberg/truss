@@ -20,7 +20,7 @@ type type_check_result = Body.type_check_result = {
   tables : tables;
   core : Core.t option;
   diagnostics : Syntax.diagnostic list;
-  evidence : Path.package list;
+  evidence_packages : Path.package list;
 }
 
 let type_check_result = Body.type_check_result
@@ -57,8 +57,6 @@ let form_origin =
                         (checked (Method { owner = impl.implements.trait; name; receiver })))))
       | None, _ -> None)
 
-(* The form of the function or method at a path, as [written] gives the form
-   of a definition. *)
 let of_path ~written database (path : Path.t) =
   Option.bind (Query.demand database form_origin path) (fun (origin, substitution) ->
       Option.map
@@ -91,7 +89,6 @@ let callers_read_body database ~same_package (path : Path.t) =
      | Some signature -> Types.body_is_definition signature && same_package
      | None -> true
 
-(* A form without the body of its function. *)
 let without_body (form : Core.t) : Core.t =
   match form.definition with
   | Function { parameters; contract; body = Some _ } ->
@@ -127,7 +124,7 @@ let evidence_packages =
   Query.query ~name:"evidence_packages" ~phase:Phases.bodies ~show:Resolve.Names.show_key
     (fun database key ->
       match Query.demand database type_check_result key with
-      | Some (result : type_check_result) -> result.evidence
+      | Some (result : type_check_result) -> result.evidence_packages
       | None -> [])
 
 let clean_tables database key =
@@ -140,7 +137,6 @@ let clean_tables database key =
     when resolved.diagnostics = []
          && (not (Resolve.Parts.broken definition Header || Resolve.Parts.broken definition Body))
          &&
-         (* A method inside a type, trait, or impl that did not parse. *)
          match Query.demand database Interface.Environment.lowered_interface key with
          | Some { interface = Error_interface _; _ } -> false
          | _ -> true ->

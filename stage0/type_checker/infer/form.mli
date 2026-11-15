@@ -58,9 +58,7 @@ val comparison :
   Core.kind
 
 val is_executable : State.state -> Core.expression -> bool
-
 val binds_lent_part : State.state -> Core.expression -> bool
-(** The [binds_lent_part] of an [if] or a [while] with this condition. *)
 
 val compound_assign :
   State.state ->
@@ -71,10 +69,7 @@ val compound_assign :
   Core.statement_kind
 
 val lend_statements : State.state -> Types.mode -> Core.expression -> Core.statement list
-(** The statements that lend the value of a tail expression of a lending method. *)
-
 val lend_block : State.state -> Types.mode -> Core.block -> Core.block
-(** A block whose value a lending method lends, as a block that lends it and has no value. *)
 
 val over_elements :
   State.state ->
@@ -85,8 +80,6 @@ val over_elements :
   origin:Core.origin ->
   (Core.elements -> Core.kind) ->
   Core.kind
-(** The core form of a quantifier that runs as a loop over the elements of a collection, made from
-    how the loop visits them. *)
 
 val for_loop :
   State.state ->
@@ -97,7 +90,6 @@ val for_loop :
   body:Core.block ->
   mode:Core.loop_mode ->
   Core.statement_kind
-(** The core form of a [for] loop over an iterable expression. *)
 
 val cost : State.state -> origin:Core.origin -> Syntax.cost -> Core.cost
 val loop_clause : State.state -> Syntax.loop_clause -> Core.loop_clause

@@ -16,10 +16,8 @@ type target =
   | Result_value
   | Old
   | Identical
-  | Visited  (** [visited]: in a [for] loop's clauses, the values of the iterations before. *)
+  | Visited
   | Final
-      (** [final], in a lending method's [ensures]: [final(result)] is the part as the caller left
-          it. *)
   | Specification_function of specification_function
   | Unknown of Diagnostic.reported
 
@@ -35,8 +33,8 @@ type specification = {
   active : bool;
   names_result : bool;
   cost_bound : bool;
-  names_visited : bool;  (** In the clauses of a [for] loop, where [visited] has its meaning. *)
-  names_final : bool;  (** In the [ensures] of a lending method, where [final] has its meaning. *)
+  names_visited : bool;
+  names_final : bool;
   elements : string list;
 }
 
@@ -44,12 +42,12 @@ type scope = {
   values : (value * string) String_map.t;
   types : target String_map.t;
   specification : specification;
-  lends : bool;
+  is_lending_method : bool;
 }
 
 type state = {
   database : Query.context;
-  file : Path.file;  (** The file the definition is written in, whose imports it reads *)
+  file : Path.file;
   names : target option array;
   brackets : bracket option array;
   mutable diagnostics : Syntax.diagnostic list;

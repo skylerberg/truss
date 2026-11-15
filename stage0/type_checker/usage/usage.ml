@@ -1,7 +1,3 @@
-(* The rules on use: every variable is used, and no code is unreachable.
-   Unused values are reported by body checking, and unused imports by
-   resolution. *)
-
 open Syntax
 
 type context = {
@@ -15,8 +11,6 @@ let report context ?(fixes = []) code (span : span) message =
   context.diagnostics <-
     Diagnostic.make ~fixes ~code:(Usage code) span message :: context.diagnostics
 
-(* How many times a definition reads each name, by the id of the name's
-   binding. *)
 let count_uses (resolved : Resolve.resolved) =
   let counts = Hashtbl.create 32 in
   Array.iter
@@ -27,8 +21,6 @@ let count_uses (resolved : Resolve.resolved) =
     resolved.names;
   counts
 
-(* Function parameters are exempt, since an implementation may not need
-   every parameter its trait declares, and so are generic parameters. *)
 let parameter_names (definition : definition) =
   let names = ref [] in
   let add (parameters : parameter list) =
@@ -50,8 +42,6 @@ let parameter_names (definition : definition) =
   | _ -> ());
   !names
 
-(* The bindings in patterns, with whether each is a bare field of a pattern
-   with several fields, which [_] alone would no longer name. *)
 let pattern_bindings (definition : definition) =
   let bindings = ref [] in
   let rec pattern ~bare_field (written : pattern) =
@@ -115,10 +105,8 @@ let check_unused context (definition : definition) =
 let diverges context (value : expression) =
   match context.tables.types.(value.id) with Some Types.Never -> true | _ -> false
 
-(* Whether a statement diverges, from types alone. *)
 let rec statement_diverges context (written : statement) =
   match written.kind with
-  (* A [parallel] or [concurrent] block ends only when every branch does. *)
   | Parallel body | Concurrent body -> List.exists (statement_diverges context) body.statements
   | Expression value -> diverges context value
   | Let { value; _ } -> diverges context value
@@ -175,9 +163,6 @@ let check_unreachable context (definition : definition) =
   and statement (written : statement) =
     (match written.kind with
     | For { body; _ } | While { body; _ } | Proof body -> check_block context body
-    (* The branches of a [parallel] or [concurrent] block do not run one
-       after another, so a branch after one that never finishes still
-       runs. *)
     | Parallel _ | Concurrent _ -> ()
     | Let { else_ = Some block; _ } -> check_block context block
     | _ -> ());
@@ -197,7 +182,6 @@ let check_unreachable context (definition : definition) =
   List.iter (check_block context) bodies;
   Syntax_walk.definition ~statement expression definition
 
-(* A definition's errors of use, in its own offsets. *)
 let definition_diagnostics =
   Query.query ~name:"usage_diagnostics" ~phase:Phases.bodies ~saved:true
     ~show:Resolve.Names.show_key (fun database key ->

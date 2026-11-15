@@ -64,8 +64,9 @@ let checks : Path.file =
 let checks_source = Fixtures.Shared.checks_source
 
 let () =
-  test "Shared's operations require Tasks outside an impl, and its value must be Storable"
-    (fun () ->
+  test
+    "Shared's operations need Tasks except directly in a method of a capability's impl, and its \
+     value must be Storable" (fun () ->
       let engine = Engine.create () in
       Database.load_package engine ~name:Path.standard_package ~dependencies:[]
         (Standard_library.files @ [ (checks, checks_source) ]);
@@ -81,6 +82,8 @@ let () =
       in
       let expected =
         [
+          ("capabilities.lambda_uses", "fn() { intrinsic::shared_key(self.ticks) }");
+          ("capabilities.not_available", "intrinsic::shared_key(self.ticks)");
           ("capabilities.not_available", "intrinsic::shared_key(ticks)");
           ("types.unsatisfied_bound", "intrinsic::Shared[Slice[Int64]]");
           ("types.unsatisfied_bound", "intrinsic::shared_key(numbers)");

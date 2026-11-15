@@ -1,15 +1,3 @@
-(* The parts of a definition that the proofs of callers in other packages
-   rely on: the [requires] and [cost] of a definition that those packages
-   can call, which those callers must meet or count on.
-
-   A function or a constant that such a part names and those packages cannot
-   see is no part of the package's interface: a release could change its
-   contract or its value, and break those proofs, while the compatibility
-   check reports no change. So these parts name only functions and constants
-   that are public. An [ensures] may name any, so that callers in the
-   package can know a public function's result in terms of its private
-   helpers. *)
-
 open Syntax
 module Names = Resolve.Names
 module Environment = Interface.Environment
@@ -20,8 +8,6 @@ let public database (module_ : Path.module_) name =
   | Some entry -> Names.is_public entry.visibility
   | None -> true
 
-(* Whether code in another package can name a function or a constant. A
-   method of an [impl] is reached through its trait. *)
 let visible_to_other_packages database (path : Path.t) =
   match path with
   | Top { module_; name } -> module_ = Intrinsic.module_ || public database module_ name
@@ -34,16 +20,10 @@ let visible_to_other_packages database (path : Path.t) =
       | None -> true)
   | Method _ | Member_constant _ | Impl _ | Derived _ | Test _ | Law_proof _ -> true
 
-(* Whether code in another package can call the definition, so that its
-   proofs read the definition's contract: a public function, method, or
-   theorem; a method of a public trait or capability; and a method of an
-   [impl] of a public trait for a type that is public. *)
 let called_from_other_packages (state : state) =
   match Query.demand state.database Names.container state.key with
   | None -> Names.is_public state.definition.visibility
   | Some container -> (
-      (* The container's interface, and not its definition: the definition
-         changes with an edit to any method written inside it. *)
       match Query.demand state.database Environment.interface container.path with
       | Some (Trait_interface _) -> visible_to_other_packages state.database container.path
       | Some (Impl_interface impl) -> (
@@ -54,8 +34,6 @@ let called_from_other_packages (state : state) =
           | _ -> true)
       | _ -> false)
 
-(* Reports each function and each constant that the definition names
-   inside [parts] and that other packages cannot see. *)
 let check_names (state : state) (parts : span list) ~message =
   if parts <> [] then begin
     let spans = Syntax_walk.spans state.definition in

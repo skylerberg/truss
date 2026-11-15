@@ -16,8 +16,6 @@ let show_signature (signature : Types.signature) =
            signature.parameters))
     (Types.show_output signature.output)
 
-(* Whether two types agree, where an error on either side agrees with
-   anything, since it was reported already. *)
 let rec agrees (left : Types.ty) (right : Types.ty) =
   match (left, right) with
   | Types.Error _, _ | _, Types.Error _ -> true
@@ -46,15 +44,6 @@ and agrees_result (left : Types.result) (right : Types.result) =
       left_mode = right_mode && agrees left right
   | _ -> false
 
-(* An [impl]'s view of its trait: the trait, the substitution for the
-   trait's [Self] and parameters, and the trait's types under that
-   substitution, in which [Self] is the [impl]'s type and each associated
-   type of [Self] is the definition given by this [impl] or by the [impl] of
-   a required trait. An associated type that the trait declares and the
-   [impl] does not define is an error wherever a method's signature mentions
-   it. The [impl] itself reports it, once. The trait's sets of capabilities
-   are read in the same way: each associated capability set of [Self] is the
-   set that this [impl] defines. *)
 type view = {
   trait : Types.trait_interface;
   shown_trait : string;
@@ -146,10 +135,6 @@ let impl_view database ~bounds (impl : Types.impl_interface) (trait_path : path_
         })
       (Query.demand database Environment.trait_interface impl.implements.trait)
 
-(* The checks of an [impl]'s own header: it defines every member that its
-   trait requires, and its type implements the traits that the trait
-   requires. Each method written inside it is checked against the trait's
-   method as a definition of its own. *)
 let check_impl state (written_members : impl_member line list) (impl : Types.impl_interface)
     (trait_path : path_type) =
   let database = state.database in
@@ -182,9 +167,6 @@ let check_impl state (written_members : impl_member line list) (impl : Types.imp
               | _ -> None)
             (Query.demand database Names.contained state.key)
         in
-        (* The [impl] must define every method without a body. For a
-           capability that is every method, because a capability's methods
-           have no bodies. *)
         List.iter
           (fun (method_ : Types.trait_method) ->
             let is_written =
@@ -206,8 +188,6 @@ let check_impl state (written_members : impl_member line list) (impl : Types.imp
             match List.assoc_opt associated.associated_name impl.implements.associated with
             | None -> ()
             | Some chosen ->
-                (* Each associated type that the [impl] defines must satisfy
-                   the bounds that the trait declares for it. *)
                 List.iter
                   (fun bound ->
                     let bound = Types.substitute_trait substitution bound in
@@ -250,7 +230,6 @@ let check_impl state (written_members : impl_member line list) (impl : Types.imp
                    name.text :: defined
                | Impl_member_error -> defined)
              [] written_members);
-        (* The traits a trait requires are implemented for the same type. *)
         List.iter
           (fun (required : Types.trait_reference) ->
             let required = Types.substitute_trait substitution required in
@@ -266,8 +245,6 @@ let check_impl state (written_members : impl_member line list) (impl : Types.imp
             "Only an `impl` of a capability can have `uses`. A trait's methods can use only the \
              capabilities the trait declares."
 
-(* A method written inside an [impl], against the method its trait
-   declares. *)
 let check_impl_method state (name : name) (receiver : Path.receiver) (written : Types.signature)
     (impl : Types.impl_interface) (trait_path : path_type) =
   match impl_view state.database ~bounds:(bounds state) impl trait_path with
@@ -306,8 +283,6 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (written : 
               "A capability's implementation takes `self`, or `mut self` if it mutates its own \
                state."
           else begin
-            (* The method's own generic parameters and [uses], after the
-               [impl]'s, which every method written inside it has. *)
             let written =
               {
                 written with
@@ -318,8 +293,6 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (written : 
                 uses = Types.capability_difference written.uses impl.impl_uses;
               }
             in
-            (* The trait method's own generic parameters are substituted by
-               the [impl] method's, by position. *)
             let expected =
               Types.map_signature normalize
                 (Types.substitute_signature
@@ -350,7 +323,6 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (written : 
                    (fun (expected_generic : Types.generic) (given_generic : Types.generic) ->
                      match (expected_generic.kind, given_generic.kind) with
                      | Type_generic expected_bounds, Type_generic given_bounds ->
-                         (* No stronger bounds than the trait's. *)
                          List.for_all
                            (fun (bound : Types.trait_reference) ->
                              List.exists
@@ -370,9 +342,6 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (written : 
                 (Printf.sprintf "`%s` must have the signature `%s%s` that `%s` declares." name.text
                    name.text (show_signature expected) shown_trait)
             else
-              (* A caller of a capability holds only that capability, so the
-                 implementation can use the capabilities that its [impl]
-                 declares and no others. *)
               let allowed = if trait.is_capability then Types.no_capabilities else expected.uses in
               if not (Types.capability_subset (normalize_capabilities written.uses) allowed) then
                 report state Impl_uses name.span

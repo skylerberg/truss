@@ -56,10 +56,7 @@ let loop_clause visit = function
 let expression_children visit (node : expression) =
   match node.kind with
   | Integer _ | Float _ | Boolean _ | String _ | Function_value _ | Value_parameter _ | Break
-  | Continue | Todo | Unreachable | Result | Current_target | Yielded
-  (* The callee of a [Method_time] is not called, so it is not reported to
-     the visitor. *)
-  | Method_time _ ->
+  | Continue | Todo | Unreachable | Result | Current_target | Yielded | Method_time _ ->
       ()
   | Template { call; _ } -> visit.expression call
   | Use core_place -> place visit core_place
@@ -79,7 +76,6 @@ let expression_children visit (node : expression) =
   | Record_update { base; updates } ->
       visit.expression base;
       List.iter (fun (_, value) -> visit.expression value) updates
-  (* [base] is the first argument of [call], so the call covers it. *)
   | Slice { call; _ } -> visit.expression call
   | Call call ->
       (match call.callee with

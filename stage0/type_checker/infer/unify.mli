@@ -1,7 +1,7 @@
 type t = {
   mutable next : int;
-  types : (int, Types.ty) Hashtbl.t;
-  values : (int, Types.value) Hashtbl.t;
+  type_solutions : (int, Types.ty) Hashtbl.t;
+  value_solutions : (int, Types.value) Hashtbl.t;
   mutable capability_variable_count : int;
   mutable deferred_capability_equalities : (Types.capability_set * Types.capability_set) list;
   mutable integer_range : Types.ty -> (Z.t * Z.t) option;

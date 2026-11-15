@@ -1,42 +1,29 @@
-(* Resolving the names of one definition. The walk maintains a scope with
-   the referent of each name at each point. It records, in tables keyed by
-   node id, the referent of each name and the interpretation of each
-   [name[...]]. It never changes the tree. Broken parts are not walked,
-   because their trees differ from the source. *)
-
 open Syntax
 module String_map = Map.Make (String)
 
 type specification_function = Log | Power | Time | Calls
 
 type target =
-  | Binding  (** This name binds a local, a parameter, or a generic parameter. *)
-  | Local of id  (** A local or parameter, by the id of the name that binds it. *)
+  | Binding
+  | Local of id
   | Law_parameter of int
-      (** In a law's proof, a parameter of the law, by its position among the law's parameters. *)
   | Type_parameter of Types.parameter
-      (** A generic type parameter, by the definition that declares it and its name. *)
-  | Capability_parameter of Types.parameter  (** A generic parameter declared [capability Name]. *)
-  | Value_parameter of Types.parameter  (** A [USize] generic parameter. *)
-  | Definition of Names.named * Path.t  (** A definition, with its kind. *)
-  | Variant of Path.t * string  (** A prelude variant written bare, such as [Some]. *)
+  | Capability_parameter of Types.parameter
+  | Value_parameter of Types.parameter
+  | Definition of Names.named * Path.t
+  | Variant of Path.t * string
   | Module of Path.module_
-  | Field of string  (** A record's field, by name, in the record's invariant or potential. *)
-  | Result_value  (** [result], in [ensures] and [cost]. *)
-  | Old  (** [old], in specifications and proofs. *)
-  | Identical  (** [identical], in specifications and proofs: identity, for every type. *)
-  | Visited  (** [visited]: in a [for] loop's clauses, the values of the iterations before. *)
+  | Field of string
+  | Result_value
+  | Old
+  | Identical
+  | Visited
   | Final
-      (** [final], in a lending method's [ensures]: [final(result)] is the part as the caller left
-          it. *)
   | Specification_function of specification_function
-      (** [log], [power], [time], or [calls] in a [cost] bound, or [log] or [power] in another
-          specification. *)
-  | Unknown of Diagnostic.reported  (** A name that refers to nothing, with its report. *)
+  | Unknown of Diagnostic.reported
 
 type bracket = Index | Type_arguments | Method_bracket
 
-(* The kind of a local value name in scope. *)
 type value =
   | Value_local of id
   | Value_generic of Types.parameter
@@ -44,22 +31,19 @@ type value =
   | Value_law_parameter of int
 
 type specification = {
-  active : bool;  (** In a specification or a proof, where [old] has its meaning. *)
+  active : bool;
   names_result : bool;
-  cost_bound : bool;  (** In a [cost] bound, where [time] and [calls] have their meaning. *)
-  names_visited : bool;  (** In the clauses of a [for] loop, where [visited] has its meaning. *)
-  names_final : bool;  (** In the [ensures] of a lending method, where [final] has its meaning. *)
+  cost_bound : bool;
+  names_visited : bool;
+  names_final : bool;
   elements : string list;
-      (** In the clauses of a [for] loop over a collection or a cursor, the names its pattern binds,
-          which hold no value there. *)
 }
 
 type scope = {
   values : (value * string) String_map.t;
-      (** With the kind of its binding, as diagnostics name it. *)
-  types : target String_map.t;  (** Generic type and capability parameters, as names mean them. *)
+  types : target String_map.t;
   specification : specification;
-  lends : bool;  (** In a lending method, whose [ensures] can name the part as the caller left it. *)
+  is_lending_method : bool;
 }
 
 let no_specification =
@@ -76,15 +60,12 @@ let in_specification = { no_specification with active = true }
 
 type state = {
   database : Query.context;
-  file : Path.file;  (** The file the definition is written in, whose imports it reads *)
+  file : Path.file;
   names : target option array;
   brackets : bracket option array;
   mutable diagnostics : Syntax.diagnostic list;
   mutable holes : (id * (string * value) list) list;
-      (** Each [todo], by its id, with the values in scope there, by name, latest first *)
   mutable used_imports : string list;
-      (** The imports that a module path of the definition begins with, by the name code writes them
-          with *)
 }
 
 let reported state ?fixes code (span : span) message =
@@ -111,7 +92,6 @@ let unknown state (name : name) ~expected candidates =
        (reported state ~fixes Unknown_name name.span
           (Printf.sprintf "Nothing named `%s` is %s." name.text expected)))
 
-(* A definition of the module, by its name. *)
 let module_item state text = Query.demand state.database Names.find (state.file.module_, text)
 
 let module_of_names state (first : name) (rest : name list) =
@@ -119,9 +99,6 @@ let module_of_names state (first : name) (rest : name list) =
     set state first (Unknown report);
     Error report
   in
-  (* An import is used where a module path begins with its name, as in
-     Rust, even where the rest of the path names no module: that path has an
-     error of its own, which deleting the [use] would not fix. *)
   if
     List.mem_assoc first.text (Query.demand state.database Names.imports state.file)
     && not (List.mem first.text state.used_imports)
@@ -130,8 +107,6 @@ let module_of_names state (first : name) (rest : name list) =
     Names.lookup_module state.database ~from:state.file
       (List.map (fun (name : Syntax.name) -> name.text) (first :: rest))
   with
-  (* For a name through an import, the [use] line has the error, and the
-     names after it resolve as usual. *)
   | Found_module (module_, `Package)
     when module_ = Intrinsic.module_ && state.file.module_.package <> Path.standard_package ->
       failed
@@ -153,8 +128,6 @@ let module_of_names state (first : name) (rest : name list) =
            (Printf.sprintf "No module `%s` is imported or exists." text))
   end
 
-(* A name written after a module, [json::parse], which must be visible from
-   here. *)
 let in_module state module_ (name : name) ~types =
   match Query.demand state.database Names.find (module_, name.text) with
   | Some item when if types then Names.is_type_kind item.kind else Names.is_value_kind item.kind ->
@@ -202,8 +175,6 @@ let type_candidates state scope =
       (Query.demand state.database Names.entries state.file.module_)
   @ List.map fst Prelude.types
 
-(* An UpperCamelCase name in the types namespace. With [variants], a prelude
-   variant also counts, as in expressions. *)
 let type_name state scope ?(variants = false) (path : path) =
   match path.modules with
   | first :: rest -> (
@@ -241,13 +212,10 @@ let rec type_expression state scope (type_ : type_expression) =
   | Function_type { inputs; input_names; output; clauses } ->
       List.iter (fun (_, input) -> type_expression state scope input) inputs;
       Option.iter (type_expression state scope) output;
-      (* The names of the inputs are in scope in the type's own [requires],
-         after the parameters before it in a signature. *)
       let named = List.fold_left (declare_parameter state) scope input_names in
       List.iter (clause state named) clauses
   | Type_error -> ()
 
-(* The generic parameter before the [.] of [Items.Element] or [Source.Uses]. *)
 and associated_base state scope (base : name) (member : name) kind =
   match String_map.find_opt base.text scope.types with
   | Some parameter -> set state base parameter
@@ -276,7 +244,6 @@ and type_argument state scope = function
   | Count_name name -> count_name state scope name
   | Constraint (_, type_) -> type_expression state scope type_
 
-(* A lowercase type argument: a value generic parameter, or a constant. *)
 and count_name state scope (name : name) =
   match String_map.find_opt name.text scope.values with
   | Some (Value_generic parameter, _) -> set state name (Value_parameter parameter)
@@ -302,7 +269,8 @@ and clause state scope (clause : clause) =
       expression state
         {
           specification with
-          specification = { in_specification with names_result = true; names_final = scope.lends };
+          specification =
+            { in_specification with names_result = true; names_final = scope.is_lending_method };
         }
         value
   | Decreases measures -> List.iter (expression state specification) measures
@@ -324,7 +292,6 @@ and clause state scope (clause : clause) =
       | Finite -> ())
   | Clause_error -> ()
 
-(* A lowercase name used as a value. *)
 and local_value state scope (name : name) =
   let text = name.text in
   match String_map.find_opt text scope.values with
@@ -386,7 +353,6 @@ and name_expression state scope (path : path) =
         type_name state scope ~variants:true path
       else local_value state scope path.last
 
-(* The referent of a name expression, if the expression is a name. *)
 and name_target state (value : expression) =
   match value.kind with
   | Name path -> target_of state path.last
@@ -425,13 +391,7 @@ and bracket state scope (value : expression) base items =
       | Item_constraint (_, type_) -> type_expression state scope type_)
     items
 
-(* Whether the operand of a mode keyword starts with a place: a local, a parameter,
-   [self], or a constant, then fields and indexes, up to the first method
-   call. After that call, the expression works on its result, so a [?] can
-   follow it, as in [mut file.read_line()?]. *)
 and check_place state (written : expression) (inner : expression) =
-  (* [`Place called]: [called] is whether the place is the receiver of a
-     method call. *)
   let rec head (value : expression) =
     match value.kind with
     | Member (base, _) -> head base
@@ -480,9 +440,6 @@ and expression state scope (value : expression) =
   | Name path -> name_expression state scope path
   | Member (base, _) -> expression state scope base
   | Bracket (base, items) -> bracket state scope value base items
-  (* In a [cost] bound, the four names are the specification functions.
-     [log] and [power] are also that in any other specification, on
-     [Integer], unless a local or a definition of the file has the name. *)
   | Call ({ kind = Name { modules = []; last }; _ }, arguments)
     when (scope.specification.cost_bound && List.mem last.text [ "log"; "power"; "time"; "calls" ])
          || scope.specification.active
@@ -560,9 +517,6 @@ and expression state scope (value : expression) =
       block state scope body
   | Block body -> block state scope body
 
-(* A condition. A name that an [is] at the top level of its [&&] chain binds
-   is in scope in the rest of the chain, and in the returned scope, which is
-   for the block that the condition guards. *)
 and condition state scope (value : expression) =
   match value.kind with
   | Binary { operator = And; left; right; _ } ->
@@ -587,15 +541,12 @@ and arm state scope (arm_ : arm) =
   let guarded = match arm_.guard with Some guard -> condition state inner guard | None -> inner in
   ignore (statement state guarded arm_.body)
 
-(* Declares a value name, reporting it if it shadows another. *)
 and declare_value state scope (name : name) =
   let shadows existing =
     report state Shadowed_name name.span
       (Printf.sprintf "`%s` is already %s, and a name cannot shadow another. Choose another name."
          name.text existing)
   in
-  (* A local may shadow a definition of the module, so adding a definition
-     to one file breaks no local of another. *)
   (match String_map.find_opt name.text scope.values with
   | Some (_, existing) -> shadows existing
   | None -> ());
@@ -609,8 +560,6 @@ and declare_parameter state scope (name : name) =
   let scope = declare_value state scope name in
   { scope with values = String_map.add name.text (Value_local name.id, "a parameter") scope.values }
 
-(* Binds a pattern's names, in the order written, with alternatives checked
-   to bind the same names. *)
 and bind_pattern state scope (pattern_ : pattern) =
   let bound = ref [] in
   pattern state scope bound pattern_;
@@ -674,7 +623,6 @@ and literal_pattern state scope = function
 
 and qualified_constant state scope = function
   | Module_constant { modules = []; last } ->
-      (* The parser builds a qualified constant only with a module before it. *)
       unknown state last ~expected:"a constant in a module here" []
   | Module_constant { modules = first :: rest; last } -> (
       match module_of_names state first rest with
@@ -693,7 +641,6 @@ and block state scope (block_ : block) =
        (fun scope statement_ -> statement state scope statement_)
        scope block_.statements)
 
-(* A statement, returning the scope for the statements after it. *)
 and statement state scope (statement_ : statement) =
   match statement_.kind with
   | Let { pattern = pattern_; annotation; value; else_; _ } ->
@@ -712,8 +659,6 @@ and statement state scope (statement_ : statement) =
       Option.iter (type_expression state scope) annotation;
       expression state scope iterable;
       let inner = bind_pattern state scope pattern_ in
-      (* A range's index names the next index in the loop's clauses. Any
-         other loop's element is bound only in its body. *)
       let elements, clause_scope =
         match iterable.kind with
         | Range { start = Some _; stop = Some _; _ } -> ([], inner)
@@ -734,8 +679,6 @@ and statement state scope (statement_ : statement) =
       block state inner body;
       scope
   | Parallel body | Concurrent body ->
-      (* Each branch has only the scope before the block. The names that the
-         branches bind are in scope after the block. *)
       let word = match statement_.kind with Concurrent _ -> "concurrent" | _ -> "parallel" in
       List.fold_left
         (fun (after : scope) (branch : statement) ->
@@ -793,12 +736,8 @@ let declare_type state scope (name : name) target =
   set state name Binding;
   { scope with types = String_map.add name.text target scope.types }
 
-(* A definition's generic parameters, each named by the definition that
-   declares it, [owner], and its own name: an [impl]'s by the [impl], and a
-   method's own by the method. *)
 let generics state scope ~(owner : Path.t) (generics : generic_parameter list) =
   let parameter (name : name) : Types.parameter = { owner; name = name.text } in
-  (* All of a list's parameters are in scope in each one's bounds. *)
   let scope =
     List.fold_left
       (fun scope (generic : generic_parameter) ->
@@ -848,11 +787,9 @@ let empty_scope =
     values = String_map.empty;
     types = String_map.empty;
     specification = no_specification;
-    lends = false;
+    is_lending_method = false;
   }
 
-(* The scope of a definition's head: the generic parameters of the type
-   head, for a method or a member constant. *)
 let head state scope ~owner = function
   | Plain_name _ -> scope
   | Member_name (head_, _) ->
@@ -866,7 +803,9 @@ let signature state scope ~owner ~(broken : bool) (signature_ : signature) =
     let scope = parameters state scope signature_.parameters in
     result state scope signature_.result;
     let scope =
-      match signature_.result with Some (Lends _) -> { scope with lends = true } | _ -> scope
+      match signature_.result with
+      | Some (Lends _) -> { scope with is_lending_method = true }
+      | _ -> scope
     in
     List.iter (clause state scope) signature_.clauses;
     Some scope
@@ -909,8 +848,6 @@ let inherited scope ~(owner : Path.t) (generics : generic_parameter list) =
       | Generic_error -> scope)
     scope generics
 
-(* [container] is the trait, the [impl], or the capability a method is
-   written inside, with its path. *)
 let definition state ~(path : Path.t) ?(container : (Path.t * definition) option)
     (definition_ : definition) =
   let broken part = Parts.broken definition_ part in
@@ -1020,8 +957,6 @@ let definition state ~(path : Path.t) ?(container : (Path.t * definition) option
         type_name state scope type_.path;
         let scope = generics state scope ~owner:path type_.generics in
         path_type state scope trait_;
-        (* The body is checked as the law's body is: with the law's
-           parameters in scope. *)
         let law_parameters =
           match state.names.(trait_.path.last.id) with
           | Some (Definition (Trait, trait)) ->

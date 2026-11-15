@@ -545,6 +545,18 @@ let check database (key : Resolve.Names.key) (form : Core.t) =
     if Hashtbl.mem seen id then wrong "the node id %d is used twice" id;
     Hashtbl.replace seen id ()
   in
+  let task_origins = Hashtbl.create 4 in
+  let unique_task_origin (node : Core.statement) =
+    match node.kind with
+    | Concurrent _ | For { mode = Concurrent_loop; _ } ->
+        if Hashtbl.mem task_origins node.origin then
+          wrong
+            "two `concurrent` statements have the origin %d, so an early exit of a task of one \
+             would end the tasks of the other"
+            node.origin;
+        Hashtbl.replace task_origins node.origin ()
+    | _ -> ()
+  in
   let callee (callee : Core.callee) =
     match callee with
     | Function { type_arguments; _ } -> List.iter (argument "a call's type argument") type_arguments
@@ -824,6 +836,7 @@ let check database (key : Resolve.Names.key) (form : Core.t) =
          statement =
            (fun (node : Core.statement) ->
              unique node.id;
+             unique_task_origin node;
              match node.kind with
              | Assign { target; _ } -> mutable_place "an assignment" target
              | Compound_assign { target; value; _ } -> (
