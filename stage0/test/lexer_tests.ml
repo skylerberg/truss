@@ -467,6 +467,15 @@ let () =
         [ "lexer.unexpected_character"; "lexer.unexpected_character" ]
         (codes "don't it's");
       error "f('ab')" ~code:String_delimiter ~at:"'" ~fixed:{|f("ab")|});
+  test "more than eight touching fixes are all withheld" (fun () ->
+      let fixed_count count =
+        List.length
+          (List.filter
+             (fun (diagnostic : Diagnostic.t) -> diagnostic.fixes <> [])
+             (snd (lex ("a" ^ String.make count ';' ^ "b"))))
+      in
+      if fixed_count 8 <> 8 then fail "eight touching semicolons have %d fixes" (fixed_count 8);
+      if fixed_count 9 <> 0 then fail "nine touching semicolons have %d fixes" (fixed_count 9));
   test "strict equality" (fun () ->
       error "a === b" ~code:Strict_equality ~at:"===" ~fixed:"a == b";
       error "a !== b" ~code:Strict_equality ~at:"!==" ~fixed:"a != b");
