@@ -18,6 +18,10 @@ impl Iterable for Range[Value: core::Countable] {
   type Element = Value
 
   fn count(self) -> UInt64
+    ensures result == (match self.start.steps_to(self.stop) {
+      Some(steps) => if self.inclusive { steps.saturating_add(1) } else { steps }
+      None => 0
+    })
     cost time finite
   {
     match self.start.steps_to(self.stop) {
@@ -59,6 +63,7 @@ impl Iterable for Reversed[Value: core::Countable] {
   type Element = Value
 
   fn count(self) -> UInt64
+    ensures result == self.range.count()
     cost time finite
   {
     self.range.count()
@@ -87,6 +92,8 @@ impl Iterable for Stepped[Value: core::Countable] {
   type Element = Value
 
   fn count(self) -> UInt64
+    ensures self.range.count() == 0 ==> result == 0
+    ensures self.range.count() > 0 ==> result == (self.range.count() - 1) / self.step + 1
     cost time finite
   {
     let whole = self.range.count()
