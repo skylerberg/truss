@@ -1,6 +1,3 @@
-(* Checks blocks and statements: [let], assignment, loops and their
-   iterations, and the value of a block. *)
-
 open Syntax
 module Names = Resolve.Names
 module Environment = Interface.Environment
@@ -13,8 +10,6 @@ open Lookups
 open Pattern_typing
 open Operators
 
-(* An assertion [by bit_vector] is decided over fixed-width bits, so each
-   variable it names is an integer or a boolean. *)
 let bit_vector_names state (value : Core.expression) =
   let spans = Syntax_walk.spans state.definition in
   Core_walk.expression
@@ -34,8 +29,6 @@ let bit_vector_names state (value : Core.expression) =
        })
     value
 
-(* A block used as a value. Its last expression is checked against the
-   expected type of the block, as part of the enclosing statement. *)
 let rec block_value state env ?expected (written : block) =
   let rec statements_value = function
     | [] -> Types.unit
@@ -51,8 +44,6 @@ let rec block_value state env ?expected (written : block) =
   in
   statements_value written.statements
 
-(* Checks a statement. A statement that is not the last of its block must
-   have type [Unit] or [Never]: a value of any other type would be unused. *)
 and statement state env (written : statement) ~last : unit =
   match written.kind with
   | Expression value ->
@@ -159,13 +150,13 @@ and statement state env (written : statement) ~last : unit =
                     [
                       {
                         Tables.expression = written_target.id;
-                        parameter_index = 0;
+                        core_argument_index = 0;
                         mode = Types.Read;
                         mode_keyword = None;
                       };
                       {
                         Tables.expression = value.id;
-                        parameter_index = 1;
+                        core_argument_index = 1;
                         mode = Types.Read;
                         mode_keyword = None;
                       };
@@ -220,15 +211,9 @@ and statement state env (written : statement) ~last : unit =
             (Types.Own, inner)
         | _ -> (Types.Read, iterable)
       in
-      (* The types in the loop's header are inferred before the body is
-         checked, so the type of the loop variable depends only on the
-         header. *)
       let loop_element = ref None in
       in_statement state env iterable.span (fun () ->
           let element, variable_mode = loop_iterable state env written ~mode inner in
-          (* The annotation is the element type. The header's statement is
-             not settled yet, so in [for index: UInt8 in 0..10] it decides
-             the literals of the range. *)
           (match annotation with
           | Some written_annotation ->
               let annotated = Lower.type_ state.context written_annotation in
@@ -300,10 +285,6 @@ and statement state env (written : statement) ~last : unit =
       check state env value Types.bool
   | Statement_error -> ()
 
-(* [collection[key] = value], where the collection's type implements
-   [IndexAssign], is a call of its [assign]. The collection keeps the key
-   and the value, so a key that is absent is added. Returns false for any
-   other assignment, which assigns to the place that the target denotes. *)
 and assigns_through_index state env (written : statement) (target : expression) (value : expression)
     =
   match (target.kind, state.resolved.brackets.(target.id)) with
@@ -327,8 +308,6 @@ and assigns_through_index state env (written : statement) (target : expression) 
           ignore
             (Calls.check_argument state env value
                (parameter "value" (associated state base_type index "Output" ~at:value.span)));
-          (* The call is recorded for the statement, which has no
-             expression of its own to record it for. *)
           let call : expression =
             { kind = Expression_error; span = written.span; id = written.id }
           in
@@ -336,7 +315,7 @@ and assigns_through_index state env (written : statement) (target : expression) 
           let argument (argument_expression : expression) position mode : Tables.argument =
             {
               expression = argument_expression.id;
-              parameter_index = position;
+              core_argument_index = position;
               mode;
               mode_keyword = None;
             }
@@ -383,10 +362,6 @@ and loop_clause state env (clause : loop_clause) =
       | Big_o value | At_most value | Exactly value -> ignore (expression state env value)
       | Finite -> ())
 
-(* Checks the iterable of a [for] loop: a range of built-in integers, a
-   cursor, or a collection, whose elements the loop visits by position or,
-   for a loop that consumes it, pulls from its cursor. Returns the type of
-   the loop variable and its mode. *)
 and loop_iterable state env (written : statement) ~mode (iterable : expression) =
   match iterable.kind with
   | Range { start = Some _; stop = Some _; inclusive; _ } -> (
@@ -431,10 +406,9 @@ and loop_iterable state env (written : statement) ~mode (iterable : expression) 
                   (Pulled
                      {
                        cursor = type_;
-                       made_by = None;
+                       cursor_call = None;
                        remaining = remaining_call state iterable.span type_;
                      });
-              (* A pull gives the loop each value owned. *)
               (associated state type_ cursor "Element" ~at:iterable.span, Types.Own)
           | None, None, None ->
               ( error state Not_indexable iterable.span

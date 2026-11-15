@@ -1,6 +1,3 @@
-(* The tests of deterministic CBOR and BLAKE3, the encoding and hash that
-   keys are defined over. *)
-
 open Harness
 
 let hex bytes = Blake3.to_hex bytes
@@ -10,8 +7,6 @@ let encodes name value expected =
       let actual = hex (Cbor.encode value) in
       if actual <> expected then fail "expected %s, got %s" expected actual)
 
-(* RFC 8949, appendix A, for the values whose preferred encoding is the
-   deterministic one. *)
 let () =
   encodes "zero is one byte" (Cbor.int 0) "00";
   encodes "23 is the largest one-byte integer" (Cbor.int 23) "17";
@@ -75,14 +70,9 @@ let () =
       | _ -> fail "encoded"
       | exception Invalid_argument _ -> ())
 
-(* The official BLAKE3 test vectors, test_vectors.json in the BLAKE3
-   repository: the input is [length] bytes of 0, 1, ..., 250, 0, 1, ...,
-   and these are the first 32 bytes of each output, in the default mode and
-   in the derive-key mode under the vectors' context. The lengths cover one
-   block, several blocks, one chunk, and trees of several depths. *)
-let vector_context = "BLAKE3 2019-12-27 16:29:52 test vectors context"
+let blake3_repository_context = "BLAKE3 2019-12-27 16:29:52 test vectors context"
 
-let vectors =
+let blake3_repository_vectors =
   [
     ( 0,
       "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
@@ -138,10 +128,13 @@ let () =
   List.iter
     (fun (length, expected_hash, expected_derived) ->
       let input = String.init length (fun index -> Char.chr (index mod 251)) in
-      test (Printf.sprintf "BLAKE3 of the %d-byte test vector" length) (fun () ->
+      test (Printf.sprintf "BLAKE3 of the BLAKE3 repository's %d-byte test vector" length)
+        (fun () ->
           let actual = hex (Blake3.hash input) in
           if actual <> expected_hash then fail "expected %s, got %s" expected_hash actual);
-      test (Printf.sprintf "BLAKE3 derive-key of the %d-byte test vector" length) (fun () ->
-          let actual = hex (Blake3.derive_key ~context:vector_context input) in
+      test
+        (Printf.sprintf "BLAKE3 derive-key of the BLAKE3 repository's %d-byte test vector" length)
+        (fun () ->
+          let actual = hex (Blake3.derive_key ~context:blake3_repository_context input) in
           if actual <> expected_derived then fail "expected %s, got %s" expected_derived actual))
-    vectors
+    blake3_repository_vectors

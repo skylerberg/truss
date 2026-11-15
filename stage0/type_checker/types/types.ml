@@ -48,8 +48,6 @@ and resource =
   | Allocated_bytes
   | Calls of { capability : Path.t; method_ : string option }
 
-(* A function type's parameters have no names, so its bounds are
-   constants: the number, when it is written as one. *)
 and cost_bound = Finite_cost | Order_of | No_more_than of Z.t option | Exactly_cost of Z.t option
 
 let capability_set capabilities : capability_set = List.sort_uniq compare capabilities
@@ -79,7 +77,6 @@ let builtin_of = function
 let is_builtin wanted type_ = builtin_of type_ = Some wanted
 let is_well_known wanted = function Named { path; _ } -> Well_known.is wanted path | _ -> false
 
-(* The built-in integer types, which an integer literal can fill. *)
 let integer_types : Intrinsic.builtin list =
   [ Int8; Int16; Int32; Int64; UInt8; UInt16; UInt32; UInt64 ]
 
@@ -142,7 +139,6 @@ and substitute_argument substitution = function
   | Value _ as value -> value
   | Capabilities capabilities -> Capabilities (substitute_capabilities substitution capabilities)
 
-(* A capability parameter stands for the set it is bound to. *)
 and substitute_capabilities substitution capabilities =
   flat_map_capabilities
     (function
@@ -415,7 +411,7 @@ type signature = {
   uses : capability_set;
   terminates : bool;
   specification_only : bool;
-  stores_functions : string list;
+  capture_free_parameters : string list;
 }
 
 let body_is_definition (signature : signature) =

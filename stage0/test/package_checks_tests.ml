@@ -1,5 +1,3 @@
-(* The tests of the checks across a package. *)
-
 open Harness
 open Support
 
@@ -69,8 +67,6 @@ let () =
       | [ "package.duplicate_test" ] -> ()
       | actual -> fail "found [%s]" (String.concat "; " actual))
 
-(* Recursive types, at scale *)
-
 let () =
   test "a long chain of types that hold each other is fine" (fun () ->
       fine
@@ -110,8 +106,6 @@ let () =
       | actual -> fail "found [%s]" (String.concat "; " actual));
   test "a generic type that swaps its arguments is not growing" (fun () ->
       fine Fixtures.Package_checks.generic_type_that_swaps_its_arguments_is_not)
-
-(* Strict positivity *)
 
 let shown = Fixtures.Package_checks.shown
 let holder = "type Kept[Source: Shown](part: Source.Part)\n\n"
@@ -195,8 +189,6 @@ let () =
         (shown ^ holder
        ^ Fixtures.Package_checks.associated_type_cannot_make_a_type_contain_itself_3)
         "package.not_strictly_positive")
-
-(* Across packages *)
 
 let () =
   test "an impl overlaps an impl in a package it depends on" (fun () ->

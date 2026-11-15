@@ -1,8 +1,3 @@
-(* Generates the core forms of the methods of a derived [impl]: each is the
-   body that the method would have if it were written by hand. [compare]
-   orders by variant, in declaration order, and then by each field in order.
-   A method with a default body in the trait, such as [not_equal], uses the
-   trait's core form. *)
 module Impls = Interface.Impls
 module Environment = Interface.Environment
 
@@ -28,7 +23,6 @@ let form database (path : Path.t) : Core.t option =
           Query.demand database Environment.type_interface type_,
           Impls.signature database path )
       with
-      (* A type whose definition is [todo] has no fields to derive from. *)
       | _, Some { shape = Todo_type; _ }, _ -> None
       | Some interface, Some { shape; _ }, Some signature ->
           let nodes = ref 0 and locals = ref 0 in
@@ -42,8 +36,6 @@ let form database (path : Path.t) : Core.t option =
             incr locals;
             Synthetic local
           in
-          (* Generated code has no source text, so every node has the origin
-             0. *)
           let origin = 0 in
           let node type_ kind : Core.expression = { id = id (); origin; type_; kind } in
           let pattern type_ kind : Core.pattern = { id = id (); origin; type_; kind } in
@@ -92,9 +84,6 @@ let form database (path : Path.t) : Core.t option =
             | [ parameter ] -> Local { local = parameter.local; type_ = parameter.type_; origin }
             | _ -> bug "`%s` takes one value beside its own" (Path.show path)
           in
-          (* A call of a method of the trait [wanted] on a value of
-             [of_type]. The evidence is the type's [impl], or a bound if the
-             type is a generic parameter. *)
           let method_of ?(type_arguments = []) (wanted : Path.t) name (receiver : Path.receiver)
               of_type arguments type_ =
             let reference : Types.trait_reference =
@@ -180,8 +169,6 @@ let form database (path : Path.t) : Core.t option =
           let record_fields () =
             match shape with Record fields -> fields | _ -> bug "a record's fields of a sum type"
           in
-          (* The fields of a record, each as a place inside the record at
-             [base]. *)
           let record_parts base =
             List.map
               (fun (field : Types.field) ->
@@ -189,8 +176,6 @@ let form database (path : Path.t) : Core.t option =
                   Core.Field { base; field = field.field_name; type_ = field.field_type; origin } ))
               (record_fields ())
           in
-          (* The fields of a variant are reachable only through a pattern.
-             The pattern binds each field, borrowed from the matched value. *)
           let bound named (fields : Types.field list) =
             List.map (fun (field : Types.field) -> (field, local (), named field.field_name)) fields
           in
@@ -216,9 +201,6 @@ let form database (path : Path.t) : Core.t option =
           in
           let self_place : Core.place = Local { local = Self; type_ = self_type; origin } in
           let is variant : Core.pattern = pattern self_type (Variant { variant; fields = [] }) in
-          (* Applies [each] to the fields of [self]: to the fields of a
-             record, or, for a sum type, to the fields of each variant in a
-             [match] with one arm per variant. *)
           let of_self type_
               (each : string option -> int -> (Types.field * Core.place) list -> Core.block) =
             match variants with
@@ -237,9 +219,6 @@ let form database (path : Path.t) : Core.t option =
                               variants;
                         }))
           in
-          (* Matches [other]. If [other] is the same variant as [self], the
-             result is [same] applied to the fields of [other]. If it is a
-             different variant, the result is [different ()]. *)
           let of_other other type_ variant (mine : (Types.field * Core.place) list) ~same ~different
               =
             match variant with
@@ -354,8 +333,6 @@ let form database (path : Path.t) : Core.t option =
                     ~name:(fun ((field : Types.field), _) -> field.field_name)
                     fields
                 in
-                (* Compares field by field, in declaration order. The first
-                   pair of fields that is not equal decides. *)
                 let rec in_turn mine theirs =
                   match (mine, theirs) with
                   | [], _ | _, [] -> ordering "Equal"
@@ -404,9 +381,6 @@ let form database (path : Path.t) : Core.t option =
                                in_turn (declared variant mine) (declared variant theirs))
                              ~different:(fun () -> ordering "Equal")))
                 | Some variants ->
-                    (* The index of the other value's variant, to compare
-                       with the index of this value's variant when the two
-                       differ. *)
                     let theirs = local () in
                     let numbered =
                       node number
@@ -561,8 +535,6 @@ let form database (path : Path.t) : Core.t option =
                     type_
                 in
                 let finish name = statement (Evaluate (source_call name [] unit)) in
-                (* [call?]: the value of [call]'s [Ok], or a return of its
-                   [Err]. *)
                 let attempted ok call =
                   let value = local () and error = local () in
                   node ok
@@ -652,13 +624,6 @@ let form database (path : Path.t) : Core.t option =
                             uses = Types.no_capabilities;
                           }))
                 in
-                (* The type's [invariant] clauses, each with its position
-                   and its source text. A type that derives [Deserialize]
-                   has only clauses that run, and the method checks each
-                   against the value it read, after the record or variant
-                   ends, so that an error has the value's path. Without the
-                   check, data could make a value that breaks its type's
-                   invariant, which every proof assumes it meets. *)
                 let invariant_clauses =
                   match Query.demand database Interface.Summary.key type_ with
                   | None -> []
@@ -690,7 +655,6 @@ let form database (path : Path.t) : Core.t option =
                           |> List.filter_map Fun.id
                       | _ -> [])
                 in
-                (* [if !holds_invariant(built, clause) { return Err(...) }] *)
                 let invariant_check built_place (index, text) =
                   let bool = Types.bool and uint64 = Types.builtin UInt64 in
                   let holds =
@@ -758,10 +722,6 @@ let form database (path : Path.t) : Core.t option =
                          else_ = None;
                        })
                 in
-                (* Reads the fields of a record or of a variant, then builds
-                   the value. A field without a default is read before the
-                   value is built, and one with a default after, into the
-                   value that its default built. *)
                 let fields_then_built variant (fields : Types.field list) end_ : Core.block =
                   let required, defaulted =
                     match variant with
@@ -994,6 +954,4 @@ let form database (path : Path.t) : Core.t option =
       | _ -> None)
   | _ -> None
 
-(* The core form of a method of a derived [impl], by the method's path. It
-   is generated once, however many instances of the method are compiled. *)
 let core = Query.query ~name:"derived" ~phase:Phases.bodies ~show:Path.show form

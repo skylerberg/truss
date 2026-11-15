@@ -1,7 +1,3 @@
-(* The tests of the code database's sessions: a session's findings, the
-   results a restart or a new worktree computes again, dependencies, comparing
-   with a commit, overlaps between worktrees, and the background process. *)
-
 open Harness
 
 let fresh = scratch
@@ -9,7 +5,6 @@ let counter = ref 0
 
 let write directory file text =
   write_files directory [ (file, text) ];
-  (* A rewrite within one second must still look changed. *)
   incr counter;
   let now = Unix.gettimeofday () in
   Unix.utimes (Filename.concat directory file) now (now +. float_of_int !counter)
@@ -18,10 +13,6 @@ let manifest name = Printf.sprintf "[package]\nname = \"%s\"\ntruss = \"0.1\"\n"
 let project = "[project]\n"
 let program = Fixtures.Database.doubling
 
-(* A store that holds the standard library's checked state and nothing
-   else, as any store does once Truss has run. Checking the standard
-   library and writing its state is most of a new store's cost, and it
-   comes out the same for each, so it is done once. *)
 let store_with_standard =
   lazy
     (let directory = fresh "standard" in
@@ -32,9 +23,6 @@ let store_with_standard =
      Database.reset ();
      directory)
 
-(* Every test starts as a new process would, with a store of its own. With
-   [~empty:true] the store holds nothing, as on a machine where Truss has
-   never run, and the process checks the standard library itself. *)
 let fresh_store ?(empty = false) () =
   let standard = if empty then None else Some (Lazy.force store_with_standard) in
   Database.reset ();
@@ -61,8 +49,6 @@ let session directory =
   | Ok (session, packages) -> (session, packages)
   | Error message -> failwith message
 
-(* A session's diagnostics and problems, as a count, after it is saved, as
-   a command would leave it. *)
 let errors directory =
   let session, packages = session directory in
   let actual =
@@ -111,17 +97,12 @@ let expect_errors directory count =
   let actual = errors directory in
   if actual <> count then fail "%d errors, expected %d" actual count
 
-(* The background process, first, since a process cannot fork once a
-   build has started domains *)
-
 let () =
   test "the background process answers requests and sees every earlier write" (fun () ->
       fresh_store ();
       let directory = package () in
       match Unix.fork () with
       | 0 ->
-          (* A request is a directory, and the answer its count of errors, or
-             [-1] to stop. *)
           Database.serve ~key:(Database.server_key directory) ~handle:(fun ~progress request ->
               let directory = request in
               progress "working";
@@ -434,7 +415,6 @@ let () =
       if not (List.mem (top "app" "extra") again) then fail "did not check extra");
   test "a new worktree's state is a difference over the state it started from" (fun () ->
       fresh_store ~empty:true ();
-      (* Eight modules, of which the second worktree changes one. *)
       let module_text index =
         Printf.sprintf
           "fn first_%d(value: Int64) -> Int64 {\n\
@@ -527,8 +507,6 @@ let () =
       fresh_store ();
       let session, _ = session (package ()) in
       if Database.find_definitions session "double" <> [ double ] then fail "found otherwise")
-
-(* With git *)
 
 let git = Harness.git
 
@@ -716,8 +694,6 @@ let () =
                  (fun (file, code, _) -> file = "caller.truss" && code = "types.missing_argument")
                  actual)
           then fail "no error found")
-
-(* The layers stay apart *)
 
 let library_file name : Path.file =
   { module_ = { package = Path.standard_package; modules = [ name ] }; name }

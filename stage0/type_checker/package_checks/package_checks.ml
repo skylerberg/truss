@@ -1,16 +1,8 @@
-(* The checks that look at more than one definition of a package: where an
-   [impl] may live, overlapping [impl]s, a type's method sharing a name
-   with a trait's, types that contain themselves in place or in a function
-   type's input, instantiation cycles, and tests with one name. Packages
-   cannot depend on each other in a cycle, so every cycle these find is
-   within one package. *)
-
 open Syntax
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Properties = Interface.Properties
 
-(* A diagnostic at a place inside a definition, moved to its file. *)
 type placed = { file : Path.file; diagnostic : Diagnostic.t }
 
 let diagnostic_at database (key : Names.key) ?(fixes = []) code (span : span) message =
@@ -54,12 +46,6 @@ let check_location database (declaration : Names.declaration) (definition : defi
          (Types.show_trait impl.implements)
          (Types.show impl.for_type))
 
-(* Sealed traits *)
-
-(* Only the built-in integer types implement the integer traits, each the
-   traits of its own signedness. Generic code over one is proven for each
-   built-in type, which would be unsound if any other type could implement
-   it. *)
 let check_sealed database (declaration : Names.declaration) (definition : definition)
     (impl : Types.impl_interface) =
   let implementors =
@@ -85,10 +71,6 @@ let check_sealed database (declaration : Names.declaration) (definition : defini
            (Types.show impl.for_type))
   | None, _ -> None
 
-(* Overlap *)
-
-(* Whether two [impl]s' heads unify, each [impl]'s generic parameters as
-   variables of their own. *)
 let overlap (first : Types.impl_interface) (second : Types.impl_interface) =
   let variables =
     List.map
@@ -102,8 +84,6 @@ let overlap (first : Types.impl_interface) (second : Types.impl_interface) =
         match Hashtbl.find_opt bindings parameter with Some bound -> resolve bound | None -> type_)
     | _ -> type_
   in
-  (* Binding a variable to a type that holds it would make an infinite
-     type, which no head can be. *)
   let occurs parameter =
     Types.exists ~resolve (function Types.Parameter other -> other = parameter | _ -> false)
   in
@@ -136,13 +116,6 @@ let overlap (first : Types.impl_interface) (second : Types.impl_interface) =
   && List.length first.implements.trait_arguments = List.length second.implements.trait_arguments
   && List.for_all2 argument first.implements.trait_arguments second.implements.trait_arguments
 
-(* A method is its name and how it takes [self]. An [impl] in a type's own
-   package may write another overload of a method the type has: one name,
-   taking [self] another way. Nothing else may use a name the type's methods
-   have: not an [impl] in another package, and not a method an [impl] leaves
-   to its trait's body, since either can arrive in an upgrade that the
-   type's author never saw, and would then change which method a call
-   means. Neither may a method share a constant's name. *)
 let check_method_names database (declaration : Names.declaration) (definition : definition)
     (impl : Types.impl_interface) =
   match
@@ -192,8 +165,6 @@ let check_method_names database (declaration : Names.declaration) (definition : 
         trait.methods
   | _ -> []
 
-(* A type definition's generic parameters, and its fields, each with the
-   variant that it is in. *)
 let type_fields database path =
   match Query.demand database Environment.type_interface path with
   | Some interface ->
@@ -218,8 +189,6 @@ let type_fields database path =
 let type_arguments arguments =
   List.filter_map (function Types.Type type_ -> Some type_ | _ -> None) arguments
 
-(* The named types that a type definition's fields contain, each with its
-   field and how it occurs in a value of the type. *)
 let contained =
   Query.query ~name:"contained_types" ~phase:Phases.interfaces ~show:Path.show (fun database path ->
       let bounds =
@@ -241,10 +210,6 @@ let contained =
             (Interface.Impls.contents database ~bounds field.field_type).contained)
         (snd (type_fields database path)))
 
-(* How a type contains itself through the fields of type definitions: the
-   occurrence of the type in itself along each cycle of definitions, with
-   the field of the type that the cycle starts at. A cycle is within one
-   package. Each type is visited once with each occurrence. *)
 let self_occurrences database (start : Path.t) =
   let visited = Hashtbl.create 16 in
   let rec from path occurrence =
@@ -263,14 +228,6 @@ let self_occurrences database (start : Path.t) =
       List.map (fun path -> (field, path)) (from target occurrence))
     (Query.demand database contained start)
 
-(* Whether a generic type contains itself with growing type arguments,
-   through any field at all, so that it has no fixed set of instances. As in
-   Go's check, the graph's nodes are the parameters of generic types: a
-   parameter goes to each argument position of a type named in a field that
-   mentions it, growing when the argument is more than the parameter itself.
-   The type grows when a path from its parameters back to them takes a
-   growing edge. Each node is visited once with each answer to whether the
-   path has grown. *)
 let grows database (start : Path.t) =
   let edges (path, index) =
     let parameters, fields = type_fields database path in
@@ -392,11 +349,6 @@ let check_recursion database (declaration : Names.declaration) (definition : def
       Option.to_list in_place @ Option.to_list function_input
   | _ -> []
 
-(* An [impl]'s associated type can make a type contain itself though no type
-   definition's fields do. With [type Kept[Source: Shown](part:
-   Source.Part)], defining [Part] as [Kept[Marker]] in [impl Shown for
-   Marker] makes [Kept[Marker]] infinitely large. A type that contains
-   itself the same way through its definition's fields is reported there. *)
 let check_associated_types database (declaration : Names.declaration) (definition : definition)
     (impl : Types.impl_interface) =
   let key = Names.key_of declaration in
@@ -451,10 +403,6 @@ let check_associated_types database (declaration : Names.declaration) (definitio
               (Interface.Impls.contents database ~bounds type_).recursions)))
     impl.implements.associated
 
-(* A generic definition's calls to generic definitions of the same package,
-   each with whether a type argument puts one of the caller's parameters
-   inside a type constructor, which makes the arguments grow around a
-   cycle. *)
 let instantiation_edges database (key : Names.key) =
   match Query.demand database Infer.core key with
   | None -> []
@@ -522,8 +470,6 @@ let check_instantiation database (package : Path.package) =
       else None)
     edges
 
-(* Two tests with one name in one file are already a duplicate definition;
-   this is for two in different files of the package. *)
 let check_tests database (package : Path.package) =
   let tests =
     List.filter
@@ -547,7 +493,6 @@ let check_tests database (package : Path.package) =
          else (name :: seen, diagnostics))
        ([], []) tests)
 
-(* A package's errors, by its name. *)
 let check =
   Query.query ~name:"package_checks" ~phase:Phases.checks ~show:Path.show_package ~saved:true
     (fun database package_name ->
@@ -578,7 +523,6 @@ let check =
           (fun (declaration, definition, impl) -> check_sealed database declaration definition impl)
           impls
       in
-      (* An impl in the wrong place reports that alone. *)
       let placed =
         List.filter
           (fun ((declaration : Names.declaration), _, impl) ->
@@ -591,9 +535,6 @@ let check =
             check_method_names database declaration definition impl)
           impls
       in
-      (* The impls of the packages this one depends on, directly or not:
-             one of this package's may overlap one of theirs, though each
-             is where the location rule lets it be. *)
       let dependency_impls =
         let rec packages seen = function
           | [] -> seen
@@ -611,10 +552,6 @@ let check =
               (Query.demand database Interface.Impls.index name))
           (List.filter (fun name -> name <> package_name) (packages [] (standard @ direct)))
       in
-      (* Two impls can overlap only if they implement one trait for one
-             type, since an impl's type is always a named type: so each is
-             compared only with the impls before it in its trait and type's
-             group, here and in the packages depended on. *)
       let group (impl : Types.impl_interface) =
         (impl.implements.trait, Interface.Impls.head impl.for_type)
       in
@@ -668,9 +605,6 @@ let check =
       @ check_instantiation database package
       @ check_tests database package)
 
-(* The packages a definition uses: those it names in a path, those with a
-   trait whose method it calls with a dot, and those with an [impl] that
-   answers a call or meets a bound in it. *)
 let used_packages =
   Query.query ~name:"used_packages" ~phase:Phases.bodies ~saved:true ~show:Names.show_key
     (fun database (key : Names.key) ->
@@ -715,7 +649,7 @@ let code_packages =
 
 type manifest_problem =
   | Not_a_capability of { dependency : Path.package; name : string }
-  | Unused of Path.package  (** A dependency that nothing in the package uses *)
+  | Unused of Path.package
 
 let manifest_sentence ~package = function
   | Not_a_capability { dependency; name } ->
@@ -727,10 +661,6 @@ let manifest_sentence ~package = function
       Printf.sprintf "Nothing in `%s` uses `%s`. Delete its entry." (Path.show_package package)
         (Path.show_package dependency)
 
-(* Which dependencies a package uses is known only once all of its code
-   checks: a call in a body with an error may not have been resolved. So a
-   package with an error elsewhere is not told that a dependency is unused,
-   which a fix would then delete. *)
 let manifest_problems =
   Query.query ~name:"manifest_problems" ~phase:Phases.checks ~saved:true ~show:Path.show_package
     (fun database package_name ->

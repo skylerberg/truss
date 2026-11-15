@@ -53,7 +53,7 @@ and mir_frame = {
   mutable block : Mir.Graph.block;
 }
 
-type task = { id : Core.task; group : Lowered.place; end_block : Lowered.block; scope_depth : int }
+type task = { id : Mir.task; group : Lowered.place; end_block : Lowered.block; scope_depth : int }
 
 type spawn_loop = {
   origin : Core.origin;

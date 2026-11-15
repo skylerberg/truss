@@ -1,23 +1,10 @@
-(* Tests of the core form's decisions that no run of a program shows, but
-   ownership checking or the prover reads: whether an operand is a place,
-   the capabilities a call is inferred to use, the resource a cost clause
-   names, and which calls a specification makes. Each test checks one such
-   fact about one definition.
-
-   The rest of the core form is tested elsewhere. [Core_lint] holds the
-   invariants of every core form, and runs on every core form that a test
-   produces. The codegen suites run programs, which test what each
-   desugaring means. *)
-
 open Harness
 open Support
 
-(* A core form, with the name that each of its locals is declared with. *)
 type form = { core : Core.t; names : (Core.local, string) Hashtbl.t }
 
 let form_of (core : Core.t) = { core; names = Core_walk.local_names core.definition }
 
-(* Every expression of a definition, in evaluation order. *)
 let expressions form =
   let found = ref [] in
   Core_walk.definition
@@ -35,7 +22,6 @@ let name form (local : Core.local) =
   | Self -> "self"
   | Named _ | Synthetic _ -> Option.value ~default:"" (Hashtbl.find_opt form.names local)
 
-(* A place written as a local and fields, such as [self.first]. *)
 let rec access_path form (place : Core.place) =
   match place with
   | Local { local; _ } -> name form local
@@ -44,9 +30,6 @@ let rec access_path form (place : Core.place) =
   | Lent call -> "lent " ^ expression form call
   | Temporary value -> "temporary " ^ expression form value
 
-(* The parts of an expression that the tests observe, written briefly: a
-   call with its callee and arguments, an operator, a slice, a use, and a
-   literal. *)
 and expression form (node : Core.expression) =
   let list describe items = String.concat ", " (List.map describe items) in
   match node.kind with
@@ -82,8 +65,6 @@ and argument form (passed : Core.argument) =
   | Passed { mode; value; _ } -> Types.show_mode mode ^ operand form value
   | Default -> "default"
 
-(* The core form of the definition [name] of the program [text], which must
-   check without a diagnostic and pass the lint. *)
 let definition_form text name =
   let database = setup [ ("app::main", text) ] in
   let file = file_of "app::main" in
@@ -115,14 +96,10 @@ let definition_form text name =
       form_of core
   | None -> failwith (Printf.sprintf "`%s` has no core form" name)
 
-(* Fails the running test unless the observations are the expected
-   ones. *)
 let expect_observed expected observed =
   if observed <> expected then
     fail "expected [%s], found [%s]" (String.concat "; " expected) (String.concat "; " observed)
 
-(* [expect test_name text observe expected]: what [observe] reports of the
-   definition [g], or of [definition], of the program [text]. *)
 let expect ?(definition = "g") test_name text observe expected =
   test test_name (fun () -> expect_observed expected (observe (definition_form text definition)))
 
@@ -131,8 +108,6 @@ let contract form : Core.contract =
   | Function { contract; _ } -> contract
   | _ -> failwith "the definition is not a function"
 
-(* The body's final expression: its value, or the last statement of a body
-   that has no value. *)
 let final_expression form =
   let of_block (block : Core.block) =
     match (block.value, List.rev block.statements) with
@@ -150,8 +125,6 @@ let capabilities (set : Types.capability_set) =
     (set :> Types.capability list)
 
 let shape = Fixtures.Core.shape
-
-(* Operands *)
 
 let () =
   expect "a match on a local borrows the local: its scrutinee is a place"
@@ -174,8 +147,6 @@ let () =
           else None)
         (calls form))
     [ "mut slice standard::list::List.slice_from(place items, 0)" ]
-
-(* Holes *)
 
 let () =
   List.iter
@@ -224,11 +195,8 @@ let () =
       "let field = Config(port: hole)";
     ]
 
-(* Capabilities *)
-
 let () =
   let apply = Fixtures.Core.apply in
-  (* The capabilities that the call of [apply] is inferred to grant. *)
   let granted form =
     List.concat_map
       (fun (call : Core.call) ->
@@ -305,8 +273,6 @@ let () =
       if List.sort compare !actual <> [ "first: (fn() uses Console)"; "second: (fn() uses Clock)" ]
       then fail "found [%s]" (String.concat "; " !actual))
 
-(* Origins *)
-
 let () =
   test "a node's origin gives its source span" (fun () ->
       let text = Fixtures.Core.nodes_origin_gives_its_source_span in
@@ -338,11 +304,7 @@ let () =
           | _ -> fail "no core form")
         (Query.demand database Resolve.Names.declarations (module_of "app::main")))
 
-(* Specifications *)
-
 let () =
-  (* The specification functions that a definition applies, and the
-     functions it calls, in order. *)
   let applied form =
     List.filter_map
       (fun (node : Core.expression) ->
@@ -437,8 +399,6 @@ let () =
           | _ -> fail "no core form with exactly one cost")
         (Query.demand database Resolve.Names.declarations (module_of "app::main")))
 
-(* The standard library's core forms satisfy the invariants. *)
-
 let () =
   let database = setup [] in
   let forms = ref 0 in
@@ -450,8 +410,6 @@ let () =
     Standard_library.files;
   test "the standard library has core forms" (fun () ->
       if !forms < 500 then fail "only %d of its definitions have one" !forms)
-
-(* Derived methods *)
 
 let () =
   test "a `todo` type has no derived core form" (fun () ->
@@ -514,8 +472,6 @@ let () =
                 interface.impl_methods)
         derived)
 
-(* [Infer.core_of_path] *)
-
 let () =
   let text = Fixtures.Core.described_both in
   let both : Path.t = Top { module_ = module_of "app::main"; name = "Both" } in
@@ -548,7 +504,6 @@ let () =
             substitution )
     | None -> failwith "no core form"
   in
-  (* The method's final expression, and then its substitution. *)
   let observed name =
     let form, substitution = core_of_method name in
     final_expression form @ substitution
@@ -577,8 +532,6 @@ let () =
       | _ ->
           fail "expected the derived method with no substitution and the inherited method with one")
 
-(* A law's proof *)
-
 let () =
   expect ~definition:"proof Ordered.agrees_with_equal for Pair"
     "a law's proof has the law's parameters, with the proof's type for Self"
@@ -601,8 +554,6 @@ let () =
       "second: Pair, synthetic local 1";
       "app::main::only_equal(place first, place second)";
     ]
-
-(* [Infer.For_testing.specification] *)
 
 let () =
   let specification text name =

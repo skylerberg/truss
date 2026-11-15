@@ -1,6 +1,3 @@
-(** Instantiating definitions while a statement is checked: fresh arguments for a generic
-    definition, its bounds as deferred requirements, and type arguments written in expressions. *)
-
 open State
 
 type static_ =

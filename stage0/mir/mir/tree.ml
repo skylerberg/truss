@@ -67,6 +67,7 @@ type provided = {
 }
 
 type loan_duration = Loop_body | Provide_body | Rest_of_statement | Operand_evaluation
+type task = Branch of { block : Core.origin; index : int } | Iteration of { loop : Core.origin }
 
 type iteration =
   | Range of { start : operand; stop : operand; inclusive : bool }
@@ -210,12 +211,7 @@ and jump =
   | Return of operand option
   | Break
   | Continue
-  | Cancel of {
-      task : Core.task;
-      winner : local;
-      number : int;
-      returned : (operand * local) option;
-    }
+  | Cancel of { task : task; winner : local; number : int; returned : (operand * local) option }
   | Unreachable
   | Written_unreachable
   | Todo

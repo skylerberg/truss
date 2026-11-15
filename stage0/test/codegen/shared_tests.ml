@@ -1,7 +1,3 @@
-(* [intrinsic::Shared] and its operations. Only the standard library can
-   name the intrinsic module, so the tests' source is one more module of the
-   [standard] package, checked and compiled with the library. *)
-
 open Codegen_support
 
 let probe : Path.file =
@@ -9,8 +5,6 @@ let probe : Path.file =
 
 let source = Fixtures.Shared.shared_probe
 
-(* The standard library with the probe module, checked, and a compiler for
-   it. *)
 let loaded =
   lazy
     (let engine = Engine.create () in
@@ -56,16 +50,15 @@ let () =
           | Error message -> failwith message)
         worker_counts)
 
-(* Where the capability check allows [shared_update] and [shared_key],
-   which require [Tasks], and the [Storable] bound on [Shared]'s value. *)
 let checks : Path.file =
   { module_ = { package = Path.standard_package; modules = [ "shared_checks" ] }; name = "checks" }
 
 let checks_source = Fixtures.Shared.checks_source
 
 let () =
-  test "Shared's operations require Tasks outside an impl, and its value must be Storable"
-    (fun () ->
+  test
+    "Shared's operations need Tasks except directly in a method of a capability's impl, and its \
+     value must be Storable" (fun () ->
       let engine = Engine.create () in
       Database.load_package engine ~name:Path.standard_package ~dependencies:[]
         (Standard_library.files @ [ (checks, checks_source) ]);
@@ -81,6 +74,8 @@ let () =
       in
       let expected =
         [
+          ("capabilities.lambda_uses", "fn() { intrinsic::shared_key(self.ticks) }");
+          ("capabilities.not_available", "intrinsic::shared_key(self.ticks)");
           ("capabilities.not_available", "intrinsic::shared_key(ticks)");
           ("types.unsatisfied_bound", "intrinsic::Shared[Slice[Int64]]");
           ("types.unsatisfied_bound", "intrinsic::shared_key(numbers)");

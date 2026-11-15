@@ -1,6 +1,3 @@
-(* The signatures of [standard::intrinsic]'s operations. Arithmetic and
-   comparison are generic over the built-in number type, which code generation
-   sees after monomorphization. *)
 let parameter operation name : Types.parameter =
   { owner = Intrinsic.operation_path operation; name }
 
@@ -28,7 +25,7 @@ let signature (operation : Intrinsic.operation) : Types.signature =
       uses = Types.no_capabilities;
       terminates = true;
       specification_only = false;
-      stores_functions = [];
+      capture_free_parameters = [];
     }
   in
   let value = parameter_type "Value" and element = parameter_type "Element" in
@@ -37,7 +34,6 @@ let signature (operation : Intrinsic.operation) : Types.signature =
     make ~generics:[ "Value" ] ~output:(Returns output) [ input "left" value; input "right" value ]
   in
   let unary output = make ~generics:[ "Value" ] ~output:(Returns output) [ input "value" value ] in
-  (* An operation on an [Array[Element, count]], generic over both. *)
   let over_array ?(output = fun _ -> Types.Returns Types.unit) parameters =
     let count = parameter operation "count" in
     let array =
@@ -52,7 +48,6 @@ let signature (operation : Intrinsic.operation) : Types.signature =
       generics = [ generic "Element"; { Types.generic = count; kind = Value_generic } ];
     }
   in
-  (* The work a coroutine or a task runs: a function of one [UInt64]. *)
   let work_item = Types.builtin UInt64 in
   let work =
     Types.Function
@@ -111,7 +106,6 @@ let signature (operation : Intrinsic.operation) : Types.signature =
   | Storage_set_capacity -> with_storage ~mode:Mut [ input "capacity" uint64 ]
   | Storage_lengthen -> with_storage ~mode:Mut [ input "by" uint64 ]
   | Storage_shorten ->
-      (* Only elements with nothing to drop can be forgotten. *)
       let plain : Types.trait_reference =
         { trait = Well_known.path Plain; trait_arguments = []; associated = [] }
       in
@@ -204,14 +198,14 @@ let signature (operation : Intrinsic.operation) : Types.signature =
   | Coroutine_start ->
       {
         (make ~output:(Returns uint64) [ input ~mode:Own "work" work; input "item" work_item ]) with
-        stores_functions = [ "work" ];
+        capture_free_parameters = [ "work" ];
       }
   | Tasks_spawn ->
       {
         (make ~output:(Returns bool)
            [ input "group" work_item; input ~mode:Own "work" work; input "item" work_item ])
         with
-        stores_functions = [ "work" ];
+        capture_free_parameters = [ "work" ];
       }
   | Holds_invariant ->
       make ~generics:[ "Value" ] ~output:(Returns bool)
@@ -295,13 +289,6 @@ type amount = Argument of int | Generic of string
 type allocations = No_allocations | One_if_positive of amount | Unknown_allocations
 type cost = { time : time; allocations : allocations }
 
-(* Each operation's cost, as the prover trusts it. Arithmetic, and
-   reading or swapping in place, take a fixed number of steps and allocate
-   nothing. Making a storage with room for some elements takes a fixed
-   number of steps and allocates one block, unless the room is for none. Moving or comparing the elements of a storage or a view, as
-   giving a storage a new capacity moves them, takes steps in proportion to
-   its length. Running a test and reaching the system may do more, and are
-   known by no bound. *)
 let cost (operation : Intrinsic.operation) =
   match operation with
   | Add | Subtract | Multiply | Divide | Remainder | Negate | Wrapping_add | Wrapping_subtract

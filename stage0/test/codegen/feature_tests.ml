@@ -1,5 +1,3 @@
-(* Truss source compiled with the standard library and run: each feature. *)
-
 open Codegen_support
 
 let () =
@@ -15,9 +13,6 @@ let () =
     Fixtures.Feature.assignment_through_an_index_inserts_or_replaces;
   passes "a cursor gives each value and then None"
     Fixtures.Feature.cursor_gives_each_value_and_then_none;
-  (* A cursor holds no evidence: one that held the evidence of the block it
-     was made in would read the [Table]'s list after that block had dropped
-     it. *)
   passes "a cursor's next uses the implementation provided where it is called"
     Fixtures.Feature.cursors_next_uses_the_implementation_provided;
   test "an associated capability set gives each instance the evidence that its type needs"
@@ -45,16 +40,12 @@ let () =
         (String.concat "" (List.init 2 (Printf.sprintf "test %d passed\n"))));
   passes "a lending method lends a local it owns, which lives until the caller's statement ends"
     Fixtures.Feature.lending_method_lends_a_local_it_owns_which_lives;
-  (* The caller continues from either path, and only the first has [label]
-     to drop when the caller's statement ends. *)
   passes "a lending method owns a value on one of its paths and not on another"
     Fixtures.Feature.lending_method_owns_a_value_on_one_of_its_paths;
   passes "a lending method lends from a `return` inside a loop, while it owns a value"
     Fixtures.Feature.lending_method_lends_from_a_return_inside_a_loop;
   passes "a `lends mut` method lends on two paths, and owns a local on one of them"
     Fixtures.Feature.lends_mut_method_lends_on_two_paths_and_owns_a;
-  (* The name aliases the label, which the method drops when the loop's
-     body ends. *)
   passes "a name that a `while` condition binds from a lent value lives until the body ends"
     Fixtures.Feature.name_a_while_condition_binds_from_a_lent_value;
   passes "sets and maps keep one of each key, in order"

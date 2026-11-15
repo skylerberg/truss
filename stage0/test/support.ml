@@ -20,8 +20,6 @@ let top_key module_name name : Resolve.Names.key =
   let module_ = module_of module_name in
   { module_; path = Top { module_; name }; ordinal = 0 }
 
-(* The standard library as a fixed base, shared by every test in a run, so
-   that it is checked once. *)
 let standard = lazy (Database.For_testing.standard_base ())
 
 let setup ?(dependencies = []) files =
@@ -90,8 +88,6 @@ let first_core_nodes text =
     (Resolve.Names.key_of
        (List.hd (Query.demand database Resolve.Names.declarations (module_of "app::main"))))
 
-(* Fails the test unless every file checks without a diagnostic and every
-   core form satisfies [Core_lint.check]. *)
 let no_diagnostics ~check files =
   let database = setup files in
   List.iter

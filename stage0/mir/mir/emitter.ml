@@ -33,7 +33,7 @@ type t = {
   mutable deferred : local list option;
   mutable extended : Core.id list;
   mutable binds_into : frame;
-  mutable tasks : (Core.task * int) list;
+  mutable tasks : (task * int) list;
   groups : (Core.origin, group) Hashtbl.t;
   held_places : (local, place) Hashtbl.t;
   bound_to_places : (local, unit) Hashtbl.t;
@@ -221,7 +221,7 @@ let return_from_scopes builder value origin =
 
 let unit_value = Constant { value = Unit; type_ = Types.unit }
 
-let group_key : Core.task -> Core.origin = function
+let group_key : task -> Core.origin = function
   | Branch { block; _ } -> block
   | Iteration { loop } -> loop
 
@@ -322,7 +322,7 @@ let looping builder build =
   build ();
   builder.loops <- List.tl builder.loops
 
-let group_of builder (task : Core.task) origin =
+let group_of builder (task : task) origin =
   let key = group_key task in
   match Hashtbl.find_opt builder.groups key with
   | Some group -> group
@@ -342,7 +342,7 @@ let tasks_left builder exit =
             (fun index _ -> index < List.length builder.tasks - loop.tasks_around)
             builder.tasks
           |> List.filter_map (fun (task, _) ->
-              match (task, exit) with Core.Iteration _, `Continue -> None | _ -> Some task)
+              match (task, exit) with Tree.Iteration _, `Continue -> None | _ -> Some task)
       | [] -> bug "a loop exit outside a loop")
 
 let leave_tasks builder tasks exit origin =

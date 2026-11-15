@@ -1,37 +1,19 @@
-(* Generated tests for dangling views: a view cannot be used after the place
-   that it borrows is mutated or moved.
-
-   Each generated function combines four parts:
-   - a source: a place that stores a list;
-   - a maker: an expression that creates a view of the source;
-   - a holder: statements that store the view under the name [held];
-   - an invalidation: statements that mutate or move the source.
-
-   For every combination, the ownership check must reject the function when
-   a use of [held] can follow the invalidation, and must accept it when the
-   use comes first. Hand-written tests cover one combination each, so a
-   combination that nobody thought of is not tested. This test covers all of
-   them. *)
-
 open Harness
 open Support
 
 let check = Checks.For_testing.through Ownership
 let helpers = Fixtures.Ownership_matrix.helpers
 
-(* A place that stores a [List[Int64]]. *)
 type source = {
   source : string;
-  header : string -> string;  (** The function's first line, given its name. *)
-  declare : string list;  (** The statements that declare the place. *)
+  header : string -> string;
+  declare : string list;
   place : string;
   invalidations : (string * string list) list;
-      (** The ways to mutate or move the place, each with a name. *)
 }
 
 let mut_method = "a mut method"
 
-(* The ways to mutate any place that stores a list. *)
 let of_place place =
   [
     (mut_method, [ Printf.sprintf "mut %s.push(4)" place ]);
@@ -91,13 +73,9 @@ let sources =
     };
   ]
 
-(* A way to create a view of a place. [make] returns the statements that
-   must run first, and the expression whose value is the view. A maker that
-   declares a local appends [suffix] to its name, so that two uses of the
-   maker in one function do not clash. *)
 type maker = {
   maker : string;
-  type_ : string option;  (** The view's type, if it can be written. *)
+  type_ : string option;
   make : suffix:string -> string -> string list * string;
 }
 
@@ -142,13 +120,9 @@ let makers =
     };
   ]
 
-(* A way to store a view under the name [held]. [view] is the expression for
-   the view of the source. A holder that also needs a second view calls
-   [other], which returns a view of another list, created by the same maker. *)
 type holder = {
   holder : string;
   hold : view:string -> other:(unit -> string) -> type_:string option -> string list option;
-      (** [None] if the holder needs a type annotation and the view's type cannot be written. *)
 }
 
 let holders =
@@ -191,13 +165,8 @@ let holders =
 
 let use = [ "look(held)" ]
 let indent = List.map (fun line -> "  " ^ line)
-
-(* The use directly follows the invalidation. *)
 let use_after invalidate = invalidate @ use
 
-(* Other control flow in which the use can follow the invalidation. These
-   are generated for one invalidation of each source, because they test the
-   dataflow analysis and not the invalidation. *)
 let other_rejected_shapes =
   [
     ( "the invalidation is in a branch",
@@ -207,18 +176,10 @@ let other_rejected_shapes =
       fun invalidate -> ("for _ in 0..2 {" :: indent (use @ invalidate)) @ [ "}" ] );
   ]
 
-(* The use comes first, so [held] is dead when its source is invalidated. *)
 let use_before invalidate = use @ invalidate @ [ "look(flag)" ]
 
-type generated = {
-  description : string;
-  rejected : bool;
-  start : int;  (** Where the function's text is in the module's. *)
-  stop : int;
-  text : string;
-}
+type generated = { description : string; rejected : bool; start : int; stop : int; text : string }
 
-(* The module that holds every function made with one maker. *)
 let generate (maker : maker) =
   let buffer = Buffer.create 65536 in
   Buffer.add_string buffer helpers;

@@ -29,8 +29,6 @@ val describe : ?extra:(string * Memory_layout.shape) list -> Ground.ty -> string
 val int32 : Ground.ty
 val uint64 : Ground.ty
 
-(* A function written by hand, and an instance written as C once the
-   layouts it is printed with are known. *)
 type local_info
 type block
 type function_
@@ -56,8 +54,6 @@ val function_ :
 val key : string -> Instance.key
 val instance : ?nested:function_ list -> string -> function_ -> instance
 val entry : ?nested:function_ list -> local_info list -> block list -> instance
-
-(* An instance already written as C. *)
 val printed : Emit_c.Builder.instance -> instance
 
 val call :
@@ -93,17 +89,9 @@ val expect_status :
   unit
 
 val example : Path.module_
-(** The root module of the package [example]. *)
-
 val example_file : Path.file
-(** [example/main.truss], the file {!load} gives its text. *)
-
 val checked_standard : Engine.t lazy_t
-
 val load_files : ?results:Compile.results -> (Path.file * string) list -> Query.context * Compile.t
-(** Loads the files as the package [example]. Fails the running test if a file has a diagnostic or a
-    core form that fails {!Core_lint.check}. *)
-
 val load : ?results:Compile.results -> string -> Query.context * Compile.t
 val tests_in : Query.context -> Path.module_ -> Path.t list
 val tests_of : Query.context -> Path.t list

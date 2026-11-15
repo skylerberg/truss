@@ -54,13 +54,13 @@ let own_iteration_ends blocks (body : Mir.Graph.block list) =
       && match (block_at blocks block).terminator with Iteration_end _ -> true | _ -> false)
     body
 
-let tasks_in blocks (body : Mir.Graph.block list) : Core.task list =
+let tasks_in blocks (body : Mir.Graph.block list) : Mir.task list =
   List.concat_map
     (fun block ->
       match (block_at blocks block).terminator with
-      | For { loop; _ } -> [ Core.Iteration { loop = loop.origin } ]
+      | For { loop; _ } -> [ Mir.Iteration { loop = loop.origin } ]
       | Fork { fork; branches; _ } ->
-          List.mapi (fun index _ -> Core.Branch { block = fork; index }) branches
+          List.mapi (fun index _ -> Mir.Branch { block = fork; index }) branches
       | _ -> [])
     body
 

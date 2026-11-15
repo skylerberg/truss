@@ -1,8 +1,3 @@
-(* Each test gives an input and the lexer's exact output: the tokens, or
-   the one diagnostic with its code, position, and fix.
-
-   Fuzzing and benchmarks are tools in stage0/tools, not tests. *)
-
 open Token
 open Harness
 
@@ -12,8 +7,6 @@ let equal_lists show name expected actual =
       (String.concat "; " (List.map show expected))
       (String.concat "; " (List.map show actual))
 
-(* Lexing *)
-
 let lex text = Lexer.lex (Source.create ~path:"test.truss" text)
 
 let codes text =
@@ -21,10 +14,6 @@ let codes text =
     (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code)
     (snd (lex text))
 
-(* A token, shown compactly: names and literals as written, punctuation and
-   keywords by spelling, NEWLINE as "NL", and a zero-width closer that layout
-   inserted with a "+" in front. A string shows its texts, with "${}" for
-   each interpolation. *)
 let show (token : Token.t) =
   match token.kind with
   | Upper name | Lower name -> name
@@ -60,12 +49,10 @@ let recovered_tokens text =
       else shown)
     (tokens_of text)
 
-(* Asserts that [text] lexes with no diagnostics into [expected]. *)
 let tokens text expected =
   List.iter (fun code -> fail "unexpected %s" code) (codes text);
   equal_lists Fun.id "tokens" expected (tokens_of text)
 
-(* The tokens of the [index]th interpolation of the first string in [text]. *)
 let interpolation_tokens text index =
   let first_string =
     Array.to_list (fst (lex text))
@@ -78,10 +65,6 @@ let interpolation_tokens text index =
 
 let find text part ~occurrence = Option.get (Substring.find ~occurrence text part)
 
-(* Asserts that [text] gives exactly one diagnostic, with [code], starting at
-   the [occurrence]th occurrence of [at]. With [fixed], its fixes must turn
-   [text] into [fixed] and then [alternatives], each of which must lex with
-   no diagnostics. Without [fixed], it must have no fix. *)
 let error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
   match snd (lex text) with
   | [ diagnostic ] -> (
@@ -114,7 +97,6 @@ let error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
               (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code)
               diagnostics))
 
-(* The texts that the fixes of the diagnostic with [code] produce. *)
 let fixed_texts text ~code =
   List.concat_map
     (fun (diagnostic : Diagnostic.t) ->
@@ -128,8 +110,6 @@ let machine_fixed text =
        (fun (diagnostic : Diagnostic.t) ->
          match diagnostic.fixes with [ fix ] -> fix.edits | _ -> [])
        (Diagnostic.machine_applicable (snd (lex text))))
-
-(* Source text *)
 
 let () =
   test "two sources of the same text are equal" (fun () ->
@@ -187,8 +167,6 @@ let () =
       in
       if not (valid 0) then fail "the JSON is not valid UTF-8: %S" json)
 
-(* Names *)
-
 let () =
   test "keywords, reserved words, and contextual words" (fun () ->
       tokens "fn Self self loop result time O _"
@@ -232,8 +210,6 @@ let () =
       in
       equal_lists Fun.id "replacements" [ "user_name"; "user_name" ] replacements)
 
-(* Numbers *)
-
 let () =
   test "integer literals" (fun () ->
       tokens "42 1_000_000 0xFF 0xdead_beef 0b1010 0o755 99999999999999999999999"
@@ -273,8 +249,6 @@ let () =
       error "0x" ~code:Number_missing_digits ~at:"0x";
       error "1e" ~code:Number_missing_digits ~at:"e";
       error "1abc" ~code:Number_followed_by_name ~at:"a")
-
-(* Strings *)
 
 let () =
   test "escapes" (fun () ->
@@ -396,8 +370,6 @@ let () =
         [ "lexer.unexpected_character"; "lexer.unexpected_character" ]
         (codes "value's'debug"))
 
-(* Raw strings *)
-
 let lines = String.concat "\n"
 
 let () =
@@ -439,8 +411,6 @@ let () =
       match snd (lex text) with
       | [ { notes = [ (span, _) ]; _ } ] when span.start = find text "}" ~occurrence:1 -> ()
       | _ -> fail "expected a note at the line where the string seems to end")
-
-(* Rejected sequences *)
 
 let () =
   test "a comment at the end of a line has no fix" (fun () ->
@@ -490,8 +460,6 @@ let () =
       error "a $ b" ~code:Unexpected_character ~at:"$");
   test "increment and decrement are left for the parser" (fun () ->
       tokens "i++\ni--\n--x" [ "i"; "++"; "NL"; "i"; "--"; "NL"; "--"; "x"; "NL" ])
-
-(* Punctuation *)
 
 let () =
   test "every punctuation lexes as itself" (fun () ->
@@ -622,8 +590,6 @@ let () =
         [ "x = \"\"\"\n  \u{0085} a\n  \"\"\"\n" ]
         (fixed_texts "x = \"\"\"\n\u{0085} a\n  \"\"\"\n" ~code:Raw_string_indentation))
 
-(* Layout *)
-
 let () =
   test "a line break ends a statement" (fun () -> tokens "a\nb" [ "a"; "NL"; "b"; "NL" ]);
   test "a line that starts with an operator continues" (fun () ->
@@ -644,8 +610,6 @@ let () =
   test "a comment line is not a blank line" (fun () ->
       let tokens, _ = lex "a\n// c\nb" in
       if tokens.(2).blank_line_before then fail "b has no blank line before it")
-
-(* Brackets *)
 
 let () =
   test "two unclosed brackets inside another each close before its closer" (fun () ->
@@ -727,8 +691,6 @@ let () =
   test "brackets swallowed by an unterminated comment are not reported" (fun () ->
       equal_lists Fun.id "codes" [ "lexer.comment" ] (codes "f( /* never closed"))
 
-(* Diagnostics *)
-
 let () =
   test "at most 200 diagnostics are shown, then a count" (fun () ->
       let diagnostic offset =
@@ -756,8 +718,6 @@ let () =
       | _ -> fail "expected Invalid_argument"
       | exception Invalid_argument _ -> ())
 
-(* Fixes in a file with several errors *)
-
 let () =
   test "the fixes for errors in two definitions each remove only their own error" (fun () ->
       let text =
@@ -781,8 +741,6 @@ let () =
                 (List.sort compare (codes (Diagnostic.apply_fix text fix))))
             diagnostic.fixes)
         (snd (lex text)))
-
-(* The documents *)
 
 let document = Parse_support.document
 let truss_blocks name = Documents.truss_blocks (document name)
@@ -841,6 +799,4 @@ let () =
             (Printf.sprintf "%s block %d lexes cleanly" name (index + 1))
             (fun () -> equal_lists Fun.id "codes" [] (codes text)))
         (truss_blocks name))
-    (* Every document at the root of the repository, so a new one is covered
-       without being listed here. *)
     (Harness.markdown_documents ())

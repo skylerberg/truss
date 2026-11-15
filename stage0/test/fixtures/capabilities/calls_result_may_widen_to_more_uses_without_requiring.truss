@@ -1,0 +1,11 @@
+fn checked[capability Granted](action: (fn() -> Instant uses Granted)) -> (fn() -> Instant uses Granted)
+  uses Granted
+{
+  let _ = action()
+  action
+}
+
+fn f() {
+  let held: (fn() -> Instant uses Clock) = checked(still)
+  let _ = held
+}

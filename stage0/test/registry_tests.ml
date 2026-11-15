@@ -1,6 +1,3 @@
-(* The tests of versions, a package's hash, the lock file, a registry's
-   files, and choosing a build's versions. *)
-
 open Harness
 module Version = Registry.Version
 module Content = Registry.Content
@@ -9,8 +6,6 @@ module Index = Registry.Index
 module Selection = Registry.Selection
 
 let contains text part = Substring.contains text part
-
-(* Versions *)
 
 let () =
   test "a version is three numbers" (fun () ->
@@ -34,8 +29,6 @@ let () =
           ({ owner = Some "acme"; name = "geometry_v" }, 1);
         ])
 
-(* A package's hash *)
-
 let () =
   test "a package's hash does not depend on the order its files are given in" (fun () ->
       let files = [ ("truss.toml", "a"); ("vector.truss", "b"); ("guide/start.md", "c") ] in
@@ -52,8 +45,6 @@ let () =
       if hash = Content.hash [ ("a.truss", "one"); ("b.truss", "too") ] then fail "bytes";
       if hash = Content.hash [ ("a.truss", "one"); ("c.truss", "two") ] then fail "path";
       if hash = Content.hash [ ("a.truss", "onetwo") ] then fail "one file for two")
-
-(* The lock file *)
 
 let lock_block () =
   String.concat "\n"
@@ -104,16 +95,12 @@ let () =
       malformed_at 2 (Printf.sprintf "format 1\nacme::geometry_v2 1.0.0 %s\n" hash);
       malformed_at 2 (Printf.sprintf "format 1\nacme::geometry 2.0.0 %s\n" hash))
 
-(* A registry's files *)
-
 let fresh = scratch
 
-(* The registry at a directory, as [TRUSS_REGISTRY] names one. *)
 let at root =
   Unix.putenv Index.variable root;
   Option.get (Index.current ())
 
-(* A version's files in a registry, at [owner/name/VERSION/]. *)
 let version_directory root (package : Path.package) version =
   List.fold_left Filename.concat root (Path.package_parts package @ [ Version.show version ])
 
@@ -173,13 +160,9 @@ let () =
       | Error _ -> ()
       | Ok _ -> fail "fetched")
 
-(* Choosing versions *)
-
 let package text = Option.get (Path.parse_package text)
 let hash_of name (version : Version.t) = Content.hash [ (name, Version.show version) ]
 
-(* A registry in memory: each package and version, with its dependencies,
-   each with the capabilities it grants, and its dependencies at publication. *)
 let load published name version ~hash =
   let written = Path.show_package name in
   match List.assoc_opt (written, version) published with
@@ -308,8 +291,6 @@ let () =
           ~load:(load published)
       in
       if chosen packages <> [ ("acme::walls", (1, 0, 0)) ] then fail "chose another")
-
-(* Package holdings *)
 
 let () =
   let package name dependencies : Selection.package =

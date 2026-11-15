@@ -1,26 +1,3 @@
-(* The capability check: a call can use only the capabilities that are
-   available at the call.
-
-   The check runs on a definition's core form, because the core form has a
-   node for every call, including the calls that desugaring introduces (the
-   [each] of a [for] loop, the [display] of an interpolated value).
-
-   The capabilities that are available at a point of the code are its scope:
-   - in a function body: the function's [uses], and the capabilities of
-     every enclosing [provide];
-   - in a lambda body: the [uses] of the lambda's function type;
-   - in a specification, a proof, or a [parallel] branch: fewer than the
-     function declares (see [scope_kind]).
-
-   The check cannot decide each call independently, because a capability set
-   can contain capability variables. A capability variable is the set that a
-   capability parameter is instantiated with at one call, and it is solved
-   from constraints. So the check only collects constraints of the form "the
-   capabilities that this call requires are a subset of the capabilities
-   available here". [solve] then solves all constraints of the definition,
-   including those that type inference collected when it converted function
-   values to function types. *)
-
 open Syntax
 module Names = Resolve.Names
 module Environment = Interface.Environment
@@ -28,19 +5,12 @@ module Impls = Interface.Impls
 open State
 
 let panic : Types.capability = Capability (Well_known.path Panic)
-
-(* The capability that [concurrent] code uses, because its behavior can
-   depend on task scheduling. *)
 let tasks : Types.capability = Capability (Well_known.path Tasks)
 
-(* [spans] maps a syntax node id to its span. A core node is reported at the
-   span of its origin. *)
 type checking = {
   state : state;
   spans : span array;
   mutable provides : (Types.capability_set * Core.implementation list * Core.block) list;
-      (** Every [provide] of the definition: the capabilities available at it, its implementations,
-          and its body. *)
 }
 
 let report checking ?(fixes = []) code (origin : Core.origin) message =
@@ -48,29 +18,14 @@ let report checking ?(fixes = []) code (origin : Core.origin) message =
   checking.state.diagnostics <-
     Diagnostic.make ~fixes ~code:(Capabilities code) span message :: checking.state.diagnostics
 
-type scope_kind =
-  | Function_body  (** The body of a function or a test. *)
-  | Lambda_body of Core.origin
-      (** The body of the lambda with this origin. The available capabilities are the [uses] of the
-          lambda's type. If that type has a capability variable, solving adds the capabilities that
-          the body requires to the variable. *)
-  | Restricted of string
-      (** Code that may use less than the enclosing function declares: a [parallel] branch (only
-          [Panic]), or a specification or proof (nothing). The string names the kind of code, for
-          error messages. *)
+type scope_kind = Function_body | Lambda_body of Core.origin | Restricted of string
 
 type scope = {
   available : Types.capability_set;
   kind : scope_kind;
   implemented_capability : Types.capability option;
-      (** Set in a method of an [impl] of a capability, and not in a lambda, a [parallel] branch, or
-          a specification inside it. An indirect call (a call through a function value) in such a
-          method may use that capability, because the method can pass its own implementation on to
-          the callee. A call of an intrinsic in such a method needs no capability (see
-          [require_intrinsic_uses]). *)
 }
 
-(* The scope of a [parallel] branch: only [Panic] is available. *)
 let panic_only description =
   {
     available = Types.capability_set [ panic ];
@@ -78,8 +33,6 @@ let panic_only description =
     implemented_capability = None;
   }
 
-(* The scope of a specification or a proof: no capability is available, not
-   even [Panic], because a specification must denote a value. *)
 let no_capabilities description =
   {
     available = Types.no_capabilities;
@@ -87,10 +40,6 @@ let no_capabilities description =
     implemented_capability = None;
   }
 
-(* A dependency may only use the capabilities that the package's manifest
-   grants it. [uses] are the capabilities that [subject], a definition of
-   [package], uses. Capability parameters are not checked: they are
-   instantiated by the caller. *)
 let check_grant checking (origin : Core.origin) ~subject package (uses : Types.capability_set) =
   List.iter
     (fun capability ->
@@ -98,9 +47,6 @@ let check_grant checking (origin : Core.origin) ~subject package (uses : Types.c
     (Interface.Grants.missing checking.state.database ~package:checking.state.package ~of_:package
        uses)
 
-(* Checks the grants for a callee: for a function, its [uses]; for a trait
-   method, the [uses] the trait declares and the [uses] of the [impl] that
-   runs. *)
 let check_callee_grants checking (origin : Core.origin) (callee : Core.callee) =
   let state = checking.state in
   match callee with
@@ -136,8 +82,6 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.callee) =
       | Bound | Dynamic -> ())
   | Capability_method _ | Intrinsic _ | Indirect _ -> ()
 
-(* Adds the constraint that [required] is a subset of the capabilities
-   available in [scope]. [origin] is where a violation is reported. *)
 let require_available checking scope (origin : Core.origin) ?(for_implementation = false)
     ?(indirect_call = false) (required : Types.capability_set) =
   let state = checking.state in
@@ -191,25 +135,12 @@ let require_available checking scope (origin : Core.origin) ?(for_implementation
     state.capability_constraints <-
       { subset = required; superset; report_missing } :: state.capability_constraints
 
-(* An intrinsic has no signature with a [uses] clause: [Intrinsic.uses] lists
-   the capabilities that a call of it requires.
-
-   A method of an [impl] of a capability is exempt. Its callers reach it
-   only through a capability call, which is an effect that their signatures
-   declare, so no code without capabilities can observe the intrinsic's
-   effects. A capability is not a trait, so the method cannot be called on the
-   value, through a bound, or through [any]. A lambda, a [parallel] branch,
-   and a specification inside the method are not exempt, and neither is a
-   helper function that the method calls. *)
 let require_intrinsic_uses checking scope (origin : Core.origin) operation =
   if Option.is_none scope.implemented_capability then
     require_available checking scope origin
       (Types.capability_set
          (List.map (fun capability -> Types.Capability capability) (Intrinsic.uses operation)))
 
-(* Handles a callee that is stored in a node other than a [Call]. It requires the [uses] of the callee's signature. A
-   trait's method requires the [uses] that the trait declares, for the type
-   that the method is called on: [next] declares [Self.Uses]. *)
 let require_callee_uses checking scope (origin : Core.origin) (callee : Core.callee) =
   let state = checking.state in
   check_callee_grants checking origin callee;
@@ -250,12 +181,8 @@ let rec check_expression checking scope (node : Core.expression) =
         body
   | Provide { implementations; body } -> check_provide checking scope implementations body
   | Quantified _ ->
-      (* The body of a quantifier is a specification even when the
-         quantifier is in executable code. *)
       check_children checking (no_capabilities "a quantifier's body") (`Expression node)
   | Function_value { path; _ } ->
-      (* Taking a function as a value lets the holder call it, so the grants
-         are checked here as they are for a call. *)
       check_callee_grants checking node.origin (Function { path; type_arguments = [] })
   | Call call -> (
       check_children checking scope (`Expression node);
@@ -296,11 +223,8 @@ and check_block checking scope (body : Core.block) =
 and check_statement checking scope (statement : Core.statement) =
   match statement.kind with
   | Parallel branches ->
-      (* A branch may only use [Panic], so the result of a [parallel] block
-         does not depend on the order its branches run in. *)
       List.iter (check_statement checking (panic_only "a `parallel` branch")) branches
   | Concurrent branches ->
-      (* A branch may use the capabilities that are available at the block. *)
       require_available checking scope statement.origin (Types.capability_set [ tasks ]);
       List.iter (check_statement checking scope) branches
   | For { mode; pattern; iteration; clauses; body } ->
@@ -335,7 +259,6 @@ and check_statement checking scope (statement : Core.statement) =
   | Proof body -> check_block checking (no_capabilities "a proof") body
   | _ -> check_children checking scope (`Statement statement)
 
-(* Loop clauses ([invariant], [decreases], [cost]) are specifications. *)
 and check_loop_clauses checking (clauses : Core.loop_clause list) =
   List.iter
     (Core_walk.loop_clause
@@ -345,11 +268,6 @@ and check_loop_clauses checking (clauses : Core.loop_clause list) =
        })
     clauses
 
-(* A [provide] block. The type of each implementation implements one or
-   more capabilities. Those capabilities are available in the body. Each
-   [impl] has its own [uses], which must be available where the [provide]
-   is. A place must be provided [mut] exactly when one of the [impl]s has a
-   [mut self] method. *)
 and check_provide checking scope implementations body =
   let state = checking.state in
   let provided = ref Types.no_capabilities in
@@ -409,16 +327,7 @@ and check_provide checking scope implementations body =
     { scope with available = Types.capability_union scope.available !provided }
     body
 
-(* Solves the definition's capability constraints.
-
-   Each capability variable starts as the empty set. For every constraint
-   whose superset has a variable, the capabilities that the subset has and
-   the superset lacks are added to that variable. This repeats until
-   nothing changes, which gives the least solution. Then every constraint
-   that still does not hold is reported. *)
 let solve (state : state) =
-  (* A constraint was collected while types were inferred, so its sets can
-     name an associated capability set of a type that was not known then. *)
   state.capability_constraints <-
     List.map
       (fun (constraint_ : subset_constraint) ->
@@ -471,11 +380,6 @@ let solve (state : state) =
       if missing <> Types.no_capabilities then constraint_.report_missing missing)
     (List.rev state.capability_constraints)
 
-(* Whether a value of a type can call code that uses a capability: the type
-   is a function type with a [uses] clause, an [any] type or a bounded type
-   parameter whose trait has a method with one, or a type that contains one
-   of these at any depth. An associated capability set is empty for an [any]
-   type, and can hold any capability for a type parameter. *)
 let rec can_call_capability_code (state : state) ~bounds ?(seen = []) (type_ : Types.ty) =
   let inside = can_call_capability_code state ~bounds ~seen in
   let trait_uses (trait : Types.trait_reference) =
@@ -527,21 +431,6 @@ let rec can_call_capability_code (state : state) ~bounds ?(seen = []) (type_ : T
   | Types.Hole | Types.Error _ ->
       false
 
-(* Data race prevention. A monitor locks its methods through [Tasks]: code
-   generation wraps each method with [Tasks.lock] and [Tasks.unlock], using
-   the implementation of [Tasks] in the same [provide], or else the one that
-   is available at the [provide]. If the body uses [Tasks] and neither
-   exists, the only implementation of [Tasks] is provided in a nested
-   [provide]. The methods then have no lock, and two tasks could run a [mut
-   self] method at the same time.
-
-   A body that can use [Tasks] only through a capability parameter is not
-   checked here. Each instance of the function receives evidence for the
-   capabilities that the parameter is instantiated with, so evidence for
-   [Tasks] exists at the [provide] exactly in the instances that can start
-   tasks, and code generation adds the lock in those.
-
-   An implementation of [Tasks] itself is not a monitor. *)
 let check_monitor_lock checking ~(solved : int -> Types.capability_set) available implementations =
   let state = checking.state in
   let provides_tasks (implementation : Core.implementation) =
@@ -576,17 +465,6 @@ let check_monitor_lock checking ~(solved : int -> Types.capability_set) availabl
                (Types.show implementation.type_)))
       implementations
 
-(* Deadlock prevention. Where the body of a [provide] can use [Tasks], an
-   implementation that is provided [mut] is a monitor: each call of its
-   methods runs to completion before the next call starts.
-
-   An implementation calls only capabilities that are provided outside its
-   own [provide], so tasks acquire monitors from the innermost outward,
-   which cannot deadlock. A callback parameter breaks that order: a callback
-   that uses a capability could enter the monitor of a nested [provide]
-   while the outer monitor is held. So a capability that a monitor
-   implements has no method with a parameter that can call code with a
-   [uses] clause. *)
 let check_monitor_callbacks checking implementations =
   let state = checking.state in
   List.iter
@@ -662,8 +540,6 @@ let check (state : state) (lowered : Environment.lowered_interface) (form : Core
   | Constant _ | Test _ | Law_proof _ | Empty -> ());
   (match (form.definition, state.definition.kind, lowered.interface) with
   | Function { body; _ }, (Function _ | Method_declaration _), Function_interface signature ->
-      (* If this function is a method of an [impl] of a capability, that
-         capability is the scope's [implemented_capability]. *)
       let implemented_capability =
         Option.bind (Query.demand state.database Names.container state.key) (fun container ->
             match Query.demand state.database Environment.lowered_interface container with
@@ -686,8 +562,6 @@ let check (state : state) (lowered : Environment.lowered_interface) (form : Core
       check_block checking (no_capabilities "a proof") body
   | _ -> ());
   solve state;
-  (* Whether a [provide]'s body can use [Tasks] is known once the
-     capability variables are solved. *)
   let solved variable =
     match state.capability_solution with
     | Some solution ->

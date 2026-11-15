@@ -1,6 +1,3 @@
-(** Checking an [impl] against the trait it implements, and each method written inside it against
-    the method the trait declares. *)
-
 val check_impl :
   Checking.state ->
   Syntax.impl_member Syntax.line list ->

@@ -1,6 +1,3 @@
-(* Checks expressions that build values: strings and tagged strings,
-   collection literals, lambdas, [if], and [match]. *)
-
 open Syntax
 module Names = Resolve.Names
 module Environment = Interface.Environment
@@ -38,8 +35,6 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
             }
     | None -> ()
   in
-  (* A call of a trait's method with [arguments], each passed with [mode], the
-     mode of the method's parameter. *)
   let trait_call ?(mode = Types.Read) trait name receiver self_type evidence arguments result :
       Tables.call =
     {
@@ -49,7 +44,12 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
       arguments =
         List.mapi
           (fun index (written : expression) ->
-            { Tables.expression = written.id; parameter_index = index; mode; mode_keyword = None })
+            {
+              Tables.expression = written.id;
+              core_argument_index = index;
+              mode;
+              mode_keyword = None;
+            })
           arguments;
       omitted_defaults = [];
       uses = Types.no_capabilities;
@@ -60,8 +60,6 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
   | None ->
       register_expression state value (fun () ->
           Form.untagged_string state ~origin:value.id literal);
-      (* Each interpolated value of an untagged string is converted with its
-         [Display]. *)
       List.iteri
         (fun index ((part : expression), part_type) ->
           defer state (fun () ->
@@ -89,7 +87,6 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
             Types.Named
               { path = tag_path; arguments = instantiate_type state tag.last.span tag_path }
           in
-          (* Each part goes into the template that the tag receives. *)
           List.iter (fun (part, part_type) -> check_owned state env part part_type) parts;
           (match expected with
           | Some expected -> ignore (unify state tag_type expected)
@@ -120,9 +117,6 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
                     | None -> ());
                     let part = associated state tag_type template_trait "Part" ~at:literal.span in
                     part_type := Some part;
-                    (* Each interpolated value is converted to the tag's
-                       [Part] type with [From], selected by the value's
-                       type. *)
                     List.iteri
                       (fun index ((part_expression : expression), part_type) ->
                         let part_type = normalize state part_type in
@@ -213,13 +207,10 @@ and map_literal state env ?expected (value : expression) entries =
            entries));
   Types.Named { path = map_type; arguments = [ Types.Type key; Types.Type value_type ] }
 
-(* A lambda. Its parameter types come only from the expected type. *)
 and lambda state env ?expected (value : expression) parameters body =
-  let references_before = state.references in
+  let locals_read_before = state.locals_read in
   state.lambdas <- value.span :: state.lambdas;
   let expected = Option.map (normalize state) expected in
-  (* A lambda with no known parameter types is still checked, so that its
-     own errors are reported. Its parameters get the unknown type. *)
   let untyped unknown =
     List.iter (fun written -> pattern state env written unknown ~mode:Types.Read) parameters;
     ignore (block_value state env body);
@@ -253,13 +244,11 @@ and lambda state env ?expected (value : expression) parameters body =
               Give the `let` a function type, or the call type arguments.")
   in
   state.lambdas <- List.tl state.lambdas;
-  (* The locals of the enclosing function that the lambda reads, in order of
-     first use. *)
   let rec newer acc list =
-    if list == references_before then acc
+    if list == locals_read_before then acc
     else match list with [] -> acc | id :: rest -> newer (id :: acc) rest
   in
-  let read = newer [] state.references in
+  let read = newer [] state.locals_read in
   let inside = Span.make value.span.start value.span.stop in
   let outer id =
     match Hashtbl.find_opt state.binding_spans id with
@@ -334,16 +323,11 @@ and if_ state env ?expected (value : expression) (test : expression) then_ else_
       join state env ~expected
         [ (then_type, then_.span, block_value_id then_); (else_type, else_span, else_end) ]
 
-(* The last expression of a block, which is the block's value. *)
 and block_value_id (written : block) =
   match List.rev written.statements with
   | { kind = Expression value; _ } :: _ -> Some value.id
   | _ -> None
 
-(* The type of an [if] or a [match]: the common type of its branches. A
-   branch of type [Never] does not count. If a type is expected, each
-   branch's value is checked against it. Otherwise the branches must have
-   the same type. *)
 and join state env ~expected branches =
   let live = List.filter (fun (type_, _, _) -> resolve state type_ <> Types.Never) branches in
   match (live, expected) with
@@ -361,7 +345,6 @@ and join state env ~expected branches =
       first
 
 and match_ state env ?expected (value : expression) scrutinees arms =
-  (* The types of the scrutinees are inferred before the arms are checked. *)
   let types =
     List.map
       (fun (scrutinee : expression) ->
@@ -416,8 +399,6 @@ and match_ state env ?expected (value : expression) scrutinees arms =
   in
   join state env ~expected branch_types
 
-(* The body of an arm is a statement. A body that is not an expression has
-   type [Unit]. *)
 and arm_value state env ?expected (body : statement) =
   match body.kind with
   | Expression value -> expression state env ?expected value
@@ -425,10 +406,6 @@ and arm_value state env ?expected (body : statement) =
       ignore (statement state env body ~last:false);
       Types.unit
 
-(* The element type of a quantifier's range or collection. In executable
-   code, a quantifier over a collection is a loop, so how the loop visits
-   the collection's elements is recorded for the quantifier, as for a [for]
-   loop. *)
 and element_of_collection state env ~(quantifier : expression) (collection : expression) =
   let collection_type = normalize state (expression state env collection) in
   match collection_type with

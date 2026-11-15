@@ -1,8 +1,6 @@
 open Harness
 open Parse_support
 
-(* The documents agree with the code *)
-
 let () =
   test "SPECIFICATION.md lists the words the parser recognizes by spelling" (fun () ->
       let listed =
@@ -31,8 +29,6 @@ let () =
           "Menhir resolves %d conflicts by precedence, and \"Ambiguities in the grammar\" lists %d"
           Reference.conflicts_resolved_by_precedence listed)
 
-(* The documents *)
-
 let markdown_files = Harness.markdown_documents ()
 
 let snippet text =
@@ -60,8 +56,6 @@ let () =
       if codes diagnostics <> [ "parser.needs_parentheses" ] then
         fail "got [%s]" (String.concat "; " (codes diagnostics)))
 
-(* The reference parser *)
-
 let () =
   List.iter
     (fun name ->
@@ -83,10 +77,6 @@ let () =
     markdown_files
 
 let () =
-  (* New syntax added to the parser and not to the grammar fails here, since
-     the standard library or a fixture uses it, even when no document's
-     example does. The fixture parser_documents/the_grammar_accepts_a_file.truss
-     holds syntax that nothing else uses. *)
   test "the grammar accepts every Truss file of the repository that the parser accepts" (fun () ->
       List.iter
         (fun path ->

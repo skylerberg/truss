@@ -1,66 +1,50 @@
-(* The tables that the type checker fills while it checks a definition. The
-   core form is built from them. All are dense arrays keyed by the syntax
-   tree's node ids. Three of them are published, for tools that work on the
-   syntax tree. *)
-
 type local = Syntax.id
 
-(* How a trait's [impl] was found, for a call of a trait method. *)
 type evidence =
-  | Impl of { impl : Path.t; arguments : Types.substitution }  (** A written or derived [impl]. *)
+  | Impl of { impl : Path.t; arguments : Types.substitution }
   | Bound
-      (** A bound in scope, on a generic parameter or on an associated type of one, resolved when
-          the code is instantiated. *)
-  | Dynamic  (** Through an [any] value's table. *)
-  | Built_in  (** [Copyable] and [Plain], which the compiler implements. *)
+  | Dynamic
+  | Built_in
 
 type callee =
   | Function of { path : Path.t; type_arguments : Types.argument list }
-      (** A named function or a type's own method, with its generic arguments, the type head's
-          first. *)
   | Trait_method of {
       trait : Types.trait_reference;
       name : string;
       receiver : Path.receiver;
       self_type : Types.ty;
-      type_arguments : Types.argument list;  (** The method's own generic arguments. *)
+      type_arguments : Types.argument list;
       evidence : evidence;
     }
   | Capability_method of { capability : Path.t; name : string }
   | Constructor of { type_ : Path.t; variant : string option; type_arguments : Types.argument list }
-  | Indirect  (** A call through a function value, by position. *)
+  | Indirect
   | Intrinsic of { operation : Intrinsic.operation; type_arguments : Types.argument list }
-  | Built_in_operator  (** [&&], [||], [!], and the bitwise operators, on built-in types. *)
+  | Built_in_operator
 
 type argument = {
   expression : Syntax.id;
   mode_keyword : Core.mode_keyword option;
-  parameter_index : int;  (** Counting a method's receiver as 0 and the rest after it. *)
+  core_argument_index : int;
   mode : Types.mode;
 }
 
 type call = {
   callee : callee;
-  arguments : argument list;  (** In the order written. *)
-  omitted_defaults : string list;  (** The parameters with defaults that were not passed. *)
-  uses : Types.capability_set;  (** The callee's [uses], with capability parameters substituted. *)
+  arguments : argument list;
+  omitted_defaults : string list;
+  uses : Types.capability_set;
   callee_result : Types.ty;
-      (** For an operator that tests the result of its call, as [<] tests the [Ordering] of
-          [compare], this is not the operator's own type. *)
 }
 
-(* The resolution of a name, member, or bracket expression, once types are
-   known. *)
 type resolution =
   | Local_value of local
   | Global of { path : Path.t; type_arguments : Types.argument list }
-      (** A function as a value, or a constant. *)
   | Field_access of { type_ : Types.ty; field : string }
   | Variant_value of { type_ : Types.ty; variant : string }
-      (** A variant with no fields, or one used as a function. *)
-  | Type_name of Types.ty  (** A type before a [.], such as [Shape] in [Shape.Circle]. *)
+  | Type_name of Types.ty
   | Value_parameter of Types.parameter
-  | Specification_value  (** [result], [old], or a specification function. *)
+  | Specification_value
 
 let show_resolution = function
   | Local_value local -> Printf.sprintf "local %d" local
@@ -71,24 +55,12 @@ let show_resolution = function
   | Value_parameter parameter -> "generic " ^ parameter.name
   | Specification_value -> "specification"
 
-type literal =
-  | Integer_value of Z.t
-  | Float_value of float
-      (** Already rounded to the literal's type. A [Float32] is rounded to 32 bits. *)
+type literal = Integer_value of Z.t | Float_value of float
 
-(* The iteration of a [for] loop. *)
 type loop =
   | Integer_range of { element : Types.ty; inclusive : bool }
-      (** A counted loop over built-in integers. *)
   | Elements of { count : call; element : call; lends : Types.mode }
-      (** The elements of a collection, by position: the calls of its [count] and of its [element],
-          which lends with [lends]. Neither call records its arguments: the collection and, for
-          [element], the position. *)
-  | Pulled of { cursor : Types.ty; made_by : call option; remaining : call option }
-      (** A cursor, pulled until it is exhausted. In a loop that consumes a collection, [made_by] is
-          the call of the collection's [cursor], which takes the collection as [own] and makes the
-          cursor. [remaining] is the call of the cursor's [remaining], if it has one: a bound on the
-          values it has left, which is the loop's measure where it states none. *)
+  | Pulled of { cursor : Types.ty; cursor_call : call option; remaining : call option }
 
 type pattern =
   | Variant_pattern of { type_ : Types.ty; variant : string }
@@ -98,43 +70,31 @@ type pattern =
   | Other_pattern
 
 type template = {
-  from_template : call option;  (** The tag's [from_template]. [None] for a plain string. *)
+  from_template : call option;
   part_conversions : call option list;
-      (** For each interpolated value: its [From] conversion to the tag's [Part], or for a plain
-          string, its [Display]. *)
   interpolated : bool;
 }
 
-(* The tables tools read. *)
 type published = {
   types : Types.ty option array;
   local_types : Types.ty option array;
   resolutions : resolution option array;
   callees : Path.t option array;
-      (** By the id of each call of a named function or a type's own method: the callee's path. *)
 }
 
 type t = {
-  types : Types.ty option array;  (** The type of each expression, by its id. Published. *)
+  types : Types.ty option array;
   local_types : Types.ty option array;
-      (** The type of each binding, by the id of its name. Published. *)
   resolutions : resolution option array;
-      (** By the id of each [Name], [Member], or [Bracket] expression. Published. *)
   calls : call option array;
-      (** By the id of each call: a [Call], an operator, an index, and a compound assignment. *)
   literals : literal option array;
-      (** By the id of each literal expression, literal pattern, and literal bound of a range
-          pattern. *)
-  patterns : pattern option array;  (** By the id of each pattern. *)
-  scrutinee_types : Types.ty option array;  (** The type of each pattern's scrutinee, by its id. *)
-  loops : loop option array;  (** By the id of each [for] statement. *)
-  templates : template option array;  (** By the id of each string literal. *)
+  patterns : pattern option array;
+  scrutinee_types : Types.ty option array;
+  loops : loop option array;
+  templates : template option array;
   lend_modes : Types.mode option array;
-      (** By the id of each call of a lending method: the mode in which the part is lent, read-only
-          or [mut]. The loan lasts until the caller's statement ends. *)
 }
 
-(* Empty tables for a definition with [size] nodes. *)
 let create size =
   {
     types = Array.make size None;
@@ -149,7 +109,6 @@ let create size =
     lend_modes = Array.make size None;
   }
 
-(* Tables with the same entries, in new arrays. *)
 let copy tables =
   {
     types = Array.copy tables.types;

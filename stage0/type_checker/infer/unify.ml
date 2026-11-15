@@ -1,29 +1,18 @@
-(* Inference variables and unification. A variable is solved within its
-   statement, except a literal variable in the type of a local, which later
-   statements may solve. *)
 type t = {
   mutable next : int;
-  types : (int, Types.ty) Hashtbl.t;  (** The solution of each solved type variable or literal. *)
-  values : (int, Types.value) Hashtbl.t;  (** The solution of each solved value variable. *)
-  mutable capability_variable_count : int;  (** The number of capability variables created. *)
+  type_solutions : (int, Types.ty) Hashtbl.t;
+  value_solutions : (int, Types.value) Hashtbl.t;
+  mutable capability_variable_count : int;
   mutable deferred_capability_equalities : (Types.capability_set * Types.capability_set) list;
-      (** Pairs of capability sets that unification found in the same position of two types, where
-          at least one has a capability variable. They must be equal once the variables are solved.
-      *)
   mutable integer_range : Types.ty -> (Z.t * Z.t) option;
-      (** For a type parameter or projection that an integer trait bounds, the values an integer
-          literal of its type may have: those every implementor holds. *)
   code_literals : (int, unit) Hashtbl.t;
-      (** The literal variables in the types of locals of code that later statements may decide. A
-          specification can use such a local, and converts it to [Integer] as it does any built-in
-          integer, so the variable never becomes [Integer]: [Integer] is no type of code. *)
 }
 
 let create () =
   {
     next = 0;
-    types = Hashtbl.create 16;
-    values = Hashtbl.create 4;
+    type_solutions = Hashtbl.create 16;
+    value_solutions = Hashtbl.create 4;
     capability_variable_count = 0;
     deferred_capability_equalities = [];
     integer_range = (fun _ -> None);
@@ -42,20 +31,10 @@ let fresh_value unifier =
   unifier.next <- unifier.next + 1;
   Types.Value_variable unifier.next
 
-(* A fresh capability variable, as a one-element capability set. It is the
-   instantiation of a capability parameter at one use of a generic function
-   or type. It is solved after the whole definition is checked, not per
-   statement: its solution is the smallest set that satisfies every subset
-   constraint on it. *)
 let fresh_capability_variable unifier =
   unifier.capability_variable_count <- unifier.capability_variable_count + 1;
   Types.capability_set [ Types.Capability_variable unifier.capability_variable_count ]
 
-(* Unifies two capability sets. Two sets that are both known unify only if
-   they are equal. If either set has a capability variable, or an associated
-   capability set of a type that is not inferred yet, the equality is
-   deferred until the definition is checked, and unification succeeds for
-   now. *)
 let unify_capabilities unifier (left : Types.capability_set) right =
   left = right
   || (Types.capabilities_unsolved left || Types.capabilities_unsolved right)
@@ -65,12 +44,10 @@ let unify_capabilities unifier (left : Types.capability_set) right =
        true
      end
 
-(* Follows the solutions of inference variables until the type is not a
-   solved variable. Only the top of the type is resolved. *)
 let rec resolve unifier (type_ : Types.ty) =
   match type_ with
   | Variable index | Literal (_, index) -> (
-      match Hashtbl.find_opt unifier.types index with
+      match Hashtbl.find_opt unifier.type_solutions index with
       | Some bound -> resolve unifier bound
       | None -> type_)
   | _ -> type_
@@ -78,12 +55,11 @@ let rec resolve unifier (type_ : Types.ty) =
 let rec resolve_value unifier (value : Types.value) =
   match value with
   | Value_variable index -> (
-      match Hashtbl.find_opt unifier.values index with
+      match Hashtbl.find_opt unifier.value_solutions index with
       | Some bound -> resolve_value unifier bound
       | None -> value)
   | _ -> value
 
-(* Replaces every solved inference variable in a type, at any depth. *)
 let rec zonk unifier (type_ : Types.ty) : Types.ty =
   let zonk = zonk unifier in
   match resolve unifier type_ with
@@ -143,7 +119,7 @@ let literal_fits unifier (kind : Types.literal_kind) (type_ : Types.ty) =
 let bind unifier index type_ =
   if occurs unifier index type_ then false
   else begin
-    Hashtbl.replace unifier.types index type_;
+    Hashtbl.replace unifier.type_solutions index type_;
     true
   end
 
@@ -189,29 +165,19 @@ let argument_unknowns unifier = function
       | _ -> [])
   | Types.Capabilities _ -> []
 
-(* Unifies two types, solving inference variables in either. An error or a
-   hole unifies with any type, so one mistake is reported once. Unification
-   is equality: function types with different [uses] or costs do not unify.
-   Implicit conversions are applied where a value is checked against an
-   expected type, not here. *)
 let rec unify unifier (left : Types.ty) (right : Types.ty) =
   let left = resolve unifier left and right = resolve unifier right in
   match (left, right) with
-  (* A variable that is unified with an error or a hole is solved as that
-     error or hole, so the mistake is not reported again as a type that
-     cannot be inferred. *)
   | (Types.Variable index | Types.Literal (_, index)), ((Types.Error _ | Types.Hole) as unknown)
   | ((Types.Error _ | Types.Hole) as unknown), (Types.Variable index | Types.Literal (_, index)) ->
-      Hashtbl.replace unifier.types index unknown;
+      Hashtbl.replace unifier.type_solutions index unknown;
       true
   | ((Types.Error _ | Types.Hole) as unknown), other
   | other, ((Types.Error _ | Types.Hole) as unknown) ->
-      (* Every variable inside a type that is unified with an error is
-         solved as that error too, so none of them is reported as unsolved. *)
       List.iter
         (function
           | Unknown_type index | Unknown_literal (_, index) ->
-              Hashtbl.replace unifier.types index unknown
+              Hashtbl.replace unifier.type_solutions index unknown
           | Unknown_value _ -> ())
         (unknowns unifier other);
       true
@@ -219,7 +185,6 @@ let rec unify unifier (left : Types.ty) (right : Types.ty) =
   | Variable index, other | other, Variable index -> bind unifier index other
   | Literal (left_kind, left_index), Literal (right_kind, right_index) ->
       let join () =
-        (* The joined variable is of code if either one is. *)
         if Hashtbl.mem unifier.code_literals left_index then
           Hashtbl.replace unifier.code_literals right_index ();
         bind unifier left_index right
@@ -276,7 +241,7 @@ and unify_value unifier left right =
   | Value_variable index, other | other, Value_variable index ->
       (match other with
       | Value_variable other_index when other_index = index -> ()
-      | _ -> Hashtbl.replace unifier.values index other);
+      | _ -> Hashtbl.replace unifier.value_solutions index other);
       true
   | left, right -> left = right
 

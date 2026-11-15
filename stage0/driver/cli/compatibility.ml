@@ -84,7 +84,7 @@ let signature ~(before : Types.signature) ~(after : Types.signature) =
          before.generics = after.generics && before.receiver = after.receiver && same_parameters
          && before.output = after.output
          && before.specification_only = after.specification_only
-         && before.stores_functions = after.stores_functions
+         && before.capture_free_parameters = after.capture_free_parameters
        then []
        else [ Breaks "changed its parameters or its result" ]);
       (if before.terminates && not after.terminates then

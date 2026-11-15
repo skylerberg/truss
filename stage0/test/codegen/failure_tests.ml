@@ -9,12 +9,8 @@ let expect_bug ~saying work =
       if not (contains text saying) then fail "expected %S in %S" saying text
 
 let env = shape_env ()
-
-(* Prints an instance as C, which checks it. *)
 let emit env instance = ignore (Emit_c.fragment env (Code (instance env)))
 
-(* A caller's call of a callee that takes one [Int32] and returns it, with
-   these arguments under this signature. *)
 let caller ?(parameters = [ value int32 ]) arguments =
   entry
     [ local (value int32) ]

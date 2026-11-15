@@ -1,9 +1,3 @@
-(* Forward references to [Expressions.expression] and [Expressions.check].
-   The expression checker is one set of mutually recursive functions, split
-   across files. A file calls the files before it directly, and calls these
-   two functions, which [Expressions] defines last, through this module.
-   [Expressions] sets them when it is linked. *)
-
 open Syntax
 open State
 

@@ -1,6 +1,3 @@
-(* Checks patterns: the names each pattern binds and their modes, constants
-   and literals in patterns, and the values of character and byte literals. *)
-
 open Syntax
 module Names = Resolve.Names
 module Environment = Interface.Environment
@@ -37,8 +34,6 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
           declare state bound type_ ~is_var ~mode
       | Some (Local id) -> (
           binds id bound;
-          (* A name in a later alternative is the same local as the name in
-             the first alternative, and has the same type. *)
           match Hashtbl.find_opt state.locals id with
           | Some local ->
               if not (unify state local.type_ type_) then
@@ -69,9 +64,6 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
           in
           let start = end_ start in
           Range { start; stop = end_ stop; inclusive });
-      (* A range pattern is only for integers and characters. A range of any
-         other type is one error, and its bounds are not checked against the
-         type. *)
       match resolve state type_ with
       | (Types.Named _ | Types.Function _ | Types.Any _ | Types.Parameter _) as resolved
         when not (integer_type state resolved || Types.is_builtin Character resolved) ->
@@ -188,7 +180,6 @@ and pattern_fields state env (written : pattern) (fields : Types.field list)
   let bare_name (inner : pattern) =
     match inner.kind with Binding name -> Some name.text | _ -> None
   in
-  (* A pattern must name every field, or end with [..] for the rest. *)
   let named =
     List.filter_map
       (fun (field : pattern_field) ->
@@ -276,9 +267,6 @@ and pattern_fields state env (written : pattern) (fields : Types.field list)
               None))
     written_fields
 
-(* A pattern that does not fit the type it matches still binds its names, so
-   that every use of a name has a type. Each name gets the given unknown
-   type (an error or a hole), and so do the sub-patterns. *)
 and unknown_pattern state env (written : pattern) unknown ~is_var ~mode =
   state.tables.scrutinee_types.(written.id) <- Some unknown;
   match written.kind with
@@ -292,8 +280,6 @@ and unknown_pattern state env (written : pattern) unknown ~is_var ~mode =
         fields
   | _ -> ()
 
-(* A constant used as a pattern or as a bound of a range pattern. It is
-   recorded under the node's id, and its type must be the matched type. *)
 and constant_pattern state id span path type_ =
   state.tables.patterns.(id) <- Some (Constant_pattern path);
   match Query.demand state.database Environment.constant_type path with
@@ -387,9 +373,6 @@ and check_literal_fits state (value : expression) number type_ =
           | _ -> ());
           true)
 
-(* [Character"a"] and [UInt8"\n"]: a character or byte literal is a tagged
-   string with exactly one Unicode scalar value or one ASCII character, and
-   no [${...}]. *)
 and character_tag state (literal : string_literal) =
   match literal.tag with
   | Some tag -> (
@@ -401,8 +384,6 @@ and character_tag state (literal : string_literal) =
       | _ -> None)
   | None -> None
 
-(* Records the value of a character or byte literal under [id], or reports
-   an error. *)
 and character_value state id (literal : string_literal) (builtin : Intrinsic.builtin) =
   let text = literal.first.value in
   let scalars =
@@ -433,8 +414,6 @@ and character_literal state id literal builtin =
   character_value state id literal builtin;
   Types.builtin builtin
 
-(* A literal used as a pattern or as a bound of a range pattern. It is
-   recorded under the node's id, and its type must be the matched type. *)
 and literal_pattern state id (span : span) literal type_ =
   match literal with
   | Literal_integer number -> (
@@ -450,8 +429,6 @@ and literal_pattern state id (span : span) literal type_ =
                 (Printf.sprintf "`%s` does not fit in `%s`." (Z.to_string number) (Types.show type_))
           | _ -> ()
       in
-      (* A scrutinee whose literal type a later statement decides, such as
-         [base] after [let base = 3], is checked once it is decided. *)
       match resolve state type_ with
       | Types.Literal (Integer_literal, _) ->
           defer state (fun () ->
@@ -472,7 +449,6 @@ and literal_pattern state id (span : span) literal type_ =
             mismatch state span ~expected:type_ ~actual:(Types.builtin builtin)
       | None -> string_pattern state span type_)
 
-(* A string literal used as a pattern matches a string. *)
 and string_pattern state span type_ =
   if
     not

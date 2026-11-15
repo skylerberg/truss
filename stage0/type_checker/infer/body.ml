@@ -1,9 +1,3 @@
-(* Checks the bodies of a definition: a function's body, defaults, and
-   clauses; a type's invariants, potential, and field defaults; a trait's
-   default methods and laws; an [impl]'s methods; a constant's value; and
-   the bodies of tests, theorems, and proofs. A part that did not parse is
-   not checked. *)
-
 open Syntax
 module Names = Resolve.Names
 module Environment = Interface.Environment
@@ -15,9 +9,8 @@ open Expressions
 type type_check_result = {
   tables : Tables.published;
   core : Core.t option;
-      (** The definition's core form, when it parsed whole and nothing in it is an error. *)
   diagnostics : Syntax.diagnostic list;
-  evidence : Path.package list;  (** The packages whose [impl]s met a bound in the definition *)
+  evidence_packages : Path.package list;
 }
 
 let no_output : env =
@@ -31,14 +24,8 @@ let no_output : env =
     in_quantifier = false;
   }
 
-(* The environment of a constant expression: the value of a constant, or a
-   default. *)
 let constant_expression : env = { no_output with compile_time = true }
 
-(* Checks a body. Types are inferred one statement at a time, and the last
-   expression is checked against the result type. The body is a statement
-   too, which gives each literal type that its statements leave undecided
-   its default type. *)
 let body state env (written : block) =
   let rec check_statements = function
     | [] -> (
@@ -53,13 +40,9 @@ let body state env (written : block) =
         in_statement state env last.span (fun () ->
             match (last.kind, env.output) with
             | Expression _, Some (Returns output) when resolve state output = Types.unit ->
-                (* The body of a function with no result ends with a
-                   statement. Its value must be used or discarded, like the
-                   value of any statement. *)
                 statement state env last ~last:false
             | Expression value, Some (Returns output) -> check state env value output
             | Expression value, Some (Lends (_, part)) ->
-                (* The value of a lending method's body is the part it lends. *)
                 mark_lent_tails state value;
                 check state env value part
             | _, Some (Returns output) ->
@@ -121,9 +104,6 @@ let check_clauses state env (clauses : clause list) =
           | `Cost_function -> ignore (expression state env value)))
     (clause_expressions clauses)
 
-(* Checks the [requires] clauses of a function-typed parameter. They are
-   specifications over the named inputs of the function type and the
-   parameters declared before it. *)
 let check_function_type_requires state env (written : parameter list) (signature : Types.signature)
     =
   let env = { env with specification = true } in
@@ -166,9 +146,6 @@ let check_defaults state env (written : parameter list) (signature : Types.signa
               signature.parameters
           with
           | Some info ->
-              (* A default is the argument of a call that leaves the
-                 parameter out, so it converts as an argument does: an owned
-                 collection becomes its view. *)
               in_statement state env value.span (fun () ->
                   let actual = expression state env ~expected:info.type_ value in
                   Lookups.coerce state env ~argument:info.mode value ~actual ~expected:info.type_);
@@ -176,8 +153,6 @@ let check_defaults state env (written : parameter list) (signature : Types.signa
           | None -> ())
       | _ -> ())
     written
-
-(* The core form of a definition's parts *)
 
 let core_contract state (clauses : clause list) : Core.contract =
   let each choose = List.concat_map (fun (clause : clause) -> choose clause.kind) clauses in
@@ -205,8 +180,6 @@ let core_contract state (clauses : clause list) : Core.contract =
         clauses;
   }
 
-(* The core parameters of a function: [self] first if there is one, each
-   with the mode and the type from the signature. *)
 let core_parameters state (written : parameter list) (signature : Types.signature) :
     Core.parameter list =
   List.filter_map
@@ -271,8 +244,6 @@ let check_function state ~broken_body (written : signature) (body_block : block 
   let env : env =
     {
       output = Some signature.output;
-      (* The body of a function for specifications only is a specification:
-         it has exact arithmetic, [==>], and quantifiers over types. *)
       specification = signature.specification_only;
       self = Option.map snd signature.receiver;
       self_mode = self_mode signature;
@@ -299,10 +270,6 @@ let check_function state ~broken_body (written : signature) (body_block : block 
         Function { parameters; contract; body });
   match body_block with Some block when not broken_body -> body state env block | _ -> ()
 
-(* A derived [Deserialize] checks each invariant clause of the value it
-   reads, so every clause must run. A clause that cannot, such as one with
-   a quantifier, would leave a value read from data unchecked against it,
-   and every proof assumes the invariant of every value. *)
 let check_deserialized_invariants state (lowered : Environment.lowered_interface) (form : Core.t) =
   match (form.definition, lowered.interface) with
   | Type { invariants; _ }, Type_interface interface
@@ -326,7 +293,6 @@ let check_definition state (lowered : Environment.lowered_interface) =
     match (definition.kind, lowered.interface) with
     | Function { signature; body = written }, Function_interface lowered_signature ->
         check_function state ~broken_body:(broken Body) signature (Some written) lowered_signature
-    (* A method without a body still has clauses, which are checked. *)
     | Method_declaration signature, Function_interface lowered_signature ->
         check_function state ~broken_body:true signature None lowered_signature
     | Type_definition { body = type_body; clauses; _ }, Type_interface interface -> (
@@ -512,7 +478,6 @@ let check_definition state (lowered : Environment.lowered_interface) =
               Function { parameters; contract; body = Some (build_block state written) });
         if not (broken Body) then body state env written
     | Law_proof { body = written; _ }, Law_proof_interface { trait; law; for_type; _ } ->
-        (* The body names the law's parameters, as the law's own body does. *)
         (match Query.demand state.database Environment.trait_interface trait.trait with
         | Some interface ->
             let substitution =
@@ -554,11 +519,6 @@ let check_definition state (lowered : Environment.lowered_interface) =
             written
     | _ -> ()
 
-(* Replaces every type in the tables by its final form, so that they hold
-   no inference variable. A variable that is still unsolved was reported,
-   and becomes the error type. An entry recorded while a statement was
-   checked, such as a call's type arguments, is final only after the
-   statement's inference finished. *)
 let finalize (state : state) =
   let final_type = final_type state and argument = final_argument state in
   let trait (reference : Types.trait_reference) =
@@ -623,11 +583,11 @@ let finalize (state : state) =
         Tables.Integer_range { element = final_type element; inclusive }
     | Elements { count; element; lends } ->
         Elements { count = call count; element = call element; lends }
-    | Pulled { cursor; made_by; remaining } ->
+    | Pulled { cursor; cursor_call; remaining } ->
         Pulled
           {
             cursor = final_type cursor;
-            made_by = Option.map call made_by;
+            cursor_call = Option.map call cursor_call;
             remaining = Option.map call remaining;
           });
   update tables.patterns (function
@@ -642,9 +602,6 @@ let finalize (state : state) =
         part_conversions = List.map (Option.map call) template.part_conversions;
       })
 
-(* The values an integer literal may have in a type that integer traits
-   bound: those of every built-in type that implements each of them, the
-   narrowest such type's. *)
 let integer_literal_range (bounds : Types.trait_reference list) =
   let signed = Intrinsic.[ Int8; Int16; Int32; Int64 ]
   and unsigned = Intrinsic.[ UInt8; UInt16; UInt32; UInt64 ] in
@@ -676,9 +633,6 @@ let check database (key : Names.key) =
     (Query.demand database Names.definition key, Query.demand database Resolve.resolved key)
   with
   | Some definition, Some resolved ->
-      (* The module comes from the definition's key. The definition's
-         position in its file is not read, so a definition that only moved
-         is not checked again. *)
       let module_ = key.module_ in
       let lowered, context = Environment.lower database key definition resolved in
       let text = Option.value ~default:"" (Query.demand database Names.text key) in
@@ -711,7 +665,7 @@ let check database (key : Names.key) =
           locals = Hashtbl.create 32;
           law_parameters = [];
           frames = [];
-          references = [];
+          locals_read = [];
           receiver_modes = [];
           yielded = Hashtbl.create 4;
           lent_tails = Hashtbl.create 4;
@@ -720,15 +674,12 @@ let check database (key : Names.key) =
           unsolved = None;
           capability_constraints = [];
           capability_solution = None;
-          evidence = [];
+          evidence_packages = [];
           undecided = [];
           decisions = Hashtbl.create 4;
           annotatable = Hashtbl.create 8;
         }
       in
-      (* Diagnostics about the types in the signature belong to the
-         interface check. Only diagnostics about the types written in the
-         body, and their bounds, are reported here. *)
       let interface_diagnostics = List.length !(context.diagnostics) in
       let interface_named = List.length !(context.named) in
       state.unifier.integer_range <-
@@ -744,7 +695,6 @@ let check database (key : Names.key) =
         @ state.diagnostics;
       finalize state;
       Exported_parts.check state;
-      (* Whether a recorded type contains a type that [unwanted] accepts. *)
       let any_type unwanted =
         let contains table =
           Array.exists
@@ -764,9 +714,6 @@ let check database (key : Names.key) =
         contains state.tables.types || contains state.tables.local_types
         || contains state.tables.scrutinee_types
       in
-      (* Whether a type is an error, or names a type whose declaration has
-         an error. The error is reported at the declaration, and a use of
-         the type is checked without a second report. *)
       let broken =
         let shapes = Hashtbl.create 8 in
         fun (part : Types.ty) ->
@@ -786,9 +733,6 @@ let check database (key : Names.key) =
                   broken)
           | _ -> false
       in
-      (* A definition has a core form if it parsed completely, has no
-         diagnostic, and no recorded type contains an error. A type contains
-         an error when it depends on a definition that has one. *)
       let whole =
         state.diagnostics = [] && resolved.diagnostics = []
         && (not (Resolve.Parts.broken definition Header || Resolve.Parts.broken definition Body))
@@ -798,10 +742,6 @@ let check database (key : Names.key) =
       let build () : Core.t =
         state.form.next_node_id <- 0;
         state.form.next_synthetic_local <- 0;
-        (* The core form has no hole type. If the definition has one, the
-           builders read a copy of the tables in which every hole is
-           [Never]. The tables themselves keep their holes for the stages
-           that still read them. *)
         let checked = state.tables in
         if any_type (fun part -> part = Types.Hole) then begin
           state.form.tables_with_holes <- Some checked;
@@ -815,18 +755,12 @@ let check database (key : Names.key) =
         state.form.tables_with_holes <- None;
         { definition }
       in
-      (* The capability check runs on the core form, and it solves the
-         capability variables. Without a core form, every capability
-         variable is solved as the empty set. *)
       let form = if whole then Some (build ()) else None in
       (match form with
       | Some form ->
           Capabilities.check state lowered form;
           check_deserialized_invariants state lowered form
       | None -> state.capability_solution <- Some (Hashtbl.create 1));
-      (* If there were capability variables, substitute their solutions
-         into the recorded types and build the core form again from them. A
-         definition that failed the capability check has no core form. *)
       let has_capability_variables = state.unifier.capability_variable_count > 0 in
       if has_capability_variables then finalize state;
       let core : Core.t option =
@@ -844,7 +778,7 @@ let check database (key : Names.key) =
               (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
                 compare (left.span, left.code, left.message) (right.span, right.code, right.message))
               state.diagnostics;
-          evidence = List.sort_uniq compare state.evidence;
+          evidence_packages = List.sort_uniq compare state.evidence_packages;
         }
   | _ -> None
 
@@ -854,7 +788,6 @@ let type_check_result =
     (fun database key ->
       Compiler_bug.while_doing ~stage:"Infer" (Names.show_key key) (fun () -> check database key))
 
-(* The diagnostics of every body in a file, in file offsets and in order. *)
 let diagnostics database file =
   Names.per_definition database file (fun key ->
       match Query.demand database type_check_result key with

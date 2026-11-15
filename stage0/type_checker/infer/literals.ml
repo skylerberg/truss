@@ -1,19 +1,12 @@
-(* Rounds a float literal from its exact decimal value to its type, once,
-   with ties to even. A literal that rounds to infinity has no value. *)
-
-(* [precision] bits of significand, with the smallest normal exponent
-   [minimum] and the largest [maximum]. *)
 let round ~precision ~minimum ~maximum ~(significand : Z.t) ~(exponent : Z.t) : float option =
   if Z.equal significand Z.zero then Some 0.0
   else
     let negative = Z.sign significand < 0 in
     let magnitude = Z.abs significand in
     let power = Z.pow (Z.of_int 10) (Z.to_int (Z.abs exponent)) in
-    (* The value is [numerator / denominator]. *)
     let numerator, denominator =
       if Z.sign exponent >= 0 then (Z.mul magnitude power, Z.one) else (magnitude, power)
     in
-    (* The binary exponent [e] with [2^e <= value < 2^(e + 1)]. *)
     let estimate = Z.numbits numerator - Z.numbits denominator in
     let at_least expression =
       if expression >= 0 then Z.geq numerator (Z.mul denominator (Z.shift_left Z.one expression))
@@ -21,8 +14,6 @@ let round ~precision ~minimum ~maximum ~(significand : Z.t) ~(exponent : Z.t) : 
     in
     let expression = if at_least estimate then estimate else estimate - 1 in
     let expression = max expression minimum in
-    (* The significand at that exponent: [value / 2^(e - precision + 1)],
-       rounded to the nearest integer, ties to even. *)
     let scale = expression - precision + 1 in
     let scaled_numerator, scaled_denominator =
       if scale >= 0 then (numerator, Z.shift_left denominator scale)

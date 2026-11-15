@@ -1,5 +1,3 @@
-(** The state of checking one definition's interface, and the helpers that report into it. *)
-
 type state = {
   database : Query.context;
   key : Resolve.Names.key;

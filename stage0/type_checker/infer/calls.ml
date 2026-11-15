@@ -1,7 +1,3 @@
-(* Checks the arguments of calls: matching arguments to parameters by label
-   and position, defaults, modes, and conversions. Also checks calls of
-   named functions and constructors. *)
-
 open Syntax
 module Names = Resolve.Names
 module Environment = Interface.Environment
@@ -13,20 +9,15 @@ open Instantiation
 open Hooks
 open Lookups
 
-(* Checks the arguments of a call whose callee is unknown, so that their own
-   errors are reported. The call has the given type. *)
 let arguments_alone state env (arguments : argument list) (type_ : Types.ty) =
   List.iter (fun (argument : argument) -> ignore (expression state env argument.value)) arguments;
   type_
 
-(* The [mut] or [own] an argument is written with, if any. *)
 let mode_keyword_of (value : expression) : Core.mode_keyword option =
   match value.kind with
   | Mode (_, operand) -> Some { written = value.id; operand = operand.id }
   | _ -> None
 
-(* An indirect call, through a function value. Arguments are positional,
-   with no labels. *)
 let rec function_value_call state env (value : expression) (callee : expression) arguments =
   let callee_type = normalize state (expression state env callee) in
   match callee_type with
@@ -60,7 +51,7 @@ let rec function_value_call state env (value : expression) (callee : expression)
             let mode = check_argument state env argument.value parameter in
             {
               Tables.expression = argument.value.id;
-              parameter_index = index;
+              core_argument_index = index;
               mode;
               mode_keyword = mode_keyword_of argument.value;
             })
@@ -86,9 +77,6 @@ let rec function_value_call state env (value : expression) (callee : expression)
            (Printf.sprintf "`%s` is not a function, so it cannot be called."
               (show state callee_type)))
 
-(* Checks one argument against its parameter's type and mode. Returns the
-   mode it is passed with, which is the parameter's mode except for a field
-   of a lent constructor that lends a place. *)
 and check_argument state env (value : expression) (parameter : Types.parameter_info) =
   let inner =
     match value.kind with
@@ -109,10 +97,6 @@ and check_argument state env (value : expression) (parameter : Types.parameter_i
   check_mode state env value parameter actual;
   parameter.mode
 
-(* Matches arguments to parameters. An argument goes to the parameter named
-   by its label, or to the parameter with the same name if the argument is a
-   bare name, or else to the first parameter. Then the arguments must be in
-   parameter order. *)
 and match_arguments state (value : expression) (parameters : Types.parameter_info list)
     (arguments : argument list) ~record =
   let named =
@@ -157,8 +141,6 @@ and match_arguments state (value : expression) (parameters : Types.parameter_inf
                   else if record && List.length parameters = 1 && List.length arguments = 1 then
                     Some 0
                   else begin
-                    (* The fix can name the label only if one parameter is
-                       left for the one argument that has no label. *)
                     let claimed =
                       List.concat
                         (List.mapi
@@ -219,8 +201,6 @@ and match_arguments state (value : expression) (parameters : Types.parameter_inf
         (argument, parameter_index))
       arguments
   in
-  (* Arguments must be in parameter order, except the fields of a
-     constructor. *)
   (if not record then
      let indexes = List.filter_map snd matched in
      let sorted = List.sort compare indexes in
@@ -264,9 +244,6 @@ and match_arguments state (value : expression) (parameters : Types.parameter_inf
         (not (Hashtbl.mem assigned index)) && not (List.nth parameters index).has_default)
       named
   in
-  (* If an argument matched no parameter, the checker cannot tell which
-     parameter was meant, so it does not also report the parameters that got
-     no argument. *)
   if List.for_all (fun (_, parameter_index) -> Option.is_some parameter_index) matched then
     List.iter
       (fun (name, _) ->
@@ -287,9 +264,6 @@ and match_arguments state (value : expression) (parameters : Types.parameter_inf
       matched,
     left_out )
 
-(* Checks the matched arguments. Arguments that are not lambdas are checked
-   first, in order. Then each lambda is checked, when the types of its
-   parameters are inferred. *)
 and check_arguments state env (parameters : Types.parameter_info list) matched ~offset =
   let is_lambda ((argument : argument), _) =
     match argument.value.kind with Lambda _ -> true | _ -> false
@@ -299,7 +273,7 @@ and check_arguments state env (parameters : Types.parameter_info list) matched ~
     let mode = check_argument state env argument.value parameter in
     {
       Tables.expression = argument.value.id;
-      parameter_index = index + offset;
+      core_argument_index = index + offset;
       mode;
       mode_keyword = mode_keyword_of argument.value;
     }
@@ -331,8 +305,6 @@ and named_call state env ?expected (value : expression) path (signature : Types.
   check_specification_call state env value signature;
   finish_call state value callee instance checked left_out
 
-(* A constructor call of a record or a variant. Fields are given by name, in
-   any order. *)
 and construct state env ?expected ?type_arguments (value : expression) type_path variant arguments =
   let type_arguments =
     match type_arguments with
@@ -395,8 +367,6 @@ and construct state env ?expected ?type_arguments (value : expression) type_path
           fields
       in
       let matched, left_out = match_arguments state value parameters arguments ~record:true in
-      (* The fields of a lent constructor may lend places, and so may the
-         fields of a constructor that is one of them. *)
       Option.iter
         (fun mode ->
           List.iter

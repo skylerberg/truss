@@ -1,7 +1,3 @@
-(* Checks calls: resolving the callee, and calls of methods of types, of
-   trait methods (in full form or with a receiver), and of capability
-   methods. *)
-
 open Syntax
 module Names = Resolve.Names
 module Environment = Interface.Environment
@@ -34,7 +30,6 @@ let rec call state env ?expected (value : expression) (callee : expression)
       | Some resolution -> call_named state env ?expected value callee resolution arguments
       | None -> function_value_call state env value callee arguments)
 
-(* A call whose callee is a name. The callee is the name's referent. *)
 and call_named state env ?expected (value : expression) (callee : expression)
     ({ name; target; type_arguments } : Resolve.head) arguments =
   match target with
@@ -49,8 +44,6 @@ and call_named state env ?expected (value : expression) (callee : expression)
                (if arguments = [] then Missing_argument else Too_many_arguments)
                value.span "`old` takes one value: `old(value)`."))
   | Final -> (
-      (* [final(result)] is a lending method's part as the caller left it: the
-         one element of the sequence of the parts the method lent. *)
       let names_result (argument : expression) =
         match argument.kind with
         | Name path -> State.target state path.last = Some Result_value
@@ -105,8 +98,6 @@ and call_named state env ?expected (value : expression) (callee : expression)
                "`final` takes the part that a lending method lends: `final(result)` is that part \
                 as the caller left it."))
   | Identical -> (
-      (* [identical(first, second)] compares two values of the same type
-         with the solver's equality. *)
       match arguments with
       | [ first; second ] ->
           let first_type = expression state env first.value in
@@ -175,10 +166,6 @@ and call_named state env ?expected (value : expression) (callee : expression)
       function_value_call state env value callee arguments
   | Binding | Module _ -> bug "the name `%s` is not resolved" name.text
 
-(* [time(Element.equal)] in a [cost] bound: a bound on the time of any one
-   call of a method of a trait that bounds a type parameter. If the bounds
-   have several overloads of the method, the term names the read-only
-   overload. *)
 and method_time state (value : expression) (type_ : Types.ty) (member : name) =
   let overloads =
     List.fold_left
@@ -235,8 +222,6 @@ and method_time state (value : expression) (type_ : Types.ty) (member : name) =
             read-only, so `time` cannot tell which one is meant."
            (show state type_) member.text)
 
-(* [Type.name(...)]: a variant constructor, a static method, or a method
-   called in full form with its receiver as the first argument. *)
 and static_call state env ?expected (value : expression) type_ (member : name) arguments =
   let ambiguous (traits : Types.trait_reference list) =
     arguments_alone state env arguments
@@ -255,9 +240,6 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
              its overloads take."
             member.text))
   in
-  (* A method with [self] called in full form. The first argument is the
-     receiver, and its mode keyword selects the overload of the method, as it does in
-     a call with a dot. *)
   let wanted : Path.receiver =
     match arguments with receiver :: _ -> marked_receiver receiver.value | [] -> Read
   in
@@ -270,8 +252,6 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
           match function_signature state method_path with
           | Some (Ok signature) ->
               let instance = instantiate state value.span signature in
-              (* The type's arguments, written or inferred, are the type
-                 arguments of the method's type. *)
               let head =
                 List.filteri
                   (fun index _ ->
@@ -299,7 +279,6 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
           | Some (Error report) -> arguments_alone state env arguments (Types.Error report)
           | None -> bug "the method `%s` has no signature" (Path.show method_path))
       | None -> (
-          (* A static trait method, as in [Int64.from(count)]. *)
           match trait_static_method state path member.text Static with
           | [ (trait, method_) ] ->
               trait_method_through_type state env ?expected value type_ trait method_ arguments
@@ -346,10 +325,6 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
                               (Printf.sprintf "`%s` has no method `%s`." (show state type_)
                                  member.text))))))
   | Types.Parameter parameter -> (
-      (* A method of a trait bound: the static method, or the overload that
-         the first argument's mode keyword selects. Two bounds on the same trait
-         differ only in the trait's type arguments, which the call's
-         arguments determine. *)
       let without_self =
         List.fold_left
           (fun methods (bound : Types.trait_reference) ->
@@ -385,9 +360,6 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
         (error state Unknown_member member.span
            (Printf.sprintf "`%s` has no method `%s`." (show state type_) member.text))
 
-(* A static trait method called on a type, which is [Self]: a constructor
-   such as [Int64.from(count)] or [Self.empty()]. The trait's type arguments
-   are inferred from the call's arguments, never from the expected type. *)
 and trait_method_through_type state env ?expected:_ ?trait_arguments (value : expression) self_type
     (trait : Types.trait_reference) (method_ : Types.trait_method) arguments =
   let trait_generics =
@@ -395,9 +367,6 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : ex
     | Some interface -> interface.trait_generics
     | None -> []
   in
-  (* The trait's type arguments as written, as in
-     [From[UInt32].from(count)], or fresh inference variables that the
-     call's arguments determine. *)
   let trait_arguments =
     match trait_arguments with
     | Some written when List.length written = List.length trait_generics -> written
@@ -431,7 +400,7 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : ex
             ( [
                 {
                   Tables.expression = first.value.id;
-                  parameter_index = 0;
+                  core_argument_index = 0;
                   mode;
                   mode_keyword = None;
                 };
@@ -476,20 +445,14 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : ex
   resolve_evidence state value self_type reference;
   normalize state result
 
-(* [Ordered.compare(first, second)]: a trait method called in full form,
-   with its receiver as the first argument. *)
 and trait_call_in_full state env (value : expression) trait ~trait_arguments (member : name)
     arguments =
-  (* The static method, or the overload that the receiver's mode keyword selects, as
-     in a call with a dot. *)
   let wanted : Path.receiver =
     match arguments with receiver :: _ -> marked_receiver receiver.value | [] -> Read
   in
   let overload = Members.trait_method state.database trait member.text in
   match match overload Static with None -> overload wanted | trait_method -> trait_method with
   | Some method_ ->
-      (* [Self] is the receiver's type. Checking the receiver as the first
-         argument infers it. *)
       trait_method_through_type state env ?trait_arguments value (fresh state)
         (trait_reference trait) method_ arguments
   | None when Members.trait_methods state.database trait member.text <> [] ->
@@ -503,7 +466,6 @@ and trait_call_in_full state env (value : expression) trait ~trait_arguments (me
       error state Unknown_member member.span
         (Printf.sprintf "`%s` has no method `%s`." (Path.show trait) member.text)
 
-(* [Clock.now()]: a call to a capability's method. *)
 and capability_call state env (value : expression) capability (member : name) arguments =
   match Members.trait_method state.database capability member.text Static with
   | Some method_ ->
@@ -529,15 +491,12 @@ and capability_call state env (value : expression) capability (member : name) ar
         (error state Unknown_member member.span
            (Printf.sprintf "`%s` has no method `%s`." (Path.show capability) member.text))
 
-(* [receiver.name(...)]: a method of the receiver's type, or a trait method. *)
 and method_call state env ?expected (value : expression) (base : expression) (member : name)
     ~type_arguments arguments =
   let receiver_type =
     default_literal state ~at:value.span (normalize state (expression state env base))
   in
   let has_mode_keyword = List.mem_assoc value.id state.receiver_modes in
-  (* A part that is lent [mut] takes no mode keyword of its own to call a [mut self]
-     method: the keyword is on the place that lends it. *)
   let lent_mode = if has_mode_keyword then None else lent state base in
   let wanted : Path.receiver =
     match (List.assoc_opt value.id state.receiver_modes, lent_mode) with
@@ -547,9 +506,6 @@ and method_call state env ?expected (value : expression) (base : expression) (me
   in
   let place = is_place state base || Option.is_some lent_mode in
   let choose overloads =
-    (* Without a mode keyword, the call selects the read-only overload. On a
-       temporary it selects the [own] overload if there is one. A [Plain]
-       place can be copied for an [own] overload. *)
     match List.assoc_opt wanted overloads with
     | Some method_path -> Some (wanted, method_path)
     | None when lent_mode = Some Types.Mut && List.mem_assoc Path.Read overloads ->
@@ -568,8 +524,6 @@ and method_call state env ?expected (value : expression) (base : expression) (me
         | None -> choose overloads
       else choose overloads
     in
-    (* A [mut self] method mutates its receiver, so every index expression
-       in the receiver must use the [mut self] overload of [at]. *)
     (match chosen with Some (Path.Mut, _) -> mutate state env ~by:Passed_mut base | _ -> ());
     chosen
   in
@@ -580,8 +534,6 @@ and method_call state env ?expected (value : expression) (base : expression) (me
          (String.concat ", "
             (List.map (fun (receiver, _) -> Path.show_receiver receiver) overloads)))
   in
-  (* A place that calls a method with only a [mut] or an [own] overload lacks
-     its mode keyword. The fix adds the keyword. *)
   let missing_receiver_mode : 'a. (Path.receiver * 'a) list -> Types.ty =
    fun overloads ->
     let has receiver = List.exists (fun (overload, _) -> overload = receiver) overloads in
@@ -644,8 +596,6 @@ and method_call state env ?expected (value : expression) (base : expression) (me
               trait_method_call state env value ~receiver:base ~receiver_type trait method_
                 ~type_arguments arguments)
       | Error traits ->
-          (* The call in full form: the receiver first, then the arguments
-             as written. *)
           let receiver_text = source state base.span in
           let arguments_text =
             List.map
@@ -705,7 +655,7 @@ and method_with_receiver state env ?expected ?(type_arguments = []) (value : exp
       let receiver_argument =
         {
           Tables.expression = receiver.id;
-          parameter_index = 0;
+          core_argument_index = 0;
           mode =
             (match signature.receiver with
             | Some (Mut, _) -> Mut
@@ -764,7 +714,7 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
   let receiver_argument =
     {
       Tables.expression = receiver.id;
-      parameter_index = 0;
+      core_argument_index = 0;
       mode = (match method_.method_receiver with Mut -> Mut | Own -> Own | _ -> Read);
       mode_keyword = None;
     }

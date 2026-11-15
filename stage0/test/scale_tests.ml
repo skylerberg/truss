@@ -1,16 +1,8 @@
-(* The cost of a change follows the change, and not the project. Each test
-   makes the same edit in a small package and in a large one, and compares
-   the work the code database counted: how many results it marked, found
-   current, and computed. Counts are compared, never times, so the tests
-   are the same on every machine. *)
-
 open Harness
 open Support
 
 let functions = 5
 
-(* A module whose functions each call [core::leaf], which so is read by
-   every module of the package. *)
 let module_text index =
   let buffer = Buffer.create 512 in
   Buffer.add_string buffer "use app::core\n\n";
@@ -27,7 +19,6 @@ let module_text index =
 let core ?(signature = "value: Int64") ?(after = "") body =
   Printf.sprintf "internal fn leaf(%s) -> Int64 {\n  %s\n}\n%s" signature body after
 
-(* A package of [modules] modules and [core], checked. *)
 let package modules =
   let names = List.init modules (fun index -> Printf.sprintf "app::part_%d" index) in
   let database =
@@ -47,7 +38,6 @@ type work = { marked : int; confirmed : int; computed : int }
 let show work =
   Printf.sprintf "marked %d, found current %d, computed %d" work.marked work.confirmed work.computed
 
-(* The work that giving a module another text costs. *)
 let edit database name text =
   let engine = Engine.of_context database in
   let before = Engine.counters engine in
@@ -60,7 +50,6 @@ let edit database name text =
     computed = after.computed - before.computed;
   }
 
-(* The same edit of [core] costs the same with four modules and with forty. *)
 let same_cost name text =
   test name (fun () ->
       let few = edit (package 4) "app::core" text and many = edit (package 40) "app::core" text in

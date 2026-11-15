@@ -1,20 +1,5 @@
-(* The tests of the standard library's source: each module checks through
-   every stage with no diagnostic, and proves. *)
-
 open Harness
 
-(* CI proves the library in several processes at once, one for each core
-   of several runners. [TRUSS_PROOF_SHARE] names this process's share as
-   [index/count], and the process checks and proves only its own modules,
-   and computes the parts of other modules they use on demand. The modules
-   are dealt out by weight, heaviest first, each to the share with the
-   least so far, so that the shares take about as long as each other. A
-   module's weight is its measured proof cost, which [Proof_weights]
-   lists. The letters of a module's source do not tell: a module of loops
-   with invariants costs several times as much as straight-line code of
-   the same length. A module that was not measured weighs by its letters,
-   which leaves out tables of numbers: they are large and have nothing to
-   prove. *)
 let share =
   match Sys.getenv_opt "TRUSS_PROOF_SHARE" with
   | None | Some "" -> None
@@ -31,8 +16,6 @@ let letters source =
       match character with 'a' .. 'z' | 'A' .. 'Z' -> letters + 1 | _ -> letters)
     0 source
 
-(* Each module of the library, with its files' texts. A module is the unit
-   that a test checks and proves. *)
 let library =
   List.map
     (fun module_ ->
@@ -52,8 +35,6 @@ let weight ((module_ : Path.module_), files) =
 let test_name (module_ : Path.module_) =
   Printf.sprintf "%s checks cleanly and proves" (Path.show_module module_)
 
-(* With [TRUSS_TEST] set, only the modules whose tests it names are checked
-   and proven. *)
 let modules =
   match share with
   | None -> List.filter (fun (module_, _) -> wanted (test_name module_)) library
@@ -72,9 +53,6 @@ let modules =
       in
       List.filter (fun entry -> List.memq entry mine) library
 
-(* Solver answers are kept in the store by the text of the query, the
-   solver's version and its limit, so a run solves only the queries that no
-   earlier run solved, whatever compiler that run was. *)
 let solver =
   let find, add = Database.results ~kind:"solver" in
   match Solver.find ~cache:{ find; add } () with
@@ -83,15 +61,6 @@ let solver =
       prerr_endline message;
       exit 1
 
-(* [TRUSS_PROOF_WEIGHTS] measures weights. Its value is [all], or the names
-   of modules with commas between them, such as
-   [standard::regex,standard::math]. Each module it names is checked and
-   proven by itself, and the run prints [Proof_weights] again, with the
-   processor time of each measured module, the solver's included, in
-   hundredths of a second, and the recorded weight of every other module.
-   Measure with a store that holds every query's answer, as CI's runs
-   start with: there a module's cost is translating it, which the solver's
-   cost from nothing would hide. *)
 let measured_modules =
   match Sys.getenv_opt "TRUSS_PROOF_WEIGHTS" with
   | None | Some "" -> None
@@ -137,9 +106,6 @@ let measure database ~record ~is_measured =
   List.iter (fun (name, weight, _) -> Printf.printf "    (%S, %d);\n" name weight) measured;
   Printf.printf "  ]\n\nlet letters_for_one = %d\n" (max 1 (total_letters / max 1 total_weight))
 
-(* A run prints how long each stage and each module took, and how many
-   queries the solver ran and did not read from its kept answers, so the
-   log of a slow job names the slow modules. *)
 let timed label work =
   let start = Unix.gettimeofday () in
   let runs_before = Solver.queries_run solver in
@@ -150,10 +116,6 @@ let timed label work =
     label;
   result
 
-(* [TRUSS_PROOF_STATE] names a state of the library in the code database's
-   store. A run that names one starts from the state the last such run
-   saved, recomputes only the dependents of an edit to the library, and
-   saves the result. A run that names none starts from the sources. *)
 let session =
   match Sys.getenv_opt "TRUSS_PROOF_STATE" with
   | None | Some "" -> None
@@ -173,13 +135,6 @@ let () =
         Database.load_standard engine;
         engine
   in
-  (* One engine holds every module's results, so an audit after each
-     module's test would compute the whole library again for each of them.
-     It is audited once, when every module is checked and before any is
-     proven: the prover's own tests audit its queries, and auditing them
-     here would translate every proof of the library a second time. An
-     engine opened from a kept state holds the last run's proofs already,
-     so its audit stops before the proofs. *)
   Engine.skip_audit engine;
   let database =
     match session with Some session -> Database.context session | None -> Engine.context engine
@@ -229,7 +184,4 @@ let () =
                 files)))
     checked;
   timed "saving the state" (fun () -> Option.iter Database.save_session session);
-  (* A run that saves a state starts no background process, and the
-     background process is what keeps the store within its budget. Without
-     this, CI's store would keep the state of every compiler it ran. *)
   Option.iter (fun _ -> timed "collecting the store" Database.For_testing.collect_store) session

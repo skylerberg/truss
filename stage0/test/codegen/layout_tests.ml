@@ -1,9 +1,5 @@
-(* Data layout, and the shapes of the standard library's types. *)
-
 open Memory_layout
 open Codegen_support
-
-(* Data layout *)
 
 let () =
   test "fields are placed by alignment, largest first, then by name" (fun () ->

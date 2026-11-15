@@ -18,10 +18,8 @@ type target = Walk.target =
   | Result_value
   | Old
   | Identical
-  | Visited  (** [visited]: in a [for] loop's clauses, the values of the iterations before. *)
+  | Visited
   | Final
-      (** [final], in a lending method's [ensures]: [final(result)] is the part as the caller left
-          it. *)
   | Specification_function of specification_function
   | Unknown of Diagnostic.reported
 
@@ -60,7 +58,6 @@ let rec head resolved (value : Syntax.expression) =
         (head resolved base)
   | _ -> None
 
-(* The name a definition declares, for reporting a duplicate. *)
 let declared_name (definition : Syntax.definition) : Syntax.name option =
   match definition.kind with
   | Function { signature = { name = Plain_name name | Member_name (_, name); _ }; _ }
@@ -101,13 +98,9 @@ let resolved =
                   (fun definition -> (container.path, definition))
                   (Query.demand database Names.definition container))
           in
-          (* No member of a definition whose own header did not parse is
-             resolved, because its enclosing declaration is unknown. *)
           (match container with
           | Some (_, enclosing) when Parts.broken enclosing Header -> ()
           | _ -> Walk.definition state ~path:key.path ?container definition);
-          (* The prelude is the same everywhere, so no definition outside the
-             module that defines a prelude name may take it. *)
           (match key.path with
           | Top { name; _ } when List.mem name Prelude.names -> (
               let defines_it =
@@ -153,12 +146,6 @@ let resolved =
             }
       | _ -> None)
 
-(* The errors of a file's [use] lines, in the file's offsets: a module that
-   does not exist, two imports with one last name, [standard::intrinsic]
-   outside the standard library, and an import that no definition's module
-   path begins with, with a fix that deletes it. A file where the parser
-   recovered reports no unused import: resolution skips the broken parts,
-   which may be what uses it. *)
 let file_diagnostics =
   Query.query ~name:"file_diagnostics" ~phase:Phases.resolution ~show:Path.show_file ~saved:true
     (fun database (path : Path.file) ->

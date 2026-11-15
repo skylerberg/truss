@@ -24,12 +24,12 @@ type subset_constraint = {
 }
 
 type frame = {
-  start : int;
-  mutable nodes : int list;
+  first_variable : int;
+  mutable recorded_expressions : int list;
   mutable bindings : int list;
   mutable declared : int list;
-  mutable pending : (unit -> bool) list;
-  mutable unmet : (Types.ty * Types.trait_reference) list;
+  mutable deferred_checks : (unit -> bool) list;
+  mutable reported_unmet_bounds : (Types.ty * Types.trait_reference) list;
   frame_specification : bool;
   span : Syntax.span;
 }
@@ -74,7 +74,7 @@ type state = {
   locals : (Syntax.id, local) Hashtbl.t;
   mutable law_parameters : (string * Types.ty) list;
   mutable frames : frame list;
-  mutable references : Syntax.id list;
+  mutable locals_read : Syntax.id list;
   mutable receiver_modes : (Syntax.id * Types.mode) list;
   yielded : (Syntax.id, Types.mode) Hashtbl.t;
   lent_tails : (Syntax.id, unit) Hashtbl.t;
@@ -83,7 +83,7 @@ type state = {
   mutable unsolved : Diagnostic.reported option;
   mutable capability_constraints : subset_constraint list;
   mutable capability_solution : (int, Types.capability_set) Hashtbl.t option;
-  mutable evidence : Path.package list;
+  mutable evidence_packages : Path.package list;
   mutable undecided : undecided_literal list;
   decisions : (int, literal_decision) Hashtbl.t;
   annotatable : (Syntax.id, unit) Hashtbl.t;
@@ -132,14 +132,8 @@ val defer : state -> (unit -> bool) -> unit
 val resolve : state -> Types.ty -> Types.ty
 val zonk : state -> Types.ty -> Types.ty
 val fresh : state -> Types.ty
-
 val integer_type : state -> Types.ty -> bool
-(** Whether a type is a built-in integer type, or a type parameter that an integer trait bounds. *)
-
 val signed_type : state -> Types.ty -> bool
-(** Whether a type is a signed integer type, a built-in one or a parameter that [SignedInteger]
-    bounds. *)
-
 val bounds : state -> Types.parameter -> Types.trait_reference list
 val normalize : state -> Types.ty -> Types.ty
 val final_type : state -> Types.ty -> Types.ty
@@ -190,8 +184,6 @@ val slice :
   stop:Core.expression option ->
   inclusive:bool ->
   Core.kind
-(** [base[start..stop]], of the view type [viewed]: a [Slice] that holds the call of the base type's
-    [slice_range], or of its [slice_from] when the stop is missing. *)
 
 type conversion = From_never | Owned_to_view | Function_widening | To_integer | From_integer
 

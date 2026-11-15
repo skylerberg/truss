@@ -1,33 +1,19 @@
-(* Exhaustiveness and reachability, by Maranget's usefulness algorithm
-   ("Warnings for pattern matching", 2007), over the matched values as a
-   vector, so a [match] over several values is checked as one.
-
-   The check reads the core form, so it checks the patterns that the MIR is
-   built from.
-
-   Constructors are the variants of a sum type, a record's one shape,
-   [true] and [false], and for integers and [Character] the intervals that
-   the patterns' literals and ranges split the type into. Strings have
-   infinitely many values, so only a pattern that matches everything
-   covers them. An arm with a guard never covers its pattern. *)
 module Members = Infer.Members
 
 type constructor =
   | Variant of string
   | Record
   | Boolean of bool
-  | Interval of Z.t * Z.t  (** Inclusive. *)
-  | Text of string  (** A string literal, one of infinitely many. *)
+  | Interval of Z.t * Z.t
+  | Text of string
   | Opaque of string
-      (** A value that is not evaluated at compile time, which covers only itself. The text names it
-          in a diagnostic. *)
 
 type space = Wild | Constructed of constructor * space list | Alternatives of space list
 
 type context = {
   database : Query.context;
   spans : Syntax.span array;
-  text : string;  (** The definition's source text, in which the spans are offsets. *)
+  text : string;
   mutable diagnostics : Syntax.diagnostic list;
 }
 
@@ -57,8 +43,6 @@ let integer_range type_ =
   | Some Character -> Some (Z.zero, Z.of_int 0x10FFFF)
   | _ -> None
 
-(* The fields of the shape a constructor makes, in declared order, with the
-   type's arguments substituted. *)
 let fields_of context type_ constructor =
   match (type_, constructor) with
   | Types.Named { path; arguments }, Variant name -> (
@@ -74,17 +58,11 @@ let fields_of context type_ constructor =
       Option.value ~default:[] (Members.fields context.database path arguments)
   | _ -> []
 
-(* A constant, an interval, a [Bool], or a string has no fields, which
-   [fields_of] gives as none. *)
 let field_types context type_ constructor =
   List.map (fun (field : Types.field) -> field.field_type) (fields_of context type_ constructor)
 
 let arity context type_ constructor = List.length (fields_of context type_ constructor)
 
-(* A pattern as a space, with its fields in the order of the shape and the fields
-   that it does not name as wildcards. [replace] substitutes one or-pattern,
-   by its id, with a subset of its alternatives, to compute that subset's
-   coverage. *)
 let rec space ?replace context (written : Core.pattern) : space =
   match written.kind with
   | Wildcard | Bind _ -> Wild
@@ -94,7 +72,6 @@ let rec space ?replace context (written : Core.pattern) : space =
       | Ok low, Ok high ->
           let high = if inclusive then high else Z.pred high in
           if Z.gt low high then Alternatives [] else Constructed (Interval (low, high), [])
-      (* A bound whose value is not evaluated here covers only itself. *)
       | Error shown, _ | _, Error shown -> Constructed (Opaque shown, []))
   | Variant { variant; fields } -> fielded ?replace context written.type_ (Variant variant) fields
   | Record fields -> fielded ?replace context written.type_ Record fields
@@ -104,8 +81,6 @@ let rec space ?replace context (written : Core.pattern) : space =
       in
       Alternatives (List.map (space ?replace context) alternatives)
 
-(* The value that a pattern compares the scrutinee with, as the pattern of
-   that value. A value that is not evaluated here covers only itself. *)
 and compared context (value : Core.expression) : space =
   match value.kind with
   | Use (Constant { path; _ }) -> constant context path
@@ -118,9 +93,6 @@ and literal (value : Core.expression) : space option =
   | String text -> Some (Constructed (Text text, []))
   | _ -> None
 
-(* A constant as the pattern of its value, so that it covers exactly the
-   values that its value covers. A value that is not evaluated here, such as
-   the result of a function call, covers only itself. *)
 and constant ?(seen = []) context path =
   let opaque = Constructed (Opaque (Path.show path), []) in
   if List.exists (Path.equal path) seen then opaque
@@ -137,8 +109,6 @@ and constant ?(seen = []) context path =
             Option.value ~default:opaque (constant_value context (path :: seen) value)
         | _ -> opaque)
 
-(* A constant's value as a space, or [None] if any part of it is not a
-   literal, a variant, a record, or another constant. *)
 and constant_value context seen (value : Core.expression) : space option =
   match value.kind with
   | Use (Constant { path; _ }) -> (
@@ -146,8 +116,6 @@ and constant_value context seen (value : Core.expression) : space option =
       | Constructed (Opaque _, _) -> None
       | space -> Some space)
   | Construct { variant; fields } ->
-      (* Every field must be written and evaluated. A field that takes its
-         default is not evaluated here. *)
       let parts =
         List.map
           (fun (_, (field : Core.operand option)) ->
@@ -164,8 +132,6 @@ and constant_value context seen (value : Core.expression) : space option =
       else None
   | _ -> literal value
 
-(* A bound of a range: [Ok] with its value, or [Error] with the name of a
-   constant whose value is not evaluated here. *)
 and range_end context (value : Core.expression) =
   match value.kind with
   | Integer value -> Ok value
@@ -187,7 +153,6 @@ and fielded ?replace context type_ constructor (written : (string * Core.pattern
 
 type row = space list
 
-(* The constructors of a type, when there are finitely many to list. *)
 let constructors context type_ =
   match type_ with
   | Types.Named { path; arguments } -> (
@@ -204,8 +169,6 @@ let constructors context type_ =
       | _ -> None)
   | _ -> None
 
-(* The column's intervals split at every boundary the column's intervals
-   draw, so each part is inside or outside each pattern. *)
 let split_intervals (low, high) (column : space list) =
   let rec intervals = function
     | Constructed (Interval (low, high), _) -> [ (low, high) ]
@@ -231,7 +194,6 @@ let rec head_constructors = function
   | Alternatives alternatives -> List.concat_map head_constructors alternatives
   | Wild -> []
 
-(* Whether a pattern's constructor covers a constructor of the split. *)
 let covers pattern_constructor constructor =
   match (pattern_constructor, constructor) with
   | Interval (low, high), Interval (part_low, part_high) ->
@@ -262,16 +224,11 @@ let rec default_matrix (rows : row list) =
       | _ -> [])
     rows
 
-(* The constructors to try for a column: every constructor of a type with
-   finitely many, or the intervals of an integer type. [None] for a type
-   whose values only a wildcard covers. *)
 let signature context type_ (column : space list) =
   match integer_range type_ with
   | Some range -> Some (split_intervals range column)
   | None -> constructors context type_
 
-(* A value the rows miss, as patterns, for one column of each type, or
-   [None] if the rows cover every value. *)
 let rec missing context (types : Types.ty list) (rows : row list) : space list option =
   match types with
   | [] -> if rows = [] then Some [] else None
@@ -290,10 +247,6 @@ let rec missing context (types : Types.ty list) (rows : row list) : space list o
             Some (Constructed (constructor, fields) :: rest)
         | None -> None
       in
-      (* Only when the column's constructors are complete is each one
-         tried. Otherwise the rows that start with a wildcard decide, and
-         a value the column has no constructor for is the witness, which
-         keeps recursive types from being expanded without end. *)
       let present = List.concat_map head_constructors column in
       match (type_, signature context type_ column) with
       | (Types.Error _ | Types.Hole | Types.Never), _ -> None
@@ -322,8 +275,6 @@ let rec missing context (types : Types.ty list) (rows : row list) : space list o
                   Some (Constructed (constructor, List.init count (fun _ -> Wild)) :: witness)
               | _ -> Some (Wild :: witness))))
 
-(* Whether a row is useful after the rows before it: whether some value it
-   matches matches none of them. *)
 let useful context types rows (row : row) =
   let rec is_useful (types : Types.ty list) (rows : row list) (row : row) =
     match (types, row) with
@@ -336,7 +287,6 @@ let useful context types rows (row : row) =
         | Constructed (constructor, arguments) -> (
             match (constructor, integer_range type_) with
             | Interval _, Some range ->
-                (* An interval is useful if any part of it is. *)
                 List.exists
                   (fun part ->
                     covers constructor part
@@ -371,8 +321,6 @@ let useful context types rows (row : row) =
     | _ -> false
   in
   is_useful types rows row
-
-(* Showing a missing value as a pattern *)
 
 let rec show context type_ (pattern : space) =
   match pattern with
@@ -416,9 +364,6 @@ let operand_type : Core.operand -> Types.ty = function
   | Place core_place -> Core_walk.place_type core_place
   | Value value -> value.type_
 
-(* Whether a type, or a type it is built from, failed to check or parse:
-   matching on it is accepted silently, since its error is reported where it
-   is written. *)
 let has_error context type_ =
   let rec contains_error seen = function
     | Types.Error _ | Types.Hole -> true
@@ -459,7 +404,6 @@ let indentation text (position : int) =
   in
   String.sub text line_start (spaces line_start - line_start)
 
-(* The or-patterns in a pattern, at any depth, each with its alternatives. *)
 let rec or_patterns (written : Core.pattern) =
   match written.kind with
   | Alternatives alternatives -> (written, alternatives) :: List.concat_map or_patterns alternatives
@@ -467,7 +411,6 @@ let rec or_patterns (written : Core.pattern) =
       List.concat_map (fun (_, inner) -> or_patterns inner) fields
   | Wildcard | Bind _ | Literal _ | Range _ | Equal_to _ -> []
 
-(* How many missing cases a [match]'s fix adds arms for. *)
 let witness_limit = 8
 
 let check_match context (node : Core.expression) scrutinees (arms : Core.arm list) =
@@ -479,8 +422,6 @@ let check_match context (node : Core.expression) scrutinees (arms : Core.arm lis
         if List.length arm.patterns = List.length types then begin
           let row = List.map (space context) arm.patterns in
           let arm_span = span context arm.origin in
-          (* An or-pattern's alternative the ones before it cover is
-             unreachable, as is an arm earlier arms cover. *)
           let reachable = useful context types !rows row in
           if not reachable then
             report context Unreachable_arm arm_span
@@ -498,8 +439,6 @@ let check_match context (node : Core.expression) scrutinees (arms : Core.arm lis
                 ]
               "Earlier arms already match everything this arm matches, so it is never reached."
           else
-            (* Each alternative, at any depth, against the arms before and
-               the alternatives before it. *)
             List.iter
               (fun ((group : Core.pattern), alternatives) ->
                 List.iteri
@@ -532,8 +471,6 @@ let check_match context (node : Core.expression) scrutinees (arms : Core.arm lis
           if Option.is_none arm.guard then rows := !rows @ [ row ]
         end)
       arms;
-    (* The cases no arm covers, one witness after another, so the fix can
-       add an arm for each. *)
     let rec witnesses rows witnesses_so_far =
       if List.length witnesses_so_far >= witness_limit then List.rev witnesses_so_far
       else
@@ -572,8 +509,6 @@ let check_match context (node : Core.expression) scrutinees (arms : Core.arm lis
              | count -> Printf.sprintf ", nor %d others" (count - 1)))
   end
 
-(* A pattern in a [let], a [for], or a lambda's parameters must cover its
-   type alone. *)
 let check_irrefutable context (written : Core.pattern) =
   if not (has_error context written.type_) then
     match missing context [ written.type_ ] [ [ space context written ] ] with
@@ -604,9 +539,6 @@ let check_definition context (definition : Core.definition) =
     }
     definition
 
-(* A definition's pattern errors, in its own offsets: arms not covered,
-   unreachable arms and alternatives, and refutable patterns where only
-   irrefutable ones may go. *)
 let definition_diagnostics =
   Query.query ~name:"pattern_diagnostics" ~phase:Phases.bodies ~saved:true
     ~show:Resolve.Names.show_key (fun database key ->

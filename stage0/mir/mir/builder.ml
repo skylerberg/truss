@@ -1046,7 +1046,7 @@ and statement builder (node : Core.statement) =
                   ignore (block builder body))
             in
             if mode = Concurrent_loop then
-              in_task builder (Core.Iteration { loop = origin }) iteration
+              in_task builder (Tree.Iteration { loop = origin }) iteration
             else iteration ()
           in
           match iteration with
@@ -1130,7 +1130,7 @@ and statement builder (node : Core.statement) =
                 block_of builder (fun () ->
                     if concurrent then
                       in_task builder
-                        (Core.Branch { block = origin; index })
+                        (Tree.Branch { block = origin; index })
                         (fun () -> statement builder branch)
                     else statement builder branch;
                     if reaches builder then Some unit_value else None))

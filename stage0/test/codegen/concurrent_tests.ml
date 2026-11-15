@@ -1,29 +1,16 @@
-(* [concurrent] blocks and loops. Whole programs use the runtime's [Tasks],
-   which runs each task when it is spawned. Truss tests provide a [Tasks]
-   written in Truss, and the test runner fails a test that leaks a heap
-   block. *)
-
 open Codegen_support
 
-(* The output of a program whose tasks run sequentially, in the order they
-   are spawned, so that the output shows which tasks ran. *)
 let expect_main ~expected text =
   let status, output, errors = run_main ~in_order:true text in
   if status <> 0 then fail "ended with status %d: %s" status errors;
   expect_string ~expected output
 
-(* A [Tasks] implementation in Truss that runs each task when it is
-   spawned. *)
 let in_order = Fixtures.Concurrent.in_order
 
-(* A test of a module whose [count] tests all pass. [InOrder] is appended to
-   the module. *)
 let passes_in_order name ~count source =
   test name (fun () ->
       expect_output (source ^ in_order)
         (String.concat "" (List.init count (Printf.sprintf "test %d passed\n"))))
-
-(* Blocks *)
 
 let () =
   test "branches use the enclosing capabilities and bind lets for the code after the block"
@@ -42,8 +29,6 @@ let () =
   test "break and continue in a branch apply to the loop that encloses the block" (fun () ->
       expect_main ~expected:"round 0\nbeside round 0\nround 2\nbeside round 2\n2\n"
         Fixtures.Concurrent.break_and_continue_in_a_branch_apply_to_the_loop)
-
-(* Loops *)
 
 let () =
   test "continue ends one iteration, break cancels the loop, and return returns a value" (fun () ->
@@ -103,8 +88,6 @@ let () =
       expect_main ~expected:"saw 5\nsaw 6\nsaw 7\n"
         Fixtures.Concurrent.task_gets_a_copy_of_a_trivial_value_that_a)
 
-(* Ownership of items and return values *)
-
 let () =
   passes_in_order "a task borrows an element that a collection lends from a read-only parameter"
     ~count:3 Fixtures.Concurrent.task_borrows_an_element_that_a_collection_lends;
@@ -120,8 +103,6 @@ let () =
 let () =
   passes "a return value that loses the cancel is dropped"
     Fixtures.Concurrent.return_value_that_loses_the_cancel_is_dropped
-
-(* Tasks on threads *)
 
 let expect_threaded ~expected text =
   let status, output, errors = run_main text in
@@ -143,8 +124,6 @@ let () =
       expect_threaded ~expected:"total 1400\n"
         Fixtures.Concurrent.on_threads_tasks_take_ownership_of_their_items_and)
 
-(* The scheduler, with each number of threads *)
-
 let expect_with_each_thread_count ~expected text =
   Fun.protect
     ~finally:(fun () -> Unix.putenv "TRUSS_WORKERS" "")
@@ -162,8 +141,6 @@ let () =
     (fun () ->
       expect_with_each_thread_count ~expected:"total 2000\n"
         (tally ^ Fixtures.Concurrent.on_threads_nested_groups_of_tasks_park_yield_block));
-  (* A flag that the runs shared would let one run drop a value that
-     another had moved, or leave one that it still owned. *)
   test "on threads, each run of a concurrent for and of a parallel for has its own drop flags"
     (fun () ->
       expect_threaded ~expected:"total 3000\nparallel total 2000\n"
@@ -171,22 +148,12 @@ let () =
   test "on threads, tasks run parallel blocks and loops with any number of threads" (fun () ->
       expect_with_each_thread_count ~expected:"total 40064\n"
         (tally ^ Fixtures.Concurrent.on_threads_tasks_run_parallel_blocks_and_loops));
-  (* The seeded scheduler runs its tasks as coroutines. [add] yields to the
-     program's scheduler in one, so the task resumes on another thread
-     while it is in a coroutine, and the other tasks park in theirs for
-     the mutex. The coroutine then suspends on that thread, when it yields
-     to the seeded scheduler. *)
   test "on threads, a task that leaves its thread in a coroutine resumes with any number of threads"
     (fun () ->
       expect_with_each_thread_count ~expected:"total 1920\n"
         Fixtures.Concurrent.on_threads_a_task_that_leaves_its_thread_in_a)
 
-(* Waiting for time and for a socket *)
-
 let () =
-  (* A sleeping task that held a thread would keep the last task from
-     running until a sleep ended: the runtime has fewer threads than this
-     program has sleeping tasks. *)
   test "on threads, more tasks sleep at once than the runtime has threads" (fun () ->
       expect_threaded ~expected:"600 woke first, before a sleep ended true\n"
         Fixtures.Concurrent.on_threads_more_tasks_sleep_at_once_than_the);
@@ -201,9 +168,6 @@ let () =
       expect_threaded ~expected:"timed out true\nthe peer closed true\n"
         Fixtures.Concurrent.on_threads_a_read_in_a_task_ends_at_the_sockets)
 
-(* A child's pipes. Each of the child's two outputs is larger than a pipe
-   holds, so the child ends only if both are read as it writes them. *)
-
 let child_lines = Fixtures.Concurrent.child_lines
 
 let () =
@@ -216,12 +180,7 @@ let () =
       expect_main ~expected:"captured 110890 and 110890\n"
         (child_lines ^ Fixtures.Concurrent.in_a_program_with_one_thread_both_of_a_childs))
 
-(* Cancelling a task that waits *)
-
 let () =
-  (* The child's output is discarded. A child that inherited the program's
-     output would keep it open after the program ended, and the test would
-     wait for the child to end. *)
   test "on threads, a cancelled task returns from a call that blocks in the operating system"
     (fun () ->
       expect_threaded ~expected:"run: cancelled\ntimed out\n"

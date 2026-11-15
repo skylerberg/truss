@@ -2103,6 +2103,9 @@ proof Ordered.transitive for Box[Item: Ordered] {
   read-only parameters, `Self` is its type, and the law's `requires` hold. A
   proof for a generic `impl` names the type as the `impl` does, and is
   proven once for every type.
+- A law proof's generic parameters have only the bounds that its `impl`
+  declares. A further bound would let the law be taken as proven for
+  instantiations that the proof does not cover.
 
 ### Bodies and contracts in proofs
 

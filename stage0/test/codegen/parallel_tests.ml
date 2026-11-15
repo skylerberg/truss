@@ -1,10 +1,5 @@
-(* [parallel] blocks and loops in whole programs, whose branches run on the
-   runtime's threads, and in a test, where they run in order. *)
-
 open Codegen_support
 
-(* A program's output with a number of threads, which changes nothing a
-   program does. More threads than cores makes them cross more often. *)
 let output_with ~workers text =
   Unix.putenv "TRUSS_WORKERS" (string_of_int workers);
   let status, output, errors = run_main text in
@@ -67,8 +62,6 @@ let () =
   passes "a test runs the branches of a parallel block and of a parallel for, in order"
     (board ^ Fixtures.Parallel.test_runs_the_branches_of_a_parallel_block_and_of)
 
-(* Outlining *)
-
 let () =
   test
     "an outlined function's own local goes with it, and a shared one is reached through its \
@@ -101,22 +94,15 @@ let () =
       Emit_c.Builder.build builder ~parameters:[] ~result:(Some int);
       let instance = Emit_c.Builder.built builder in
       let c = Emit_c.For_testing.c (Emit_c.fragment env (Code instance)) in
-      (* Each function reaches two locals of the entry, and the first keeps
-         its own. *)
       List.iter
         (fun text -> if not (contains c text) then fail "no %s in:\n%s" text c)
         [ "f_capture0"; "f_capture1"; "int32_t l6_own;" ];
       if contains c "f_capture2" then fail "a function reaches three locals:\n%s" c;
       expect_status 20 [ printed instance ])
 
-(* Coroutines *)
-
 let () =
   test "a coroutine runs when resumed, switches back when it suspends, and ends when it returns"
     (fun () ->
-      (* The coroutine adds its item to a count, suspends, and adds 10. The
-         entry reads the count after each resume, and the result of each
-         resume. *)
       let work : Ground.function_type =
         { parameters = [ (Read, named "UInt64") ]; result = Returns (named "Unit"); uses = [] }
       in

@@ -866,7 +866,7 @@ let task_function_type st : Lowered.ty =
    [parts]. Every
    exit from the task jumps to [end_block], where the task returns. Gives
    the task's function value, for [Tasks.spawn]. *)
-let task_body st ~(id : Core.task) ~group ~parts (f : task -> unit) : Lowered.rvalue =
+let task_body st ~(id : Mir.task) ~group ~parts (f : task -> unit) : Lowered.rvalue =
   let nested, environment =
     outlined st ~parts (fun () ->
         let task =
@@ -915,7 +915,7 @@ let locked_evidence st ~(tasks : Lowered.operand) (evidence : (Path.t * Lowered.
    [number] in [winner] and moves the value it returns, if any, into the
    exit's local, for the code after the group; otherwise it drops the
    value. The task then ends, whether or not it was first. *)
-let cancel st ~(task : Core.task) ~winner ~number ~value =
+let cancel st ~(task : Mir.task) ~winner ~number ~value =
   match st.tasks with
   | current :: _ when current.id = task ->
       let won = block st.builder and lost = block st.builder and after = block st.builder in

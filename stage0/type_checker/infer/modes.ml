@@ -1,18 +1,11 @@
 open Syntax
 open State
 
-(* Records that a call is a call of a lending method, with the mode it
-   lends with. The result of such a call is a part of the receiver, lent
-   for the rest of the caller's statement. It is not a temporary: it is
-   never moved. *)
 let note_lending state (value : expression) (output : Types.result) =
   match output with
   | Lends (mode, _) -> state.tables.lend_modes.(value.id) <- Some mode
   | Returns _ -> ()
 
-(* The mode with which an expression is lent, if it is the result of a
-   lending call, or a field or an element of one. A mode keyword before the
-   expression belongs to the receiver of the lending call. *)
 let rec lent state (value : expression) : Types.mode option =
   match value.kind with
   | Call _ -> state.tables.lend_modes.(value.id)
@@ -22,27 +15,15 @@ let rec lent state (value : expression) : Types.mode option =
   | Mode (_, inner) when Option.is_some (call_with_mode_keyword state inner) -> lent state inner
   | _ -> None
 
-(* Whether an expression is a slice, such as [items[1..3]]. A slice is
-   written like an index, but it is a value: a view of part of its base. *)
 let rec is_slice (value : expression) =
   match value.kind with
   | Bracket (_, [ Item { kind = Range _; _ } ]) -> true
   | Parenthesized inner | Mode (_, inner) -> is_slice inner
   | _ -> false
 
-(* Whether a [let], [match], or [is] borrows the expression: it denotes a
-   place, or a part that a lending call lends. The bindings then borrow
-   parts of that place. A slice is a value, so it is not borrowed. *)
 let borrowed state (value : expression) =
   (is_place state value || Option.is_some (lent state value)) && not (is_slice value)
 
-(* The mode in which a pattern's bindings bind the parts of the scrutinee of
-   a [match] or an [is]. A scrutinee written with [own] or [mut] has that
-   mode. A place with no mode keyword, or a lent part, is borrowed, so the
-   bindings are [Read]. Any other scrutinee is a value that the match
-   consumes, so the bindings are [Own]. A mode keyword that belongs to the
-   receiver of a method call, as in [mut cursor.next()], is not a mode
-   keyword on the scrutinee. *)
 let scrutinee_mode state (scrutinee : expression) : Types.mode =
   match scrutinee.kind with
   | Mode (Own, inner) when Option.is_none (call_with_mode_keyword state inner) -> Own
@@ -51,18 +32,8 @@ let scrutinee_mode state (scrutinee : expression) : Types.mode =
       Mut
   | _ -> if borrowed state scrutinee then Read else Own
 
-(* Why a place cannot be mutated. *)
-type immutable =
-  | Read_only of string
-      (** The place is, or is part of, a [let] binding, a parameter that is not [mut], a constant,
-          or [self] in a method that does not take [mut self]. *)
-  | Captured of string  (** Inside a lambda, the place belongs to the enclosing function. *)
-  | Lent_read_only  (** The place is a part that a lending call lent read-only. *)
-  | Not_a_place
+type immutable = Read_only of string | Captured of string | Lent_read_only | Not_a_place
 
-(* Why a place cannot be mutated, or [None] if it can. Only a [var], a
-   [mut] parameter, the variable of a [mut] loop, [mut self], a part of one
-   of these, and a part that a call lends [mut] can be mutated. *)
 let rec immutable state env (value : expression) : immutable option =
   match value.kind with
   | Name path -> (
@@ -95,11 +66,6 @@ let rec immutable state env (value : expression) : immutable option =
       | None -> Some Not_a_place)
   | _ -> Some Not_a_place
 
-(* Records that a place is mutated: every index expression in the place
-   is a call of [IndexMut.at], which lends its element [mut]. A collection
-   whose type implements [Index] alone lends each element read-only, so an
-   element of it cannot be mutated in place. That is reported with [code]
-   where the place is otherwise one that can be mutated. *)
 let rec use_mutable_indexes state ~(report_with : Diagnostic.Code.types option) (value : expression)
     =
   match value.kind with
@@ -128,7 +94,8 @@ let rec use_mutable_indexes state ~(report_with : Diagnostic.Code.types option) 
                     arguments =
                       List.map
                         (fun (argument : Tables.argument) ->
-                          if argument.parameter_index = 0 then { argument with mode = Types.Mut }
+                          if argument.core_argument_index = 0 then
+                            { argument with mode = Types.Mut }
                           else argument)
                         arguments;
                   }
@@ -150,12 +117,8 @@ let rec use_mutable_indexes state ~(report_with : Diagnostic.Code.types option) 
       use_mutable_indexes state ~report_with base
   | _ -> ()
 
-type mutation =
-  | Assignment
-  | Passed_mut  (** The place is passed [mut], is a [mut] receiver, or is lent or yielded [mut]. *)
+type mutation = Assignment | Passed_mut
 
-(* Checks that a place may be mutated, and records that it is. Every
-   construct that mutates a place calls this. *)
 let mutate state env ~(by : mutation) (value : expression) =
   let code : Diagnostic.Code.types =
     match by with Assignment -> Not_assignable | Passed_mut -> Wrong_mode
@@ -215,13 +178,6 @@ let argument_form state (value : expression) =
       | Some mode -> Lent mode
       | None -> if is_place state value then Place else Temporary)
 
-(* The mode with which a field of a constructor that a lending method
-   lends lends a place to the value that is built, or [None] if the field
-   takes its value, as a field of any other constructor does. [type_] is
-   the type of [value]. A method that lends read-only lends every place
-   read-only, except a [Plain] place, which is copied. A method that lends
-   [mut] lends the places that are passed [mut]. A slice is a value, so it
-   is taken. *)
 let lent_field state (value : expression) type_ : Types.mode option =
   match (Hashtbl.find_opt state.yielded value.id, argument_form state value) with
   | _ when is_slice value -> None
@@ -352,12 +308,6 @@ let check_lent_value state env (operand : expression) =
   in
   fields ~variant:None operand
 
-(* Checks a value where an owned value is required and no parameter
-   receives it: the initializer of a [var], the value of an assignment, an
-   element of a collection literal, or a part of a tagged string. A place
-   there must be passed [own] or copied, unless its type is [Plain]. This
-   is a rule of ownership. The type checker reports it because only the
-   syntax tree has the mode keywords. *)
 let check_owned state env (value : expression) type_ =
   if runs env then
     defer state (fun () ->

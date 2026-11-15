@@ -1,11 +1,5 @@
-(* Each test gives an input and the parser's exact output: the tree,
-   printed compactly, or the one diagnostic with its code, position, and
-   fixes. *)
-
 open Harness
 open Parse_support
-
-(* Splitting a file into definitions *)
 
 let () =
   test "definitions are split at line breaks outside brackets" (fun () ->
@@ -97,8 +91,6 @@ let () =
       if codes diagnostics <> [ "lexer.unclosed_bracket" ] then
         fail "got [%s]" (String.concat "; " (codes diagnostics));
       if List.length file.definitions <> 2 then fail "expected two definitions")
-
-(* Parsing one definition *)
 
 let () =
   test "spans are relative to the definition" (fun () ->
@@ -227,8 +219,6 @@ let () =
       if codes diagnostics <> [ "lexer.unclosed_bracket"; "parser.unexpected_token" ] then
         fail "got [%s]" (String.concat "; " (codes diagnostics)))
 
-(* Parsing one piece at a time *)
-
 let () =
   let pieces text =
     let source = source text in
@@ -278,7 +268,6 @@ let () =
       in
       if parsed text <> parsed ("fn g() {}\n\n\n" ^ text) then fail "the results differ");
   test "indenting a method changes neither its tree nor its diagnostics" (fun () ->
-      (* The method has no body, so it has a diagnostic with a fix. *)
       let method_of ~indentation =
         let source, tokens, pieces =
           pieces ("impl Clock for Fixed {\n" ^ indentation ^ "fn now(self) -> Instant\n}")
@@ -298,8 +287,6 @@ let () =
             fail "code %s" (Diagnostic.Code.name diagnostic.code);
           if diagnostic.span.start <> 41 then fail "start %d" diagnostic.span.start
       | _, diagnostics -> fail "%d diagnostics" (List.length diagnostics))
-
-(* The parser's first sets and the lexer's line-break rule *)
 
 let () =
   test "Layout lets every token in the first set of a statement begin one" (fun () ->
@@ -321,7 +308,6 @@ let () =
               };
           ]
       in
-      (* An open-ended range is written only in brackets, where line breaks are ignored. *)
       let only_in_brackets = [ Token.Punctuation Dot_dot; Punctuation Dot_dot_equal ] in
       List.iter
         (fun kind ->
@@ -337,11 +323,6 @@ let () =
               | _ -> "a name or a literal"))
         kinds)
 
-(* Node ids *)
-
-(* The ids of a definition's expressions and statements, after checking that
-   each child's id comes before its parent's, since a node gets its id when
-   it is built, after its children. *)
 let ids_of (definition : Syntax.definition) =
   let ids = ref [] in
   let rec expression ~parent (value : Syntax.expression) =
@@ -388,8 +369,6 @@ let () =
             fail "ids repeat"
       | _ -> fail "wrong definitions")
 
-(* Types *)
-
 let () =
   let type_of text expected =
     definition ("fn f(value: " ^ text ^ ") {}") ("(fn f ((value: " ^ expected ^ ")) (block))")
@@ -429,8 +408,6 @@ let () =
   test "generic parameters" (fun () ->
       definition "fn f[Key: Hash + Ordered, count: UInt64, capability Granted]() {}"
         "(fn f[Key: Hash + Ordered, count: UInt64, capability Granted] () (block))")
-
-(* Patterns *)
 
 let () =
   let pattern_of text expected =
@@ -475,8 +452,6 @@ let () =
       body_error "match x {\n  0.. => todo\n}" ~code:Unexpected_token ~at:"=>");
   test "a string in a pattern cannot interpolate" (fun () ->
       body_error "match x {\n  \"${y}\" => todo\n}" ~code:Interpolation_not_allowed ~at:"\"${")
-
-(* Expressions *)
 
 let () =
   let expression text expected = statement ("let x = " ^ text) ("(let x " ^ expected ^ ")") in
@@ -587,8 +562,6 @@ let () =
          done)))) (block))";
       definition "fn f() requires forall value: Int64 => value + 0 == value {}"
         "(fn f () (requires (forall value: Int64 (== (+ value 0) value))) (block))")
-
-(* Statements *)
 
 let () =
   test "let and var with annotations" (fun () ->

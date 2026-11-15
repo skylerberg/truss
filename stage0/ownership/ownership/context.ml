@@ -39,7 +39,7 @@ let stores_function context (callee : Mir.callee) position =
   let declared (signature : Types.signature) =
     let index = if Option.is_some signature.receiver then position - 1 else position in
     match List.nth_opt signature.parameters index with
-    | Some parameter when index >= 0 -> List.mem parameter.name signature.stores_functions
+    | Some parameter when index >= 0 -> List.mem parameter.name signature.capture_free_parameters
     | _ -> false
   in
   match callee with

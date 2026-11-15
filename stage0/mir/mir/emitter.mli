@@ -68,7 +68,7 @@ val deferring : t -> (unit -> 'a) -> 'a * local list
 val with_compound_target : t -> place -> (unit -> 'a) -> 'a
 val compound_target : t -> place option
 val looping : t -> (unit -> unit) -> unit
-val in_task : t -> Core.task -> (unit -> 'a) -> 'a
+val in_task : t -> task -> (unit -> 'a) -> 'a
 val start_group : t -> Core.origin -> Core.origin -> unit
 val resume_group : t -> Core.origin -> Core.origin -> unit
 val return_ : t -> operand option -> Core.origin -> unit
