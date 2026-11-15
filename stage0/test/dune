@@ -41,6 +41,7 @@
   unicode
   zarith
   documents
+  file_system
   syntax
   syntax_print
   core

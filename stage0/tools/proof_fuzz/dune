@@ -8,6 +8,7 @@
   token
   lexer
   documents
+  file_system
   substring
   query
   engine

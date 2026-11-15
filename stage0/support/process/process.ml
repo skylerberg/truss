@@ -62,7 +62,7 @@ let kill pid = try Unix.kill pid Sys.sigkill with Unix.Unix_error (ESRCH, _, _) 
 let rec exchange piece pid ~readers ~writer ~deadline =
   match (readers, writer) with
   | [], None -> deadline
-  | _ ->
+  | _ -> (
       let timeout =
         match deadline with None -> -1. | Some at -> Float.max 0. (at -. Unix.gettimeofday ())
       in
@@ -76,24 +76,22 @@ let rec exchange piece pid ~readers ~writer ~deadline =
         | readable, writable, _ -> (readable, writable)
         | exception Unix.Unix_error (EINTR, _, _) -> ([], [])
       in
-      let deadline =
-        match deadline with
-        | Some at when Unix.gettimeofday () >= at ->
-            kill pid;
-            None
-        | deadline -> deadline
-      in
-      let readers =
-        List.filter
-          (fun reader -> (not (List.mem reader.descriptor readable)) || read_piece piece reader)
-          readers
-      in
-      let writer =
-        Option.bind writer (fun writer ->
-            if (not (List.mem writer.stdin writable)) || write_piece writer then Some writer
-            else None)
-      in
-      exchange piece pid ~readers ~writer ~deadline
+      match deadline with
+      | Some at when Unix.gettimeofday () >= at ->
+          kill pid;
+          None
+      | _ ->
+          let readers =
+            List.filter
+              (fun reader -> (not (List.mem reader.descriptor readable)) || read_piece piece reader)
+              readers
+          in
+          let writer =
+            Option.bind writer (fun writer ->
+                if (not (List.mem writer.stdin writable)) || write_piece writer then Some writer
+                else None)
+          in
+          exchange piece pid ~readers ~writer ~deadline)
 
 let rec await pid deadline =
   match Unix.waitpid (if Option.is_some deadline then [ WNOHANG ] else []) pid with

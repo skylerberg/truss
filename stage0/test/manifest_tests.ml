@@ -2,7 +2,7 @@ open Harness
 module Manifest = Manifest
 
 let manifest_block () =
-  let text = Documents.read (Harness.workspace_path "PACKAGES.md") in
+  let text = File_system.read (Harness.workspace_path "PACKAGES.md") in
   String.concat "\n" (Documents.block_after text "## Package manifest")
 
 let contains text part = Substring.contains text part
@@ -31,16 +31,16 @@ let () =
                  };
                ];
            };
-       time_limit = None;
+       time_limit_seconds = None;
       } ->
           ()
       | _ -> fail "read differently");
   test "PACKAGES.md's project manifest is a project with a time limit, and no package" (fun () ->
-      let text = Documents.read (Harness.workspace_path "PACKAGES.md") in
+      let text = File_system.read (Harness.workspace_path "PACKAGES.md") in
       let manifest = String.concat "\n" (Documents.block_after text "## Projects") in
       if not (Manifest.has_project_table manifest) then fail "not a project";
       match Manifest.parse manifest with
-      | { package = None; time_limit = Some 10 } -> ()
+      | { package = None; time_limit_seconds = Some 10 } -> ()
       | _ -> fail "read differently");
   test "a manifest has a package, a project, or both" (fun () ->
       let both = "[project]\n[package]\nname = \"a\"\n" in
