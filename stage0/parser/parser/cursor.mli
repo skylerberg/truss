@@ -6,7 +6,6 @@ val create :
   diagnostics:Diagnostic.Collector.t -> base:int -> Token.t array -> first:int -> stop:int -> t
 
 val interpolation : t -> Token.interpolation -> t
-val restarted : t -> t
 val index : t -> int
 val fresh_id : t -> int
 val token_at : t -> int -> Token.t

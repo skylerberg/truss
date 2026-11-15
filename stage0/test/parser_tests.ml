@@ -76,6 +76,16 @@ let () =
       let printed = Syntax_print.For_testing.definitions file.definitions in
       if printed <> [ "(error fn List[Element].sort)"; "(error type Point)"; "(fn f () (block))" ]
       then fail "got [%s]" (String.concat "; " printed));
+  test "a failed const keeps its name" (fun () ->
+      let tokens, _ = Lexer.lex (source "const pi: Float64 = 1 +") in
+      let parsed, _ = Parser.For_testing.definition tokens (List.hd (Parser.split tokens)) in
+      let printed = Syntax_print.For_testing.definition parsed.value.value in
+      if printed <> "(error let pi)" then fail "got %s" printed);
+  test "a failed definition keeps its visibility" (fun () ->
+      let file, _ = parse "public fn f() -> {\n}\nfn g() {}" in
+      match Syntax_print.For_testing.definitions file.definitions with
+      | "(public (error fn f))" :: _ -> ()
+      | printed -> fail "got [%s]" (String.concat "; " printed));
   test "a function without a body keeps its signature" (fun () ->
       let file, _ = parse "fn f(x: Int64) -> Int64\nfn g() {}" in
       match file.definitions with

@@ -226,18 +226,10 @@ let check_name cursor (name : definition_name) =
       "A function cannot be named `identical`, which tests whether two values are the same value, \
        in specifications."
 
-let function_signature cursor =
-  Cursor.expect_keyword cursor Fn;
-  let name = definition_name cursor in
+let function_signature cursor ~name =
   check_name cursor name;
   let method_ = match name with Member_name _ -> true | Plain_name _ -> false in
   signature cursor ~name ~method_
-
-let member_signature cursor : signature =
-  Cursor.expect_keyword cursor Fn;
-  let name = Plain_name (Atoms.lower cursor "a method name") in
-  check_name cursor name;
-  signature cursor ~name ~method_:true
 
 let members cursor ~member ~error =
   Parse_expression.body_opening cursor;
@@ -309,9 +301,9 @@ let capability_member cursor : capability_member =
 
 type container = In_trait | In_impl | In_capability
 
-let method_ cursor ~(container : container) ~visibility : definition =
-  let start = Cursor.index cursor in
-  let signature = member_signature cursor in
+let method_kind cursor ~(container : container) ~name =
+  check_name cursor name;
+  let signature = signature cursor ~name ~method_:true in
   let kind =
     match container with
     | In_trait -> (
@@ -333,6 +325,21 @@ let method_ cursor ~(container : container) ~visibility : definition =
         Method_declaration signature
   in
   if not (Cursor.at_end cursor) then Cursor.fail cursor "a line break or `}` after the method";
+  kind
+
+let method_ cursor ~container ~visibility : definition =
+  let start = Cursor.index cursor in
+  Cursor.advance cursor;
+  let intended = Some Intended_function in
+  let kind =
+    match Atoms.lower cursor "a method name" with
+    | exception Cursor.Failed -> Definition_error { intended; name = None }
+    | name -> (
+        let name = Plain_name name in
+        match method_kind cursor ~container ~name with
+        | kind -> kind
+        | exception Cursor.Failed -> Definition_error { intended; name = Some name })
+  in
   finish cursor start visibility kind
 
 let fields cursor : field list =
@@ -395,9 +402,7 @@ let type_clauses cursor =
   in
   loop []
 
-let type_definition cursor =
-  Cursor.advance cursor;
-  let name = Atoms.upper cursor "the name of the type" in
+let type_definition cursor ~name =
   let generics = Parse_expression.generics cursor in
   let body =
     if Cursor.is_punctuation cursor (Open Paren) then Fields (fields cursor)
@@ -407,9 +412,7 @@ let type_definition cursor =
   in
   Type_definition { name; generics; body; clauses = type_clauses cursor }
 
-let trait cursor =
-  Cursor.advance cursor;
-  let name = Atoms.upper cursor "the name of the trait" in
+let trait cursor ~name =
   let generics = Parse_expression.generics cursor in
   let requires =
     if Cursor.accept_punctuation cursor Colon then Parse_expression.bounds cursor else []
@@ -451,15 +454,11 @@ let impl cursor =
   Impl
     { trait_; type_; uses; members = members cursor ~member:impl_member ~error:Impl_member_error }
 
-let capability cursor =
-  Cursor.advance cursor;
-  let name = Atoms.upper cursor "the name of the capability" in
+let capability cursor ~name =
   Capability
     { name; members = members cursor ~member:capability_member ~error:Capability_member_error }
 
-let constant cursor =
-  Cursor.advance cursor;
-  let name = definition_name cursor in
+let constant cursor ~name =
   Cursor.expect_punctuation cursor Colon;
   let type_ = Parse_expression.type_expression cursor in
   Cursor.expect_punctuation cursor Equal;
@@ -484,9 +483,7 @@ let test cursor =
   in
   Test { name; uses; body = Parse_expression.body cursor }
 
-let theorem cursor =
-  Cursor.advance cursor;
-  let name = Atoms.lower cursor "the name of the theorem" in
+let theorem cursor ~name =
   let generics = Parse_expression.generics cursor in
   let parameters = parameters cursor ~method_:false in
   let clauses = clauses cursor in
@@ -501,29 +498,6 @@ let law_proof cursor =
   let type_ = type_head cursor in
   Law_proof { trait_; law; type_; body = Parse_expression.body cursor }
 
-let header cursor : intended_kind option * definition_name option =
-  ignore (visibility cursor);
-  let intended =
-    match Cursor.peek_kind cursor with
-    | Keyword Fn -> Some Intended_function
-    | Keyword Let -> Some Intended_constant
-    | Keyword Type -> Some Intended_type
-    | Keyword Trait -> Some Intended_trait
-    | Keyword Capability -> Some Intended_capability
-    | Keyword Theorem -> Some Intended_theorem
-    | _ -> None
-  in
-  Cursor.advance cursor;
-  let name () : definition_name option =
-    match intended with
-    | Some (Intended_function | Intended_constant) -> Some (definition_name cursor)
-    | Some (Intended_type | Intended_trait | Intended_capability) ->
-        Some (Plain_name (Atoms.upper cursor "a name"))
-    | Some Intended_theorem -> Some (Plain_name (Atoms.lower cursor "a name"))
-    | None -> None
-  in
-  (intended, match name () with name -> name | exception Cursor.Failed -> None)
-
 type empty = |
 
 let top_level cursor ~function_ =
@@ -533,55 +507,95 @@ let top_level cursor ~function_ =
     remove_visibility cursor Misplaced_visibility visibility_tokens
       (Printf.sprintf "%s takes no visibility: nothing refers to it by name." construct)
   in
+  let ended kind =
+    (match (visibility, opaque, kind) with
+    | _, None, _
+    | Public_opaque, Some _, Either.Left (Type_definition _)
+    | _, Some _, Left (Impl _ | Test _ | Law_proof _) ->
+        ()
+    | _, Some (public, opaque), _ ->
+        Cursor.report cursor Misplaced_opaque opaque.span "Only a type can be `opaque`."
+          ~fixes:
+            [
+              Diagnostic.fix "Remove `opaque`"
+                [ Diagnostic.delete (Source.span public.span.stop opaque.span.stop) ];
+            ]);
+    if not (Cursor.at_end cursor) then Cursor.fail cursor "a line break after the definition";
+    kind
+  in
+  let failed intended name = Either.Left (Definition_error { intended; name }) in
+  let unnamed parse =
+    match ended (parse ()) with kind -> kind | exception Cursor.Failed -> failed None None
+  in
+  let named intended ~name ~written ~parse =
+    Cursor.advance cursor;
+    match name () with
+    | exception Cursor.Failed -> failed (Some intended) None
+    | parsed -> (
+        match ended (parse parsed) with
+        | kind -> kind
+        | exception Cursor.Failed -> failed (Some intended) (Some (written parsed)))
+  in
+  let plain name = Plain_name name in
+  let upper expected () = Atoms.upper cursor expected in
   let kind =
     match Cursor.peek_kind cursor with
-    | Keyword Fn -> function_ cursor
-    | Keyword Type -> Either.Left (type_definition cursor)
-    | Keyword Trait -> Left (trait cursor)
+    | Keyword Fn ->
+        named Intended_function
+          ~name:(fun () -> definition_name cursor)
+          ~written:Fun.id ~parse:(function_ cursor)
+    | Keyword Type ->
+        named Intended_type ~name:(upper "the name of the type") ~written:plain ~parse:(fun name ->
+            Either.Left (type_definition cursor ~name))
+    | Keyword Trait ->
+        named Intended_trait ~name:(upper "the name of the trait") ~written:plain
+          ~parse:(fun name -> Either.Left (trait cursor ~name))
     | Keyword Impl ->
         remove_visibility cursor Misplaced_visibility visibility_tokens
           "An `impl` takes no visibility: it applies wherever its trait and the types it names are \
            visible.";
-        Left (impl cursor)
-    | Keyword Capability -> Left (capability cursor)
-    | Keyword Let -> Left (constant cursor)
+        unnamed (fun () -> Either.Left (impl cursor))
+    | Keyword Capability ->
+        named Intended_capability ~name:(upper "the name of the capability") ~written:plain
+          ~parse:(fun name -> Either.Left (capability cursor ~name))
+    | Keyword Let ->
+        named Intended_constant
+          ~name:(fun () -> definition_name cursor)
+          ~written:Fun.id
+          ~parse:(fun name -> Either.Left (constant cursor ~name))
     | Reserved ((Const | Static) as reserved) ->
         Habits.constant_keyword cursor ~token:(Cursor.peek cursor) ~reserved;
-        Left (constant cursor)
+        named Intended_constant
+          ~name:(fun () -> definition_name cursor)
+          ~written:Fun.id
+          ~parse:(fun name -> Either.Left (constant cursor ~name))
     | Keyword Test ->
         no_visibility "A test";
-        Left (test cursor)
-    | Keyword Theorem -> Left (theorem cursor)
+        unnamed (fun () -> Either.Left (test cursor))
+    | Keyword Theorem ->
+        named Intended_theorem
+          ~name:(fun () -> Atoms.lower cursor "the name of the theorem")
+          ~written:plain
+          ~parse:(fun name -> Either.Left (theorem cursor ~name))
     | Keyword Proof ->
         no_visibility "A law's proof";
-        Left (law_proof cursor)
+        unnamed (fun () -> Either.Left (law_proof cursor))
     | kind when visibility = Private && Atoms.begins_statement kind ->
-        Cursor.report cursor Statement_at_top_level (Cursor.peek cursor).span
-          "Statements must be inside a function, a test, or another definition with a body.";
-        raise Cursor.Failed
+        unnamed (fun () ->
+            Cursor.report cursor Statement_at_top_level (Cursor.peek cursor).span
+              "Statements must be inside a function, a test, or another definition with a body.";
+            raise Cursor.Failed)
     | _ ->
-        Cursor.fail cursor
-          "a definition: `fn`, `type`, `trait`, `impl`, `capability`, `let`, `test`, `theorem`, or \
-           `proof`"
+        unnamed (fun () ->
+            Cursor.fail cursor
+              "a definition: `fn`, `type`, `trait`, `impl`, `capability`, `let`, `test`, \
+               `theorem`, or `proof`")
   in
-  (match (visibility, opaque, kind) with
-  | _, None, _
-  | Public_opaque, Some _, Left (Type_definition _)
-  | _, Some _, Left (Impl _ | Test _ | Law_proof _) ->
-      ()
-  | _, Some (public, opaque), _ ->
-      Cursor.report cursor Misplaced_opaque opaque.span "Only a type can be `opaque`."
-        ~fixes:
-          [
-            Diagnostic.fix "Remove `opaque`"
-              [ Diagnostic.delete (Source.span public.span.stop opaque.span.stop) ];
-          ]);
-  if not (Cursor.at_end cursor) then Cursor.fail cursor "a line break after the definition";
   Either.map ~left:(finish cursor start visibility) ~right:(fun other -> (visibility, other)) kind
 
 let definition cursor : definition =
-  let function_ cursor : (definition_kind, empty) Either.t =
-    let signature = function_signature cursor in
+  let function_ cursor name : (definition_kind, empty) Either.t =
+    let signature = function_signature cursor ~name in
     Left (Function { signature; body = body cursor })
   in
   match top_level cursor ~function_ with Left definition -> definition | Right (_, _) -> .
@@ -589,8 +603,8 @@ let definition cursor : definition =
 type example = Whole of definition | Signature_alone of visibility * signature
 
 let example cursor =
-  let function_ cursor =
-    let signature = function_signature cursor in
+  let function_ cursor name =
+    let signature = function_signature cursor ~name in
     match optional_body cursor with
     | Some body -> Either.Left (Function { signature; body })
     | None -> Right signature
