@@ -51,7 +51,9 @@ let () =
   passes "an any value calls the methods of its trait's supertraits"
     Fixtures.Source.any_value_calls_the_methods_of_its_traits_supertraits;
   passes "an any value calls a derived method of its trait's supertrait"
-    Fixtures.Source.any_value_calls_a_derived_method_of_its_traits
+    Fixtures.Source.any_value_calls_a_derived_method_of_its_traits;
+  passes "an any value calls a method of a supertrait whose argument is Self"
+    Fixtures.Source.any_value_calls_a_method_of_a_supertrait_whose
 
 let () =
   passes "a constant that compares constants is folded"

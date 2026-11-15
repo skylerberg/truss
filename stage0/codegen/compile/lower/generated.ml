@@ -457,7 +457,14 @@ let any_table context (key : Instance.key) : Lowered.table =
               if Path.equal any_method.trait.trait interface.implements.trait then
                 (impl, type_arguments)
               else
-                resolve_impl context substitution ~trait:any_method.trait
+                resolve_impl context substitution
+                  ~trait:
+                    (Types.substitute_trait
+                       [
+                         ( Interface.Definition.make_self_parameter interface.implements.trait,
+                           Types.Type interface.for_type );
+                       ]
+                       any_method.trait)
                   ~self_type:interface.for_type ~evidence:Bound
             in
             let entry_signature, _, _ =

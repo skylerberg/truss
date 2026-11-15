@@ -119,6 +119,7 @@ type any_method = {
 type any_slot = Operation_slot of Drop_and_copy.any_operation | Method_slot of any_method
 
 let lay_out_any_vtable context (any : Types.trait_reference) =
+  let self = Interface.Definition.make_self_parameter any.trait in
   let traits =
     List.fold_left
       (fun traits (bound : Types.trait_reference) ->
@@ -129,13 +130,14 @@ let lay_out_any_vtable context (any : Types.trait_reference) =
         then traits
         else traits @ [ bound ])
       []
-      (Interface.Properties.bound_closure context.lookups.interface ~self:(Types.Any any) any)
+      (Interface.Properties.bound_closure context.lookups.interface ~self:(Types.Parameter self) any)
   in
   let lay_out_methods (trait : Types.trait_reference) =
     match Interface.Definition.trait_interface context.lookups.interface trait.trait with
     | Some interface ->
         let substitution =
-          Interface.Properties.trait_substitution interface ~self:(Types.Any any) trait
+          Interface.Properties.trait_substitution interface ~self:(Types.Any any)
+            (Types.substitute_trait [ (self, Types.Type (Types.Any any)) ] trait)
         in
         List.filter_map
           (fun trait_method ->
