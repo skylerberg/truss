@@ -1,7 +1,6 @@
 (* With [TRUSS_SKIP_SUITES] naming this executable, such as
    [prover_tests,database_tests], it says it is skipped and runs no test:
-   CI runs the slowest suites in jobs of their own, and skips a suite that
-   builds no C where it runs the codegen tests under sanitizers. *)
+   CI runs the slowest suites in jobs of their own. *)
 let () =
   let suite = Filename.remove_extension (Filename.basename Sys.executable_name) in
   match Sys.getenv_opt "TRUSS_SKIP_SUITES" with
