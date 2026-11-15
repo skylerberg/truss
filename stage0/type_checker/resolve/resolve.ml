@@ -129,7 +129,7 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
         let span =
           match declared_name definition with
           | Some name -> name.span
-          | None -> Syntax.Span.make definition.span.start definition.span.start
+          | None -> Source.Definition_span.make definition.span.start definition.span.start
         in
         let first =
           match (lookups.place { key with ordinal = 0 }, lookups.place key) with

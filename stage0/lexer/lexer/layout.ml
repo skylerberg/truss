@@ -30,14 +30,14 @@ let can_begin = function
 type input =
   | Next of {
       kind : Token.kind;
-      span : span;
-      first_line_break : span option;
+      span : Source.span;
+      first_line_break : Source.span option;
       blank_line : bool;
       unterminated_string : bool;
     }
   | End of {
       position : int;
-      first_line_break : span option;
+      first_line_break : Source.span option;
       blank_line : bool;
       ends_unterminated : bool;
     }
@@ -85,9 +85,11 @@ let token_starts_definition source ~first_line_break (kind : Token.kind) offset 
   && match kind with Keyword keyword -> List.mem keyword definition_keywords | _ -> false
 
 let closer_position first_line_break position =
-  match first_line_break with Some (line_break : span) -> line_break.start | None -> position
+  match first_line_break with
+  | Some (line_break : Source.span) -> line_break.start
+  | None -> position
 
-type opener = { bracket : bracket; span : span; index : int }
+type opener = { bracket : bracket; span : Source.span; index : int }
 
 let closing_position source tokens ~closers ~is_unterminated_string (opener : opener) =
   let opener_line = Source.line_start source opener.span.start in
@@ -152,7 +154,7 @@ let run ~source ~diagnostics ~mode next_input =
   let previous = ref None in
   let open_at_end = ref false in
   let unterminated_strings = Hashtbl.create 4 in
-  let is_unterminated_string (span : span) = Hashtbl.mem unterminated_strings span.start in
+  let is_unterminated_string (span : Source.span) = Hashtbl.mem unterminated_strings span.start in
   let emit token =
     Dynarray.add_last output token;
     Dynarray.add_last closers (-1);

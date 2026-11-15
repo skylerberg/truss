@@ -1,11 +1,17 @@
 open Context
 
-let copy_fix context title type_ (at : Syntax.span) =
+let copy_fix context title type_ (at : Source.Definition_span.t) =
   if copyable context type_ then
-    [ Diagnostic.fix title [ Diagnostic.insert (Syntax.Span.zero_width at.stop) ".copy()" ] ]
+    [
+      Diagnostic.fix title
+        [ Diagnostic.insert (Source.Definition_span.zero_width at.stop) ".copy()" ];
+    ]
   else []
 
-type verdict = Moves | Reads | Refused of (context -> Syntax.span -> Types.ty -> unit)
+type verdict =
+  | Moves
+  | Reads
+  | Refused of (context -> Source.Definition_span.t -> Types.ty -> unit)
 
 let verdict context (place : Place.t) ~type_ ~is_returned ~is_captured : verdict =
   let shown = show context place in

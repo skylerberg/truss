@@ -2,7 +2,7 @@ open Syntax
 open State
 module Environment = Interface.Environment
 
-let check_evidence_grants state (span : span) evidence =
+let check_evidence_grants state (span : Source.Definition_span.t) evidence =
   let impls =
     Interface.Grants.evidence_uses state.lookups.interface ~bounds:(bounds state) evidence
   in
@@ -24,7 +24,7 @@ type static_ =
   | Static_trait of Path.t * Types.argument list option
   | Static_capability of Path.t
 
-let require state ~(at : span) type_ (bound : Types.trait_reference) ~unmet =
+let require state ~(at : Source.Definition_span.t) type_ (bound : Types.trait_reference) ~unmet =
   let trait = { bound with associated = [] } in
   defer state (fun () ->
       let type_ = normalize state type_ in
@@ -47,7 +47,7 @@ let require state ~(at : span) type_ (bound : Types.trait_reference) ~unmet =
         true
       end)
 
-let require_bounds state (span : span) ?of_type generics substitution =
+let require_bounds state (span : Source.Definition_span.t) ?of_type generics substitution =
   List.iter
     (fun (argument, bound) ->
       require state ~at:span argument bound ~unmet:(fun argument other ->
@@ -179,7 +179,8 @@ type instance = {
   type_arguments : Types.argument list;
 }
 
-let instantiate state (span : span) ?(extra = []) (signature : Types.signature) =
+let instantiate state (span : Source.Definition_span.t) ?(extra = []) (signature : Types.signature)
+    =
   let substitution =
     List.map
       (fun (generic : Types.generic) ->

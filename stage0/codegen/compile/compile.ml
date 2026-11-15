@@ -238,7 +238,10 @@ let todo_type_position compiler (path : Path.t) =
   let names = compiler.requests.interface.names in
   match Option.map (fun key -> (names.place key, names.definition key)) (names.key path) with
   | Some (Some { file; base }, Some { kind = Type_definition { name; _ }; _ }) ->
-      let line, column = Source.position (compiler.requests.source file) (base + name.span.start) in
+      let line, column =
+        Source.position (compiler.requests.source file)
+          (Source.Definition_span.to_file ~base name.span).start
+      in
       (compiler.file_name file, line, column)
   | Some _ | None ->
       bug "%s is reached as a type defined as todo, and has no definition" (Path.show path)

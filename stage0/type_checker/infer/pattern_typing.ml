@@ -408,7 +408,7 @@ and character_literal state id literal builtin =
   character_value state id literal builtin;
   Types.builtin builtin
 
-and literal_pattern state id (span : span) literal type_ =
+and literal_pattern state id (span : Source.Definition_span.t) literal type_ =
   match literal with
   | Literal_integer number -> (
       state.tables.literals.(id) <- Some (Integer_value number);

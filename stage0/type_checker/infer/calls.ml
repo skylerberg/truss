@@ -39,7 +39,10 @@ let rec function_value_call state env (value : expression) (callee : expression)
                   ~fixes:
                     [
                       fix "Remove the label."
-                        [ Diagnostic.delete (Span.make label.span.start argument.value.span.start) ];
+                        [
+                          Diagnostic.delete
+                            (Source.Definition_span.make label.span.start argument.value.span.start);
+                        ];
                     ]
                   "A call through a function value passes its arguments by position, without \
                    labels."
@@ -219,7 +222,7 @@ and match_arguments state (value : expression) (parameters : Types.parameter_inf
                | Some label -> label.span.start
                | None -> argument.value.span.start
              in
-             source state (Span.make start argument.value.span.stop)
+             source state (Source.Definition_span.make start argument.value.span.stop)
            in
            let start =
              match first.label with
@@ -232,7 +235,7 @@ and match_arguments state (value : expression) (parameters : Types.parameter_inf
                  fix "Put the arguments in the order of the parameters."
                    [
                      replace
-                       (Span.make start last.value.span.stop)
+                       (Source.Definition_span.make start last.value.span.stop)
                        (String.concat ", " (List.map written ordered));
                    ];
                ]

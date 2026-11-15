@@ -570,7 +570,7 @@ let walk_names ?(on_path_type = ignore) ~on_name:add (definition_ : definition) 
       block_ body
   | Definition_error { name; _ } -> Option.iter definition_name name
 
-let spans (definition_ : definition) : span array =
+let spans (definition_ : definition) : Source.Definition_span.t array =
   let spans = Array.make (definition_.id + 1) definition_.span in
   let rec pattern (written : pattern) =
     spans.(written.id) <- written.span;
@@ -633,7 +633,7 @@ let names definition_ =
     !names
 
 let without_positions (definition_ : definition) : definition =
-  let no_span = Span.zero_width 0 in
+  let no_span = Source.Definition_span.zero_width 0 in
   let name_ (written : name) = { written with span = no_span } in
   let path (written : path) =
     { modules = List.map name_ written.modules; last = name_ written.last }

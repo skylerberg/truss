@@ -28,7 +28,7 @@ let body state env (written : block) =
         | Some (Returns output) ->
             if not (unify state output Types.unit) then
               report state Mismatch
-                (Span.make written.span.stop written.span.stop)
+                (Source.Definition_span.make written.span.stop written.span.stop)
                 (Printf.sprintf "This body must end with a value of type `%s`." (show state output))
         | _ -> ())
     | [ (last : statement) ] ->

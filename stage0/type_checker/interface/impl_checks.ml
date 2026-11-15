@@ -51,7 +51,7 @@ type view = {
   impl_bounds : Types.parameter -> Types.trait_reference list;
   normalize : Types.ty -> Types.ty;
   normalize_capabilities : Types.capability_set -> Types.capability_set;
-  missing_associated : (string * Syntax.diagnostic) list;
+  missing_associated : (string * Diagnostic.in_definition) list;
 }
 
 let compiler_implements (impl : Types.impl_interface) =
@@ -150,7 +150,7 @@ let check_impl state (written_members : impl_member line list) (impl : Types.imp
     match impl_view lookups ~bounds:(bounds state) impl trait_path with
     | None -> ()
     | Some { trait; shown_trait; substitution; impl_bounds; normalize; missing_associated; _ } ->
-        let check_evidence_grants (span : span) evidence =
+        let check_evidence_grants (span : Source.Definition_span.t) evidence =
           state.diagnostics <-
             List.map
               (Diagnostic.make ~code:(Capabilities Not_granted) span)

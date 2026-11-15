@@ -1,5 +1,3 @@
-type span = Source.span = private { start : int; stop : int }
-
 module Code = struct
   type lexer =
     | Invalid_utf8
@@ -520,7 +518,8 @@ type 'span diagnostic = {
   fixes : 'span fix list;
 }
 
-type t = span diagnostic
+type t = Source.span diagnostic
+type in_definition = Source.Definition_span.t diagnostic
 
 let make ?(notes = []) ?(fixes = []) ~code span message = { code; message; span; notes; fixes }
 
@@ -596,16 +595,17 @@ let map_spans convert diagnostic =
         diagnostic.fixes;
   }
 
-let apply_edits text (edits : span edit list) =
+let apply_edits text (edits : Source.span edit list) =
   let edits =
     List.stable_sort
-      (fun (left : span edit) (right : span edit) -> compare left.span.start right.span.start)
+      (fun (left : Source.span edit) (right : Source.span edit) ->
+        compare left.span.start right.span.start)
       edits
   in
   let buffer = Buffer.create (String.length text) in
   let position =
     List.fold_left
-      (fun position (edit : span edit) ->
+      (fun position (edit : Source.span edit) ->
         if edit.span.start < position then invalid_arg "Diagnostic.apply_fix: overlapping edits";
         Buffer.add_substring buffer text position (edit.span.start - position);
         Buffer.add_string buffer edit.replacement;
@@ -615,7 +615,7 @@ let apply_edits text (edits : span edit list) =
   Buffer.add_substring buffer text position (String.length text - position);
   Buffer.contents buffer
 
-let apply_fix text (fix : span fix) = apply_edits text fix.edits
+let apply_fix text (fix : Source.span fix) = apply_edits text fix.edits
 
 let adds_none ~(before : _ diagnostic list) ~(after : _ diagnostic list) =
   let codes diagnostics =
@@ -638,7 +638,7 @@ type accepted = { stop : int; has_insertion : bool }
 
 let machine_applicable (diagnostics : t list) =
   let accepted = ref Starts.empty in
-  let overlaps (edit : span edit) =
+  let overlaps (edit : Source.span edit) =
     let start = edit.span.start and stop = edit.span.stop in
     let is_insertion = start = stop in
     (match Starts.find_last_opt (fun other -> other <= start) !accepted with
@@ -650,7 +650,7 @@ let machine_applicable (diagnostics : t list) =
     | Some (other_start, _) -> other_start < stop
     | None -> false
   in
-  let accept (edit : span edit) =
+  let accept (edit : Source.span edit) =
     let start = edit.span.start and stop = edit.span.stop in
     accepted :=
       Starts.update start
@@ -740,7 +740,7 @@ let quote text =
   Buffer.add_char buffer '"';
   Buffer.contents buffer
 
-let render source diagnostic =
+let render source (diagnostic : t) =
   let buffer = Buffer.create 256 in
   let text = Source.text source in
   Printf.bprintf buffer "%s: error[%s]: %s\n"
@@ -772,13 +772,14 @@ let render source diagnostic =
       (String.make (max 1 (stop_column - start_column)) '^')
   end;
   List.iter
-    (fun (span, note) -> Printf.bprintf buffer "  note: %s: %s\n" (location source span.start) note)
+    (fun ((span : Source.span), note) ->
+      Printf.bprintf buffer "  note: %s: %s\n" (location source span.start) note)
     diagnostic.notes;
   List.iter
     (fun fix ->
       Printf.bprintf buffer "  fix: %s\n" fix.title;
       List.iter
-        (fun (edit : span edit) ->
+        (fun (edit : Source.span edit) ->
           let original = String.sub text edit.span.start (edit.span.stop - edit.span.start) in
           Printf.bprintf buffer "    %s at %s\n"
             (if edit.span.start = edit.span.stop then "insert " ^ quote edit.replacement
@@ -809,7 +810,7 @@ let json_string value =
   Buffer.add_char buffer '"';
   Buffer.contents buffer
 
-let json_span source span =
+let json_span source (span : Source.span) =
   let line, column = Source.position source span.start in
   let end_line, end_column = Source.position source span.stop in
   Printf.sprintf {|{"start":%d,"stop":%d,"line":%d,"column":%d,"end_line":%d,"end_column":%d}|}
@@ -828,7 +829,7 @@ let to_json_object source diagnostic =
       (fun fix ->
         let edits =
           List.map
-            (fun (edit : span edit) ->
+            (fun (edit : Source.span edit) ->
               Printf.sprintf {|{"start":%d,"stop":%d,"replacement":%s}|} edit.span.start
                 edit.span.stop (json_string edit.replacement))
             fix.edits

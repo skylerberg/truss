@@ -16,7 +16,7 @@ let unfinished snapshot pipeline packages =
               List.map
                 (fun ({ keyword; span; _ } : Inspect.unfinished) ->
                   let line, column =
-                    Source.position source (Syntax.Span.to_source ~base span).start
+                    Source.position source (Source.Definition_span.to_file ~base span).start
                   in
                   ( (match keyword with `Todo -> "todo" | `Echo -> "echo"),
                     Source.path source,

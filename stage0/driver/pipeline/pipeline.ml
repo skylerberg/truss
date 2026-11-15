@@ -13,7 +13,7 @@ end
 module Path_table = Hashtbl.Make (Path_key)
 module Call_graph = Graph.Make (Path_key)
 
-type 'a part = Value of 'a | Failed of Syntax.diagnostic list | Blocked
+type 'a part = Value of 'a | Failed of Diagnostic.in_definition list | Blocked
 
 exception Reads_failed_part
 
@@ -2318,7 +2318,7 @@ let stage_diagnostics pipeline (file : Path.file) stage =
   let placed key diagnostics =
     match names.place key with
     | Some { file = home; base } when home = file ->
-        List.map (Diagnostic.map_spans (Syntax.Span.to_source ~base)) diagnostics
+        List.map (Diagnostic.map_spans (Source.Definition_span.to_file ~base)) diagnostics
     | Some _ | None -> []
   in
   let of_definitions () =
@@ -2412,9 +2412,10 @@ let holes proofs path =
   match Option.bind (names.key path) (proof proofs) with
   | Some (Value (Obligations { holes; _ })) ->
       List.filter_map
-        (fun ((home : Names.key), (span : Syntax.span)) ->
+        (fun ((home : Names.key), (span : Source.Definition_span.t)) ->
           Option.map
-            (fun ({ file; base } : Names.place) -> (file, base + span.start))
+            (fun ({ file; base } : Names.place) ->
+              (file, (Source.Definition_span.to_file ~base span).start))
             (names.place home))
         holes
   | Some (Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked) | None -> []

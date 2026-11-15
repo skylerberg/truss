@@ -158,7 +158,7 @@ let accept_keyword cursor keyword =
   end
   else false
 
-let span cursor span = Syntax.Span.of_source ~base:cursor.base span
+let span cursor span = Source.Definition_span.of_file ~base:cursor.base span
 
 let previous_token cursor =
   if cursor.index > cursor.first then Some cursor.tokens.(cursor.index - 1) else None
@@ -171,7 +171,7 @@ let span_from cursor start_index =
   let stop = max start (previous_stop cursor) in
   span cursor (Source.span start stop)
 
-let absolute cursor span = Syntax.Span.to_source ~base:cursor.base span
+let absolute cursor span = Source.Definition_span.to_file ~base:cursor.base span
 
 let text cursor (span : Source.span) =
   String.sub cursor.text (span.start - cursor.base) (span.stop - span.start)

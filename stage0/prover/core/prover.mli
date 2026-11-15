@@ -3,7 +3,10 @@ module Facts = Facts
 module Contracts = Contracts
 module Lookups = Lookups
 
-type proof = Obligations of State.outcome | Unsupported of Syntax.span * string | Not_proven_here
+type proof =
+  | Obligations of State.outcome
+  | Unsupported of Source.Definition_span.t * string
+  | Not_proven_here
 
 val proof : Lookups.t -> Resolve.Names.key -> proof
 
@@ -15,7 +18,7 @@ type 'span state = {
   trusts_compiled_code : bool;
 }
 
-type verdict = (Syntax.span state * (Resolve.Names.key * Core.origin) option) list
+type verdict = (Source.Definition_span.t state * (Resolve.Names.key * Core.origin) option) list
 
 val verdicts :
   runs:(State.template_check * (bool list, string) result) list ->
@@ -25,7 +28,7 @@ val verdicts :
   (Resolve.Names.key * verdict) list
 
 val states :
-  Lookups.t -> verdict:(Resolve.Names.key -> verdict) -> Path.file -> Diagnostic.span state list
+  Lookups.t -> verdict:(Resolve.Names.key -> verdict) -> Path.file -> Source.span state list
 
 val diagnostics :
   Lookups.t -> verdict:(Resolve.Names.key -> verdict) -> Path.file -> Diagnostic.t list

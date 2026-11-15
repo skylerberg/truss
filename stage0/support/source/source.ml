@@ -6,6 +6,22 @@ let span start stop =
 
 let zero_width position = span position position
 
+module Definition_span = struct
+  type t = { start : int; stop : int }
+
+  let make start stop =
+    if start < 0 || stop < start then
+      invalid_arg (Printf.sprintf "Source.Definition_span.make %d %d" start stop);
+    { start; stop }
+
+  let zero_width position = make position position
+
+  let to_file ~base (definition_span : t) =
+    span (base + definition_span.start) (base + definition_span.stop)
+
+  let of_file ~base (file_span : span) = make (file_span.start - base) (file_span.stop - base)
+end
+
 type t = { path : string; text : string; line_starts : int array }
 
 let byte_order_mark = "\xEF\xBB\xBF"

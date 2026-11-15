@@ -49,16 +49,15 @@ let without_colliding_renames text (tokens : Token.t array) (diagnostics : Diagn
 
 type placed = { original : Source.span; fixed_start : int; fixed_stop : int }
 
-let placed_edits (edits : Diagnostic.span Diagnostic.edit list) =
+let placed_edits (edits : Source.span Diagnostic.edit list) =
   let sorted =
     List.stable_sort
-      (fun (left : Diagnostic.span Diagnostic.edit) right ->
-        compare left.span.start right.span.start)
+      (fun (left : Source.span Diagnostic.edit) right -> compare left.span.start right.span.start)
       edits
   in
   let _, placed =
     List.fold_left
-      (fun (shift, placed) (edit : Diagnostic.span Diagnostic.edit) ->
+      (fun (shift, placed) (edit : Source.span Diagnostic.edit) ->
         let fixed_start = edit.span.start + shift in
         let fixed_stop = fixed_start + String.length edit.replacement in
         ( shift + String.length edit.replacement - (edit.span.stop - edit.span.start),
@@ -162,9 +161,7 @@ let membership fixes =
       (Hashtbl.find_all table (diagnostic.span.start, diagnostic.span.stop))
 
 let works source tokens diagnostics fixes =
-  let edits =
-    List.concat_map (fun (_, (fix : Diagnostic.span Diagnostic.fix)) -> fix.edits) fixes
-  in
+  let edits = List.concat_map (fun (_, (fix : Source.span Diagnostic.fix)) -> fix.edits) fixes in
   let fixed_tokens, remaining =
     scan
       (Source.create ~path:(Source.path source) (Diagnostic.apply_edits (Source.text source) edits))
@@ -180,9 +177,9 @@ let works source tokens diagnostics fixes =
   | [] when Diagnostic.adds_none ~before:others ~after:remaining -> Some fixed_tokens
   | _ -> None
 
-let extent ((_, fix) : Diagnostic.t * Diagnostic.span Diagnostic.fix) =
+let extent ((_, fix) : Diagnostic.t * Source.span Diagnostic.fix) =
   List.fold_left
-    (fun (start, stop) (edit : Diagnostic.span Diagnostic.edit) ->
+    (fun (start, stop) (edit : Source.span Diagnostic.edit) ->
       (min start edit.span.start, max stop edit.span.stop))
     (max_int, min_int) fix.edits
 

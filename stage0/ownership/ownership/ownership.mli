@@ -1,7 +1,7 @@
 module Lookups = Lookups
 
 type result = {
-  diagnostics : Syntax.diagnostic list;
+  diagnostics : Diagnostic.in_definition list;
   must_be_disjoint : (Core.origin * Core.origin) list;
 }
 

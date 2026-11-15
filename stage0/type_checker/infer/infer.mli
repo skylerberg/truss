@@ -24,8 +24,10 @@ type checked = Body.checked = {
   evidence_packages : Path.package list;
 }
 
-val contract : Lookups.t -> Resolve.Names.key -> (checked, Syntax.diagnostic list) result option
-val body : Lookups.t -> Resolve.Names.key -> (checked, Syntax.diagnostic list) result option
+val contract :
+  Lookups.t -> Resolve.Names.key -> (checked, Diagnostic.in_definition list) result option
+
+val body : Lookups.t -> Resolve.Names.key -> (checked, Diagnostic.in_definition list) result option
 val derived : Lookups.t -> Path.t -> Core.t option
 
 type form_origin = Written of Resolve.Names.key | Generated | Inherited of Resolve.Names.key

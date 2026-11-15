@@ -3,22 +3,23 @@ open Syntax
 type part = Header | Body | Member_header of int | Member_body of int
 
 let spans (definition : definition) =
-  let split header body (whole : span) (body_span : span) =
-    [ (header, Span.make whole.start body_span.start); (body, body_span) ]
+  let split header body (whole : Source.Definition_span.t) (body_span : Source.Definition_span.t) =
+    [ (header, Source.Definition_span.make whole.start body_span.start); (body, body_span) ]
   in
   let members lines body_of =
     List.concat
       (List.mapi
          (fun index (line : _ line) ->
            match body_of line.kind with
-           | Some (body : span) -> split (Member_header index) (Member_body index) line.span body
+           | Some (body : Source.Definition_span.t) ->
+               split (Member_header index) (Member_body index) line.span body
            | None -> [ (Member_header index, line.span) ])
          lines)
   in
   let with_members lines body_of =
     let header =
       match lines with
-      | (first : _ line) :: _ -> Span.make definition.span.start first.span.start
+      | (first : _ line) :: _ -> Source.Definition_span.make definition.span.start first.span.start
       | [] -> definition.span
     in
     (Header, header) :: members lines body_of
@@ -35,16 +36,16 @@ let spans (definition : definition) =
   | Impl { members; _ } -> with_members members (fun (_ : impl_member) -> None)
   | Capability { members; _ } -> with_members members (fun (_ : capability_member) -> None)
 
-let lies_in all (recovered : span) (part_span : span) =
+let lies_in all (recovered : Source.Definition_span.t) (part_span : Source.Definition_span.t) =
   if recovered.start < recovered.stop then
     recovered.start < part_span.stop && part_span.start < recovered.stop
   else
     let position = recovered.start in
-    if List.exists (fun (_, (span : span)) -> span.start = position) all then
+    if List.exists (fun (_, (span : Source.Definition_span.t)) -> span.start = position) all then
       part_span.start = position
     else part_span.start <= position && position < part_span.stop
 
-let recovery_report (span : span) = Diagnostic.recovered span
+let recovery_report (span : Source.Definition_span.t) = Diagnostic.recovered span
 
 let reported definition part =
   let all = spans definition in

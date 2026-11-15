@@ -1,5 +1,3 @@
-type span = Source.span = private { start : int; stop : int }
-
 module Code : sig
   type lexer =
     | Invalid_utf8
@@ -261,7 +259,8 @@ type 'span diagnostic = {
   fixes : 'span fix list;
 }
 
-type t = span diagnostic
+type t = Source.span diagnostic
+type in_definition = Source.Definition_span.t diagnostic
 
 val make :
   ?notes:('span * string) list ->
@@ -283,8 +282,8 @@ type reported
 val reported : _ diagnostic -> reported
 val recovered : _ -> reported
 val map_spans : ('a -> 'b) -> 'a diagnostic -> 'b diagnostic
-val apply_fix : string -> span fix -> string
-val apply_edits : string -> span edit list -> string
+val apply_fix : string -> Source.span fix -> string
+val apply_edits : string -> Source.span edit list -> string
 val adds_none : before:'span diagnostic list -> after:'span diagnostic list -> bool
 val machine_applicable : t list -> t list
 

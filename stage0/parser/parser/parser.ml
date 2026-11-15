@@ -7,10 +7,12 @@ let is_use (tokens : Token.t array) piece = tokens.(piece.first).kind = Keyword 
 let begins_statement = Atoms.begins_statement
 let spelled_words = List.map fst Cost_word.spellings @ [ "by"; "bit_vector" ]
 
-type 'value parsed = { value : 'value Syntax.item; diagnostics : Syntax.diagnostic list }
+type 'value parsed = { value : 'value Syntax.item; diagnostics : Diagnostic.in_definition list }
 
 let diagnostics_in_file parsed =
-  List.map (Diagnostic.map_spans (Syntax.Span.to_source ~base:parsed.value.base)) parsed.diagnostics
+  List.map
+    (Diagnostic.map_spans (Source.Definition_span.to_file ~base:parsed.value.base))
+    parsed.diagnostics
 
 let piece_text source (tokens : Token.t array) piece =
   let base = tokens.(piece.first).span.start in
@@ -37,7 +39,7 @@ let parsed (item : _ Syntax.item) diagnostics =
   {
     value = item;
     diagnostics =
-      List.map (Diagnostic.map_spans (Syntax.Span.of_source ~base:item.base)) diagnostics;
+      List.map (Diagnostic.map_spans (Source.Definition_span.of_file ~base:item.base)) diagnostics;
   }
 
 let checked_fixes ~unchecked source (tokens : Token.t array) piece (diagnostics : Diagnostic.t list)
@@ -58,15 +60,15 @@ let checked_fixes ~unchecked source (tokens : Token.t array) piece (diagnostics 
     match diagnostics_of text with
     | None -> diagnostics
     | Some before ->
-        let works (diagnostic : Diagnostic.t) (fix : Diagnostic.span Diagnostic.fix) =
-          let in_piece (edit : Diagnostic.span Diagnostic.edit) =
+        let works (diagnostic : Diagnostic.t) (fix : Source.span Diagnostic.fix) =
+          let in_piece (edit : Source.span Diagnostic.edit) =
             base <= edit.span.start && edit.span.stop <= base + String.length text
           in
           if not (List.for_all in_piece fix.edits) then true
           else
             let edits =
               List.map
-                (fun (edit : Diagnostic.span Diagnostic.edit) ->
+                (fun (edit : Source.span Diagnostic.edit) ->
                   Diagnostic.replace
                     (Source.span (edit.span.start - base) (edit.span.stop - base))
                     edit.replacement)

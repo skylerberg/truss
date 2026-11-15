@@ -114,7 +114,7 @@ let ground st ty = Monomorphic.ground st.context.monomorphic st.frame.code.subst
 let trivial st ty = Glue.trivial st.context.glue ty
 let is_zero_size st = Memory_layout.has_zero_size st.context.env
 
-let site st (span : Syntax.span) : Lowered.site =
+let site st (span : Source.Definition_span.t) : Lowered.site =
   let text = st.frame.code.text in
   let line = ref 0 and column = ref 1 in
   String.iteri
@@ -135,7 +135,7 @@ exception Unsupported of unsupported
 let unsupported ?at format =
   Printf.ksprintf (fun construct -> raise (Unsupported { construct; at })) format
 
-let source st (span : Syntax.span) =
+let source st (span : Source.Definition_span.t) =
   let text = st.frame.code.text in
   let start = min span.start (String.length text) in
   String.sub text start (min span.stop (String.length text) - start)

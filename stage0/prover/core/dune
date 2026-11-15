@@ -10,7 +10,6 @@
   well_known
   types
   core
-  syntax
   resolve
   interface
   infer

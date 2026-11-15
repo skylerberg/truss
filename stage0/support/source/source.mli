@@ -3,6 +3,15 @@ type span = private { start : int; stop : int }
 val span : int -> int -> span
 val zero_width : int -> span
 
+module Definition_span : sig
+  type t = private { start : int; stop : int }
+
+  val make : int -> int -> t
+  val zero_width : int -> t
+  val to_file : base:int -> t -> span
+  val of_file : base:int -> span -> t
+end
+
 type t
 
 val create : path:string -> string -> t

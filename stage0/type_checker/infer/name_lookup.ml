@@ -442,7 +442,7 @@ and overloads state receiver_type name :
              (List.assoc_opt receiver (own @ from_traits)))
          [ Read; Mut; Own ])
 
-and method_version state (span : span) type_ name (receiver : Path.receiver) :
+and method_version state (span : Source.Definition_span.t) type_ name (receiver : Path.receiver) :
     (Tables.callee * Types.signature) option =
   let found = match overloads state type_ name with Ok found -> found | Error _ -> [] in
   match List.assoc_opt receiver found with
@@ -486,7 +486,7 @@ and method_version state (span : span) type_ name (receiver : Path.receiver) :
 and argumentless_call callee (signature : Types.signature) result : Tables.call =
   { callee; arguments = []; omitted_defaults = []; uses = signature.uses; callee_result = result }
 
-and elements_calls state (span : span) type_ (mode : Types.mode) =
+and elements_calls state (span : Source.Definition_span.t) type_ (mode : Types.mode) =
   let receiver : Path.receiver = match mode with Read -> Read | Mut -> Mut | Own -> Own in
   let is_uint64 type_ = Types.is_builtin UInt64 (normalize state type_) in
   match
@@ -510,7 +510,7 @@ and elements_calls state (span : span) type_ (mode : Types.mode) =
       | _ -> None)
   | _ -> None
 
-and consuming_cursor state (span : span) type_ =
+and consuming_cursor state (span : Source.Definition_span.t) type_ =
   match method_version state span type_ "cursor" Own with
   | Some (callee, ({ parameters = []; output = Returns cursor; _ } as signature)) -> (
       let cursor = normalize state cursor in
@@ -528,7 +528,7 @@ and consuming_cursor state (span : span) type_ =
       | None -> None)
   | _ -> None
 
-and remaining_call state (span : span) cursor =
+and remaining_call state (span : Source.Definition_span.t) cursor =
   match method_version state span cursor "remaining" Read with
   | Some (callee, ({ parameters = []; output = Returns bound; _ } as signature))
     when Types.is_builtin UInt64 (normalize state bound) ->

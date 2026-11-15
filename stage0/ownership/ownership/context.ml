@@ -1,7 +1,7 @@
 type context = {
   lookups : Lookups.t;
   bounds : Types.parameter -> Types.trait_reference list;
-  spans : Syntax.span array Lazy.t;
+  spans : Source.Definition_span.t array Lazy.t;
   mode_keywords : (Core.origin, Types.mode * Core.mode_keyword) Hashtbl.t;
   names : (Core.local, string) Hashtbl.t;
   binding_modes : (Core.local, Types.mode) Hashtbl.t;
@@ -9,7 +9,7 @@ type context = {
   mutable parameters : Core.local list;
   implements_capability : bool;
   mutable mutable_locals : Core.local list;
-  mutable diagnostics : Syntax.diagnostic list;
+  mutable diagnostics : Diagnostic.in_definition list;
   mutable must_be_disjoint : (Core.origin * Core.origin) list;
 }
 
@@ -46,11 +46,12 @@ let stores_function context (callee : Mir.callee) position =
   | Indirect _ -> true
   | _ -> List.exists declared (callee_signatures context callee)
 
-let span context (origin : Core.origin) : Syntax.span =
+let span context (origin : Core.origin) : Source.Definition_span.t =
   let spans = Lazy.force context.spans in
-  if origin >= 0 && origin < Array.length spans then spans.(origin) else Syntax.Span.make 0 0
+  if origin >= 0 && origin < Array.length spans then spans.(origin)
+  else Source.Definition_span.make 0 0
 
-let report context ?(fixes = []) ?(notes = []) code (at : Syntax.span) message =
+let report context ?(fixes = []) ?(notes = []) code (at : Source.Definition_span.t) message =
   let is_reported =
     List.exists
       (fun (reported : _ Diagnostic.diagnostic) -> reported.span = at && reported.message = message)
@@ -133,12 +134,12 @@ let copy_edits context (moved : Core.origin) =
     | Some (Own, { written; operand }) ->
         [
           Diagnostic.delete
-            (Syntax.Span.make (span context written).start (span context operand).start);
+            (Source.Definition_span.make (span context written).start (span context operand).start);
         ]
     | Some ((Read | Mut), _) | None -> [])
-  @ [ Diagnostic.insert (Syntax.Span.zero_width (span context moved).stop) ".copy()" ]
+  @ [ Diagnostic.insert (Source.Definition_span.zero_width (span context moved).stop) ".copy()" ]
 
-let span_with_mode_keyword context (place : Core.origin) : Syntax.span =
+let span_with_mode_keyword context (place : Core.origin) : Source.Definition_span.t =
   match Hashtbl.find_opt context.mode_keywords place with
   | Some (_, { written; _ }) -> span context written
   | None -> span context place

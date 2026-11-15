@@ -29,7 +29,8 @@ let () =
         match (fst (parse text)).definitions with
         | [ item ] ->
             List.map
-              (fun (span : Syntax.span) -> String.sub item.text span.start (span.stop - span.start))
+              (fun (span : Source.Definition_span.t) ->
+                String.sub item.text span.start (span.stop - span.start))
               item.value.recovered
         | _ -> [ "wrong definitions" ]
       in
@@ -43,7 +44,7 @@ let () =
       match (fst (parse "fn f(x: Int64) -> Int64\nfn g() {}")).definitions with
       | { value = { kind = Function { body; _ }; recovered; _ }; _ } :: _ ->
           if
-            List.map (fun (span : Syntax.span) -> (span.start, span.stop)) recovered
+            List.map (fun (span : Source.Definition_span.t) -> (span.start, span.stop)) recovered
             <> [ (body.span.start, body.span.start) ]
           then fail "recovered at the wrong place"
       | _ -> fail "the signature was not kept");
@@ -53,7 +54,7 @@ let () =
           if
             not
               (List.exists
-                 (fun (span : Syntax.span) ->
+                 (fun (span : Source.Definition_span.t) ->
                    span.start < span.stop && body.span.start <= span.start
                    && span.start < body.span.stop)
                  recovered)
@@ -62,7 +63,11 @@ let () =
   test "a failed clause at the end lies in the signature" (fun () ->
       match (fst (parse "fn f() requires")).definitions with
       | { value = { kind = Function { body; _ }; recovered; _ }; _ } :: _ ->
-          if not (List.exists (fun (span : Syntax.span) -> span.start < body.span.start) recovered)
+          if
+            not
+              (List.exists
+                 (fun (span : Source.Definition_span.t) -> span.start < body.span.start)
+                 recovered)
           then fail "no recovery in the signature"
       | _ -> fail "wrong definitions");
   test "a definition whose header did not parse keeps its keyword and name" (fun () ->

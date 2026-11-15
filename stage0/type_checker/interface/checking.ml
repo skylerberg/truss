@@ -6,10 +6,10 @@ type state = {
   key : Names.key;
   definition : definition;
   lowered : Environment.lowered_interface;
-  mutable diagnostics : Syntax.diagnostic list;
+  mutable diagnostics : Diagnostic.in_definition list;
 }
 
-let reported state ?fixes code (span : span) message =
+let reported state ?fixes code (span : Source.Definition_span.t) message =
   let diagnostic = Diagnostic.make ?fixes ~code:(Types code) span message in
   state.diagnostics <- diagnostic :: state.diagnostics;
   Diagnostic.reported diagnostic

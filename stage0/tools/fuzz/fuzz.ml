@@ -18,7 +18,7 @@ let rec check_tokens text ~start ~stop (tokens : Token.t array) =
   let check_spans ~start ~stop spans =
     ignore
       (List.fold_left
-         (fun previous_stop (span : span) ->
+         (fun previous_stop (span : Source.span) ->
            if span.start < start || span.stop > stop then fail "span out of bounds in %s" quoted
            else if span.start < previous_stop then fail "spans overlap in %s" quoted;
            span.stop)
@@ -54,11 +54,11 @@ let check_diagnostic_spans text (diagnostic : Diagnostic.t) =
   let spans =
     (diagnostic.span :: List.map fst diagnostic.notes)
     @ List.concat_map
-        (fun (fix : Diagnostic.span Diagnostic.fix) ->
-          List.map (fun (edit : Diagnostic.span Diagnostic.edit) -> edit.span) fix.edits)
+        (fun (fix : Source.span Diagnostic.fix) ->
+          List.map (fun (edit : Source.span Diagnostic.edit) -> edit.span) fix.edits)
         diagnostic.fixes
   in
-  if List.exists (fun (span : Diagnostic.span) -> span.stop > String.length text) spans then
+  if List.exists (fun (span : Source.span) -> span.stop > String.length text) spans then
     fail "a span of %s is out of bounds in %s"
       (Diagnostic.Code.name diagnostic.code)
       (Diagnostic.quote text)
@@ -79,11 +79,11 @@ let parse text =
 
 let check_tree text (item : Syntax.definition Syntax.item) =
   let quoted = Diagnostic.quote text in
-  let contains_span (outer : Syntax.span) (inner : Syntax.span) =
+  let contains_span (outer : Source.Definition_span.t) (inner : Source.Definition_span.t) =
     outer.start <= inner.start && inner.stop <= outer.stop
   in
   let ids = Hashtbl.create 64 in
-  let rec expression (outer : Syntax.span) (value : Syntax.expression) =
+  let rec expression (outer : Source.Definition_span.t) (value : Syntax.expression) =
     if not (contains_span outer value.span) then
       fail "an expression's span is outside its parent in %s" quoted;
     if Hashtbl.mem ids value.id then fail "an id repeats in %s" quoted;
@@ -104,7 +104,7 @@ let check_tree text (item : Syntax.definition Syntax.item) =
   if item.value.span.start <> 0 || item.value.span.stop > String.length item.text then
     fail "a definition's span is out of bounds in %s" quoted;
   List.iter
-    (fun (span : Syntax.span) ->
+    (fun (span : Source.Definition_span.t) ->
       if span.stop > String.length item.text then fail "a recovery is out of bounds in %s" quoted)
     item.value.recovered;
   Syntax_walk.definition (expression item.value.span) item.value
@@ -218,7 +218,7 @@ let check_fixes_work text =
       let judged = if is_lexer diagnostic then List.filter is_lexer else Fun.id in
       let before = judged (List.filter (fun other -> other != diagnostic) diagnostics) in
       List.iter
-        (fun (fix : Diagnostic.span Diagnostic.fix) ->
+        (fun (fix : Source.span Diagnostic.fix) ->
           match Diagnostic.apply_fix text fix with
           | exception Invalid_argument _ ->
               fail "the fix %S has overlapping edits in %s" fix.title (Diagnostic.quote text)

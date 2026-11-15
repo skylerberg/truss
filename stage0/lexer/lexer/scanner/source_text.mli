@@ -1,7 +1,7 @@
 type context = Code | Ordinary_string | Raw_string
 
 val remove_trivia :
-  Cursor.t -> start:int -> stop:int -> line_break:bool -> Diagnostic.span Diagnostic.edit
+  Cursor.t -> start:int -> stop:int -> line_break:bool -> Source.span Diagnostic.edit
 
 val forbidden_run : Cursor.t -> context:context -> unit
 val invalid_run : Cursor.t -> unit

@@ -100,7 +100,7 @@ let empty_frame source =
 
 let definition_span (source : source) =
   let spans = Lazy.force source.spans in
-  match Array.length spans with 0 -> Syntax.Span.make 0 0 | count -> spans.(count - 1)
+  match Array.length spans with 0 -> Source.Definition_span.make 0 0 | count -> spans.(count - 1)
 
 type promise = { counter : Costs.counter; clause : Mir.cost; written_in : source; inherited : bool }
 

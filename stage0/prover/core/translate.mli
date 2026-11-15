@@ -1,4 +1,4 @@
-val definition_span : State.source -> Syntax.Span.t
+val definition_span : State.source -> Source.Definition_span.t
 
 val function_ :
   ?proof:bool ->
@@ -17,7 +17,7 @@ val laws :
   trait:Types.trait_reference ->
   for_type:Types.ty ->
   proofs:(string * (State.source * Types.substitution)) list ->
-  at:State.span ->
+  at:Source.Definition_span.t ->
   State.outcome
 
 val type_ : Lookups.t -> State.source -> path:Path.t -> State.outcome

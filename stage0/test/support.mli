@@ -38,5 +38,5 @@ val one_diagnostic :
 
 val proven : Pipeline.t -> Path.file -> Pipeline.proofs
 val proof_diagnostics : Pipeline.t -> Path.file -> Diagnostic.t list
-val proof_states : Pipeline.t -> Path.file -> Diagnostic.span Prover.state list
+val proof_states : Pipeline.t -> Path.file -> Source.span Prover.state list
 val proofs : Pipeline.t -> Path.file -> Resolve.Names.key -> Prover.proof

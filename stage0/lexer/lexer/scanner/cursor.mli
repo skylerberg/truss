@@ -37,10 +37,10 @@ val satisfies : t -> int -> (char -> bool) -> bool
 
 val report :
   t ->
-  ?notes:(Diagnostic.span * string) list ->
-  ?fixes:Diagnostic.span Diagnostic.fix list ->
+  ?notes:(Source.span * string) list ->
+  ?fixes:Source.span Diagnostic.fix list ->
   code:Diagnostic.Code.lexer ->
-  Diagnostic.span ->
+  Source.span ->
   string ->
   unit
 

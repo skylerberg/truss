@@ -63,7 +63,7 @@ let visibility_of state (path : Path.t) =
       | None -> None)
   | _ -> None
 
-let check_private_in_public state ~visibility types (span : span) =
+let check_private_in_public state ~visibility types (span : Source.Definition_span.t) =
   if Names.is_public visibility then
     List.iter
       (fun path ->
@@ -155,7 +155,7 @@ let field_names (fields : field list) =
     fields
 
 let remove_derived (clause : type_clause) (traits : path_type list) (written : path_type) =
-  let delete start stop = Diagnostic.delete (Span.make start stop) in
+  let delete start stop = Diagnostic.delete (Source.Definition_span.make start stop) in
   match traits with
   | [ _ ] -> delete clause.span.start clause.span.stop
   | _ -> (

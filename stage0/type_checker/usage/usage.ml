@@ -5,10 +5,10 @@ type context = {
   resolved : Resolve.resolved;
   tables : Infer.tables;
   text : string Lazy.t;
-  mutable diagnostics : Syntax.diagnostic list;
+  mutable diagnostics : Diagnostic.in_definition list;
 }
 
-let report context ?(fixes = []) code (span : span) message =
+let report context ?(fixes = []) code (span : Source.Definition_span.t) message =
   context.diagnostics <-
     Diagnostic.make ~fixes ~code:(Usage code) span message :: context.diagnostics
 
@@ -142,7 +142,7 @@ let check_block context (written : block) =
             ~fixes:
               [
                 Diagnostic.fix "Delete the code that cannot run."
-                  [ Diagnostic.delete (Span.make start last.span.stop) ];
+                  [ Diagnostic.delete (Source.Definition_span.make start last.span.stop) ];
               ]
             "This code can never run: the statement before it never finishes."
         end

@@ -5,7 +5,7 @@ let units = function Utf_8 -> Source.Bytes | Utf_16 -> Source.Utf_16_code_units
 let position encoding source offset = Source.location (units encoding) source offset
 let offset encoding source ~line ~column = Source.offset (units encoding) source ~line ~column
 
-let range encoding source (span : Diagnostic.span) =
+let range encoding source (span : Source.span) =
   let point offset =
     let line, character = position encoding source offset in
     Json.Object [ ("line", Json.Int line); ("character", Json.Int character) ]
@@ -67,7 +67,7 @@ let lsp_diagnostic encoding ~uri source (diagnostic : Diagnostic.t) =
              diagnostic.notes) );
     ]
 
-let lsp_state encoding source (state : Diagnostic.span Prover.state) =
+let lsp_state encoding source (state : Source.span Prover.state) =
   Json.Object
     [
       ("range", range encoding source state.span);

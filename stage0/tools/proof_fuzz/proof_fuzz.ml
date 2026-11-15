@@ -94,7 +94,7 @@ let proven (names : Resolve.Names.lookups) key states =
   match (names.place key, names.text key) with
   | Some { base; _ }, Some text ->
       List.for_all
-        (fun (state : Diagnostic.span Prover.state) ->
+        (fun (state : Source.span Prover.state) ->
           state.span.stop <= base
           || state.span.start >= base + String.length text
           || state.failure = None)
@@ -185,7 +185,7 @@ let run_mutant ~samples text =
 
 let mutants text =
   let tokens, _ = Lexer.lex (Source.create ~path:"seed.truss" text) in
-  let replace (span : Token.span) by =
+  let replace (span : Source.span) by =
     String.sub text 0 span.start ^ by ^ String.sub text span.stop (String.length text - span.stop)
   in
   Array.to_list tokens

@@ -2,7 +2,7 @@ open State
 
 let variable ?(numbers = []) label = Symbol.Variable { label; numbers }
 
-exception Unsupported of span * string
+exception Unsupported of Source.Definition_span.t * string
 exception Foreign_unsupported of string
 
 let unsupported span format =
@@ -150,8 +150,9 @@ let add_requires context frame required =
   in
   let edit =
     match brace with
-    | Some at when at > 0 && text.[at - 1] = '\n' -> edit (Syntax.Span.zero_width at) ""
-    | Some at when at > 0 && text.[at - 1] = ' ' -> edit (Syntax.Span.make (at - 1) at) "\n"
+    | Some at when at > 0 && text.[at - 1] = '\n' -> edit (Source.Definition_span.zero_width at) ""
+    | Some at when at > 0 && text.[at - 1] = ' ' ->
+        edit (Source.Definition_span.make (at - 1) at) "\n"
     | _ -> None
   in
   match edit with
@@ -300,12 +301,13 @@ and make_obligation ?template_clause context frame code span message goal =
 
 let span_of (source : source) origin =
   let spans = Lazy.force source.spans in
-  if origin >= 0 && origin < Array.length spans then spans.(origin) else Syntax.Span.make 0 0
+  if origin >= 0 && origin < Array.length spans then spans.(origin)
+  else Source.Definition_span.make 0 0
 
 let quote source origin =
   match source.key with Some key -> Quote (key, origin) | None -> Text "this expression"
 
-let quoted text (span : span) =
+let quoted text (span : Source.Definition_span.t) =
   if span.stop > span.start && span.stop <= String.length text then
     String.sub text span.start (span.stop - span.start)
   else "this expression"

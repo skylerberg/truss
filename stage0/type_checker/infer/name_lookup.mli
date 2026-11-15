@@ -61,10 +61,12 @@ val overloads :
 
 val elements_calls :
   State.state ->
-  Syntax.span ->
+  Source.Definition_span.t ->
   Types.ty ->
   Types.mode ->
   (Tables.loop * Types.ty * Types.mode) option
 
-val consuming_cursor : State.state -> Syntax.span -> Types.ty -> (Tables.loop * Types.ty) option
-val remaining_call : State.state -> Syntax.span -> Types.ty -> Tables.call option
+val consuming_cursor :
+  State.state -> Source.Definition_span.t -> Types.ty -> (Tables.loop * Types.ty) option
+
+val remaining_call : State.state -> Source.Definition_span.t -> Types.ty -> Tables.call option

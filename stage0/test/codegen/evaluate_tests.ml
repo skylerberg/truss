@@ -99,14 +99,12 @@ let () =
       let states = Pipeline.states (verdicts compile pipeline) example_file in
       let with_code code =
         List.filter
-          (fun (state : Diagnostic.span Prover.state) ->
+          (fun (state : Source.span Prover.state) ->
             Diagnostic.Code.name (Prover state.code) = code)
           states
       in
       let trusting =
-        List.filter
-          (fun (state : Diagnostic.span Prover.state) -> state.trusts_compiled_code)
-          states
+        List.filter (fun (state : Source.span Prover.state) -> state.trusts_compiled_code) states
       in
       match (trusting, with_code "prover.ensures") with
       | [ template ], [ ensured ] ->

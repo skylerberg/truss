@@ -64,7 +64,7 @@ type section_names = {
   names : target option array;
   brackets : bracket option array;
   mutable holes : (id * (string * value) list) list;
-  mutable diagnostics : Syntax.diagnostic list;
+  mutable diagnostics : Diagnostic.in_definition list;
   mutable used_imports : string list;
 }
 
@@ -113,7 +113,7 @@ let in_section state section walk =
     state.section <- enclosing
   end
 
-let reported state ?fixes code (span : span) message =
+let reported state ?fixes code (span : Source.Definition_span.t) message =
   let diagnostic = Diagnostic.make ?fixes ~code:(Resolve code) span message in
   let names = current state in
   names.diagnostics <- diagnostic :: names.diagnostics;
@@ -471,7 +471,7 @@ and check_place state (written : expression) (inner : expression) =
         ~fixes:
           [
             Diagnostic.fix "Remove the keyword."
-              [ Diagnostic.delete (Span.make written.span.start keyword_end) ];
+              [ Diagnostic.delete (Source.Definition_span.make written.span.start keyword_end) ];
           ]
         "Only a place, such as a variable, a field, or an element, can take `mut` or `own`. A \
          temporary value is always passed as owned."

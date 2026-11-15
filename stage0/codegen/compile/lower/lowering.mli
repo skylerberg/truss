@@ -86,14 +86,14 @@ val outlined : state -> parts:Lowered.local list -> (unit -> unit) -> int * Lowe
 val ground : state -> Types.ty -> Ground.ty
 val trivial : state -> Ground.ty -> bool
 val is_zero_size : state -> Ground.ty -> bool
-val site : state -> Syntax.span -> Lowered.site
+val site : state -> Source.Definition_span.t -> Lowered.site
 
 type unsupported = { construct : string; at : Lowered.site option }
 
 exception Unsupported of unsupported
 
 val unsupported : ?at:Lowered.site -> ('a, unit, string, 'b) format4 -> 'a
-val source : state -> Syntax.span -> string
+val source : state -> Source.Definition_span.t -> string
 val innermost_scope : state -> scope
 val temporary : state -> ?name:string -> Ground.ty -> Lowered.place
 val binding : state -> ?name:string -> Ground.ty -> Lowered.place

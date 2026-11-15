@@ -28,19 +28,19 @@ val is_punctuation : t -> Token.punctuation -> bool
 val is_keyword : t -> Token.keyword -> bool
 val accept_punctuation : t -> Token.punctuation -> bool
 val accept_keyword : t -> Token.keyword -> bool
-val span : t -> Source.span -> Syntax.Span.t
+val span : t -> Source.span -> Source.Definition_span.t
 val previous_token : t -> Token.t option
 val previous_stop : t -> int
-val span_from : t -> int -> Syntax.Span.t
-val absolute : t -> Syntax.span -> Source.span
+val span_from : t -> int -> Source.Definition_span.t
+val absolute : t -> Source.Definition_span.t -> Source.span
 val text : t -> Source.span -> string
 
 val report :
   t ->
-  ?notes:(Diagnostic.span * string) list ->
-  ?fixes:Diagnostic.span Diagnostic.fix list ->
+  ?notes:(Source.span * string) list ->
+  ?fixes:Source.span Diagnostic.fix list ->
   Diagnostic.Code.parser ->
-  Diagnostic.span ->
+  Source.span ->
   string ->
   unit
 
@@ -56,8 +56,8 @@ val group : t -> Token.t array
 val skip_method : t -> unit
 val skip_trailing_comma : t -> unit
 val is_after_inserted_closer : t -> bool
-val bracketed : t -> item:(t -> 'a) -> recover:(Syntax.Span.t -> 'a) -> 'a list
-val lines : t -> item:(t -> 'a) -> recover:(int -> Syntax.Span.t -> 'a) -> 'a list
+val bracketed : t -> item:(t -> 'a) -> recover:(Source.Definition_span.t -> 'a) -> 'a list
+val lines : t -> item:(t -> 'a) -> recover:(int -> Source.Definition_span.t -> 'a) -> 'a list
 val blank_line_before : t -> int -> bool
-val recovered : t -> Syntax.span list
+val recovered : t -> Source.Definition_span.t list
 val methods : t -> Split.piece list

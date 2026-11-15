@@ -6,14 +6,14 @@ type context = {
   self_trait : Types.trait_reference option;
   self_associated : (string * Types.ty) list;
   self_capabilities : (string * Types.capability_set) list;
-  diagnostics : Syntax.diagnostic list ref;
+  diagnostics : Diagnostic.in_definition list ref;
   named : (Syntax.id * Types.ty) list ref;
 }
 
 val create : Lookups.t -> Resolve.resolved -> Environment.scope -> context
 val scope : context -> Environment.scope
-val report : context -> Diagnostic.Code.types -> Syntax.span -> string -> unit
-val error : context -> Diagnostic.Code.types -> Syntax.span -> string -> Types.ty
+val report : context -> Diagnostic.Code.types -> Source.Definition_span.t -> string -> unit
+val error : context -> Diagnostic.Code.types -> Source.Definition_span.t -> string -> Types.ty
 val bug : ('a, unit, string, 'b) format4 -> 'a
 val target : context -> Syntax.name -> Resolve.target option
 val type_ : context -> Syntax.type_expression -> Types.ty

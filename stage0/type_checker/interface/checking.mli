@@ -3,14 +3,14 @@ type state = {
   key : Resolve.Names.key;
   definition : Syntax.definition;
   lowered : Environment.lowered_interface;
-  mutable diagnostics : Syntax.diagnostic list;
+  mutable diagnostics : Diagnostic.in_definition list;
 }
 
 val report :
   state ->
-  ?fixes:Syntax.span Diagnostic.fix list ->
+  ?fixes:Source.Definition_span.t Diagnostic.fix list ->
   Diagnostic.Code.types ->
-  Syntax.span ->
+  Source.Definition_span.t ->
   string ->
   unit
 

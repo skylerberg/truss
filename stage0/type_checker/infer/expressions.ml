@@ -171,6 +171,9 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
           declare state bound (Lower.type_ state.context written) ~is_var:false ~mode:Types.Read);
       check state { env with in_quantifier = true } body Types.bool;
       register_expression state value (fun () ->
+          let quantifier : Core.quantifier =
+            match quantifier with Forall -> Forall | Exists -> Exists
+          in
           let quantified binder : Core.kind =
             Quantified { quantifier; binder; body = build_expression state body }
           in

@@ -443,7 +443,7 @@ let check (interface : Interface.Lookups.t) (key : Resolve.Names.key) (form : Co
   let quoted () =
     match (!at, Lazy.force source) with
     | Some origin, Some (spans, text) when origin >= 0 && origin < Array.length spans ->
-        let span : Syntax.span = spans.(origin) in
+        let span : Source.Definition_span.t = spans.(origin) in
         Printf.sprintf ", in `%s`" (excerpt (String.sub text span.start (span.stop - span.start)))
     | _ -> ""
   in

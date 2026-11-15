@@ -24,10 +24,11 @@ let proof context = { context with is_specification = true; allows_assert = true
 let may_be_specification context = context.is_specification || context.is_function_body
 let quantifier_word = function Forall -> "forall" | Exists -> "exists"
 
-let report cursor code (span : span) message =
+let report cursor code (span : Source.Definition_span.t) message =
   Cursor.report cursor code (Cursor.absolute cursor span) message
 
-let try_operator_span (span : span) = Syntax.Span.make (max span.start (span.stop - 1)) span.stop
+let try_operator_span (span : Source.Definition_span.t) =
+  Source.Definition_span.make (max span.start (span.stop - 1)) span.stop
 
 let rec expression cursor context (value : expression) =
   (match value.kind with

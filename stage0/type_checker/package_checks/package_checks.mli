@@ -1,6 +1,6 @@
 module Lookups = Lookups
 
-type placed = { key : Resolve.Names.key; diagnostic : Syntax.diagnostic }
+type placed = { key : Resolve.Names.key; diagnostic : Diagnostic.in_definition }
 
 type manifest_problem =
   | Not_a_capability of { dependency : Path.package; name : string }
