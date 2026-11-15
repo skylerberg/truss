@@ -1,11 +1,3 @@
-(* Top-level definitions, and the members of traits, implementations, and
-   capabilities.
-
-   Each definition is chosen by its first token, after its visibility. The
-   rules the grammar leaves to a check, such as where [opaque] and [self] may
-   appear and which clauses appear at most once, are checked here, where the
-   tokens and their spans are available for fixes. *)
-
 open Token
 open Syntax
 
@@ -18,31 +10,28 @@ let finish cursor start visibility kind : definition =
     id = Cursor.fresh_id cursor;
   }
 
-(* [public], [public opaque], or [internal], with the tokens that spelled
-   it. [modifier] is the token of [public] and the token of the [opaque]
-   after it. *)
 type written_visibility = {
   visibility : visibility;
   tokens : Token.t list;
-  modifier : (Token.t * Token.t) option;
+  opaque : (Token.t * Token.t) option;
 }
 
 let visibility cursor =
   match Cursor.peek_kind cursor with
   | Keyword Public -> (
       let public = Cursor.next cursor in
-      let modified visibility =
-        let modifier = Cursor.next cursor in
-        { visibility; tokens = [ public; modifier ]; modifier = Some (public, modifier) }
-      in
       match Cursor.peek_kind cursor with
-      | Keyword Opaque -> modified Public_opaque
-      | _ -> { visibility = Public; tokens = [ public ]; modifier = None })
-  | Keyword Internal -> { visibility = Internal; tokens = [ Cursor.next cursor ]; modifier = None }
-  | _ -> { visibility = Private; tokens = []; modifier = None }
+      | Keyword Opaque ->
+          let opaque = Cursor.next cursor in
+          {
+            visibility = Public_opaque;
+            tokens = [ public; opaque ];
+            opaque = Some (public, opaque);
+          }
+      | _ -> { visibility = Public; tokens = [ public ]; opaque = None })
+  | Keyword Internal -> { visibility = Internal; tokens = [ Cursor.next cursor ]; opaque = None }
+  | _ -> { visibility = Private; tokens = []; opaque = None }
 
-(* Removes a visibility keyword that is not allowed, with the space after
-   it. *)
 let remove_visibility cursor code (tokens : Token.t list) message =
   match tokens with
   | [] -> ()
@@ -57,15 +46,12 @@ let remove_visibility cursor code (tokens : Token.t list) message =
               [ Diagnostic.delete (Source.span first.span.start next.span.start) ];
           ]
 
-(* [List[Element: Ordered]] before the [.] of a method, or [hourly::Forecast]. *)
 let type_head cursor : type_head =
   let start = cursor.Cursor.index in
   let path = Atoms.upper_path cursor "a type name" in
   let generics = Parse_expression.generics cursor in
   { path; generics; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor }
 
-(* A function's name, or a constant's: [length], or [List[Element].length]
-   under a type. *)
 let definition_name cursor =
   match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
   | Upper _, _ | Lower _, Punctuation Colon_colon ->
@@ -95,7 +81,6 @@ let parameter cursor : parameter =
   in
   { kind; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor }
 
-(* [self] may only be the first parameter, and only of a method. *)
 let parameters cursor ~method_ =
   if not (Cursor.is_punctuation cursor (Open Paren)) then
     Cursor.fail cursor "`(` to start the parameters";
@@ -123,7 +108,6 @@ let result cursor =
   if Cursor.accept_punctuation cursor Arrow then
     Some (Returns (Parse_expression.type_expression cursor))
   else if Cursor.accept_keyword cursor Lends then begin
-    (* A lent part stays with [self], so it is never handed over. *)
     let own = Cursor.peek cursor in
     let mode = Atoms.mode cursor in
     if mode = Some Own then
@@ -139,10 +123,6 @@ let result cursor =
   end
   else None
 
-(* The clauses of a signature. An error in one skips to the next clause
-   keyword, or to the body's [{] at the definition's own depth, so a broken
-   [requires] still leaves the body parsed. [uses] and [decreases] appear at
-   most once. *)
 let clauses cursor =
   let rec loop clauses =
     let start = cursor.Cursor.index in
@@ -168,8 +148,6 @@ let clauses cursor =
               id = Cursor.fresh_id cursor;
             }
       in
-      (* Each kind of clause that appears at most once, with a message that
-         says how to combine two of them. *)
       let once same message =
         if List.exists (fun (earlier : clause) -> same earlier.kind) clauses then
           Cursor.report cursor Repeated_clause (Cursor.token_at cursor start).span message
@@ -190,12 +168,9 @@ let clauses cursor =
   in
   loop []
 
-(* A body after a signature, if there is one. *)
 let optional_body cursor =
   if Parse_expression.opens_body cursor then Some (Parse_expression.body cursor) else None
 
-(* A body that must come after a signature. A missing one gets the body of
-   unwritten code, [{ todo }], as its fix. *)
 let body cursor =
   match optional_body cursor with
   | Some body -> body
@@ -214,8 +189,6 @@ let body cursor =
               Diagnostic.fix "Add `{ todo }`"
                 [ Diagnostic.insert (Source.zero_width stop) " { todo }" ];
             ];
-        (* The signature parsed, so the definition keeps it, with an error
-           statement at the offset where the body belongs. *)
         let at = Cursor.span cursor (Source.zero_width stop) in
         {
           statements =
@@ -233,7 +206,6 @@ let body cursor =
       end
       else Cursor.fail cursor "`{` to start the body"
 
-(* [fn name[...](...) -> Result clauses], after [fn]. *)
 let signature cursor ~name ~method_ : signature =
   let generics = Parse_expression.generics cursor in
   let parameters = parameters cursor ~method_ in
@@ -254,7 +226,6 @@ let check_name cursor (name : definition_name) =
       "A function cannot be named `identical`, which tests whether two values are the same value, \
        in specifications."
 
-(* A top-level function's signature, after [fn]. *)
 let function_signature cursor =
   Cursor.expect_keyword cursor Fn;
   let name = definition_name cursor in
@@ -262,16 +233,12 @@ let function_signature cursor =
   let method_ = match name with Member_name _ -> true | Plain_name _ -> false in
   signature cursor ~name ~method_
 
-(* A method declared in a trait, an [impl], or a capability. *)
 let member_signature cursor : signature =
   Cursor.expect_keyword cursor Fn;
   let name = Plain_name (Atoms.lower cursor "a method name") in
   check_name cursor name;
   signature cursor ~name ~method_:true
 
-(* The members of a trait, an [impl], or a capability, one per line. A
-   method is a separate definition: its token range is recorded and
-   skipped here, and it is parsed later with a cursor of its own. *)
 let members cursor ~member ~error =
   Parse_expression.body_opening cursor;
   List.filter_map Fun.id
@@ -280,7 +247,7 @@ let members cursor ~member ~error =
          let start = cursor.Cursor.index in
          if Cursor.is_keyword cursor Fn then begin
            let stop = Split.stop cursor.tokens ~first:start in
-           cursor.methods := (start, stop) :: !(cursor.methods);
+           cursor.methods := { first = start; stop } :: !(cursor.methods);
            Cursor.skip_to cursor stop;
            None
          end
@@ -302,8 +269,6 @@ let members cursor ~member ~error =
              id = Cursor.fresh_id cursor;
            }))
 
-(* [type Key], [type Element: Ordered], [capability Uses], or a law, in a
-   trait. *)
 let trait_member cursor =
   match Cursor.peek_kind cursor with
   | Keyword Type ->
@@ -344,12 +309,8 @@ let impl_member cursor =
 let capability_member cursor : capability_member =
   Cursor.fail cursor "`fn` to start a method of the capability"
 
-(* The kind of definition that a method is declared inside. *)
 type container = In_trait | In_impl | In_capability
 
-(* A method declared inside a trait, an [impl], or a capability, from the
-   start of its slice. A trait's may have a body, an [impl]'s must, and a
-   capability's has none. *)
 let method_ cursor ~(container : container) ~visibility : definition =
   let start = cursor.Cursor.index in
   let signature = member_signature cursor in
@@ -376,7 +337,6 @@ let method_ cursor ~(container : container) ~visibility : definition =
   if not (Cursor.at_end cursor) then Cursor.fail cursor "a line break or `}` after the method";
   finish cursor start visibility kind
 
-(* Fields in parentheses, as a record or a variant declares them. *)
 let fields cursor : field list =
   let field cursor : field =
     let start = cursor.Cursor.index in
@@ -466,22 +426,20 @@ let trait cursor =
 
 let impl cursor =
   Cursor.advance cursor;
-  (* [impl<T> Trait for Box<T>], from Rust: the parameters are reported
-     and skipped. *)
   (match
      if Cursor.is_punctuation cursor Less then Parse_expression.angle_closer cursor else None
    with
   | Some closer ->
       let opening = Cursor.peek cursor in
-      let plain =
-        List.for_all
+      let has_bounds =
+        List.exists
           (fun index ->
             match (Cursor.token_at cursor index).kind with
-            | Upper _ | Punctuation Comma -> true
-            | _ -> false)
+            | Upper _ | Punctuation Comma -> false
+            | _ -> true)
           (List.init (closer - cursor.index - 1) (fun offset -> cursor.index + 1 + offset))
       in
-      Habits.impl_parameters cursor ~opening ~closing:(Cursor.token_at cursor closer) ~plain;
+      Habits.impl_parameters cursor ~opening ~closing:(Cursor.token_at cursor closer) ~has_bounds;
       Cursor.skip_to cursor (closer + 1)
   | None -> ());
   let trait_ = Parse_expression.path_type cursor in
@@ -499,7 +457,6 @@ let capability cursor =
   Capability
     { name; members = members cursor ~member:capability_member ~error:Capability_member_error }
 
-(* After [let], or after [const] or [static] from another language. *)
 let constant cursor =
   Cursor.advance cursor;
   let name = definition_name cursor in
@@ -535,8 +492,6 @@ let theorem cursor =
   let clauses = clauses cursor in
   Theorem { name; generics; parameters; clauses; body = Parse_expression.body cursor }
 
-(* [proof Monoid.associative for Int64 { ... }]. The type is written as an
-   [impl]'s is, with its generic parameters: [for Box[Item: Ordered]]. *)
 let law_proof cursor =
   Cursor.advance cursor;
   let trait_ = Parse_expression.path_type cursor in
@@ -546,9 +501,6 @@ let law_proof cursor =
   let type_ = type_head cursor in
   Law_proof { trait_; law; type_; body = Parse_expression.body cursor }
 
-(* The intended kind and the name of a definition whose header did not
-   parse. [cursor] is at the start of the definition, and its diagnostics
-   are discarded. Later stages use the name to declare the definition. *)
 let header cursor : intended_kind option * definition_name option =
   ignore (visibility cursor);
   let intended =
@@ -574,12 +526,9 @@ let header cursor : intended_kind option * definition_name option =
 
 type empty = |
 
-(* A top-level item: [Left] of a definition, or [Right] of the value that
-   [function_] returns in place of a function, such as the signature
-   without a body that an example in a document may show. *)
 let top_level cursor ~function_ =
   let start = cursor.Cursor.index in
-  let { visibility; tokens = visibility_tokens; modifier } = visibility cursor in
+  let { visibility; tokens = visibility_tokens; opaque } = visibility cursor in
   let no_visibility construct =
     remove_visibility cursor Misplaced_visibility visibility_tokens
       (Printf.sprintf "%s takes no visibility: nothing refers to it by name." construct)
@@ -615,25 +564,21 @@ let top_level cursor ~function_ =
           "a definition: `fn`, `type`, `trait`, `impl`, `capability`, `let`, `test`, `theorem`, or \
            `proof`"
   in
-  (* The fix removes the modifier with the space before it, after [public].
-     A definition that takes no visibility at all has that reported, with
-     every visibility token removed. *)
-  (match (visibility, modifier, kind) with
+  (match (visibility, opaque, kind) with
   | _, None, _
   | Public_opaque, Some _, Left (Type_definition _)
   | _, Some _, Left (Impl _ | Test _ | Law_proof _) ->
       ()
-  | _, Some (public, word), _ ->
-      Cursor.report cursor Misplaced_opaque word.span "Only a type can be `opaque`."
+  | _, Some (public, opaque), _ ->
+      Cursor.report cursor Misplaced_opaque opaque.span "Only a type can be `opaque`."
         ~fixes:
           [
             Diagnostic.fix "Remove `opaque`"
-              [ Diagnostic.delete (Source.span public.span.stop word.span.stop) ];
+              [ Diagnostic.delete (Source.span public.span.stop opaque.span.stop) ];
           ]);
   if not (Cursor.at_end cursor) then Cursor.fail cursor "a line break after the definition";
   Either.map ~left:(finish cursor start visibility) ~right:(fun other -> (visibility, other)) kind
 
-(* One definition, from the start of its slice. *)
 let definition cursor : definition =
   let function_ cursor : (definition_kind, empty) Either.t =
     let signature = function_signature cursor in
@@ -641,8 +586,6 @@ let definition cursor : definition =
   in
   match top_level cursor ~function_ with Left definition -> definition | Right (_, _) -> .
 
-(* A top-level example in a document: a definition, or a function's
-   signature without a body. *)
 type example = Whole of definition | Signature_alone of visibility * signature
 
 let example cursor =

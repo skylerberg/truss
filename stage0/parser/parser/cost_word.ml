@@ -1,10 +1,5 @@
-(* The words of a [cost] clause. The lexer reads them as names, and the
-   parser recognizes them by their spelling where a clause expects them. *)
-
 type t = Amortized | Time | Allocations | Allocated_bytes | Calls | O | Finite | Potential
 
-(* The only place each word is spelled. A test checks the list against
-   SPECIFICATION.md. *)
 let spellings =
   [
     ("amortized", Amortized);
@@ -19,16 +14,11 @@ let spellings =
 
 let spelling word = fst (List.find (fun (_, candidate) -> candidate = word) spellings)
 
-(* The word a token spells: a name, uppercase only for [O]. *)
 let of_token (kind : Token.kind) =
   match kind with Lower text | Upper text -> List.assoc_opt text spellings | _ -> None
 
 let resources = [ Time; Allocations; Allocated_bytes; Calls ]
 
-(* Reports the name [name] where one of the cost words [words] was
-   expected. When exactly one of them is within an edit distance of 2, the
-   fix replaces the name with that word, and the function returns the word,
-   so that the rest of the clause is parsed and checked. *)
 let correct_misspelling cursor (token : Token.t) name ~words ~category =
   let message =
     Printf.sprintf "Expected %s, one of %s, found `%s`." category
@@ -50,8 +40,6 @@ let correct_misspelling cursor (token : Token.t) name ~words ~category =
       Cursor.report cursor Diagnostic.Code.Cost_word token.span message;
       raise Cursor.Failed
 
-(* The cost word the current token spells, among [accepted], or the one of
-   [suggested] it misspells. *)
 let expect ?suggested cursor ~accepted ~category ~expected =
   let token = Cursor.peek cursor in
   let word =

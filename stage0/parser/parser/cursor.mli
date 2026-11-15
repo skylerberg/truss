@@ -9,13 +9,13 @@ type t = {
   text : string;
   diagnostics : Diagnostic.Collector.t;
   mutable index : int;
-  mutable depth : int;
+  mutable nesting_depth : int;
   next_id : int ref;
   recoveries : Source.span list ref;
-  methods : (int * int) list ref;
+  methods : Split.piece list ref;
   mutable after_inserted_closer : bool;
-  mutable unterminated : bool;
-  mutable line_ended : bool;
+  mutable is_unterminated_interpolation : bool;
+  mutable ended_by_arm_comma : bool;
 }
 
 val create :
@@ -61,7 +61,7 @@ val fail : t -> string -> 'a
 val expect_punctuation : t -> Token.punctuation -> unit
 val expect_keyword : t -> Token.keyword -> unit
 val nested : t -> (t -> 'a) -> 'a
-val check_chain_length : t -> length:int -> unit
+val check_chain_length : t -> chain_length:int -> unit
 val closer : t -> int -> int
 val skip_to : t -> int -> unit
 val skip_one : t -> unit

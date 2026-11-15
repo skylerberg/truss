@@ -88,7 +88,8 @@ let rec spell_type (type_ : type_expression) =
   | Any_type path -> "any " ^ spell_path_type path
   | Function_type { inputs; output; _ } ->
       Printf.sprintf "fn(%s)%s"
-        (String.concat ", " (List.map (fun (_, input) -> spell_type input) inputs))
+        (String.concat ", "
+           (List.map (fun (input : function_input) -> spell_type input.type_) inputs))
         (match output with Some output -> " -> " ^ spell_type output | None -> "")
   | Type_error -> "?"
 
@@ -200,7 +201,7 @@ let plain_items (definitions : definition Syntax.item list) =
       match definition.kind with
       (* A method written inside a trait, an [impl], or a capability is
          reached through that one, not by its name. *)
-      | _ when Option.is_some item.container -> []
+      | _ when Option.is_some item.container_index -> []
       | Function { signature = { name = Plain_name name; generics; _ }; _ } ->
           plain name.text Function (generics <> [])
       | Type_definition { name; generics; _ } -> plain name.text Type (generics <> [])
@@ -386,7 +387,7 @@ let file_declarations =
             path;
             ordinal = 0;
             index;
-            container = item.container;
+            container = item.container_index;
             kind;
             visibility = item.value.visibility;
             generic;
@@ -397,7 +398,9 @@ let file_declarations =
            (fun index (item : definition Syntax.item) ->
              let definition = item.value in
              let declare = declare index item in
-             match (definition.kind, Option.bind item.container (Hashtbl.find_opt containers)) with
+             match
+               (definition.kind, Option.bind item.container_index (Hashtbl.find_opt containers))
+             with
              | (Function { signature; _ } | Method_declaration signature), Some (owner, static) ->
                  declare
                    (Method
