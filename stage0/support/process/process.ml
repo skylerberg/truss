@@ -1,45 +1,8 @@
-let read_all = In_channel.input_all
-
-(* A process's status as a shell reports it: its exit code, or [128 +
-   signal] for a process a signal ended. *)
 let exit_code (status : Unix.process_status) =
   match status with
   | WEXITED code -> code
-  | WSIGNALED signal | WSTOPPED signal ->
-      (* OCaml numbers signals its own way; report the system's number. *)
-      let system =
-        List.assoc_opt signal
-          [
-            (Sys.sigabrt, 6);
-            (Sys.sigsegv, 11);
-            (Sys.sigkill, 9);
-            (Sys.sigbus, 10);
-            (Sys.sigfpe, 8);
-            (Sys.sigill, 4);
-            (Sys.sigterm, 15);
-          ]
-      in
-      128 + Option.value system ~default:signal
+  | WSIGNALED signal | WSTOPPED signal -> 128 + Sys.signal_to_int signal
 
-(* Reads a channel to its end, handing each piece to [on_output] as it
-   arrives. *)
-let read_streaming channel on_output =
-  let buffer = Buffer.create 256 in
-  let piece = Bytes.create 65536 in
-  let rec loop () =
-    match input channel piece 0 (Bytes.length piece) with
-    | 0 -> ()
-    | read_count ->
-        let text = Bytes.sub_string piece 0 read_count in
-        Buffer.add_string buffer text;
-        on_output text;
-        loop ()
-  in
-  loop ();
-  Buffer.contents buffer
-
-(* The program is run with its arguments and no shell. *)
-(* This process's environment with each of [overrides] set. *)
 let environment_with overrides =
   let overridden entry =
     List.exists (fun (name, _) -> String.starts_with ~prefix:(name ^ "=") entry) overrides
@@ -49,89 +12,149 @@ let environment_with overrides =
        (List.filter (fun entry -> not (overridden entry)) (Array.to_list (Unix.environment ()))))
     (Array.of_list (List.map (fun (name, value) -> name ^ "=" ^ value) overrides))
 
-let run ?(environment = []) ?input ?on_output ?time_limit program arguments =
+type reader = {
+  descriptor : Unix.file_descr;
+  contents : Buffer.t;
+  on_read : (string -> unit) option;
+}
+
+type writer = {
+  stdin : Unix.file_descr;
+  text : string;
+  mutable written : int;
+  mutable is_open : bool;
+}
+
+let piece_length = 65536
+
+let read_piece piece reader =
+  match Unix.read reader.descriptor piece 0 piece_length with
+  | 0 -> false
+  | count ->
+      Buffer.add_subbytes reader.contents piece 0 count;
+      Option.iter (fun on_read -> on_read (Bytes.sub_string piece 0 count)) reader.on_read;
+      true
+  | exception Unix.Unix_error (EINTR, _, _) -> true
+
+let close_stdin writer =
+  writer.is_open <- false;
+  Unix.close writer.stdin
+
+let write_piece writer =
+  match
+    Unix.single_write_substring writer.stdin writer.text writer.written
+      (min piece_length (String.length writer.text - writer.written))
+  with
+  | count ->
+      writer.written <- writer.written + count;
+      if writer.written < String.length writer.text then true
+      else begin
+        close_stdin writer;
+        false
+      end
+  | exception Unix.Unix_error ((EAGAIN | EWOULDBLOCK | EINTR), _, _) -> true
+  | exception Unix.Unix_error (EPIPE, _, _) ->
+      close_stdin writer;
+      false
+
+let kill pid = try Unix.kill pid Sys.sigkill with Unix.Unix_error (ESRCH, _, _) -> ()
+
+let rec exchange piece pid ~readers ~writer ~deadline =
+  match (readers, writer) with
+  | [], None -> deadline
+  | _ ->
+      let timeout =
+        match deadline with None -> -1. | Some at -> Float.max 0. (at -. Unix.gettimeofday ())
+      in
+      let readable, writable =
+        match
+          Unix.select
+            (List.map (fun reader -> reader.descriptor) readers)
+            (Option.to_list (Option.map (fun writer -> writer.stdin) writer))
+            [] timeout
+        with
+        | readable, writable, _ -> (readable, writable)
+        | exception Unix.Unix_error (EINTR, _, _) -> ([], [])
+      in
+      let deadline =
+        match deadline with
+        | Some at when Unix.gettimeofday () >= at ->
+            kill pid;
+            None
+        | deadline -> deadline
+      in
+      let readers =
+        List.filter
+          (fun reader -> (not (List.mem reader.descriptor readable)) || read_piece piece reader)
+          readers
+      in
+      let writer =
+        Option.bind writer (fun writer ->
+            if (not (List.mem writer.stdin writable)) || write_piece writer then Some writer
+            else None)
+      in
+      exchange piece pid ~readers ~writer ~deadline
+
+let rec await pid deadline =
+  match Unix.waitpid (if Option.is_some deadline then [ WNOHANG ] else []) pid with
+  | exception Unix.Unix_error (EINTR, _, _) -> await pid deadline
+  | 0, _ -> (
+      match deadline with
+      | Some at when Unix.gettimeofday () >= at ->
+          kill pid;
+          await pid None
+      | _ ->
+          Unix.sleepf 0.01;
+          await pid deadline)
+  | _, status -> status
+
+let run ?(environment = []) ?input ?on_output ?time_limit_ms program arguments =
+  let deadline =
+    Option.map (fun limit -> Unix.gettimeofday () +. (Float.of_int limit /. 1000.)) time_limit_ms
+  in
   let stdout_read, stdout_write = Unix.pipe ~cloexec:true () in
   let stderr_read, stderr_write = Unix.pipe ~cloexec:true () in
-  let stdin_read, stdin_write =
-    match input with
-    | Some _ ->
-        let read, write = Unix.pipe ~cloexec:true () in
-        (read, Some write)
-    | None -> (Unix.stdin, None)
-  in
-  let pid =
-    Unix.create_process_env program
-      (Array.of_list (program :: arguments))
-      (environment_with environment) stdin_read stdout_write stderr_write
-  in
-  Unix.close stdout_write;
-  Unix.close stderr_write;
-  (* Write the input on another domain too, and close it, so the program
-     sees its end. *)
-  let writer =
-    match (input, stdin_write) with
-    | Some text, Some write ->
-        (* A program that ends without reading it all closes the pipe, which
-           must not end this process. *)
-        Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
-        Unix.close stdin_read;
-        Some
-          (Domain.spawn (fun () ->
-               let channel = Unix.out_channel_of_descr write in
-               (try output_string channel text with Sys_error _ -> ());
-               try close_out channel with Sys_error _ -> ()))
-    | _ -> None
-  in
-  (* A program that runs past its time limit is killed, and its status is
-     that of [SIGKILL]. *)
-  let ended = Atomic.make false in
-  let watchdog =
-    Option.map
-      (fun limit ->
-        Domain.spawn (fun () ->
-            let deadline = Unix.gettimeofday () +. (float_of_int limit /. 1000.) in
-            while (not (Atomic.get ended)) && Unix.gettimeofday () < deadline do
-              Unix.sleepf 0.01
-            done;
-            if not (Atomic.get ended) then
-              try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ()))
-      time_limit
-  in
-  (* Read standard error on another domain, so neither pipe fills while the
-     other is read. *)
-  let errors = Domain.spawn (fun () -> read_all (Unix.in_channel_of_descr stderr_read)) in
-  let output =
-    let channel = Unix.in_channel_of_descr stdout_read in
-    match on_output with
-    | Some on_output -> read_streaming channel on_output
-    | None -> read_all channel
-  in
-  let errors = Domain.join errors in
-  Option.iter Domain.join writer;
-  Unix.close stdout_read;
-  Unix.close stderr_read;
-  let _, status = Unix.waitpid [] pid in
-  Atomic.set ended true;
-  Option.iter Domain.join watchdog;
-  (exit_code status, output, errors)
-
-let output ?(environment = []) program arguments =
-  let stdout_read, stdout_write = Unix.pipe ~cloexec:true () in
-  let null = Unix.openfile "/dev/null" [ O_WRONLY; O_CLOEXEC ] 0 in
+  let stdin_pipe = Option.map (fun _ -> Unix.pipe ~cloexec:true ()) input in
   let pid =
     Fun.protect
       ~finally:(fun () ->
         Unix.close stdout_write;
-        Unix.close null)
+        Unix.close stderr_write;
+        Option.iter (fun (stdin_read, _) -> Unix.close stdin_read) stdin_pipe)
       (fun () ->
-        Unix.create_process_env program
-          (Array.of_list (program :: arguments))
-          (environment_with environment) Unix.stdin stdout_write null)
+        try
+          Unix.create_process_env program
+            (Array.of_list (program :: arguments))
+            (environment_with environment)
+            (Option.fold ~none:Unix.stdin ~some:fst stdin_pipe)
+            stdout_write stderr_write
+        with error ->
+          Unix.close stdout_read;
+          Unix.close stderr_read;
+          Option.iter (fun (_, stdin_write) -> Unix.close stdin_write) stdin_pipe;
+          raise error)
   in
-  let output = read_all (Unix.in_channel_of_descr stdout_read) in
-  Unix.close stdout_read;
-  let _, status = Unix.waitpid [] pid in
-  (exit_code status, output)
+  let output = { descriptor = stdout_read; contents = Buffer.create 4096; on_read = on_output } in
+  let errors = { descriptor = stderr_read; contents = Buffer.create 256; on_read = None } in
+  let writer =
+    match (input, stdin_pipe) with
+    | Some text, Some (_, stdin) ->
+        Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
+        Unix.set_nonblock stdin;
+        Some { stdin; text; written = 0; is_open = true }
+    | _ -> None
+  in
+  let deadline =
+    Fun.protect
+      ~finally:(fun () ->
+        Unix.close stdout_read;
+        Unix.close stderr_read;
+        Option.iter (fun writer -> if writer.is_open then close_stdin writer) writer)
+      (fun () ->
+        exchange (Bytes.create piece_length) pid ~readers:[ output; errors ] ~writer ~deadline)
+  in
+  let status = await pid deadline in
+  (exit_code status, Buffer.contents output.contents, Buffer.contents errors.contents)
 
 let run_attached program arguments =
   let pid =
