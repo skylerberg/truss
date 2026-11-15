@@ -1,0 +1,11 @@
+fn forever(depth: UInt64) -> UInt64 {
+  let below = forever(depth.wrapping_add(1))
+  depth.wrapping_subtract(below)
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console
+{
+  Console.print_line("${forever(0)}")
+  ExitCode(0)
+}

@@ -1,0 +1,19 @@
+fn spread(remaining: UInt64) -> UInt64 {
+  var buffer: Array[UInt64, 12500] = Array.filled(remaining)
+  if remaining == 0 {
+    return 0
+  }
+  let below = spread(remaining - 1)
+  var total: UInt64 = 0
+  for value in buffer {
+    total = total.wrapping_add(value)
+  }
+  total.wrapping_subtract(below)
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console
+{
+  Console.print_line("${spread(100)}")
+  ExitCode(0)
+}

@@ -6,9 +6,10 @@ type build = C_runtime.build = Development | Release
 type linkage = C_runtime.linkage = External | Internal
 
 let anchor_struct = C_runtime.anchor_struct
+let stack_struct = C_runtime.stack_struct
 let runtime_declarations = C_runtime.runtime_declarations
 let anchor_symbol = C_runtime.anchor_symbol
-let version = 27
+let version = 28
 
 type site = C_runtime.site = { definition : Path.t; line : int; column : int }
 type failure = C_runtime.failure = Echo | Todo

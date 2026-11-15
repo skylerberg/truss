@@ -1,0 +1,26 @@
+fn descend(remaining: UInt64) -> UInt64 {
+  if remaining == 0 {
+    return 0
+  }
+  let below = descend(remaining - 1)
+  remaining.wrapping_subtract(below)
+}
+
+fn both(first: UInt64, second: UInt64) -> UInt64 {
+  parallel {
+    let left = descend(first)
+    let right = descend(second)
+  }
+  left.wrapping_add(right)
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console
+{
+  concurrent {
+    let first = descend(10000)
+    let second = both(5000, second: 20000)
+  }
+  Console.print_line("${first} ${second}")
+  ExitCode.success
+}

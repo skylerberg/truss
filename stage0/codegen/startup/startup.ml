@@ -173,36 +173,19 @@ static _Noreturn void t_out_of_memory(void) {
   abort();
 }
 
-static char t_signal_stack[65536];
-
-static void t_stack_overflow(int signal) {
-  (void)signal;
-  (void)pthread_mutex_trylock(&t_text_lock);
+static _Noreturn void t_stack_overflow(void) {
+  pthread_mutex_lock(&t_text_lock);
   t_text_length = 0;
   t_text_string("stack overflow");
   t_end(t_panicked, "", 101);
 }
 
 static void t_install_signal_dispositions(void) {
-  stack_t stack;
-  memset(&stack, 0, sizeof stack);
-  stack.ss_sp = t_signal_stack;
-  stack.ss_size = sizeof t_signal_stack;
-  sigaltstack(&stack, NULL);
-  struct sigaction action;
-  memset(&action, 0, sizeof action);
-  action.sa_handler = t_stack_overflow;
-  action.sa_flags = SA_ONSTACK;
-  sigemptyset(&action.sa_mask);
-  sigaction(SIGSEGV, &action, NULL);
-  sigaction(SIGBUS, &action, NULL);
   signal(SIGPIPE, SIG_IGN);
-  sigset_t runtime;
-  sigemptyset(&runtime);
-  sigaddset(&runtime, SIGSEGV);
-  sigaddset(&runtime, SIGBUS);
-  sigaddset(&runtime, SIGURG);
-  pthread_sigmask(SIG_UNBLOCK, &runtime, NULL);
+  sigset_t interrupt;
+  sigemptyset(&interrupt);
+  sigaddset(&interrupt, SIGURG);
+  pthread_sigmask(SIG_UNBLOCK, &interrupt, NULL);
 }
 |}
 
@@ -262,15 +245,6 @@ static size_t t_stack_size(void) {
   return stack;
 }
 
-static void t_thread_signal_stack_install(void) {
-  stack_t stack;
-  memset(&stack, 0, sizeof stack);
-  stack.ss_sp = malloc(65536);
-  if (stack.ss_sp == NULL) return;
-  stack.ss_size = 65536;
-  if (sigaltstack(&stack, NULL) != 0) free(stack.ss_sp);
-}
-
 static void t_thread_attributes(pthread_attr_t *attributes) {
   pthread_attr_init(attributes);
   pthread_attr_setstacksize(attributes, t_stack_size());
@@ -304,55 +278,12 @@ void __tsan_destroy_fiber(void *fiber);
 void __tsan_switch_to_fiber(void *fiber, unsigned flags);
 #endif
 
-#define T_STACK_CACHE 64
-
-static pthread_mutex_t t_stack_lock = PTHREAD_MUTEX_INITIALIZER;
-static void *t_stack_cache[T_STACK_CACHE];
-static size_t t_stack_cached;
-static size_t t_stack_bytes;
-static size_t t_stack_guard;
-
-static void *t_stack_acquire(void) {
-  pthread_mutex_lock(&t_stack_lock);
-  if (t_stack_bytes == 0) {
-    size_t page = (size_t)sysconf(_SC_PAGESIZE);
-    t_stack_guard = page;
-    t_stack_bytes = (t_stack_size() + page - 1) / page * page;
-  }
-  void *low = t_stack_cached > 0 ? t_stack_cache[--t_stack_cached] : NULL;
-  pthread_mutex_unlock(&t_stack_lock);
-  if (low != NULL) return low;
-  int flags = MAP_PRIVATE | MAP_ANON;
-#ifdef MAP_NORESERVE
-  flags |= MAP_NORESERVE;
-#endif
-#ifdef MAP_STACK
-  flags |= MAP_STACK;
-#endif
-  char *mapping = mmap(NULL, t_stack_guard + t_stack_bytes, PROT_READ | PROT_WRITE, flags, -1, 0);
-  if (mapping == MAP_FAILED) t_out_of_memory();
-  if (mprotect(mapping, t_stack_guard, PROT_NONE) != 0) t_out_of_memory();
-  return mapping + t_stack_guard;
-}
-
-static void t_stack_release(void *low) {
-#ifdef T_ADDRESS_SANITIZER
-  __asan_unpoison_memory_region(low, t_stack_bytes);
-#endif
-  pthread_mutex_lock(&t_stack_lock);
-  if (t_stack_cached < T_STACK_CACHE) {
-    t_stack_cache[t_stack_cached++] = low;
-    low = NULL;
-  }
-  pthread_mutex_unlock(&t_stack_lock);
-  if (low != NULL) munmap((char *)low - t_stack_guard, t_stack_guard + t_stack_bytes);
-}
-
-struct t_context {
+struct t_resume_point {
   void *stack_pointer;
 };
 
-void t_context_switch(struct t_context *from, const struct t_context *to);
+void t_switch(struct t_resume_point *from, const struct t_resume_point *to);
+void t_stack_call(char *high, void (*function)(void *argument), void *argument);
 
 #ifdef __APPLE__
 #define T_ASSEMBLY_NAME(name) "_" name
@@ -362,9 +293,9 @@ void t_context_switch(struct t_context *from, const struct t_context *to);
 
 #if defined(__x86_64__)
 __asm__(".text\n"
-        ".globl " T_ASSEMBLY_NAME("t_context_switch") "\n"
+        ".globl " T_ASSEMBLY_NAME("t_switch") "\n"
         ".p2align 4\n"
-        T_ASSEMBLY_NAME("t_context_switch") ":\n"
+        T_ASSEMBLY_NAME("t_switch") ":\n"
         "  pushq %rbp\n"
         "  pushq %rbx\n"
         "  pushq %r12\n"
@@ -379,20 +310,32 @@ __asm__(".text\n"
         "  popq %r12\n"
         "  popq %rbx\n"
         "  popq %rbp\n"
+        "  retq\n"
+        ".globl " T_ASSEMBLY_NAME("t_stack_call") "\n"
+        ".p2align 4\n"
+        T_ASSEMBLY_NAME("t_stack_call") ":\n"
+        "  pushq %rbp\n"
+        "  movq %rsp, %rbp\n"
+        "  movq %rdi, %rsp\n"
+        "  andq $-16, %rsp\n"
+        "  movq %rdx, %rdi\n"
+        "  callq *%rsi\n"
+        "  movq %rbp, %rsp\n"
+        "  popq %rbp\n"
         "  retq\n");
 
-static void t_context_start(struct t_context *context, void *low, size_t size, void (*entry)(void)) {
-  uint64_t *top = (uint64_t *)(((uintptr_t)low + size) & ~(uintptr_t)15);
+static void t_resume_point_start(struct t_resume_point *point, char *high, void (*entry)(void)) {
+  uint64_t *top = (uint64_t *)((uintptr_t)high & ~(uintptr_t)15);
   *--top = 0;
   *--top = (uint64_t)(uintptr_t)entry;
   for (int saved = 0; saved < 6; saved++) *--top = 0;
-  context->stack_pointer = top;
+  point->stack_pointer = top;
 }
 #elif defined(__aarch64__)
 __asm__(".text\n"
-        ".globl " T_ASSEMBLY_NAME("t_context_switch") "\n"
+        ".globl " T_ASSEMBLY_NAME("t_switch") "\n"
         ".p2align 2\n"
-        T_ASSEMBLY_NAME("t_context_switch") ":\n"
+        T_ASSEMBLY_NAME("t_switch") ":\n"
         "  sub sp, sp, #160\n"
         "  stp x19, x20, [sp, #0]\n"
         "  stp x21, x22, [sp, #16]\n"
@@ -419,35 +362,334 @@ __asm__(".text\n"
         "  ldp d12, d13, [sp, #128]\n"
         "  ldp d14, d15, [sp, #144]\n"
         "  add sp, sp, #160\n"
+        "  ret\n"
+        ".globl " T_ASSEMBLY_NAME("t_stack_call") "\n"
+        ".p2align 2\n"
+        T_ASSEMBLY_NAME("t_stack_call") ":\n"
+        "  stp x29, x30, [sp, #-16]!\n"
+        "  mov x29, sp\n"
+        "  and x9, x0, #-16\n"
+        "  mov sp, x9\n"
+        "  mov x0, x2\n"
+        "  blr x1\n"
+        "  mov sp, x29\n"
+        "  ldp x29, x30, [sp], #16\n"
         "  ret\n");
 
-static void t_context_start(struct t_context *context, void *low, size_t size, void (*entry)(void)) {
-  uint64_t *top = (uint64_t *)(((uintptr_t)low + size) & ~(uintptr_t)15);
+static void t_resume_point_start(struct t_resume_point *point, char *high, void (*entry)(void)) {
+  uint64_t *top = (uint64_t *)((uintptr_t)high & ~(uintptr_t)15);
   uint64_t *saved = top - 20;
   memset(saved, 0, 160);
   saved[11] = (uint64_t)(uintptr_t)entry;
-  context->stack_pointer = saved;
+  point->stack_pointer = saved;
 }
 #else
 #error "the runtime has no context switch for this processor"
 #endif
 
-struct t_coroutine {
-  struct t_context context;
-  struct t_context resumer;
-  void *stack;
-  int finished;
-  void (*code)(void *environment, uint64_t item);
+extern const uint64_t t_runtime_red_zone;
+
+#define T_FIRST_SEGMENT ((size_t)256 << 10)
+#define T_EXTENSION_SEGMENT ((size_t)8 << 20)
+#define T_STACK_LIMIT ((uint64_t)1 << 30)
+#define T_SEGMENTS_PER_CHUNK 256
+#define T_WARM_SEGMENTS 64
+
+#if defined(__linux__) && !defined(MADV_GUARD_INSTALL)
+#define MADV_GUARD_INSTALL 102
+#endif
+
+struct t_segment {
+  char *low;
+  char *high;
+  struct t_segment *deeper;
+  struct t_segment *next;
+};
+
+static pthread_once_t t_segments_once = PTHREAD_ONCE_INIT;
+static pthread_mutex_t t_segment_lock = PTHREAD_MUTEX_INITIALIZER;
+static size_t t_page_size;
+static size_t t_first_size;
+static size_t t_extension_size;
+static struct t_segment *t_warm_segments;
+static size_t t_warm_count;
+static struct t_segment *t_cold_segments;
+static char *t_chunk_next;
+static char *t_chunk_end;
+
+static size_t t_whole_pages(size_t size) { return (size + t_page_size - 1) / t_page_size * t_page_size; }
+
+static void t_segments_start(void) {
+  t_page_size = (size_t)sysconf(_SC_PAGESIZE);
+  size_t room = 2 * (size_t)t_runtime_red_zone;
+  t_first_size = t_whole_pages(room > T_FIRST_SEGMENT ? room : T_FIRST_SEGMENT);
+  t_extension_size = t_whole_pages(room > T_EXTENSION_SEGMENT ? room : T_EXTENSION_SEGMENT);
+}
+
+static char *t_map(size_t size) {
+  int flags = MAP_PRIVATE | MAP_ANON;
+#ifdef MAP_NORESERVE
+  flags |= MAP_NORESERVE;
+#endif
+#ifdef MAP_STACK
+  flags |= MAP_STACK;
+#endif
+  char *mapping = mmap(NULL, size, PROT_READ | PROT_WRITE, flags, -1, 0);
+  if (mapping == MAP_FAILED) t_out_of_memory();
+#ifdef MADV_NOHUGEPAGE
+  madvise(mapping, size, MADV_NOHUGEPAGE);
+#endif
+  return mapping;
+}
+
+static struct t_segment *t_segment_new(char *mapping, size_t size) {
+#ifdef __linux__
+  int guarded = madvise(mapping, t_page_size, MADV_GUARD_INSTALL) == 0;
+#else
+  int guarded = 0;
+#endif
+  if (!guarded && mprotect(mapping, t_page_size, PROT_NONE) != 0) t_out_of_memory();
+  struct t_segment *segment = malloc(sizeof *segment);
+  if (segment == NULL) t_out_of_memory();
+  segment->low = mapping + t_page_size;
+  segment->high = mapping + t_page_size + size;
+  segment->deeper = NULL;
+  segment->next = NULL;
+  return segment;
+}
+
+static void t_segment_clean(struct t_segment *segment) {
+#ifdef T_ADDRESS_SANITIZER
+  __asan_unpoison_memory_region(segment->low, (size_t)(segment->high - segment->low));
+#else
+  (void)segment;
+#endif
+}
+
+static struct t_segment *t_first_acquire(void) {
+  pthread_once(&t_segments_once, t_segments_start);
+  struct t_segment *segment = NULL;
+  char *mapping = NULL;
+  pthread_mutex_lock(&t_segment_lock);
+  if (t_warm_segments != NULL) {
+    segment = t_warm_segments;
+    t_warm_segments = segment->next;
+    t_warm_count -= 1;
+  } else if (t_cold_segments != NULL) {
+    segment = t_cold_segments;
+    t_cold_segments = segment->next;
+  } else {
+    if (t_chunk_next == t_chunk_end) {
+      size_t chunk = (t_page_size + t_first_size) * T_SEGMENTS_PER_CHUNK;
+      t_chunk_next = t_map(chunk);
+      t_chunk_end = t_chunk_next + chunk;
+    }
+    mapping = t_chunk_next;
+    t_chunk_next += t_page_size + t_first_size;
+  }
+  pthread_mutex_unlock(&t_segment_lock);
+  if (segment == NULL) segment = t_segment_new(mapping, t_first_size);
+  return segment;
+}
+
+static void t_first_release(struct t_segment *segment) {
+  t_segment_clean(segment);
+  pthread_mutex_lock(&t_segment_lock);
+  int is_warm = t_warm_count < T_WARM_SEGMENTS;
+  if (is_warm) {
+    segment->next = t_warm_segments;
+    t_warm_segments = segment;
+    t_warm_count += 1;
+  }
+  pthread_mutex_unlock(&t_segment_lock);
+  if (is_warm) return;
+#ifdef __APPLE__
+  madvise(segment->low, (size_t)(segment->high - segment->low), MADV_FREE);
+#else
+  madvise(segment->low, (size_t)(segment->high - segment->low), MADV_DONTNEED);
+#endif
+  pthread_mutex_lock(&t_segment_lock);
+  segment->next = t_cold_segments;
+  t_cold_segments = segment;
+  pthread_mutex_unlock(&t_segment_lock);
+}
+
+static struct t_segment *t_extension_acquire(void) {
+  pthread_once(&t_segments_once, t_segments_start);
+  return t_segment_new(t_map(t_page_size + t_extension_size), t_extension_size);
+}
+
+static void t_extension_release(struct t_segment *segment) {
+  t_segment_clean(segment);
+  munmap(segment->low - t_page_size, t_page_size + (size_t)(segment->high - segment->low));
+  free(segment);
+}
+
+static void t_stack_begin(struct t_stack *stack) {
+  struct t_segment *segment = t_first_acquire();
+  stack->segment = segment;
+  stack->limit = (uint64_t)(uintptr_t)segment->low + t_runtime_red_zone;
+  stack->depth = (uint64_t)(segment->high - segment->low);
+}
+
+static void t_stack_end(struct t_stack *stack) {
+  struct t_segment *first = stack->segment;
+  if (first->deeper != NULL) t_extension_release(first->deeper);
+  first->deeper = NULL;
+  t_first_release(first);
+}
+
+struct t_segment_call {
+  struct t_stack *stack;
+  void (*function)(struct t_stack *stack, void *arguments);
+  void *arguments;
+#ifdef T_ADDRESS_SANITIZER
+  const void *caller_bottom;
+  size_t caller_size;
+#endif
+};
+
+static void t_segment_call_run(void *argument) {
+  struct t_segment_call *call = argument;
+#ifdef T_ADDRESS_SANITIZER
+  __sanitizer_finish_switch_fiber(NULL, &call->caller_bottom, &call->caller_size);
+#endif
+  call->function(call->stack, call->arguments);
+#ifdef T_ADDRESS_SANITIZER
+  __sanitizer_start_switch_fiber(NULL, call->caller_bottom, call->caller_size);
+#endif
+}
+
+static void t_on_segment(struct t_stack *stack, void (*function)(struct t_stack *stack, void *arguments),
+                         void *arguments) {
+  struct t_segment *segment = stack->segment;
+  struct t_segment_call call;
+  call.stack = stack;
+  call.function = function;
+  call.arguments = arguments;
+#ifdef T_ADDRESS_SANITIZER
+  void *fake = NULL;
+  __sanitizer_start_switch_fiber(&fake, segment->low, (size_t)(segment->high - segment->low));
+#endif
+  t_stack_call(segment->high, t_segment_call_run, &call);
+#ifdef T_ADDRESS_SANITIZER
+  __sanitizer_finish_switch_fiber(fake, NULL, NULL);
+#endif
+}
+
+void t_runtime_grow(struct t_stack *stack, void (*function)(struct t_stack *stack, void *arguments),
+                    void *arguments) {
+  struct t_segment *current = stack->segment;
+  struct t_segment *next = current->deeper;
+  if (next == NULL) {
+    if (stack->depth + t_extension_size > T_STACK_LIMIT) t_stack_overflow();
+    next = t_extension_acquire();
+    current->deeper = next;
+  }
+  uint64_t limit = stack->limit;
+  uint64_t size = (uint64_t)(next->high - next->low);
+  stack->segment = next;
+  stack->limit = (uint64_t)(uintptr_t)next->low + t_runtime_red_zone;
+  stack->depth += size;
+  t_on_segment(stack, function, arguments);
+  stack->depth -= size;
+  stack->limit = limit;
+  stack->segment = current;
+  if (next->deeper != NULL) {
+    t_extension_release(next->deeper);
+    next->deeper = NULL;
+  }
+}
+
+struct t_fiber {
+  struct t_resume_point suspended;
+  struct t_resume_point *switcher;
+  struct t_stack stack;
+  void (*code)(struct t_stack *stack, void *environment, uint64_t item);
   void *environment;
   uint64_t item;
+  int finished;
 #ifdef T_ADDRESS_SANITIZER
-  const void *resumer_stack;
-  size_t resumer_stack_size;
+  const void *suspended_bottom;
+  size_t suspended_size;
+  const void *switcher_bottom;
+  size_t switcher_size;
 #endif
 #ifdef T_THREAD_SANITIZER
-  void *fiber;
-  void *resumer_fiber;
+  void *sanitizer_fiber;
+  void *suspended_sanitizer_fiber;
+  void *switcher_sanitizer_fiber;
 #endif
+};
+
+static void t_fiber_begin(struct t_fiber *fiber, void (*code)(struct t_stack *stack, void *environment, uint64_t item),
+                          void *environment, uint64_t item, void (*entry)(void)) {
+  t_stack_begin(&fiber->stack);
+  fiber->code = code;
+  fiber->environment = environment;
+  fiber->item = item;
+  fiber->finished = 0;
+  fiber->switcher = NULL;
+  t_resume_point_start(&fiber->suspended, fiber->stack.segment->high, entry);
+#ifdef T_ADDRESS_SANITIZER
+  fiber->suspended_bottom = fiber->stack.segment->low;
+  fiber->suspended_size = (size_t)(fiber->stack.segment->high - fiber->stack.segment->low);
+#endif
+#ifdef T_THREAD_SANITIZER
+  fiber->sanitizer_fiber = __tsan_create_fiber(0);
+  fiber->suspended_sanitizer_fiber = fiber->sanitizer_fiber;
+#endif
+}
+
+static void t_fiber_end(struct t_fiber *fiber) {
+#ifdef T_THREAD_SANITIZER
+  __tsan_destroy_fiber(fiber->sanitizer_fiber);
+#endif
+  t_stack_end(&fiber->stack);
+}
+
+static void t_fiber_enter(struct t_fiber *fiber, struct t_resume_point *switcher) {
+  fiber->switcher = switcher;
+#ifdef T_ADDRESS_SANITIZER
+  void *fake = NULL;
+  __sanitizer_start_switch_fiber(&fake, fiber->suspended_bottom, fiber->suspended_size);
+#endif
+#ifdef T_THREAD_SANITIZER
+  fiber->switcher_sanitizer_fiber = __tsan_get_current_fiber();
+  __tsan_switch_to_fiber(fiber->suspended_sanitizer_fiber, 0);
+#endif
+  t_switch(switcher, &fiber->suspended);
+#ifdef T_ADDRESS_SANITIZER
+  __sanitizer_finish_switch_fiber(fake, &fiber->suspended_bottom, &fiber->suspended_size);
+#endif
+}
+
+static void t_fiber_leave(struct t_fiber *fiber) {
+#ifdef T_ADDRESS_SANITIZER
+  void *fake = NULL;
+  __sanitizer_start_switch_fiber(fiber->finished ? NULL : &fake, fiber->switcher_bottom,
+                                 fiber->switcher_size);
+#endif
+#ifdef T_THREAD_SANITIZER
+  fiber->suspended_sanitizer_fiber = __tsan_get_current_fiber();
+  __tsan_switch_to_fiber(fiber->switcher_sanitizer_fiber, 0);
+#endif
+  t_switch(&fiber->suspended, fiber->switcher);
+#ifdef T_ADDRESS_SANITIZER
+  __sanitizer_finish_switch_fiber(fake, &fiber->switcher_bottom, &fiber->switcher_size);
+#endif
+}
+
+static void t_fiber_run(struct t_fiber *fiber) {
+#ifdef T_ADDRESS_SANITIZER
+  __sanitizer_finish_switch_fiber(NULL, &fiber->switcher_bottom, &fiber->switcher_size);
+#endif
+  fiber->code(&fiber->stack, fiber->environment, fiber->item);
+}
+
+struct t_coroutine {
+  struct t_fiber fiber;
+  struct t_resume_point resumer;
 };
 
 static _Thread_local struct t_coroutine *t_coroutine_self;
@@ -462,47 +704,19 @@ __attribute__((noinline)) static void t_coroutine_current_set(struct t_coroutine
   t_coroutine_self = coroutine;
 }
 
-static void t_coroutine_leave(struct t_coroutine *coroutine) {
-#ifdef T_ADDRESS_SANITIZER
-  void *fake = NULL;
-  __sanitizer_start_switch_fiber(coroutine->finished ? NULL : &fake, coroutine->resumer_stack,
-                                 coroutine->resumer_stack_size);
-#endif
-#ifdef T_THREAD_SANITIZER
-  __tsan_switch_to_fiber(coroutine->resumer_fiber, 0);
-#endif
-  t_context_switch(&coroutine->context, &coroutine->resumer);
-#ifdef T_ADDRESS_SANITIZER
-  __sanitizer_finish_switch_fiber(fake, &coroutine->resumer_stack,
-                                  &coroutine->resumer_stack_size);
-#endif
-}
-
 static void t_coroutine_entry(void) {
   struct t_coroutine *coroutine = t_coroutine_current();
-#ifdef T_ADDRESS_SANITIZER
-  __sanitizer_finish_switch_fiber(NULL, &coroutine->resumer_stack,
-                                  &coroutine->resumer_stack_size);
-#endif
-  coroutine->code(coroutine->environment, coroutine->item);
-  coroutine->finished = 1;
-  t_coroutine_leave(coroutine);
+  t_fiber_run(&coroutine->fiber);
+  coroutine->fiber.finished = 1;
+  t_fiber_leave(&coroutine->fiber);
   t_runtime_compiler_bug();
 }
 
-uint64_t t_runtime_coroutine_start(void (*code)(void *environment, uint64_t item), void *environment,
-                                  uint64_t item) {
+uint64_t t_runtime_coroutine_start(void (*code)(struct t_stack *stack, void *environment, uint64_t item),
+                                  void *environment, uint64_t item) {
   struct t_coroutine *coroutine = malloc(sizeof *coroutine);
   if (coroutine == NULL) t_out_of_memory();
-  coroutine->stack = t_stack_acquire();
-  coroutine->finished = 0;
-  coroutine->code = code;
-  coroutine->environment = environment;
-  coroutine->item = item;
-  t_context_start(&coroutine->context, coroutine->stack, t_stack_bytes, t_coroutine_entry);
-#ifdef T_THREAD_SANITIZER
-  coroutine->fiber = __tsan_create_fiber(0);
-#endif
+  t_fiber_begin(&coroutine->fiber, code, environment, item, t_coroutine_entry);
   return (uint64_t)coroutine;
 }
 
@@ -510,24 +724,10 @@ uint8_t t_runtime_coroutine_resume(uint64_t handle) {
   struct t_coroutine *coroutine = (struct t_coroutine *)handle;
   struct t_coroutine *resumer = t_coroutine_current();
   t_coroutine_current_set(coroutine);
-#ifdef T_ADDRESS_SANITIZER
-  void *fake = NULL;
-  __sanitizer_start_switch_fiber(&fake, coroutine->stack, t_stack_bytes);
-#endif
-#ifdef T_THREAD_SANITIZER
-  coroutine->resumer_fiber = __tsan_get_current_fiber();
-  __tsan_switch_to_fiber(coroutine->fiber, 0);
-#endif
-  t_context_switch(&coroutine->resumer, &coroutine->context);
-#ifdef T_ADDRESS_SANITIZER
-  __sanitizer_finish_switch_fiber(fake, NULL, NULL);
-#endif
+  t_fiber_enter(&coroutine->fiber, &coroutine->resumer);
   t_coroutine_current_set(resumer);
-  if (!coroutine->finished) return 1;
-#ifdef T_THREAD_SANITIZER
-  __tsan_destroy_fiber(coroutine->fiber);
-#endif
-  t_stack_release(coroutine->stack);
+  if (!coroutine->fiber.finished) return 1;
+  t_fiber_end(&coroutine->fiber);
   free(coroutine);
   return 0;
 }
@@ -535,7 +735,7 @@ uint8_t t_runtime_coroutine_resume(uint64_t handle) {
 void t_runtime_coroutine_suspend(void) {
   struct t_coroutine *coroutine = t_coroutine_current();
   if (coroutine == NULL) t_runtime_compiler_bug();
-  t_coroutine_leave(coroutine);
+  t_fiber_leave(&coroutine->fiber);
 }
 
 struct t_shared {
@@ -608,12 +808,12 @@ static void t_descriptors_poll(const int32_t *descriptors, size_t count) {
 }
 
 struct t_branch {
-  void (*run)(void *environment);
+  void (*run)(struct t_stack *stack, void *environment);
   void *environment;
 };
 
 struct t_job {
-  void (*run)(void *environment);
+  void (*run)(struct t_stack *stack, void *environment);
   void *environment;
   atomic_int done;
   int offered;
@@ -628,6 +828,7 @@ struct t_worker {
   _Alignas(64) _Atomic(int64_t) top;
   _Alignas(64) _Atomic(int64_t) bottom;
   uint64_t random;
+  struct t_stack stack;
   _Alignas(64) _Atomic(struct t_job *) jobs[T_QUEUE];
 };
 
@@ -724,8 +925,8 @@ static void t_wake(int everyone) {
   pthread_mutex_unlock(&t_pool_lock);
 }
 
-static void t_run_taken(struct t_job *job) {
-  job->run(job->environment);
+static void t_run_taken(struct t_stack *stack, struct t_job *job) {
+  job->run(stack, job->environment);
   atomic_store(&job->done, 1);
   t_wake(1);
 }
@@ -754,12 +955,12 @@ static void t_sleep(atomic_int *done, int runner) {
   pthread_mutex_unlock(&t_pool_lock);
 }
 
-static void t_wait_for(struct t_worker *self, struct t_job *job) {
+static void t_wait_for(struct t_stack *stack, struct t_worker *self, struct t_job *job) {
   unsigned idle = 0;
   while (!atomic_load_explicit(&job->done, memory_order_acquire)) {
     struct t_job *other = t_find(self);
     if (other != NULL) {
-      t_run_taken(other);
+      t_run_taken(stack, other);
       idle = 0;
     } else if (++idle < 40) {
       t_rest(idle);
@@ -784,6 +985,8 @@ static void t_runner_signals(void) {
   pthread_sigmask(SIG_SETMASK, &all, NULL);
 }
 
+static void t_job_run(struct t_stack *stack, void *job) { t_run_taken(stack, job); }
+
 static void t_run_until(struct t_worker *self, atomic_int *done) {
   unsigned idle = 0;
   while (done == NULL || !atomic_load(done)) {
@@ -793,7 +996,7 @@ static void t_run_until(struct t_worker *self, atomic_int *done) {
       t_task_run(task);
       idle = 0;
     } else if (job != NULL) {
-      t_run_taken(job);
+      t_on_segment(&self->stack, t_job_run, job);
       idle = 0;
     } else if (++idle < 40) {
       t_rest(idle);
@@ -808,7 +1011,7 @@ static void *t_worker_main(void *argument) {
   struct t_worker *self = argument;
   t_self = self;
   t_runner_signals();
-  t_thread_signal_stack_install();
+  t_stack_begin(&self->stack);
   t_run_until(self, NULL);
   return NULL;
 }
@@ -837,7 +1040,8 @@ static void t_pool_start(void) {
   pthread_attr_destroy(&attributes);
 }
 
-static void t_fork(struct t_worker *self, const struct t_branch *branches, size_t count) {
+static void t_fork(struct t_stack *stack, struct t_worker *self, const struct t_branch *branches,
+                   size_t count) {
   struct t_job jobs[T_FORK];
   int offered = 0;
   for (size_t index = count - 1; index >= 1; index--) {
@@ -849,47 +1053,48 @@ static void t_fork(struct t_worker *self, const struct t_branch *branches, size_
     offered |= job->offered;
   }
   if (offered) t_wake(0);
-  branches[0].run(branches[0].environment);
+  branches[0].run(stack, branches[0].environment);
   for (size_t index = 1; index < count; index++) {
     struct t_job *job = &jobs[index - 1];
     if (!job->offered) {
-      job->run(job->environment);
+      job->run(stack, job->environment);
       continue;
     }
-    struct t_job *back = t_take_back(self);
-    if (back == job) job->run(job->environment);
-    else if (back == NULL) t_wait_for(self, job);
+    struct t_job *taken = t_take_back(self);
+    if (taken == job) job->run(stack, job->environment);
+    else if (taken == NULL) t_wait_for(stack, self, job);
     else t_runtime_compiler_bug();
   }
 }
 
-void t_runtime_parallel(const struct t_branch *branches, uint64_t count) {
+void t_runtime_parallel(struct t_stack *stack, const struct t_branch *branches, uint64_t count) {
   pthread_once(&t_pool_once, t_pool_start);
   if (t_pool_workers == 1) {
-    for (uint64_t index = 0; index < count; index++) branches[index].run(branches[index].environment);
+    for (uint64_t index = 0; index < count; index++)
+      branches[index].run(stack, branches[index].environment);
     return;
   }
   struct t_worker *self = t_worker_self();
   while (count > 0) {
     size_t batch = count > T_FORK + 1 ? T_FORK + 1 : (size_t)count;
-    t_fork(self, branches, batch);
+    t_fork(stack, self, branches, batch);
     branches += batch;
     count -= batch;
   }
 }
 
 struct t_range {
-  void (*body)(void *environment, uint64_t first, uint64_t last);
+  void (*body)(struct t_stack *stack, void *environment, uint64_t first, uint64_t last);
   void *environment;
   uint64_t first;
   uint64_t last;
   uint64_t size;
 };
 
-static void t_range_run(void *argument) {
+static void t_range_run(struct t_stack *stack, void *argument) {
   const struct t_range *range = argument;
   if (range->last - range->first < range->size) {
-    range->body(range->environment, range->first, range->last);
+    range->body(stack, range->environment, range->first, range->last);
     return;
   }
   uint64_t middle = range->first + (range->last - range->first) / 2;
@@ -898,24 +1103,22 @@ static void t_range_run(void *argument) {
   low.last = middle;
   high.first = middle + 1;
   const struct t_branch halves[2] = {{t_range_run, &low}, {t_range_run, &high}};
-  t_runtime_parallel(halves, 2);
+  t_runtime_parallel(stack, halves, 2);
 }
 
-void t_runtime_parallel_range(void (*body)(void *environment, uint64_t first, uint64_t last),
+void t_runtime_parallel_range(struct t_stack *stack,
+                              void (*body)(struct t_stack *stack, void *environment, uint64_t first,
+                                           uint64_t last),
                               void *environment, uint64_t first, uint64_t last) {
   struct t_range whole = {body, environment, first, last, ((last - first) >> 8) + 1};
-  t_range_run(&whole);
+  t_range_run(stack, &whole);
 }
 
 struct t_wait_slot;
 
 struct t_task {
-  struct t_context context;
-  void *stack;
+  struct t_fiber fiber;
   struct t_group *group;
-  void (*code)(void *environment, uint64_t item);
-  void *environment;
-  uint64_t item;
   struct t_task *next;
   uint64_t wait_key;
   _Atomic(struct t_wait_slot *) cancellable;
@@ -923,19 +1126,7 @@ struct t_task {
   _Atomic(pthread_t) thread;
   atomic_int blocking;
   atomic_int state;
-  int finished;
   struct t_coroutine *coroutine;
-#ifdef T_ADDRESS_SANITIZER
-  const void *suspended_stack;
-  size_t suspended_stack_size;
-  const void *thread_stack;
-  size_t thread_stack_size;
-#endif
-#ifdef T_THREAD_SANITIZER
-  void *fiber;
-  void *suspended_fiber;
-  void *thread_fiber;
-#endif
 };
 
 struct t_group {
@@ -953,16 +1144,11 @@ struct t_group {
 enum { T_RUNNING, T_PARKING, T_PARKED };
 
 static _Thread_local struct t_task *t_task_running;
-static _Thread_local struct t_context t_thread_context;
+static _Thread_local struct t_resume_point t_thread_resume_point;
 
 __attribute__((noinline)) static struct t_task *t_task_self(void) {
   __asm__ __volatile__("");
   return t_task_running;
-}
-
-__attribute__((noinline)) static struct t_context *t_thread_context_self(void) {
-  __asm__ __volatile__("");
-  return &t_thread_context;
 }
 
 static pthread_mutex_t t_run_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -1000,26 +1186,12 @@ static void t_task_run(struct t_task *task) {
   t_task_running = task;
   t_coroutine_self = task->coroutine;
   atomic_store(&task->thread, pthread_self());
-#ifdef T_ADDRESS_SANITIZER
-  void *fake = NULL;
-  __sanitizer_start_switch_fiber(&fake, task->suspended_stack, task->suspended_stack_size);
-#endif
-#ifdef T_THREAD_SANITIZER
-  task->thread_fiber = __tsan_get_current_fiber();
-  __tsan_switch_to_fiber(task->suspended_fiber, 0);
-#endif
-  t_context_switch(&t_thread_context, &task->context);
-#ifdef T_ADDRESS_SANITIZER
-  __sanitizer_finish_switch_fiber(fake, &task->suspended_stack, &task->suspended_stack_size);
-#endif
+  t_fiber_enter(&task->fiber, &t_thread_resume_point);
   t_task_running = NULL;
   task->coroutine = t_coroutine_self;
   t_coroutine_self = NULL;
-  if (task->finished) {
-#ifdef T_THREAD_SANITIZER
-    __tsan_destroy_fiber(task->fiber);
-#endif
-    t_stack_release(task->stack);
+  if (task->fiber.finished) {
+    t_fiber_end(&task->fiber);
     free(task);
     return;
   }
@@ -1027,26 +1199,10 @@ static void t_task_run(struct t_task *task) {
   if (!atomic_compare_exchange_strong(&task->state, &state, T_PARKED)) t_run_push(task);
 }
 
-static void t_task_switch(struct t_task *task) {
-#ifdef T_ADDRESS_SANITIZER
-  void *fake = NULL;
-  __sanitizer_start_switch_fiber(task->finished ? NULL : &fake, task->thread_stack,
-                                 task->thread_stack_size);
-#endif
-#ifdef T_THREAD_SANITIZER
-  task->suspended_fiber = __tsan_get_current_fiber();
-  __tsan_switch_to_fiber(task->thread_fiber, 0);
-#endif
-  t_context_switch(&task->context, t_thread_context_self());
-#ifdef T_ADDRESS_SANITIZER
-  __sanitizer_finish_switch_fiber(fake, &task->thread_stack, &task->thread_stack_size);
-#endif
-}
-
 static void t_task_park(struct t_task *task, pthread_mutex_t *lock) {
   atomic_store(&task->state, T_PARKING);
   pthread_mutex_unlock(lock);
-  t_task_switch(task);
+  t_fiber_leave(&task->fiber);
 }
 
 static void t_task_ready(struct t_task *task) {
@@ -1065,7 +1221,6 @@ static int t_spares_called;
 static void *t_spare_main(void *argument) {
   t_self = argument;
   t_runner_signals();
-  t_thread_signal_stack_install();
   for (;;) {
     struct t_task *task = t_run_pop();
     if (task != NULL) t_task_run(task);
@@ -1685,10 +1840,7 @@ uint64_t t_runtime_tasks_open(void) { return (uint64_t)(uintptr_t)t_group_new(t_
 
 static void t_task_entry(void) {
   struct t_task *task = t_task_self();
-#ifdef T_ADDRESS_SANITIZER
-  __sanitizer_finish_switch_fiber(NULL, &task->thread_stack, &task->thread_stack_size);
-#endif
-  task->code(task->environment, task->item);
+  t_fiber_run(&task->fiber);
   struct t_group *group = task->group;
   struct t_task *joiner = NULL;
   pthread_mutex_lock(&group->lock);
@@ -1704,35 +1856,23 @@ static void t_task_entry(void) {
   }
   pthread_mutex_unlock(&group->lock);
   if (joiner != NULL) t_task_ready(joiner);
-  task->finished = 1;
-  t_task_switch(task);
+  task->fiber.finished = 1;
+  t_fiber_leave(&task->fiber);
   t_runtime_compiler_bug();
 }
 
-static struct t_task *t_task_new(struct t_group *group, void (*code)(void *environment, uint64_t item),
+static struct t_task *t_task_new(struct t_group *group,
+                                 void (*code)(struct t_stack *stack, void *environment, uint64_t item),
                                  void *environment, uint64_t item) {
   struct t_task *task = malloc(sizeof *task);
   if (task == NULL) t_out_of_memory();
-  task->stack = t_stack_acquire();
-  t_context_start(&task->context, task->stack, t_stack_bytes, t_task_entry);
+  t_fiber_begin(&task->fiber, code, environment, item, t_task_entry);
   task->group = group;
-  task->code = code;
-  task->environment = environment;
-  task->item = item;
   task->next = NULL;
   atomic_init(&task->blocking, 0);
   atomic_init(&task->state, T_RUNNING);
   atomic_init(&task->cancellable, NULL);
-  task->finished = 0;
   task->coroutine = NULL;
-#ifdef T_ADDRESS_SANITIZER
-  task->suspended_stack = task->stack;
-  task->suspended_stack_size = t_stack_bytes;
-#endif
-#ifdef T_THREAD_SANITIZER
-  task->fiber = __tsan_create_fiber(0);
-  task->suspended_fiber = task->fiber;
-#endif
   pthread_mutex_lock(&group->lock);
   group->running += 1;
   task->sibling = group->tasks;
@@ -1741,7 +1881,8 @@ static struct t_task *t_task_new(struct t_group *group, void (*code)(void *envir
   return task;
 }
 
-uint8_t t_runtime_tasks_spawn(uint64_t handle, void (*code)(void *environment, uint64_t item),
+uint8_t t_runtime_tasks_spawn(uint64_t handle,
+                              void (*code)(struct t_stack *stack, void *environment, uint64_t item),
                               void *environment, uint64_t item) {
   struct t_group *group = (struct t_group *)(uintptr_t)handle;
   if (atomic_load_explicit(&group->cancelled, memory_order_acquire)) return 0;
@@ -1801,24 +1942,25 @@ int32_t t_runtime_tasks_cancel(uint64_t handle) {
 }
 
 struct t_root {
-  void (*code)(void *environment, uint64_t item);
+  void (*code)(struct t_stack *stack, void *environment, uint64_t item);
   void *environment;
   atomic_int ended;
 };
 
-static void t_root_run(void *argument, uint64_t item) {
+static void t_root_run(struct t_stack *stack, void *argument, uint64_t item) {
   struct t_root *root = argument;
-  root->code(root->environment, item);
+  root->code(stack, root->environment, item);
   atomic_store(&root->ended, 1);
   t_wake(1);
 }
 
-void t_runtime_main(void (*code)(void *environment, uint64_t item), void *environment,
-                    uint32_t requested_workers) {
+void t_runtime_main(void (*code)(struct t_stack *stack, void *environment, uint64_t item),
+                    void *environment, uint32_t requested_workers) {
   t_install_signal_dispositions();
   t_requested_workers = requested_workers;
   t_self = &t_workers[0];
   t_workers[0].random = 1;
+  t_stack_begin(&t_workers[0].stack);
   atomic_store(&t_worker_count, 1);
   struct t_root root = {code, environment, 0};
   t_task_run(t_task_new(t_group_new(NULL), t_root_run, &root, 0));
@@ -1860,7 +2002,7 @@ int32_t t_runtime_tasks_unlock(uint64_t mutex) {
 }
 
 int32_t t_runtime_tasks_yield(void) {
-  t_task_switch(t_task_self());
+  t_fiber_leave(&t_task_self()->fiber);
   return 0;
 }
 
@@ -1973,42 +2115,67 @@ int32_t t_runtime_signals_wait(const int32_t *signals, size_t count) {
 
 let resolving =
   {|
-long t_runtime_addresses_of_host(const char *host, void *room, size_t size) {
-  struct addrinfo wanted;
-  memset(&wanted, 0, sizeof wanted);
-  wanted.ai_socktype = SOCK_STREAM;
-  struct addrinfo *found = NULL;
-  int failed = getaddrinfo(host, NULL, &wanted, &found);
+struct t_lookup {
+  const char *host;
+  uint8_t *room;
+  size_t size;
+  long written;
+};
+
+static void t_lookup_run(struct t_stack *stack, void *argument) {
+  (void)stack;
+  struct t_lookup *lookup = argument;
+  struct addrinfo hints;
+  memset(&hints, 0, sizeof hints);
+  hints.ai_socktype = SOCK_STREAM;
+  struct addrinfo *addresses = NULL;
+  int failed = getaddrinfo(lookup->host, NULL, &hints, &addresses);
   if (failed != 0) {
 #ifdef EAI_NODATA
-    if (failed == EAI_NODATA) return -1;
+    if (failed == EAI_NODATA) {
+      lookup->written = -1;
+      return;
+    }
 #endif
-    return failed == EAI_NONAME ? -1 : -2;
+    lookup->written = failed == EAI_NONAME ? -1 : -2;
+    return;
   }
-  uint8_t *bytes = room;
   size_t used = 0;
-  for (const struct addrinfo *each = found; each != NULL; each = each->ai_next) {
-    if (each->ai_family == AF_INET && size - used >= 5) {
-      bytes[used] = 4;
-      memcpy(bytes + used + 1, &((const struct sockaddr_in *)(const void *)each->ai_addr)->sin_addr, 4);
+  for (const struct addrinfo *address = addresses; address != NULL; address = address->ai_next) {
+    if (address->ai_family == AF_INET && lookup->size - used >= 5) {
+      lookup->room[used] = 4;
+      memcpy(lookup->room + used + 1,
+             &((const struct sockaddr_in *)(const void *)address->ai_addr)->sin_addr, 4);
       used += 5;
-    } else if (each->ai_family == AF_INET6 && size - used >= 17) {
-      bytes[used] = 6;
-      memcpy(bytes + used + 1, &((const struct sockaddr_in6 *)(const void *)each->ai_addr)->sin6_addr, 16);
+    } else if (address->ai_family == AF_INET6 && lookup->size - used >= 17) {
+      lookup->room[used] = 6;
+      memcpy(lookup->room + used + 1,
+             &((const struct sockaddr_in6 *)(const void *)address->ai_addr)->sin6_addr, 16);
       used += 17;
     }
   }
-  freeaddrinfo(found);
-  return (long)used;
+  freeaddrinfo(addresses);
+  lookup->written = (long)used;
+}
+
+long t_runtime_addresses_of_host(const char *host, void *room, size_t size) {
+  struct t_lookup lookup = {host, room, size, 0};
+  struct t_stack stack;
+  stack.segment = t_extension_acquire();
+  stack.limit = 0;
+  stack.depth = 0;
+  t_on_segment(&stack, t_lookup_run, &lookup);
+  t_extension_release(stack.segment);
+  return lookup.written;
 }
 |}
 
 let tests_table =
   {|
-typedef void (*t_test)(void);
+typedef void (*t_test)(struct t_stack *stack);
 const t_test *t_runtime_tests;
 
-void t_runtime_run_test(uint32_t index) { t_runtime_tests[index](); }
+void t_runtime_run_test(struct t_stack *stack, uint32_t index) { t_runtime_tests[index](stack); }
 |}
 
 let runtime ~tests =
@@ -2017,6 +2184,7 @@ let runtime ~tests =
       (if tests then "#define T_TESTS 1\n" else "");
       headers;
       Emit_c.anchor_struct;
+      Emit_c.stack_struct;
       failing;
       allocation;
       threads;
@@ -2029,14 +2197,15 @@ let starting ?(before_start = "") ~declarations ~requested_workers root_call =
     "typedef __INT32_TYPE__ int32_t;\n\
      typedef __UINT32_TYPE__ uint32_t;\n\
      typedef __UINT64_TYPE__ uint64_t;\n\
-     void t_runtime_main(void (*code)(void *environment, uint64_t item), void *environment,\n\
-    \                    uint32_t requested_workers);\n\
+     struct t_stack;\n\
+     void t_runtime_main(void (*code)(struct t_stack *stack, void *environment, uint64_t item),\n\
+    \                    void *environment, uint32_t requested_workers);\n\
      %sstruct t_program {\n\
     \  int32_t count;\n\
     \  void *arguments;\n\
     \  int32_t status;\n\
      };\n\
-     static void t_program_run(void *environment, uint64_t item) {\n\
+     static void t_program_run(struct t_stack *stack, void *environment, uint64_t item) {\n\
     \  struct t_program *program = environment;\n\
     \  (void)item;\n\
     \  %s;\n\
@@ -2050,37 +2219,39 @@ let starting ?(before_start = "") ~declarations ~requested_workers root_call =
 
 let main_calling entry =
   starting
-    ~declarations:(Printf.sprintf "int32_t %s(void);\n" entry)
+    ~declarations:(Printf.sprintf "int32_t %s(struct t_stack *stack);\n" entry)
     ~requested_workers:0
-    (Printf.sprintf "program->status = %s()" entry)
+    (Printf.sprintf "program->status = %s(stack)" entry)
 
 let tests_calling ~time_limit_ms ~runner tests =
   let test_declarations =
-    String.concat "" (List.map (fun symbol -> Printf.sprintf "void %s(void);\n" symbol) tests)
+    String.concat ""
+      (List.map (fun symbol -> Printf.sprintf "void %s(struct t_stack *stack);\n" symbol) tests)
   in
   starting
     ~declarations:
       (Printf.sprintf
-         "typedef void (*t_test)(void);\n\
+         "typedef void (*t_test)(struct t_stack *stack);\n\
           extern const t_test *t_runtime_tests;\n\
-          int32_t %s(uint32_t count, uint32_t time_limit_milliseconds);\n\
+          int32_t %s(struct t_stack *stack, uint32_t count, uint32_t time_limit_milliseconds);\n\
           %sstatic const t_test t_tests[] = { %s };\n"
          runner test_declarations
          (if tests = [] then "0" else String.concat ", " tests))
     ~before_start:"  t_runtime_tests = t_tests;\n" ~requested_workers:1
-    (Printf.sprintf "program->status = %s(%d, %d)" runner (List.length tests) time_limit_ms)
+    (Printf.sprintf "program->status = %s(stack, %d, %d)" runner (List.length tests) time_limit_ms)
 
 let evaluator_calling entry =
   starting
-    ~declarations:(Printf.sprintf "void %s(void);\n" entry)
+    ~declarations:(Printf.sprintf "void %s(struct t_stack *stack);\n" entry)
     ~requested_workers:1
-    (Printf.sprintf "(void)program;\n  %s()" entry)
+    (Printf.sprintf "(void)program;\n  %s(stack)" entry)
 
 let program_calling entry =
   starting
-    ~declarations:(Printf.sprintf "int32_t %s(int32_t count, void *arguments);\n" entry)
+    ~declarations:
+      (Printf.sprintf "int32_t %s(struct t_stack *stack, int32_t count, void *arguments);\n" entry)
     ~requested_workers:0
-    (Printf.sprintf "program->status = %s(program->count, program->arguments)" entry)
+    (Printf.sprintf "program->status = %s(stack, program->count, program->arguments)" entry)
 
 module For_testing = struct
   let main_calling = main_calling

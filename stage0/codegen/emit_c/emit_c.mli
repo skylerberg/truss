@@ -23,6 +23,7 @@ val failures : fragment -> (failure * site) list
 val text : fragment -> string
 val file : Memory_layout.env -> build -> (fragment * linkage) list -> string
 val anchor_struct : string
+val stack_struct : string
 val runtime_declarations : string
 val anchor_symbol : Path.t -> string
 

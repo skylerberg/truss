@@ -71,6 +71,7 @@ val strict : string list lazy_t
 val counter : int ref
 val cache : Build.cache lazy_t
 val settings : Build.settings lazy_t
+val release_settings : Build.settings lazy_t
 val worker_counts : int list
 
 val run_program :
@@ -91,14 +92,29 @@ val expect_status :
 val example : Path.module_
 val example_file : Path.file
 val checked_standard : Engine.t lazy_t
-val load_files : ?results:Compile.results -> (Path.file * string) list -> Query.context * Compile.t
-val load : ?results:Compile.results -> string -> Query.context * Compile.t
+
+val load_files :
+  ?results:Compile.results ->
+  ?settings:Build.settings lazy_t ->
+  (Path.file * string) list ->
+  Query.context * Compile.t
+
+val load :
+  ?results:Compile.results -> ?settings:Build.settings lazy_t -> string -> Query.context * Compile.t
+
 val tests_in : Query.context -> Path.module_ -> Path.t list
 val tests_of : Query.context -> Path.t list
 val run_source : string -> string
 val expect_output : string -> String.t -> unit
 val passes : string -> string -> unit
-val run_main : ?arguments:string list -> ?input:string -> string -> int * string * string
+
+val run_main :
+  ?arguments:string list ->
+  ?input:string ->
+  ?settings:Build.settings lazy_t ->
+  string ->
+  int * string * string
+
 val drop_shapes : (string * Memory_layout.shape) list
 val standard_context : Monomorphic.context
 val standard : string -> string -> ?arguments:Ground.argument list -> unit -> Ground.ty

@@ -273,6 +273,58 @@ let resolve text name =
   scan 0;
   Buffer.contents buffer
 
+let segment_check (context : C_types.context) ~current ~symbol ~names ~types ~result ~returns =
+  let call = symbol ^ "_Call" and on_segment = symbol ^ "_On_segment" in
+  let fields =
+    List.mapi (fun position ty -> (Printf.sprintf "f_%d" position, c_ty context current ty)) types
+  in
+  let result_type = if returns then Option.map (c_ty context current) result else None in
+  let members =
+    List.map (fun (field, c_type) -> Printf.sprintf "  %s %s;\n" c_type field) fields
+    @
+    match result_type with
+    | Some c_type -> [ Printf.sprintf "  %s f_result;\n" c_type ]
+    | None -> []
+  in
+  let is_packed = members <> [] in
+  let invoke =
+    Printf.sprintf "%s(%s)" symbol
+      (String.concat ", " ("t_stack" :: List.map (fun (field, _) -> "t_call->" ^ field) fields))
+  in
+  let on_segment_body =
+    if is_packed then
+      Printf.sprintf "  struct %s *t_call = arguments;\n  %s%s;\n" call
+        (if Option.is_some result_type then "t_call->f_result = " else "")
+        invoke
+    else Printf.sprintf "  (void)arguments;\n  %s;\n" invoke
+  in
+  context.statics <-
+    ((if is_packed then Printf.sprintf "struct %s {\n%s};\n" call (String.concat "" members) else "")
+    ^ Printf.sprintf
+        "__attribute__((unused)) static void %s(struct t_stack *t_stack, void *arguments) {\n%s}\n"
+        on_segment on_segment_body)
+    :: context.statics;
+  let packing =
+    if not is_packed then ""
+    else if fields = [] then Printf.sprintf "    struct %s t_call;\n" call
+    else
+      Printf.sprintf "    struct %s t_call = { %s };\n" call
+        (String.concat ", "
+           (List.map2 (fun (field, _) name -> Printf.sprintf ".%s = %s" field name) fields names))
+  in
+  let leaving =
+    if not returns then "    T_UNREACHABLE();\n"
+    else if Option.is_some result_type then "    return t_call.f_result;\n"
+    else "    return;\n"
+  in
+  Printf.sprintf
+    "  if (__builtin_expect((uint64_t)__builtin_frame_address(0) < t_stack->limit, 0)) {\n\
+     %s    t_runtime_grow(t_stack, %s, %s);\n\
+     %s  }\n"
+    packing on_segment
+    (if is_packed then "&t_call" else "0")
+    leaving
+
 let build ?(returns = true) builder ~parameters ~result =
   let functions = Dynarray.to_array builder.functions in
   let count = Array.length functions in
@@ -411,9 +463,20 @@ let build ?(returns = true) builder ~parameters ~result =
                 field
           | _ -> bug "local %d is neither a function's own nor in its environment" local
       in
+      let symbol = Instance.symbol function_.code.key in
+      let function_symbol =
+        match function_.nested with
+        | Some nested -> Printf.sprintf "%s_Nested_%d" symbol nested
+        | None -> symbol
+      in
+      let parameters = parameters_of number in
+      let parameter_types = List.map (local_type builder) parameters in
+      let returns = if number = 0 then returns else true in
       let body = Buffer.create 1024 in
       Buffer.add_string body " {\n";
-      let symbol = Instance.symbol function_.code.key in
+      Buffer.add_string body
+        (segment_check context ~current:symbol ~symbol:function_symbol
+           ~names:(List.map name parameters) ~types:parameter_types ~result ~returns);
       List.iter
         (fun local ->
           let ty = local_type builder local in
@@ -449,21 +512,9 @@ let build ?(returns = true) builder ~parameters ~result =
           | None -> bug "block %d is never finished" block)
         blocks;
       Buffer.add_string body "}\n";
-      let symbol =
-        match function_.nested with
-        | Some nested -> Printf.sprintf "%s_Nested_%d" (Instance.symbol function_.code.key) nested
-        | None -> Instance.symbol function_.code.key
-      in
-      let parameters = parameters_of number in
       let header =
-        prototype context
-          (Instance.symbol function_.code.key)
-          symbol ~names:(List.map name parameters) ~linkage:External
-          {
-            parameters = List.map (local_type builder) parameters;
-            result;
-            returns = (if number = 0 then returns else true);
-          }
+        prototype context symbol function_symbol ~names:(List.map name parameters) ~linkage:External
+          { parameters = parameter_types; result; returns }
       in
       function_.code.functions <-
         (function_.nested, (header, resolve (Buffer.contents body) name))

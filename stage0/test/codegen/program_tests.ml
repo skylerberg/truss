@@ -616,3 +616,26 @@ let () =
           expect_string ~expected:"counted 5\n" output;
           if not (contains errors "many arguments") then fail "panicked with %S" errors
       | status, _, errors -> fail "ended with status %d: %s" status errors)
+
+let () =
+  test "a recursion deeper than a first segment grows the stack" (fun () ->
+      match run_main Fixtures.Program.recursion_deeper_than_a_first_segment_grows_the with
+      | 0, output, _ -> expect_string ~expected:"500000\n" output
+      | status, _, errors -> fail "ended with status %d: %s" status errors);
+  test "frames larger than the frame budget grow the stack" (fun () ->
+      match run_main Fixtures.Program.frames_larger_than_the_frame_budget_grow_the with
+      | 0, output, _ -> expect_string ~expected:"625000\n" output
+      | status, _, errors -> fail "ended with status %d: %s" status errors);
+  test "a recursion with no end reports a stack overflow" (fun () ->
+      match run_main Fixtures.Program.recursion_with_no_end_reports_a_stack_overflow with
+      | 101, _, errors -> expect_string ~expected:"stack overflow\n" errors
+      | status, _, errors -> fail "ended with status %d: %s" status errors)
+
+let () =
+  test "a link-time optimized program grows past frames larger than the frame budget" (fun () ->
+      match
+        run_main ~settings:release_settings
+          Fixtures.Program.frames_larger_than_the_frame_budget_grow_the
+      with
+      | 0, output, _ -> expect_string ~expected:"625000\n" output
+      | status, _, errors -> fail "ended with status %d: %s" status errors)

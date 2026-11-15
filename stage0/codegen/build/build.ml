@@ -6,8 +6,22 @@ let cache directory =
 
 type settings = { build : Emit_c.build; optimization : Toolchain.optimization; extra : string list }
 
+let frame_budget = 65536
+let library_margin = 65536
+
+let is_link_time_optimized settings =
+  List.exists (String.starts_with ~prefix:"-flto") settings.extra
+
+let compiled_flags settings =
+  settings.extra
+  @
+  if is_link_time_optimized settings then
+    [ Printf.sprintf "-Wframe-larger-than=%d" frame_budget; "-Wno-error=frame-larger-than" ]
+  else [ "-fstack-usage" ]
+
 let flags settings =
-  (Toolchain.optimization_flag settings.optimization :: Toolchain.required_flags) @ settings.extra
+  (Toolchain.optimization_flag settings.optimization :: Toolchain.required_flags)
+  @ compiled_flags settings
 
 let derive_object_key = Blake3.derive_key ~context:"truss 2026-11-12 object key"
 
@@ -23,12 +37,19 @@ let object_key (toolchain : Toolchain.t) settings text =
              ])))
 
 let object_path cache key = Filename.concat cache.directory (key ^ ".o")
+let stack_usage_path object_ = Filename.remove_extension object_ ^ ".su"
+
+let is_compiled settings output =
+  Sys.file_exists output
+  && (is_link_time_optimized settings || Sys.file_exists (stack_usage_path output))
 
 let compile_one toolchain cache settings (name, text) =
   let key = object_key toolchain settings text in
   let output = object_path cache key in
-  if Sys.file_exists output then begin
-    (try Unix.utimes output 0. 0. with Unix.Unix_error _ -> ());
+  if is_compiled settings output then begin
+    List.iter
+      (fun path -> try Unix.utimes path 0. 0. with Unix.Unix_error _ -> ())
+      [ output; stack_usage_path output ];
     Ok output
   end
   else
@@ -37,10 +58,14 @@ let compile_one toolchain cache settings (name, text) =
     File_system.write source text;
     let partial = base ^ ".o" in
     match
-      Toolchain.compile toolchain ~optimization:settings.optimization ~extra:settings.extra ~source
-        ~output:partial ()
+      Toolchain.compile toolchain ~optimization:settings.optimization
+        ~extra:(compiled_flags settings) ~source ~output:partial ()
     with
     | Ok () ->
+        if Sys.file_exists (stack_usage_path partial) then
+          Sys.rename (stack_usage_path partial) (stack_usage_path output)
+        else if not (is_link_time_optimized settings) then
+          File_system.write (stack_usage_path output) "";
         Sys.rename partial output;
         if Option.value (Sys.getenv_opt "TRUSS_KEEP_C") ~default:"" = "" then Sys.remove source
         else Sys.rename source (Filename.concat cache.directory (key ^ ".c"));
@@ -71,7 +96,7 @@ let objects ?progress toolchain cache settings sources =
     List.length
       (List.filter
          (fun (_, text) ->
-           not (Sys.file_exists (object_path cache (object_key toolchain settings text))))
+           not (is_compiled settings (object_path cache (object_key toolchain settings text))))
          sources)
   in
   let compiled = Atomic.make 0 in
@@ -83,7 +108,9 @@ let objects ?progress toolchain cache settings sources =
   in
   if missing > 0 then report ();
   let compile source =
-    let cached = Sys.file_exists (object_path cache (object_key toolchain settings (snd source))) in
+    let cached =
+      is_compiled settings (object_path cache (object_key toolchain settings (snd source)))
+    in
     let result = compile_one toolchain cache settings source in
     if not cached then begin
       Atomic.incr compiled;
@@ -98,6 +125,51 @@ let objects ?progress toolchain cache settings sources =
       | Ok path, Ok paths -> Ok (path :: paths)
       | Error message, _ | _, Error message -> Error message)
     results (Ok [])
+
+let digits_from text start =
+  let rec stop position =
+    if position < String.length text && text.[position] >= '0' && text.[position] <= '9' then
+      stop (position + 1)
+    else position
+  in
+  int_of_string_opt (String.sub text start (stop start - start))
+
+let reported_frame diagnostics =
+  List.fold_left
+    (fun largest line ->
+      List.fold_left
+        (fun largest marker ->
+          match Substring.find line marker with
+          | None -> largest
+          | Some position -> (
+              match digits_from line (position + String.length marker) with
+              | Some size -> max largest size
+              | None -> largest))
+        largest
+        [ "stack frame size ("; "the frame size of " ])
+    0
+    (String.split_on_char '\n' diagnostics)
+
+let largest_frame objects =
+  List.fold_left
+    (fun largest object_ ->
+      match largest with
+      | Error _ -> largest
+      | Ok largest -> (
+          match In_channel.with_open_text (stack_usage_path object_) In_channel.input_all with
+          | exception Sys_error message -> Error message
+          | usage ->
+              Ok
+                (List.fold_left
+                   (fun largest line ->
+                     match String.split_on_char '\t' line with
+                     | _ :: size :: _ -> (
+                         match int_of_string_opt size with
+                         | Some size -> max largest size
+                         | None -> largest)
+                     | _ -> largest)
+                   largest (String.split_on_char '\n' usage))))
+    (Ok 0) objects
 
 let program ?progress ?(tests = false) ?(copied = fun _ -> []) toolchain cache env settings ~files
     ~sources ~output =
@@ -126,7 +198,31 @@ let program ?progress ?(tests = false) ?(copied = fun _ -> []) toolchain cache e
   let runtime = ("the runtime", Startup.runtime ~tests) in
   match objects ?progress toolchain cache settings ((runtime :: emitted) @ sources) with
   | Error message -> Error message
-  | Ok objects -> Toolchain.link toolchain ~extra:settings.extra ~objects ~output ()
+  | Ok objects -> (
+      let link largest_frame =
+        let red_zone = ((2 * largest_frame) + library_margin + 4095) / 4096 * 4096 in
+        match
+          compile_one toolchain cache settings
+            ( "the red zone",
+              Printf.sprintf
+                "typedef __UINT64_TYPE__ uint64_t;\nconst uint64_t t_runtime_red_zone = %dULL;\n"
+                red_zone )
+        with
+        | Error message -> Error message
+        | Ok red_zone_object ->
+            Toolchain.link toolchain ~extra:settings.extra ~objects:(objects @ [ red_zone_object ])
+              ~output ()
+      in
+      if is_link_time_optimized settings then
+        match link frame_budget with
+        | Error message -> Error message
+        | Ok diagnostics ->
+            let reported = reported_frame diagnostics in
+            if reported > frame_budget then Result.map ignore (link reported) else Ok ()
+      else
+        match largest_frame objects with
+        | Error message -> Error message
+        | Ok largest_frame -> Result.map ignore (link largest_frame))
 
 module For_testing = struct
   let objects = objects

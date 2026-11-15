@@ -20,4 +20,4 @@ val compile :
   (unit, string) result
 
 val link :
-  t -> ?extra:string list -> objects:string list -> output:string -> unit -> (unit, string) result
+  t -> ?extra:string list -> objects:string list -> output:string -> unit -> (string, string) result

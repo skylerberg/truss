@@ -1,0 +1,14 @@
+fn descend(remaining: UInt64) -> UInt64 {
+  if remaining == 0 {
+    return 0
+  }
+  let below = descend(remaining - 1)
+  remaining.wrapping_subtract(below)
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console
+{
+  Console.print_line("${descend(1000000)}")
+  ExitCode(0)
+}

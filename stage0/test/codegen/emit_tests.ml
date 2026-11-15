@@ -215,7 +215,7 @@ let () =
         ]);
   test "a mut parameter is a restrict pointer in C" (fun () ->
       let c_file = c_file (shape_env ()) [ (bump, External) ] in
-      let expected = "void t_test__bump(int32_t *restrict l0_count)" in
+      let expected = "void t_test__bump(struct t_stack *t_stack, int32_t *restrict l0_count)" in
       if not (contains c_file expected) then fail "no %S in:\n%s" expected c_file);
   let callback =
     ({ parameters = [ (Read, int32) ]; result = Returns int32; uses = [] } : Ground.function_type)
@@ -393,7 +393,7 @@ let () =
           ]
       in
       let c_file = c_file (shape_env ()) [ (caller, External); (callee, Internal) ] in
-      let copy = "static inline int32_t t_test__callee(int32_t l0) {" in
+      let copy = "static inline int32_t t_test__callee(struct t_stack *t_stack, int32_t l0) {" in
       if not (contains c_file copy) then fail "no %S in:\n%s" copy c_file;
       if contains c_file "\nint32_t t_test__callee(int32_t);" then
         fail "the callee is also declared as another file's:\n%s" c_file);

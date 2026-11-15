@@ -65,17 +65,17 @@ let intrinsic_c context (intrinsic : Lowered.intrinsic) (arguments : (string * L
       Printf.sprintf "%s(%s)"
         (use_helper context (if width 0 = 32 then "t_float32_from_bits" else "t_float64_from_bits"))
         all
-  | Run_test -> "t_runtime_run_test(" ^ all ^ ")"
+  | Run_test -> "t_runtime_run_test(t_stack, " ^ all ^ ")"
   | Coroutine_start ->
       Printf.sprintf
-        "t_runtime_coroutine_start((void (*)(void *, uint64_t))%s.f_code, (void \
+        "t_runtime_coroutine_start((void (*)(struct t_stack *, void *, uint64_t))%s.f_code, (void \
          *)%s.f_environment, %s)"
         (argument 0) (argument 0) (argument 1)
   | Coroutine_resume -> "t_runtime_coroutine_resume(" ^ all ^ ")"
   | Coroutine_suspend -> "t_runtime_coroutine_suspend()"
   | Tasks_spawn ->
       Printf.sprintf
-        "t_runtime_tasks_spawn(%s, (void (*)(void *, uint64_t))%s.f_code, (void \
+        "t_runtime_tasks_spawn(%s, (void (*)(struct t_stack *, void *, uint64_t))%s.f_code, (void \
          *)%s.f_environment, %s)"
         (argument 0) (argument 1) (argument 1) (argument 2)
   | (Shared_allocate | Shared_retain | Shared_release | Shared_free | Shared_lock | Shared_unlock)
@@ -111,7 +111,8 @@ let intrinsic_c context (intrinsic : Lowered.intrinsic) (arguments : (string * L
         | Lend_defer_drop -> "_defer_drop"
         | _ -> "_defer_write_back"
       in
-      use_helper context "t_lend" ^ name ^ "(" ^ all ^ ")"
+      let passed = match lend with Lend_release -> "t_stack, " ^ all | _ -> all in
+      use_helper context "t_lend" ^ name ^ "(" ^ passed ^ ")"
   | Live_blocks -> "t_runtime_live_blocks()"
   | Environment ->
       declare_prototype context "environ" "extern char **environ;\n";
@@ -139,7 +140,7 @@ let intrinsic_c context (intrinsic : Lowered.intrinsic) (arguments : (string * L
 
 let call_c context fc (target : Lowered.target) arguments =
   let arguments = List.filter_map (operand_c context fc) arguments in
-  let texts = String.concat ", " (List.map fst arguments) in
+  let texts = String.concat ", " ("t_stack" :: List.map fst arguments) in
   (match target with
   | Direct { signature; _ }
   | Indirect { signature; _ }
@@ -172,7 +173,7 @@ let call_c context fc (target : Lowered.target) arguments =
         | None -> bug "a function value of zero size"
       in
       Printf.sprintf "%s.f_code(%s)" value
-        (String.concat ", " ((value ^ ".f_environment") :: List.map fst arguments))
+        (String.concat ", " ("t_stack" :: (value ^ ".f_environment") :: List.map fst arguments))
   | Intrinsic intrinsic -> intrinsic_c context intrinsic arguments
   | Foreign declaration -> (
       declare_prototype context declaration.symbol (Libc.prototype declaration);
@@ -194,7 +195,7 @@ let call_c context fc (target : Lowered.target) arguments =
       in
       let texts =
         match operand_c context fc value with
-        | Some (value, _) -> String.concat ", " (value :: List.map fst arguments)
+        | Some (value, _) -> String.concat ", " ("t_stack" :: value :: List.map fst arguments)
         | None -> bug "an any value of zero size"
       in
       let result =
@@ -216,7 +217,7 @@ let call_c context fc (target : Lowered.target) arguments =
       Printf.sprintf "((%s (*)(%s))((const struct t_evidence *)%s)->table[%d])(%s)" result
         (signature_parameters context fc.symbol signature.parameters None)
         evidence slot
-        (String.concat ", " (evidence :: List.map fst arguments))
+        (String.concat ", " ("t_stack" :: evidence :: List.map fst arguments))
 
 let may_alias (first : Lowered.place) (second : Lowered.place) =
   let rec overlap (first : Lowered.projection list) (second : Lowered.projection list) =
@@ -276,7 +277,7 @@ let statement_c context fc buffer (statement : Lowered.statement) =
           declare_prototype context symbol
             (prototype context fc.symbol symbol ~linkage:External (Convention.drop_signature ty)
             ^ ";\n");
-          line "%s(&%s);" symbol text
+          line "%s(t_stack, &%s);" symbol text
       | Some _ -> bug "a drop of a place that is not a value")
   | Echo { text; length; site } ->
       context.failures <-
@@ -316,7 +317,7 @@ let statement_c context fc buffer (statement : Lowered.statement) =
                   (function_ref_symbol fc (Nested nested))
                   (operand environment))
               branches));
-      line "  t_runtime_parallel(branches, %d);" (List.length branches);
+      line "  t_runtime_parallel(t_stack, branches, %d);" (List.length branches);
       line "}"
   | Fork_range { body; environment; first; last } ->
       let operand argument =
@@ -324,7 +325,7 @@ let statement_c context fc buffer (statement : Lowered.statement) =
         | Some (text, _) -> text
         | None -> bug "an operand of zero size"
       in
-      line "t_runtime_parallel_range(&%s, (void *)%s, %s, %s);"
+      line "t_runtime_parallel_range(t_stack, &%s, (void *)%s, %s, %s);"
         (function_ref_symbol fc (Nested body))
         (operand environment) (operand first) (operand last)
 

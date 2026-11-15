@@ -181,6 +181,15 @@ let added_flags =
 let settings : Build.settings Lazy.t =
   lazy { build = Development; optimization = O1; extra = Lazy.force strict @ added_flags }
 
+let release_settings : Build.settings Lazy.t =
+  lazy
+    {
+      build = Release;
+      optimization = O2;
+      extra =
+        Toolchain.link_time_optimization (Lazy.force compiler) @ Lazy.force strict @ added_flags;
+    }
+
 let worker_counts =
   if List.exists (String.starts_with ~prefix:"-fsanitize=") added_flags then [ 8 ]
   else [ 1; 2; 8; 32 ]
@@ -211,7 +220,7 @@ let example : Path.module_ = { package = { owner = None; name = "example" }; mod
 let example_file : Path.file = { module_ = example; name = "main" }
 let checked_standard = lazy (Database.For_testing.standard_base ())
 
-let load_files ?results files =
+let load_files ?results ?(settings = settings) files =
   let database = Engine.context (Engine.create ~bases:[ Lazy.force checked_standard ] ()) in
   Database.load_package (Engine.of_context database)
     ~name:{ owner = None; name = "example" }
@@ -232,7 +241,7 @@ let load_files ?results files =
           (Compile.add_roots (Engine.context (Engine.of_context database)) lowering wanted))
       database host (Lazy.force compiler) (Lazy.force cache) (Lazy.force settings) )
 
-let load ?results text = load_files ?results [ (example_file, text) ]
+let load ?results ?settings text = load_files ?results ?settings [ (example_file, text) ]
 
 let tests_in database module_ =
   List.filter_map
@@ -251,8 +260,8 @@ let run_source text =
 let expect_output text expected = expect_string ~expected (run_source text)
 let passes name source = test name (fun () -> expect_output source "test 0 passed\n")
 
-let run_main ?(arguments = []) ?input text =
-  let _, compile = load text in
+let run_main ?(arguments = []) ?input ?settings text =
+  let _, compile = load ?settings text in
   match
     Compile.For_testing.run_program ?input compile
       ~main:(Top { module_ = example; name = "main" })

@@ -1,0 +1,26 @@
+use standard::tasks
+
+fn descend(remaining: UInt64) -> UInt64 {
+  if remaining == 0 {
+    return 0
+  }
+  let below = descend(remaining - 1)
+  remaining.wrapping_subtract(below)
+}
+
+fn both() -> UInt64
+  uses Tasks
+{
+  concurrent {
+    let first = descend(20000)
+    let second = descend(10)
+  }
+  first.wrapping_add(second)
+}
+
+test "seeded tasks recurse deeper than their first segments" {
+  let total = provide tasks::SeededTasks.new(7) {
+    both()
+  }
+  assert total == 10005
+}

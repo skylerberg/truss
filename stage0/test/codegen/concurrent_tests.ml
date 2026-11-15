@@ -201,3 +201,10 @@ let () =
   test "on threads, a cancelled task returns from a wait for a child's output" (fun () ->
       expect_threaded ~expected:"run: cancelled\ntimed out\n"
         Fixtures.Concurrent.on_threads_a_cancelled_task_returns_from_a_wait)
+
+let () =
+  test "on threads, tasks and parallel branches recurse deeper than their first segments" (fun () ->
+      expect_with_each_thread_count ~expected:"5000 12500\n"
+        Fixtures.Concurrent.on_threads_tasks_and_parallel_branches_recurse);
+  passes "seeded tasks recurse deeper than their first segments"
+    Fixtures.Concurrent.seeded_tasks_recurse_deeper_than_their_first

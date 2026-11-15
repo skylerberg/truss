@@ -150,18 +150,16 @@ let field_declarations context (fields : Memory_layout.field list) =
   )
 
 let signature_parameters context symbol (parameters : Lowered.ty list) names =
-  match parameters with
-  | [] -> "void"
-  | _ ->
-      String.concat ", "
-        (List.mapi
-           (fun position ty ->
-             let order = c_ty context symbol ty in
-             let qualified = match ty with Lowered.Pointer _ -> order ^ "restrict" | _ -> order in
-             match names with
-             | None -> qualified
-             | Some names -> qualified ^ " " ^ List.nth names position)
-           parameters)
+  String.concat ", "
+    ((match names with None -> "struct t_stack *" | Some _ -> "struct t_stack *t_stack")
+    :: List.mapi
+         (fun position ty ->
+           let order = c_ty context symbol ty in
+           let qualified = match ty with Lowered.Pointer _ -> order ^ "restrict" | _ -> order in
+           match names with
+           | None -> qualified
+           | Some names -> qualified ^ " " ^ List.nth names position)
+         parameters)
 
 let rec define context key =
   context.references <- Some [];

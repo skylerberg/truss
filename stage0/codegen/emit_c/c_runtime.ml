@@ -9,6 +9,14 @@ let anchor_symbol definition = "t_Anchor_" ^ Instance.path_symbol definition
 let anchor_struct =
   "struct t_anchor {\n  const uint8_t *path;\n  uint64_t path_length;\n  uint32_t line;\n};\n"
 
+let stack_struct =
+  "struct t_segment;\n\
+   struct t_stack {\n\
+  \  uint64_t limit;\n\
+  \  struct t_segment *segment;\n\
+  \  uint64_t depth;\n\
+   };\n"
+
 let integer_c : Memory_layout.integer -> string = function
   | Int8 -> "int8_t"
   | Int16 -> "int16_t"
@@ -41,6 +49,9 @@ let runtime_declarations =
       "typedef __UINT32_TYPE__ uint32_t;\n";
       "typedef __UINT64_TYPE__ uint64_t;\n";
       anchor_struct;
+      stack_struct;
+      "void t_runtime_grow(struct t_stack *stack, void (*function)(struct t_stack *stack, void \
+       *arguments), void *arguments);\n";
       "struct t_site {\n\
       \  const struct t_anchor *anchor;\n\
       \  uint32_t line;\n\
@@ -64,17 +75,22 @@ let runtime_declarations =
       "void *t_runtime_reallocate(void *pointer, uint64_t old_size, uint64_t size, uint64_t \
        alignment);\n";
       "void t_runtime_free(void *pointer);\n";
-      "struct t_branch {\n  void (*run)(void *environment);\n  void *environment;\n};\n";
-      "void t_runtime_parallel(const struct t_branch *branches, uint64_t count);\n";
-      "void t_runtime_parallel_range(void (*body)(void *environment, uint64_t first, uint64_t \
-       last), void *environment, uint64_t first, uint64_t last);\n";
-      "uint64_t t_runtime_coroutine_start(void (*code)(void *environment, uint64_t item), void \
-       *environment, uint64_t item);\n";
+      "struct t_branch {\n\
+      \  void (*run)(struct t_stack *stack, void *environment);\n\
+      \  void *environment;\n\
+       };\n";
+      "void t_runtime_parallel(struct t_stack *stack, const struct t_branch *branches, uint64_t \
+       count);\n";
+      "void t_runtime_parallel_range(struct t_stack *stack, void (*body)(struct t_stack *stack, \
+       void *environment, uint64_t first, uint64_t last), void *environment, uint64_t first, \
+       uint64_t last);\n";
+      "uint64_t t_runtime_coroutine_start(void (*code)(struct t_stack *stack, void *environment, \
+       uint64_t item), void *environment, uint64_t item);\n";
       "uint8_t t_runtime_coroutine_resume(uint64_t coroutine);\n";
       "void t_runtime_coroutine_suspend(void);\n";
-      "uint8_t t_runtime_tasks_spawn(uint64_t group, void (*code)(void *environment, uint64_t \
-       item), void *environment, uint64_t item);\n";
-      "void t_runtime_run_test(uint32_t index);\n";
+      "uint8_t t_runtime_tasks_spawn(uint64_t group, void (*code)(struct t_stack *stack, void \
+       *environment, uint64_t item), void *environment, uint64_t item);\n";
+      "void t_runtime_run_test(struct t_stack *stack, uint32_t index);\n";
       "void t_runtime_report_tests_to(int32_t descriptor);\n";
       "uint64_t t_runtime_live_blocks(void);\n";
     ]
@@ -84,7 +100,7 @@ let helpers =
     ( "t_lend",
       {|struct t_lend_deferred {
   struct t_lend_deferred *next;
-  void (*drop)(void *);
+  void (*drop)(struct t_stack *, void *);
   void *target;
   const void *source;
   uint64_t size;
@@ -135,7 +151,7 @@ __attribute__((unused)) static inline struct t_lend_deferred *t_lend_defer(struc
 }
 __attribute__((unused)) static inline void t_lend_defer_drop(struct t_lend *lend, void *drop, void *value) {
   struct t_lend_deferred *deferred = t_lend_defer(lend);
-  deferred->drop = (void (*)(void *))drop;
+  deferred->drop = (void (*)(struct t_stack *, void *))drop;
   deferred->target = value;
 }
 __attribute__((unused)) static inline void t_lend_defer_write_back(struct t_lend *lend, void *destination,
@@ -170,12 +186,13 @@ __attribute__((unused)) static inline void t_lend_free_blocks(struct t_lend *len
     t_runtime_free(block);
   }
 }
-__attribute__((unused)) static inline void t_lend_release(struct t_lend *lend, struct t_lend_mark *mark) {
+__attribute__((unused)) static inline void t_lend_release(struct t_stack *stack, struct t_lend *lend,
+                                                           struct t_lend_mark *mark) {
   if (!mark->is_lent) return;
   mark->is_lent = 0;
   for (struct t_lend_deferred *deferred = mark->deferred_after; deferred != mark->deferred_before;
        deferred = deferred->next) {
-    if (deferred->drop) deferred->drop(deferred->target);
+    if (deferred->drop) deferred->drop(stack, deferred->target);
     else if (deferred->source) __builtin_memcpy(deferred->target, deferred->source, deferred->size);
     else if (deferred->target) t_runtime_free(deferred->target);
     deferred->drop = 0;

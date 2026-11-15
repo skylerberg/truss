@@ -71,4 +71,4 @@ let link toolchain ?(extra = []) ~objects ~output () =
     Process.run toolchain.compiler (extra @ [ "@" ^ response; "-o"; output; "-lm"; "-pthread" ])
   in
   (try Sys.remove response with Sys_error _ -> ());
-  match result with 0, _, _ -> Ok () | _, out, err -> Error (out ^ err)
+  match result with 0, out, err -> Ok (out ^ err) | _, out, err -> Error (out ^ err)

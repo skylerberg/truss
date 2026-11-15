@@ -9,4 +9,5 @@
   cbor
   blake3
   unix
+  substring
   file_system))
