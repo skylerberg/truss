@@ -1,25 +1,15 @@
-(* The state of lowering one function: its frame, scopes, loops, and
-   temporaries, and the small helpers every part of lowering shares. *)
-
 open Definitions
 open Emit_c.Builder
 
 type cleanup =
-  | Drop_value of Lowered.place  (** Drops the place's value, if the place still owns it. *)
+  | Drop_value of Lowered.place
   | Drop_flagged of { place : Lowered.place; flag : Lowered.place }
-      (** Drops the place's value where its drop flag, the [Bool] at [flag], is true, for a place
-          that only some paths initialize. *)
   | Free_pointed of Lowered.place
-      (** Frees the heap block that the pointer at the place points to, after the block's contents
-          are dropped. *)
-  | Join_group of Lowered.statement  (** Joins a task group with the call of [Tasks.join]. *)
+  | Join_group of Lowered.statement
 
-(* A scope owns the values dropped as it ends: the scope of a block's names,
-   or the scope of one statement, whose temporaries end with it. *)
 type scope_kind = Bindings | Statement
-type scope = { kind : scope_kind; mutable owned : cleanup list  (** Most recent first *) }
+type scope = { kind : scope_kind; mutable owned : cleanup list }
 
-(* Where [continue] and [break] go, and how many scopes each keeps. *)
 type loop = {
   continue_ : Lowered.block;
   continue_depth : int;
@@ -40,7 +30,7 @@ type frame = {
   code : code;
   mutable self_place : Lowered.place option;
   exit : (Lowered.block * int) option;
-  mir : mir_frame option;  (** The MIR being lowered in this frame *)
+  mir : mir_frame option;
 }
 
 and mir_frame = {
@@ -65,41 +55,28 @@ and mir_frame = {
   mutable block : Mir.Graph.block;
 }
 
-(* A task whose body is being lowered. *)
-type task = {
-  id : Mir.task;
-  group : Lowered.place;
-  end_block : Lowered.block;  (** Every exit from the task jumps here *)
-  scope_depth : int;  (** The number of scopes enclosing the task *)
-}
+type task = { id : Mir.task; group : Lowered.place; end_block : Lowered.block; scope_depth : int }
 
-(* A [concurrent for] loop whose iterations are being spawned. *)
 type spawn_loop = {
   origin : Core.origin;
   group : Lowered.place;
-  item : Lowered.local;  (** A [UInt64]: the argument of the next task *)
+  item : Lowered.local;
   element : Ground.ty;
 }
 
-(* How the iterations of a loop run: one after another, as chunks of a
-   range on several threads, or each as a spawned task. *)
 type schedule = Sequential | Chunked | Spawned of spawn_loop
-
-(* Where a function's result goes: through the pointer it is given, into a
-   local it returns, or nowhere. *)
 type result_slot = Through of Lowered.local | Returned_in of Lowered.local | No_result
 
 type state = {
   context : context;
   mutable frame : frame;
   builder : Emit_c.Builder.t;
-  mutable scopes : scope list;  (** Innermost first *)
+  mutable scopes : scope list;
   mutable loops : loop list;
   mutable result : result_slot;
-  nested : int ref;  (** How many nested functions, lambdas and outlined code, the instance has *)
+  nested : int ref;
   mutable evidence : (Path.t * Lowered.operand) list;
-      (** The evidence for each capability available *)
-  mutable tasks : task list;  (** The tasks around the code being lowered, innermost first *)
+  mutable tasks : task list;
   mutable moved : Lowered.place list;
   mutable lend_record : Lowered.operand option;
 }
@@ -163,7 +140,6 @@ let source st (span : Syntax.span) =
   let start = min span.start (String.length text) in
   String.sub text start (min span.stop (String.length text) - start)
 
-(* The scope a new name belongs to: the innermost that holds names. *)
 let rec binding_scope = function
   | ({ kind = Bindings; _ } as scope) :: _ -> scope
   | { kind = Statement; _ } :: rest -> binding_scope rest
@@ -184,11 +160,7 @@ let owned_local st ?name (scope : scope) ty =
   if not (trivial st ty) then scope.owned <- Drop_value place :: scope.owned;
   place
 
-(* A local that lasts for the statement being lowered, or for the scope
-   around when no statement is. *)
 let temporary st ?name ty = owned_local st ?name (innermost_scope st) ty
-
-(* A local that lasts as long as the names around it. *)
 let binding st ?name ty = owned_local st ?name (binding_scope st.scopes) ty
 
 let flagged_binding st ty ~flag =
@@ -226,8 +198,6 @@ let evidence_parameters st capabilities =
       arriving;
   List.map snd arriving
 
-(* Makes the slot for the function's result, as the convention passes one.
-   Nothing here owns it: it is the caller's once the function returns. *)
 let result_slot st (convention : Convention.result) =
   st.result <-
     (match convention with
@@ -235,7 +205,6 @@ let result_slot st (convention : Convention.result) =
     | Returned ty -> Returned_in (local st.builder ~name:"result" ty)
     | Nothing -> No_result)
 
-(* Where the function's result is written, if it has one with a size. *)
 let result_place st : Lowered.place option =
   match st.result with
   | Through pointer -> Some { root = Local pointer; projections = [ Deref ] }
@@ -263,9 +232,6 @@ let leave_to st depth =
     (fun position scope -> if List.length st.scopes - position > depth then drop_scope st scope)
     st.scopes
 
-(* A scope opened here and ended by [close_scope], with its drops, or by
-   [pop_scope], whose caller writes the drops on each path the scope ends
-   on. *)
 let open_scope st kind =
   let scope = { kind; owned = [] } in
   st.scopes <- scope :: st.scopes;
@@ -306,9 +272,6 @@ let unreachable_block st =
   finish st.builder Unreachable;
   start st.builder (block st.builder)
 
-(* An operand for an owned position: a [var], an [own] argument, a field, a
-   returned value. The type checker has made sure a place there is a
-   temporary or was passed [own], or copies implicitly. *)
 let owned st place ty = if trivial st ty then Lowered.Copy place else moved st place
 
 let take st (place : Lowered.place) ty ~destination =
@@ -317,8 +280,6 @@ let take st (place : Lowered.place) ty ~destination =
       Glue.copy_into st.context.glue st.builder ~destination ~source:place ty
   | Static _ | Local _ -> emit st.builder (Assign (destination, Use (owned st place ty)))
 
-(* A place whose indexes are fixed now, so that an alias of it refers to the
-   same element however the index variables change later. *)
 let snapshot st (place : Lowered.place) =
   {
     place with
@@ -338,8 +299,6 @@ let looping st ~continue_ ~break_ ~depth body =
   body ();
   st.loops <- List.tl st.loops
 
-(* The type of a place in the function being written, or [None] where it has
-   zero size or is reached through a lambda's environment. *)
 let place_type st (place : Lowered.place) =
   let environment _ = bug "a place in an environment, whose type lowering does not track" in
   let rec projected (ty : Lowered.ty) = function

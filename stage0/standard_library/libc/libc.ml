@@ -533,7 +533,9 @@ let describe function_ =
          differs. *)
       row
         (everywhere (Pointer (Named "int")))
-        (Points_at Int32) [] ~symbol:(everywhere "t_runtime_errno") ~headers:[]
+        (Points_at Int32) []
+        ~symbol:(everywhere "t_runtime_errno_address_uncached")
+        ~headers:[]
   | Clock_gettime ->
       row (everywhere (Named "int")) (Returns Int32)
         [

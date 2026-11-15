@@ -215,8 +215,6 @@ let file env build (fragments : (fragment * linkage) list) =
           List.iter (register context) defined.references)
         fragment.environments)
     fragments;
-  (* Every function of the file is declared before any body, so that a call
-     of a copy sees the copy's declaration, not one made for the call. *)
   let linkage_text = function Internal -> "static inline " | External -> "" in
   let own =
     List.concat_map
@@ -230,7 +228,6 @@ let file env build (fragments : (fragment * linkage) list) =
       fragments
   in
   let symbol_of header =
-    (* The symbol a header declares: the name before its parameters. *)
     let before = String.sub header 0 (String.index header '(') in
     match String.rindex_opt before ' ' with
     | Some space -> String.sub before (space + 1) (String.length before - space - 1)
@@ -253,8 +250,6 @@ let file env build (fragments : (fragment * linkage) list) =
           end)
         fragment.prototypes)
     fragments;
-  (* Define every type the code names, and every type those definitions
-     name, until nothing new is named. *)
   let definitions = ref Keys.empty in
   let define_key key =
     match Hashtbl.find_opt local_types key with
@@ -295,9 +290,6 @@ let file env build (fragments : (fragment * linkage) list) =
             (Printf.sprintf "typedef struct %s %s;\n" (key_name key) (key_name key))
       | Typedef _ | Code_typedef _ -> ())
     keys;
-  (* Typedefs, each after the typedefs it names; then structs, each after
-     the structs it holds by value. Every struct is declared above, so
-     naming one needs nothing more. *)
   let emitted = ref Keys.empty in
   let rec emit_typedef key =
     if not (Keys.mem key !emitted) then

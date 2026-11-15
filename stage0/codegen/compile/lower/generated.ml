@@ -1,7 +1,3 @@
-(* Instances lowering makes rather than finds in source: capability
-   entries and tables, the real implementations' evidence, the program's
-   main, adapters, and [any] entries and tables. *)
-
 open Definitions
 open Lowering
 open Targets
@@ -22,14 +18,10 @@ let generated_state context ~key ~anchor ~substitution =
 let passed_on st result_ty =
   match result_place st with Some place -> place | None -> temporary st result_ty
 
-(* The capability an [impl] implements, and the capabilities its own
-   methods use, in path order, which its evidence captures. *)
 let impl_capability context impl =
   let interface = impl_interface context impl in
   (interface, interface.implements.trait, evidence_for context [] interface.impl_uses)
 
-(* An entry: unpacks the implementation and the evidence it captured from
-   the evidence it is called with, and calls the [impl]'s method. *)
 let entry context (key : Instance.key) (method_key : Instance.key) : Emit_c.Builder.instance =
   let path, type_arguments =
     match method_key with
@@ -101,13 +93,6 @@ let entry context (key : Instance.key) (method_key : Instance.key) : Emit_c.Buil
     ();
   built st.builder
 
-(* The entry of a capability's locking table for the method [name]. The
-   evidence it is called with was built by a [provide mut] whose body can
-   use [Tasks]: its implementation pointer is the address of the mutex,
-   its first outer evidence is the implementation's own evidence, and its
-   second is the evidence for [Tasks]. The entry locks the mutex, calls
-   the implementation's entry, and unlocks the mutex, so calls of one
-   implementation by several tasks are mutually exclusive. *)
 let locked_entry context (key : Instance.key) ~capability ~name : Emit_c.Builder.instance =
   let slot, capability_signature = capability_method context capability name in
   let c_signature, result = entry_signature context capability_signature in
@@ -185,8 +170,6 @@ let locked_entry context (key : Instance.key) ~capability ~name : Emit_c.Builder
     ();
   built st.builder
 
-(* A capability's locking table: a locking entry for each of the
-   capability's methods, in the capability's order. *)
 let locked_table context (key : Instance.key) ~capability : Lowered.table =
   let interface =
     match demand context Environment.trait_interface capability with
@@ -204,8 +187,6 @@ let locked_table context (key : Instance.key) ~capability : Lowered.table =
         interface.methods;
   }
 
-(* A capability [impl]'s table: an entry for each of the capability's
-   methods, in the capability's order. *)
 let table context (key : Instance.key) : Lowered.table =
   match key with
   | Table { impl; type_arguments } ->
@@ -240,10 +221,6 @@ let table context (key : Instance.key) : Lowered.table =
       { table_key = key; capability = Some capability; entries }
   | _ -> bug "not a table: %s" (Instance.to_string key)
 
-(* The [impl] of a standard capability by its real implementation: the
-   standard library's [System] type for it, such as [SystemConsole], in the
-   module of [standard::system] named for the capability, as [FileRead]'s is
-   in [standard::system::file_read]. *)
 let real_implementation (capability : Path.t) : Path.t =
   let name = Ground.path_name capability in
   let module_name =
@@ -291,14 +268,8 @@ let real_implementations st ~user capabilities =
       (capability, implementation_evidence st ~impl ~type_arguments:[] ~implementation))
     capabilities
 
-(* The standard library's function that copies bytes into a [String],
-   replacing invalid UTF-8. *)
 let text_copied_from = Well_known.path Text_copied_from
 
-(* The C [main]'s Truss side: the program's arguments as a [List] of
-   [String]s, each made of an argument's bytes by the standard library; the
-   real implementation of each capability [main] uses; and [main]'s
-   [ExitCode] as the process's status. *)
 let program_main context (key : Instance.key) main_path : Emit_c.Builder.instance =
   let st = generated_state context ~key ~anchor:main_path ~substitution:[] in
   let builder = st.builder in
@@ -369,7 +340,6 @@ let program_main context (key : Instance.key) main_path : Emit_c.Builder.instanc
   finish_function st ~first:[ count; arguments_pointer ] ~rest:[] ();
   built st.builder
 
-(* A named function as a value of a function type. *)
 let adapter context (key : Instance.key) ~(function_ : Instance.key) ~(ty : Ground.function_type) :
     Emit_c.Builder.instance =
   let path, type_arguments =
@@ -405,8 +375,6 @@ let adapter context (key : Instance.key) ~(function_ : Instance.key) ~(ty : Grou
     ();
   built st.builder
 
-(* An entry in an [any] table: the value's pointer as [self], then the
-   method's arguments. *)
 let any_entry context (key : Instance.key) (method_key : Instance.key) : Emit_c.Builder.instance =
   let path, type_arguments =
     match method_key with
@@ -470,8 +438,6 @@ let any_entry context (key : Instance.key) (method_key : Instance.key) : Emit_c.
     ();
   built st.builder
 
-(* An [any] table: the type's drop in slot 0, then an entry for each method
-   that can be called through [any]. *)
 let any_table context (key : Instance.key) : Lowered.table =
   match key with
   | Any_table { impl; type_arguments } ->
@@ -515,6 +481,3 @@ let any_table context (key : Instance.key) : Lowered.table =
         entries = (Instance.Any_drop self_ty, drop_signature) :: entries;
       }
   | _ -> bug "not an any table: %s" (Instance.to_string key)
-
-(* Whether a method of a derived [impl] is the trait's own, written in the
-   trait, rather than one the derivation writes. *)

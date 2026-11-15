@@ -87,7 +87,6 @@ let zero_size = { size = 0; alignment = 1; form = Zero_size; niche = None }
 let round_up value alignment = (value + alignment - 1) / alignment * alignment
 let bits bytes = Z.shift_left Z.one (8 * bytes)
 
-(* The spare values of a scalar on its own. *)
 let scalar_niche = function
   | Bool -> Some { path = []; scalar = Bool; start = Z.of_int 2; count = Z.of_int 254 }
   | Character ->
@@ -100,7 +99,6 @@ let of_scalar scalar =
   let size = scalar_size scalar in
   { size; alignment = size; form = Scalar scalar; niche = scalar_niche scalar }
 
-(* The smallest unsigned integer that numbers [count] variants. *)
 let tag_for count = if count <= 0x100 then UInt8 else if count <= 0x10000 then UInt16 else UInt32
 
 let tag_niche tag count path =
@@ -109,9 +107,6 @@ let tag_niche tag count path =
 
 let under name niche = { niche with path = Field name :: niche.path }
 
-(* The niche with the most spare values among [fields], the first in
-   placement order on a tie, so the choice never depends on anything but
-   the layout. *)
 let best_niche (fields : field list) =
   List.fold_left
     (fun best (field : field) ->
@@ -122,9 +117,6 @@ let best_niche (fields : field list) =
           if Z.gt niche.count current.count then Some (under field.name niche) else best)
     None fields
 
-(* Fields placed by alignment, largest first, then by name, so the order
-   they are written in never changes the layout. Fields of zero size take no
-   room and are left out. *)
 let place (fields : (string * member * t) list) =
   let sized = List.filter (fun (_, _, (layout : t)) -> layout.size > 0) fields in
   let ordered =

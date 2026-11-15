@@ -1,6 +1,3 @@
-(* Constants: a constant's value folded exactly from its expression, or
-   computed by running its evaluator. *)
-
 open Definitions
 open Lowering
 open Targets
@@ -16,13 +13,11 @@ let all values =
       Some (value :: rest))
     values (Some [])
 
-(* An integer of a kind, if the kind holds it. *)
 let integer (kind : Memory_layout.integer) value =
   let low, high = Memory_layout.integer_range kind in
   if Z.leq low value && Z.leq value high then Some (Lowered.Static_scalar (Integer (kind, value)))
   else None
 
-(* The integer kind a type is, if it is one. *)
 let integer_kind st ty =
   match (Memory_layout.of_type st.context.env ty).form with
   | Scalar (Integer kind) -> Some kind
@@ -30,9 +25,6 @@ let integer_kind st ty =
 
 let truth value = Some (Lowered.Static_scalar (Bool value))
 
-(* An arithmetic or bitwise operation on two folded numbers, where the
-   result equals the result of running the operation. Anything else, such
-   as a sum that does not fit its type, is left to be run. *)
 let arithmetic st ty (operation : Intrinsic.operation) (left : Lowered.static_value)
     (right : Lowered.static_value) =
   match (left, right) with
@@ -88,7 +80,6 @@ let negated (value : Lowered.static_value) =
         (Lowered.Static_scalar (Float32 (Int32.bits_of_float (Float.neg (Int32.float_of_bits x)))))
   | _ -> None
 
-(* A comparison of two folded integers or two folded [Bool]s. *)
 let compared (comparison : Core.comparison) (left : Lowered.static_value)
     (right : Lowered.static_value) =
   match (left, right) with
@@ -108,8 +99,6 @@ let compared (comparison : Core.comparison) (left : Lowered.static_value)
       | Less | Less_equal | Greater | Greater_equal -> None)
   | _ -> None
 
-(* How deep folding follows calls, and how many blocks it runs in all. A
-   constant that needs more is left to be run. *)
 let call_depth = 8
 let step_limit = 10_000
 
@@ -124,7 +113,6 @@ let rec part (value : Lowered.static_value) (projections : Mir.projection list) 
       part field rest
   | _ -> None
 
-(* A literal of the MIR, as static data of its type. *)
 let literal st ty (constant : Mir.constant) =
   let number literal =
     match constant_of st ty literal with
@@ -272,7 +260,6 @@ let rec fold_body ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowered.stat
         match operand condition with Some (Static_scalar (Bool true)) -> Some () | _ -> None)
     | Live _ | Dead _ | Loan_start _ | Loan_end _ | Matched _ | Ghost_assert _ | Proof _ -> Some ()
     | Assign _ | Lend _ | Slice _ | Template _ | Echo _ | Provide _ | Provide_end -> None
-    (* A graph holds none of these: they are blocks and terminators. *)
     | While _ | For _ | Fork _ | Resume _ | Yield _ | Jump _ -> None
   in
   let rec run block =
@@ -297,7 +284,6 @@ let rec fold_body ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowered.stat
   in
   run 0
 
-(* The state to lower a constant's expression in, its MIR, and its type. *)
 let constant_state context path =
   let key = key_of context path in
   let mir =
@@ -319,8 +305,6 @@ let constant_state context path =
   let st = enter context ~builder:(create context.env ~key:(Evaluator path)) (frame_of code) in
   (st, mir, ty)
 
-(* A constant's static data, where its value folds, and otherwise the type
-   of the value its evaluator computes. *)
 type constant = Folded of Lowered.data | Run of Ground.ty
 
 let constant context path =
@@ -329,9 +313,6 @@ let constant context path =
   | Some value -> Folded { data_key = Constant path; ty; value }
   | None -> Run ty
 
-(* Code run while compiling appends its results, in their binary form,
-   to an output it owns, and writes that to standard output as it ends, with
-   the standard library's function that writes every byte. *)
 let begin_output st =
   let output = temporary st Glue.output_ty in
   emit st.builder (Assign (output, Storage.empty Glue.output_ty));
@@ -363,8 +344,6 @@ let write_output st output =
     ~arguments:[ (Read, int32, descriptor); (Read, view_ty, view) ]
     ~destination:(temporary st result) ()
 
-(* Code run while compiling: computes a constant's value and writes its
-   binary form to standard output. *)
 let evaluator context path : Emit_c.Builder.instance =
   let st, mir, ty = constant_state context path in
   start st.builder (block st.builder);

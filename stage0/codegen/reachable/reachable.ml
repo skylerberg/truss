@@ -59,9 +59,6 @@ module Keys = Map.Make (struct
   let compare = Instance.compare
 end)
 
-(* Tarjan's algorithm, with an explicit stack in place of recursion, so that
-   a long chain of calls cannot overflow the stack. An instance that refers
-   only to itself is in no group, since its own hash marks that. *)
 let groups ~edges roots =
   let counter = ref 0 in
   let number = Table.create 1024 and low = Table.create 1024 in

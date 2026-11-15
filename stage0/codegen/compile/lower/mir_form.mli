@@ -1,17 +1,9 @@
 val mir_of : Definitions.context -> Path.t -> Mir.Graph.t
-(** The MIR of a function or a method. *)
-
 val parameter_defaults : Definitions.context -> Path.t -> (int * Mir.Graph.t) list
-(** The MIR of each default of the parameters of the function or method at a path, by the
-    parameter's position. *)
-
 val parameter_of : Mir.Graph.body -> Mir.local -> Types.mode * string * Types.ty
-(** A parameter's mode, name, and type, from its local. *)
 
 val mir_into :
   ?arguments:Lowered.place list -> Lowering.state -> Mir.Graph.t -> Lowered.place -> unit
-(** Lowers the MIR of one expression that runs on its own, such as a default or a clause, with its
-    parameters bound to [arguments], into a place. *)
 
 val fill_defaults :
   Lowering.state ->

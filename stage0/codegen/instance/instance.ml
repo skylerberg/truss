@@ -18,77 +18,8 @@ type key =
   | Locked_entry of { capability : Path.t; name : string }
   | Locked_table of Path.t
 
-let rank = function
-  | Code _ -> 0
-  | Constant _ -> 1
-  | Drop _ -> 2
-  | Copy _ -> 3
-  | Debug _ -> 4
-  | Adapter _ -> 6
-  | Entry _ -> 7
-  | Table _ -> 8
-  | Program_main _ -> 10
-  | Any_entry _ -> 11
-  | Any_table _ -> 12
-  | Encode _ -> 13
-  | Evaluator _ -> 14
-  | Any_drop _ -> 15
-  | Template_check _ -> 16
-  | Call_evaluation _ -> 17
-  | Locked_entry _ -> 18
-  | Locked_table _ -> 19
-
-let ( >>= ) order next = if order <> 0 then order else next ()
-
-let rec compare left right =
-  match (left, right) with
-  | Code left, Code right ->
-      Path.compare left.path right.path >>= fun () ->
-      Ground.compare_arguments left.type_arguments right.type_arguments
-  | Constant left, Constant right -> Path.compare left right
-  | Drop left, Drop right
-  | Copy left, Copy right
-  | Debug left, Debug right
-  | Encode left, Encode right
-  | Any_drop left, Any_drop right ->
-      Ground.compare left right
-  | Adapter left, Adapter right ->
-      compare left.function_ right.function_ >>= fun () ->
-      Ground.compare (Function left.ty) (Function right.ty)
-  | Entry left, Entry right | Any_entry left, Any_entry right -> compare left right
-  | Any_table left, Any_table right ->
-      Path.compare left.impl right.impl >>= fun () ->
-      Ground.compare_arguments left.type_arguments right.type_arguments
-  | Locked_entry left, Locked_entry right ->
-      Path.compare left.capability right.capability >>= fun () ->
-      String.compare left.name right.name
-  | Locked_table left, Locked_table right -> Path.compare left right
-  | Table left, Table right ->
-      Path.compare left.impl right.impl >>= fun () ->
-      Ground.compare_arguments left.type_arguments right.type_arguments
-  | Program_main left, Program_main right | Evaluator left, Evaluator right ->
-      Path.compare left right
-  | Template_check left, Template_check right ->
-      Path.compare left.from_template right.from_template >>= fun () ->
-      List.compare String.compare left.texts right.texts
-  | Call_evaluation left, Call_evaluation right ->
-      Path.compare left.function_ right.function_ >>= fun () ->
-      List.compare Z.compare left.arguments right.arguments
-  | _ -> Int.compare (rank left) (rank right)
-
-let equal left right = compare left right = 0
-(* Mangling. A Truss name is either [UpperCamelCase], with no [_], or
-   [lower_snake_case], with no uppercase letter, no [__], and no [_] at
-   either end. So in a symbol, [__] can only separate the parts of a module
-   path, [_] followed by a lowercase letter can only separate a type from
-   its method's name, and [_] followed by an uppercase word and another [_]
-   is a marker, such as [_Of_] before type arguments. Text that is not a
-   name, such as an [impl]'s name ["From[Int32] for Int64"] or a test's
-   name, is written between markers with every character other than a
-   letter or digit, [_] included, as a marker [_C] and its hexadecimal code
-   [_]. Every name ends where one of these begins, so a symbol reads back in
-   exactly one way: mangling never gives two keys one symbol. *)
-
+let compare = Stdlib.compare
+let equal = ( = )
 let marker word = "_" ^ word ^ "_"
 
 let module_path (module_ : Path.module_) =
@@ -203,8 +134,6 @@ let rec mangle = function
 let limit = 200
 let prefix_length = 180
 
-(* A long name keeps its start, which a profiler shows, and ends
-   with a hash of the whole name, which keeps it unique. *)
 let shorten name =
   if String.length name <= limit then name
   else String.sub name 0 prefix_length ^ "_Hash_" ^ Blake3.hex_digest ~digits:32 name

@@ -11,9 +11,6 @@ type context = {
   types : Intrinsics.types;
   bool : Ground.ty;
   checks : bool;
-      (** Whether the program checks, as it runs, each operation that is undefined or wrong where
-          its precondition does not hold: an index, a slice, arithmetic, a shift, a call of the C
-          library, and [unreachable]. No [requires] clause is evaluated. *)
   constant : Path.t -> Lowered.static_value option;
 }
 
