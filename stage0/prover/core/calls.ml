@@ -966,7 +966,7 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
       let substitution = pair (generics_of path) arguments ~fixed:[] in
       with_contract
         ~substitution_of:(fun _ -> substitution)
-        ~instance:(List.map argument_key arguments) path
+        ~instance:arguments path
         (function_contract ?reading_package:(reading_package context) context.database path)
   | Trait_method { trait; name; receiver; evidence; self_type; type_arguments } -> (
       let arguments = arguments_of type_arguments in
@@ -1029,7 +1029,7 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
             if part.inherited then trait_substitution else own_substitution
           in
           with_contract ~substitution_of
-            ~instance:(List.map argument_key (Types.Type self_type :: arguments))
+            ~instance:(Types.Type self_type :: arguments)
             path
             (method_contract ?reading_package:(reading_package context) context.database trait name
                receiver evidence))

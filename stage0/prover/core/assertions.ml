@@ -3,17 +3,17 @@ open Facts
 
 let is_test context = match context.current with Path.Test _ -> true | _ -> false
 
-let bitwise_operations =
+let bitwise_operations : Intrinsic.operation list =
   [
-    "and";
-    "or";
-    "xor";
-    "complement";
-    "shift_left";
-    "shift_right";
-    "rotate_left";
-    "rotate_right";
-    "swap_bytes";
+    Bit_and;
+    Bit_or;
+    Bit_xor;
+    Complement;
+    Shift_left;
+    Shift_right;
+    Rotate_left;
+    Rotate_right;
+    Swap_bytes;
   ]
 
 let bitwise_of : Logic.symbol -> _ = function
@@ -43,25 +43,25 @@ let exactly (query : Logic.query) =
             let operand_bits = bits_of first in
             let result =
               match (operation, rest) with
-              | "complement", _ -> Some (Logic.Operation ("bvnot", [ operand_bits ]))
-              | "and", [ second_operand ] ->
+              | Intrinsic.Complement, _ -> Some (Logic.Operation ("bvnot", [ operand_bits ]))
+              | Bit_and, [ second_operand ] ->
                   Some (Logic.Operation ("bvand", [ operand_bits; bits_of second_operand ]))
-              | "or", [ second_operand ] ->
+              | Bit_or, [ second_operand ] ->
                   Some (Logic.Operation ("bvor", [ operand_bits; bits_of second_operand ]))
-              | "xor", [ second_operand ] ->
+              | Bit_xor, [ second_operand ] ->
                   Some (Logic.Operation ("bvxor", [ operand_bits; bits_of second_operand ]))
-              | "shift_left", [ second_operand ] ->
+              | Shift_left, [ second_operand ] ->
                   Some (Logic.Operation ("bvshl", [ operand_bits; bits_of second_operand ]))
-              | "shift_right", [ second_operand ] ->
+              | Shift_right, [ second_operand ] ->
                   Some
                     (Logic.Operation
                        ( (if signed then "bvashr" else "bvlshr"),
                          [ operand_bits; bits_of second_operand ] ))
-              | ("rotate_left" | "rotate_right"), [ second_operand ] ->
+              | (Rotate_left | Rotate_right), [ second_operand ] ->
                   let by = bits_of (Logic.Operation ("mod", [ second_operand; Logic.int bits ])) in
                   let rest = Logic.Operation ("bvsub", [ bits_of (Logic.int bits); by ]) in
                   let towards, back =
-                    if operation = "rotate_left" then ("bvshl", "bvlshr") else ("bvlshr", "bvshl")
+                    if operation = Rotate_left then ("bvshl", "bvlshr") else ("bvlshr", "bvshl")
                   in
                   Some
                     (Logic.Operation
@@ -70,7 +70,7 @@ let exactly (query : Logic.query) =
                            Logic.Operation (towards, [ operand_bits; by ]);
                            Logic.Operation (back, [ operand_bits; rest ]);
                          ] ))
-              | "swap_bytes", _ ->
+              | Swap_bytes, _ ->
                   let byte index =
                     Logic.Operation
                       ( Printf.sprintf "(_ extract %d %d)" ((8 * index) + 7) (8 * index),

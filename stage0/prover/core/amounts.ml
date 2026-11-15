@@ -333,7 +333,7 @@ let step_amount context frame (invocation : Invocation.t) (values : passed list)
       | _ -> unknown_amount context frame counter)
 
 let held_symbol context ty term =
-  let symbol = Symbol.Potential (type_key ty) in
+  let symbol = Symbol.Potential ty in
   declare context (Logic.Function (symbol, [ sort_of context ty ], Logic.Int));
   Logic.Apply (symbol, [ term ])
 
@@ -373,7 +373,7 @@ let find_buffer_elements context (ty : Types.ty) =
   | _ -> None
 
 let buffer_elements context (ty : Types.ty) =
-  let key = type_key ty in
+  let key = ty in
   match Hashtbl.find_opt context.buffers key with
   | Some elements -> elements
   | None ->
@@ -382,12 +382,12 @@ let buffer_elements context (ty : Types.ty) =
       elements
 
 let buffer_slack context (ty : Types.ty) term =
-  let symbol = Symbol.Slack (type_key ty) in
+  let symbol = Symbol.Slack ty in
   declare context (Logic.Function (symbol, [ sort_of context ty ], Logic.Int));
   Logic.Apply (symbol, [ term ])
 
 let potential_measure context element =
-  let symbol = Symbol.Potential_measure (type_key element) in
+  let symbol = Symbol.Potential_measure element in
   let measure = measure_type element in
   declare context (Logic.Constant (symbol, sort_of context (Types.Function measure)));
   let term = Logic.Symbol symbol in
@@ -411,7 +411,7 @@ let rec potential_clause context (ty : Types.ty) =
 and has_potential context ?(seen = []) (ty : Types.ty) =
   if seen <> [] then holds_potential_type context ~seen ty
   else
-    let key = type_key ty in
+    let key = ty in
     match Hashtbl.find_opt context.holds_potential key with
     | Some holds -> holds
     | None ->
@@ -606,7 +606,7 @@ let method_time_bound context (method_ : Path.t) self_type =
   | _ -> None
 
 let trait_method_time context frame (method_ : Path.t) self_type =
-  let symbol = Symbol.Method_time { method_; self_type = type_key self_type } in
+  let symbol = Symbol.Method_time { method_; self_type } in
   declare context (Logic.Constant (symbol, Logic.Int));
   fact context frame (Logic.Operation ("<=", [ Logic.int 1; Logic.Symbol symbol ]));
   (match method_time_bound context method_ self_type with

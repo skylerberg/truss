@@ -156,7 +156,7 @@ let written_equal context ty left right =
             Symbol.Function
               {
                 callee = Path.Method { owner = impl; name = "equal"; receiver = Read };
-                instance = [ type_key ty ];
+                instance = [ Types.Type ty ];
               }
           in
           let sort = sort_of context ty in
@@ -167,7 +167,7 @@ let written_equal context ty left right =
 
 let derived_equal context frame (ty : Types.ty) left right =
   let sort = sort_of context ty in
-  let symbol = Symbol.Equal (type_key ty) in
+  let symbol = Symbol.Equal ty in
   declare context (Logic.Function (symbol, [ sort; sort ], Logic.Bool));
   let equal = Logic.Apply (symbol, [ left; right ]) in
   (match (visible_type context ty, constructors context ty) with
@@ -189,7 +189,7 @@ let derived_equal context frame (ty : Types.ty) left right =
                  match written_equal context field_type left right with
                  | Some equal -> equal
                  | None ->
-                     let symbol = Symbol.Equal (type_key field_type) in
+                     let symbol = Symbol.Equal field_type in
                      declare context
                        (Logic.Function
                           ( symbol,
@@ -223,14 +223,14 @@ let equal_of context frame (ty : Types.ty) left right =
 
 let width (ty : Types.ty) = Option.map fst (Types.integer_bits ty)
 
-let opaque_operation context frame ty name arguments =
+let opaque_operation context frame ty operation arguments =
   let sorts = List.map (fun _ -> Logic.Int) arguments in
   let integer =
     Option.map
       (fun bits -> (bits, match bounds ty with Some (low, _) -> Z.sign low < 0 | None -> false))
       (width ty)
   in
-  let symbol = Symbol.Opaque_operation { operation = name; type_key = type_key ty; integer } in
+  let symbol = Symbol.Opaque_operation { operation; type_ = ty; integer } in
   declare context (Logic.Function (symbol, sorts, sort_of context ty));
   let term = Logic.Apply (symbol, arguments) in
   assume context frame (in_range ty term);
@@ -441,7 +441,7 @@ let primitive_operation context frame ~(site : Invocation.site) (operation : Int
           (in_range ty negated)
       else if ty <> Types.Integer then unsupported span "negating a value of `%s`" (Types.show ty);
       negated
-  | Complement, ty :: _, [ inner ] -> opaque_operation context frame ty "complement" [ inner ]
+  | Complement, ty :: _, [ inner ] -> opaque_operation context frame ty Complement [ inner ]
   | (Shift_left | Shift_right), ty :: _, [ left; right ] ->
       (match width ty with
       | Some bits ->
@@ -460,8 +460,7 @@ let primitive_operation context frame ~(site : Invocation.site) (operation : Int
             (Printf.sprintf "%s may not be less than %d." text bits)
             Logic.(Operation ("<", [ right; int bits ]))
       | None -> unsupported span "a shift of `%s`" (Types.show ty));
-      let name = match operation with Shift_left -> "shift_left" | _ -> "shift_right" in
-      let shifted = opaque_operation context frame ty name [ left; right ] in
+      let shifted = opaque_operation context frame ty operation [ left; right ] in
       (match (bounds ty, width ty) with
       | Some (low, high), Some bits
         when Z.equal low Z.zero && not (Logic.mentions frame.bound right) ->
@@ -482,8 +481,7 @@ let primitive_operation context frame ~(site : Invocation.site) (operation : Int
       | _ -> ());
       shifted
   | (Bit_and | Bit_or | Bit_xor), ty :: _, [ left; right ] ->
-      let name = match operation with Bit_and -> "and" | Bit_or -> "or" | _ -> "xor" in
-      let term = opaque_operation context frame ty name [ left; right ] in
+      let term = opaque_operation context frame ty operation [ left; right ] in
       (match bounds ty with
       | Some (low, _) when Z.sign low < 0 && operation = Bit_and ->
           let masked_by operand =
@@ -547,31 +545,24 @@ let primitive_operation context frame ~(site : Invocation.site) (operation : Int
     when bounds source <> None && bounds target <> None && not (Types.is_builtin Character target)
     ->
       Logic.ite (in_range target value) value
-        (opaque_operation context frame target "convert" [ value ])
+        (opaque_operation context frame target Convert [ value ])
   | (Leading_zeros | Trailing_zeros | Count_ones), ty :: _, [ value ] when bounds ty <> None -> (
       let low, _ = Option.get (bounds ty) in
       match width ty with
       | Some bits ->
-          let count name value =
-            let symbol = Symbol.Bit_count { count = name; width = bits } in
+          let count counted value =
+            let symbol = Symbol.Bit_count { count = counted; width = bits } in
             declare context (Logic.Function (symbol, [ Logic.Int ], Logic.Int));
             Logic.Apply (symbol, [ value ])
           in
-          let term =
-            count
-              (match operation with
-              | Leading_zeros -> "leading_zeros"
-              | Trailing_zeros -> "trailing_zeros"
-              | _ -> "count_ones")
-              value
-          in
+          let term = count operation value in
           assume context frame
             Logic.(Operation ("<=", [ int 0; term ]) &&& Operation ("<=", [ term; int bits ]));
           (if Z.equal low Z.zero then
              of_each_value context frame value @@ fun frame value ->
-             let leading = count "leading_zeros" value
-             and trailing = count "trailing_zeros" value
-             and ones = count "count_ones" value in
+             let leading = count Leading_zeros value
+             and trailing = count Trailing_zeros value
+             and ones = count Count_ones value in
              let power exponent = power_of context frame (Logic.int 2) exponent in
              let width = Logic.int bits in
              let nonzero = Logic.not_ (Logic.equal value (Logic.int 0)) in
@@ -660,13 +651,7 @@ let primitive_operation context frame ~(site : Invocation.site) (operation : Int
                   ] )
           | _ -> fallback ())
       | (Rotate_left | Rotate_right | Swap_bytes), ty :: _ when bounds ty <> None ->
-          let name =
-            match operation with
-            | Rotate_left -> "rotate_left"
-            | Rotate_right -> "rotate_right"
-            | _ -> "swap_bytes"
-          in
-          opaque_operation context frame ty name operands
+          opaque_operation context frame ty operation operands
       | Convert, [ source; target ] when float_format source <> None && bounds target <> None -> (
           match operands with
           | [ value ] ->

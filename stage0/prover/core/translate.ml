@@ -517,7 +517,7 @@ let laws database (source : source) ~impl ~trait ~for_type ~proofs ~at =
     (fun (law_source, (law : Mir.law)) ->
       let types = law_parameter_types ~substitution law in
       if not (List.exists (fun ty -> Types.is_error ty) types) then begin
-        context.laws_assumed <- laws_key trait for_type :: context.laws_assumed;
+        context.laws_assumed <- (trait, for_type) :: context.laws_assumed;
         let terms =
           List.map
             (fun ty ->

@@ -9,7 +9,7 @@ val contract_call :
   lent_final:(Logic.term -> Logic.term) option ->
   havoc_mut:(State.frame -> State.frame) ->
   substitution_of:(State.part -> Types.substitution) ->
-  instance:string list ->
+  instance:Types.argument list ->
   State.frame * Logic.term
 
 val time_of : State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term

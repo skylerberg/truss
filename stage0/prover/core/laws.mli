@@ -7,7 +7,6 @@ val check_callback_requires :
   unit
 
 val calls_updating_helper : State.context -> Invocation.t -> bool
-val laws_key : Types.trait_reference -> Types.ty -> string
 val laws_of : State.context -> Path.t -> (State.source * Mir.law) list
 val law_parameter_types : substitution:Types.substitution -> Mir.law -> Types.ty list
 

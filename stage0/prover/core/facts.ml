@@ -332,25 +332,8 @@ let float_format (ty : Types.ty) =
   match builtin ty with Some Float32 -> Some (8, 24) | Some Float64 -> Some (11, 53) | _ -> None
 
 let is_bool ty = Types.is_builtin Bool ty
-
-let rec type_key (ty : Types.ty) =
-  match ty with
-  | Named { path; arguments = [] } -> Path.show path
-  | Named { path; arguments } ->
-      Path.show path ^ "[" ^ String.concat ", " (List.map argument_key arguments) ^ "]"
-  | _ -> Types.show ty
-
-and argument_key = function
-  | Types.Type ty -> type_key ty
-  | argument -> Types.show_argument argument
-
-let constructor_name (ty : Types.ty) variant =
-  let type_name =
-    match ty with Named { path = Top { name; _ }; _ } -> name | _ -> Types.show ty
-  in
-  Symbol.Constructor { type_key = type_key ty; type_name; variant }
-
-let selector_name ty variant field = Symbol.Field { type_key = type_key ty; variant; field }
+let constructor_name (ty : Types.ty) variant = Symbol.Constructor { type_ = ty; variant }
+let selector_name ty variant field = Symbol.Field { type_ = ty; variant; field }
 let is_standard_equal = Well_known.is Equal
 let equal_trait = Well_known.path Equal
 
@@ -397,23 +380,20 @@ let rec sort_of context (ty : Types.ty) : Logic.sort =
     match (ty, float_format ty) with
     | _, Some (exponent, significand) -> Float (exponent, significand)
     | _ when Types.equal ty Types.unit ->
-        if not (Hashtbl.mem context.datatypes "Unit") then begin
-          Hashtbl.replace context.datatypes "Unit" ();
-          context.declarations <-
-            Logic.Datatype ("Unit", [ (Symbol.Unit, []) ]) :: context.declarations
+        if not (Hashtbl.mem context.datatypes ty) then begin
+          Hashtbl.replace context.datatypes ty ();
+          context.declarations <- Logic.Datatype (ty, [ (Symbol.Unit, []) ]) :: context.declarations
         end;
-        Uninterpreted "Unit"
-    | Function function_type, _ ->
-        Uninterpreted (Printf.sprintf "function/%d" (List.length function_type.inputs))
+        Type_sort ty
+    | Function function_type, _ -> Function_sort (List.length function_type.inputs)
     | _ -> begin
-        let name = type_key ty in
-        (if not (Hashtbl.mem context.datatypes name) then
+        (if not (Hashtbl.mem context.datatypes ty) then
            match constructors context ty with
            | Some shape ->
-               Hashtbl.replace context.datatypes name ();
+               Hashtbl.replace context.datatypes ty ();
                let declaration =
                  Logic.Datatype
-                   ( name,
+                   ( ty,
                      List.map
                        (fun (variant, fields) ->
                          ( constructor_name ty variant,
@@ -425,7 +405,7 @@ let rec sort_of context (ty : Types.ty) : Logic.sort =
                in
                context.declarations <- declaration :: context.declarations
            | None -> ());
-        Uninterpreted name
+        Type_sort ty
       end
 
 let rec structural context ?(seen = []) (ty : Types.ty) =

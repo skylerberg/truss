@@ -1,36 +1,40 @@
-type sort = Int | Bool | Float of int * int | Uninterpreted of string
+type sort = Int | Bool | Float of int * int | Type_sort of Types.ty | Function_sort of int
 
 module Symbol : sig
   type 'term t =
     | Variable of { label : string; numbers : int list }
-    | Function of { callee : Path.t; instance : string list }
-    | Limited of { callee : Path.t; instance : string list }
-    | Function_value of { callee : Path.t; instance : string list }
+    | Function of { callee : Path.t; instance : Types.argument list }
+    | Limited of { callee : Path.t; instance : Types.argument list }
+    | Function_value of { callee : Path.t; instance : Types.argument list }
     | Constant of Path.t
     | Generic_value of { owner : Path.t; name : string }
-    | Text_literal of { type_key : string; text : string }
+    | Text_literal of { type_ : Types.ty; text : string }
     | Named_term of 'term
     | Lambda of { sorts : sort list; definition : 'term }
     | Lifted of 'term t
-    | Constructor of { type_key : string; type_name : string; variant : string option }
-    | Field of { type_key : string; variant : string option; field : string }
+    | Constructor of { type_ : Types.ty; variant : string option }
+    | Field of { type_ : Types.ty; variant : string option; field : string }
     | Unit
     | Apply of sort list
-    | Equal of string
-    | Valid of string
-    | Rank of string
-    | Capacity of string
-    | Model of string
-    | Slack of string
-    | Potential of string
-    | Potential_measure of string
-    | Block_bytes of { type_key : string; variant : string option }
+    | Equal of Types.ty
+    | Valid of Types.ty
+    | Rank of Types.ty
+    | Capacity of Types.ty
+    | Model of Types.ty
+    | Slack of Types.ty
+    | Potential of Types.ty
+    | Potential_measure of Types.ty
+    | Block_bytes of { type_ : Types.ty; variant : string option }
     | Time of sort
-    | Method_time of { method_ : Path.t; self_type : string }
-    | Opaque_operation of { operation : string; type_key : string; integer : (int * bool) option }
-    | Bit_count of { count : string; width : int }
-    | System of string
-    | Libc_number of string
+    | Method_time of { method_ : Path.t; self_type : Types.ty }
+    | Opaque_operation of {
+        operation : Intrinsic.operation;
+        type_ : Types.ty;
+        integer : (int * bool) option;
+      }
+    | Bit_count of { count : Intrinsic.operation; width : int }
+    | System of Intrinsic.operation
+    | Libc_number of Libc.number
     | Handle_descriptor
     | Compare_bytes_order
     | Cost_most
@@ -56,7 +60,7 @@ and symbol = term Symbol.t
 type declaration =
   | Constant of symbol * sort
   | Function of symbol * sort list * sort
-  | Datatype of string * (symbol * (symbol * sort) list) list
+  | Datatype of Types.ty * (symbol * (symbol * sort) list) list
 
 type query = { declarations : declaration list; facts : term list; goal : term }
 
