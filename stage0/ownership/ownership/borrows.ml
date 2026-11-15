@@ -10,11 +10,11 @@ let lifetime_ends_at_return context (view : Actions.view) =
   | Temporary _ | Environment -> true
   | Local local ->
       if local = Self || List.mem local context.parameters then
-        kind context place.root = Owned && is_borrow_of_root place.root view
+        binding_mode context place.root = Own && is_borrow_of_root place.root view
       else true
 
 let outlives_function context (place : Place.t) =
-  kind context place.root = Borrowed_mut
+  binding_mode context place.root = Mut
   &&
   match place.root with
   | Local local -> List.mem local context.parameters
@@ -82,7 +82,7 @@ let check_disjoint context first second ~on_overlap =
 
 let check_body context (actions : Actions.t) moves =
   let states = Dataflow.forward context actions in
-  let live = Moves.live moves actions.body ~drops:false in
+  let live_after = Moves.live_after moves actions.body in
   let mir_local = Hashtbl.create 16 in
   Array.iteri
     (fun local (info : Mir.local_info) ->
@@ -92,7 +92,7 @@ let check_body context (actions : Actions.t) moves =
     actions.body.locals;
   let is_live_after ({ block; index } : Actions.position) core =
     match Hashtbl.find_opt mir_local core with
-    | Some local -> live block (index + 1) local
+    | Some local -> live_after block index local
     | None -> false
   in
   let resolve = Dataflow.resolve context in
@@ -290,7 +290,7 @@ let check_body context (actions : Actions.t) moves =
                 match viewed.root with
                 | Environment -> true
                 | Temporary _ | Constant _ -> false
-                | Local _ -> kind context viewed.root <> Owned)
+                | Local _ -> binding_mode context viewed.root <> Own)
               (viewed_places here views)
           with
           | Some { root = Environment; _ } ->
@@ -380,10 +380,10 @@ let check_body context (actions : Actions.t) moves =
             | Temporary _ -> true
             | Constant _ | Environment -> false
             | Local local -> (
-                match kind context root with
-                | Borrowed_mut -> true
-                | Owned -> List.mem local context.mutable_locals
-                | Borrowed -> false)
+                match binding_mode context root with
+                | Mut -> true
+                | Own -> List.mem local context.mutable_locals
+                | Read -> false)
           in
           match slice with
           | { steps = _ :: _; _ } ->
@@ -415,7 +415,7 @@ let check_body context (actions : Actions.t) moves =
           in
           let owned =
             List.find_opt
-              (fun (part : Place.t) -> part.steps <> [] && kind context part.root = Owned)
+              (fun (part : Place.t) -> part.steps <> [] && binding_mode context part.root = Own)
               parts
           in
           let receiver =
@@ -428,7 +428,7 @@ let check_body context (actions : Actions.t) moves =
                 | Local local
                   when (local = Self || List.mem local context.parameters)
                        && Some local <> receiver
-                       && kind context part.root <> Owned ->
+                       && binding_mode context part.root <> Own ->
                     Some part.root
                 | _ -> None)
               (parts @ List.map Actions.viewed_place forwarded)

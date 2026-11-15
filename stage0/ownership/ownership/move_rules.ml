@@ -14,8 +14,8 @@ let verdict context (place : Place.t) ~type_ ~is_returned ~is_captured : verdict
       (fun context at type_ ->
         report context Not_owned at ~fixes:(copy_fix context "Pass a copy." type_ at) message)
   in
-  let root_kind = if is_captured then Borrowed else kind context place.root in
-  if is_returned && root_kind <> Owned then
+  let root_mode : Types.mode = if is_captured then Read else binding_mode context place.root in
+  if is_returned && root_mode <> Own then
     if is_view context type_ then Reads
     else
       Refused
@@ -31,16 +31,16 @@ let verdict context (place : Place.t) ~type_ ~is_returned ~is_captured : verdict
           with a method such as `remove`."
          shown)
   else
-    match (root_kind, place.root) with
-    | Borrowed, Constant _ ->
+    match (root_mode, place.root) with
+    | Read, Constant _ ->
         refuse
           (Printf.sprintf "`%s` is %s, so it cannot be moved. Copy it instead." shown
              (if place.steps = [] then "a constant" else "part of a constant"))
-    | Borrowed, _ ->
+    | Read, _ ->
         refuse
           (Printf.sprintf "`%s` is borrowed, not owned, so it cannot be moved. Copy it instead."
              shown)
-    | (Owned | Borrowed_mut), _ -> Moves
+    | (Own | Mut), _ -> Moves
 
 let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
   let place_of (path : Moves.path) : Place.t option =
