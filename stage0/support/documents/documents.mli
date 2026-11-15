@@ -1,4 +1,3 @@
-val read : string -> string
 val truss_blocks : string -> string list
 val block_after : string -> string -> string list
 val between : string -> string -> string -> string

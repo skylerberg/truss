@@ -13,9 +13,10 @@ let () =
   end
 
 let () =
-  test "a program still running at its time limit is stopped" (fun () ->
+  test "a program still running at its time limit is stopped, though its child holds its output"
+    (fun () ->
       let started = Unix.gettimeofday () in
-      let status, _, _ = Process.run ~time_limit_ms:100 "/bin/sleep" [ "5" ] in
+      let status, _, _ = Process.run ~time_limit_ms:100 "/bin/sh" [ "-c"; "sleep 5 & sleep 5" ] in
       if status <> 137 then fail "status %d" status;
       if Unix.gettimeofday () -. started > 2. then fail "it was not stopped");
   test "a program that fills both outputs before it reads its input does not deadlock" (fun () ->

@@ -2624,7 +2624,7 @@ let tests_calling ~time_limit_ms ~runner tests =
      void t_runtime_install(void);\n\
      typedef void (*t_test)(void);\n\
      extern const t_test *t_runtime_tests;\n\
-     int32_t %s(uint32_t count, uint32_t time_limit);\n\
+     int32_t %s(uint32_t count, uint32_t time_limit_milliseconds);\n\
      %sstatic const t_test t_tests[] = { %s };\n\
      int main(int count, char **arguments) {\n\
     \  (void)count;\n\

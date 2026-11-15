@@ -287,8 +287,8 @@ let () =
                   [ (example_file, text) ];
                 shown (Checks.diagnostics (Engine.context engine) example_file);
                 false)
-          (if Filename.check_suffix file ".md" then Documents.truss_blocks (Documents.read file)
-           else [ Documents.read file ]))
+          (if Filename.check_suffix file ".md" then Documents.truss_blocks (File_system.read file)
+           else [ File_system.read file ]))
       (List.rev !files)
   in
   let all = List.concat_map mutants seeds in

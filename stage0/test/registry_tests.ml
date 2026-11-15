@@ -49,7 +49,7 @@ let () =
 let lock_block () =
   String.concat "\n"
     (Documents.block_after
-       (Documents.read (Harness.workspace_path "PACKAGES.md"))
+       (File_system.read (Harness.workspace_path "PACKAGES.md"))
        "## The lock file")
   ^ "\n"
 

@@ -380,7 +380,7 @@ let file_path session (file : Path.file) =
       Project.file_path ~directory file
   | _ -> Path.show_file file
 
-let time_limit session = (own_layout session).time_limit
+let time_limit_ms session = (own_layout session).time_limit_ms
 let registry_packages session = demand session Project.registry ()
 let lock_fix session = (demand session Project.selection ()).lock_fix
 

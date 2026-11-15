@@ -19,7 +19,7 @@ type layout = {
   packages : (string * Manifest.package) list;
   files : source_file list;
   problems : string list;
-  time_limit : int;
+  time_limit_ms : int;
 }
 
 val layout : (string, layout) Query.query
