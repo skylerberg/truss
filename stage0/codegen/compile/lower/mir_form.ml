@@ -193,7 +193,7 @@ let frame_of_body st ?owner ?returns_into ?lending ?(passed : Ground.mode list o
     called_parts =
       statements_where
         (fun _ -> true)
-        (fun (statement : Mir.statement) ->
+        (fun (statement : Mir.Graph.statement) ->
           match statement.kind with
           | Lend { call = { callee = Intrinsic _; _ }; _ } -> []
           | Lend { part; _ } -> [ part ]
@@ -232,7 +232,7 @@ let outlives_call ~(owns : Mir.local -> bool) ~(is_view : Types.ty -> bool) (bod
   let sources ~holds_view local : (Mir.place * bool) list option =
     let exception Made in
     let is_local (target : Mir.place) = target = { root = Local local; projections = [] } in
-    let given (statement : Mir.statement) =
+    let given (statement : Mir.Graph.statement) =
       match statement.kind with
       | Assign { target; value; _ } when is_local target -> (
           match value with
@@ -1021,7 +1021,7 @@ and lower_from st region block index =
         emit st.builder (Assign (List.assoc path frame.flags, Use (Constant (Bool true)))))
       (Moves.given_on_entry frame.moves block);
   List.iteri
-    (fun position (statement : Mir.statement) ->
+    (fun position (statement : Mir.Graph.statement) ->
       if position >= index then begin
         let before = Moves.copy frame.state in
         Moves.apply_moves frame.moves frame.state statement;
@@ -1060,7 +1060,7 @@ and concurrent_block st region ~fork ~(branches : Mir.Graph.branch list) ~join =
         functions);
   match join with Some join -> goto st region join | None -> unreachable_block st
 
-and lower_statement st (statement : Mir.statement) =
+and lower_statement st (statement : Mir.Graph.statement) =
   let origin = statement.origin in
   match statement.kind with
   | Assign { target; value; _ } -> assign st target value ~origin
@@ -1114,8 +1114,6 @@ and lower_statement st (statement : Mir.statement) =
           st.evidence <- enclosing;
           frame.provides <- rest
       | [] -> bug "the end of a provide that did not start")
-  | While _ | For _ | Fork _ | Resume _ | Yield _ | Jump _ ->
-      bug "a statement that holds blocks or jumps, in a graph"
 
 and dead st local =
   let frame = mir st in

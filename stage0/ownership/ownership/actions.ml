@@ -500,7 +500,7 @@ let returned_temporaries (body : Mir.Graph.body) =
     Array.iter
       (fun (block : Mir.Graph.basic_block) ->
         List.iter
-          (fun (statement : Mir.statement) ->
+          (fun (statement : Mir.Graph.statement) ->
             match statement.kind with
             | Assign
                 {
@@ -528,7 +528,7 @@ let read_uses builder ?(is_returned = fun _ -> false) ?(skip = fun _ -> false) u
       if not (skip use) then evaluate builder ~is_returned:(is_returned use) use)
     uses
 
-let statement builder (statement : Mir.statement) =
+let statement builder (statement : Mir.Graph.statement) =
   let origin = statement.origin in
   let uses = Moves.statement_uses builder.moves statement in
   match statement.kind with
@@ -718,8 +718,6 @@ let statement builder (statement : Mir.statement) =
         Hashtbl.replace builder.loop_body_starts builder.position.block (builder.position.index + 1)
   | Loan_end loans -> emit builder (End_loans loans) origin
   | Provide_end | Ghost_assert _ | Matched _ | Proof _ -> ()
-  | While _ | For _ | Fork _ | Resume _ | Yield _ | Jump _ ->
-      Compiler_bug.bug ~stage:"Ownership" "a statement of a MIR graph that is a block or a jump"
 
 let pull builder (iteration : Mir.iteration) origin =
   match iteration with
@@ -928,7 +926,7 @@ let of_body context moves (body : Mir.Graph.body) ~returns_to_caller : t =
                        blocks);
                 pattern_locals =
                   List.concat_map
-                    (fun (statement : Mir.statement) ->
+                    (fun (statement : Mir.Graph.statement) ->
                       match statement.kind with
                       | Live locals -> List.filter_map (core_local builder) locals
                       | _ -> [])

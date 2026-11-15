@@ -139,7 +139,7 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
     (fun block (basic : Mir.Graph.basic_block) ->
       let state = Moves.entry moves block in
       List.iter
-        (fun (statement : Mir.statement) ->
+        (fun (statement : Mir.Graph.statement) ->
           check_uses state (Moves.statement_uses moves statement);
           List.iter
             (fun (initialized : Moves.path) ->

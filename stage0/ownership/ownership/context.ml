@@ -107,7 +107,7 @@ let collect context (mir : Mir.Graph.t) =
     Array.iter
       (fun (block : Mir.Graph.basic_block) ->
         List.iter
-          (fun (statement : Mir.statement) ->
+          (fun (statement : Mir.Graph.statement) ->
             match statement.kind with
             | Call { call; _ } | Lend { call; _ } | Slice { call; _ } | Template { call; _ } ->
                 record_mode_keywords call

@@ -1,8 +1,8 @@
-let is_bookkeeping (statement : Mir.statement) =
+let is_bookkeeping (statement : Mir.Graph.statement) =
   match statement.kind with
   | Live _ | Dead _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ -> true
   | Assign _ | Call _ | Lend _ | Slice _ | Template _ | Assert _ | Echo _ | Provide _ | Provide_end
-  | While _ | For _ | Fork _ | Resume _ | Yield _ | Jump _ ->
+    ->
       false
 
 let rec only_returns (body : Mir.Graph.body) block ~seen =
@@ -29,7 +29,7 @@ let forwarding (body : Mir.Graph.body) : forwarding option =
   let is_unnamed local =
     match body.locals.(local).kind with Temporary | Lent _ -> true | Source _ -> false
   in
-  let rec scan ~held ~computed : Mir.statement list -> _ = function
+  let rec scan ~held ~computed : Mir.Graph.statement list -> _ = function
     | [] -> None
     | statement :: rest -> (
         let is_new local =

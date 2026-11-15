@@ -250,7 +250,7 @@ let rec fold_body ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowered.stat
         assign destination value
     | _ -> None
   in
-  let statement (statement : Mir.statement) =
+  let statement (statement : Mir.Graph.statement) =
     match statement.kind with
     | Assign { target = { root = Local local; projections = [] } as target; value; _ } ->
         let* value = rvalue local value in
@@ -260,7 +260,6 @@ let rec fold_body ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowered.stat
         match operand condition with Some (Static_scalar (Bool true)) -> Some () | _ -> None)
     | Live _ | Dead _ | Loan_start _ | Loan_end _ | Matched _ | Ghost_assert _ | Proof _ -> Some ()
     | Assign _ | Lend _ | Slice _ | Template _ | Echo _ | Provide _ | Provide_end -> None
-    | While _ | For _ | Fork _ | Resume _ | Yield _ | Jump _ -> None
   in
   let rec run block =
     if !steps <= 0 then None
