@@ -1,18 +1,15 @@
-(* A segment is a header followed by records. A record is a kind byte, a
-   32-byte key, the value's length in 4 bytes, the value, and an 8-byte
-   checksum of everything before it in the record. A value's key is the hash
-   of its bytes, and a result's is the hash of its kind and key, so every key
-   has the same width, and a sealed segment's index is a sorted run of
-   fixed-width entries: the key, the record's offset in 8 bytes, and its
-   value's length in 4. *)
-
 let header = "TRUSS-SEGMENT-1\n"
+let kind_width = 1
 let key_width = 32
-let entry_width = key_width + 8 + 4
+let length_width = 4
+let offset_width = 8
+let checksum_width = 8
+let length_position = kind_width + key_width
+let record_head_width = length_position + length_width
+let entry_width = key_width + offset_width + length_width
+let pointer_head_width = length_width + checksum_width
 let seal_size = 64 * 1024 * 1024
 
-(* FNV-1a, 64 bits: a checksum against torn and damaged records, which need
-   no cryptographic strength. *)
 let fnv hash bytes =
   let hash = ref hash in
   for index = 0 to String.length bytes - 1 do
@@ -24,7 +21,7 @@ let fnv hash bytes =
   !hash
 
 let checksum parts =
-  let buffer = Bytes.create 8 in
+  let buffer = Bytes.create checksum_width in
   Bytes.set_int64_le buffer 0 (List.fold_left fnv 0xcbf29ce484222325L parts);
   Bytes.to_string buffer
 
@@ -32,25 +29,25 @@ type location = { offset : int; length : int }
 
 type segment = {
   path : string;
-  mutable index : string option;  (** A sealed segment's sorted entries *)
-  table : (string, location) Hashtbl.t;  (** An active segment's entries, as scanned *)
-  mutable scanned : int;  (** How far an active segment has been read *)
+  mutable index : string option;
+  table : (string, location) Hashtbl.t;
+  mutable scanned : int;
   mutable channel : in_channel option;
 }
 
 type writer = {
   segment : segment;
   descriptor : Unix.file_descr;
-  mutable size : int;  (** The segment's length once [pending] is written *)
-  pending : Buffer.t;  (** Records not yet written to the file *)
+  mutable size : int;
+  pending : Buffer.t;
 }
 
 type t = {
   root : string;
-  mutable segments : segment list;  (** Others', newest first *)
-  mutable refreshed : float;  (** When other processes' segments were last looked for *)
+  mutable segments : segment list;
+  mutable refreshed : float;
   mutable writer : writer option;
-  used : (string, unit) Hashtbl.t;  (** Results this process read or added *)
+  used : (string, unit) Hashtbl.t;
 }
 
 let segments_directory store = Filename.concat store.root "segments"
@@ -72,9 +69,6 @@ let close_channel segment =
   Option.iter close_in_noerr segment.channel;
   segment.channel <- None
 
-(* The segments with an open channel. A process reads from many segments,
-   and may hold only so many files open, so past a limit the channels are
-   closed, and each is opened again when next read. *)
 let open_segments : segment list ref = ref []
 let open_limit = 64
 
@@ -91,23 +85,22 @@ let channel segment =
       open_segments := segment :: !open_segments;
       channel
 
-(* The record at an offset, checked; [None] if it is cut short or damaged. *)
 let read_record channel ~offset =
   try
     seek_in channel offset;
-    let head = really_input_string channel (1 + key_width + 4) in
-    let length = Int32.to_int (String.get_int32_le head (1 + key_width)) in
+    let head = really_input_string channel record_head_width in
+    let length = Int32.to_int (String.get_int32_le head length_position) in
     if length < 0 then None
     else
       let value = really_input_string channel length in
-      let check = really_input_string channel 8 in
-      if checksum [ head; value ] = check then Some (head.[0], String.sub head 1 key_width, value)
+      let check = really_input_string channel checksum_width in
+      if checksum [ head; value ] = check then
+        Some (head.[0], String.sub head kind_width key_width, value)
       else None
   with End_of_file | Sys_error _ -> None
 
-let record_size length = 1 + key_width + 4 + length + 8
+let record_size length = record_head_width + length + checksum_width
 
-(* Reads an active segment's records from where the last scan stopped. *)
 let scan segment =
   match open_in_bin segment.path with
   | exception Sys_error _ -> ()
@@ -144,6 +137,12 @@ let compare_key index position key =
   in
   loop 0
 
+let entry_location index position =
+  {
+    offset = Int64.to_int (String.get_int64_le index (position + key_width));
+    length = Int32.to_int (String.get_int32_le index (position + key_width + offset_width));
+  }
+
 let search index key =
   let rec halve low high =
     if low >= high then None
@@ -151,12 +150,7 @@ let search index key =
       let middle = (low + high) / 2 in
       let position = middle * entry_width in
       let order = compare_key index position key in
-      if order = 0 then
-        Some
-          {
-            offset = Int64.to_int (String.get_int64_le index (position + key_width));
-            length = Int32.to_int (String.get_int32_le index (position + key_width + 8));
-          }
+      if order = 0 then Some (entry_location index position)
       else if order < 0 then halve (middle + 1) high
       else halve low middle
   in
@@ -174,7 +168,6 @@ let load_segment path =
   | _ | (exception Sys_error _) -> scan segment);
   segment
 
-(* Finds segments other processes made or grew since the last look. *)
 let refresh store =
   let directory = segments_directory store in
   let own = Option.map (fun writer -> writer.segment.path) store.writer in
@@ -234,8 +227,6 @@ let new_writer store =
   in
   { segment; descriptor; size = String.length header; pending = Buffer.create 4096 }
 
-(* Records are gathered and written to the file together, so that adding one
-   is not a system call. *)
 let pending_limit = 1024 * 1024
 
 let drain writer =
@@ -244,7 +235,6 @@ let drain writer =
     Buffer.clear writer.pending
   end
 
-(* Writes a sealed segment's index beside it, from its entries. *)
 let write_index segment =
   let entries =
     List.sort
@@ -275,8 +265,6 @@ let seal store =
       store.segments <- writer.segment :: store.segments;
       writing := List.filter (fun other -> other != store) !writing
 
-(* A process that ends seals its additions, so that the next reads an index
-   and not every record. *)
 let () =
   at_exit (fun () ->
       List.iter (fun store -> try seal store with Sys_error _ | Unix.Unix_error _ -> ()) !writing)
@@ -293,10 +281,10 @@ let writer store =
 
 let append_record store kind key value =
   let writer = writer store in
-  let head = Bytes.create (1 + key_width + 4) in
+  let head = Bytes.create record_head_width in
   Bytes.set head 0 kind;
-  Bytes.blit_string key 0 head 1 key_width;
-  Bytes.set_int32_le head (1 + key_width) (Int32.of_int (String.length value));
+  Bytes.blit_string key 0 head kind_width key_width;
+  Bytes.set_int32_le head length_position (Int32.of_int (String.length value));
   let head = Bytes.unsafe_to_string head in
   Hashtbl.replace writer.segment.table key { offset = writer.size; length = String.length value };
   Buffer.add_string writer.pending head;
@@ -322,19 +310,16 @@ let flush store =
       Unix.fsync writer.descriptor)
     store.writer
 
-(* The record must be the key's own: an index that is damaged can name
-   another record's offset. *)
 let read_from segment key location =
   match read_record (channel segment) ~offset:location.offset with
   | Some (_, record_key, value) when record_key = key -> Some value
   | Some _ | None -> None
   | exception Sys_error _ -> None
 
-(* A record this process added, which is in memory until it is written. *)
 let read_own writer key location =
   let written = writer.size - Buffer.length writer.pending in
   if location.offset >= written then
-    Some (Buffer.sub writer.pending (location.offset - written + 1 + key_width + 4) location.length)
+    Some (Buffer.sub writer.pending (location.offset - written + record_head_width) location.length)
   else read_from writer.segment key location
 
 let lookup_once store key =
@@ -351,10 +336,6 @@ let lookup_once store key =
 
 let refresh_interval = 0.02
 
-(* A miss looks again for other processes' additions, but not more often
-   than every [refresh_interval]: a build that computes everything misses
-   on every result, and a result another process added a moment ago is only
-   computed again. *)
 let lookup store key =
   match lookup_once store key with
   | Some value -> Some value
@@ -375,9 +356,6 @@ let put store bytes =
   key
 
 let get store key = if String.length key <> key_width then None else lookup store key
-
-(* A result's name. Values share the segments with results, and the
-   derive-key mode keeps every result's name apart from every value's. *)
 let derive_result_key = Blake3.derive_key ~context:"truss 2026-11-12 store result"
 
 let result_key ~kind ~key =
@@ -408,8 +386,6 @@ let cache_files store name =
   File_system.make_directory path;
   path
 
-(* Each file in the cache directories: its path, its size, and when it was
-   last modified. *)
 let files_in_caches store =
   let rec walk directory files =
     match Sys.readdir directory with
@@ -480,10 +456,8 @@ let unlock pointer =
       pointer.lock_descriptor <- None
   | None -> ()
 
-(* A pointer's value is framed with its length and a checksum, so that
-   one cut short or damaged reads as nothing. *)
 let framed bytes =
-  let length = Bytes.create 4 in
+  let length = Bytes.create length_width in
   Bytes.set_int32_le length 0 (Int32.of_int (String.length bytes));
   let head = Bytes.to_string length in
   head ^ checksum [ head; bytes ] ^ bytes
@@ -493,18 +467,16 @@ let read pointer =
   | exception Sys_error _ -> None
   | contents ->
       let total = String.length contents in
-      if total < 12 then None
+      if total < pointer_head_width then None
       else
         let length = Int32.to_int (String.get_int32_le contents 0) in
-        if length < 0 || 12 + length <> total then None
+        if length < 0 || pointer_head_width + length <> total then None
         else
-          let head = String.sub contents 0 4 in
-          let check = String.sub contents 4 8 in
-          let bytes = String.sub contents 12 length in
+          let head = String.sub contents 0 length_width in
+          let check = String.sub contents length_width checksum_width in
+          let bytes = String.sub contents pointer_head_width length in
           if checksum [ head; bytes ] = check then Some bytes else None
 
-(* Written beside the pointer and renamed over it, after the values it may
-   name are durable, so a pointer never names a value a crash lost. *)
 let write_pointer pointer bytes =
   flush pointer.store;
   File_system.write_atomically ~durable:true pointer.pointer_path (framed bytes)
@@ -522,7 +494,6 @@ let size store =
   + List.fold_left (fun total (_, size, _) -> total + size) 0 (files_in_caches store)
   + match store.writer with Some writer -> writer.size | None -> 0
 
-(* Whether a segment's writer has gone: its lock can be taken. *)
 let abandoned segment =
   segment.index <> None
   ||
@@ -543,17 +514,11 @@ let entries segment =
   | Some index ->
       List.init
         (String.length index / entry_width)
-        (fun offset ->
-          let position = offset * entry_width in
-          ( String.sub index position key_width,
-            {
-              offset = Int64.to_int (String.get_int64_le index (position + key_width));
-              length = Int32.to_int (String.get_int32_le index (position + key_width + 8));
-            } ))
+        (fun entry ->
+          let position = entry * entry_width in
+          (String.sub index position key_width, entry_location index position))
   | None -> Hashtbl.fold (fun key location acc -> (key, location) :: acc) segment.table []
 
-(* Copies the records of segments that [keep] chooses into this process's
-   segment, and deletes those segments. *)
 let rewrite store candidates ~keep =
   List.iter
     (fun segment ->
@@ -601,9 +566,6 @@ let collect store ~budget ~live =
       (files_in_caches store)
   end
 
-(* Every process that writes leaves a segment, and a lookup searches each
-   segment's index, so small segments are gathered into one once there are
-   many. Every record is kept. *)
 let small = 8 * 1024 * 1024
 let many = 32
 

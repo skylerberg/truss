@@ -153,9 +153,56 @@ let () =
           | Error _ -> ()
           | Ok _ -> fail "opened a session the background process holds");
           ignore (call "stop");
-          ignore (Unix.waitpid [] child))
+          ignore (Unix.waitpid [] child));
+  test "a background process that asks whether it serves its own key keeps its lock" (fun () ->
+      fresh_store ();
+      let key = Database.server_key (package ()) in
+      match Unix.fork () with
+      | 0 ->
+          Database.serve ~key ~handle:(fun ~progress:_ request ->
+              if request = "stop" then begin
+                Database.stop ();
+                false
+              end
+              else List.mem key (Database.servers ()));
+          Unix._exit 0
+      | child ->
+          let call request =
+            match Database.call ~program:"/nonexistent" ~key ~progress:ignore request with
+            | Ok (served : bool) -> served
+            | Error message ->
+                fail "%s" message;
+                false
+          in
+          if not (call "ask") then fail "the background process did not find its own key";
+          if not (List.mem key (Database.servers ())) then
+            fail "the background process released its lock";
+          ignore (call "stop");
+          ignore (Unix.waitpid [] child));
+  test "a servers directory that another user could open is refused" (fun () ->
+      let refused make_servers =
+        let cache = fresh "cache" in
+        Unix.putenv "TRUSS_CACHE" cache;
+        make_servers (Filename.concat cache "servers");
+        match Database.call ~start_server:false ~key:"refused" ~progress:ignore () with
+        | Ok () -> fail "reached a background process"
+        | Error message -> if not (contains message "only this user") then fail "%s" message
+      in
+      refused (fun servers ->
+          Unix.mkdir servers 0o755;
+          Unix.chmod servers 0o755);
+      refused (fun servers ->
+          let target = fresh "target" in
+          Unix.chmod target 0o700;
+          Unix.symlink target servers))
 
 let () =
+  test "a new worktree skips a pointer whose record another compiler wrote" (fun () ->
+      fresh_store ();
+      let store = Store.open_ (Store.default_directory ()) in
+      Store.write_pointer (Store.pointer store "unreadable") "a record of a later format";
+      Store.close store;
+      expect_errors (package ()) 0);
   test "a session of a package with no errors finds none" (fun () ->
       fresh_store ();
       expect_errors (package ()) 0);

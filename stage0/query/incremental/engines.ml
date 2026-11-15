@@ -33,7 +33,7 @@ let unroot engine (query : ('key, 'value) query) key =
   | Some cell ->
       if cell.node.root then begin
         cell.node.root <- false;
-        Hashtbl.replace engine.unsaved cell.node.id cell.node
+        Hashtbl.replace engine.unwritten_nodes cell.node.id cell.node
       end;
       collect_or_defer engine cell.node;
       sweep engine
@@ -60,8 +60,6 @@ let by_id nodes = List.sort (fun (left : node) (right : node) -> compare left.id
 let differing engine = by_id (Hashtbl.fold (fun _ node nodes -> node :: nodes) engine.own [])
 let count engine = Hashtbl.length engine.own
 
-(* The engine's own nodes and those of each base that [skip] does not
-   exclude and the engine has not replaced. *)
 let own_and_inherited engine ~skip =
   let own = Hashtbl.fold (fun _ node nodes -> node :: nodes) engine.own [] in
   by_id
@@ -78,8 +76,6 @@ let own_and_inherited engine ~skip =
 let unshared engine other =
   own_and_inherited engine ~skip:(fun base -> base.fixed || List.memq base other.bases)
 
-(* The state's nodes, apart from its fixed bases': the engine's own, and
-   those of an earlier state it has not replaced. *)
 let nodes engine = own_and_inherited engine ~skip:(fun base -> base.fixed)
 let nodes_including_fixed engine = own_and_inherited engine ~skip:(fun _ -> false)
 let reads = current_reads
@@ -90,7 +86,7 @@ let readers engine (node : node) =
     if node.engine == engine then
       Hashtbl.fold (fun _ reader readers -> reader :: readers) node.readers []
     else
-      match Hashtbl.find_opt engine.foreign node.id with
+      match Hashtbl.find_opt engine.readers_of_base_nodes node.id with
       | Some table -> Hashtbl.fold (fun _ reader readers -> reader :: readers) table []
       | None -> []
   in
@@ -106,7 +102,7 @@ let readers engine (node : node) =
         in
         List.fold_left
           (fun readers (other : t) ->
-            match Hashtbl.find_opt other.foreign base.id with
+            match Hashtbl.find_opt other.readers_of_base_nodes base.id with
             | Some table -> from table readers
             | None -> readers)
           (if base.engine == engine then own else from base.readers own)
@@ -114,9 +110,6 @@ let readers engine (node : node) =
   in
   by_id readers
 
-(* The same query and key in another engine, computed there if it has none.
-   The other engine only observes it, so comparing two states makes no root
-   in either. *)
 let current_in (node : node) other =
   match node.cell with
   | Input (input, cell) ->
@@ -126,9 +119,6 @@ let current_in (node : node) other =
       else Some (observed_node other query cell.key)
   | Unfilled -> None
 
-(* Whether two nodes of one query or input and key, each in its engine,
-   hold equal results. The nodes' own cells are compared, so a node that
-   was collected since still answers. *)
 let same_outcome engine (left : node) other (right : node) =
   match (left.cell, right.cell) with
   | Input (input, mine), Input (other_input, theirs) -> (
@@ -151,8 +141,6 @@ let same_outcome engine (left : node) other (right : node) =
       | None -> false)
   | _ -> false
 
-(* Whether the store still has the value of every input of the state,
-   apart from its fixed bases'. *)
 let inputs_stored engine =
   List.for_all
     (fun (holder : t) ->

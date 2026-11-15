@@ -1,4 +1,5 @@
 val resolve : Nodes.t -> Nodes.node -> Nodes.node
+val necessary : Nodes.node -> bool
 val defer_collection : Nodes.t -> Nodes.node -> unit
 val forget : Nodes.t -> Nodes.node -> unit
 val collect_or_defer : Nodes.t -> Nodes.node -> unit

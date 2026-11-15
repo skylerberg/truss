@@ -1,30 +1,23 @@
-(* The data a client keeps with a session, such as the problems of a project's
-   manifests. The session layer does not look inside. *)
 type attachment = ..
 type attachment += Nothing
 
 type t = {
   key : string;
   mutable engine : Engine.t;
-  pointer : Store.pointer option;  (** Where the state is named in the store, if it is saved *)
-  version : string;  (** The name of the code that computed the state's results *)
-  bases : Engine.t list;  (** The fixed bases the state is over *)
+  pointer : Store.pointer option;
+  version : string;
+  bases : Engine.t list;
   mutable used : float;
   fingerprints : (string, string) Hashtbl.t;
-      (** Each file's fingerprint, by its path, by which another set of files finds this state *)
-  mutable pointed : bool;  (** Whether the pointer names the state as it is *)
+  mutable pointed : bool;
   mutable attachment : attachment;
   snapshot_of : string option;
-      (** For a snapshot of a state another process saves: the artifact it was opened from *)
 }
 
 type state = { store : Store.t; identity : string; sessions : (string, t) Hashtbl.t }
 
 let state : state option ref = ref None
 let logging = ref false
-
-(* Run when every state is closed or discarded, so that a client lets go of
-   its data built on them. *)
 let closing : (unit -> unit) list ref = ref []
 let on_close hook = closing := hook :: !closing
 
@@ -32,13 +25,8 @@ let current () =
   match !state with
   | Some state -> state
   | None ->
-      (* A state leaves out the results of a query that is not declared, so
-         none may be declared from here on. *)
       Engine.seal ();
       let store = Store.open_ (Store.default_directory ()) in
-      (* Every process leaves a segment, so one that opens the store gathers
-         the small ones once there are many, whether or not a background
-         process ever runs. *)
       Store.compact store;
       let fresh =
         { store; identity = Identity.compute (Store.directory store); sessions = Hashtbl.create 8 }
@@ -64,18 +52,12 @@ let budget () =
   | Some bytes -> bytes
   | None -> 20 * 1024 * 1024 * 1024
 
-(* The versions whose states this program can read: its own identity, and
-   each a client names. An artifact is marshaled, so a state of any other
-   version is never read. *)
 let readable_versions : string list ref = ref []
 
 let allow_reading version =
   if not (List.mem version !readable_versions) then
     readable_versions := version :: !readable_versions
 
-(* A pointer's record: the version that wrote the state, its artifact's
-   name, and each file's fingerprint. It is text, not a marshaled value, so
-   that any compiler can read any pointer of the store. *)
 type record = { version : string; artifact : string; files : (string * string) list }
 
 let record_header = "truss state 1"
@@ -132,9 +114,6 @@ let point session pointer artifact =
   Store.write_pointer pointer (print_record { version = session.version; artifact; files });
   session.pointed <- true
 
-(* Writes a session's state's changes since it was last written, as a
-   difference over the artifact it was opened from or last wrote, and points
-   its name at it. *)
 let save session =
   match session.pointer with
   | Some pointer when Engine.unwritten session.engine || not session.pointed ->
@@ -146,12 +125,6 @@ let stabilize session =
   save session;
   change
 
-(* A chain of differences is folded into one whole state once the
-   differences reach half its size, which costs the state's size. So the
-   background process folds while no request is waiting, and makes a command
-   wait for it only once the differences are several times that. A process
-   that serves one command folds as it opens the state, which costs it the
-   state's size already. *)
 let serving = ref false
 
 let compact ?(waited_for = false) session =
@@ -168,8 +141,6 @@ let compact ?(waited_for = false) session =
       end
   | None -> ()
 
-(* A file's fingerprint, for telling which saved state a set of files is
-   nearest to. *)
 let fingerprint text = Blake3.hash text
 
 let note_file session path = function
@@ -184,10 +155,7 @@ let note_file session path = function
         session.pointed <- false
       end
 
-(* The saved state of a version nearest to a set of files: the one that
-   differs from them in the fewest files, if it shares any. *)
 let nearest state ~version (files : (string * string) list) =
-  (* Another process may have written a state a moment ago. *)
   Store.refresh state.store;
   let wanted = Hashtbl.create (List.length files) in
   List.iter (fun (path, print) -> Hashtbl.replace wanted path print) files;
@@ -214,8 +182,6 @@ let nearest state ~version (files : (string * string) list) =
     None (Store.pointers state.store)
   |> Option.map fst
 
-(* The list of the directories that have states, so that the pointer of one
-   that is gone can be removed. *)
 let homes_file state = Filename.concat (Store.directory state.store) "worktrees"
 
 let known_homes state =
@@ -250,7 +216,6 @@ let open_ ~key ?pointer:name ?home ~version ~bases ~fingerprints () =
       | _ ->
           let bases = bases () in
           let own =
-            (* Another process may have written the state a moment ago. *)
             Store.refresh state.store;
             Option.bind (Option.bind pointer read_record) (fun record ->
                 if record.version <> version then None
@@ -263,8 +228,6 @@ let open_ ~key ?pointer:name ?home ~version ~bases ~fingerprints () =
             match own with
             | Some (engine, record) -> (engine, record.files, Own)
             | None -> (
-                (* A new set of files starts from the nearest saved state,
-                   if the store still has every input's value of it. *)
                 match
                   Option.bind
                     (nearest state ~version (fingerprints ()))
@@ -295,9 +258,6 @@ let open_ ~key ?pointer:name ?home ~version ~bases ~fingerprints () =
           | _ -> ());
           Ok (session, start))
 
-(* A session that starts from another's state and changes on its own, for
-   trying a change: the state is written, and opened again, so the two share
-   everything but the trial's changes. It is never saved. *)
 let trial session =
   let state = current () in
   save session;
@@ -324,9 +284,6 @@ let trial session =
     snapshot_of = None;
   }
 
-(* A session of the state that a name points at, which another process
-   saves: opened without the name's lock, never saved, and changing on its
-   own. It is opened again when the name points at another state. *)
 let snapshot ~key ~pointer:name ~version ~bases =
   let state = current () in
   Store.refresh state.store;
@@ -357,8 +314,6 @@ let snapshot ~key ~pointer:name ~version ~bases =
             (open_state state ~version ~bases record.artifact))
   | Some _ | None -> None
 
-(* Each directory that has a saved state, with the name its state is saved
-   under. *)
 let homes () = known_homes (current ())
 
 let sessions () =
@@ -403,9 +358,6 @@ let reset () =
       close_all current;
       state := None
 
-(* Runs a command. If a state it reads has lost an input's value, as after
-   another process collected the store, every open state is discarded with
-   its pointer, and the command is run once more, from the files. *)
 let recovering run =
   try run ()
   with Engine.Lost _ ->
@@ -426,7 +378,6 @@ let recovering run =
 
 let idle_limit = 3600.
 
-(* Drops sessions unused for [idle_limit], saving them first. *)
 let drop_idle () =
   let state = current () in
   let now = Unix.time () in
@@ -443,10 +394,6 @@ let drop_idle () =
       Hashtbl.remove state.sessions key)
     idle
 
-(* Removes the pointer of each directory that is gone, of any compiler, and
-   its line in the list. A new set of files looks through every pointer for
-   the state nearest to it, so those of directories that are gone must not
-   gather. *)
 let prune state =
   let known = known_homes state in
   let live, dead = List.partition (fun (home, _) -> Sys.file_exists home) known in
@@ -458,15 +405,10 @@ let prune state =
     with Sys_error _ -> ()
   end
 
-(* Keeps the store within its budget. The values a state of a version this
-   program can read refers to are kept, and so are those [keep] names. A state
-   another version wrote can be read only by that version, so its values
-   are not kept; that version finds its state gone, and starts again. *)
 let collect ~keep =
   let state = current () in
   prune state;
   Store.compact state.store;
-  (* One process collects at a time: every background process comes here. *)
   let lock =
     Unix.openfile
       (Filename.concat (Store.directory state.store) "collect.lock")

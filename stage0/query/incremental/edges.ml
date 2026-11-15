@@ -1,18 +1,13 @@
 open Nodes
 
-(* A node as an engine sees it: its own copy, if it has made one. *)
 let resolve engine (node : node) =
   if node.engine == engine then node
   else match Hashtbl.find_opt engine.shadows node.id with Some own -> own | None -> node
 
-(* Collection. A node is necessary if it is a root or a necessary node reads
-   it; an unnecessary node is collected, with the nodes only it read. That is done
-   only once no query runs: a query that is still running has read nodes
-   that do not yet count it as a reader. A copy of a base's node is never
-   collected, since the base's readers may read it. *)
+let necessary (node : node) = node.root || node.below <> None || Hashtbl.length node.readers > 0
 
 let defer_collection engine (node : node) =
-  if node.engine == engine && node.below = None && not node.root then
+  if node.engine == engine && not (necessary node) then
     engine.candidates <- node :: engine.candidates
 
 let forget engine (node : node) =
@@ -27,23 +22,17 @@ let forget engine (node : node) =
       | None -> ())
   | Unfilled -> ()
 
-(* A result is collectable, and an input only while it is not set: the value of
-   a set input comes from the database and cannot be recomputed. *)
 let collectable (node : node) =
   match node.cell with
   | Input (_, { slot = Unset; _ }) | Result _ -> true
   | Input _ | Unfilled -> false
 
 let rec collect engine (node : node) =
-  if
-    node.alive && (not node.root) && (not node.busy) && node.below = None
-    && Hashtbl.length node.readers = 0
-    && collectable node
-  then begin
+  if node.alive && (not node.busy) && (not (necessary node)) && collectable node then begin
     node.alive <- false;
     forget engine node;
     Hashtbl.remove engine.own node.id;
-    Hashtbl.remove engine.unsaved node.id;
+    Hashtbl.remove engine.unwritten_nodes node.id;
     if node.written <> Unwritten then
       engine.collected <- (name node, key_bytes node) :: engine.collected;
     engine.tally.collections <- engine.tally.collections + 1;
@@ -69,8 +58,6 @@ let rec sweep engine =
         List.iter (collect engine) candidates;
         sweep engine
 
-(* Replaces a node's reads, adding it to the readers of its new dependencies
-   before taking it from the readers of its old ones. *)
 let commit_reads engine (node : node) (reads : node list) =
   List.iter (fun read -> add_reader engine read node) reads;
   let now = Hashtbl.create (List.length reads) in
@@ -85,10 +72,6 @@ let commit_reads engine (node : node) (reads : node list) =
       end)
     old
 
-(* Copies a base's node into an engine, where a change may have reached it.
-   The copy holds the same result and has the base node's dependencies, as
-   the engine sees each, and the engine's own nodes that depended on the
-   base's node now depend on the copy. *)
 let shadow engine (base : node) =
   match Hashtbl.find_opt engine.shadows base.id with
   | Some own -> own
@@ -114,9 +97,9 @@ let shadow engine (base : node) =
       let reads = List.map (resolve engine) base.reads in
       own.reads <- reads;
       List.iter (fun read -> add_reader engine read own) reads;
-      (match Hashtbl.find_opt engine.foreign base.id with
+      (match Hashtbl.find_opt engine.readers_of_base_nodes base.id with
       | Some readers ->
-          Hashtbl.remove engine.foreign base.id;
+          Hashtbl.remove engine.readers_of_base_nodes base.id;
           Hashtbl.iter
             (fun _ (reader : node) ->
               reader.reads <- List.map (fun read -> if read == base then own else read) reader.reads;
@@ -146,14 +129,11 @@ let readers_here engine (node : node) ~phase =
       in
       List.fold_left
         (fun readers (other : t) ->
-          match Hashtbl.find_opt other.foreign base.id with
+          match Hashtbl.find_opt other.readers_of_base_nodes base.id with
           | Some table -> from table readers
           | None -> readers)
         (from base.readers own) engine.bases
 
-(* Marks a result, and its readers within its phase, as possibly changed.
-   Its readers from a later phase are left alone until it is known to have
-   changed. *)
 let mark ?(every_phase = false) engine (start : node) =
   let stack = Stack.create () in
   Stack.push start stack;
@@ -170,8 +150,6 @@ let mark ?(every_phase = false) engine (start : node) =
     end
   done
 
-(* A node's result changed: its readers are to be marked when their phase
-   is reached. *)
 let seed engine (node : node) =
   List.iter
     (fun (reader : node) ->
@@ -201,12 +179,10 @@ let record_read (context : context) (node : node) =
         match own with
         | Some own when not own.root ->
             own.root <- true;
-            Hashtbl.replace engine.unsaved own.id own
+            Hashtbl.replace engine.unwritten_nodes own.id own
         | Some _ | None -> ()
       end
 
-(* A cycle: every frame from the one for [node] to the newest is on it, so
-   each of their results is the cycle. *)
 let cycle engine (node : node) =
   let rec on_cycle frames = function
     | [] -> None
