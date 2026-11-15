@@ -1,8 +1,3 @@
-(* BLAKE3, following the specification's reference implementation. Words are
-   32 bits, held in OCaml's native integers and masked after each
-   operation. *)
-
-(* Words are held in native integers, which need more than 32 bits. *)
 let () = assert (Sys.int_size >= 63)
 let mask = 0xffffffff
 let[@inline] rotate_right value count = (value lsr count) lor (value lsl (32 - count)) land mask
@@ -22,11 +17,7 @@ let derive_key_material = 64
 let block_length = 64
 let chunk_length = 1024
 
-(* Which of the block's words each of the seven rounds mixes in, in order,
-   sixteen to a round. The specification permutes the block's words after
-   each round; these are the same words, by their places in the block as it
-   was. *)
-let schedule =
+let message_schedule =
   let rounds = Array.make (7 * 16) 0 in
   let current = ref (Array.init 16 Fun.id) in
   for round = 0 to 6 do
@@ -36,11 +27,8 @@ let schedule =
   rounds
 
 let[@inline] word (block : int array) base place =
-  Array.unsafe_get block (Array.unsafe_get schedule (base + place))
+  Array.unsafe_get block (Array.unsafe_get message_schedule (base + place))
 
-(* The compression function. Nearly all of a hash's time is spent here, so
-   its sixteen words are local variables, which stay in registers, and each
-   mixing step is written out. *)
 let compress (chaining : int array) (block : int array) ~counter ~length ~flags =
   let v0 = ref (Array.unsafe_get chaining 0) in
   let v1 = ref (Array.unsafe_get chaining 1) in
@@ -60,7 +48,6 @@ let compress (chaining : int array) (block : int array) ~counter ~length ~flags 
   let v15 = ref flags in
   for round = 0 to 6 do
     let base = round * 16 in
-    (* Down the four columns *)
     v0 := (!v0 + !v4 + word block base 0) land mask;
     v12 := rotate_right (!v12 lxor !v0) 16;
     v8 := (!v8 + !v12) land mask;
@@ -93,7 +80,6 @@ let compress (chaining : int array) (block : int array) ~counter ~length ~flags 
     v15 := rotate_right (!v15 lxor !v3) 8;
     v11 := (!v11 + !v15) land mask;
     v7 := rotate_right (!v7 lxor !v11) 7;
-    (* Along the four diagonals *)
     v0 := (!v0 + !v5 + word block base 8) land mask;
     v15 := rotate_right (!v15 lxor !v0) 16;
     v10 := (!v10 + !v15) land mask;
@@ -138,9 +124,7 @@ let compress (chaining : int array) (block : int array) ~counter ~length ~flags 
     !v7 lxor !v15;
   |]
 
-(* The sixteen little-endian words of up to 64 bytes of [input] from
-   [offset], padded with zeros. *)
-let words input offset length =
+let block_words input offset length =
   let block = Array.make 16 0 in
   let whole = length / 4 in
   for place = 0 to whole - 1 do
@@ -152,25 +136,19 @@ let words input offset length =
   done;
   block
 
-(* The inputs to finishing a chunk or a parent node: compressed without [root]
-   it is a chaining value, and with it the digest. *)
 type output = { chaining : int array; block : int array; counter : int; length : int; flags : int }
 
 let chaining_value ?(flags = 0) output =
   compress output.chaining output.block ~counter:output.counter ~length:output.length
     ~flags:(output.flags lor flags)
 
-(* The output of the chunk numbered [counter], which holds [length] bytes of
-   [input] from [offset]. Every block but the last is compressed here. [key]
-   and [mode] are the chaining value and the flags that the hash's mode
-   starts every chunk and parent node with. *)
 let chunk_output ~key ~mode input ~offset ~length ~counter =
   let chaining = ref key in
   let blocks = if length = 0 then 1 else (length + block_length - 1) / block_length in
   for index = 0 to blocks - 2 do
     chaining :=
       compress !chaining
-        (words input (offset + (index * block_length)) block_length)
+        (block_words input (offset + (index * block_length)) block_length)
         ~counter ~length:block_length
         ~flags:(mode lor if index = 0 then chunk_start else 0)
   done;
@@ -178,7 +156,7 @@ let chunk_output ~key ~mode input ~offset ~length ~counter =
   let last_length = length - last_offset in
   {
     chaining = !chaining;
-    block = words input (offset + last_offset) last_length;
+    block = block_words input (offset + last_offset) last_length;
     counter;
     length = last_length;
     flags = mode lor (if blocks = 1 then chunk_start else 0) lor chunk_end;
@@ -193,15 +171,10 @@ let parent_output ~key ~mode left right =
     flags = mode lor parent;
   }
 
-(* The eight words of the root's chaining value, which are the first 32
-   bytes of the hash's output. *)
 let root_words ~key ~mode input =
   let total = String.length input in
   let chunks = if total = 0 then 1 else (total + chunk_length - 1) / chunk_length in
-  (* The stack of chaining values of complete subtrees, merged as the
-     reference implementation merges them: after chunk [n], once for each
-     trailing zero bit of [n]. *)
-  let stack = ref [] in
+  let chaining_value_stack = ref [] in
   for index = 0 to chunks - 2 do
     let output =
       chunk_output ~key ~mode input ~offset:(index * chunk_length) ~length:chunk_length
@@ -210,14 +183,14 @@ let root_words ~key ~mode input =
     let value = ref (chaining_value output) in
     let finished = ref (index + 1) in
     while !finished land 1 = 0 do
-      (match !stack with
+      (match !chaining_value_stack with
       | left :: rest ->
           value := chaining_value (parent_output ~key ~mode left !value);
-          stack := rest
+          chaining_value_stack := rest
       | [] -> assert false);
       finished := !finished lsr 1
     done;
-    stack := !value :: !stack
+    chaining_value_stack := !value :: !chaining_value_stack
   done;
   let last_offset = (chunks - 1) * chunk_length in
   let last =
@@ -227,7 +200,7 @@ let root_words ~key ~mode input =
   let output =
     List.fold_left
       (fun right left -> parent_output ~key ~mode left (chaining_value right))
-      last !stack
+      last !chaining_value_stack
   in
   chaining_value ~flags:root output
 

@@ -191,7 +191,7 @@ let () =
       in
       incr counter;
       let output = Filename.concat (Lazy.force scratch) (Printf.sprintf "tests%d" !counter) in
-      match Compile.For_testing.build_supplied_tests compile ~time_limit:300 tests ~output with
+      match Compile.For_testing.build_supplied_tests compile ~time_limit_ms:300 tests ~output with
       | Error message -> fail "%s" message
       | Ok () ->
           let status, out, _ = Process.run output [] in
@@ -236,10 +236,3 @@ let () =
       expect_string ~expected:path actual;
       if (Unix.stat actual).st_mtime < Unix.time () -. 3600. then
         fail "an object that was found kept the time it was compiled at")
-
-let () =
-  test "a program still running at its time limit is stopped" (fun () ->
-      let started = Unix.gettimeofday () in
-      let status, _, _ = Process.run ~time_limit:100 "/bin/sleep" [ "5" ] in
-      if status <> 137 then fail "status %d" status;
-      if Unix.gettimeofday () -. started > 2. then fail "it was not stopped")

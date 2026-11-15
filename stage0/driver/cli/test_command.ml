@@ -211,7 +211,7 @@ let run_tests ?(rerun = false) ?(progress = ignore) session packages tests =
           Compile.run_tests ~rerun
             ~progress:(fun event -> progress (shifted event))
             (Lazy.force compile)
-            ~time_limit:(Database.time_limit session * 1000)
+            ~time_limit_ms:(Database.time_limit session * 1000)
             (List.map (fun test -> test.path) own)
         with
         | Ok records -> records

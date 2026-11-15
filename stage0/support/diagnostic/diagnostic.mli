@@ -1,13 +1,5 @@
-(** Errors with spans and exact fixes, shared by every stage of the compiler.
-
-    Every diagnostic is an error: Truss has no warnings. Each has a stable code, so that tools and
-    agents match on codes rather than on message text. *)
-
 type span = Source.span = private { start : int; stop : int }
 
-(** The codes, one constructor each and grouped by the stage that reports them, so that a misspelled
-    code cannot compile and every stable code is listed in one place. {!Code.name} gives the name
-    tools see, such as ["lexer.unterminated_string"]: the stage, then the code. *)
 module Code : sig
   type lexer =
     | Invalid_utf8
@@ -243,7 +235,6 @@ module Code : sig
     | Instantiation_cycle
     | Duplicate_test
 
-  (* Each stage adds its own group; its codes are named "stage.code". *)
   type t =
     | Lexer of lexer
     | Parser of parser
@@ -261,27 +252,17 @@ module Code : sig
 end
 
 type 'span edit = { span : 'span; replacement : string }
-(** Replace the bytes of [span] with [replacement]. An empty span inserts. *)
-
 type 'span fix = { title : string; edits : 'span edit list }
 
 type 'span diagnostic = {
   code : Code.t;
   message : string;
-      (** Whole sentences, each starting with a capital letter, or with code in backticks, and
-          ending with a period: "This string is not closed on its line." Every stage writes them the
-          same way. *)
   span : 'span;
   notes : ('span * string) list;
-  fixes : 'span fix list;  (** Alternatives. Most diagnostics have at most one. *)
+  fixes : 'span fix list;
 }
-(** A diagnostic's spans are either file offsets, {!span}, or offsets relative to a definition's
-    base, [Syntax.Span.t]. Every stage that caches its results per definition keeps its diagnostics
-    relative, so that moving a definition invalidates none of them. The two kinds of span are
-    different types, so a relative diagnostic cannot be shown at the wrong place in its file. *)
 
 type t = span diagnostic
-(** A diagnostic in its file's offsets, which can be shown. *)
 
 val make :
   ?notes:('span * string) list ->
@@ -293,85 +274,36 @@ val make :
 
 val fix : string -> 'span edit list -> 'span fix
 val replace : 'span -> string -> 'span edit
-
 val insert : 'span -> string -> 'span edit
-(** [insert at text] inserts [text] at [at], an empty span. *)
-
 val delete : 'span -> 'span edit
-
 val edit_distance : string -> string -> int
-(** The optimal string alignment distance: insertions, deletions, substitutions, and swaps of two
-    neighboring letters each count one. *)
-
 val closest : string -> string list -> string option
-(** The candidate closest to a name, if one is near enough to be a typo: at most a third of the
-    name's letters away, and at least one. *)
 
 type reported
 
 val reported : _ diagnostic -> reported
-(** The diagnostic is the report. *)
-
 val recovered : _ -> reported
-(** A span the parser recorded as a recovery is the report: it records one only where it or the
-    lexer reported an error. *)
-
 val map_spans : ('a -> 'b) -> 'a diagnostic -> 'b diagnostic
-(** Converts every span in a diagnostic: its own, its notes', and its fixes' edits. *)
-
 val apply_fix : string -> span fix -> string
-(** Applies a fix's edits to the text it was made for. Raises [Invalid_argument] if the edits
-    overlap. *)
-
 val apply_edits : string -> span edit list -> string
-(** Like {!apply_fix}, for any edits. *)
-
 val adds_none : before:'span diagnostic list -> after:'span diagnostic list -> bool
-(** Whether every code of [after] is in [before], counting each as often as it occurs. *)
-
 val machine_applicable : t list -> t list
-(** The diagnostics whose only fix [truss check --fix] and the lexer's recovery apply, leaving out
-    one whose edits overlap an earlier one's. *)
 
-(** Collects the diagnostics of one file. Every diagnostic is kept, so that later checks, such as of
-    fixes, see all of them; only {!shown} limits how many are listed. *)
 module Collector : sig
   type diagnostic := t
   type t
 
   val create : unit -> t
   val add : t -> diagnostic -> unit
-
   val to_list : t -> diagnostic list
-  (** In order of position. *)
 end
 
 val shown : t list -> t list
-(** The diagnostics to list: at most {!limit}, and then, if there were more, one with the code
-    [Too_many_diagnostics] that counts the rest, so that a binary file opened by mistake gives a
-    short report. *)
-
-(** {1 Showing diagnostics} *)
-
 val render : Source.t -> t -> string
-(** For people: the position, the code and message, the line of source with the span marked, and the
-    notes and fixes. *)
-
 val to_json : Source.t -> t list -> string
-(** For tools: a JSON array. Spans carry byte offsets as well as lines and columns, and fixes are
-    always byte ranges. The output is always valid UTF-8: a byte that is not valid UTF-8, which can
-    only come from quoted source text, is written as U+FFFD. *)
-
 val to_json_object : Source.t -> t -> string
-(** One diagnostic as {!to_json} writes it, for a tool's output that gathers several files'. *)
-
 val json_string : string -> string
-(** Text as a JSON string, always valid UTF-8, as {!to_json} writes every string: a byte that is not
-    valid UTF-8 is written as U+FFFD. *)
-
 val quote : string -> string
-(** Text in double quotes, with quotes, backslashes, control characters, and bytes that are not
-    valid UTF-8 escaped, so that text in any script stays readable and the result is valid UTF-8. *)
 
 module For_testing : sig
   val limit : int

@@ -142,7 +142,13 @@ let check_parse_robust text =
       fail "the parser raised %s on %s" (Printexc.to_string exception_) (Diagnostic.quote text)
   | _, file, diagnostics ->
       List.iter (check_tree text) file.definitions;
-      List.iter (check_diagnostic_spans text) diagnostics
+      List.iter (check_diagnostic_spans text) diagnostics;
+      if
+        diagnostics = []
+        && List.exists
+             (fun (item : Syntax.definition Syntax.item) -> item.value.recovered <> [])
+             file.definitions
+      then fail "the parser recovered with no error in %s" (Diagnostic.quote text)
 
 (* A parser diagnostic's claim about the reference grammar: that it
    rejects the tokens, that it accepts them because the rule is checked

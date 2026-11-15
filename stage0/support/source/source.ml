@@ -31,7 +31,6 @@ let read_file path = create ~path (In_channel.with_open_bin path In_channel.inpu
 let path source = source.path
 let text source = source.text
 
-(* The index of the line holding [offset], counting from 0. *)
 let line_index source offset =
   let starts = source.line_starts in
   let rec search low high =
@@ -60,7 +59,6 @@ let line_end source offset =
 
 type units = Bytes | Scalar_values | Utf_16_code_units
 
-(* The width in [units] of the character at [at], and its width in bytes. *)
 let step units text at =
   let decoded = String.get_utf_8_uchar text at in
   let width = max 1 (Uchar.utf_decode_length decoded) in
