@@ -41,6 +41,12 @@ let () =
       let files = [ ("truss.toml", "a"); ("vector.truss", "b"); ("guide/start.md", "c") ] in
       if Content.hash files <> Content.hash (List.rev files) then fail "the hashes differ";
       if not (Content.is_hash (Content.hash files)) then fail "not 64 hexadecimal digits");
+  test "a package's hash is the BLAKE3 hash of a line for each file, as PACKAGES.md defines"
+    (fun () ->
+      let line path bytes = path ^ " " ^ Blake3.hex_digest bytes ^ "\n" in
+      let expected = Blake3.hex_digest (line "a.truss" "one" ^ line "b/c.truss" "two") in
+      if Content.hash [ ("b/c.truss", "two"); ("a.truss", "one") ] <> expected then
+        fail "another hash");
   test "a package's hash changes with a file's bytes, and with its path" (fun () ->
       let hash = Content.hash [ ("a.truss", "one"); ("b.truss", "two") ] in
       if hash = Content.hash [ ("a.truss", "one"); ("b.truss", "too") ] then fail "bytes";
@@ -81,8 +87,8 @@ let () =
   let hash = String.make 64 'a' in
   let malformed_at line text =
     match Lock.parse text with
-    | exception Lock.Malformed (actual, _) when actual = line -> ()
-    | exception Lock.Malformed (actual, message) -> fail "at line %d: %s" actual message
+    | exception Lock.Malformed { line = actual; _ } when actual = line -> ()
+    | exception Lock.Malformed { line = actual; message } -> fail "at line %d: %s" actual message
     | _ -> fail "accepted"
   in
   test "a lock file without its first line is malformed" (fun () ->
@@ -138,7 +144,7 @@ let () =
       with
       | Ok directory ->
           if Filename.basename directory <> hash then fail "in %s" directory;
-          if Content.hash (Content.files ~all:true directory) <> hash then fail "other files"
+          if Content.hash (Content.all_files directory) <> hash then fail "other files"
       | Error reason -> fail "%s" reason);
   test "files that do not have the hash asked for are not kept" (fun () ->
       let root = fresh "registry" and into = fresh "packages" in

@@ -7,10 +7,7 @@ module Environment = Interface.Environment
    library, the calling package, and the packages its manifest lists. *)
 let visible_packages database (package : Path.package) =
   List.sort_uniq compare
-    (Path.standard_package :: package
-    :: List.map
-         (fun (dependency : Manifest.dependency) -> dependency.package)
-         (Query.demand database Packages.dependencies package))
+    (Path.standard_package :: package :: Query.demand database Packages.dependency_names package)
 
 (* The methods of a type with the given name: one for each receiver mode. *)
 let own_methods database owner name =

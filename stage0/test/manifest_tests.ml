@@ -11,8 +11,8 @@ let contains text part = Substring.contains text part
 
 let malformed_at line text =
   match Manifest.parse text with
-  | exception Manifest.Malformed (actual, _) when actual = line -> ()
-  | exception Manifest.Malformed (actual, message) -> fail "at line %d: %s" actual message
+  | exception Manifest.Malformed { line = actual; _ } when actual = line -> ()
+  | exception Manifest.Malformed { line = actual; message } -> fail "at line %d: %s" actual message
   | _ -> fail "accepted"
 
 let () =
@@ -33,19 +33,22 @@ let () =
                  };
                ];
            };
-       project = false;
        time_limit = None;
       } ->
           ()
       | _ -> fail "read differently");
   test "PACKAGES.md's project manifest is a project with a time limit, and no package" (fun () ->
       let text = Documents.read (Harness.workspace_path "PACKAGES.md") in
-      match Manifest.parse (String.concat "\n" (Documents.block_after text "## Projects")) with
-      | { package = None; project = true; time_limit = Some 10 } -> ()
+      let manifest = String.concat "\n" (Documents.block_after text "## Projects") in
+      if not (Manifest.has_project_table manifest) then fail "not a project";
+      match Manifest.parse manifest with
+      | { package = None; time_limit = Some 10 } -> ()
       | _ -> fail "read differently");
   test "a manifest has a package, a project, or both" (fun () ->
-      (match Manifest.parse "[project]\n[package]\nname = \"a\"\n" with
-      | { package = Some { name = { Path.owner = None; name = "a" }; _ }; project = true; _ } -> ()
+      let both = "[project]\n[package]\nname = \"a\"\n" in
+      if not (Manifest.has_project_table both) then fail "not a project";
+      (match Manifest.parse both with
+      | { package = Some { name = { Path.owner = None; name = "a" }; _ }; _ } -> ()
       | _ -> fail "read differently");
       malformed_at 1 "# nothing\n";
       malformed_at 2 "[project]\n[dependencies]\njson = []\n");
@@ -80,13 +83,13 @@ let () =
   test "a version, as other languages' manifests have, is malformed, with the replacement"
     (fun () ->
       (match Manifest.parse "[package]\nname = \"a\"\nversion = \"1.0\"\n" with
-      | exception Manifest.Malformed (3, message) ->
+      | exception Manifest.Malformed { line = 3; message } ->
           if not (contains message "holds no version") then fail "said %s" message
       | _ -> fail "accepted");
       (match
          Manifest.parse "[package]\nname = \"a\"\n[dependencies]\njson = { version = \"2.1\" }\n"
        with
-      | exception Manifest.Malformed (4, message) ->
+      | exception Manifest.Malformed { line = 4; message } ->
           if not (contains message "json = []") then fail "said %s" message
       | _ -> fail "accepted");
       malformed_at 4 "[package]\nname = \"a\"\n[dependencies]\njson = \"2.1\"\n");

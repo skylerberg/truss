@@ -134,12 +134,9 @@ let receiver (parameters : parameter list) : Path.receiver =
 (* The packages a module can name at the start of a path: its own, the
    standard library, and its dependencies. *)
 let packages database (module_ : Path.module_) =
-  let dependencies =
-    List.map
-      (fun (dependency : Manifest.dependency) -> dependency.package)
-      (Query.demand database Packages.dependencies module_.package)
-  in
-  List.sort_uniq compare (module_.package :: Path.standard_package :: dependencies)
+  List.sort_uniq compare
+    (module_.package :: Path.standard_package
+    :: Query.demand database Packages.dependency_names module_.package)
 
 (* The module that a full path denotes, written in a file of [from]. The
    path starts with a package's name, which takes two segments when the

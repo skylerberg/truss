@@ -227,6 +227,8 @@ module For_testing : sig
   val standard_base : unit -> Engine.t
   (** The standard library, checked whole and frozen as a fixed base for engines to be made over. *)
 
+  val session_base : unit -> Engine.t
+
   val logging : bool ref
   (** Whether new sessions keep a log of the queries they compute. *)
 

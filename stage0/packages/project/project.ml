@@ -31,9 +31,6 @@ let rec package_directory ~is_package directory =
   else if directory = "" then None
   else package_directory ~is_package (parent directory)
 
-(* A file's path under its package's directory, as the file of a module:
-   its directory names the module, and its own name, without [.truss], the
-   file. *)
 let file_of_path ~package ~directory path : Path.file =
   let inside =
     if directory = "" then path
@@ -58,16 +55,17 @@ type package = {
   files : Path.file list;
 }
 
+type source_file = { path : string; directory : string; file : Path.file }
+
 type layout = {
   packages : (string * Manifest.package) list;
-  files : (string * string * Path.file) list;
+  files : source_file list;
   problems : string list;
   time_limit : int;
 }
 
 let files database root = Option.value (Query.find database tree root) ~default:[]
 
-(* Records a problem with the manifest in [directory]. *)
 let manifest_problem problems directory format =
   Printf.ksprintf
     (fun message ->
@@ -108,7 +106,7 @@ let layout =
             else
               match Manifest.parse text with
               | manifest -> Some (directory, manifest)
-              | exception Manifest.Malformed (line, message) ->
+              | exception Manifest.Malformed { line; message } ->
                   problems :=
                     Printf.sprintf "%s:%d: %s" (manifest_file directory) line message :: !problems;
                   None)
@@ -157,7 +155,7 @@ let layout =
                 (fun directory ->
                   Option.map
                     (fun (package : Manifest.package) ->
-                      (path, directory, file_of_path ~package:package.name ~directory path))
+                      { path; directory; file = file_of_path ~package:package.name ~directory path })
                     (List.assoc_opt directory packages)))
           files
       in
@@ -189,7 +187,7 @@ let selection =
       let written =
         match Registry.Lock.parse (Option.value ~default:"" written_text) with
         | entries -> Some entries
-        | exception Registry.Lock.Malformed (line, message) ->
+        | exception Registry.Lock.Malformed { line; message } ->
             problems := Printf.sprintf "truss.lock:%d: %s" line message :: !problems;
             None
       in
@@ -205,22 +203,10 @@ let selection =
             | None ->
                 missing := (name, version, hash) :: !missing;
                 Error "its files are not fetched yet")
-        | Some _ -> (
-            let read file = Query.find database text (root, file) in
-            match
-              ( Option.map Manifest.parse (read "truss.toml"),
-                Registry.Lock.parse (Option.value ~default:"" (read lock_file)) )
-            with
-            | exception Manifest.Malformed (line, message) ->
-                Error (Printf.sprintf "its manifest cannot be read: line %d: %s" line message)
-            | exception Registry.Lock.Malformed (line, message) ->
-                Error (Printf.sprintf "its lock file cannot be read: line %d: %s" line message)
-            | Some { package = Some manifest; _ }, record when manifest.name = name ->
-                Ok (manifest, record)
-            | _ ->
-                Error
-                  (Printf.sprintf "its manifest does not name the package `%s`"
-                     (Path.show_package name)))
+        | Some _ ->
+            Registry.Selection.manifest_and_record
+              ~read:(fun file -> Query.find database text (root, file))
+              name
       in
       let selected, selection_problems =
         Registry.Selection.choose
@@ -238,10 +224,9 @@ let selection =
           ~local:named ~load
       in
       let missing = List.sort_uniq compare !missing in
-      (* While a package is still to be fetched, the build's errors are
-         not known yet. *)
+      let is_build_fetched = missing = [] in
       let lock_fix = ref None in
-      if missing = [] then begin
+      if is_build_fetched then begin
         List.iter
           (fun problem -> lock_problem "%s" (Registry.Selection.sentence problem))
           selection_problems;
@@ -255,9 +240,6 @@ let selection =
                   version Manifest.truss_version
             | _ -> ())
           selected;
-        (* The lock file has one canonical form, derived from the manifests
-           and its versions. Another is a problem whose fix is to write
-           that one. *)
         match written with
         | Some written when selection_problems = [] ->
             let current =
@@ -291,9 +273,8 @@ let selection =
 
 type place = { root : string; directory : string; manifest : Manifest.package }
 
-(* Where each package of the build is, by name. *)
-let build =
-  Query.query ~name:"project_build" ~phase:Phases.project ~saved:true
+let places =
+  Query.query ~name:"project_places" ~phase:Phases.project ~saved:true
     ~show:(fun () -> "")
     (fun database () ->
       let by_name = Hashtbl.create 16 in
@@ -315,10 +296,6 @@ let build =
         (fun (left, _) (right, _) -> Path.compare_package left right)
         (Hashtbl.fold (fun name place packages -> (name, place) :: packages) by_name []))
 
-(* The standard package is the standard library in every project, so its
-   place reads the standard library's root alone, and the results derived
-   from it are the standard library's own: the fixed base holds them, and
-   a project's state does not compute them again. *)
 let place =
   Query.query ~name:"project_place" ~phase:Phases.project ~saved:true ~show:Path.show_package
     (fun database name ->
@@ -328,7 +305,7 @@ let place =
             if manifest.name = name then Some { root = standard_root; directory; manifest }
             else None)
           (Query.demand database layout standard_root).packages
-      else List.assoc_opt name (Query.demand database build ()))
+      else List.assoc_opt name (Query.demand database places ()))
 
 let package =
   Query.query ~name:"project_package" ~phase:Phases.project ~saved:true ~show:Path.show_package
@@ -337,7 +314,8 @@ let package =
         (fun { root; directory; manifest } ->
           let files =
             List.filter_map
-              (fun (_, owner, file) -> if owner = directory then Some file else None)
+              (fun (source : source_file) ->
+                if source.directory = directory then Some source.file else None)
               (Query.demand database layout root).files
           in
           {
@@ -349,7 +327,6 @@ let package =
           })
         (Query.demand database place name))
 
-(* A file's root and its path in it. *)
 let file_place =
   Query.query ~name:"project_file_place" ~phase:Phases.project ~show:Path.show_file
     (fun database (file : Path.file) ->
@@ -357,7 +334,7 @@ let file_place =
           let path = file_path ~directory file in
           if
             List.exists
-              (fun (written, _, _) -> written = path)
+              (fun (source : source_file) -> source.path = path)
               (Query.demand database layout root).files
           then Some (root, path)
           else None))
@@ -367,8 +344,6 @@ let file_text =
     (fun database file ->
       Option.bind (Query.demand database file_place file) (Query.find database text))
 
-(* A package that is in a cycle of packages that depend on each other, with
-   the cycle. *)
 let dependency_cycle (packages : (string * Manifest.package) list) =
   let dependencies name =
     match List.find_opt (fun (_, (package : Manifest.package)) -> package.name = name) packages with
@@ -376,25 +351,22 @@ let dependency_cycle (packages : (string * Manifest.package) list) =
         List.map (fun (dependency : Manifest.dependency) -> dependency.package) package.dependencies
     | None -> []
   in
-  (* A package that reaches no cycle is not walked again. *)
-  let clear = Hashtbl.create 8 in
-  let rec reaches target path name =
-    if List.mem name path || Hashtbl.mem clear name then None
-    else
-      let cycle =
-        List.find_map
-          (fun next ->
-            if next = target then Some [ name; target ]
-            else Option.map (fun rest -> name :: rest) (reaches target (name :: path) next))
-          (dependencies name)
-      in
-      if cycle = None then Hashtbl.replace clear name ();
-      cycle
+  let visited = Hashtbl.create 8 in
+  let rec reaches target name =
+    if Hashtbl.mem visited name then None
+    else begin
+      Hashtbl.replace visited name ();
+      List.find_map
+        (fun next ->
+          if next = target then Some [ name; target ]
+          else Option.map (fun rest -> name :: rest) (reaches target next))
+        (dependencies name)
+    end
   in
   List.find_map
     (fun (directory, (package : Manifest.package)) ->
-      Hashtbl.reset clear;
-      Option.map (fun way -> (directory, way)) (reaches package.name [] package.name))
+      Hashtbl.reset visited;
+      Option.map (fun cycle -> (directory, cycle)) (reaches package.name package.name))
     packages
 
 let problems =
@@ -409,11 +381,6 @@ let problems =
       let named name =
         List.find_opt (fun (_, (package : Manifest.package)) -> package.name = name) packages
       in
-      let selected_named name =
-        List.find_opt
-          (fun (selected : Registry.Selection.package) -> selected.name = name)
-          chosen.selected
-      in
       List.iter
         (fun (directory, (package : Manifest.package)) ->
           (match package.truss with
@@ -426,8 +393,6 @@ let problems =
               problem directory "`%s` is written for Truss %s, and this toolchain is Truss %s."
                 (Path.show_package package.name) version Manifest.truss_version
           | Some _ -> ());
-          (* Every path must read one way: [acme::geometry::vector] cannot be
-             both a module of [acme::geometry] and one of a package [acme]. *)
           (match package.name with
           | { owner = None; name } ->
               List.iter
@@ -450,22 +415,16 @@ let problems =
             (fun (dependency : Manifest.dependency) ->
               if dependency.package = package.name then
                 problem directory "`%s` cannot depend on itself." (Path.show_package package.name)
-                (* A dependency the registry would have, with no version
-                 known, is reported with the lock file. *)
-              else if
-                named dependency.package = None
-                && selected_named dependency.package = None
-                && dependency.package.owner = None
-              then
+              else if dependency.package.owner = None && named dependency.package = None then
                 problem directory "`%s` is not a package of this project."
                   (Path.show_package dependency.package))
             package.dependencies)
         packages;
       (match dependency_cycle packages with
-      | Some (directory, way) ->
+      | Some (directory, cycle) ->
           problem directory "Packages cannot depend on each other in a cycle: %s."
             (String.concat " -> "
-               (List.map (fun package -> Printf.sprintf "`%s`" (Path.show_package package)) way))
+               (List.map (fun package -> Printf.sprintf "`%s`" (Path.show_package package)) cycle))
       | None -> ());
       own.problems @ chosen.lock_problems @ List.rev !problems)
 

@@ -151,22 +151,9 @@ let fetch name version ~hash =
 let load_published name version ~hash =
   match fetch name version ~hash with
   | Error reason -> Error reason
-  | Ok directory -> (
-      let files = Registry.Content.files ~all:true directory in
-      let text file = List.assoc_opt file files in
-      match
-        ( Option.map Manifest.parse (text "truss.toml"),
-          Registry.Lock.parse (Option.value ~default:"" (text "truss.lock")) )
-      with
-      | exception Manifest.Malformed (line, message) ->
-          Error (Printf.sprintf "its manifest cannot be read: line %d: %s" line message)
-      | exception Registry.Lock.Malformed (line, message) ->
-          Error (Printf.sprintf "its lock file cannot be read: line %d: %s" line message)
-      | Some { package = Some manifest; _ }, record when manifest.name = name ->
-          Ok (manifest, record)
-      | _ ->
-          Error
-            (Printf.sprintf "its manifest does not name the package `%s`" (Path.show_package name)))
+  | Ok directory ->
+      let files = Registry.Content.all_files directory in
+      Registry.Selection.manifest_and_record ~read:(fun file -> List.assoc_opt file files) name
 
 let resolve_registry session ~before =
   let engine = Session.engine session in
@@ -176,22 +163,20 @@ let resolve_registry session ~before =
     List.iter (fun hash -> Engine.remove engine Project.unavailable hash) (selection ()).failed;
     project.retried <- true
   end;
-  let rec fetch_missing rounds =
+  let rec fetch_missing () =
     match (selection ()).missing with
     | [] -> ()
-    | missing when rounds > 0 ->
+    | missing ->
         List.iter
           (fun (name, version, hash) ->
             match fetch name version ~hash with
             | Ok directory ->
-                set_root engine (Project.registry_root hash)
-                  (Registry.Content.files ~all:true directory)
+                set_root engine (Project.registry_root hash) (Registry.Content.all_files directory)
             | Error reason -> Engine.set engine Project.unavailable hash reason)
           missing;
-        fetch_missing (rounds - 1)
-    | _ -> ()
+        fetch_missing ()
   in
-  fetch_missing 64;
+  fetch_missing ();
   let selected = demand session Project.registry () in
   List.iter
     (fun ((_, _, hash) as was) ->
@@ -233,8 +218,10 @@ let scan (files : Files.t) session =
         Session.note_file session path None;
         (* A file that is gone has no diagnostics to maintain, so they
            are no longer a root. *)
-        match List.find_opt (fun (written, _, _) -> written = path) was_files with
-        | Some (_, _, file) -> Engine.unroot engine Checks.file_diagnostics file
+        match
+          List.find_opt (fun (source : Project.source_file) -> source.path = path) was_files
+        with
+        | Some source -> Engine.unroot engine Checks.file_diagnostics source.file
         | None -> ()
       end)
     was;
@@ -879,6 +866,7 @@ module For_testing = struct
   let engine = Session.engine
   let logging = Session.logging
   let standard_base = standard_base
+  let session_base () = Lazy.force !standard
   let collect_store () = Session.collect ~keep:(fun () -> [])
 
   let session_engine directory =

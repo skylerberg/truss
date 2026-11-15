@@ -1,0 +1,9 @@
+use helper::numbers
+
+internal fn kept(value: Int64) -> Int64 {
+  numbers::same(value)
+}
+
+test "keeping" {
+  assert kept(2) == 2
+}

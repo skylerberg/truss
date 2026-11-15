@@ -31,7 +31,7 @@ let run ~names =
   let written = In_channel.with_open_bin manifest In_channel.input_all in
   let with_entries =
     try List.fold_left (fun text (name, _) -> Manifest.with_dependency text name) written wanted
-    with Manifest.Malformed (line, message) ->
+    with Manifest.Malformed { line; message } ->
       Outcome.cannot_run "%s:%d: %s" (Shown_path.shown manifest) line message
   in
   let write text =

@@ -132,6 +132,9 @@ let machine_fixed text =
 (* Source text *)
 
 let () =
+  test "two sources of the same text are equal" (fun () ->
+      if Source.create ~path:"test.truss" "a\nb" <> Source.create ~path:"test.truss" "a\nb" then
+        fail "they differ");
   test "a byte order mark at the start is skipped" (fun () -> tokens "\xEF\xBB\xBFx" [ "x"; "NL" ]);
   test "a byte order mark elsewhere is forbidden" (fun () ->
       error "a \xEF\xBB\xBF b" ~code:Forbidden_character ~at:"\xEF" ~fixed:"a b");

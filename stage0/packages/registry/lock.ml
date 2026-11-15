@@ -1,10 +1,10 @@
 type entry = { name : Path.package; version : Version.t; hash : string; holds : string list }
 type t = entry list
 
-exception Malformed of int * string
+exception Malformed of { line : int; message : string }
 
 let malformed line format =
-  Printf.ksprintf (fun message -> raise (Malformed (line, message))) format
+  Printf.ksprintf (fun message -> raise (Malformed { line; message })) format
 
 let header = "format 1"
 let sorted entries = List.sort (fun left right -> Path.compare_package left.name right.name) entries
