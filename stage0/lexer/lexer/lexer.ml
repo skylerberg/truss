@@ -232,8 +232,15 @@ let rec failing source tokens diagnostics ~fixes_of groups =
       @ failing source tokens diagnostics ~fixes_of
           (List.filteri (fun index _ -> index >= half) groups)
 
+let largest_checked_cluster = 8
+
 let failing_alone source tokens diagnostics fixes =
-  let clusters = List.map Array.of_list (clusters tokens fixes) in
+  let clusters, unchecked =
+    List.partition
+      (fun cluster -> List.length cluster <= largest_checked_cluster)
+      (clusters tokens fixes)
+  in
+  let clusters = List.map Array.of_list clusters in
   let rounds = List.fold_left (fun most cluster -> max most (Array.length cluster)) 0 clusters in
   List.concat_map
     (fun round ->
@@ -243,6 +250,7 @@ let failing_alone source tokens diagnostics fixes =
            (fun cluster -> if round < Array.length cluster then Some cluster.(round) else None)
            clusters))
     (List.init rounds Fun.id)
+  @ List.concat unchecked
 
 let conflicting source tokens diagnostics fixes =
   let greedy clusters =

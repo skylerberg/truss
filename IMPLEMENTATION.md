@@ -110,9 +110,10 @@ develop as well as make it easier to bootstrap the compiler in parts.
   so fixes whose edits an untouched token separates are independent, and
   one lex checks them all. When the lex fails, halving the group finds the
   fixes that fail. Each fix must also work alone, which is checked in
-  rounds that take one fix from each set of fixes whose edits touch. A
-  check that lexes once for each fix makes a file with a fix on every line
-  quadratic.
+  rounds that take one fix from each set of fixes whose edits touch. A set
+  of more than eight touching fixes is withheld unchecked, so the rounds
+  are few. A check that lexes once for each fix makes a file with a fix on
+  every line quadratic.
 
 ### Stages
 
