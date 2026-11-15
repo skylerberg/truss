@@ -128,11 +128,9 @@ let consequences session text =
     List.sort_uniq Path.compare
       (List.filter_map
          (fun (path, part, (difference : Graph_types.difference)) ->
-           match part with
-           | Some part
-             when difference = Changed && List.mem part Signatures.parts && not (ours path) ->
-               Some path
-           | _ -> None)
+           if difference = Changed && List.mem part Signatures.parts && not (ours path) then
+             Some path
+           else None)
          (Database.changes trial session))
   in
   let edges = Database.dependents trial changed in

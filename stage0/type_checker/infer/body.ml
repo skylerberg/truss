@@ -784,7 +784,7 @@ let check database (key : Names.key) =
 
 let type_check_result =
   Query.query ~name:"type_check_result" ~phase:Phases.bodies ~show:Names.show_key ~saved:true
-    ~about:(fun (key : Names.key) -> Some { Query.path = key.path; part = Some "body" })
+    ~about:(fun (key : Names.key) -> Some { Query.path = key.path; part = Body })
     (fun database key ->
       Compiler_bug.while_doing ~stage:"Infer" (Names.show_key key) (fun () -> check database key))
 

@@ -567,7 +567,7 @@ let contained =
 
 let definition =
   Query.query ~name:"definition" ~phase:Phases.declarations ~show:show_key ~saved:true
-    ~about:(fun key -> Some { path = key.path; part = Some "tree" })
+    ~about:(fun key -> Some { path = key.path; part = Tree })
     (fun database key ->
       match Query.demand database locate key with
       | None -> None

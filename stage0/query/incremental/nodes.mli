@@ -1,7 +1,10 @@
 exception Cycle of string list
 exception Lost of string
 
-type subject = { path : Path.t; part : string option }
+type part = Tree | Resolved | Interface | Shape | Signature | Body | Ownership
+type subject = { path : Path.t; part : part }
+
+val show_part : part -> string
 
 type counters = {
   marked : int;

@@ -1,12 +1,12 @@
 type edge = {
   dependent : Path.t;
-  dependent_part : string;
+  dependent_part : Query.part;
   dependency : Path.t;
-  dependency_part : string;
+  dependency_part : Query.part;
 }
 
 type difference = Changed | Added | Same
-type place = { path : Path.t option; part : string option; label : string }
+type place = { subject : Query.subject option; label : string }
 
 type overlap =
   | Both_change of place

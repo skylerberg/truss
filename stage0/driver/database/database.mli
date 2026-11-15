@@ -121,7 +121,7 @@ val find_definitions : session -> string -> Path.t list
 
 (** {1 Comparing} *)
 
-val changes : session -> session -> (Path.t * string option * Graph_types.difference) list
+val changes : session -> session -> (Path.t * Query.part * Graph_types.difference) list
 
 (** {1 Parallel work} *)
 

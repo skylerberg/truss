@@ -1,5 +1,9 @@
 type context = Incremental.context
-type subject = Incremental.subject = { path : Path.t; part : string option }
+type part = Incremental.part = Tree | Resolved | Interface | Shape | Signature | Body | Ownership
+type subject = Incremental.subject = { path : Path.t; part : part }
+
+let show_part = Incremental.show_part
+
 type ('key, 'value) input = ('key, 'value) Incremental.input
 type ('key, 'value) query = ('key, 'value) Incremental.query
 type phase = int

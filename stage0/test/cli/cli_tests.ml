@@ -830,16 +830,19 @@ let () =
       if not (contains output "means a name bound here" && contains output "has type Counter") then
         fail "wrote %s" output);
   test "an overlap is told as a sentence about the parts that meet" (fun () ->
-      let place path part : Graph_types.place =
+      let place name part : Graph_types.place =
         {
-          path =
+          subject =
             Some
-              (Path.Top
-                 {
-                   module_ = { package = { Path.owner = None; name = "demo" }; modules = [] };
-                   name = path;
-                 });
-          part = Some part;
+              {
+                path =
+                  Path.Top
+                    {
+                      module_ = { package = { Path.owner = None; name = "demo" }; modules = [] };
+                      name;
+                    };
+                part;
+              };
           label = "";
         }
       in
@@ -849,11 +852,7 @@ let () =
            which the other changes"
         (Overlap_command.For_testing.sentence
            (Reads
-              {
-                this_worktree = true;
-                change = place "four" "body";
-                reads = place "double" "signature";
-              })))
+              { this_worktree = true; change = place "four" Body; reads = place "double" Signature })))
 
 let registry_root = ref ""
 

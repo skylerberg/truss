@@ -482,13 +482,11 @@ let double : Path.t =
 let doubling : Path.t =
   Test { module_ = { package = { owner = None; name = "app" }; modules = [] }; name = "doubling" }
 
+let path_of (place : Graph_types.place) =
+  Option.map (fun (subject : Query.subject) -> subject.path) place.subject
+
 let test_body_reads_signature : Graph_types.edge =
-  {
-    dependent = doubling;
-    dependent_part = "body";
-    dependency = double;
-    dependency_part = "signature";
-  }
+  { dependent = doubling; dependent_part = Body; dependency = double; dependency_part = Signature }
 
 let () =
   test "a definition's dependents are found part by part" (fun () ->
@@ -613,7 +611,7 @@ let () =
             not
               (List.exists
                  (fun (path, part, difference) ->
-                   Path.equal path double && part = Some "signature"
+                   Path.equal path double && part = Query.Signature
                    && difference = Graph_types.Changed)
                  (Database.changes session base))
           then
@@ -621,7 +619,7 @@ let () =
               (String.concat "; "
                  (List.map
                     (fun (path, part, digest) ->
-                      Printf.sprintf "%s %s %s" (Path.show path) (Option.value part ~default:"-")
+                      Printf.sprintf "%s %s %s" (Path.show path) (Query.show_part part)
                         (match digest with
                         | Graph_types.Changed -> "changed"
                         | Added -> "added"
@@ -651,7 +649,7 @@ let () =
               (List.exists
                  (function
                    | Graph_types.Reads { this_worktree = true; change; reads } ->
-                       change.path = Some quadruple && reads.path = Some double
+                       path_of change = Some quadruple && path_of reads = Some double
                    | _ -> false)
                  overlaps)
           then
@@ -694,7 +692,7 @@ let () =
               (List.exists
                  (function
                    | Graph_types.Reads { this_worktree = true; reads; _ } ->
-                       reads.path = Some double
+                       path_of reads = Some double
                    | _ -> false)
                  overlaps)
           then fail "no overlap found");
