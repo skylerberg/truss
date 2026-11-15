@@ -2,7 +2,7 @@ open Context
 
 let collection_type (body : Mir.Graph.body) ~(inside : Mir.Graph.block) (element : Mir.local) =
   List.find_map
-    (fun (statement : Mir.statement) ->
+    (fun (statement : Mir.Graph.statement) ->
       match statement.kind with
       | Lend { part; call = { arguments = Passed { value = Borrow { type_; _ }; _ } :: _; _ } }
         when part = element ->

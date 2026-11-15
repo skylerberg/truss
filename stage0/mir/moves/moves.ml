@@ -71,7 +71,7 @@ let call_uses ~moving (call : Mir.call) =
         | Default -> [])
       call.arguments
 
-let uses ~moving (statement : Mir.statement) =
+let uses ~moving (statement : Mir.Graph.statement) =
   let origin = statement.origin in
   match statement.kind with
   | Assign { value; _ } -> rvalue_uses ~moving ~origin value
@@ -83,7 +83,7 @@ let uses ~moving (statement : Mir.statement) =
         (fun (provided : Mir.provided) -> operand_use ~moving ~by_value:false provided.value)
         provided
   | Live _ | Dead _ | Provide_end | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _
-  | While _ | For _ | Fork _ | Resume _ | Yield _ | Jump _ ->
+    ->
       []
 
 let rec yielded_uses ~moving ~owns : Mir.yielded -> use list = function
@@ -120,17 +120,19 @@ let moved uses =
 
 let moves ~moving statement = moved (uses ~moving statement)
 
-let inits (statement : Mir.statement) : Mir.place list =
+let inits (statement : Mir.Graph.statement) : Mir.place list =
   match statement.kind with
   | Assign { target; _ } -> [ target ]
   | Call { destination; _ } -> Option.to_list destination
   | Lend { part; _ } -> [ { root = Local part; projections = [] } ]
   | Slice { destination; _ } | Template { destination; _ } -> [ destination ]
   | Live _ | Dead _ | Assert _ | Echo _ | Provide _ | Provide_end | Loan_start _ | Loan_end _
-  | Ghost_assert _ | Matched _ | Proof _ | While _ | For _ | Fork _ | Resume _ | Yield _ | Jump _ ->
+  | Ghost_assert _ | Matched _ | Proof _ ->
       []
 
-let ends (statement : Mir.statement) = match statement.kind with Dead locals -> locals | _ -> []
+let ends (statement : Mir.Graph.statement) =
+  match statement.kind with Dead locals -> locals | _ -> []
+
 let terminator_moves ~moving ~owns basic = moved (terminator_uses ~moving ~owns basic)
 
 type t = {
@@ -190,44 +192,9 @@ let set_holds state positions =
       state.moved_at.(position) <- [])
     positions
 
-let rec promote analysis state path =
-  match List.rev path.steps with
-  | Field _ :: rest -> (
-      let parent = { path with steps = List.rev rest } in
-      match index analysis parent with
-      | Some parent_position when state.maybe_empty.(parent_position) ->
-          let parts =
-            List.filter
-              (fun position -> position <> parent_position)
-              analysis.inside.(parent_position)
-          in
-          let direct =
-            List.filter
-              (fun position ->
-                match List.rev analysis.paths.(position).steps with
-                | Field _ :: rest -> List.rev rest = parent.steps
-                | _ -> false)
-              parts
-          in
-          if
-            direct <> []
-            && List.for_all
-                 (fun position -> state.maybe_holds.(position) && not state.maybe_empty.(position))
-                 direct
-          then begin
-            set_holds state [ parent_position ];
-            promote analysis state parent
-          end
-      | _ -> ())
-  | _ -> ()
-
 let apply_effects analysis state ~moves ~inits ~ends =
   List.iter (fun (place, origin) -> set_empty ~origin state (affected analysis place)) moves;
-  List.iter
-    (fun place ->
-      set_holds state (affected analysis place);
-      Option.iter (promote analysis state) (path_of_place place))
-    inits;
+  List.iter (fun place -> set_holds state (affected analysis place)) inits;
   List.iter (fun local -> set_empty state (affected_local analysis local)) ends
 
 let apply_moves analysis state statement =
@@ -571,7 +538,7 @@ let place_locals (place : Mir.place) =
 let use_locals uses = List.concat_map (fun use -> place_locals use.place) uses
 let every _ = true
 
-let reads_and_writes (statement : Mir.statement) =
+let reads_and_writes (statement : Mir.Graph.statement) =
   match statement.kind with
   | Live locals -> ([], locals)
   | _ ->
@@ -592,7 +559,7 @@ let live_after analysis (body : Mir.Graph.body) =
   Array.iter
     (fun (basic : Mir.Graph.basic_block) ->
       List.iter
-        (fun (statement : Mir.statement) ->
+        (fun (statement : Mir.Graph.statement) ->
           match statement.kind with
           | Assign { target = { root = Local local; projections = [] }; value; _ }
             when not (owns analysis local) ->

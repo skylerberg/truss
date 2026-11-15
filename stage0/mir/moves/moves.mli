@@ -24,16 +24,16 @@ type use = {
   passed : Types.mode option;
 }
 
-val statement_uses : t -> Mir.statement -> use list
+val statement_uses : t -> Mir.Graph.statement -> use list
 val terminator_uses : t -> Mir.Graph.basic_block -> use list
-val given_by : Mir.statement -> path list
-val ended_by : Mir.statement -> Mir.local list
+val given_by : Mir.Graph.statement -> path list
+val ended_by : Mir.Graph.statement -> Mir.local list
 
 type state
 
 val entry : t -> Mir.Graph.block -> state
-val apply : t -> state -> Mir.statement -> unit
-val apply_moves : t -> state -> Mir.statement -> unit
+val apply : t -> state -> Mir.Graph.statement -> unit
+val apply_moves : t -> state -> Mir.Graph.statement -> unit
 val apply_terminator_moves : t -> state -> Mir.Graph.basic_block -> unit
 val copy : state -> state
 val move_out : t -> state -> Mir.place -> origin:Core.origin -> unit

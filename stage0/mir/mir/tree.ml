@@ -1,3 +1,4 @@
+type in_tree = In_tree
 type local = int
 
 type local_kind =
@@ -168,33 +169,40 @@ and lent_element = { element : local; collection : place; count : block }
 and compared = { comparison : Core.comparison; left : operand; right : operand }
 and asserted = { names : local list; code : block }
 and early_exit = { resumed : block; returned : local option }
-and statement = { kind : statement_kind; origin : Core.origin }
+and statement = { kind : in_tree statement_kind; origin : Core.origin }
 
-and statement_kind =
-  | Assign of { target : place; value : rvalue; node : Core.id option }
-  | Call of { destination : place option; call : call }
-  | Lend of { part : local; call : call }
-  | Slice of { destination : place; base : place; call : call }
-  | Template of { destination : place; literals : string list; call : call }
-  | Live of local list
-  | Dead of local list
-  | Assert of { condition : operand; bit_vector : asserted option }
-  | Echo of operand
-  | Provide of { provided : provided list; can_use_tasks : bool }
-  | Provide_end
-  | Loan_start of { loan : int; borrowed : operand; mode : Types.mode; duration : loan_duration }
-  | Loan_end of int list
-  | Ghost_assert of { condition : formula; by_bit_vector : bool }
-  | Matched of { patterns : Core.origin list }
-  | Proof of t
-  | While of {
+and _ statement_kind =
+  | Assign : { target : place; value : rvalue; node : Core.id option } -> 'form statement_kind
+  | Call : { destination : place option; call : call } -> 'form statement_kind
+  | Lend : { part : local; call : call } -> 'form statement_kind
+  | Slice : { destination : place; base : place; call : call } -> 'form statement_kind
+  | Template : { destination : place; literals : string list; call : call } -> 'form statement_kind
+  | Live : local list -> 'form statement_kind
+  | Dead : local list -> 'form statement_kind
+  | Assert : { condition : operand; bit_vector : asserted option } -> 'form statement_kind
+  | Echo : operand -> 'form statement_kind
+  | Provide : { provided : provided list; can_use_tasks : bool } -> 'form statement_kind
+  | Provide_end : 'form statement_kind
+  | Loan_start : {
+      loan : int;
+      borrowed : operand;
+      mode : Types.mode;
+      duration : loan_duration;
+    }
+      -> 'form statement_kind
+  | Loan_end : int list -> 'form statement_kind
+  | Ghost_assert : { condition : formula; by_bit_vector : bool } -> 'form statement_kind
+  | Matched : { patterns : Core.origin list } -> 'form statement_kind
+  | Proof : t -> 'form statement_kind
+  | While : {
       loop : loop;
       condition : block;
       body : block;
       failed : statement list;
       compared : compared option;
     }
-  | For of {
+      -> in_tree statement_kind
+  | For : {
       loop : loop;
       iteration : iteration;
       part : local;
@@ -202,10 +210,16 @@ and statement_kind =
       binding_count : int;
       body : block;
     }
-  | Fork of { fork : Core.origin; concurrent : bool; branches : block list }
-  | Resume of { winner : local; exits : early_exit list }
-  | Yield of { mode : Types.mode; part : yielded }
-  | Jump of jump
+      -> in_tree statement_kind
+  | Fork : {
+      fork : Core.origin;
+      concurrent : bool;
+      branches : block list;
+    }
+      -> in_tree statement_kind
+  | Resume : { winner : local; exits : early_exit list } -> in_tree statement_kind
+  | Yield : { mode : Types.mode; part : yielded } -> in_tree statement_kind
+  | Jump : jump -> in_tree statement_kind
 
 and jump =
   | Return of operand option
