@@ -192,6 +192,59 @@ let with_helper =
   [ ("app::main", callee_and_caller); ("app::extra", "fn helper() -> Int64 { 1 }\n") ]
 
 let () =
+  test "a client whose background process exits without serving gets an error at once" (fun () ->
+      let started = Unix.gettimeofday () in
+      (match
+         (Database.call ~program:"/usr/bin/false" ~key:(scratch "unserved") ~progress:ignore 0
+           : (int, string) result)
+       with
+      | Error _ -> ()
+      | Ok _ -> fail "answered with no background process");
+      let elapsed = Unix.gettimeofday () -. started in
+      if elapsed > 2. then fail "the error took %.1f s" elapsed);
+  test "the background process answers each request and sends its progress" (fun () ->
+      let key = scratch "served" in
+      let socket =
+        match Database.For_testing.listen ~key with
+        | Ok socket -> socket
+        | Error message -> failwith message
+      in
+      match Unix.fork () with
+      | 0 -> (
+          Unix.dup2 socket Unix.stdin;
+          match
+            Database.serve ~key ~handle:(fun ~progress request ->
+                progress "working";
+                if request = "stop" then Database.stop ();
+                String.length request)
+          with
+          | () -> Unix._exit 0
+          | exception _ -> Unix._exit 1)
+      | process ->
+          Unix.close socket;
+          Fun.protect
+            ~finally:(fun () ->
+              (try Unix.kill process Sys.sigkill with Unix.Unix_error _ -> ());
+              ignore (Unix.waitpid [] process))
+            (fun () ->
+              let progressed = ref false in
+              let served_length request =
+                match
+                  Database.call ~start_server:false ~key
+                    ~progress:(fun text -> if text = "working" then progressed := true)
+                    request
+                with
+                | Ok (length : int) -> length
+                | Error message ->
+                    fail "%s" message;
+                    -1
+              in
+              let lengths = List.map served_length [ "one"; "three"; "stop" ] in
+              if lengths <> [ 3; 5; 4 ] then
+                fail "answered %s" (String.concat ", " (List.map string_of_int lengths));
+              if not !progressed then fail "sent no progress"))
+
+let () =
   test "a caller's checked body reads the callee's interface and not its body" (fun () ->
       expect_reads
         (checked "fn callee(x: Int64) -> Int64 { x + 1 }\nfn caller() -> Int64 { callee(1) }\n")

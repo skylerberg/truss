@@ -51,11 +51,13 @@ val call :
 
 val servers : unit -> string list
 val stop : unit -> unit
+val wait_until_ended : key:string -> unit
 val reset : unit -> unit
 
 module For_testing : sig
   val standard_state : unit -> Pipeline.state
   val cold_pipeline : snapshot -> Pipeline.t
   val collect_store : unit -> unit
+  val listen : key:string -> (Unix.file_descr, string) result
   val interrupt_commit : string -> unit
 end
