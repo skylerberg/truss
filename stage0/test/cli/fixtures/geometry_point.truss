@@ -1,0 +1,1 @@
+public type Point(x: Int64, y: Int64)

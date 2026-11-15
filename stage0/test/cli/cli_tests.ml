@@ -546,6 +546,31 @@ let () =
         ~expected:[ "public type Point(x: Int64, y: Int64)"; "public fn Point.sum(self) -> Int64" ]
         (shown root "demo::Point"))
 
+let two_points () =
+  package
+    [
+      ("main.truss", Fixtures.impl_for_geometry_point);
+      ("geometry/geometry.truss", Fixtures.geometry_point);
+      ("drawing/drawing.truss", Fixtures.drawing_point);
+    ]
+
+let headers texts = List.map (fun text -> List.hd (String.split_on_char '\n' text)) texts
+
+let () =
+  test "a type is shown with an impl that names it by its module's path" (fun () ->
+      expect_strings
+        ~expected:
+          [ "public type Point(x: Int64, y: Int64)"; "impl Display for demo::geometry::Point {" ]
+        (headers (shown (two_points ()) "demo::geometry::Point")));
+  test "a type is shown without the impls of another module's type of the same name" (fun () ->
+      let root = two_points () in
+      let geometry = headers (shown root "demo::geometry::Point")
+      and drawing = headers (shown root "demo::drawing::Point") in
+      if not (List.mem "impl Display for Point {" drawing) then
+        fail "the drawing's Point showed %s" (String.concat "; " drawing);
+      if List.mem "impl Display for Point {" geometry then
+        fail "the geometry's Point showed %s" (String.concat "; " geometry))
+
 let lowering (snapshot, packages) = Compiler.lowering_only (Database.pipeline snapshot) packages
 
 let () =

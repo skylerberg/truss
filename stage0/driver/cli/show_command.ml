@@ -7,42 +7,35 @@ type shown_definition = {
   text : string;
 }
 
-let as_module (names : Names.lookups) written : Path.module_ option =
+let find_module (names : Names.lookups) written : Path.module_ option =
   match names.split_module written with
   | Some module_ when names.module_exists module_ -> Some module_
   | Some _ | None -> None
 
-let declarations pipeline (module_ : Path.module_) =
+let list_module_declarations pipeline (module_ : Path.module_) =
   (Pipeline.names pipeline [ module_.package ]).declarations module_
   |> List.filter (fun (declaration : Names.declaration) -> declaration.ordinal = 0)
 
-let visible packages (declaration : Names.declaration) =
+let list_package_declarations pipeline package =
+  (Pipeline.names pipeline [ package ]).package_declarations package
+  |> List.filter (fun (declaration : Names.declaration) -> declaration.ordinal = 0)
+
+let is_visible packages (declaration : Names.declaration) =
   List.mem declaration.module_.package packages || Names.is_public declaration.visibility
-
-let owner_of : Path.t -> Path.t option = function
-  | Method { owner; _ } | Member_constant { owner; _ } -> Some owner
-  | _ -> None
-
-let impl_of_type (path : Path.t) name =
-  match path with Impl { for_type; _ } -> for_type.type_name = name | _ -> false
 
 let resolve pipeline packages text =
   let names = Pipeline.names pipeline packages in
   let argument = Path_argument.parse text in
-  let in_package package =
-    List.filter
-      (fun (declaration : Names.declaration) -> declaration.ordinal = 0)
-      ((Pipeline.names pipeline [ package ]).package_declarations package)
-  in
-  let module_ = if argument.member = None then as_module names argument.names else None in
+  let module_ = if argument.member = None then find_module names argument.names else None in
   match (names.split_module argument.names, module_, argument.member) with
   | Some { package; modules = [] }, _, None ->
       List.filter
         (fun (declaration : Names.declaration) -> Names.is_public declaration.visibility)
-        (in_package package)
-  | _, Some module_, _ -> List.filter (visible packages) (declarations pipeline module_)
+        (list_package_declarations pipeline package)
+  | _, Some module_, _ ->
+      List.filter (is_visible packages) (list_module_declarations pipeline module_)
   | _, None, member -> (
-      match (as_module names (Path_argument.prefix argument), List.rev argument.names) with
+      match (find_module names (Path_argument.prefix argument), List.rev argument.names) with
       | None, _ | _, [] -> []
       | Some module_, last :: _ -> (
           match member with
@@ -51,32 +44,39 @@ let resolve pipeline packages text =
               match
                 List.filter
                   (fun (declaration : Names.declaration) -> Path.equal declaration.path path)
-                  (declarations pipeline module_)
+                  (list_module_declarations pipeline module_)
               with
               | [ declaration ] when declaration.kind = Type ->
-                  let package = in_package module_.package in
+                  let package_declarations = list_package_declarations pipeline module_.package in
+                  let impls =
+                    List.map snd
+                      ((Pipeline.names pipeline [ module_.package ]).impls_of_type module_.package
+                         path)
+                  in
                   declaration
                   :: List.filter
                        (fun (declaration : Names.declaration) ->
-                         match owner_of declaration.path with
-                         | Some owning_path -> Path.equal owning_path path
-                         | None -> false)
-                       package
+                         match declaration.path with
+                         | Method { owner; _ } | Member_constant { owner; _ } ->
+                             Path.equal owner path
+                         | _ -> false)
+                       package_declarations
                   @ List.filter
-                      (fun (declaration : Names.declaration) -> impl_of_type declaration.path last)
-                      package
-                  |> List.filter (visible packages)
-              | declarations -> List.filter (visible packages) declarations)
+                      (fun (declaration : Names.declaration) ->
+                        List.exists (Path.equal declaration.path) impls)
+                      package_declarations
+                  |> List.filter (is_visible packages)
+              | declarations -> List.filter (is_visible packages) declarations)
           | Some member ->
               let owner : Path.t = Top { module_; name = last } in
-              in_package module_.package
+              list_package_declarations pipeline module_.package
               |> List.filter (fun (declaration : Names.declaration) ->
                   match declaration.path with
                   | Method { owner = owning_path; name; _ }
                   | Member_constant { owner = owning_path; name } ->
                       Path.equal owning_path owner && name = member
                   | _ -> false)
-              |> List.filter (visible packages)))
+              |> List.filter (is_visible packages)))
 
 let find snapshot pipeline packages ~body text =
   List.filter_map
