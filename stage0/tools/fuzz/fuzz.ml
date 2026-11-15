@@ -199,7 +199,7 @@ let check_parsers_agree text =
             all)
   then
     let parser_rejects = List.mem Grammar_rejects verdicts
-    and reference_rejects = not (Reference.accepts Reference.file all) in
+    and reference_rejects = not (Reference_parser.accepts Reference_parser.file all) in
     if parser_rejects <> reference_rejects then
       fail "the parser %s and the reference grammar %s %s"
         (if parser_rejects then "rejects" else "accepts")
@@ -454,10 +454,10 @@ let () =
     let source = Source.read_file path in
     let tokens, _ = Lexer.lex source in
     List.map
-      (fun (piece : Parser.piece) ->
+      (fun (piece : Parser.For_testing.piece) ->
         let start = tokens.(piece.first).span.start in
         String.sub (Source.text source) start (tokens.(piece.stop - 1).span.stop - start))
-      (Parser.split tokens)
+      (Parser.For_testing.split tokens)
   in
   let examples =
     Array.of_list (List.concat_map pieces (List.concat_map truss_files (List.rev !paths)))

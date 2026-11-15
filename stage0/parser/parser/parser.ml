@@ -5,8 +5,6 @@ type piece = Split.piece = { first : int; stop : int }
 let split = Split.pieces
 let is_use (tokens : Token.t array) piece = tokens.(piece.first).kind = Keyword Use
 let recovers = Cursor.recovers
-let begins_statement = Atoms.begins_statement
-let spelled_words = List.map fst Contextual_keyword.spellings
 
 let parse_piece (tokens : Token.t array) piece parse =
   let diagnostics = Diagnostic.Collector.create () in
@@ -130,42 +128,47 @@ let parse tokens =
       (fun (left : Diagnostic.t) (right : Diagnostic.t) -> compare left.span.start right.span.start)
       diagnostics )
 
-type example = Example_definition | Example_signature
-
-let example_definition tokens piece =
-  let (example, container), diagnostics =
-    parse_piece tokens piece (fun cursor ->
-        match Parse_definition.example cursor with
-        | Whole (definition, methods) ->
-            (Example_definition, Some (checked cursor definition, methods))
-        | Signature_alone (_, signature) ->
-            Syntax_walk.signature (fun value -> Operators.expression cursor value) signature;
-            Check.signature cursor signature;
-            (Example_signature, None))
-  in
-  let method_diagnostics =
-    match container with
-    | Some (container, pieces) -> List.concat_map snd (parse_methods tokens container pieces)
-    | None -> []
-  in
-  (example, diagnostics @ method_diagnostics)
-
-let example_statement tokens piece =
-  let (), diagnostics =
-    parse_piece tokens piece (fun cursor ->
-        match
-          let statement = Parse_expression.statement_line cursor ~previous:None in
-          if not (Cursor.at_end cursor) then Cursor.fail cursor "a line break after the statement";
-          statement
-        with
-        | statement ->
-            Syntax_walk.statement (fun value -> Operators.expression cursor value) statement
-        | exception Cursor.Failed -> ())
-  in
-  diagnostics
-
 module For_testing = struct
+  type piece = Split.piece = { first : int; stop : int }
+  type example = Example_definition | Example_signature
+
+  let split = split
+  let is_use = is_use
+  let use_line = use_line
   let definition = definition
-  let begins_statement = begins_statement
-  let spelled_words = spelled_words
+
+  let example_definition tokens piece =
+    let (example, container), diagnostics =
+      parse_piece tokens piece (fun cursor ->
+          match Parse_definition.example cursor with
+          | Whole (definition, methods) ->
+              (Example_definition, Some (checked cursor definition, methods))
+          | Signature_alone (_, signature) ->
+              Syntax_walk.signature (fun value -> Operators.expression cursor value) signature;
+              Check.signature cursor signature;
+              (Example_signature, None))
+    in
+    let method_diagnostics =
+      match container with
+      | Some (container, pieces) -> List.concat_map snd (parse_methods tokens container pieces)
+      | None -> []
+    in
+    (example, diagnostics @ method_diagnostics)
+
+  let example_statement tokens piece =
+    let (), diagnostics =
+      parse_piece tokens piece (fun cursor ->
+          match
+            let statement = Parse_expression.statement_line cursor ~previous:None in
+            if not (Cursor.at_end cursor) then Cursor.fail cursor "a line break after the statement";
+            statement
+          with
+          | statement ->
+              Syntax_walk.statement (fun value -> Operators.expression cursor value) statement
+          | exception Cursor.Failed -> ())
+    in
+    diagnostics
+
+  let begins_statement = Atoms.begins_statement
+  let spelled_words = List.map fst Contextual_keyword.spellings
 end

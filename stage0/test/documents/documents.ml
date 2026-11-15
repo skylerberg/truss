@@ -51,14 +51,3 @@ let block_after document marker =
 let words lines =
   List.sort_uniq compare
     (List.filter (( <> ) "") (List.concat_map (String.split_on_char ' ') lines))
-
-let between document first second =
-  let start = Option.get (Substring.find document first) + String.length first in
-  let rest = String.sub document start (String.length document - start) in
-  String.sub rest 0 (Option.get (Substring.find rest second))
-  |> String.split_on_char '\n' |> List.map String.trim |> String.concat " "
-
-let backticked text =
-  match String.split_on_char '`' text with
-  | [] -> []
-  | _ :: rest -> List.filteri (fun index _ -> index mod 2 = 0) rest

@@ -147,7 +147,7 @@ module Snippet = struct
   type kind = Use | Definition | Signature | Statement
   type item = { kind : kind; first : int; stop : int }
 
-  let starts_definition (tokens : Token.t array) (piece : Parser.piece) =
+  let starts_definition (tokens : Token.t array) (piece : Parser.For_testing.piece) =
     let kind offset =
       if piece.first + offset < piece.stop then tokens.(piece.first + offset).kind else End_of_file
     in
@@ -162,17 +162,18 @@ module Snippet = struct
   let parse tokens =
     let pieces =
       List.map
-        (fun (piece : Parser.piece) ->
+        (fun (piece : Parser.For_testing.piece) ->
           let kind, diagnostics =
-            if Parser.is_use tokens piece then (Use, snd (Parser.use_line tokens piece))
+            if Parser.For_testing.is_use tokens piece then
+              (Use, snd (Parser.For_testing.use_line tokens piece))
             else if starts_definition tokens piece then
-              match Parser.example_definition tokens piece with
+              match Parser.For_testing.example_definition tokens piece with
               | Example_definition, diagnostics -> (Definition, diagnostics)
               | Example_signature, diagnostics -> (Signature, diagnostics)
-            else (Statement, Parser.example_statement tokens piece)
+            else (Statement, Parser.For_testing.example_statement tokens piece)
           in
           ({ kind; first = piece.first; stop = piece.stop }, diagnostics))
-        (Parser.split tokens)
+        (Parser.For_testing.split tokens)
     in
     (List.map fst pieces, List.concat_map snd pieces)
 

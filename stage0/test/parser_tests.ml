@@ -42,7 +42,7 @@ let () =
       if recovered "fn f(x: Int64) -> Int64" <> [] then fail "the body its fix writes is recorded");
   test "a missing body's recovery is where the body starts" (fun () ->
       let tokens, _ = Lexer.lex (source "fn f(x: Int64) -> Int64\nfn g() {}") in
-      match Parser.For_testing.definition tokens (List.hd (Parser.split tokens)) with
+      match Parser.For_testing.definition tokens (List.hd (Parser.For_testing.split tokens)) with
       | { definition = { value = { kind = Function { body; _ }; recovered; _ }; _ }; _ }, _ ->
           if
             List.map (fun (span : Source.Definition_span.t) -> (span.start, span.stop)) recovered
@@ -78,7 +78,9 @@ let () =
       then fail "got [%s]" (String.concat "; " printed));
   test "a failed const keeps its name" (fun () ->
       let tokens, _ = Lexer.lex (source "const pi: Float64 = 1 +") in
-      let top_level, _ = Parser.For_testing.definition tokens (List.hd (Parser.split tokens)) in
+      let top_level, _ =
+        Parser.For_testing.definition tokens (List.hd (Parser.For_testing.split tokens))
+      in
       let printed = Syntax_print.For_testing.definition top_level.definition.value in
       if printed <> "(error let pi)" then fail "got %s" printed);
   test "a failed definition keeps its visibility" (fun () ->
@@ -236,7 +238,7 @@ let () =
   let pieces text =
     let source = source text in
     let tokens, _ = Lexer.lex source in
-    (source, tokens, Parser.split tokens)
+    (source, tokens, Parser.For_testing.split tokens)
   in
   test "a method is a definition of its own, inside its impl" (fun () ->
       let text = "impl Clock for Fixed {\n  fn now(self) -> Instant {\n    todo\n  }\n}" in
@@ -296,7 +298,7 @@ let () =
       if method_of ~indentation:"  " <> method_of ~indentation:"\t\t" then fail "the results differ");
   test "an example's diagnostics include those of the methods declared inside it" (fun () ->
       let _, tokens, pieces = pieces "impl Clock for Fixed {\n  fn now(self) -> { todo }\n}" in
-      match Parser.example_definition tokens (List.hd pieces) with
+      match Parser.For_testing.example_definition tokens (List.hd pieces) with
       | _, [ diagnostic ] ->
           if Diagnostic.Code.name diagnostic.code <> "parser.unexpected_token" then
             fail "code %s" (Diagnostic.Code.name diagnostic.code);
