@@ -141,7 +141,6 @@ and statement_kind =
   | Yield of { mode : Types.mode; part : operand }
 
 and loop_mode = Sequential | Parallel_loop | Concurrent_loop
-and task = Branch of { block : origin; index : int } | Iteration of { loop : origin }
 
 and iteration =
   | Integer_range of { start : expression; stop : expression; inclusive : bool }

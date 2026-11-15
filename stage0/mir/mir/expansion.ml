@@ -5,7 +5,7 @@ let bug format = Compiler_bug.bug ~stage:"MIR" format
 type jump_targets = {
   break_ : Graph.block option;
   continue_ : Graph.terminator option;
-  task_ends : (Core.task * Graph.block) list;
+  task_ends : (task * Graph.block) list;
 }
 
 let expanded_body (body : body) : Graph.body =
@@ -169,7 +169,7 @@ let expanded_body (body : body) : Graph.body =
                         {
                           targets with
                           task_ends =
-                            (Core.Branch { block = fork; index }, branch_end) :: targets.task_ends;
+                            (Tree.Branch { block = fork; index }, branch_end) :: targets.task_ends;
                         }
                     | None -> targets
                   in

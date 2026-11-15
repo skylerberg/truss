@@ -67,7 +67,7 @@ and mir_frame = {
 
 (* A task whose body is being lowered. *)
 type task = {
-  id : Core.task;
+  id : Mir.task;
   group : Lowered.place;
   end_block : Lowered.block;  (** Every exit from the task jumps here *)
   scope_depth : int;  (** The number of scopes enclosing the task *)

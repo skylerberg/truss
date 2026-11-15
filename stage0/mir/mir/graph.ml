@@ -25,7 +25,7 @@ type terminator =
   | Yield of { mode : Types.mode; part : yielded; resume : block }
   | Return of operand option
   | Cancel of {
-      task : Core.task;
+      task : task;
       task_end : block option;
       winner : local;
       number : int;

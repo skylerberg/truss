@@ -22,7 +22,7 @@ type run = {
   in_formula : bool;
   provides : (Core.origin, Mir.provided list) Hashtbl.t;
   mutable loops : loop_exits list;
-  mutable cancelled : (Core.task * frame list ref) list;
+  mutable cancelled : (Mir.task * frame list ref) list;
 }
 
 let unit_callee : _ Core.target -> Invocation.callee = function
@@ -1188,7 +1188,7 @@ and read_statement context frame run (statement : Mir.statement) =
         (fun frame (index, (branch : Mir.block)) ->
           let* frame = frame in
           let cancelled = ref [] in
-          run.cancelled <- (Core.Branch { block = fork; index }, cancelled) :: run.cancelled;
+          run.cancelled <- (Mir.Branch { block = fork; index }, cancelled) :: run.cancelled;
           let ended = read_statements context frame run branch.statements in
           run.cancelled <- List.tl run.cancelled;
           join_frames context (Option.to_list ended @ List.rev !cancelled))
