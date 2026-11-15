@@ -12,4 +12,6 @@ val mode : Types.mode -> Ground.mode
 val evidence_for : context -> Types.substitution -> Types.capability_set -> Path.t list
 val substitution : Types.generic list -> Ground.argument list -> Types.substitution
 val panic_capability : Path.t
+val find_builtin_shape : Ground.ty -> Memory_layout.shape option
+val compute_fixed_layout : Ground.ty -> Memory_layout.t option
 val shape : context -> Ground.ty -> Memory_layout.shape

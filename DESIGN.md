@@ -1949,13 +1949,20 @@ before the stage runs, on a cold build as on a hot one:
 |---|---|
 | A member's interface | Its container's header, which the declarations name |
 | A type's type facts | Those of the types that its resolved fields name |
-| A ground type's layout | The layouts of the ground types it stores in place |
-| An instance's lowered code | The layouts of the ground types it uses, which its MIR and type arguments name |
+| A ground type's layout | The layouts of the ground types it stores in place, other than fixed layouts |
+| An instance's lowered code | The layouts of the ground types it uses, other than fixed layouts, which its MIR and type arguments name |
 | A constant's value | The values of the constants that its MIR names, directly or in the functions it calls. A constant computed by running code is a run, cached by its test key. |
 | A test key | The test keys of the instances that its lowered code refers to |
 
 A cycle in one of these relationships is a strongly connected component, and
 its parts are computed as one unit.
+
+**A fixed layout is no part.** A type whose layout no definition affects has
+a *fixed layout*: an integer, `Storage[Point]`, which holds a pointer and two
+counts, a function value, or an `any` value. The compiler computes a fixed
+layout wherever a stage reads one, so an instance's ground types list only
+the types whose layouts are parts, and lowering may name any type with a
+fixed layout without listing it.
 
 **Propagation stops where a part comes out unchanged.** Most changes stop
 one hop from the edit, because a caller reads the callee's signature and

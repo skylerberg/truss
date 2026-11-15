@@ -6,20 +6,7 @@ module Set = Set.Make (struct
   let compare = Ground.compare
 end)
 
-let lowering_types =
-  [
-    Ground.builtin UInt8;
-    Ground.builtin Int32;
-    uint64;
-    Ground.builtin Bool;
-    Ground.builtin Unit;
-    Ground.builtin Character;
-    Ground.builtin Handle;
-    Ground.Never;
-    string_slice;
-    Writing.output_ty;
-    Storage.view_of_elements (Ground.builtin UInt8);
-  ]
+let lowering_types = [ string_slice ]
 
 let is_runtime (ty : Types.ty) =
   (not (Types.contains_unsolved ty))
@@ -447,13 +434,7 @@ let rec walk_key walk (key : Instance.key) =
   | Evaluator path ->
       walk_constant walk path;
       walk_signature walk Constants.write_fully []
-  | Drop ty | Copy ty | Any_drop ty | Any_copy ty -> add walk ty
-  | Debug ty ->
-      add walk ty;
-      List.iter (add walk) Debug_output.ground_types
-  | Encode ty ->
-      add walk ty;
-      List.iter (add walk) Encoding.ground_types
+  | Drop ty | Copy ty | Any_drop ty | Any_copy ty | Debug ty | Encode ty -> add walk ty
   | Template_check { from_template; clauses; _ } ->
       walk_signature walk Constants.write_fully [];
       walk_signature walk from_template [];
@@ -543,7 +524,10 @@ let of_instance context (key : Instance.key) =
   let walk = { context; named = []; constants = []; walked = [] } in
   walk_key walk key;
   {
-    types = closed context (lowering_types @ walk.named);
+    types =
+      List.filter
+        (fun ty -> Option.is_none (Monomorphic.compute_fixed_layout ty))
+        (closed context (lowering_types @ walk.named));
     folded_constants =
       (match key with Constant _ -> List.sort_uniq Path.compare walk.constants | _ -> []);
   }

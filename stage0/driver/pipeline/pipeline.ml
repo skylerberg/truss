@@ -873,12 +873,23 @@ let proof_lookups pipeline note : Prover.Lookups.t =
     recursion_group = recursion_group pipeline note;
   }
 
-let layout pipeline note ty =
-  read pipeline note (Layout ty);
-  match Type_table.find_opt pipeline.layouts ty with
-  | Some (Value layout) -> layout
-  | Some (Failed _ | Blocked) -> raise Reads_failed_part
-  | None -> unchecked (Part.show (Layout ty))
+let read_layout pipeline note ty =
+  match Compile.compute_fixed_layout ty with
+  | Some layout -> layout
+  | None -> (
+      read pipeline note (Layout ty);
+      match Type_table.find_opt pipeline.layouts ty with
+      | Some (Value layout) -> layout
+      | Some (Failed _ | Blocked) -> raise Reads_failed_part
+      | None -> unchecked (Part.show (Layout ty)))
+
+let read_ground_layout pipeline note ~readers ground_types ty =
+  if Option.is_none (Compile.compute_fixed_layout ty) && not (Type_table.mem (Lazy.force ground_types) ty)
+  then
+    Compiler_bug.bug ~stage:"Pipeline" "%s reads the layout of %s, which its ground types lack"
+      (String.concat ", " (List.map Instance.to_string readers))
+      (Ground.to_string ty);
+  read_layout pipeline note ty
 
 let stage_lowering_lookups pipeline note : Compile.Lookups.t =
   { interface = interface_lookups pipeline note ~is_checked:true; mir = mir_lookups pipeline note }
@@ -896,18 +907,14 @@ let ground_types pipeline note key =
 let lowered pipeline note key = instance_part pipeline note pipeline.lowered (Lowered key) key
 let test_key pipeline note key = instance_part pipeline note pipeline.test_keys (Test_key key) key
 
-let instance_layout pipeline note key =
+let make_instance_layout_reader pipeline note key =
   let types =
     lazy
       (let types = Type_table.create 64 in
        List.iter (fun ty -> Type_table.replace types ty ()) (ground_types pipeline note key).types;
        types)
   in
-  fun ty ->
-    if not (Type_table.mem (Lazy.force types) ty) then
-      Compiler_bug.bug ~stage:"Pipeline" "%s reads the layout of %s, which its ground types lack"
-        (Instance.to_string key) (Ground.to_string ty);
-    layout pipeline note ty
+  read_ground_layout pipeline note ~readers:[ key ] types
 
 let instance_slot table instance =
   {
@@ -1623,7 +1630,7 @@ let compute_part pipeline (part : Part.t) =
       update_references pipeline key
   | Lowered key ->
       into (instance_slot pipeline.lowered key) (fun note ->
-          let layout_of = instance_layout pipeline note key in
+          let layout_of = make_instance_layout_reader pipeline note key in
           Some
             (computed
                (fun key ->
@@ -1651,7 +1658,7 @@ let compute_part pipeline (part : Part.t) =
             (match
                Compile.layout
                  (interface_lookups pipeline note ~is_checked:true)
-                 ~layout_of:(layout pipeline note) ty
+                 ~layout_of:(read_layout pipeline note) ty
              with
             | layout -> Value layout
             | exception Reads_failed_part -> Blocked
@@ -2508,7 +2515,7 @@ let requested table part key =
       Compiler_bug.bug ~stage:"Pipeline" "%s is requested from code with errors" (Part.show part)
   | None -> unchecked (Part.show part)
 
-let layouts pipeline packages keys =
+let request_layouts pipeline packages keys =
   request pipeline packages ~through:Lowered_code ~needs:(laid_out pipeline) keys;
   let ground_types = Type_table.create 256 in
   List.iter
@@ -2517,12 +2524,7 @@ let layouts pipeline packages keys =
         (fun ty -> Type_table.replace ground_types ty ())
         (requested pipeline.ground_types (Ground_types key) key).types)
     keys;
-  fun ty ->
-    if not (Type_table.mem ground_types ty) then
-      Compiler_bug.bug ~stage:"Pipeline" "%s reads the layout of %s, which its ground types lack"
-        (String.concat ", " (List.map Instance.to_string keys))
-        (Ground.to_string ty);
-    layout pipeline ignore ty
+  read_ground_layout pipeline ignore ~readers:keys (Lazy.from_val ground_types)
 
 let interface_lookups pipeline packages =
   drain pipeline ~through:Signature_checks packages;
@@ -2586,7 +2588,7 @@ let lowering_requests pipeline packages : Compile.requests =
       (fun key ->
         request pipeline packages ~through:Test_keys ~needs:(fun key -> [ Test_key key ]) [ key ];
         reached_todo_types pipeline key);
-    layouts = layouts pipeline packages;
+    layouts = request_layouts pipeline packages;
   }
 
 let main pipeline package =

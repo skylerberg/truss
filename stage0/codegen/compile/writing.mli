@@ -1,5 +1,4 @@
 val output_ty : Ground.ty
-val ground_types : Ground.ty list
 val output_parameter : Memory_layout.env -> Lowered.ty
 val value_parameter : Ground.ty -> Lowered.ty
 val signature : Memory_layout.env -> Lowered.ty list -> Lowered.signature

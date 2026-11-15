@@ -125,51 +125,71 @@ let fields context substitution (fields : Types.field list) =
       (field.field_name, Memory_layout.Typed (ground context substitution field.field_type)))
     fields
 
-let shape context (ty : Ground.ty) : Memory_layout.shape =
+let find_builtin_shape (ty : Ground.ty) : Memory_layout.shape option =
   match ty with
-  | Never -> Sum []
-  | Function function_type -> Convention.function_value_shape function_type
-  | Any _ -> Record [ ("value", Raw (Pointer Opaque)); ("vtable", Raw (Pointer Opaque)) ]
+  | Never -> Some (Sum [])
+  | Function function_type -> Some (Convention.function_value_shape function_type)
+  | Any _ -> Some (Record [ ("value", Raw (Pointer Opaque)); ("vtable", Raw (Pointer Opaque)) ])
   | Named { path; arguments } -> (
       match (Intrinsic.builtin_of_path path, arguments) with
-      | Some Int8, [] -> Scalar (Integer Int8)
-      | Some Int16, [] -> Scalar (Integer Int16)
-      | Some Int32, [] -> Scalar (Integer Int32)
-      | Some Int64, [] -> Scalar (Integer Int64)
-      | Some UInt8, [] -> Scalar (Integer UInt8)
-      | Some UInt16, [] -> Scalar (Integer UInt16)
-      | Some UInt32, [] -> Scalar (Integer UInt32)
-      | Some UInt64, [] -> Scalar (Integer UInt64)
-      | Some Float32, [] -> Scalar Float32
-      | Some Float64, [] -> Scalar Float64
-      | Some Bool, [] -> Scalar Bool
-      | Some Character, [] -> Scalar Character
-      | Some Unit, [] -> Record []
-      | Some Never, [] -> Sum []
-      | Some Array, [ Type element; Value count ] -> Array (element, Z.to_int count)
-      | Some Storage, [ Type element ] -> Storage.shape ~uint64 element
-      | Some View, [ Type element ] -> Storage.view_shape ~uint64 element
-      | Some Handle, [] -> Record [ ("descriptor", Raw (Integer Int32)) ]
-      | Some Shared, [ Type _ ] -> Record [ ("value", Raw (Pointer Opaque)) ]
+      | None, _ -> None
+      | Some Int8, [] -> Some (Scalar (Integer Int8))
+      | Some Int16, [] -> Some (Scalar (Integer Int16))
+      | Some Int32, [] -> Some (Scalar (Integer Int32))
+      | Some Int64, [] -> Some (Scalar (Integer Int64))
+      | Some UInt8, [] -> Some (Scalar (Integer UInt8))
+      | Some UInt16, [] -> Some (Scalar (Integer UInt16))
+      | Some UInt32, [] -> Some (Scalar (Integer UInt32))
+      | Some UInt64, [] -> Some (Scalar (Integer UInt64))
+      | Some Float32, [] -> Some (Scalar Float32)
+      | Some Float64, [] -> Some (Scalar Float64)
+      | Some Bool, [] -> Some (Scalar Bool)
+      | Some Character, [] -> Some (Scalar Character)
+      | Some Unit, [] -> Some (Record [])
+      | Some Never, [] -> Some (Sum [])
+      | Some Array, [ Type element; Value count ] -> Some (Array (element, Z.to_int count))
+      | Some Storage, [ Type element ] -> Some (Storage.shape ~uint64 element)
+      | Some View, [ Type element ] -> Some (Storage.view_shape ~uint64 element)
+      | Some Handle, [] -> Some (Record [ ("descriptor", Raw (Integer Int32)) ])
+      | Some Shared, [ Type _ ] -> Some (Record [ ("value", Raw (Pointer Opaque)) ])
       | Some Integer, _ -> bug "Integer exists only in specifications"
-      | Some _, _ -> bug "a built-in type with the wrong arguments: %s" (Ground.to_string ty)
-      | None, _ -> (
-          match context.type_interface path with
-          | None -> bug "%s is not a type" (Path.show path)
-          | Some interface -> (
-              let substitution = substitution interface.type_generics arguments in
-              match interface.shape with
-              | Record record -> Record (fields context substitution record)
-              | Sum variants ->
-                  Sum
-                    (List.map
-                       (fun (value : Types.variant) ->
-                         {
-                           Memory_layout.name = value.variant_name;
-                           indirect = value.indirect;
-                           fields =
-                             fields context substitution (Option.value value.fields ~default:[]);
-                         })
-                       variants)
-              | Builtin_type _ -> bug "a built-in type under a path that is not built in"
-              | Types.Todo_type -> raise (Todo_type ty))))
+      | Some _, _ -> bug "a built-in type with the wrong arguments: %s" (Ground.to_string ty))
+
+exception Defined_layout
+
+let rec compute_fixed_layout ty =
+  match find_builtin_shape ty with
+  | None -> None
+  | Some shape -> (
+      let layout_of stored =
+        match compute_fixed_layout stored with Some layout -> layout | None -> raise Defined_layout
+      in
+      match Memory_layout.layout ~layout_of ty shape with
+      | layout -> Some layout
+      | exception Defined_layout -> None)
+
+let read_defined_shape context (ty : Ground.ty) : Memory_layout.shape =
+  match ty with
+  | Named { path; arguments } -> (
+      match context.type_interface path with
+      | None -> bug "%s is not a type" (Path.show path)
+      | Some interface -> (
+          let substitution = substitution interface.type_generics arguments in
+          match interface.shape with
+          | Record record -> Record (fields context substitution record)
+          | Sum variants ->
+              Sum
+                (List.map
+                   (fun (value : Types.variant) ->
+                     {
+                       Memory_layout.name = value.variant_name;
+                       indirect = value.indirect;
+                       fields = fields context substitution (Option.value value.fields ~default:[]);
+                     })
+                   variants)
+          | Builtin_type _ -> bug "a built-in type under a path that is not built in"
+          | Types.Todo_type -> raise (Todo_type ty)))
+  | Never | Function _ | Any _ -> bug "%s is built in" (Ground.to_string ty)
+
+let shape context ty =
+  match find_builtin_shape ty with Some shape -> shape | None -> read_defined_shape context ty

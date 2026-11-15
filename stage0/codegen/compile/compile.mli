@@ -110,6 +110,8 @@ val test_keys :
   Instance.key list ->
   (Instance.key * string) list
 
+val compute_fixed_layout : Ground.ty -> Memory_layout.t option
+
 val layout :
   Interface.Lookups.t -> layout_of:(Ground.ty -> Memory_layout.t) -> Ground.ty -> Memory_layout.t
 

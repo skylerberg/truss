@@ -474,6 +474,18 @@ let () =
       in
       expect_included recomputed ~parts:[ "layout Inner"; "layout Outer" ];
       expect_untouched recomputed ~names:[ "layout Holder"; "layout List" ]);
+  test "lowered code reads the layouts of defined types and no layout of a built-in type" (fun () ->
+      let pipeline =
+        built ~roots:[ "size" ]
+          [
+            ( "app::main",
+              "type Point(x: Int64, flag: Bool)\n\
+               fn size(point: Point, counts: List[Int64]) -> Int64 { point.x }\n" );
+          ]
+      in
+      expect_reads pipeline (lowered "size")
+        ~includes:[ "layout Point"; "layout List[Int64]" ]
+        ~excludes:[ "layout Int64"; "layout Bool"; "layout Storage[Int64]" ]);
   test "reordering a type's fields recomputes no layout of the types that hold it" (fun () ->
       let holders inner =
         [

@@ -791,6 +791,7 @@ let ground_types settings lookups key =
     (fun () -> Lower.ground_types settings lookups key)
 
 let shape interface ty = Monomorphic.shape (Lower.monomorphic interface) ty
+let compute_fixed_layout = Monomorphic.compute_fixed_layout
 let layout interface ~layout_of ty = Memory_layout.layout ~layout_of ty (shape interface ty)
 
 let stored_in_place interface ty =
