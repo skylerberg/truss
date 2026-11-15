@@ -2,6 +2,7 @@ val test : string -> (unit -> unit) -> unit
 val always : string -> (unit -> unit) -> unit
 val wanted : string -> bool
 val fail : ('a, unit, string, unit) format4 -> 'a
+val expect_results_current : Engine.t -> unit
 
 val expect_not_recomputed :
   Engine.t ->

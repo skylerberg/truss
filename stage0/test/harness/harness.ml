@@ -27,8 +27,6 @@ let fail format =
       Printf.printf "FAIL %s: %s\n" !current_test message)
     format
 
-let () = Engine.For_testing.auditing := true
-
 let wanted =
   match Sys.getenv_opt "TRUSS_TEST" with
   | None | Some "" -> fun _ -> true
@@ -44,14 +42,10 @@ let wanted =
 let always name body =
   incr count;
   current_test := name;
-  (match body () with
+  match body () with
   | () -> ()
   | exception exception_ ->
-      fail "raised %s%s" (Printexc.to_string exception_) (Printexc.get_backtrace ()));
-  match Engine.For_testing.audit_all () with
-  | problems ->
-      List.iter (fun problem -> fail "the code database kept a stale result: %s" problem) problems
-  | exception exception_ -> fail "auditing raised %s" (Printexc.to_string exception_)
+      fail "raised %s%s" (Printexc.to_string exception_) (Printexc.get_backtrace ())
 
 let ordinal = ref 0
 
@@ -63,6 +57,11 @@ let test name body =
     incr ordinal;
     if is_mine then always name body
   end
+
+let expect_results_current engine =
+  List.iter
+    (fun problem -> fail "the code database kept a stale result: %s" problem)
+    (Engine.For_testing.audit engine)
 
 let expect_not_recomputed engine ~first ~again query keys =
   let computed step =
@@ -78,7 +77,8 @@ let expect_not_recomputed engine ~first ~again query keys =
         fail "%s was never computed" (Engine.For_testing.result_label query key)
       else if List.mem key after then
         fail "%s was computed again" (Engine.For_testing.result_label query key))
-    keys
+    keys;
+  expect_results_current engine
 
 let workspace_root =
   lazy

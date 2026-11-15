@@ -80,13 +80,6 @@ let inputs_stored = Incremental.inputs_stored
 let values_in store ~version name = Incremental.values_in (store_of store ~version) name
 let forget_bases = Incremental.forget_bases
 
-let audit ?include_bases ?before engine =
-  Incremental.audit ?include_bases ?before:(Option.map Query.phase_rank before) engine
-
-let audit_all = Incremental.audit_all
-let auditing = Incremental.auditing
-let skip_audit = Incremental.skip_audit
-
 module For_testing = struct
   let executed = executed
   let computed = computed
@@ -94,6 +87,7 @@ module For_testing = struct
   let clear_log = clear_log
   let differing = differing
   let count = count
-  let audit_all = audit_all
-  let auditing = auditing
+
+  let audit ?include_bases ?before engine =
+    Incremental.audit ?include_bases ?before:(Option.map Query.phase_rank before) engine
 end

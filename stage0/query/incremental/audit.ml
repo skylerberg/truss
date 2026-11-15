@@ -17,12 +17,7 @@ let audit ?(include_bases = false) ?before engine =
     check_can_change engine;
     sweep engine;
     settle engine;
-    within_audit := true;
-    let fresh =
-      Fun.protect
-        ~finally:(fun () -> within_audit := false)
-        (fun () -> create ~bases:(if include_bases then [] else engine.bases) ())
-    in
+    let fresh = create ~bases:(if include_bases then [] else engine.bases) () in
     fresh.store <-
       Option.map
         (fun store ->
@@ -52,44 +47,24 @@ let audit ?(include_bases = false) ?before engine =
         (List.rev engine.bases);
     let own = differing engine in
     List.iter replay own;
-    let problems =
-      List.filter_map
-        (fun (node : node) ->
-          match node.cell with
-          | Result (query, cell)
-            when node.alive && match before with Some phase -> node.phase < phase | None -> true
-            -> (
-              match load engine cell with
-              | None -> None
-              | Some mine ->
-                  let theirs =
-                    match demand (context fresh) query cell.key with
-                    | value -> Value value
-                    | exception exception_ -> Raised exception_
-                  in
-                  if same_outcomes query mine theirs then None
-                  else
-                    Some
-                      (Printf.sprintf "%s holds %s, and a fresh engine gives %s" (label node)
-                         (describe_outcome (Some mine)) (describe_outcome (Some theirs))))
-          | _ -> None)
-        own
-    in
-    if engine.audited <> max_int then engine.audited <- engine.activity;
-    problems
+    List.filter_map
+      (fun (node : node) ->
+        match node.cell with
+        | Result (query, cell)
+          when node.alive && match before with Some phase -> node.phase < phase | None -> true -> (
+            match load engine cell with
+            | None -> None
+            | Some mine ->
+                let theirs =
+                  match demand (context fresh) query cell.key with
+                  | value -> Value value
+                  | exception exception_ -> Raised exception_
+                in
+                if same_outcomes query mine theirs then None
+                else
+                  Some
+                    (Printf.sprintf "%s holds %s, and a fresh engine gives %s" (label node)
+                       (describe_outcome (Some mine)) (describe_outcome (Some theirs))))
+        | _ -> None)
+      own
   end
-
-let skip_audit engine = engine.audited <- max_int
-
-let audit_all () =
-  let problems = ref [] in
-  let table = !remembered in
-  for index = 0 to Weak.length table - 1 do
-    match Weak.get table index with
-    | Some engine
-      when (not engine.frozen) && engine.audited <> max_int && engine.activity <> engine.audited
-           && engine.frames = [] ->
-        problems := audit engine @ !problems
-    | _ -> ()
-  done;
-  !problems

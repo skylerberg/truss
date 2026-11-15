@@ -96,6 +96,11 @@ let shapes_method name : Resolve.Names.key =
     ordinal = 0;
   }
 
+let expect_session_current directory =
+  match Database.For_testing.session_engine directory with
+  | Some engine -> expect_results_current engine
+  | None -> fail "no session"
+
 let clear directory =
   Option.iter Engine.For_testing.clear_log (Database.For_testing.session_engine directory)
 
@@ -210,7 +215,8 @@ let () =
       Database.reset ();
       expect_errors directory 0;
       let again = executed directory in
-      if again <> [] then fail "computed [%s]" (String.concat "; " again));
+      if again <> [] then fail "computed [%s]" (String.concat "; " again);
+      expect_session_current directory);
   test "a change made while no process ran is seen after a restart" (fun () ->
       fresh_store ();
       let directory = package () in
@@ -234,7 +240,8 @@ let () =
       expect_errors directory 0;
       let again = checked directory in
       if List.mem (top "app" "double") again then fail "checked double again";
-      if not (List.mem (top "app" "triple") again) then fail "did not check triple");
+      if not (List.mem (top "app" "triple") again) then fail "did not check triple";
+      expect_session_current directory);
   test "reordering a type's fields checks no reader of the type again" (fun () ->
       fresh_store ();
       let directory = package () in
@@ -251,7 +258,8 @@ let () =
       write directory "point/point.truss" (point "y: Int64, x: Int64");
       expect_errors directory 0;
       if List.mem width (checked directory) then fail "checked width again";
-      if List.mem width (lowered directory) then fail "lowered width's interface again");
+      if List.mem width (lowered directory) then fail "lowered width's interface again";
+      expect_session_current directory);
   test "editing one method's body checks only that method again" (fun () ->
       fresh_store ();
       let directory = package () in
@@ -272,7 +280,8 @@ let () =
       expect_errors directory 0;
       let again = checked directory in
       if not (List.mem (shapes_method "area") again) then fail "did not check area";
-      if List.mem (shapes_method "sides") again then fail "checked sides again");
+      if List.mem (shapes_method "sides") again then fail "checked sides again";
+      expect_session_current directory);
   test "a removed module is gone from the package" (fun () ->
       fresh_store ();
       let directory = package () in
@@ -342,7 +351,8 @@ let () =
       if computed root Packages.dependencies = [] then fail "the grant was not read again";
       if imports () <> [] then fail "resolved the imports again";
       if module_files () <> [] then fail "listed a module's files again";
-      if module_exists () <> [] then fail "looked up a module again");
+      if module_exists () <> [] then fail "looked up a module again";
+      expect_session_current root);
   test "a file that cannot be read is not there, and a change beside it is still seen" (fun () ->
       fresh_store ();
       let directory = package () in
@@ -439,7 +449,8 @@ let () =
       expect_errors second 0;
       let again = checked second in
       if List.mem (top "app" "double") again then fail "checked double again";
-      if not (List.mem (top "app" "extra") again) then fail "did not check extra");
+      if not (List.mem (top "app" "extra") again) then fail "did not check extra";
+      expect_session_current second);
   test "a new worktree's state is a difference over the state it started from" (fun () ->
       fresh_store ~empty:true ();
       let module_text index =
@@ -761,7 +772,8 @@ let () =
         List.exists (fun (key : Resolve.Names.key) -> key.module_ = file.module_) checked
       in
       if not (in_module second) then fail "the edited module was not checked again";
-      if in_module first then fail "the unchanged module was checked again");
+      if in_module first then fail "the unchanged module was checked again";
+      expect_results_current engine);
   test "a library state drops the text of a file that is gone from the sources" (fun () ->
       fresh_store ~empty:true ();
       let first = (library_file "first", library_function "first") in

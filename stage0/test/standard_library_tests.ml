@@ -135,7 +135,6 @@ let () =
         Database.load_standard engine;
         engine
   in
-  Engine.skip_audit engine;
   let database =
     match session with Some session -> Database.context session | None -> Engine.context engine
   in
@@ -162,7 +161,7 @@ let () =
   test "the code database kept every result of checking the standard library current" (fun () ->
       timed "auditing the code database" (fun () ->
           let before = Option.map (fun _ -> Phases.proofs) session in
-          List.iter (fun problem -> fail "%s" problem) (Engine.audit ?before engine)));
+          List.iter (fun problem -> fail "%s" problem) (Engine.For_testing.audit ?before engine)));
   timed "solving ahead" (fun () ->
       Prover.solve_ahead ~record database solver
         (List.concat_map

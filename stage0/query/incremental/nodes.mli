@@ -67,8 +67,6 @@ type t = {
   mutable chain : string option;
   mutable on_whole : bool;
   mutable chain_size : chain_size;
-  mutable activity : int;
-  mutable audited : int;
 }
 
 and binding = Binding : 'table Type.Id.t * 'table -> binding
@@ -148,9 +146,6 @@ type ('key, 'value) input_cells = ('key, ('key, 'value) input_cell) Hashtbl.t
 val numbers : int ref
 val seal : unit -> unit
 val check_not_sealed : string -> unit
-val auditing : bool ref
-val remembered : t Weak.t ref
-val within_audit : bool ref
 val create : ?log:bool -> ?bases:t list -> unit -> t
 val hash_of : fingerprint -> string option
 val context : t -> context

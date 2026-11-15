@@ -70,7 +70,6 @@ let change engine (cell : ('key, 'value) input_cell) slot =
   cell.slot <- slot;
   forget_fingerprint node;
   node.changed_at <- tick engine;
-  engine.activity <- engine.activity + 1;
   Hashtbl.replace engine.unwritten_nodes node.id node;
   seed engine node
 

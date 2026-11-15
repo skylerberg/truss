@@ -104,6 +104,3 @@ val inputs_stored : t -> bool
 val values_in : store -> string -> string list
 val forget_bases : unit -> unit
 val audit : ?include_bases:bool -> ?before:int -> t -> string list
-val auditing : bool ref
-val audit_all : unit -> string list
-val skip_audit : t -> unit

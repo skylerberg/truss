@@ -1554,7 +1554,9 @@ let again before after =
         else None)
       (Engine.For_testing.computed engine Prover.proof)
   in
-  (List.sort_uniq compare proven, Solver.queries_run solver - runs_before)
+  let solved = Solver.queries_run solver - runs_before in
+  expect_results_current engine;
+  (List.sort_uniq compare proven, solved)
 
 let expect_again before after ~proven ~solved =
   let actual, count = again before after in

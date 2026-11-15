@@ -25,7 +25,6 @@ let () =
         exit 1
   in
   let engine = Engine.create () in
-  Engine.skip_audit engine;
   let database = Engine.context engine in
   Database.load_standard engine;
   let timed =
