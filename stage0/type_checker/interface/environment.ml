@@ -24,6 +24,13 @@ type lowered_interface = {
   bounds : (Types.parameter * Types.trait_reference list) list;
 }
 
+let is_specification = function
+  | Function_interface signature -> signature.specification_only
+  | Theorem_interface _ | Law_proof_interface _ -> true
+  | Type_interface _ | Trait_interface _ | Impl_interface _ | Constant_interface _
+  | Test_interface _ | Error_interface _ ->
+      false
+
 (* The type a head names, and the generic parameters it declares, which
    are in scope after it whether or not the type is known. *)
 let head_type context owner (head : type_head) =

@@ -1,7 +1,3 @@
-(* The state of the ownership check of one definition: its locals, its
-   source text, and the diagnostics reported so far. *)
-(* How a local is bound: it owns its value, it borrows a place read-only, or
-   it borrows a place [mut] for a call, an iteration, or a block. *)
 type kind = Owned | Borrowed | Borrowed_mut
 
 type context = {
@@ -26,14 +22,6 @@ let is_view context type_ = Interface.Impls.is_view context.database ~bounds:con
 let holds_function context type_ =
   Interface.Impls.holds_function context.database ~bounds:context.bounds type_
 
-(* Whether the callee declares the parameter at [position] as an [own]
-   parameter of a function type, where a method's receiver is position 0.
-   The callee may store a function that it receives through such a
-   parameter. A generic [own] parameter that is instantiated with a function
-   type does not count: the callee treats its value as any other view, so
-   the view rules track it. *)
-(* The signatures that a callee may have: one for a function or a trait
-   method, and each implementation's for a capability method. *)
 let callee_signatures context (callee : Mir.callee) : Types.signature list =
   match callee with
   | Function { path; _ } -> Option.to_list (Interface.Impls.signature context.database path)
@@ -92,9 +80,6 @@ let show context (place : Place.t) =
   ^ String.concat ""
       (List.map (function Place.Field name -> "." ^ name | Element _ -> "[...]") place.steps)
 
-(* The names, kinds, and types of the definition's locals, which its MIR's
-   source locals carry, and the mode keywords of its arguments. A lambda's capture
-   is its enclosing body's local, which that body describes. *)
 let collect context (mir : Mir.Graph.t) =
   let record_mode_keyword (argument : Mir.argument) =
     match argument with
@@ -143,9 +128,7 @@ let collect context (mir : Mir.Graph.t) =
            | Temporary | Lent _ -> None)
          mir.body.parameters)
 
-(* The edits that replace a move by a copy: insert [.copy()] after the place
-   and delete the [own] keyword before it. *)
-let copy_at context (moved : Core.origin) =
+let copy_edits context (moved : Core.origin) =
   (match Hashtbl.find_opt context.mode_keywords moved with
     | Some (Own, { written; operand }) ->
         [
@@ -155,8 +138,7 @@ let copy_at context (moved : Core.origin) =
     | Some ((Read | Mut), _) | None -> [])
   @ [ Diagnostic.insert (Syntax.Span.zero_width (span context moved).stop) ".copy()" ]
 
-(* The span of a place together with the [mut] or [own] keyword before it. *)
-let with_mode_keyword context (place : Core.origin) : Syntax.span =
+let span_with_mode_keyword context (place : Core.origin) : Syntax.span =
   match Hashtbl.find_opt context.mode_keywords place with
   | Some (_, { written; _ }) -> span context written
   | None -> span context place
