@@ -15,17 +15,8 @@ type ty =
   | Function of function_type
   | Any of { trait : Path.t; arguments : argument list; associated : (string * ty) list }
       (** [any Cursor[Element = Int64]], with every associated type fixed, sorted by name *)
-  | Lent of lent
-      (** The value of a constructor of lent places that a lending method lends. It owns nothing. *)
   | Never
 
-(* A value of type [base] in which each of [fields] holds the address of a
-   place of the field's type, or a lent value of its own. Every other field
-   holds a value of a [Plain] type. The places are lent to be changed where
-   [writable]. *)
-and lent = { base : ty; writable : bool; fields : lent_field list }
-and lent_field = { variant : string option; field : string; holds : holds }
-and holds = Address | Nested of lent
 and argument = Type of ty | Value of Z.t | Capabilities of Path.t list
 
 and function_type = { parameters : (mode * ty) list; result : result; uses : Path.t list }

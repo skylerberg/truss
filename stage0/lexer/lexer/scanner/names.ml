@@ -1,17 +1,9 @@
-(* The checks on each name on its own: that it is ASCII, and the case rules.
-
-   A name with a problem gets one diagnostic, for the first check it fails.
-   A case problem has a fix that rewrites the name to pass every check. A
-   letter outside ASCII has none, since no spelling can be chosen for the
-   author. The fix depends only on the name, so every use of a misspelled
-   name gets the same fix. *)
-
 type kind = Upper | Lower
 
 type checked = {
   kind : kind;
-  name : string; (* as written *)
-  problem : (Diagnostic.Code.lexer * string) option; (* code, message *)
+  name : string;
+  problem : (Diagnostic.Code.lexer * string) option;
   fix : string option;
 }
 
@@ -28,12 +20,8 @@ let kind_of name =
   | Some first when is_upper first -> Upper
   | _ -> Lower
 
-(* The parts of a name between `_`s, leaving out empty ones. *)
 let parts name = List.filter (fun part -> part <> "") (String.split_on_char '_' name)
 
-(* `userName` and `parseHTTPResponse` become `user_name` and
-   `parse_http_response`: a `_` goes before an uppercase letter that follows
-   a lowercase letter or digit, or that starts a new word after an acronym. *)
 let to_snake name =
   let length = String.length name in
   let buffer = Buffer.create (length + 4) in
@@ -54,7 +42,6 @@ let to_snake name =
     name;
   String.concat "_" (parts (Buffer.contents buffer))
 
-(* `Http_client` becomes `HttpClient`. *)
 let to_camel name =
   String.concat ""
     (List.mapi
@@ -98,17 +85,15 @@ let case_problem name =
   in
   Option.map (fun message -> (Diagnostic.Code.Name_case, message)) message
 
-(* The first character outside ASCII, described for a message. The scanner
-   gives only valid UTF-8 here. *)
 let first_non_ascii name =
   let rec find index =
     if index >= String.length name then None
     else if Char.code name.[index] >= 0x80 then
-      let packed = Unicode.decode name index in
+      let decoded = Unicode.decode name index in
       Some
         (Printf.sprintf "`%s` (U+%04X)"
-           (String.sub name index (Unicode.decoded_length packed))
-           (Unicode.decoded_code_point packed))
+           (String.sub name index (Unicode.Decoded.length decoded))
+           (Unicode.Decoded.code_point decoded))
     else find (index + 1)
   in
   find 0

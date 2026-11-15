@@ -46,9 +46,6 @@ val owns : t -> Mir.local -> bool
 val lent_mut : t -> Mir.local -> bool
 (** Whether a local is another owner's place lent [mut]. *)
 
-val built_values : t -> Mir.local -> Mir.rvalue list option
-(** For a lent local that some assignment constructs around places, the values assigned to it. *)
-
 type use = {
   place : Mir.place;
   origin : Core.origin;

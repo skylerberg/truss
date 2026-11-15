@@ -194,8 +194,8 @@ module Code = struct
     | Needs_owned
     | Data_race
     | Lent_part_escapes
+    | Lends_other_parameter
     | Read_only_view
-    | Owned_beside_lent
     | Lent_mut_in_variant
     | Task_outlives_view
 
@@ -453,8 +453,8 @@ module Code = struct
     | Needs_owned -> "needs_owned"
     | Data_race -> "data_race"
     | Lent_part_escapes -> "lent_part_escapes"
+    | Lends_other_parameter -> "lends_other_parameter"
     | Read_only_view -> "read_only_view"
-    | Owned_beside_lent -> "owned_beside_lent"
     | Lent_mut_in_variant -> "lent_mut_in_variant"
     | Task_outlives_view -> "task_outlives_view"
 
@@ -696,13 +696,13 @@ let location source offset =
 let iter_utf8 text ~valid ~invalid =
   let rec loop index =
     if index < String.length text then begin
-      let packed = Unicode.decode text index in
-      if packed < 0 then begin
+      let decoded = Unicode.decode text index in
+      if not (Unicode.Decoded.is_valid decoded) then begin
         invalid text.[index];
         loop (index + 1)
       end
       else begin
-        let length = Unicode.decoded_length packed in
+        let length = Unicode.Decoded.length decoded in
         valid (String.sub text index length);
         loop (index + length)
       end

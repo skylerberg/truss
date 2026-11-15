@@ -7,15 +7,19 @@ val version : string
 
 (** {1 UTF-8} *)
 
-val decode : string -> int -> int
-(** [decode text offset] decodes the UTF-8 sequence starting at [offset] strictly. It returns
-    [(code_point lsl 3) lor length], or [-1] if the bytes there do not start a valid sequence: an
-    overlong form, an encoded surrogate, a value above U+10FFFF, a stray continuation byte, or a
-    truncated sequence. Use {!decoded_code_point} and {!decoded_length} on the result, which avoids
-    allocating. *)
+module Decoded : sig
+  type t [@@immediate]
 
-val decoded_code_point : int -> int
-val decoded_length : int -> int
+  val is_valid : t -> bool
+  val code_point : t -> int
+  val length : t -> int
+end
+
+val decode : string -> int -> Decoded.t
+(** [decode text offset] decodes the UTF-8 sequence starting at [offset] strictly. The result is not
+    valid if the bytes there do not start a valid sequence: an overlong form, an encoded surrogate,
+    a value above U+10FFFF, a stray continuation byte, a truncated sequence, or the end of [text].
+    The result is an unboxed integer, so decoding does not allocate. *)
 
 val encode : Buffer.t -> int -> unit
 (** Appends the UTF-8 encoding of a Unicode scalar value. *)

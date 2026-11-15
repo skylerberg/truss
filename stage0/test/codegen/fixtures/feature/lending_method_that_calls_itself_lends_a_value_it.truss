@@ -1,0 +1,39 @@
+type Tree =
+  | Leaf
+  | indirect Node(left: Tree, name: String, right: Tree)
+
+fn Tree.leftmost_name(self) lends String {
+  match self {
+    Leaf => "none".copy()
+    Node(left, name, ..) => {
+      if left is Leaf {
+        name
+      } else {
+        left.leftmost_name()
+      }
+    }
+  }
+}
+
+fn Tree.path_to_leftmost(self, prefix: String) lends String {
+  match self {
+    Leaf => "${prefix}."
+    Node(left, name, ..) => left.path_to_leftmost("${prefix}/${name}")
+  }
+}
+
+test "a part of the receiver, through each call" {
+  let one = Tree.Node(left: Tree.Leaf, name: "one".copy(), right: Tree.Leaf)
+  let two = Tree.Node(left: own one, name: "two".copy(), right: Tree.Leaf)
+  assert two.leftmost_name() == "one"
+  assert two.leftmost_name().length() == 3
+}
+
+test "a value that the innermost call made" {
+  let leaf = Tree.Leaf
+  assert leaf.leftmost_name() == "none"
+  let one = Tree.Node(left: Tree.Leaf, name: "one".copy(), right: Tree.Leaf)
+  let two = Tree.Node(left: own one, name: "two".copy(), right: Tree.Leaf)
+  assert two.path_to_leftmost("root") == "root/two/one."
+  assert two.path_to_leftmost("root").length() == 13
+}

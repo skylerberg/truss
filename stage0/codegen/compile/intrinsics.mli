@@ -22,6 +22,7 @@ val consumed_places : Intrinsic.operation -> int list
 val lower :
   ?checks:bool ->
   ?value_arguments:Z.t list ->
+  ?reported:Lowered.operand ->
   Memory_layout.env ->
   Emit_c.Builder.t ->
   types ->

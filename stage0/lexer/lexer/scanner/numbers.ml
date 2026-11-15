@@ -1,12 +1,3 @@
-(* Number literals. A number is scanned wide, over the name characters that
-   follow it, and then checked, so that `1_` and `0b102` each become one
-   token with one precise error.
-
-   A literal with several problems gets one diagnostic, for the leftmost,
-   and its fix corrects all of them at once. A problem with no exact fix,
-   such as a digit its base does not allow, leaves the literal without a
-   fix. *)
-
 type problem = { code : Diagnostic.Code.lexer; message : string; start : int; stop : int }
 type checked = { value : Token.kind; problem : problem option; fixes : (string * string) list }
 
@@ -22,7 +13,6 @@ let is_radix_prefix text start =
   && text.[start] = '0'
   && match text.[start + 1] with 'x' | 'b' | 'o' -> true | _ -> false
 
-(* The end of the name characters from [position]. *)
 let name_end text position =
   let length = String.length text in
   let rec loop position =
@@ -31,16 +21,16 @@ let name_end text position =
       match text.[position] with
       | '0' .. '9' | 'a' .. 'z' | 'A' .. 'Z' | '_' -> loop (position + 1)
       | character when Char.code character >= 0x80 ->
-          let packed = Unicode.decode text position in
-          if packed >= 0 && Unicode.is_xid_continue (Unicode.decoded_code_point packed) then
-            loop (position + Unicode.decoded_length packed)
+          let decoded = Unicode.decode text position in
+          if
+            Unicode.Decoded.is_valid decoded
+            && Unicode.is_xid_continue (Unicode.Decoded.code_point decoded)
+          then loop (position + Unicode.Decoded.length decoded)
           else position
       | _ -> position
   in
   loop position
 
-(* The end of the number that starts at [start]: its name characters, and a
-   fraction and an exponent's sign when its digits have them. *)
 let scan_end text start =
   let length = String.length text in
   let stop = name_end text start in
@@ -63,8 +53,6 @@ let scan_end text start =
   then name_end text (stop + 1)
   else stop
 
-(* A group of digits with `_` only singly and between digits, and the offset
-   of the first misplaced `_`. *)
 let clean_underscores group =
   let parts = List.filter (fun part -> part <> "") (String.split_on_char '_' group) in
   let cleaned = String.concat "_" parts in
@@ -90,11 +78,9 @@ let underscore_issue offset =
   issue Number_underscore "`_` can only go between digits." offset (offset + 1)
 
 let character_length text offset =
-  let packed = Unicode.decode text offset in
-  if packed < 0 then 1 else Unicode.decoded_length packed
+  let decoded = Unicode.decode text offset in
+  if Unicode.Decoded.is_valid decoded then Unicode.Decoded.length decoded else 1
 
-(* The leftmost problem without an exact fix if there is one, and otherwise
-   the leftmost, with the fix that corrects them all. *)
 let choose_problem value issues ~fixed =
   let leftmost issues =
     List.fold_left
@@ -185,7 +171,6 @@ let check_decimal text =
         else position + 1
       in
       let digits = group_from digits_offset in
-      (* `e` followed by a name character, as in `2em`, is not an exponent. *)
       if snd digits = "" && digits_offset < length then None
       else Some (position, String.sub text (position + 1) (digits_offset - position - 1), digits)
     else None
@@ -243,7 +228,7 @@ let check_decimal text =
         | _ -> Z.zero
       in
       Token.Float
-        (Token.Decimal.make
+        (Token.Decimal.normalized
            ~significand:(Z.of_string (whole_digits ^ fraction_digits))
            ~exponent:(Z.sub exponent_value (Z.of_int (String.length fraction_digits))))
   in

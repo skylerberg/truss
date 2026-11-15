@@ -294,7 +294,7 @@ let () =
             Lower "name";
             Underscore;
             Integer Z.one;
-            Float (Token.Decimal.make ~significand:Z.one ~exponent:Z.zero);
+            Float (Token.Decimal.normalized ~significand:Z.one ~exponent:Z.zero);
             String
               {
                 tag = None;

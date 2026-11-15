@@ -81,6 +81,31 @@ develop as well as make it easier to bootstrap the compiler in parts.
   interface that exports only the values tests and tools read. CI rejects a
   use anywhere else.
 
+### The lexer
+
+- **The scanner reads Truss, and the habits read other languages.** The
+  scanner's core scans the grammar of [SPECIFICATION.md](SPECIFICATION.md).
+  Each form of another language, such as a `//` comment, `===`, `f"..."`,
+  or `0755`, belongs to a module of `Habits`, which the scanner asks first
+  wherever such a form can start. A habit reports the form and lexes it as
+  the Truss token it stands for. A change to Truss's grammar edits the core,
+  and a new form of another language edits only the habits.
+- **A decision about a token looks at the next token, not at bytes.** `1.`
+  is a float unless a word follows the `.`, and `...` is a range, `todo`, or
+  nothing, by the operands on its two sides. The scanner scans the next token
+  with its own scanning function and holds it, so the decision sees the
+  token that follows in fact, inside an interpolation as well. A token
+  carries the trivia before it, so a token scanned ahead never takes a line
+  break that precedes the token before it.
+- **A file's tokens are the tokens of its fixed text.** The lexer applies
+  every machine-applicable fix, lexes the result, and maps the tokens back
+  to the file's offsets, so the parser reads the file as its fixes would
+  write it. A fix whose text adds an error, or joins or splits a neighboring
+  token, is withheld, so a habit needs no guard of its own against those.
+  Recovery cannot see a fix that lexes cleanly but changes a value, such as
+  a string's text that would become an escape or an interpolation; the
+  habit that offers the fix must withhold it.
+
 ### Stages
 
 - **Every stage after the type checker reads the MIR.** Ownership, the

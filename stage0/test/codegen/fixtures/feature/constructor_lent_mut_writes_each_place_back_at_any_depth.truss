@@ -1,0 +1,41 @@
+type Entry(title: String, count: Int64)
+
+type Pair(entry: Entry, name: String)
+
+type Holder(title: String, name: String, count: Int64)
+
+fn Holder.pair(mut self) lends mut Pair {
+  Pair(entry: Entry(title: mut self.title, count: mut self.count), name: mut self.name)
+}
+
+fn Holder.labelled(mut self) lends mut Pair {
+  Pair(entry: Entry(title: "label ${self.count}", count: mut self.count), name: mut self.name)
+}
+
+fn rename(pair: mut Pair) {
+  pair.name = "${pair.entry.title} renamed"
+  pair.entry.count += 1
+}
+
+test "a place in a nested constructor is written back when the lend ends" {
+  var holder = Holder(title: "${1}st", name: "${2}nd", count: 3)
+  mut holder.pair().entry.title = "${4}th title"
+  assert holder.title == "4th title"
+  mut holder.pair().entry.count = 9
+  assert holder.count == 9
+  mut holder.pair().name = "${5}th"
+  assert holder.name == "5th"
+  rename(mut holder.pair())
+  assert holder.name == "4th title renamed"
+  assert holder.count == 10
+}
+
+test "a field that the method made is dropped, and the places beside it are written back" {
+  var holder = Holder(title: "${1}st", name: "${2}nd", count: 3)
+  rename(mut holder.labelled())
+  assert holder.name == "label 3 renamed"
+  assert holder.count == 4
+  assert holder.title == "1st"
+  mut holder.labelled().entry.title = "${6}th"
+  assert holder.title == "1st"
+}

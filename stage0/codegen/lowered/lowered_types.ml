@@ -15,6 +15,14 @@ type ty =
   | Evidence of int
       (** Evidence a [provide] builds on the stack, with room for [n] pointers to the evidence its
           implementation captured *)
+  | Lend
+  | Lend_mark
+
+(* A position within a definition, which the definition's anchor turns into
+   a file and line. It names its definition, rather than taking the
+   instance's, because code can come from another definition: a trait's
+   provided method compiled for an [impl] reports positions in the trait. *)
+type site = { definition : Path.t; line : int; column : int }
 
 (* A place: a local or a constant's static data, then fields, elements, and
    dereferences. *)
@@ -47,7 +55,8 @@ and constant =
   | Character of int
   | Bytes of string  (** The address of static bytes, such as a string literal's *)
   | Null
-  | Symbol_address of Instance.key  (** The address of a table *)
+  | Symbol_address of Instance.key
+  | Site of site
   | Size_of of Ground.ty
   | Alignment_of of Ground.ty
 
@@ -141,6 +150,13 @@ type intrinsic =
           counts the thread as blocked, and a spare thread may run tasks in its place. The runtime
           can now interrupt the call if the calling task is cancelled. *)
   | Blocking_end  (** [()]: after such a call. It leaves [errno] as the call set it. *)
+  | Lend_begin
+  | Lend_called
+  | Lend_release
+  | Lend_transfer
+  | Lend_allocate
+  | Lend_defer_drop
+  | Lend_defer_write_back
 
 type target =
   | Direct of { function_ : function_ref; signature : signature }
@@ -167,12 +183,6 @@ type rvalue =
   | Is_variant of place * string  (** Whether a sum type's value holds the variant *)
   | Function_value of { code : function_ref; environment : operand option }
 
-(* A position within a definition, which the definition's anchor turns into
-   a file and line. It names its definition, rather than taking the
-   instance's, because code can come from another definition: a trait's
-   provided method compiled for an [impl] reports positions in the trait. *)
-type site = { definition : Path.t; line : int; column : int }
-
 (* Why a [fail] ends the run: a panic, a failed [assert] in a test, or a
    [todo] that was reached. *)
 type failure = Panic | Assertion | Todo
@@ -196,6 +206,7 @@ type statement =
   | Free_block of { place : place; variant : string }
       (** Frees the block of an [indirect] variant whose fields have all been moved out or dropped
       *)
+  | Defer_free_block of { lend : operand; place : place; variant : string }
   | Fork of { branches : (int * operand) list }
   | Fork_range of { body : int; environment : operand; first : operand; last : operand }
 
@@ -206,8 +217,13 @@ type terminator =
   | Switch_variant of { place : place; cases : (string * block) list; default : block option }
   | Return of operand option
   | Unreachable  (** A point the prover has shown is never reached *)
-  | Fail of { failure : failure; message : operand; length : operand; site : site }
-      (** Ends a test or the process: the message is a pointer to UTF-8 bytes and their length *)
+  | Fail of {
+      failure : failure;
+      message : operand;
+      length : operand;
+      site : site;
+      reported : operand option;
+    }  (** Ends a test or the process: the message is a pointer to UTF-8 bytes and their length *)
 
 (* Static data: a constant's value, which the emitter writes as C
    initializers in a read-only place. *)

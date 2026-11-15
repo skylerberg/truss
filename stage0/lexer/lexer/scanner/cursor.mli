@@ -1,3 +1,16 @@
+type ending = Closed | Unterminated
+
+type token = {
+  kind : Token.kind;
+  start : int;
+  stop : int;
+  ending : ending;
+  first_line_break : Source.span option;
+  blank_line : bool;
+}
+
+type item = Token of token | Line_end | End
+
 type t = {
   source : Source.t;
   text : string;
@@ -9,21 +22,21 @@ type t = {
   mutable line_is_blank : bool;
   mutable unterminated_at_end : bool;
   names : (string, Names.checked) Hashtbl.t;
-  mutable previous : Token.kind option;
-  is_peek : bool;
+  mutable previous : token option;
+  mutable held : item list;
+  mutable semicolons : int list;
   foreign_escape : t -> Buffer.t -> bool;
 }
 
 val create : foreign_escape:(t -> Buffer.t -> bool) -> Source.t -> Diagnostic.Collector.t -> t
-
-val peek : t -> int -> t
-(** A copy of [cursor] at [index], for scanning ahead, that discards what it reports. *)
-
-type ending = Closed | Unterminated
-type item = Token of { kind : Token.kind; start : int; ending : ending } | Line_end | End
-
 val span : int -> int -> Source.span
-val byte : t -> int -> int
+val at_end : t -> int -> bool
+
+val char : t -> int -> char
+(** The byte at [index], which is before the end. *)
+
+val is_at : t -> int -> char -> bool
+val satisfies : t -> int -> (char -> bool) -> bool
 
 val report :
   t ->
@@ -34,17 +47,16 @@ val report :
   string ->
   unit
 
-val is_line_break : int -> bool
-val is_end_of_line : int -> bool
-val is_space : int -> bool
-val is_digit : int -> bool
-val is_hexadecimal_digit : int -> bool
-val is_ascii_letter : int -> bool
-val is_ascii_name_byte : int -> bool
-val quote : int
-val dollar : int
-val decode : t -> int -> int
-val run_length : t -> int -> int -> int
+val is_line_break : char -> bool
+val is_end_of_line : t -> int -> bool
+val is_space : char -> bool
+val is_digit : char -> bool
+val is_hexadecimal_digit : char -> bool
+val is_ascii_letter : char -> bool
+val is_ascii_name_byte : char -> bool
+val is_ascii : char -> bool
+val decode : t -> int -> Unicode.Decoded.t
+val run_length : t -> int -> char -> int
 val skip_spaces : t -> int -> int
 val end_of_line : t -> int -> int
 val line_break_length : t -> int -> int

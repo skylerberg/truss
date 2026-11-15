@@ -40,7 +40,6 @@ type basic_block = {
   statements : statement list;
   terminator : terminator;
   terminator_origin : Core.origin;
-  inlined : inlined list;
 }
 
 type body = {
@@ -159,37 +158,3 @@ let block_successors (body : body) block =
     | Some (For { body = first; after; _ }) -> [ first; after ]
     | _ -> [])
   @ successors terminator
-
-let conditional_lends (body : body) =
-  let ends_of part (statement : statement) =
-    match statement.kind with Dead locals -> List.mem part locals | _ -> false
-  in
-  let ends_in part (block : basic_block) = List.exists (ends_of part) block.statements in
-  let lends = ref [] in
-  Array.iteri
-    (fun index (block : basic_block) ->
-      List.iteri
-        (fun position (statement : statement) ->
-          match statement.kind with
-          | Lend { part; _ } -> lends := (part, index, position) :: !lends
-          | _ -> ())
-        block.statements)
-    body.blocks;
-  List.filter_map
-    (fun (part, lending, position) ->
-      let ended_before =
-        List.exists (ends_of part)
-          (List.filteri (fun at _ -> at < position) body.blocks.(lending).statements)
-      in
-      let visited = Array.make (Array.length body.blocks) false in
-      let rec reaches block =
-        block <> lending
-        && (not visited.(block))
-        && begin
-          visited.(block) <- true;
-          ends_in part body.blocks.(block)
-          || List.exists reaches (successors body.blocks.(block).terminator)
-        end
-      in
-      if ended_before || reaches 0 then Some part else None)
-    !lends

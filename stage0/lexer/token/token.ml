@@ -1,6 +1,3 @@
-(* The tokens the lexer produces. Each list below is the single place its
-   items are spelled; a test checks the lists against SPECIFICATION.md. *)
-
 type span = Source.span = private { start : int; stop : int }
 
 type keyword =
@@ -41,8 +38,8 @@ type keyword =
   | Public
   | Requires
   | Return
-  | Self_value (* self *)
-  | Self_type (* Self *)
+  | Self_value
+  | Self_type
   | Test
   | Theorem
   | Todo
@@ -121,16 +118,13 @@ type foreign = Plus_plus | Minus_minus | Star_star | Colon_equal | Pipe_greater
 module Decimal : sig
   type t = private { significand : Z.t; exponent : Z.t }
 
-  val make : significand:Z.t -> exponent:Z.t -> t
+  val normalized : significand:Z.t -> exponent:Z.t -> t
 end = struct
   type t = { significand : Z.t; exponent : Z.t }
 
   let ten = Z.of_int 10
 
-  (* The zeros are counted in the decimal digits, in one pass. Dividing by
-     ten once for each zero would take time quadratic in the number of
-     digits, which a literal with many zeros would make the lexer pay. *)
-  let make ~significand ~exponent =
+  let normalized ~significand ~exponent =
     if Z.equal significand Z.zero then { significand = Z.zero; exponent = Z.zero }
     else
       let digits = Z.to_string significand in
@@ -147,12 +141,7 @@ end = struct
         }
 end
 
-type t = {
-  kind : kind;
-  span : span;
-  line_break_before : bool; (* a line break between this token and the one before *)
-  blank_line_before : bool; (* a blank line between them *)
-}
+type t = { kind : kind; span : span; line_break_before : bool; blank_line_before : bool }
 
 and kind =
   | Upper of string

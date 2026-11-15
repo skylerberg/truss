@@ -376,6 +376,7 @@ let () =
                        message = Constant (Bytes "boom");
                        length = Constant (Integer (UInt64, Z.of_int 4));
                        site = { definition = definition "entry"; line = 3; column = 5 };
+                       reported = None;
                      });
               ];
           ]

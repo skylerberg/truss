@@ -1,14 +1,20 @@
 module Tables = Unicode_tables
 
 let version = Tables.unicode_version
-let decoded_code_point packed = packed lsr 3
-let decoded_length packed = packed land 7
+
+module Decoded = struct
+  type t = int
+
+  let is_valid decoded = decoded >= 0
+  let code_point decoded = decoded lsr 3
+  let length decoded = decoded land 7
+end
 
 let decode text offset =
   let length = String.length text in
   let byte index = Char.code (String.unsafe_get text index) in
   let continuation index = index < length && byte index land 0xC0 = 0x80 in
-  let first = byte offset in
+  let first = if offset < length then byte offset else 0xFF in
   if first < 0x80 then (first lsl 3) lor 1
   else if first < 0xC2 then -1
   else if first < 0xE0 then

@@ -47,6 +47,11 @@ let runtime_declarations =
       "typedef __UINT32_TYPE__ uint32_t;\n";
       "typedef __UINT64_TYPE__ uint64_t;\n";
       anchor_struct;
+      "struct t_site {\n\
+      \  const struct t_anchor *anchor;\n\
+      \  uint32_t line;\n\
+      \  uint32_t column;\n\
+       };\n";
       "_Noreturn void t_runtime_panic(const uint8_t *message, uint64_t length, const struct \
        t_anchor *anchor, uint32_t line, uint32_t column);\n";
       "_Noreturn void t_runtime_assertion_failed(const uint8_t *message, uint64_t length, const \
@@ -84,6 +89,128 @@ let runtime_declarations =
    files that use it. *)
 let helpers =
   [
+    ( "t_lend",
+      {|struct t_lend_deferred {
+  struct t_lend_deferred *next;
+  void (*drop)(void *);
+  void *target;
+  const void *source;
+  uint64_t size;
+};
+struct t_lend_block {
+  struct t_lend_block *next;
+};
+struct t_lend {
+  struct t_lend_deferred *deferred;
+  struct t_lend_block *blocks;
+  uint64_t used;
+  uint64_t lends;
+  _Alignas(16) uint8_t storage[128];
+};
+struct t_lend_mark {
+  struct t_lend_deferred *deferred_before;
+  struct t_lend_deferred *deferred_after;
+  struct t_lend_block *blocks_before;
+  struct t_lend_block *blocks_after;
+  uint64_t used_before;
+  uint64_t used_after;
+  uint8_t is_lent;
+};
+__attribute__((unused)) static inline void *t_lend_allocate(struct t_lend *lend, uint64_t size, uint64_t alignment) {
+  uint64_t start = (lend->used + alignment - 1) & ~(alignment - 1);
+  if (alignment <= 16 && start + size <= sizeof lend->storage) {
+    lend->used = start + size;
+    return lend->storage + start;
+  }
+  uint64_t block_alignment =
+    alignment < _Alignof(struct t_lend_block) ? _Alignof(struct t_lend_block) : alignment;
+  uint64_t header = (sizeof(struct t_lend_block) + block_alignment - 1) & ~(block_alignment - 1);
+  struct t_lend_block *block = t_runtime_allocate(header + size, block_alignment);
+  block->next = lend->blocks;
+  lend->blocks = block;
+  return (uint8_t *)block + header;
+}
+__attribute__((unused)) static inline struct t_lend_deferred *t_lend_defer(struct t_lend *lend) {
+  struct t_lend_deferred *deferred =
+    t_lend_allocate(lend, sizeof(struct t_lend_deferred), _Alignof(struct t_lend_deferred));
+  deferred->next = lend->deferred;
+  deferred->drop = 0;
+  deferred->target = 0;
+  deferred->source = 0;
+  deferred->size = 0;
+  lend->deferred = deferred;
+  return deferred;
+}
+__attribute__((unused)) static inline void t_lend_defer_drop(struct t_lend *lend, void *drop, void *value) {
+  struct t_lend_deferred *deferred = t_lend_defer(lend);
+  deferred->drop = (void (*)(void *))drop;
+  deferred->target = value;
+}
+__attribute__((unused)) static inline void t_lend_defer_write_back(struct t_lend *lend, void *destination,
+                                           const void *source, uint64_t size) {
+  struct t_lend_deferred *deferred = t_lend_defer(lend);
+  deferred->target = destination;
+  deferred->source = source;
+  deferred->size = size;
+}
+__attribute__((unused)) static inline void t_lend_defer_free(struct t_lend *lend, void *block) {
+  t_lend_defer(lend)->target = block;
+}
+__attribute__((unused)) static inline void t_lend_begin(struct t_lend *lend, struct t_lend_mark *mark) {
+  mark->deferred_before = lend->deferred;
+  mark->blocks_before = lend->blocks;
+  mark->used_before = lend->used;
+  mark->deferred_after = lend->deferred;
+  mark->blocks_after = lend->blocks;
+  mark->used_after = lend->used;
+  mark->is_lent = 1;
+  lend->lends += 1;
+}
+__attribute__((unused)) static inline void t_lend_called(struct t_lend *lend, struct t_lend_mark *mark) {
+  mark->deferred_after = lend->deferred;
+  mark->blocks_after = lend->blocks;
+  mark->used_after = lend->used;
+}
+__attribute__((unused)) static inline void t_lend_free_blocks(struct t_lend *lend, struct t_lend_block *until) {
+  while (lend->blocks != until) {
+    struct t_lend_block *block = lend->blocks;
+    lend->blocks = block->next;
+    t_runtime_free(block);
+  }
+}
+__attribute__((unused)) static inline void t_lend_release(struct t_lend *lend, struct t_lend_mark *mark) {
+  if (!mark->is_lent) return;
+  mark->is_lent = 0;
+  for (struct t_lend_deferred *deferred = mark->deferred_after; deferred != mark->deferred_before;
+       deferred = deferred->next) {
+    if (deferred->drop) deferred->drop(deferred->target);
+    else if (deferred->source) __builtin_memcpy(deferred->target, deferred->source, deferred->size);
+    else if (deferred->target) t_runtime_free(deferred->target);
+    deferred->drop = 0;
+    deferred->target = 0;
+    deferred->source = 0;
+  }
+  if (lend->deferred == mark->deferred_after && lend->blocks == mark->blocks_after &&
+      lend->used == mark->used_after) {
+    lend->deferred = mark->deferred_before;
+    t_lend_free_blocks(lend, mark->blocks_before);
+    lend->used = mark->used_before;
+  }
+  lend->lends -= 1;
+  if (lend->lends == 0) {
+    t_lend_free_blocks(lend, 0);
+    lend->deferred = 0;
+    lend->used = 0;
+  }
+}
+__attribute__((unused)) static inline void t_lend_transfer(struct t_lend *lend, struct t_lend_mark *mark) {
+  if (mark->is_lent) {
+    mark->is_lent = 0;
+    lend->lends -= 1;
+  }
+}
+|}
+    );
     ( "t_compare_bytes",
       {|static inline int32_t t_compare_bytes(const void *first, const void *second, uint64_t count) {
   int order = __builtin_memcmp(first, second, count);

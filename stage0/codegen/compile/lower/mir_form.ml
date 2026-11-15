@@ -1,17 +1,3 @@
-(* Lowers a body from its MIR to C, once {!Instance_mir} has inlined
-   the lending methods it calls. The MIR has made every
-   decision about the order of evaluation, the scope of temporaries and
-   bindings, and the flow of patterns and loops, so this lowering decides
-   only what is C's: pointers, layout, the calling convention, drops,
-   and the outlining of [parallel] and [concurrent] code.
-
-   A body is lowered as regions. A region is the code of one body that is
-   lowered in one state of the scopes: a whole body, the body of a [for]
-   loop, or a branch of a [concurrent] block. Each region lowers each of its
-   blocks of the MIR once, the first time a jump reaches it. A jump to a
-   block of an enclosing region of the same body leaves the scopes between,
-   as a [break] does. *)
-
 open Definitions
 open Lowering
 open Targets
@@ -45,11 +31,12 @@ let site_of st (origin : Core.origin) =
   if origin >= 0 && origin < Array.length spans then site st spans.(origin)
   else site st (Syntax.Span.make 0 0)
 
-(* Where a check that fails in the code being lowered is reported: at the
-   code's own position, or, for the standard library's code that is
-   inlined into a program's, at the program's call. *)
-let failure_site st (origin : Core.origin) =
-  match st.frame.reported with Some site -> site | None -> site_of st origin
+let reported_site st : Lowered.operand option =
+  match st.frame.mir with
+  | Some { lending = Some { site; _ }; _ }
+    when Path.package st.frame.code.anchor = Path.standard_package ->
+      Some site
+  | _ -> None
 
 let info st local = (mir st).body.locals.(local)
 
@@ -118,8 +105,8 @@ let place st (written : Mir.place) : Lowered.place =
   List.fold_left
     (fun place (projection : Mir.projection) ->
       match projection with
-      | Field field -> project st place (Field field)
-      | Variant_field { variant; field } -> project st place (Variant_field { variant; field }))
+      | Field field -> place / Field field
+      | Variant_field { variant; field } -> place / Variant_field { variant; field })
     root written.projections
 
 let variants_of st (ty : Ground.ty) : (string option * (string * Ground.ty) list) list =
@@ -140,7 +127,7 @@ let variants_of st (ty : Ground.ty) : (string option * (string * Ground.ty) list
         variants
   | Scalar _ | Array _ -> bug "the fields of %s, which has none" (Ground.to_string ty)
 
-let frame_of_body st ?owner ?returns_into ?(passed : Ground.mode list option) ~lambdas
+let frame_of_body st ?owner ?returns_into ?lending ?(passed : Ground.mode list option) ~lambdas
     (body : Mir.Graph.body) : mir_frame =
   (* How each parameter is passed, where it is not as its binding says: a
      lambda's parameters are patterns, and its function type says how each
@@ -174,6 +161,24 @@ let frame_of_body st ?owner ?returns_into ?(passed : Ground.mode list option) ~l
     | None -> false
   in
   let moves = Moves.analyse ~passed ~tracks:needs_drop body in
+  let after_lend = Array.make (Array.length body.blocks) false in
+  let rec reach block =
+    if not after_lend.(block) then begin
+      after_lend.(block) <- true;
+      List.iter reach (Mir.Graph.block_successors body block)
+    end
+  in
+  Array.iter
+    (fun (basic : Mir.Graph.basic_block) ->
+      match basic.terminator with Yield { resume; _ } -> reach resume | _ -> ())
+    body.blocks;
+  let statements_where in_block select =
+    List.concat
+      (List.mapi
+         (fun block (basic : Mir.Graph.basic_block) ->
+           if in_block block then List.concat_map select basic.statements else [])
+         (Array.to_list body.blocks))
+  in
   {
     body;
     lambdas;
@@ -205,75 +210,115 @@ let frame_of_body st ?owner ?returns_into ?(passed : Ground.mode list option) ~l
           (path, at (local st.builder ~name:"owned" ~is_zeroed:true (Raw Bool))))
         (Moves.flagged moves);
     state = Moves.entry moves 0;
+    lending;
+    called_parts =
+      statements_where
+        (fun _ -> true)
+        (fun (statement : Mir.statement) ->
+          match statement.kind with
+          | Lend { call = { callee = Intrinsic _; _ }; _ } -> []
+          | Lend { part; _ } -> [ part ]
+          | _ -> []);
+    lent_calls = Hashtbl.create 4;
+    placed_parts = Hashtbl.create 4;
+    forwarded_locals = 0;
+    ended_after_lend = statements_where (fun block -> after_lend.(block)) Moves.ended_by;
+    after_lend;
+    block = 0;
   }
 
-(* Writes [build] for each variant that the value at [source], of type
-   [ty], may have, with the variant's fields: once for a record, and for a
-   sum type in a case of a switch on the variant. *)
-let each_variant st ty (source : Lowered.place) build =
-  match variants_of st ty with
-  | [ (None, fields) ] -> build None fields
-  | variants ->
-      let after = block st.builder in
-      let cases =
-        List.map
-          (fun (variant, fields) ->
-            let case = block st.builder in
-            in_block st.builder case (fun () ->
-                build variant fields;
-                finish st.builder (Goto after));
-            (Option.get variant, case))
-          variants
-      in
-      finish st.builder (Switch_variant { place = source; cases; default = None });
-      start st.builder after
+let outlives_call ~(owns : Mir.local -> bool) ~(is_view : Types.ty -> bool) (body : Mir.Graph.body)
+    (place : Mir.place) : bool =
+  let operand_place (operand : Mir.operand) =
+    match operand with
+    | Borrow { place; type_; _ } | Use { place; type_; _ } | Take { place; type_; _ } ->
+        Some (place, is_view type_)
+    | Constant _ -> None
+  in
+  let viewed_by (call : Mir.call) =
+    List.filter_map
+      (function
+        | Mir.Passed { mode; value; _ } -> (
+            match operand_place value with
+            | Some (place, holds_view) when holds_view || mode <> Own -> Some (place, holds_view)
+            | _ -> None)
+        | Default -> None)
+      call.arguments
+  in
+  let receiver (call : Mir.call) =
+    match call.arguments with
+    | Passed { mode = Read | Mut; value; _ } :: _ -> Option.to_list (operand_place value)
+    | _ -> []
+  in
+  let sources ~holds_view local : (Mir.place * bool) list option =
+    let exception Made in
+    let is_local (target : Mir.place) = target = { root = Local local; projections = [] } in
+    let given (statement : Mir.statement) =
+      match statement.kind with
+      | Assign { target; value; _ } when is_local target -> (
+          match value with
+          | Operand (Borrow { place; _ }) -> [ (place, holds_view) ]
+          | Operand ((Use _ | Take _) as operand) when holds_view ->
+              Option.to_list (operand_place operand)
+          | Construct { fields; _ } when holds_view ->
+              List.filter_map
+                (fun (_, field) ->
+                  match (field : Mir.operand option) with
+                  | Some (Borrow { place; _ }) -> Some (place, false)
+                  | Some operand ->
+                      Option.bind (operand_place operand) (fun (place, holds_view) ->
+                          if holds_view then Some (place, true) else None)
+                  | None -> None)
+                fields
+          | _ -> raise Made)
+      | Lend { part; call } when part = local ->
+          if holds_view then receiver call @ viewed_by call else receiver call
+      | Slice { destination; base; call } when is_local destination ->
+          [ (base, match receiver call with (_, holds_view) :: _ -> holds_view | [] -> false) ]
+      | (Call { destination = Some target; call } | Template { destination = target; call; _ })
+        when is_local target ->
+          if holds_view then viewed_by call else raise Made
+      | _ -> []
+    in
+    try
+      Some
+        (Array.fold_left
+           (fun places (block : Mir.Graph.basic_block) ->
+             let places =
+               List.fold_left
+                 (fun places statement -> given statement @ places)
+                 places block.statements
+             in
+             match block.terminator with
+             | For { iteration = Pull { cursor; _ }; part; _ } when part = local && holds_view ->
+                 (cursor, true) :: places
+             | For { part; _ } when part = local -> raise Made
+             | _ -> places)
+           [] body.blocks)
+    with Made -> None
+  in
+  let rec outlives seen ~holds_view (place : Mir.place) =
+    match place.root with
+    | Constant _ -> true
+    | Local local when List.mem (local, holds_view) seen -> true
+    | Local local -> (
+        match body.locals.(local).kind with
+        | Source { mode = Read | Mut; _ } when List.mem local body.parameters -> true
+        | _ when List.mem local body.parameters -> holds_view
+        | _ when owns local && not holds_view -> false
+        | _ -> (
+            match sources ~holds_view local with
+            | Some places ->
+                List.for_all
+                  (fun (place, holds_view) ->
+                    outlives ((local, holds_view) :: seen) ~holds_view place)
+                  places
+            | None -> false))
+  in
+  outlives [] ~holds_view:false place
 
 let field_of variant field : Lowered.projection =
   match variant with Some variant -> Variant_field { variant; field } | None -> Field field
-
-(* The value at a place as a value of its type. A lent value there is
-   copied into one. *)
-let rec whole st (source : Lowered.place) : Lowered.place =
-  match lent_at st source with Some lent -> copied_lent st lent source | None -> source
-
-and copied_lent st (lent : Ground.lent) (source : Lowered.place) : Lowered.place =
-  let ty = lent.base in
-  let copy = at (local st.builder (Value ty)) in
-  let scope = innermost_scope st in
-  if lent.writable then
-    begin match variants_of st ty with
-    | [ (None, _) ] -> ()
-    | _ -> bug "%s is lent to be mutated" (Ground.to_string (Lent lent))
-    end;
-  each_variant st ty source (fun variant fields ->
-      let fields =
-        List.map
-          (fun (name, field_ty) ->
-            let field_place = whole st (project st source (field_of variant name)) in
-            if lent.writable then begin
-              scope.owned <-
-                Write_back
-                  {
-                    destination = field_place;
-                    source = copy / field_of variant name;
-                    ty = field_ty;
-                  }
-                :: scope.owned;
-              (name, owned st field_place field_ty)
-            end
-            else (name, Lowered.Copy field_place))
-          fields
-      in
-      emit st.builder (Assign (copy, Build { ty; variant; fields })));
-  (match
-     List.filter_map
-       (fun (variant_shape : Memory_layout.variant_shape) ->
-         if variant_shape.indirect then Some variant_shape.name else None)
-       (match Memory_layout.shape st.context.env ty with Sum variants -> variants | _ -> [])
-   with
-  | [] -> ()
-  | variants -> scope.owned <- Free_blocks { place = copy; variants } :: scope.owned);
-  copy
 
 (* Operands *)
 
@@ -307,20 +352,20 @@ let value st (operand : Mir.operand) : Lowered.operand =
       string_literal st ty text ~destination:held;
       owned st held ty
   | Constant { value; _ } -> constant st ty value
-  | Use { place = written; _ } -> owned st (whole st (place st written)) ty
+  | Use { place = written; _ } -> owned st (place st written) ty
   | Take { place = written; _ } -> owned st (taken st written) ty
-  | Borrow { place = written; _ } -> Copy (whole st (place st written))
+  | Borrow { place = written; _ } -> Copy (place st written)
 
 let operand_place st (operand : Mir.operand) : Lowered.place =
   let ty = operand_type st operand in
   match operand with
-  | Borrow { place = written; _ } -> whole st (place st written)
+  | Borrow { place = written; _ } -> place st written
   | Use { place = { root = Local local; projections = [] } as written; _ }
     when (info st local).kind = Temporary ->
       place st written
   | Use { place = written; _ } ->
       let held = temporary st ty in
-      take st (whole st (place st written)) ty ~destination:held;
+      take st (place st written) ty ~destination:held;
       held
   | Take { place = written; _ } ->
       let held = temporary st ty in
@@ -336,11 +381,6 @@ let operand_place st (operand : Mir.operand) : Lowered.place =
       emit st.builder (Assign (held, Use (constant st ty value)));
       held
 
-let operand_part st (operand : Mir.operand) : Lowered.place =
-  match operand with
-  | Borrow { place = written; _ } -> place st written
-  | _ -> operand_place st operand
-
 (* Writes an operand's value to [destination], which holds nothing. *)
 let write_operand st (operand : Mir.operand) (destination : Lowered.place) =
   let ty = operand_type st operand in
@@ -348,10 +388,10 @@ let write_operand st (operand : Mir.operand) (destination : Lowered.place) =
   | Constant { value = Unit; _ } -> ()
   | Constant { value = String text; _ } -> string_literal st ty text ~destination
   | Constant { value; _ } -> emit st.builder (Assign (destination, Use (constant st ty value)))
-  | Use { place = written; _ } -> take st (whole st (place st written)) ty ~destination
+  | Use { place = written; _ } -> take st (place st written) ty ~destination
   | Take { place = written; _ } -> take st (taken st written) ty ~destination
   | Borrow { place = written; _ } ->
-      emit st.builder (Assign (destination, Use (Copy (whole st (place st written)))))
+      emit st.builder (Assign (destination, Use (Copy (place st written))))
 
 let discarded st = temporary st (Monomorphic.builtin Unit)
 
@@ -617,47 +657,6 @@ let resolve_callee st (callee : Mir.callee) : (Path.t * Ground.argument list) op
       | _ -> bug "a trait method's key")
   | Capability_method _ | Intrinsic _ | Indirect _ -> None
 
-(* A lending method a call reaches, with its MIR as the instance runs it,
-   for inlining. *)
-let inlinable st (callee : Mir.callee) : Instance_mir.callee option =
-  match resolve_callee st callee with
-  | Some (path, type_arguments) -> (
-      match (signature_of st.context path).output with
-      | Lends _ ->
-          let code = code_of st.context path type_arguments in
-          Some
-            {
-              path;
-              type_arguments = List.map Monomorphic.back_argument type_arguments;
-              mir = Instance_mir.substituted code.substitution (mir_of st.context path);
-              defaults =
-                List.map
-                  (fun (position, default) ->
-                    (position, Instance_mir.substituted code.substitution default))
-                  (parameter_defaults st.context path);
-            }
-      | Returns _ -> None)
-  | None -> None
-
-let block_frame st (base : frame) (chain : Mir.inlined list) =
-  List.fold_right
-    (fun (inlined : Mir.inlined) (outer : frame) ->
-      let saved = st.frame in
-      st.frame <- outer;
-      let call_site = site_of st inlined.call in
-      let type_arguments = List.map (ground_argument st) inlined.type_arguments in
-      st.frame <- saved;
-      {
-        outer with
-        code = code_of st.context inlined.method_ type_arguments;
-        reported =
-          (if Path.package inlined.method_ = Path.standard_package then
-             Some (Option.value outer.reported ~default:call_site)
-           else None);
-        inlined = inlined.method_ :: outer.inlined;
-      })
-    chain base
-
 let resolved st (callee : Mir.callee) =
   match resolve_callee st callee with
   | Some (path, type_arguments) ->
@@ -760,8 +759,8 @@ let shared_update st ~shared ~input ~change ~destination =
 
 (* Lowers a call of an intrinsic. Returns the place it lends, for one that
    lends. An intrinsic takes storage and views by place. *)
-let intrinsic st (operation : Intrinsic.operation) ~type_arguments (arguments : Mir.argument list)
-    ~destination ~site =
+let intrinsic st ?reported (operation : Intrinsic.operation) ~type_arguments
+    (arguments : Mir.argument list) ~destination ~site =
   match (operation, arguments) with
   | Shared_update, [ shared; input; change ] ->
       shared_update st ~shared ~input ~change ~destination;
@@ -788,8 +787,8 @@ let intrinsic st (operation : Intrinsic.operation) ~type_arguments (arguments : 
           | Intrinsics.Place place -> ignore (moved st place)
           | Value _ -> ())
         (Intrinsics.consumed_places operation);
-      Intrinsics.lower ~checks:st.context.checks ~value_arguments st.context.env st.builder
-        st.context.types operation ~type_arguments arguments ~destination ~site
+      Intrinsics.lower ~checks:st.context.checks ~value_arguments ?reported st.context.env
+        st.builder st.context.types operation ~type_arguments arguments ~destination ~site
 
 (* The default of a field of a type: its type, and the graph of its value. *)
 let field_default st (ty : Ground.ty) ~variant ~field : Types.ty * Mir.Graph.t =
@@ -1019,76 +1018,66 @@ let spawn_with_item st (loop : spawn_loop) (value : Lowered.place) ~owned:is_own
     ~not_spawned:(fun () -> in_scope st (fun () -> ignore (unbox ~dropped_here:true)))
     (fun () -> in_scope st (fun () -> each (unbox ~dropped_here:false)))
 
-(* Lent values *)
-
-let lent_field (lent : Ground.lent) variant field =
-  List.find_map
-    (fun (lent_field : Ground.lent_field) ->
-      if lent_field.variant = variant && lent_field.field = field then Some lent_field.holds
-      else None)
-    lent.fields
-
-let rec built_lent st ~writable ty (values : Mir.rvalue list) : Ground.lent =
-  let lent_field_for variant (name, field_ty) : Ground.lent_field option =
-    let fields =
-      List.concat_map
-        (fun (value : Mir.rvalue) ->
-          match value with
-          | Construct { variant = constructed; fields } when constructed = variant -> (
-              match List.assoc_opt name fields with Some (Some field) -> [ field ] | _ -> [])
-          | _ -> [])
-        values
-    in
-    let nested =
-      List.concat_map
-        (fun (field : Mir.operand) ->
-          match field with
-          | Use { place = { root = Local part; projections = [] }; _ } ->
-              Option.value (Moves.built_values (mir st).moves part) ~default:[]
-          | _ -> [])
-        fields
-    in
-    let holds : Ground.holds option =
-      if nested <> [] then Some (Nested (built_lent st ~writable field_ty nested))
-      else if
-        List.exists (function Mir.Borrow _ -> true | _ -> false) fields
-        || not (trivial st field_ty)
-      then Some Address
-      else None
-    in
-    Option.map (fun holds -> { Ground.variant; field = name; holds }) holds
-  in
-  {
-    base = ty;
-    writable;
-    fields =
-      List.concat_map
-        (fun (variant, fields) -> List.filter_map (lent_field_for variant) fields)
-        (variants_of st ty);
-  }
-
-let rec lent_from st (lent : Ground.lent) (source : Lowered.place) : Lowered.place =
-  match lent_at st source with
-  | Some existing when Ground.compare (Lent existing) (Lent lent) = 0 -> source
-  | Some existing -> lend_fields st lent (copied_lent st existing source)
-  | None -> lend_fields st lent source
-
-and lend_fields st (lent : Ground.lent) (source : Lowered.place) : Lowered.place =
-  let built = at (local st.builder (Value (Lent lent))) in
-  each_variant st lent.base source (fun variant fields ->
-      let fields =
-        List.map
-          (fun (name, _) ->
-            let field_place = source / field_of variant name in
-            match lent_field lent variant name with
-            | Some Address ->
-                (name, Lowered.Address { place = field_place; writable = lent.writable })
-            | Some (Nested inner) -> (name, Copy (lent_from st inner field_place))
-            | None -> (name, Copy field_place))
-          fields
+let lend_record st : Lowered.operand =
+  match st.lend_record with
+  | Some record -> record
+  | None ->
+      let record : Lowered.operand =
+        Address { place = at (local st.builder ~name:"lend" ~is_zeroed:true Lend); writable = true }
       in
-      emit st.builder (Assign (built, Build { ty = Lent lent; variant; fields })));
-  built
+      st.lend_record <- Some record;
+      record
+
+let lent_call st part : lent_call =
+  let frame = mir st in
+  match Hashtbl.find_opt frame.lent_calls part with
+  | Some call -> call
+  | None ->
+      let call =
+        {
+          mark = at (local st.builder ~name:"lent" ~is_zeroed:true Lend_mark);
+          record = lend_record st;
+        }
+      in
+      Hashtbl.replace frame.lent_calls part call;
+      call
+
+let emit_mark st (intrinsic : Lowered.intrinsic) (call : lent_call) =
+  emit st.builder
+    (Call
+       {
+         target = Intrinsic intrinsic;
+         arguments = [ call.record; Address { place = call.mark; writable = true } ];
+         result = Discarded;
+       })
+
+let forwarded_call st (call : Mir.call) : Forwarded.t option =
+  match resolve_callee st call.callee with
+  | Some (path, type_arguments) when Path.package path = Path.standard_package ->
+      let frame = mir st in
+      let fresh () =
+        frame.forwarded_locals <- frame.forwarded_locals + 1;
+        -frame.forwarded_locals
+      in
+      let code = code_of st.context path type_arguments in
+      Option.bind
+        (Forwarded.call ~substitution:code.substitution ~fresh (mir_of st.context path) call)
+        (fun (forwarded : Forwarded.t) ->
+          if List.for_all (fun (_, type_, _) -> trivial st (ground st type_)) forwarded.setup then
+            Some forwarded
+          else None)
+  | _ -> None
+
+let is_forwarded_whole (frame : mir_frame) part =
+  match frame.body.blocks.(frame.block).terminator with
+  | Yield { part = Part (Borrow { place = { root = Local lent; projections = [] }; _ }); _ } ->
+      lent = part
+  | _ -> false
+
+type deferred =
+  | Deferred_drop of Ground.ty
+  | Deferred_write_back of { source : Lowered.place; ty : Ground.ty }
+  | Deferred_free of string
 
 (* Lowering *)
 
@@ -1141,8 +1130,9 @@ and run_region st region ~entry:(block, index) =
 
 and lower_from st region block index =
   let basic = (mir st).body.blocks.(block) in
-  st.frame <- block_frame st region.region_frame basic.inlined;
+  st.frame <- region.region_frame;
   let frame = mir st in
+  frame.block <- block;
   frame.state <- Moves.entry frame.moves block;
   if index = 0 then
     List.iter
@@ -1237,6 +1227,7 @@ and lower_statement st (statement : Mir.statement) =
              message = Constant (Bytes message);
              length = constant_uint64 (String.length message);
              site = site_of st origin;
+             reported = None;
            });
       start st.builder after
   | Echo echoed ->
@@ -1252,9 +1243,13 @@ and lower_statement st (statement : Mir.statement) =
   | While _ | For _ | Fork _ | Resume _ | Yield _ | Jump _ ->
       bug "a statement that holds blocks or jumps, in a graph"
 
-(* Lowers the ends of scopes that a task's early exit leaves, once the task
-   has ended. *)
-and dead st local = drop_local st local
+and dead st local =
+  let frame = mir st in
+  if List.mem local frame.called_parts && not (Hashtbl.mem frame.placed_parts local) then
+    emit_mark st
+      (if frame.after_lend.(frame.block) then Lend_transfer else Lend_release)
+      (lent_call st local)
+  else drop_local st local
 
 and provide st (provided : Mir.provided list) ~can_use_tasks =
   (* The body runs with the evidence of each implementation added. *)
@@ -1264,8 +1259,7 @@ and provide st (provided : Mir.provided list) ~can_use_tasks =
       (fun (implementation : Mir.provided) ->
         let place =
           match implementation.value with
-          | Use { place = written; _ } | Borrow { place = written; _ } ->
-              whole st (place st written)
+          | Use { place = written; _ } | Borrow { place = written; _ } -> place st written
           | value -> operand_place st value
         in
         let pointer =
@@ -1321,11 +1315,7 @@ and mir_place_type st (written : Mir.place) =
       | _ -> bug "a place of no known type")
 
 and assign st (target : Mir.place) (value : Mir.rvalue) ~origin =
-  let frame = mir st in
   match (target, value) with
-  | { root = Local part; projections = [] }, (Construct _ | Operand (Borrow _))
-    when Moves.built_values frame.moves part <> None ->
-      build_part st part value
   | { root = Local local; projections = [] }, Operand (Borrow { place = source; mode; _ }) ->
       alias st local (place st source) ~writable:(mode = Mut)
   | _ -> (
@@ -1346,7 +1336,7 @@ and assign st (target : Mir.place) (value : Mir.rvalue) ~origin =
         end
         else None
       in
-      let destination = whole st (place st target) in
+      let destination = place st target in
       let frame = mir st in
       if List.mem target frame.taken then
         frame.taken <- List.filter (fun taken -> taken <> target) frame.taken
@@ -1354,50 +1344,6 @@ and assign st (target : Mir.place) (value : Mir.rvalue) ~origin =
       match evaluated with
       | Some fresh -> emit st.builder (Assign (destination, Use (owned st fresh ty)))
       | None -> into ?types_ty st value destination ty ~origin)
-
-and build_part st part (value : Mir.rvalue) =
-  let slot =
-    match Hashtbl.find_opt (mir st).places part with
-    | Some slot -> slot
-    | None ->
-        let { Mir.kind; type_; _ } = info st part in
-        let writable = match kind with Lent Mut | Source { mode = Mut; _ } -> true | _ -> false in
-        let lent =
-          built_lent st ~writable (ground st type_)
-            (Option.get (Moves.built_values (mir st).moves part))
-        in
-        let slot = held st (Value (Lent lent)) in
-        bind_local st part slot;
-        slot
-  in
-  let lent =
-    match lent_at st slot with Some lent -> lent | None -> bug "a built part with no lent value"
-  in
-  match value with
-  | Construct { variant; fields } ->
-      let fields =
-        List.map
-          (fun (name, (field : Mir.operand option)) ->
-            let evaluated () =
-              match field with
-              | Some (Borrow { place = written; _ }) -> snapshot st (place st written)
-              | Some (Use { place = { root = Local nested; projections = [] } as written; _ })
-                when Moves.built_values (mir st).moves nested <> None ->
-                  place st written
-              | Some field -> operand_place st field
-              | None -> fst (field_default_place st lent.base ~variant ~field:name)
-            in
-            match lent_field lent variant name with
-            | Some (Nested inner) -> (name, Lowered.Copy (lent_from st inner (evaluated ())))
-            | Some Address ->
-                (name, Address { place = whole st (evaluated ()); writable = lent.writable })
-            | None -> (name, Copy (whole st (evaluated ()))))
-          fields
-      in
-      emit st.builder (Assign (slot, Build { ty = Lent lent; variant; fields }))
-  | Operand part ->
-      emit st.builder (Assign (slot, Use (Copy (lent_from st lent (operand_part st part)))))
-  | _ -> bug "a part built from a value that is no constructor or operand"
 
 (* Whether an rvalue reads a local. *)
 and reads (value : Mir.rvalue) local =
@@ -1433,12 +1379,11 @@ and alias st local (source : Lowered.place) ~writable =
           bind_local st local (pointer / Deref);
           pointer
     in
-    emit st.builder (Assign (pointer, Use (Address { place = whole st source; writable })))
+    emit st.builder (Assign (pointer, Use (Address { place = source; writable })))
   end
   else if
     (not writable)
     && (match (Memory_layout.of_type st.context.env ty).form with Scalar _ -> true | _ -> false)
-    && lent_at st source = None
     && match (info st local).kind with Source _ -> true | Temporary | Lent _ -> false
   then begin
     let copy = held st ~name:"binding" (Value ty) in
@@ -1454,8 +1399,8 @@ and into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.place) ty ~or
   | Operation { operation; type_arguments; operands } ->
       let type_arguments, value_arguments = split_arguments st type_arguments in
       ignore
-        (Intrinsics.lower ~checks:st.context.checks ~value_arguments st.context.env st.builder
-           st.context.types operation ~type_arguments
+        (Intrinsics.lower ~checks:st.context.checks ~value_arguments ?reported:(reported_site st)
+           st.context.env st.builder st.context.types operation ~type_arguments
            (List.map
               (fun operand ->
                 let operand_ty = operand_type st operand in
@@ -1463,7 +1408,7 @@ and into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.place) ty ~or
                   Intrinsics.Place (operand_place st operand)
                 else Intrinsics.Value (value st operand))
               operands)
-           ~destination:(Some destination) ~site:(failure_site st origin))
+           ~destination:(Some destination) ~site:(site_of st origin))
   | Compare { comparison; left; right } ->
       assign (Binary (binary comparison, value st left, value st right))
   | Not inner -> assign (Unary (Not, value st inner))
@@ -1530,8 +1475,7 @@ and into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.place) ty ~or
           | _ -> None)
         ~captures:
           (List.map
-             (fun (capture : Mir.capture) ->
-               (whole st (place st capture.place), ground st capture.type_))
+             (fun (capture : Mir.capture) -> (place st capture.place, ground st capture.type_))
              captures)
         ~body:(fun inner ~captures:capture_places parameter_places ->
           inner.frame <-
@@ -1565,9 +1509,7 @@ and field_default_place st ty ~variant ~field =
       (place, default_ty))
 
 and mir_into ?(arguments = []) st (expression_mir : Mir.Graph.t) (destination : Lowered.place) =
-  let expression_mir =
-    Instance_mir.inlined ~resolve:(inlinable st) ~enclosing:st.frame.inlined expression_mir
-  in
+  let expression_mir = Loop_parts.ended expression_mir in
   let caller = st.frame in
   let exit = block st.builder in
   let frame =
@@ -1739,24 +1681,228 @@ and holds_invariant st ~value ~clause ~destination =
   in_type_definition st value_ty (fun () ->
       mir_into ~arguments:[ value_place ] st invariant destination)
 
-and lend st part (call : Mir.call) ~origin =
-  match call.callee with
-  | Intrinsic { operation; type_arguments } ->
+and lend ?(forwards = 0) st part (call : Mir.call) ~origin =
+  match (call.callee, if forwards < 8 then forwarded_call st call else None) with
+  | Intrinsic { operation; type_arguments }, _ ->
+      Hashtbl.replace (mir st).placed_parts part ();
       in_statement st (fun () ->
           match
             intrinsic st operation ~type_arguments call.arguments ~destination:None
-              ~site:(failure_site st origin)
+              ?reported:(reported_site st) ~site:(site_of st origin)
           with
           | Some place -> bind_local st part place
           | None -> bug "a lent place from an intrinsic that does not lend")
-  | callee -> (
-      (* A lending method runs inside the statement that calls it, so its
-         code is inlined there. The inlining of a lending method that
-         calls itself would not end. *)
-      match inlinable st callee with
-      | Some { path; _ } when List.exists (Path.equal path) st.frame.inlined ->
-          unsupported ~at:(site_of st origin) "a lending method that calls itself"
-      | _ -> bug "a lending call that is not inlined")
+  | _, Some { setup; call = inner } ->
+      List.iter
+        (fun (local, type_, (computing : Mir.call)) ->
+          let destination = held st (Value (ground st type_)) in
+          Hashtbl.replace (mir st).places local destination;
+          call_into st computing destination ~origin)
+        setup;
+      lend ~forwards:(forwards + 1) st part inner ~origin
+  | callee, None ->
+      let frame = mir st in
+      let lent = lent_call st part in
+      let lending part_ty : Lowered.operand list =
+        (if is_zero_size st part_ty then []
+         else
+           [
+             (match frame.lending with
+             | Some { slot = Some slot; part = own; _ }
+               when is_forwarded_whole frame part && Ground.compare own part_ty = 0 ->
+                 Lowered.Copy slot
+             | Some _ when List.mem part frame.ended_after_lend -> Constant Null
+             | _ -> Address { place = held st ~name:"lent" (Value part_ty); writable = true });
+           ])
+        @ [
+            lent.record;
+            Option.value (reported_site st) ~default:(Constant (Site (site_of st origin)));
+          ]
+      in
+      let lent_place (output : Types.result) substitution called =
+        let mode, part_ty =
+          match output with
+          | Lends (mode, ty) -> (mode, Monomorphic.ground st.context.monomorphic substitution ty)
+          | Returns _ -> bug "a lending call of a method that does not lend"
+        in
+        emit_mark st Lend_begin lent;
+        if is_zero_size st part_ty then begin
+          called ~lending:(lending part_ty) (discarded st);
+          held st (Value part_ty)
+        end
+        else begin
+          let pointer =
+            held st ~name:"part" (Pointer { target = Value part_ty; writable = mode = Mut })
+          in
+          called ~lending:(lending part_ty) pointer;
+          pointer / Deref
+        end
+      in
+      let place =
+        match (resolve_callee st callee, callee) with
+        | Some (path, type_arguments), _ ->
+            let signature = signature_of st.context path in
+            let substitution = bind signature.generics type_arguments in
+            let arguments, mask = evaluate_arguments st signature substitution call.arguments in
+            lent_place signature.output substitution (fun ~lending destination ->
+                call_instance st
+                  (Code { path; type_arguments })
+                  ~signature ~substitution ~arguments ~mask ~lending ~destination ())
+        | None, Trait_method { trait; name; self_type; _ } -> (
+            let any_type =
+              match Types.substitute st.frame.code.substitution self_type with
+              | Types.Any reference -> reference
+              | receiver -> bug "a call through any on %s" (Types.show receiver)
+            in
+            let _, signature = dynamic_slot st.context trait.trait name in
+            match List.map (argument_place st) call.arguments with
+            | (_, _, any) :: arguments ->
+                lent_place signature.output (any_substitution st.context ~any:any_type trait.trait)
+                  (fun ~lending destination ->
+                    call_through_any st ~any_type ~trait:trait.trait ~name ~any ~arguments ~lending
+                      destination)
+            | [] -> bug "a call through any with no receiver")
+        | None, (Capability_method _ | Indirect _) ->
+            unsupported ~at:(site_of st origin)
+              "a lending call of a capability's method or of a function value"
+        | None, (Function _ | Intrinsic _) -> bug "a lending call that does not resolve"
+      in
+      emit_mark st Lend_called lent;
+      bind_local st part place
+
+and lend_part st ~(mode : Types.mode) (part : Mir.yielded) =
+  let frame = mir st in
+  let lending =
+    match frame.lending with
+    | Some lending -> lending
+    | None -> bug "a part lent outside a lending method"
+  in
+  let owns = Moves.owns frame.moves in
+  let outlives =
+    outlives_call ~owns
+      ~is_view:(fun ty ->
+        Interface.Impls.is_view st.context.database
+          ~bounds:(fun _ -> [])
+          (Types.substitute st.frame.code.substitution ty))
+      frame.body
+  in
+  let lent_in_place (written : Mir.place) : Lowered.place option =
+    let lowered = place st written in
+    let is_reached_through_pointer =
+      match lowered.root with
+      | Static _ -> true
+      | Local _ -> List.exists (function Lowered.Deref -> true | _ -> false) lowered.projections
+    in
+    if outlives written && is_reached_through_pointer then Some lowered else None
+  in
+  let rec write (yielded : Mir.yielded) (destination : Lowered.place) :
+      (Lowered.projection list * deferred) list =
+    match yielded with
+    | Part operand -> (
+        let ty = operand_type st operand in
+        let made () = if trivial st ty then [] else [ ([], Deferred_drop ty) ] in
+        match operand with
+        | Borrow { place = { root = Local local; projections = [] } as written; _ } when owns local
+          ->
+            take st (place st written) ty ~destination;
+            made ()
+        | Borrow { place = written; _ } -> (
+            emit st.builder (Assign (destination, Use (Copy (place st written))));
+            match (lent_in_place written, mode) with
+            | Some source, Mut -> [ ([], Deferred_write_back { source; ty }) ]
+            | Some _, (Read | Own) -> []
+            | None, Mut when outlives written ->
+                bug "a place lent `mut` that is not reached through a pointer"
+            | None, _ ->
+                if not (outlives written || trivial st ty) then
+                  bug "a lent part of %s that the method owns" (Ground.to_string ty);
+                [])
+        | Use _ | Take _ | Constant _ ->
+            write_operand st operand destination;
+            made ())
+    | Built { variant; fields; type_; _ } ->
+        let ty = ground st type_ in
+        let field_types = List.assoc variant (variants_of st ty) in
+        let built =
+          List.map
+            (fun (name, (field : Mir.yielded option)) ->
+              let field_ty = List.assoc name field_types in
+              let value = held st (Value field_ty) in
+              let deferred =
+                match field with
+                | Some field -> write field value
+                | None ->
+                    let default, default_ty = field_default_place st ty ~variant ~field:name in
+                    take st default default_ty ~destination:value;
+                    if trivial st default_ty then [] else [ ([], Deferred_drop default_ty) ]
+              in
+              ( (name, if trivial st field_ty then Lowered.Copy value else Move value),
+                List.map
+                  (fun (inside, deferred) -> (field_of variant name :: inside, deferred))
+                  deferred ))
+            fields
+        in
+        emit st.builder (Assign (destination, Build { ty; variant; fields = List.map fst built }));
+        let is_indirect variant =
+          List.exists
+            (fun (shape : Memory_layout.variant_shape) -> shape.name = variant && shape.indirect)
+            (match Memory_layout.shape st.context.env ty with Sum shapes -> shapes | _ -> [])
+        in
+        (match variant with
+          | Some variant when is_indirect variant -> [ ([], Deferred_free variant) ]
+          | _ -> [])
+        @ List.concat_map snd built
+  in
+  let defer_call intrinsic arguments =
+    emit st.builder
+      (Call
+         {
+           target = Intrinsic intrinsic;
+           arguments = lending.record :: arguments;
+           result = Discarded;
+         })
+  in
+  let address place : Lowered.operand = Address { place; writable = true } in
+  let defer (slot : Lowered.place) (inside, deferred) =
+    let target = List.fold_left ( / ) slot inside in
+    match deferred with
+    | Deferred_drop ty ->
+        defer_call Lend_defer_drop [ Constant (Symbol_address (Any_drop ty)); address target ]
+    | Deferred_write_back { source; ty } ->
+        defer_call Lend_defer_write_back [ address source; address target; Constant (Size_of ty) ]
+    | Deferred_free variant ->
+        emit st.builder (Defer_free_block { lend = lending.record; place = target; variant })
+  in
+  match lending.slot with
+  | None -> ()
+  | Some slot_pointer -> (
+      let pointer : Lowered.operand =
+        match part with
+        | Part (Borrow { place = written; _ }) when lent_in_place written <> None ->
+            Address { place = Option.get (lent_in_place written); writable = mode = Mut }
+        | _ ->
+            let has_no_slot = held st (Raw Bool) in
+            emit st.builder (Assign (has_no_slot, Binary (Equal, Copy slot_pointer, Constant Null)));
+            when_ st.builder (Copy has_no_slot) (fun () ->
+                emit st.builder
+                  (Call
+                     {
+                       target = Intrinsic Lend_allocate;
+                       arguments =
+                         [
+                           lending.record;
+                           Constant (Size_of lending.part);
+                           Constant (Alignment_of lending.part);
+                         ];
+                       result = Returned slot_pointer;
+                     }));
+            let slot = slot_pointer / Deref in
+            List.iter (defer slot) (write part slot);
+            Address { place = slot; writable = mode = Mut }
+      in
+      match result_place st with
+      | Some result -> emit st.builder (Assign (result, Use pointer))
+      | None -> bug "a lending method with no result")
 
 and terminator st region (ending : Mir.Graph.terminator) ~origin =
   match ending with
@@ -1776,6 +1922,7 @@ and terminator st region (ending : Mir.Graph.terminator) ~origin =
              message = Constant (Bytes message);
              length = constant_uint64 (String.length message);
              site = site_of st origin;
+             reported = None;
            });
       start st.builder (block st.builder)
   | Return returned ->
@@ -1826,7 +1973,9 @@ and terminator st region (ending : Mir.Graph.terminator) ~origin =
         (Switch
            { value = Copy (local_place st winner); cases; default = Some (jump st region next) });
       start st.builder (block st.builder)
-  | Yield _ -> bug "a lent part outside an inlined lending call"
+  | Yield { mode; part; resume } ->
+      in_statement st (fun () -> lend_part st ~mode part);
+      goto st region resume
   | For { iteration; part; body; after; loop; _ } ->
       claim st region after;
       for_loop st region ~iteration ~part ~body ~loop;
@@ -2129,15 +2278,13 @@ let fill_defaults st (mask : Lowered.place) (body : Mir.Graph.body)
 
 (* Lowers the MIR of the code at [path] in the current frame, with its
    parameters in [parameters], in order. *)
-let lower_code st path ~parameters =
-  let code_mir =
-    Instance_mir.inlined ~resolve:(inlinable st) ~enclosing:st.frame.inlined
-      (mir_of st.context path)
-  in
+let lower_code st path ~parameters ?lending () =
+  let code_mir = Loop_parts.ended (mir_of st.context path) in
   let frame =
-    frame_of_body st ~owner:(innermost_scope st) ~lambdas:code_mir.lambdas code_mir.body
+    frame_of_body st ~owner:(innermost_scope st) ?lending ~lambdas:code_mir.lambdas code_mir.body
   in
   st.frame <- { st.frame with mir = Some frame };
+  Option.iter (fun (lending : lending) -> st.lend_record <- Some lending.record) lending;
   List.iter2 (bind_local st) code_mir.body.parameters parameters;
   make_owned_locals st;
   lower_body st frame
