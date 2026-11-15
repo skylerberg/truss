@@ -66,14 +66,6 @@ let interpolation cursor (inner : Token.interpolation) =
     is_unterminated_interpolation = not inner.is_closed;
   }
 
-let restarted cursor =
-  {
-    (create ~diagnostics:(Diagnostic.Collector.create ()) ~base:cursor.base cursor.tokens
-       ~first:cursor.first ~stop:cursor.stop)
-    with
-    next_id = cursor.next_id;
-  }
-
 let index cursor = cursor.index
 
 let fresh_id cursor =

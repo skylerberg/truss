@@ -45,21 +45,8 @@ let check cursor definition =
 let one_definition tokens piece parse =
   let item, cursor, diagnostics =
     with_cursor tokens piece (fun cursor ->
-        let definition : Syntax.definition =
-          match parse cursor with
-          | definition ->
-              check cursor definition;
-              definition
-          | exception Cursor.Failed ->
-              let intended, name = Parse_definition.header (Cursor.restarted cursor) in
-              {
-                visibility = Private;
-                kind = Definition_error { intended; name };
-                span = Cursor.span_from cursor piece.first;
-                recovered = [];
-                id = Cursor.fresh_id cursor;
-              }
-        in
+        let definition : Syntax.definition = parse cursor in
+        check cursor definition;
         { definition with recovered = Cursor.recovered cursor })
   in
   (parsed item diagnostics, Cursor.methods cursor)
@@ -186,8 +173,7 @@ let example_definition tokens piece =
         | Signature_alone (_, signature) ->
             Syntax_walk.signature (fun value -> Operators.expression cursor value) signature;
             Check.signature cursor signature;
-            (Example_signature, None)
-        | exception Cursor.Failed -> (Example_definition, None))
+            (Example_signature, None))
   in
   let example, container = item.value in
   let method_diagnostics =
