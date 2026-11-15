@@ -634,23 +634,43 @@ let adds_none ~(before : _ diagnostic list) ~(after : _ diagnostic list) =
   in
   contained (codes after) (codes before)
 
+module Starts = Map.Make (Int)
+
+type accepted = { stop : int; has_insertion : bool }
+
 let machine_applicable (diagnostics : t list) =
-  let overlaps (left : span edit) (right : span edit) =
-    (left.span.start < right.span.stop && right.span.start < left.span.stop)
-    || left.span.start = right.span.start
-       && (left.span.start = left.span.stop || right.span.start = right.span.stop)
+  let accepted = ref Starts.empty in
+  let overlaps (edit : span edit) =
+    let start = edit.span.start and stop = edit.span.stop in
+    let is_insertion = start = stop in
+    (match Starts.find_last_opt (fun other -> other <= start) !accepted with
+      | Some (other_start, other) ->
+          start < other.stop || (other_start = start && (is_insertion || other.has_insertion))
+      | None -> false)
+    ||
+    match Starts.find_first_opt (fun other -> other > start) !accepted with
+    | Some (other_start, _) -> other_start < stop
+    | None -> false
   in
-  let accepted_edits = ref [] in
+  let accept (edit : span edit) =
+    let start = edit.span.start and stop = edit.span.stop in
+    accepted :=
+      Starts.update start
+        (fun previous ->
+          let is_insertion = start = stop in
+          Some
+            (match previous with
+            | Some other ->
+                { stop = max stop other.stop; has_insertion = is_insertion || other.has_insertion }
+            | None -> { stop; has_insertion = is_insertion }))
+        !accepted
+  in
   List.filter
     (fun (diagnostic : t) ->
       match diagnostic.fixes with
       | [ fix ] ->
-          let clear =
-            List.for_all
-              (fun (edit : span edit) -> not (List.exists (overlaps edit) !accepted_edits))
-              fix.edits
-          in
-          if clear then accepted_edits := fix.edits @ !accepted_edits;
+          let clear = not (List.exists overlaps fix.edits) in
+          if clear then List.iter accept fix.edits;
           clear
       | _ -> false)
     diagnostics

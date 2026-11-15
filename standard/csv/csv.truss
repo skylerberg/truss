@@ -6,7 +6,7 @@ public type Options(delimiter: Character = Character",", quote: Character = Char
 public type ParseErrorKind = UnterminatedQuote | UnexpectedQuote
   derives Equal
 
-public type ParseError(kind: ParseErrorKind, line: USize, column: USize)
+public type ParseError(kind: ParseErrorKind, line: UInt64, column: UInt64)
   derives Equal
 
 impl Display for ParseError {
@@ -45,7 +45,7 @@ fn is_blank(character: Character) -> Bool
   character == Character" " || character == Character"\t"
 }
 
-fn append_field(row: mut List[String], field: own String, trimmed_length: USize, trim_fields: Bool)
+fn append_field(row: mut List[String], field: own String, trimmed_length: UInt64, trim_fields: Bool)
   requires trimmed_length <= field.length()
   cost amortized time O(1)
 {
@@ -60,18 +60,18 @@ type ParserState(
   rows: List[List[String]],
   row: List[String],
   field: String,
-  trimmed_length: USize,
+  trimmed_length: UInt64,
   quoted: Bool,
   quote_closed: Bool,
   row_started: Bool,
-  line: USize,
-  column: USize,
-  quote_line: USize,
-  quote_column: USize,
+  line: UInt64,
+  column: UInt64,
+  quote_line: UInt64,
+  quote_column: UInt64,
 )
   invariant trimmed_length <= field.length()
 
-fn advance(state: mut ParserState, text: StringSlice, index: USize, options: Options) -> Result[USize, ParseError]
+fn advance(state: mut ParserState, text: StringSlice, index: UInt64, options: Options) -> Result[UInt64, ParseError]
   requires index < text.length()
   ensures !(result is Ok(next) && (next <= index || next > text.length()))
   cost time finite
@@ -168,7 +168,7 @@ public fn parse(text: StringSlice, options: Options = Options()) -> Result[List[
     quote_line: 1,
     quote_column: 1,
   )
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < text.length()
     invariant index <= text.length()
     invariant state.trimmed_length <= state.field.length()
@@ -201,7 +201,7 @@ fn needs_quotes(field: StringSlice, options: Options) -> Bool
   if field.length() == 0 {
     return false
   }
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < field.length()
     invariant index <= field.length()
     decreases field.length() - index
@@ -225,7 +225,7 @@ fn push_field(text: mut String, field: StringSlice, options: Options, alone: Boo
     return
   }
   mut text.push_character(options.quote)
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < field.length()
     invariant index <= field.length()
     decreases field.length() - index
@@ -283,14 +283,14 @@ public fn parse_table(text: StringSlice, options: Options = Options()) -> Result
   Ok(Table(header: own header, rows: own rows))
 }
 
-public fn Table.column(self, name: StringSlice) -> Option[USize]
+public fn Table.column(self, name: StringSlice) -> Option[UInt64]
   ensures match result {
     Some(index) => index < self.header.length()
     None => true
   }
   cost time O(self.header.length() * (1 + name.length()))
 {
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < self.header.length()
     invariant index <= self.header.length()
     decreases self.header.length() - index
@@ -304,7 +304,7 @@ public fn Table.column(self, name: StringSlice) -> Option[USize]
   None
 }
 
-public fn Table.cell(self, row: USize, name: StringSlice) -> Option[StringSlice]
+public fn Table.cell(self, row: UInt64, name: StringSlice) -> Option[StringSlice]
   cost time O(self.header.length() * (1 + name.length()))
 {
   match self.column(name) {
@@ -335,11 +335,11 @@ public fn RowReader[Source: streams::Reader].new(source: own Source, options: Op
   RowReader(source: streams::BufferedReader.new(own source), options: options)
 }
 
-fn quotes_in(text: StringSlice, quote: Character) -> USize
+fn quotes_in(text: StringSlice, quote: Character) -> UInt64
   cost time finite
 {
-  var count: USize = 0
-  var index: USize = 0
+  var count: UInt64 = 0
+  var index: UInt64 = 0
   while index < text.length()
     invariant index <= text.length()
     invariant count <= index

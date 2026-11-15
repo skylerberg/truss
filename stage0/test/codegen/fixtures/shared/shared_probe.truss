@@ -67,7 +67,7 @@ fn add(counter: intrinsic::Shared[Counter], amount: Int64) -> Int64
   })
 }
 
-fn push(texts: intrinsic::Shared[List[String]], text: own String) -> USize
+fn push(texts: intrinsic::Shared[List[String]], text: own String) -> UInt64
   uses Tasks
 {
   intrinsic::shared_update(texts, input: own text, change: fn(list, added) {

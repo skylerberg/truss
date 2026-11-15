@@ -1,4 +1,4 @@
-fn f() -> USize {
+fn f() -> UInt64 {
   let part = make().slice()
   part.length()
 }

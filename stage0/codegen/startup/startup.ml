@@ -58,7 +58,7 @@ __attribute__((noinline)) int *t_runtime_errno(void) {
   return &errno;
 }
 
-void *t_runtime_allocate(t_usize size, t_usize alignment);
+void *t_runtime_allocate(uint64_t size, uint64_t alignment);
 
 /* A test worker reports to the runner through this pipe; anywhere else it
    is -1, and reports go to standard error. */
@@ -136,7 +136,7 @@ static _Noreturn void t_end(uint8_t kind, const char *heading, int status) {
   _exit(status);
 }
 
-static void t_describe(const uint8_t *message, t_usize length, const struct t_anchor *anchor, uint32_t line,
+static void t_describe(const uint8_t *message, uint64_t length, const struct t_anchor *anchor, uint32_t line,
                        uint32_t column) {
   pthread_mutex_lock(&t_text_lock);
   t_text_length = 0;
@@ -145,25 +145,25 @@ static void t_describe(const uint8_t *message, t_usize length, const struct t_an
   t_text_position(anchor, line, column);
 }
 
-_Noreturn void t_runtime_panic(const uint8_t *message, t_usize length, const struct t_anchor *anchor,
+_Noreturn void t_runtime_panic(const uint8_t *message, uint64_t length, const struct t_anchor *anchor,
                                uint32_t line, uint32_t column) {
   t_describe(message, length, anchor, line, column);
   t_end(t_panicked, "panic: ", 101);
 }
 
-_Noreturn void t_runtime_assertion_failed(const uint8_t *message, t_usize length,
+_Noreturn void t_runtime_assertion_failed(const uint8_t *message, uint64_t length,
                                           const struct t_anchor *anchor, uint32_t line, uint32_t column) {
   t_describe(message, length, anchor, line, column);
   t_end(t_failed, "assertion failed: ", 1);
 }
 
-_Noreturn void t_runtime_todo(const uint8_t *message, t_usize length, const struct t_anchor *anchor,
+_Noreturn void t_runtime_todo(const uint8_t *message, uint64_t length, const struct t_anchor *anchor,
                               uint32_t line, uint32_t column) {
   t_describe(message, length, anchor, line, column);
   t_end(t_incomplete, "", 101);
 }
 
-void t_runtime_echo(const uint8_t *text, t_usize length, const struct t_anchor *anchor, uint32_t line,
+void t_runtime_echo(const uint8_t *text, uint64_t length, const struct t_anchor *anchor, uint32_t line,
                     uint32_t column) {
   pthread_mutex_lock(&t_text_lock);
   t_text_length = 0;
@@ -234,16 +234,16 @@ let allocation =
    it allocates, so a test that leaves one is a compiler bug. A program
    that is not a test program counts nothing. */
 #ifdef T_TESTS
-static t_usize t_live_blocks = 0;
+static uint64_t t_live_blocks = 0;
 #define t_block_allocated() (t_live_blocks += 1)
 #define t_block_freed() (t_live_blocks -= 1)
-t_usize t_runtime_live_blocks(void) { return t_live_blocks; }
+uint64_t t_runtime_live_blocks(void) { return t_live_blocks; }
 #else
 #define t_block_allocated() ((void)0)
 #define t_block_freed() ((void)0)
 #endif
 
-void *t_runtime_allocate(t_usize size, t_usize alignment) {
+void *t_runtime_allocate(uint64_t size, uint64_t alignment) {
   void *pointer = NULL;
   if (size == 0) size = 1;
   if (alignment <= 16) {
@@ -261,7 +261,7 @@ void t_runtime_free(void *pointer) {
   free(pointer);
 }
 
-void *t_runtime_reallocate(void *pointer, t_usize old_size, t_usize size, t_usize alignment) {
+void *t_runtime_reallocate(void *pointer, uint64_t old_size, uint64_t size, uint64_t alignment) {
   if (size == 0) size = 1;
   if (alignment <= 16) {
     void *moved = realloc(pointer, size);
@@ -567,7 +567,7 @@ static void t_coroutine_entry(void) {
   t_runtime_compiler_bug();
 }
 
-t_usize t_runtime_coroutine_start(void (*code)(void *environment, uint64_t item), void *environment,
+uint64_t t_runtime_coroutine_start(void (*code)(void *environment, uint64_t item), void *environment,
                                   uint64_t item) {
   struct t_coroutine *coroutine = malloc(sizeof *coroutine);
   if (coroutine == NULL) t_out_of_memory();
@@ -580,13 +580,13 @@ t_usize t_runtime_coroutine_start(void (*code)(void *environment, uint64_t item)
 #ifdef T_THREAD_SANITIZER
   coroutine->fiber = __tsan_create_fiber(0);
 #endif
-  return (t_usize)coroutine;
+  return (uint64_t)coroutine;
 }
 
 /* Runs a coroutine until it suspends or its function returns. Returns 1 if
    it suspended. Returns 0 if its function returned, and frees the
    coroutine. */
-uint8_t t_runtime_coroutine_resume(t_usize handle) {
+uint8_t t_runtime_coroutine_resume(uint64_t handle) {
   struct t_coroutine *coroutine = (struct t_coroutine *)handle;
   struct t_coroutine *resumer = t_coroutine_current();
   t_coroutine_current_set(coroutine);
@@ -634,9 +634,9 @@ struct t_shared {
 
 static struct t_shared *t_shared_header(void *value) { return (struct t_shared *)value - 1; }
 
-void *t_runtime_shared_allocate(t_usize size, t_usize alignment) {
+void *t_runtime_shared_allocate(uint64_t size, uint64_t alignment) {
   if (alignment < _Alignof(struct t_shared)) alignment = _Alignof(struct t_shared);
-  t_usize offset = (sizeof(struct t_shared) + alignment - 1) / alignment * alignment;
+  uint64_t offset = (sizeof(struct t_shared) + alignment - 1) / alignment * alignment;
   char *block = t_runtime_allocate(offset + size, alignment);
   struct t_shared *shared = t_shared_header(block + offset);
   shared->block = block;
@@ -849,8 +849,8 @@ struct t_branch {
    order, which gives the same result as running them at once. A test already has
    one core of the machine, and in order a check that fails is the same
    check on every run. */
-void t_runtime_parallel(const struct t_branch *branches, t_usize count) {
-  for (t_usize index = 0; index < count; index++) branches[index].run(branches[index].environment);
+void t_runtime_parallel(const struct t_branch *branches, uint64_t count) {
+  for (uint64_t index = 0; index < count; index++) branches[index].run(branches[index].environment);
 }
 
 void t_runtime_parallel_range(void (*body)(void *environment, uint64_t first, uint64_t last),
@@ -1153,7 +1153,7 @@ static void t_fork(struct t_worker *self, const struct t_branch *branches, size_
   }
 }
 
-void t_runtime_parallel(const struct t_branch *branches, t_usize count) {
+void t_runtime_parallel(const struct t_branch *branches, uint64_t count) {
   pthread_once(&t_pool_once, t_pool_start);
   /* A branch may use no capability but [Panic], so a task neither parks
      nor yields in one, and it leaves the block on the thread it entered
@@ -1161,7 +1161,7 @@ void t_runtime_parallel(const struct t_branch *branches, t_usize count) {
   struct t_worker *self = t_worker_self();
   if (self == NULL) {
     /* The first thread of a machine with one core: in order. */
-    for (t_usize index = 0; index < count; index++) branches[index].run(branches[index].environment);
+    for (uint64_t index = 0; index < count; index++) branches[index].run(branches[index].environment);
     return;
   }
   while (count > 0) {
@@ -2592,7 +2592,6 @@ let runtime ~tests ~in_order =
       (if tests then "#define T_TESTS 1\n" else "");
       (if in_order then "#define T_IN_ORDER 1\n" else "");
       headers;
-      "typedef uint64_t t_usize;\ntypedef int64_t t_isize;\n";
       Emit_c.anchor_struct;
       failing;
       allocation;

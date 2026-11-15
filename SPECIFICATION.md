@@ -170,7 +170,7 @@ decides it: after `let limit = 10`, `count < limit` with a `UInt8` count makes
   `UInt8` count, the `1` is a `UInt8`. Otherwise it has its default type, as
   the `2` in `duration * 2` does. An expression made only of literals waits
   for the same decision.
-- A literal shift amount is a `USize`.
+- A literal shift amount is a `UInt64`.
 - An integer literal is never a float.
 - A literal that does not fit its type is an error. A negated literal is
   checked after the negation, so `-128` fits an `Int8`.
@@ -334,7 +334,6 @@ its file or its position in the file.
 |---|---|
 | `Int8`, `Int16`, `Int32`, `Int64` | Signed integers |
 | `UInt8`, `UInt16`, `UInt32`, `UInt64` | Unsigned integers |
-| `USize`, `ISize` | Unsigned and signed integers of 64 bits, on every target |
 | `Float32`, `Float64` | IEEE 754 binary floating point |
 | `Bool` | `true` and `false` |
 | `String` | UTF-8 text |
@@ -434,7 +433,7 @@ type_argument  = type | INTEGER | LOWER_NAME | UPPER_NAME "=" type ;
 ```
 
 - `Items.Element` names an associated type of a type parameter.
-- An `INTEGER` or `LOWER_NAME` argument is the value of a `USize` generic
+- An `INTEGER` or `LOWER_NAME` argument is the value of a `UInt64` generic
   parameter, as in `Array[UInt8, 32]`.
 - `UPPER_NAME "=" type` constrains an associated type, as in
   `Iterable[Element = Int64]`.
@@ -449,7 +448,7 @@ generic_parameter = UPPER_NAME [ ":" bound ]
 bound             = path_type { "+" path_type } ;
 ```
 
-- A `LOWER_NAME` parameter has type `USize`, and its value is known when the
+- A `LOWER_NAME` parameter has type `UInt64`, and its value is known when the
   code is compiled.
 - A `capability` parameter stands for a set of capabilities (see
   [Capability parameters](#capability-parameters)). Only a function, a
@@ -487,7 +486,7 @@ public type Interval =
   `requires` and `ensures`:
 
   ```truss
-  fn SortedList[Element: Ordered].sift_into_place(mut self, index: USize)
+  fn SortedList[Element: Ordered].sift_into_place(mut self, index: UInt64)
     requires index < self.items.length()
     requires is_sorted(self.items[..index])
     ensures is_sorted(self.items)
@@ -744,7 +743,7 @@ capability_reference = path_type
 ```
 
 ```truss
-public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Element) -> Option[USize]
+public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Element) -> Option[UInt64]
   requires is_sorted(sorted)
   ensures match result {
     Some(index) => sorted[index] == target
@@ -781,7 +780,7 @@ public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Elemen
   itself a part:
 
   ```truss
-  fn depth(tree: Tree) -> USize
+  fn depth(tree: Tree) -> UInt64
     cost time O(tree.size())
   {
     match tree {
@@ -862,7 +861,7 @@ fn Slice[Element: Equal].contains(self, item: Element) -> Bool
 #### Amortized costs
 
 ```truss
-public opaque type List[Element](buffer: Buffer[Element], length: USize, capacity: USize)
+public opaque type List[Element](buffer: Buffer[Element], length: UInt64, capacity: UInt64)
   invariant length <= capacity
   cost potential growth_credit(length, capacity)
 
@@ -939,7 +938,7 @@ type that holds a function writes the capabilities in the field's type.
 ## Methods
 
 ```truss
-fn List[Element].with_capacity(capacity: USize) -> List[Element]
+fn List[Element].with_capacity(capacity: UInt64) -> List[Element]
 
 fn List[Element].push(mut self, item: own Element)
 
@@ -1024,7 +1023,7 @@ mut grid.cell(position).visit()
 The lent value may be a constructor applied to places:
 
 ```truss
-fn Slice[Element].get(self, index: USize) lends Option[Element] {
+fn Slice[Element].get(self, index: UInt64) lends Option[Element] {
   if index < self.length() {
     Some(self[index])
   } else {
@@ -1049,7 +1048,7 @@ fn Slice[Element].get(self, index: USize) lends Option[Element] {
 #### Contracts of lending methods
 
 ```truss
-fn List[Element].element(mut self, position: USize) lends mut Element
+fn List[Element].element(mut self, position: UInt64) lends mut Element
   requires position < self.count()
   ensures identical(result, old(self.model())[position])
   ensures identical(self.model(), old(self.model()).update(position, value: final(result)))
@@ -1079,12 +1078,12 @@ trait Cursor {
 ```
 
 ```truss
-type Countdown(left: USize)
+type Countdown(left: UInt64)
 
 impl Cursor for Countdown {
-  type Element = USize
+  type Element = UInt64
 
-  fn next(mut self) -> Option[USize] {
+  fn next(mut self) -> Option[UInt64] {
     if self.left == 0 {
       return None
     }
@@ -1329,8 +1328,8 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
 - **A `for` loop over a collection visits its elements by position.**
   `for item in items` evaluates `items.count()` once, and each iteration is
   lent `items.element(position)`, for each position from zero up to the
-  count. A type supports `for` by defining `count(self) -> USize` and
-  `element(self, position: USize)`, a lending method, as its own methods or
+  count. A type supports `for` by defining `count(self) -> UInt64` and
+  `element(self, position: UInt64)`, a lending method, as its own methods or
   by implementing `Iterable`.
 - `for item in mut items` is lent each element by the overload of `element`
   that takes `mut self`. A `mut` loop mutates elements but does not add or
@@ -1351,7 +1350,7 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
 - `decreases` names a measure that every iteration makes smaller and that
   never goes below zero. A `while` loop in a function with a `time` clause is
   proven to terminate, and so is a `for` loop over a cursor. A `for` loop
-  over a cursor whose type has a `remaining(self) -> USize` method has that
+  over a cursor whose type has a `remaining(self) -> UInt64` method has that
   method's value as its measure where it states none.
 - In the clauses of a loop over a range, the loop variable is the index of
   the next iteration: in `for i in start..end`, `i` is `start` on entry and
@@ -1947,7 +1946,7 @@ impl Cursor for Chain[First: Cursor, Second: Cursor[Element = First.Element]] {
   { todo }
 }
 
-fn count[Source: Cursor](source: own Source) -> USize
+fn count[Source: Cursor](source: own Source) -> UInt64
   uses Source.Uses
 ```
 

@@ -126,7 +126,7 @@ let () =
         { definition = Top { module_ = example; name = "suite" }; line = 2; column = 3 }
       in
       let text value = Lowered.Constant (Bytes value) in
-      let length value = Lowered.Constant (Integer (USize, Z.of_int (String.length value))) in
+      let length value = Lowered.Constant (Integer (UInt64, Z.of_int (String.length value))) in
       let ending failure message =
         Lowered.Fail
           { failure; message = text message; length = length message; site; reported = None }
@@ -150,7 +150,8 @@ let () =
                       target = Intrinsic Allocate;
                       arguments =
                         [
-                          Constant (Integer (USize, Z.of_int 8)); Constant (Integer (USize, Z.one));
+                          Constant (Integer (UInt64, Z.of_int 8));
+                          Constant (Integer (UInt64, Z.one));
                         ];
                       result = Discarded;
                     };

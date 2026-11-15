@@ -120,18 +120,14 @@ let () =
   test "a literal of a type UnsignedInteger bounds cannot be negated" (fun () ->
       one_diagnostic Fixtures.Infer.literal_of_a_type_unsignedinteger_bounds_cannot_be
         "types.negated_unsigned");
-  test "a USize literal has 64 bits on every target" (fun () ->
-      fine Fixtures.Infer.usize_literal_has_64_bits_on_every_target;
-      one_diagnostic Fixtures.Infer.usize_literal_above_64_bits_is_out_of_range
-        "types.literal_out_of_range");
   test "a negated literal is checked after the negation" (fun () ->
       fine Fixtures.Infer.negated_literal_is_checked_after_the_negation);
   test "an integer literal where a float is expected is an error with a fix" (fun () ->
       one_diagnostic Fixtures.Infer.integer_literal_where_a_float_is_expected_is_an
         "types.integer_for_float"
         ~fixed:Fixtures.Infer.integer_literal_where_a_float_is_expected_is_an_fixed);
-  test "a literal shift amount is a USize" (fun () ->
-      has_type Fixtures.Infer.literal_shift_amount_is_a_usize "3" ~occurrence:3 "USize");
+  test "a literal shift amount is a UInt64" (fun () ->
+      has_type Fixtures.Infer.literal_shift_amount_is_a_uint64 "3" ~occurrence:3 "UInt64");
   test "a loop variable's literal type is decided by the loop's body" (fun () ->
       has_type Fixtures.Infer.loop_variables_literal_type_is_decided_by_the "0" "UInt8");
   test "a local's literal type is decided by a later statement" (fun () ->
@@ -908,7 +904,7 @@ let () =
   test "a constant cannot call a capability" (fun () ->
       one_diagnostic "let started: Instant = Clock.now()\n" "types.not_constant");
   test "a constant cannot call a method" (fun () ->
-      one_diagnostic "let length: USize = \"four\".length()\n" "types.not_constant");
+      one_diagnostic "let length: UInt64 = \"four\".length()\n" "types.not_constant");
   test "a constant cannot index a collection" (fun () ->
       one_diagnostic Fixtures.Infer.constant_cannot_index_a_collection "types.not_constant");
   test "a constant cannot branch" (fun () ->
@@ -916,7 +912,7 @@ let () =
   test "a constant cannot use an operator that a type defines" (fun () ->
       one_diagnostic Fixtures.Infer.constant_cannot_use_an_operator_that_a_type "types.not_constant");
   test "a constant's arithmetic must stay within its type" (fun () ->
-      one_diagnostic "let size: USize = 0 - 1\n" "types.constant_overflow");
+      one_diagnostic "let size: UInt64 = 0 - 1\n" "types.constant_overflow");
   test "each step of a constant's arithmetic must stay within its type" (fun () ->
       one_diagnostic "let small: UInt8 = 200 + 100 - 100\n" "types.constant_overflow");
   test "a constant's arithmetic through another constant must stay within its type" (fun () ->

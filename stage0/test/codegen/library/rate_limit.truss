@@ -47,7 +47,7 @@ fn limited_statuses() -> List[String]
     })
     {
       var client = http::Client.new()
-      let count: USize = 3
+      let count: UInt64 = 3
       for _ in 0..count {
         mut seen.push(match mut client.get("http://localhost:8098/") {
           Ok(response) => "${response.status.code} ${response.headers.get("Retry-After").unwrap_or("-")} ${response.text_body().unwrap_or("")}"

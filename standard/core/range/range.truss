@@ -17,7 +17,7 @@ public fn Range[Value: Ordered].contains(self, value: Value) -> Bool
 impl Iterable for Range[Value: core::Countable] {
   type Element = Value
 
-  fn count(self) -> USize
+  fn count(self) -> UInt64
     cost time finite
   {
     match self.start.steps_to(self.stop) {
@@ -26,7 +26,7 @@ impl Iterable for Range[Value: core::Countable] {
     }
   }
 
-  fn element(self, position: USize) lends Value
+  fn element(self, position: UInt64) lends Value
     requires position < self.count()
     ensures self.contains(result)
     cost time finite
@@ -58,13 +58,13 @@ public fn Range[Value: core::Countable].reversed(self) -> Reversed[Value]
 impl Iterable for Reversed[Value: core::Countable] {
   type Element = Value
 
-  fn count(self) -> USize
+  fn count(self) -> UInt64
     cost time finite
   {
     self.range.count()
   }
 
-  fn element(self, position: USize) lends Value
+  fn element(self, position: UInt64) lends Value
     requires position < self.count()
     ensures self.range.contains(result)
     cost time finite
@@ -73,10 +73,10 @@ impl Iterable for Reversed[Value: core::Countable] {
   }
 }
 
-public opaque type Stepped[Value: core::Countable](range: Range[Value], step: USize)
+public opaque type Stepped[Value: core::Countable](range: Range[Value], step: UInt64)
   invariant step > 0
 
-public fn Range[Value: core::Countable].step_by(self, step: USize) -> Stepped[Value]
+public fn Range[Value: core::Countable].step_by(self, step: UInt64) -> Stepped[Value]
   requires step > 0
   cost time O(1)
 {
@@ -86,14 +86,14 @@ public fn Range[Value: core::Countable].step_by(self, step: USize) -> Stepped[Va
 impl Iterable for Stepped[Value: core::Countable] {
   type Element = Value
 
-  fn count(self) -> USize
+  fn count(self) -> UInt64
     cost time finite
   {
     let whole = self.range.count()
     if whole == 0 { 0 } else { (whole - 1) / self.step + 1 }
   }
 
-  fn element(self, position: USize) lends Value
+  fn element(self, position: UInt64) lends Value
     requires position < self.count()
     ensures self.range.contains(result)
     cost time finite
@@ -102,7 +102,7 @@ impl Iterable for Stepped[Value: core::Countable] {
   }
 }
 
-public fn Range[Value: core::Countable].length(self) -> Option[USize]
+public fn Range[Value: core::Countable].length(self) -> Option[UInt64]
   cost time O(1)
 {
   match self.start.steps_to(self.stop) {

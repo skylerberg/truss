@@ -1,7 +1,7 @@
 use standard::intrinsic
 
 public type DecodeError =
-  | InvalidCharacter(offset: USize)
+  | InvalidCharacter(offset: UInt64)
   | OddLength
   derives Equal
 
@@ -24,7 +24,7 @@ public fn encode(bytes: Slice[UInt8], uppercase: Bool = false) -> String
   cost time O(bytes.length())
   cost allocations <= 1
 {
-  if bytes.length() > USize.maximum / 2 {
+  if bytes.length() > UInt64.maximum / 2 {
     intrinsic::crash("a string cannot hold that many bytes".slice())
   }
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(2 * bytes.length())
@@ -51,7 +51,7 @@ public fn decode(text: StringSlice) -> Result[List[UInt8], DecodeError]
     return Err(DecodeError.OddLength)
   }
   var bytes: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(text.length() / 2)
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < text.length()
     invariant index <= text.length()
     invariant index % 2 == 0

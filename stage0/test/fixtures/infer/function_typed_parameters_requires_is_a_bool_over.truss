@@ -1,3 +1,3 @@
-fn apply_all(limit: USize, visit: (fn(index: USize) requires index < limit)) {
+fn apply_all(limit: UInt64, visit: (fn(index: UInt64) requires index < limit)) {
   todo
 }

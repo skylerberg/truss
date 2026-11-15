@@ -1,5 +1,5 @@
 fn make() -> List[Int64] { [1, 2, 3] }
 
-fn f() -> USize {
+fn f() -> UInt64 {
   make()[1..2].length()
 }

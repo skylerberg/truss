@@ -1,10 +1,10 @@
-fn table() -> USize
+fn table() -> UInt64
   cost time O(power(2, 10))
 {
   todo
 }
 
-fn f() -> USize
+fn f() -> UInt64
   cost time O(1)
 {
   table()

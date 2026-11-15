@@ -1,10 +1,10 @@
 type Bag(items: List[Int64])
 
-fn Bag.count(self) -> USize {
+fn Bag.count(self) -> UInt64 {
   self.items.count()
 }
 
-fn Bag.element(self, position: USize) lends Int64 {
+fn Bag.element(self, position: UInt64) lends Int64 {
   self.items[position]
 }
 

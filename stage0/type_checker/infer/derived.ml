@@ -146,7 +146,7 @@ let form database (path : Path.t) : Core.t option =
             Passed
               {
                 mode = Read;
-                value = Value (node (Types.builtin USize) (Integer (Z.of_int count)));
+                value = Value (node (Types.builtin UInt64) (Integer (Z.of_int count)));
                 mode_keyword = None;
               }
           in
@@ -656,7 +656,7 @@ let form database (path : Path.t) : Core.t option =
                       | _ -> [])
                 in
                 let invariant_check built_place (index, text) =
-                  let bool = Types.bool and usize = Types.builtin USize in
+                  let bool = Types.bool and uint64 = Types.builtin UInt64 in
                   let holds =
                     node bool
                       (Call
@@ -674,7 +674,7 @@ let form database (path : Path.t) : Core.t option =
                                Passed
                                  {
                                    mode = Read;
-                                   value = Value (node usize (Integer (Z.of_int index)));
+                                   value = Value (node uint64 (Integer (Z.of_int index)));
                                    mode_keyword = None;
                                  };
                              ];

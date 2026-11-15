@@ -45,7 +45,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
   | Value_parameter parameter ->
       state.tables.resolutions.(value.id) <- Some (Value_parameter parameter);
       register_expression state value (fun () -> Value_parameter parameter);
-      Types.builtin USize
+      Types.builtin UInt64
   | Type_parameter _ | Capability_parameter _ ->
       error state Not_a_value value.span (Printf.sprintf "`%s` is a type, not a value." text)
   | Definition ((Function | Theorem), path) -> (
@@ -268,10 +268,10 @@ and explicit_type_arguments ?(head = 0) state (value : expression) instance item
               ignore (Unify.unify_value state.unifier written own)
           | Types.Type _, Types.Value _ ->
               report state Argument_kind value.span
-                "A type argument is given where a `USize` value is expected."
+                "A type argument is given where a `UInt64` value is expected."
           | Types.Value _, Types.Type _ ->
               report state Argument_kind value.span
-                "A `USize` value is given where a type argument is expected."
+                "A `UInt64` value is given where a type argument is expected."
           | _ -> ())
         written own
   end
@@ -497,7 +497,7 @@ and argumentless_call callee (signature : Types.signature) result : Tables.call 
 
 and elements_calls state (span : span) type_ (mode : Types.mode) =
   let receiver : Path.receiver = match mode with Read -> Read | Mut -> Mut | Own -> Own in
-  let is_usize type_ = Types.is_builtin USize (normalize state type_) in
+  let is_uint64 type_ = Types.is_builtin UInt64 (normalize state type_) in
   match
     ( method_version state span type_ "count" Read,
       method_version state span type_ "element" receiver )
@@ -505,12 +505,12 @@ and elements_calls state (span : span) type_ (mode : Types.mode) =
   | Some (count, counted), Some (element, lent) -> (
       match (counted.parameters, counted.output, lent.parameters, lent.output) with
       | [], Returns count_type, [ position ], Lends (lends, part)
-        when is_usize count_type && is_usize position.type_ ->
+        when is_uint64 count_type && is_uint64 position.type_ ->
           let part = normalize state part in
           Some
             ( Tables.Elements
                 {
-                  count = argumentless_call count counted (Types.builtin USize);
+                  count = argumentless_call count counted (Types.builtin UInt64);
                   element = argumentless_call element lent part;
                   lends;
                 },
@@ -540,6 +540,6 @@ and consuming_cursor state (span : span) type_ =
 and remaining_call state (span : span) cursor =
   match method_version state span cursor "remaining" Read with
   | Some (callee, ({ parameters = []; output = Returns bound; _ } as signature))
-    when Types.is_builtin USize (normalize state bound) ->
-      Some (argumentless_call callee signature (Types.builtin USize))
+    when Types.is_builtin UInt64 (normalize state bound) ->
+      Some (argumentless_call callee signature (Types.builtin UInt64))
   | _ -> None

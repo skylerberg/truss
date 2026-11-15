@@ -24,7 +24,7 @@ fn entries_on_linux(
   directory: intrinsic::View[UInt8],
   listed: mut List[files::DirectoryEntry],
 ) -> Result[Unit, Int32] {
-  let room: USize = 32768
+  let room: UInt64 = 32768
   let length_at = intrinsic::libc_dirent_length_offset()
   let kind_at = intrinsic::libc_dirent_kind_offset()
   let name_at = intrinsic::libc_dirent_name_offset()
@@ -42,10 +42,10 @@ fn entries_on_linux(
     } else if got == 0 {
       reading = false
     } else {
-      let filled: USize = intrinsic::convert(got)
+      let filled: UInt64 = intrinsic::convert(got)
       intrinsic::storage_lengthen(mut block, by: filled)
       let bytes = intrinsic::storage_view(block)
-      var start: USize = 0
+      var start: UInt64 = 0
       while start < filled
         invariant start <= filled
       {
@@ -53,12 +53,11 @@ fn entries_on_linux(
         if stated > 32768 {
           return Err(intrinsic::libc_eio())
         }
-        let length: USize = intrinsic::convert(stated)
-        if length <= name_at || length > filled - start {
+        if stated <= name_at || stated > filled - start {
           return Err(intrinsic::libc_eio())
         }
         let name = calls::before_zero_byte(
-          intrinsic::view_slice(bytes, start: start + name_at, stop: start + length),
+          intrinsic::view_slice(bytes, start: start + name_at, stop: start + stated),
         )
         let stated_kind = calls::number_at(bytes, offset: start + kind_at, size: 1)
         let kind = if stated_kind == intrinsic::libc_dt_reg() {
@@ -73,7 +72,7 @@ fn entries_on_linux(
           files::FileKind.Other
         }
         add(mut listed, name: own name, kind: kind)
-        start += length
+        start += stated
       }
     }
   }
@@ -90,7 +89,7 @@ fn entries_on_macos(descriptor: Int32, listed: mut List[files::DirectoryEntry]) 
   calls::add_number(mut wanted, number: attributes, size: 4)
   calls::add_number(mut wanted, number: 0, size: 8)
   calls::add_number(mut wanted, number: 0, size: 8)
-  let room: USize = 32768
+  let room: UInt64 = 32768
   var block: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(room)
   for index in 0..room
     invariant intrinsic::storage_length(block) == index
@@ -118,7 +117,7 @@ fn entries_on_macos(descriptor: Int32, listed: mut List[files::DirectoryEntry]) 
       reading = false
     } else {
       let bytes = intrinsic::storage_view(block)
-      var start: USize = 0
+      var start: UInt64 = 0
       var index: Int32 = 0
       while index < count && start < room
         invariant start <= room
@@ -129,10 +128,9 @@ fn entries_on_macos(descriptor: Int32, listed: mut List[files::DirectoryEntry]) 
         if stated < 36 || stated > 32768 || name_from > 32768 || name_size > 32768 {
           return Err(intrinsic::libc_eio())
         }
-        let length: USize = intrinsic::convert(stated)
-        let name_start: USize = start + 24 + intrinsic::convert(name_from)
-        let name_stop: USize = name_start + intrinsic::convert(name_size)
-        if length > room - start || name_stop > start + length {
+        let name_start: UInt64 = start + 24 + name_from
+        let name_stop: UInt64 = name_start + name_size
+        if stated > room - start || name_stop > start + stated {
           return Err(intrinsic::libc_eio())
         }
         let name = calls::before_zero_byte(intrinsic::view_slice(bytes, start: name_start, stop: name_stop))
@@ -147,7 +145,7 @@ fn entries_on_macos(descriptor: Int32, listed: mut List[files::DirectoryEntry]) 
           files::FileKind.Other
         }
         add(mut listed, name: own name, kind: kind)
-        start += length
+        start += stated
         index += 1
       }
     }

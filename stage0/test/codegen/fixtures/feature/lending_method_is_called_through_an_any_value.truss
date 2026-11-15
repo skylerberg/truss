@@ -1,7 +1,7 @@
 trait Titled {
   fn title(self) lends String
 
-  fn subtitle(self, index: USize) lends Option[String]
+  fn subtitle(self, index: UInt64) lends Option[String]
 
   fn retitle(mut self) lends mut String
 }
@@ -15,7 +15,7 @@ impl Titled for Book {
     self.title
   }
 
-  fn subtitle(self, index: USize) lends Option[String] {
+  fn subtitle(self, index: UInt64) lends Option[String] {
     self.chapters.get(index)
   }
 
@@ -29,7 +29,7 @@ impl Titled for Sign {
     "sign: ${self.text}"
   }
 
-  fn subtitle(self, index: USize) lends Option[String] {
+  fn subtitle(self, index: UInt64) lends Option[String] {
     if index == 0 {
       Some(self.text)
     } else {
@@ -42,7 +42,7 @@ impl Titled for Sign {
   }
 }
 
-fn title_length(titled: any Titled) -> USize {
+fn title_length(titled: any Titled) -> UInt64 {
   titled.title().length()
 }
 

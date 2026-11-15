@@ -33,7 +33,7 @@ public fn Path.bytes(self) -> Slice[UInt8]
   self.text.bytes()
 }
 
-internal type Span(start: USize, end: USize)
+internal type Span(start: UInt64, end: UInt64)
 
 internal fn Span.is_empty(self) -> Bool
   cost time O(1)
@@ -42,7 +42,7 @@ internal fn Span.is_empty(self) -> Bool
   self.start == self.end
 }
 
-internal fn next_component(text: StringSlice, from: USize) -> Span
+internal fn next_component(text: StringSlice, from: UInt64) -> Span
   requires from <= text.length()
   ensures from <= result.start
   ensures result.start <= result.end
@@ -113,7 +113,7 @@ internal fn is_dot_or_dot_dot(text: StringSlice, span: Span) -> Bool
     || (length == 2 && text.byte(span.start) == 46 && text.byte(span.start + 1) == 46)
 }
 
-internal fn extension_start(text: StringSlice, name: Span) -> USize
+internal fn extension_start(text: StringSlice, name: Span) -> UInt64
   requires name.start <= name.end
   requires name.end <= text.length()
   ensures name.start <= result
@@ -147,7 +147,7 @@ internal fn join_paths(first: StringSlice, second: StringSlice) -> Path
   if first.length() == 0 {
     return Path(text: second.to_string())
   }
-  if first.length() > USize.maximum / 4 || second.length() > USize.maximum / 4 {
+  if first.length() > UInt64.maximum / 4 || second.length() > UInt64.maximum / 4 {
     intrinsic::crash("a path cannot hold that many bytes".slice())
   }
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(first.length() + 1 + second.length())
@@ -266,7 +266,7 @@ public fn Path.with_extension(self, extension: StringSlice) -> Path
     return Path(text: text.to_string())
   }
   let stem = text.part(0, to: extension_start(text, name: name))
-  if stem.length() > USize.maximum / 4 || extension.length() > USize.maximum / 4 {
+  if stem.length() > UInt64.maximum / 4 || extension.length() > UInt64.maximum / 4 {
     intrinsic::crash("a path cannot hold that many bytes".slice())
   }
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(stem.length() + 1 + extension.length())
@@ -287,7 +287,7 @@ public fn Path.with_file_name(self, name: StringSlice) -> Path
     return join_paths(text, second: name)
   }
   let before = text.part(0, to: last.start)
-  if before.length() > USize.maximum / 4 || name.length() > USize.maximum / 4 {
+  if before.length() > UInt64.maximum / 4 || name.length() > UInt64.maximum / 4 {
     intrinsic::crash("a path cannot hold that many bytes".slice())
   }
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(before.length() + name.length())
@@ -302,7 +302,7 @@ public fn Path.components(self) -> List[StringSlice]
 {
   var parts: List[StringSlice] = []
   let text = self.text.slice()
-  var from: USize = 0
+  var from: UInt64 = 0
   while from < text.length()
     invariant from <= text.length()
     invariant parts.length() <= from
@@ -319,7 +319,7 @@ public fn Path.components(self) -> List[StringSlice]
   parts
 }
 
-internal fn parent_length(output: intrinsic::Storage[UInt8], floor: USize) -> USize
+internal fn parent_length(output: intrinsic::Storage[UInt8], floor: UInt64) -> UInt64
   requires floor <= intrinsic::storage_length(output)
   ensures floor <= result
   ensures result <= intrinsic::storage_length(output)
@@ -345,7 +345,7 @@ public fn Path.normalized(self) -> Path
 {
   let text = self.text.slice()
   let absolute = self.is_absolute()
-  if text.length() > USize.maximum / 4 {
+  if text.length() > UInt64.maximum / 4 {
     intrinsic::crash("a path cannot hold that many bytes".slice())
   }
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(text.length() + 1)
@@ -353,7 +353,7 @@ public fn Path.normalized(self) -> Path
     intrinsic::storage_push(mut output, value: 47)
   }
   var floor = intrinsic::storage_length(output)
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < text.length()
     invariant index <= text.length()
     invariant index == 0 || index == text.length() || text.byte(index) == 47
@@ -407,8 +407,8 @@ public fn Path.starts_with(self, base: Path) -> Bool
   }
   let text = self.text.slice()
   let prefix = base.text.slice()
-  var mine: USize = 0
-  var theirs: USize = 0
+  var mine: UInt64 = 0
+  var theirs: UInt64 = 0
   while theirs < prefix.length()
     invariant mine <= text.length()
     invariant theirs <= prefix.length()
@@ -440,8 +440,8 @@ public fn Path.relative_to(self, base: Path) -> Option[Path]
   }
   let text = self.text.slice()
   let prefix = base.text.slice()
-  var mine: USize = 0
-  var theirs: USize = 0
+  var mine: UInt64 = 0
+  var theirs: UInt64 = 0
   while theirs < prefix.length()
     invariant mine <= text.length()
     invariant theirs <= prefix.length()
@@ -590,7 +590,7 @@ public fn FileReader.close(own self) -> Result[Unit, SystemError]
 }
 
 impl streams::Reader for FileReader {
-  fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
+  fn read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError]
     uses Handles
   {
     mut self.reader.read(mut buffer, limit: limit)
@@ -638,13 +638,13 @@ internal fn File.opened(simulated_handle: UInt64) -> File {
   File(handle: streams::Handle.simulated(simulated_handle))
 }
 
-public fn File.read_at(mut self, offset: UInt64, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
+public fn File.read_at(mut self, offset: UInt64, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError]
   uses Handles
 {
   Handles.read_at(self.handle, offset: offset, buffer: mut buffer, limit: limit)
 }
 
-public fn File.write_at(mut self, offset: UInt64, bytes: Slice[UInt8]) -> Result[USize, SystemError]
+public fn File.write_at(mut self, offset: UInt64, bytes: Slice[UInt8]) -> Result[UInt64, SystemError]
   uses Handles
 {
   Handles.write_at(self.handle, offset: offset, bytes: bytes)
@@ -675,7 +675,7 @@ public fn File.close(own self) -> Result[Unit, SystemError]
 }
 
 impl streams::Reader for File {
-  fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
+  fn read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError]
     uses Handles
   {
     Handles.read(self.handle, buffer: mut buffer, limit: limit)
@@ -683,7 +683,7 @@ impl streams::Reader for File {
 }
 
 impl streams::Writer for File {
-  fn write(mut self, bytes: Slice[UInt8]) -> Result[USize, SystemError]
+  fn write(mut self, bytes: Slice[UInt8]) -> Result[UInt64, SystemError]
     uses Handles
   {
     Handles.write(self.handle, bytes: bytes)
@@ -889,10 +889,10 @@ public fn with_temporary_file[Output, capability Granted](work: (fn(Path) -> Out
   Ok(own output)
 }
 
-public type WalkEntry(path: Path, kind: FileKind, depth: USize)
+public type WalkEntry(path: Path, kind: FileKind, depth: UInt64)
   derives Equal
 
-let walk_depth_limit: USize = 256
+let walk_depth_limit: UInt64 = 256
 
 public fn walk(root: Path, follow_links: Bool = false) -> Result[List[WalkEntry], SystemError]
   uses FileRead
@@ -934,27 +934,27 @@ type GlobComponent =
   | AnyDirectories
   | Name(tokens: List[GlobToken])
 
-type ParsedClass(token: GlobToken, end: USize)
+type ParsedClass(token: GlobToken, end: UInt64)
 
 public opaque type Glob(components: List[GlobComponent], absolute: Bool)
   derives Copyable
 
 fn wildcard_matches(
-  pattern_length: USize,
-  text_length: USize,
-  is_wildcard: (fn(pattern_index: USize) -> Bool requires pattern_index < pattern_length cost time finite),
+  pattern_length: UInt64,
+  text_length: UInt64,
+  is_wildcard: (fn(pattern_index: UInt64) -> Bool requires pattern_index < pattern_length cost time finite),
   matches_one: (
-    fn(pattern_index: USize, text_index: USize) -> Bool
+    fn(pattern_index: UInt64, text_index: UInt64) -> Bool
       requires pattern_index < pattern_length && text_index < text_length
       cost time finite
   ),
 ) -> Bool
   cost time finite
 {
-  var text: USize = 0
-  var pattern: USize = 0
-  var wildcard: Option[USize] = None
-  var retry: USize = 0
+  var text: UInt64 = 0
+  var pattern: UInt64 = 0
+  var wildcard: Option[UInt64] = None
+  var retry: UInt64 = 0
   while text < text_length
     invariant text <= text_length
     invariant pattern <= pattern_length
@@ -1025,7 +1025,7 @@ fn name_matches(tokens: Slice[GlobToken], name: StringSlice) -> Bool
   )
 }
 
-fn parse_class(pattern: StringSlice, from: USize) -> Result[ParsedClass, GlobError]
+fn parse_class(pattern: StringSlice, from: UInt64) -> Result[ParsedClass, GlobError]
   requires from < pattern.length()
   ensures !(result is Ok(parsed) && (parsed.end <= from || parsed.end > pattern.length()))
   cost time finite
@@ -1096,7 +1096,7 @@ public fn Glob.parse(pattern: StringSlice) -> Result[Glob, GlobError]
 {
   var components: List[GlobComponent] = []
   var tokens: List[GlobToken] = []
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < pattern.length()
     invariant index <= pattern.length()
     decreases pattern.length() - index
@@ -1189,7 +1189,7 @@ public fn Glob.find(self, root: Path) -> Result[List[Path], SystemError]
   Ok(own paths)
 }
 
-public type GlobError(offset: USize)
+public type GlobError(offset: UInt64)
   derives Equal
 
 impl Display for GlobError {
@@ -1323,7 +1323,7 @@ type InodeKind =
   | Directory
   | Link(target: Path)
 
-type Inode(kind: InodeKind, permissions: Permissions, modified: Instant, link_count: USize)
+type Inode(kind: InodeKind, permissions: Permissions, modified: Instant, link_count: UInt64)
 
 type OpenFile(handle: UInt64, inode: UInt64, position: UInt64, readable: Bool, writable: Bool, appending: Bool)
 
@@ -1335,9 +1335,9 @@ type Renamed(from: Path, to: Path, inode: UInt64)
 
 let last_console_handle: UInt64 = 2
 
-let followed_links_limit: USize = 32
+let followed_links_limit: UInt64 = 32
 
-let largest_file: USize = 1073741824
+let largest_file: UInt64 = 1073741824
 
 public opaque type MemoryFiles(
   names: Map[Path, UInt64],
@@ -1439,16 +1439,14 @@ fn offset_from(base: UInt64, by: Int64) -> Option[UInt64] {
 }
 
 fn overwrite(contents: mut List[UInt8], at: UInt64, bytes: Slice[UInt8]) -> Result[Unit, SystemError] {
-  let limit: UInt64 = intrinsic::convert(largest_file)
-  if at > limit || bytes.length() > largest_file {
+  if at > largest_file || bytes.length() > largest_file {
     return Err(SystemError.OutOfStorage)
   }
-  let start: USize = intrinsic::convert(at)
-  while contents.length() < start {
+  while contents.length() < at {
     mut contents.push(0)
   }
   for index in 0..bytes.length() {
-    let position = start + index
+    let position = at + index
     if position < contents.length() {
       contents[position] = bytes[index]
     } else {
@@ -1481,7 +1479,7 @@ internal fn MemoryFiles.kind_of(self, inode: UInt64) -> Option[FileKind] {
 internal fn MemoryFiles.locate(self, path: Path, follow_last: Bool) -> Result[Located, SystemError] {
   var unresolved = reversed_components(path)
   var current = Path.new("/")
-  var followed: USize = 0
+  var followed: UInt64 = 0
   while mut unresolved.pop() is Some(name) {
     if name == "." {
       continue
@@ -1676,7 +1674,7 @@ internal fn MemoryFiles.change_inode(
 internal fn MemoryFiles.metadata_of(self, inode: UInt64) -> Result[Metadata, SystemError] {
   match self.inodes.get(inode) {
     Some(entry) => {
-      let length: USize = match entry.kind {
+      let length: UInt64 = match entry.kind {
         Bytes(contents) => contents.length()
         Directory => 0
         Link(target) => target.bytes().length()
@@ -1688,7 +1686,7 @@ internal fn MemoryFiles.metadata_of(self, inode: UInt64) -> Result[Metadata, Sys
       }
       Ok(Metadata(
         kind: kind,
-        length: intrinsic::convert(length),
+        length: length,
         permissions: entry.permissions,
         modified: entry.modified,
         accessed: None,
@@ -1714,7 +1712,7 @@ internal fn MemoryFiles.add_open_file(mut self, inode: UInt64, readable: Bool, w
   self.handles_made
 }
 
-internal fn MemoryFiles.open_file_index(self, handle: streams::Handle) -> Option[USize]
+internal fn MemoryFiles.open_file_index(self, handle: streams::Handle) -> Option[UInt64]
   ensures !(result is Some(index) && index >= self.open_files.length())
 {
   let number = handle.number()
@@ -1724,28 +1722,27 @@ internal fn MemoryFiles.open_file_index(self, handle: streams::Handle) -> Option
 internal fn MemoryFiles.length_of(self, inode: UInt64) -> UInt64 {
   match self.inodes.get(inode) {
     Some(entry) => match entry.kind {
-      Bytes(contents) => intrinsic::convert(contents.length())
+      Bytes(contents) => contents.length()
       _ => 0
     }
     None => 0
   }
 }
 
-internal fn MemoryFiles.copy_out(self, inode: UInt64, from: UInt64, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
+internal fn MemoryFiles.copy_out(self, inode: UInt64, from: UInt64, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError]
   ensures !(result is Ok(count) && (count > limit || buffer.length() != old(buffer.length()) + count))
   ensures !(result is Err(_) && buffer.length() != old(buffer.length()))
 {
   match self.inodes.get(inode) {
     Some(entry) => match entry.kind {
       Bytes(contents) => {
-        let length: UInt64 = intrinsic::convert(contents.length())
+        let length: UInt64 = contents.length()
         if from >= length {
           return Ok(0)
         }
-        let start: USize = intrinsic::convert(from)
-        let available = contents.length() - start
+        let available = contents.length() - from
         let count = if limit < available { limit } else { available }
-        mut buffer.append_slice(contents.slice_range(start, stop: start + count))
+        mut buffer.append_slice(contents.slice_range(from, stop: from + count))
         Ok(count)
       }
       Directory => Err(SystemError.IsADirectory)
@@ -1775,20 +1772,18 @@ internal fn MemoryFiles.copy_in(mut self, inode: UInt64, at: UInt64, bytes: Slic
 }
 
 internal fn MemoryFiles.resize(mut self, inode: UInt64, length: UInt64) -> Result[Unit, SystemError] {
-  let limit: UInt64 = intrinsic::convert(largest_file)
-  if length > limit {
+  if length > largest_file {
     return Err(SystemError.OutOfStorage)
   }
-  let wanted: USize = intrinsic::convert(length)
   match mut self.inodes.take(inode) {
     Some(entry) => {
       var changed = own entry
       let outcome: Result[Unit, SystemError] = match mut changed.kind {
         Bytes(contents) => {
-          if wanted < contents.length() {
-            mut contents.truncate(wanted)
+          if length < contents.length() {
+            mut contents.truncate(length)
           }
-          while contents.length() < wanted {
+          while contents.length() < length {
             mut contents.push(0)
           }
           Ok(Unit)
@@ -2029,7 +2024,7 @@ impl FileWrite for MemoryFiles {
 }
 
 impl Handles for MemoryFiles {
-  fn read(mut self, handle: streams::Handle, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError] {
+  fn read(mut self, handle: streams::Handle, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError] {
     let index = match self.open_file_index(handle) {
       Some(index) => index
       None => return Err(SystemError.Closed)
@@ -2043,11 +2038,11 @@ impl Handles for MemoryFiles {
       buffer: mut buffer,
       limit: limit,
     )?
-    self.open_files[index].position = self.open_files[index].position.saturating_add(intrinsic::convert(count))
+    self.open_files[index].position = self.open_files[index].position.saturating_add(count)
     Ok(count)
   }
 
-  fn write(mut self, handle: streams::Handle, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
+  fn write(mut self, handle: streams::Handle, bytes: Slice[UInt8]) -> Result[UInt64, SystemError] {
     let index = match self.open_file_index(handle) {
       Some(index) => index
       None => return Err(SystemError.Closed)
@@ -2058,7 +2053,7 @@ impl Handles for MemoryFiles {
     let inode = self.open_files[index].inode
     let at = if self.open_files[index].appending { self.length_of(inode) } else { self.open_files[index].position }
     mut self.copy_in(inode, at: at, bytes: bytes)?
-    self.open_files[index].position = at.saturating_add(intrinsic::convert(bytes.length()))
+    self.open_files[index].position = at.saturating_add(bytes.length())
     Ok(bytes.length())
   }
 
@@ -2067,8 +2062,8 @@ impl Handles for MemoryFiles {
     handle: streams::Handle,
     offset: UInt64,
     buffer: mut List[UInt8],
-    limit: USize,
-  ) -> Result[USize, SystemError] {
+    limit: UInt64,
+  ) -> Result[UInt64, SystemError] {
     let index = match self.open_file_index(handle) {
       Some(index) => index
       None => return Err(SystemError.Closed)
@@ -2079,7 +2074,7 @@ impl Handles for MemoryFiles {
     self.copy_out(self.open_files[index].inode, from: offset, buffer: mut buffer, limit: limit)
   }
 
-  fn write_at(mut self, handle: streams::Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
+  fn write_at(mut self, handle: streams::Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[UInt64, SystemError] {
     let index = match self.open_file_index(handle) {
       Some(index) => index
       None => return Err(SystemError.Closed)
@@ -2177,7 +2172,7 @@ impl Handles for MemoryFiles {
     socket: streams::Handle,
     bytes: Slice[UInt8],
     address: network::SocketAddress,
-  ) -> Result[USize, SystemError] {
+  ) -> Result[UInt64, SystemError] {
     Err(SystemError.Unsupported)
   }
 
@@ -2185,7 +2180,7 @@ impl Handles for MemoryFiles {
     mut self,
     socket: streams::Handle,
     buffer: mut List[UInt8],
-    limit: USize,
+    limit: UInt64,
   ) -> Result[network::Datagram, SystemError] {
     Err(SystemError.Unsupported)
   }

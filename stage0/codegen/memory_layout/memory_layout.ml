@@ -1,6 +1,6 @@
 let bug format = Compiler_bug.bug ~stage:"Memory_layout" format
 
-type integer = Int8 | Int16 | Int32 | Int64 | UInt8 | UInt16 | UInt32 | UInt64 | USize | ISize
+type integer = Int8 | Int16 | Int32 | Int64 | UInt8 | UInt16 | UInt32 | UInt64
 
 type pointee =
   | Data of Ground.ty
@@ -66,14 +66,14 @@ let integer_size = function
   | Int8 | UInt8 -> 1
   | Int16 | UInt16 -> 2
   | Int32 | UInt32 -> 4
-  | Int64 | UInt64 | USize | ISize -> 8
+  | Int64 | UInt64 -> 8
 
 let integer_range integer =
   let bits = 8 * integer_size integer in
   match integer with
-  | Int8 | Int16 | Int32 | Int64 | ISize ->
+  | Int8 | Int16 | Int32 | Int64 ->
       (Z.neg (Z.shift_left Z.one (bits - 1)), Z.pred (Z.shift_left Z.one (bits - 1)))
-  | UInt8 | UInt16 | UInt32 | UInt64 | USize -> (Z.zero, Z.pred (Z.shift_left Z.one bits))
+  | UInt8 | UInt16 | UInt32 | UInt64 -> (Z.zero, Z.pred (Z.shift_left Z.one bits))
 
 let scalar_size = function
   | Integer integer -> integer_size integer
@@ -291,8 +291,6 @@ let integer_to_string = function
   | UInt16 -> "UInt16"
   | UInt32 -> "UInt32"
   | UInt64 -> "UInt64"
-  | USize -> "USize"
-  | ISize -> "ISize"
 
 let scalar_to_string = function
   | Integer integer -> integer_to_string integer

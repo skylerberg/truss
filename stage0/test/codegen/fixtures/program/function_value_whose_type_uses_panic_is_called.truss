@@ -4,7 +4,7 @@ fn fail(message: StringSlice)
   Panic.crash(message)
 }
 
-fn report(count: USize) -> USize
+fn report(count: UInt64) -> UInt64
   uses Console, Panic
 {
   if count > 5 {
@@ -19,7 +19,7 @@ fn main(arguments: List[String]) -> ExitCode
 {
   let crash = fail
   let counted = report
-  let checked: (fn(USize) -> USize uses Panic) = fn(count) {
+  let checked: (fn(UInt64) -> UInt64 uses Panic) = fn(count) {
     if count > 9 {
       Panic.crash("far too many")
     }

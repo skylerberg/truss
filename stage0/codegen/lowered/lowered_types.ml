@@ -57,8 +57,8 @@ and constant =
   | Null
   | Symbol_address of Instance.key
   | Site of site
-  | Size_of of Ground.ty  (** A [USize]: how many bytes a value of the type takes *)
-  | Alignment_of of Ground.ty  (** A [USize]: the alignment of a value of the type *)
+  | Size_of of Ground.ty
+  | Alignment_of of Ground.ty
 
 and function_ref =
   | Instance of Instance.key
@@ -95,7 +95,6 @@ type binary =
    calls are added with the standard library's real implementations. *)
 type intrinsic =
   | Allocate
-      (** [(size: USize, alignment: USize) -> pointer]; ends the process when memory runs out *)
   | Reallocate  (** [(pointer, old size, new size, alignment) -> pointer] *)
   | Free  (** [(pointer)] *)
   | Copy_bytes  (** [(destination, source, count)], which must not overlap *)
@@ -122,9 +121,9 @@ type intrinsic =
   | Run_test  (** [(index: UInt32)]: runs a test of the test program's table *)
   | Report_tests_to
       (** [(descriptor: Int32)]: has failures and echoes written as records to the descriptor *)
-  | Live_blocks  (** [() -> USize]: how many blocks a test program has allocated and not freed *)
+  | Live_blocks
   | Environment  (** [() -> pointer] to the environment the process was started with *)
-  | Terminated_length  (** [(bytes) -> USize]: how many bytes come before the first zero byte *)
+  | Terminated_length
   | Evidence_implementation  (** [(evidence) -> pointer] to the value that implements it *)
   | Evidence_outer  (** [(evidence, index) -> evidence] the implementation captured *)
   | Program_argument
@@ -133,19 +132,12 @@ type intrinsic =
       (** [(evidence's address, implementation, table, captured evidence...)]: fills evidence a
           [provide] builds *)
   | Coroutine_start
-      (** [(function value, item: UInt64) -> USize]: creates a suspended coroutine that will call
-          the function with the item on its own stack, and returns its handle *)
   | Coroutine_resume
-      (** [(coroutine: USize) -> Bool]: runs the coroutine until it suspends, and returns true, or
-          until its function returns, and then frees the coroutine and returns false *)
   | Coroutine_suspend  (** [()]: in a coroutine, switches to the code that resumed it *)
   | Tasks_spawn
       (** [(group: UInt64, function value, item: UInt64) -> Bool]: spawns a runtime task that calls
           the function with the item, and returns true. Returns false if the group is cancelled. *)
   | Shared_allocate
-      (** [(size: USize, alignment: USize) -> pointer]: allocates the heap block of a shared value,
-          with a reference count of one and an unlocked mutex, and returns the address of the value
-          in the block. The other shared operations take that address. *)
   | Shared_retain  (** [(value pointer)]: increments the reference count *)
   | Shared_release
       (** [(value pointer) -> Bool]: decrements the reference count, and returns true if it reached

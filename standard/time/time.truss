@@ -239,7 +239,7 @@ impl Default for Duration {
   }
 }
 
-internal fn write_fixed_point(output: mut TextBuilder, whole: UInt64, fraction: UInt64, digits: USize)
+internal fn write_fixed_point(output: mut TextBuilder, whole: UInt64, fraction: UInt64, digits: UInt64)
   cost time finite
 {
   whole.display(mut output)
@@ -286,9 +286,9 @@ impl Display for Duration {
   }
 }
 
-internal type ParsedUnit(nanoseconds: UInt64, end: USize)
+internal type ParsedUnit(nanoseconds: UInt64, end: UInt64)
 
-internal fn parse_unit(text: StringSlice, from: USize) -> Option[ParsedUnit]
+internal fn parse_unit(text: StringSlice, from: UInt64) -> Option[ParsedUnit]
   requires from <= text.length()
   ensures !(result is Some(scale) && (scale.end <= from || scale.end > text.length()))
   ensures !(result is Some(scale) && (scale.nanoseconds == 0 || scale.nanoseconds > 3600000000000))
@@ -320,7 +320,7 @@ internal fn parse_unit(text: StringSlice, from: USize) -> Option[ParsedUnit]
   }
 }
 
-internal fn skip_digits(text: StringSlice, from: USize) -> USize
+internal fn skip_digits(text: StringSlice, from: UInt64) -> UInt64
   requires from <= text.length()
   ensures from <= result
   ensures result <= text.length()
@@ -340,7 +340,7 @@ internal fn skip_digits(text: StringSlice, from: USize) -> USize
   index
 }
 
-internal fn parse_integer(text: StringSlice, from: USize, to: USize) -> Option[UInt64]
+internal fn parse_integer(text: StringSlice, from: UInt64, to: UInt64) -> Option[UInt64]
   requires from <= to
   requires to <= text.length()
   requires forall i in from..to => text.byte(i) >= 48 && text.byte(i) <= 57
@@ -366,7 +366,7 @@ internal fn parse_integer(text: StringSlice, from: USize, to: USize) -> Option[U
   if fits { Some(value) } else { None }
 }
 
-internal fn parse_fraction(text: StringSlice, from: USize, to: USize, unit: UInt64) -> UInt64
+internal fn parse_fraction(text: StringSlice, from: UInt64, to: UInt64, unit: UInt64) -> UInt64
   requires from <= to
   requires to <= text.length()
   requires forall i in from..to => text.byte(i) >= 48 && text.byte(i) <= 57
@@ -390,9 +390,9 @@ internal fn parse_fraction(text: StringSlice, from: USize, to: USize, unit: UInt
   value
 }
 
-internal type ParsedTerm(nanoseconds: UInt64, end: USize, error: Option[ParseTimeError])
+internal type ParsedTerm(nanoseconds: UInt64, end: UInt64, error: Option[ParseTimeError])
 
-internal fn parse_term(text: StringSlice, from: USize) -> ParsedTerm
+internal fn parse_term(text: StringSlice, from: UInt64) -> ParsedTerm
   requires from <= text.length()
   ensures from <= result.end
   ensures result.end <= text.length()
@@ -433,7 +433,7 @@ impl text::Parse for Duration {
       return Err(ParseTimeError.Empty)
     }
     let negative = text.byte(0) == 45
-    var index: USize = if negative || text.byte(0) == 43 { 1 } else { 0 }
+    var index: UInt64 = if negative || text.byte(0) == 43 { 1 } else { 0 }
     if index == text.length() {
       return Err(ParseTimeError.Malformed(offset: index))
     }
@@ -601,9 +601,9 @@ impl Display for Instant {
   }
 }
 
-internal type Number(value: Int64, end: USize)
+internal type Number(value: Int64, end: UInt64)
 
-internal fn parse_number(text: StringSlice, from: USize, most: USize) -> Result[Number, ParseTimeError]
+internal fn parse_number(text: StringSlice, from: UInt64, most: UInt64) -> Result[Number, ParseTimeError]
   requires from <= text.length()
   requires most <= 9
   ensures !(result is Ok(number) && (number.end <= from || number.end > text.length() || number.end - from > most))
@@ -638,7 +638,7 @@ internal fn parse_number(text: StringSlice, from: USize, most: USize) -> Result[
   Ok(Number(value: value, end: index))
 }
 
-internal fn parse_field(text: StringSlice, from: USize, width: USize) -> Result[Int64, ParseTimeError]
+internal fn parse_field(text: StringSlice, from: UInt64, width: UInt64) -> Result[Int64, ParseTimeError]
   requires from <= text.length()
   requires 1 <= width && width <= 9
   ensures !(result is Ok(value) && (value < 0 || value > 999999999 || width > text.length() - from))
@@ -651,7 +651,7 @@ internal fn parse_field(text: StringSlice, from: USize, width: USize) -> Result[
   Ok(number.value)
 }
 
-internal fn expect_byte(text: StringSlice, at: USize, byte: UInt8) -> Result[USize, ParseTimeError]
+internal fn expect_byte(text: StringSlice, at: UInt64, byte: UInt8) -> Result[UInt64, ParseTimeError]
   requires at <= text.length()
   ensures !(result is Ok(next) && (next != at + 1 || next > text.length()))
   cost time O(1)
@@ -663,9 +663,9 @@ internal fn expect_byte(text: StringSlice, at: USize, byte: UInt8) -> Result[USi
   }
 }
 
-internal type ParsedDate(date: Date, end: USize)
+internal type ParsedDate(date: Date, end: UInt64)
 
-internal fn parse_iso_date(text: StringSlice, from: USize) -> Result[ParsedDate, ParseTimeError]
+internal fn parse_iso_date(text: StringSlice, from: UInt64) -> Result[ParsedDate, ParseTimeError]
   requires from <= text.length()
   ensures !(result is Ok(read) && (read.end <= from || read.end > text.length()))
   cost time O(1)
@@ -693,7 +693,7 @@ internal fn parse_iso_date(text: StringSlice, from: USize) -> Result[ParsedDate,
   }
 }
 
-internal fn power_of_ten(digits: USize) -> Int64
+internal fn power_of_ten(digits: UInt64) -> Int64
   requires 1 <= digits && digits <= 9
   ensures 1 <= result && result <= 100000000
   cost time O(1)
@@ -719,9 +719,9 @@ internal fn power_of_ten(digits: USize) -> Int64
   }
 }
 
-internal type ParsedTime(time: TimeOfDay, end: USize)
+internal type ParsedTime(time: TimeOfDay, end: UInt64)
 
-internal fn parse_iso_time(text: StringSlice, from: USize) -> Result[ParsedTime, ParseTimeError]
+internal fn parse_iso_time(text: StringSlice, from: UInt64) -> Result[ParsedTime, ParseTimeError]
   requires from <= text.length()
   ensures !(result is Ok(read) && (read.end <= from || read.end > text.length()))
   cost time O(1)
@@ -755,9 +755,9 @@ internal fn parse_iso_time(text: StringSlice, from: USize) -> Result[ParsedTime,
   }
 }
 
-internal type ParsedDateTime(date_time: DateTime, end: USize)
+internal type ParsedDateTime(date_time: DateTime, end: UInt64)
 
-internal fn parse_iso_date_time(text: StringSlice, from: USize) -> Result[ParsedDateTime, ParseTimeError]
+internal fn parse_iso_date_time(text: StringSlice, from: UInt64) -> Result[ParsedDateTime, ParseTimeError]
   requires from <= text.length()
   ensures !(result is Ok(read) && (read.end <= from || read.end > text.length()))
   cost time O(1)
@@ -767,7 +767,7 @@ internal fn parse_iso_date_time(text: StringSlice, from: USize) -> Result[Parsed
   Ok(ParsedDateTime(date_time: DateTime(date: date.date, time: time.time), end: time.end))
 }
 
-internal fn parse_iso_offset(text: StringSlice, from: USize) -> Result[Int64, ParseTimeError]
+internal fn parse_iso_offset(text: StringSlice, from: UInt64) -> Result[Int64, ParseTimeError]
   requires from <= text.length()
   ensures !(result is Ok(seconds) && (seconds <= -86400 || seconds >= 86400))
   cost time O(1)
@@ -809,7 +809,7 @@ internal fn DateTime.instant(self, offset_seconds: Int64) -> Option[Instant]
   Some(Instant(nanoseconds: whole.checked_add(near * 86400000000000 + nanoseconds_of_day - offset_seconds * 1000000000)?))
 }
 
-internal fn write_fraction(output: mut TextBuilder, value: UInt64, digits: USize)
+internal fn write_fraction(output: mut TextBuilder, value: UInt64, digits: UInt64)
   cost time finite
 {
   let padded = value.format(minimum_digits: digits)
@@ -843,7 +843,7 @@ impl text::Parse for Instant {
 
 public type ParseTimeError =
   | Empty
-  | Malformed(offset: USize)
+  | Malformed(offset: UInt64)
   | OutOfRange
   derives Equal
 
@@ -1527,7 +1527,7 @@ impl core::Countable for Date {
     self.plus_days(-1)
   }
 
-  fn advanced(self, by: USize) -> Option[Date]
+  fn advanced(self, by: UInt64) -> Option[Date]
     cost time O(1)
   {
     match self.days_since_epoch.advanced(by: by) {
@@ -1536,7 +1536,7 @@ impl core::Countable for Date {
     }
   }
 
-  fn retreated(self, by: USize) -> Option[Date]
+  fn retreated(self, by: UInt64) -> Option[Date]
     cost time O(1)
   {
     match self.days_since_epoch.retreated(by: by) {
@@ -1545,7 +1545,7 @@ impl core::Countable for Date {
     }
   }
 
-  fn steps_to(self, other: Date) -> Option[USize]
+  fn steps_to(self, other: Date) -> Option[UInt64]
     cost time O(1)
   {
     self.days_since_epoch.steps_to(other.days_since_epoch)
@@ -1750,11 +1750,11 @@ fn ZoneRule.offset_at(self, seconds: Int64) -> Int64
   }
 }
 
-fn transitions_at_or_before(transitions: Slice[Int64], seconds: Int64) -> USize
+fn transitions_at_or_before(transitions: Slice[Int64], seconds: Int64) -> UInt64
   ensures result <= transitions.length()
   cost time O(log(transitions.length()))
 {
-  var low: USize = 0
+  var low: UInt64 = 0
   var high = transitions.length()
   while low < high
     invariant low <= high
@@ -1835,9 +1835,9 @@ public fn TimeZone.fixed(offset: Duration) -> Option[TimeZone]
   ))
 }
 
-type ZoneHeader(version: UInt8, time_count: USize, type_count: USize, block: USize)
+type ZoneHeader(version: UInt8, time_count: UInt64, type_count: UInt64, block: UInt64)
 
-fn big_endian(bytes: Slice[UInt8], at: USize, width: USize) -> Option[UInt64]
+fn big_endian(bytes: Slice[UInt8], at: UInt64, width: UInt64) -> Option[UInt64]
   requires 1 <= width && width <= 8
   cost time O(1)
 {
@@ -1845,7 +1845,7 @@ fn big_endian(bytes: Slice[UInt8], at: USize, width: USize) -> Option[UInt64]
     return None
   }
   var value: UInt64 = 0
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < width
     invariant index <= width
     decreases width - index
@@ -1857,15 +1857,15 @@ fn big_endian(bytes: Slice[UInt8], at: USize, width: USize) -> Option[UInt64]
   Some(value)
 }
 
-fn count_at(bytes: Slice[UInt8], at: USize) -> Option[USize]
+fn count_at(bytes: Slice[UInt8], at: UInt64) -> Option[UInt64]
   ensures !(result is Some(count) && count > 4294967295)
   cost time O(1)
 {
   let value = big_endian(bytes, at: at, width: 4)?
-  Some(intrinsic::convert(value % 4294967296))
+  Some(value % 4294967296)
 }
 
-fn read_header(bytes: Slice[UInt8], at: USize, time_width: USize) -> Option[ZoneHeader]
+fn read_header(bytes: Slice[UInt8], at: UInt64, time_width: UInt64) -> Option[ZoneHeader]
   requires at <= 1099511627776
   requires time_width == 4 || time_width == 8
   ensures !(result is Some(header) && (header.time_count > 4294967295 || header.type_count > 4294967295
@@ -1893,9 +1893,9 @@ fn read_header(bytes: Slice[UInt8], at: USize, time_width: USize) -> Option[Zone
   ))
 }
 
-type ParsedNumber(value: Int64, end: USize)
+type ParsedNumber(value: Int64, end: UInt64)
 
-fn posix_number(bytes: Slice[UInt8], from: USize, to: USize, most: Int64) -> Option[ParsedNumber]
+fn posix_number(bytes: Slice[UInt8], from: UInt64, to: UInt64, most: Int64) -> Option[ParsedNumber]
   requires from <= to
   requires to <= bytes.length()
   requires 0 <= most && most <= 100000
@@ -1923,7 +1923,7 @@ fn posix_number(bytes: Slice[UInt8], from: USize, to: USize, most: Int64) -> Opt
   Some(ParsedNumber(value: value, end: index))
 }
 
-fn posix_time(bytes: Slice[UInt8], from: USize, to: USize) -> Option[ParsedNumber]
+fn posix_time(bytes: Slice[UInt8], from: UInt64, to: UInt64) -> Option[ParsedNumber]
   requires from <= to
   requires to <= bytes.length()
   ensures !(result is Some(time) && (time.value <= -700000 || time.value >= 700000 || time.end <= from || time.end > to))
@@ -1951,7 +1951,7 @@ fn posix_time(bytes: Slice[UInt8], from: USize, to: USize) -> Option[ParsedNumbe
   Some(ParsedNumber(value: if negative { -seconds } else { seconds }, end: index))
 }
 
-fn posix_name_end(bytes: Slice[UInt8], from: USize, to: USize) -> Option[USize]
+fn posix_name_end(bytes: Slice[UInt8], from: UInt64, to: UInt64) -> Option[UInt64]
   requires from <= to
   requires to <= bytes.length()
   ensures !(result is Some(end) && (end <= from || end > to))
@@ -1984,9 +1984,9 @@ fn posix_name_end(bytes: Slice[UInt8], from: USize, to: USize) -> Option[USize]
   Some(index)
 }
 
-type ParsedRuleDay(day: RuleDay, time: Int64, end: USize)
+type ParsedRuleDay(day: RuleDay, time: Int64, end: UInt64)
 
-fn posix_rule_day(bytes: Slice[UInt8], from: USize, to: USize) -> Option[ParsedRuleDay]
+fn posix_rule_day(bytes: Slice[UInt8], from: UInt64, to: UInt64) -> Option[ParsedRuleDay]
   requires from <= to
   requires to <= bytes.length()
   ensures !(result is Some(parsed) && (parsed.time <= -700000 || parsed.time >= 700000 || parsed.end <= from
@@ -2029,7 +2029,7 @@ fn posix_rule_day(bytes: Slice[UInt8], from: USize, to: USize) -> Option[ParsedR
   Some(ParsedRuleDay(day: day, time: 7200, end: index))
 }
 
-fn posix_rule(bytes: Slice[UInt8], from: USize, to: USize) -> Option[ZoneRule]
+fn posix_rule(bytes: Slice[UInt8], from: UInt64, to: UInt64) -> Option[ZoneRule]
   requires from <= to
   requires to <= bytes.length()
   cost time finite
@@ -2070,7 +2070,7 @@ fn posix_rule(bytes: Slice[UInt8], from: USize, to: USize) -> Option[ZoneRule]
   ))
 }
 
-fn footer_rule(rules: Slice[UInt8], from: USize) -> Result[Option[ZoneRule], ZoneError]
+fn footer_rule(rules: Slice[UInt8], from: UInt64) -> Result[Option[ZoneRule], ZoneError]
   cost time finite
 {
   if from >= rules.length() || rules[from] != 10 {
@@ -2106,8 +2106,8 @@ public fn TimeZone.from_rules(name: StringSlice, rules: Slice[UInt8]) -> Result[
     Some(header) => header
     None => return Err(ZoneError.MalformedRules)
   }
-  var start: USize = 44
-  var time_width: USize = 4
+  var start: UInt64 = 44
+  var time_width: UInt64 = 4
   if header.version != 0 {
     start = 44 + header.block + 44
     time_width = 8
@@ -2123,7 +2123,7 @@ public fn TimeZone.from_rules(name: StringSlice, rules: Slice[UInt8]) -> Result[
   let types_start = kinds_start + header.time_count
   var transitions: List[Int64] = List.with_capacity(header.time_count)
   var offsets: List[Int32] = List.with_capacity(header.time_count)
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < header.time_count
     invariant index <= header.time_count
     invariant transitions.length() == index
@@ -2145,7 +2145,7 @@ public fn TimeZone.from_rules(name: StringSlice, rules: Slice[UInt8]) -> Result[
     if kinds_start + index >= rules.length() {
       return Err(ZoneError.MalformedRules)
     }
-    let kind: USize = intrinsic::convert(rules[kinds_start + index])
+    let kind: UInt64 = intrinsic::convert(rules[kinds_start + index])
     if kind >= header.type_count {
       return Err(ZoneError.MalformedRules)
     }
@@ -2303,8 +2303,8 @@ fn layout_parts(pattern: StringSlice) -> Option[List[LayoutPart]]
   cost time finite
 {
   var parts: List[LayoutPart] = []
-  var run: USize = 0
-  var index: USize = 0
+  var run: UInt64 = 0
+  var index: UInt64 = 0
   while index < pattern.length()
     invariant run <= index
     invariant index <= pattern.length()
@@ -2390,7 +2390,7 @@ public fn DateTime.format(self, layout: Layout) -> String
   let nanoseconds_of_day: Int64 = intrinsic::convert(self.time.nanoseconds_since_midnight)
   let seconds = nanoseconds_of_day / 1000000000
   var output = TextBuilder.new()
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < layout.parts.length()
     invariant index <= layout.parts.length()
     decreases layout.parts.length() - index
@@ -2411,7 +2411,7 @@ public fn DateTime.format(self, layout: Layout) -> String
       Second => write_two_digits(mut output, value: seconds % 60)
       Fraction(digits) => {
         let padded = (nanoseconds_of_day % 1000000000).format(minimum_digits: 9)
-        let shown: USize = intrinsic::convert(digits)
+        let shown: UInt64 = intrinsic::convert(digits)
         if shown <= padded.length() {
           mut output.write(padded.slice().part(0, to: shown))
         }
@@ -2425,7 +2425,7 @@ public fn DateTime.format(self, layout: Layout) -> String
 
 type LayoutFields(year: Int64, month: Int64, day: Int64, hour: Int64, minute: Int64, second: Int64, nanosecond: Int64)
 
-fn weekday_name_end(text: StringSlice, from: USize) -> USize
+fn weekday_name_end(text: StringSlice, from: UInt64) -> UInt64
   requires from <= text.length()
   ensures from <= result
   ensures result <= text.length()
@@ -2448,8 +2448,8 @@ public fn Layout.parse_date_time(self, text: StringSlice) -> Result[DateTime, Pa
 {
   var fields = LayoutFields(year: 1970, month: 1, day: 1, hour: 0, minute: 0, second: 0, nanosecond: 0)
   var weekday: Option[String] = None
-  var position: USize = 0
-  var index: USize = 0
+  var position: UInt64 = 0
+  var index: UInt64 = 0
   while index < self.parts.length()
     invariant index <= self.parts.length()
     invariant position <= text.length()
@@ -2494,7 +2494,7 @@ public fn Layout.parse_date_time(self, text: StringSlice) -> Result[DateTime, Pa
         position += 2
       }
       Fraction(digits) => {
-        let width: USize = intrinsic::convert(digits)
+        let width: UInt64 = intrinsic::convert(digits)
         if width < 1 || width > 9 {
           return Err(ParseTimeError.Malformed(offset: position))
         }

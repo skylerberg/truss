@@ -4,6 +4,7 @@ val local_name : Lowered.local -> string option -> string
 val erased : C_types.context -> Lowered.ty -> bool
 val declare_prototype : C_types.context -> string -> string -> unit
 val anchor_c : C_types.context -> Path.t -> string
+val bytes_symbol : C_types.context -> int -> string
 val bytes_name : C_types.context -> string -> string
 val function_ref_symbol : function_context -> Lowered.function_ref -> string
 val block_pointer : C_types.context -> string -> Ground.ty -> string -> string

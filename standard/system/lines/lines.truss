@@ -1,7 +1,7 @@
 use standard::intrinsic
 use standard::system::calls
 
-internal type LineInput(unread: intrinsic::Storage[UInt8], consumed: USize, ended: Bool)
+internal type LineInput(unread: intrinsic::Storage[UInt8], consumed: UInt64, ended: Bool)
   invariant consumed <= intrinsic::storage_length(unread)
 
 internal fn LineInput.new() -> LineInput {
@@ -9,7 +9,7 @@ internal fn LineInput.new() -> LineInput {
 }
 
 internal fn LineInput.next_line(mut self, descriptor: Int32) -> Result[Option[String], Int32] {
-  var end: USize = self.consumed
+  var end: UInt64 = self.consumed
   var has_newline = false
   var searching = true
   while searching
@@ -52,7 +52,7 @@ internal fn LineInput.next_line(mut self, descriptor: Int32) -> Result[Option[St
   }
 }
 
-fn LineInput.discard_consumed(mut self, room_to_read_into: USize)
+fn LineInput.discard_consumed(mut self, room_to_read_into: UInt64)
   requires self.consumed <= intrinsic::storage_length(self.unread)
   requires room_to_read_into <= 65536
   ensures self.consumed == 0

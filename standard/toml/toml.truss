@@ -15,7 +15,7 @@ public type Value =
   | Table(entries: Map[String, Value])
   derives Equal
 
-public type ParseError(message: String, line: USize, column: USize)
+public type ParseError(message: String, line: UInt64, column: UInt64)
   derives Equal
 
 impl Display for ParseError {
@@ -54,16 +54,16 @@ impl Display for EncodeError {
   }
 }
 
-type Failure(message: String, offset: USize)
+type Failure(message: String, offset: UInt64)
 
-fn failure_at(message: StringSlice, offset: USize) -> Failure {
+fn failure_at(message: StringSlice, offset: UInt64) -> Failure {
   Failure(message: message.to_string(), offset: offset)
 }
 
 fn with_position(text: StringSlice, failure: Failure) -> ParseError {
-  var line: USize = 1
-  var column: USize = 1
-  var index: USize = 0
+  var line: UInt64 = 1
+  var column: UInt64 = 1
+  var index: UInt64 = 0
   while index < text.length() && index < failure.offset {
     let byte = text.byte(index)
     if byte == 10 {
@@ -77,7 +77,7 @@ fn with_position(text: StringSlice, failure: Failure) -> ParseError {
   ParseError(message: failure.message.copy(), line: line, column: column)
 }
 
-fn peek(text: StringSlice, at: USize) -> Option[UInt8]
+fn peek(text: StringSlice, at: UInt64) -> Option[UInt8]
   ensures (result is Some(_)) == (at < text.length())
 {
   if at < text.length() { Some(text.byte(at)) } else { None }
@@ -91,13 +91,13 @@ fn is_digit(byte: UInt8) -> Bool {
   48 <= byte && byte <= 57
 }
 
-fn skip_spaces(text: StringSlice, at: mut USize) {
+fn skip_spaces(text: StringSlice, at: mut UInt64) {
   while peek(text, at: at) is Some(byte) && (byte == 32 || byte == 9) {
     at += 1
   }
 }
 
-fn skip_comment(text: StringSlice, at: mut USize) -> Result[Unit, Failure] {
+fn skip_comment(text: StringSlice, at: mut UInt64) -> Result[Unit, Failure] {
   if peek(text, at: at) != Some(35) {
     return Ok(Unit)
   }
@@ -110,7 +110,7 @@ fn skip_comment(text: StringSlice, at: mut USize) -> Result[Unit, Failure] {
   Ok(Unit)
 }
 
-fn skip_newline(text: StringSlice, at: mut USize) -> Bool {
+fn skip_newline(text: StringSlice, at: mut UInt64) -> Bool {
   match peek(text, at: at) {
     Some(byte) => {
       if byte == 10 {
@@ -127,7 +127,7 @@ fn skip_newline(text: StringSlice, at: mut USize) -> Bool {
   }
 }
 
-fn skip_blank(text: StringSlice, at: mut USize) -> Result[Unit, Failure] {
+fn skip_blank(text: StringSlice, at: mut UInt64) -> Result[Unit, Failure] {
   while true {
     skip_spaces(text, at: mut at)
     skip_comment(text, at: mut at)?
@@ -137,7 +137,7 @@ fn skip_blank(text: StringSlice, at: mut USize) -> Result[Unit, Failure] {
   }
 }
 
-fn end_of_line(text: StringSlice, at: mut USize) -> Result[Unit, Failure] {
+fn end_of_line(text: StringSlice, at: mut UInt64) -> Result[Unit, Failure] {
   skip_spaces(text, at: mut at)
   skip_comment(text, at: mut at)?
   if peek(text, at: at) is None || skip_newline(text, at: mut at) {
@@ -147,7 +147,7 @@ fn end_of_line(text: StringSlice, at: mut USize) -> Result[Unit, Failure] {
   }
 }
 
-fn push_code(output: mut String, code: UInt32, at: USize) -> Result[Unit, Failure] {
+fn push_code(output: mut String, code: UInt32, at: UInt64) -> Result[Unit, Failure] {
   match Character.try_from(code) {
     Ok(character) => {
       mut output.push_character(character)
@@ -157,7 +157,7 @@ fn push_code(output: mut String, code: UInt32, at: USize) -> Result[Unit, Failur
   }
 }
 
-fn hex_digits(text: StringSlice, at: mut USize, count: USize) -> Result[UInt32, Failure] {
+fn hex_digits(text: StringSlice, at: mut UInt64, count: UInt64) -> Result[UInt32, Failure] {
   var code: UInt32 = 0
   for _ in 0..count {
     match peek(text, at: at) {
@@ -175,7 +175,7 @@ fn hex_digits(text: StringSlice, at: mut USize, count: USize) -> Result[UInt32, 
   Ok(code)
 }
 
-fn escape(text: StringSlice, at: mut USize, output: mut String) -> Result[Unit, Failure] {
+fn escape(text: StringSlice, at: mut UInt64, output: mut String) -> Result[Unit, Failure] {
   let start = at
   at = at.saturating_add(1)
   match peek(text, at: at) {
@@ -210,7 +210,7 @@ fn escape(text: StringSlice, at: mut USize, output: mut String) -> Result[Unit, 
   }
 }
 
-fn push_byte_run(output: mut String, text: StringSlice, from: USize, to: USize) {
+fn push_byte_run(output: mut String, text: StringSlice, from: UInt64, to: UInt64) {
   if from < to && to <= text.length() {
     mut output.push(text.part(from, to: to))
   }
@@ -226,7 +226,7 @@ fn is_forbidden_in_string(byte: UInt8, multiline: Bool) -> Bool {
   byte < 32 || byte == 127
 }
 
-fn basic_string(text: StringSlice, at: mut USize) -> Result[String, Failure] {
+fn basic_string(text: StringSlice, at: mut UInt64) -> Result[String, Failure] {
   let start = at
   at = at.saturating_add(1)
   var output = ""
@@ -254,7 +254,7 @@ fn basic_string(text: StringSlice, at: mut USize) -> Result[String, Failure] {
   }
 }
 
-fn literal_string(text: StringSlice, at: mut USize) -> Result[String, Failure] {
+fn literal_string(text: StringSlice, at: mut UInt64) -> Result[String, Failure] {
   let start = at
   at = at.saturating_add(1)
   let from = at
@@ -277,11 +277,11 @@ fn literal_string(text: StringSlice, at: mut USize) -> Result[String, Failure] {
   }
 }
 
-fn starts_with_three(text: StringSlice, at: USize, byte: UInt8) -> Bool {
+fn starts_with_three(text: StringSlice, at: UInt64, byte: UInt8) -> Bool {
   peek(text, at: at) == Some(byte) && peek(text, at: at.saturating_add(1)) == Some(byte) && peek(text, at: at.saturating_add(2)) == Some(byte)
 }
 
-fn multiline_string(text: StringSlice, at: mut USize, quote: UInt8) -> Result[String, Failure] {
+fn multiline_string(text: StringSlice, at: mut UInt64, quote: UInt8) -> Result[String, Failure] {
   let start = at
   at = at.saturating_add(3)
   let _ = skip_newline(text, at: mut at)
@@ -292,7 +292,7 @@ fn multiline_string(text: StringSlice, at: mut USize, quote: UInt8) -> Result[St
       Some(byte) => {
         if byte == quote && starts_with_three(text, at: at, byte: quote) {
           var end = at + 3
-          var extra: USize = 0
+          var extra: UInt64 = 0
           while extra < 2 && peek(text, at: end) == Some(quote) {
             end += 1
             extra += 1
@@ -330,7 +330,7 @@ fn multiline_string(text: StringSlice, at: mut USize, quote: UInt8) -> Result[St
   }
 }
 
-fn simple_key(text: StringSlice, at: mut USize) -> Result[String, Failure] {
+fn simple_key(text: StringSlice, at: mut UInt64) -> Result[String, Failure] {
   match peek(text, at: at) {
     Some(byte) => {
       if byte == 34 {
@@ -354,7 +354,7 @@ fn simple_key(text: StringSlice, at: mut USize) -> Result[String, Failure] {
   }
 }
 
-fn dotted_key(text: StringSlice, at: mut USize) -> Result[List[String], Failure] {
+fn dotted_key(text: StringSlice, at: mut UInt64) -> Result[List[String], Failure] {
   var keys: List[String] = []
   while true {
     skip_spaces(text, at: mut at)
@@ -367,7 +367,7 @@ fn dotted_key(text: StringSlice, at: mut USize) -> Result[List[String], Failure]
   }
 }
 
-fn token_end(text: StringSlice, from: USize) -> USize
+fn token_end(text: StringSlice, from: UInt64) -> UInt64
   ensures result >= from
 {
   var at = from
@@ -380,9 +380,9 @@ fn token_end(text: StringSlice, from: USize) -> USize
   at
 }
 
-fn is_date_at(text: StringSlice, at: USize) -> Bool {
+fn is_date_at(text: StringSlice, at: UInt64) -> Bool {
   var all = true
-  let width: USize = 4
+  let width: UInt64 = 4
   for index in 0..width {
     if !(peek(text, at: at.saturating_add(index)) is Some(byte) && is_digit(byte)) {
       all = false
@@ -391,12 +391,12 @@ fn is_date_at(text: StringSlice, at: USize) -> Bool {
   all && peek(text, at: at.saturating_add(4)) == Some(45)
 }
 
-fn is_time_at(text: StringSlice, at: USize) -> Bool {
+fn is_time_at(text: StringSlice, at: UInt64) -> Bool {
   peek(text, at: at) is Some(first) && is_digit(first) && peek(text, at: at.saturating_add(1)) is Some(second) && is_digit(second)
     && peek(text, at: at.saturating_add(2)) == Some(58)
 }
 
-fn date_time_value(text: StringSlice, at: mut USize) -> Result[Value, Failure] {
+fn date_time_value(text: StringSlice, at: mut UInt64) -> Result[Value, Failure] {
   let start = at
   var end = token_end(text, from: at)
   if is_date_at(text, at: start) && end == start.saturating_add(10) && peek(text, at: end) == Some(32)
@@ -460,7 +460,7 @@ fn is_digit_of(byte: UInt8, hexadecimal: Bool) -> Bool {
   if hexadecimal { byte.digit_value() < 16 } else { is_digit(byte) }
 }
 
-fn without_underscores(token: StringSlice, start: USize, hexadecimal: Bool) -> Result[String, Failure] {
+fn without_underscores(token: StringSlice, start: UInt64, hexadecimal: Bool) -> Result[String, Failure] {
   var digits = ""
   var previous: UInt8 = 0
   for index in 0..token.length() {
@@ -478,7 +478,7 @@ fn without_underscores(token: StringSlice, start: USize, hexadecimal: Bool) -> R
   Ok(own digits)
 }
 
-fn number_value(text: StringSlice, at: mut USize) -> Result[Value, Failure] {
+fn number_value(text: StringSlice, at: mut UInt64) -> Result[Value, Failure] {
   let start = at
   let end = token_end(text, from: at)
   if end > text.length() || end <= start {
@@ -535,7 +535,7 @@ fn number_value(text: StringSlice, at: mut USize) -> Result[Value, Failure] {
   }
 }
 
-fn after_element(text: StringSlice, at: mut USize, closing: UInt8, inside: StringSlice) -> Result[Bool, Failure] {
+fn after_element(text: StringSlice, at: mut UInt64, closing: UInt8, inside: StringSlice) -> Result[Bool, Failure] {
   match peek(text, at: at) {
     Some(byte) => {
       if byte == 44 {
@@ -558,7 +558,7 @@ fn after_element(text: StringSlice, at: mut USize, closing: UInt8, inside: Strin
   }
 }
 
-fn array_value(text: StringSlice, at: mut USize, depth: USize) -> Result[Value, Failure]
+fn array_value(text: StringSlice, at: mut UInt64, depth: UInt64) -> Result[Value, Failure]
   requires depth <= 128
 {
   at = at.saturating_add(1)
@@ -579,7 +579,7 @@ fn array_value(text: StringSlice, at: mut USize, depth: USize) -> Result[Value, 
 }
 
 
-fn parse_value(text: StringSlice, at: mut USize, depth: USize) -> Result[Value, Failure] {
+fn parse_value(text: StringSlice, at: mut UInt64, depth: UInt64) -> Result[Value, Failure] {
   if depth > 128 {
     return Err(failure_at("values nested too deeply", offset: at))
   }
@@ -629,9 +629,9 @@ type Kind = Branch | Tables | Leaf
 
 type Document(
   kinds: List[Kind],
-  children: Map[String, USize],
+  children: Map[String, UInt64],
   names: List[List[String]],
-  items: List[List[USize]],
+  items: List[List[UInt64]],
   values: List[Option[Value]],
   headers: List[Bool],
   dotted: List[Bool],
@@ -643,7 +643,7 @@ fn Document.new() -> Document {
   document
 }
 
-fn add_node(document: mut Document, kind: Kind, value: own Option[Value], header: Bool, dotted: Bool) -> USize {
+fn add_node(document: mut Document, kind: Kind, value: own Option[Value], header: Bool, dotted: Bool) -> UInt64 {
   let index = document.kinds.length()
   mut document.kinds.push(kind)
   mut document.names.push([])
@@ -654,26 +654,26 @@ fn add_node(document: mut Document, kind: Kind, value: own Option[Value], header
   index
 }
 
-fn Document.kind(self, index: USize) -> Option[Kind] {
+fn Document.kind(self, index: UInt64) -> Option[Kind] {
   if index < self.kinds.length() { Some(self.kinds[index]) } else { None }
 }
 
-fn Document.is_header(self, index: USize) -> Bool {
+fn Document.is_header(self, index: UInt64) -> Bool {
   index < self.headers.length() && self.headers[index]
 }
 
-fn Document.is_dotted(self, index: USize) -> Bool {
+fn Document.is_dotted(self, index: UInt64) -> Bool {
   index < self.dotted.length() && self.dotted[index]
 }
 
-fn child_key(parent: USize, key: StringSlice) -> String {
+fn child_key(parent: UInt64, key: StringSlice) -> String {
   var joined = parent.format()
   mut joined.push(":")
   mut joined.push(key)
   joined
 }
 
-fn Document.child(self, parent: USize, key: StringSlice) -> Option[USize] {
+fn Document.child(self, parent: UInt64, key: StringSlice) -> Option[UInt64] {
   let joined = child_key(parent, key: key)
   if self.children.contains(joined) {
     return Some(self.children[joined])
@@ -681,7 +681,7 @@ fn Document.child(self, parent: USize, key: StringSlice) -> Option[USize] {
   None
 }
 
-fn add_child(document: mut Document, parent: USize, key: StringSlice, kind: Kind, value: own Option[Value], header: Bool, dotted: Bool) -> USize {
+fn add_child(document: mut Document, parent: UInt64, key: StringSlice, kind: Kind, value: own Option[Value], header: Bool, dotted: Bool) -> UInt64 {
   let index = add_node(mut document, kind: kind, value: own value, header: header, dotted: dotted)
   let _ = mut document.children.replace(child_key(parent, key: key), value: index)
   if parent < document.names.length() {
@@ -690,7 +690,7 @@ fn add_child(document: mut Document, parent: USize, key: StringSlice, kind: Kind
   index
 }
 
-fn add_item(document: mut Document, tables: USize) -> USize {
+fn add_item(document: mut Document, tables: UInt64) -> UInt64 {
   let index = add_node(mut document, kind: Kind.Branch, value: None, header: true, dotted: false)
   if tables < document.items.length() {
     mut document.items[tables].push(index)
@@ -698,7 +698,7 @@ fn add_item(document: mut Document, tables: USize) -> USize {
   index
 }
 
-fn last_item(document: Document, tables: USize) -> Option[USize] {
+fn last_item(document: Document, tables: UInt64) -> Option[UInt64] {
   if tables < document.items.length() {
     match document.items[tables].last() {
       Some(item) => Some(item)
@@ -709,11 +709,11 @@ fn last_item(document: Document, tables: USize) -> Option[USize] {
   }
 }
 
-fn already_defined(at: USize) -> Failure {
+fn already_defined(at: UInt64) -> Failure {
   failure_at("a key or table that is already defined", offset: at)
 }
 
-fn insert_dotted(document: mut Document, table: USize, keys: Slice[String], value: own Value, at: USize) -> Result[Unit, Failure] {
+fn insert_dotted(document: mut Document, table: UInt64, keys: Slice[String], value: own Value, at: UInt64) -> Result[Unit, Failure] {
   if keys.is_empty() {
     return Err(failure_at("expected a key", offset: at))
   }
@@ -742,11 +742,11 @@ fn insert_dotted(document: mut Document, table: USize, keys: Slice[String], valu
   Ok(Unit)
 }
 
-fn open_header(document: mut Document, keys: Slice[String], array: Bool, at: USize) -> Result[USize, Failure] {
+fn open_header(document: mut Document, keys: Slice[String], array: Bool, at: UInt64) -> Result[UInt64, Failure] {
   if keys.is_empty() {
     return Err(failure_at("expected a key", offset: at))
   }
-  var current: USize = 0
+  var current: UInt64 = 0
   let last = keys.length() - 1
   for index in 0..last {
     let key = keys[index].slice()
@@ -787,7 +787,7 @@ fn open_header(document: mut Document, keys: Slice[String], array: Bool, at: USi
   }
 }
 
-fn build(document: Document, leaves: mut Map[USize, Value], index: USize) -> Value {
+fn build(document: Document, leaves: mut Map[UInt64, Value], index: UInt64) -> Value {
   match document.kind(index) {
     Some(Leaf) => match mut leaves.take(index) {
       Some(value) => own value
@@ -820,8 +820,8 @@ fn build(document: Document, leaves: mut Map[USize, Value], index: USize) -> Val
 
 fn Document.finish(own self) -> Map[String, Value] {
   var document = own self
-  var leaves: Map[USize, Value] = [:]
-  var index: USize = 0
+  var leaves: Map[UInt64, Value] = [:]
+  var index: UInt64 = 0
   for value in own document.values {
     match own value {
       Some(leaf) => {
@@ -838,7 +838,7 @@ fn Document.finish(own self) -> Map[String, Value] {
   }
 }
 
-fn inline_table_value(text: StringSlice, at: mut USize, depth: USize) -> Result[Value, Failure]
+fn inline_table_value(text: StringSlice, at: mut UInt64, depth: UInt64) -> Result[Value, Failure]
   requires depth <= 128
 {
   at = at.saturating_add(1)
@@ -872,7 +872,7 @@ public fn parse(text: StringSlice) -> Result[Map[String, Value], ParseError] {
   }
 }
 
-fn header_line(text: StringSlice, at: mut USize, document: mut Document) -> Result[USize, Failure] {
+fn header_line(text: StringSlice, at: mut UInt64, document: mut Document) -> Result[UInt64, Failure] {
   let line_at = at
   let array = peek(text, at: at.saturating_add(1)) == Some(91)
   at = at.saturating_add(if array { 2 } else { 1 })
@@ -892,7 +892,7 @@ fn header_line(text: StringSlice, at: mut USize, document: mut Document) -> Resu
   Ok(table)
 }
 
-fn key_value_line(text: StringSlice, at: mut USize, document: mut Document, table: USize) -> Result[Unit, Failure] {
+fn key_value_line(text: StringSlice, at: mut UInt64, document: mut Document, table: UInt64) -> Result[Unit, Failure] {
   let line_at = at
   let keys = dotted_key(text, at: mut at)?
   if peek(text, at: at) != Some(61) {
@@ -907,8 +907,8 @@ fn key_value_line(text: StringSlice, at: mut USize, document: mut Document, tabl
 
 fn parse_document(text: StringSlice) -> Result[Map[String, Value], Failure] {
   var document = Document.new()
-  var table: USize = 0
-  var at: USize = 0
+  var table: UInt64 = 0
+  var at: UInt64 = 0
   if text.starts_with("\u{feff}") {
     at = 3
   }

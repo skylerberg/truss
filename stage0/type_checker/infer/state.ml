@@ -806,7 +806,7 @@ let check_resource state (resource : Syntax.resource) =
 
 let slice state ~origin ~viewed (base : Core.place) ~start ~stop ~inclusive : Core.kind =
   let make = synthetic_expression state ~origin in
-  let usize = Types.builtin USize in
+  let uint64 = Types.builtin UInt64 in
   let path, type_arguments =
     match Core_walk.place_type base with
     | Types.Named { path; arguments } -> (path, arguments)
@@ -827,14 +827,14 @@ let slice state ~origin ~viewed (base : Core.place) ~start ~stop ~inclusive : Co
   let bound value : Core.argument =
     Passed { mode = Read; value = Value value; mode_keyword = None }
   in
-  let start = match start with Some start -> start | None -> make usize (Integer Z.zero) in
+  let start = match start with Some start -> start | None -> make uint64 (Integer Z.zero) in
   match stop with
   | None -> Slice { call = call "slice_from" [ receiver; bound start ] viewed }
   | Some stop ->
       let stop =
         if inclusive then
-          make usize
-            (Operator { operation = Add; arguments = [ stop; make usize (Integer Z.one) ] })
+          make uint64
+            (Operator { operation = Add; arguments = [ stop; make uint64 (Integer Z.one) ] })
         else stop
       in
       Slice { call = call "slice_range" [ receiver; bound start; bound stop ] viewed }

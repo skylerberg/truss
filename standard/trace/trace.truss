@@ -22,7 +22,7 @@ fn is_zero(bytes: Slice[UInt8]) -> Bool {
   true
 }
 
-fn field(text: StringSlice, from: USize, length: USize) -> Option[StringSlice] {
+fn field(text: StringSlice, from: UInt64, length: UInt64) -> Option[StringSlice] {
   if from > text.length() || text.length() - from < length {
     return None
   }
@@ -58,7 +58,7 @@ public fn Context.parse(header: StringSlice) -> Option[Context] {
   Some(Context(trace_id: own trace_id, span_id: own span_id, is_sampled: (flags[0] & 1) == 1))
 }
 
-fn nonzero_bytes(count: USize) -> List[UInt8]
+fn nonzero_bytes(count: UInt64) -> List[UInt8]
   uses Random
 {
   var bytes = random::bytes(count)

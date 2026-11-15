@@ -58,7 +58,7 @@ internal fn Character.encode_onto(self, output: mut intrinsic::Storage[UInt8])
   }
 }
 
-public fn Character.utf8_length(self) -> USize
+public fn Character.utf8_length(self) -> UInt64
   ensures 1 <= result && result <= 4
   ensures (result == 1) == (self.code() < 128)
   ensures (result == 2) == (128 <= self.code() && self.code() < 2048)
@@ -78,7 +78,7 @@ public fn Character.utf8_length(self) -> USize
   }
 }
 
-public fn Character.utf16_length(self) -> USize
+public fn Character.utf16_length(self) -> UInt64
   ensures 1 <= result && result <= 2
   cost time O(1)
 {
@@ -290,21 +290,21 @@ impl core::Countable for Character {
     if index == 0 { None } else { Some(Character.at_scalar_index(index - 1)) }
   }
 
-  fn advanced(self, by: USize) -> Option[Character]
+  fn advanced(self, by: UInt64) -> Option[Character]
     cost time O(1)
   {
-    let index: USize = intrinsic::convert(self.scalar_index())
+    let index: UInt64 = intrinsic::convert(self.scalar_index())
     if by > 1112063 - index { None } else { Some(Character.at_scalar_index(intrinsic::convert(index + by))) }
   }
 
-  fn retreated(self, by: USize) -> Option[Character]
+  fn retreated(self, by: UInt64) -> Option[Character]
     cost time O(1)
   {
-    let index: USize = intrinsic::convert(self.scalar_index())
+    let index: UInt64 = intrinsic::convert(self.scalar_index())
     if by > index { None } else { Some(Character.at_scalar_index(intrinsic::convert(index - by))) }
   }
 
-  fn steps_to(self, other: Character) -> Option[USize]
+  fn steps_to(self, other: Character) -> Option[UInt64]
     cost time O(1)
   {
     let from = self.scalar_index()

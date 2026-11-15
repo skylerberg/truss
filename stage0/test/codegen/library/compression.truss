@@ -12,13 +12,13 @@ fn text_of(bytes: Slice[UInt8]) -> String {
   String.from_utf8_lossy(bytes)
 }
 
-fn pattern(count: USize) -> List[UInt8] {
+fn pattern(count: UInt64) -> List[UInt8] {
   let letters = "abcdefg".bytes()
   var bytes: List[UInt8] = []
   var state: UInt32 = 1
   for index in 0..count {
     state = state.wrapping_multiply(1103515245).wrapping_add(12345)
-    mut bytes.push(if index % 50 < 30 { letters[USize.from(state >> 16) % 7] } else { 120 })
+    mut bytes.push(if index % 50 < 30 { letters[UInt64.from(state >> 16) % 7] } else { 120 })
   }
   bytes
 }

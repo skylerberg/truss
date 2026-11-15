@@ -79,8 +79,8 @@ fn application(request: own http::Request, responder: mut http::Responder)
 {
   if request.matches(http::Route"POST /count") is Some(_) {
     var body = own request.body
-    var total: USize = 0
-    var pieces: USize = 0
+    var total: UInt64 = 0
+    var pieces: UInt64 = 0
     var buffer: List[UInt8] = []
     while mut body.read(mut buffer, limit: 1000) is Ok(count) && count > 0 {
       total += count
@@ -92,7 +92,7 @@ fn application(request: own http::Request, responder: mut http::Responder)
   }
   if request.matches(http::Route"GET /stream") is Some(_) {
     let _ = mut responder.start(http::Status.ok)
-    let parts: USize = 3
+    let parts: UInt64 = 3
     for index in 0..parts {
       let _ = mut responder.write("part ${index};".slice().bytes())
     }

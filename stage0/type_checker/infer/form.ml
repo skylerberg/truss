@@ -437,7 +437,7 @@ let list_literal state ~origin (element : Types.ty) (elements : Core.expression 
            uses = Types.no_capabilities;
          })
   in
-  let capacity = make (Types.builtin USize) (Integer (Z.of_int (List.length elements))) in
+  let capacity = make (Types.builtin UInt64) (Integer (Z.of_int (List.length elements))) in
   let let_storage =
     statement
       (Let
@@ -883,17 +883,17 @@ let collection_place state (iterable : expression) (mode : Types.mode) :
 
 let elements_at state ~origin (collection : Core.place) ~(count : Tables.call)
     ~(element : Tables.call) ~(lends : Types.mode) : Core.elements =
-  let usize = Types.builtin USize in
+  let uint64 = Types.builtin UInt64 in
   let local = fresh_synthetic_local state in
   let receiver mode : Core.argument =
     Passed { mode; value = Place collection; mode_keyword = None }
   in
   let position =
-    synthetic_expression state ~origin usize (Use (Local { local; type_ = usize; origin }))
+    synthetic_expression state ~origin uint64 (Use (Local { local; type_ = uint64; origin }))
   in
   {
     count =
-      synthetic_expression state ~origin usize
+      synthetic_expression state ~origin uint64
         (Call
            {
              callee = callee count.callee;
@@ -905,7 +905,7 @@ let elements_at state ~origin (collection : Core.place) ~(count : Tables.call)
       {
         id = fresh_node_id state;
         origin;
-        type_ = usize;
+        type_ = uint64;
         kind = Bind { local; name = "position"; is_var = false; mode = Own };
       };
     element =
@@ -994,7 +994,7 @@ let for_loop state (written : statement) (iterable : expression) ~pattern ~claus
             (fun (remaining : Tables.call) ->
               Core.Decreases
                 [
-                  synthetic_expression state ~origin:iterable.id (Types.builtin USize)
+                  synthetic_expression state ~origin:iterable.id (Types.builtin UInt64)
                     (Call
                        {
                          callee = callee remaining.callee;
@@ -1190,7 +1190,7 @@ let inserted_literal state ~origin (type_ : Types.ty) ~name ~insert
            uses = Types.no_capabilities;
          })
   in
-  let capacity = make (Types.builtin USize) (Integer (Z.of_int (List.length entries))) in
+  let capacity = make (Types.builtin UInt64) (Integer (Z.of_int (List.length entries))) in
   let created =
     call "with_capacity" Static
       [ Passed { mode = Read; value = Value capacity; mode_keyword = None } ]

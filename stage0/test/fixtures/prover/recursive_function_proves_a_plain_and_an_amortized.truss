@@ -1,4 +1,4 @@
-fn shift_left_all(items: mut List[Int64], position: USize)
+fn shift_left_all(items: mut List[Int64], position: UInt64)
   requires position <= items.length()
   ensures items.length() == old(items.length())
   decreases position

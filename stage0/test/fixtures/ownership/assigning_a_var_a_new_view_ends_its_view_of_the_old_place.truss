@@ -1,4 +1,4 @@
-fn f(first: List[Int64], second: List[Int64]) -> USize {
+fn f(first: List[Int64], second: List[Int64]) -> UInt64 {
   var items = first.copy()
   var part = items[..]
   part = second[..]

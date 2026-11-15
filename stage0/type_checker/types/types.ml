@@ -78,7 +78,7 @@ let is_builtin wanted type_ = builtin_of type_ = Some wanted
 let is_well_known wanted = function Named { path; _ } -> Well_known.is wanted path | _ -> false
 
 let integer_types : Intrinsic.builtin list =
-  [ Int8; Int16; Int32; Int64; UInt8; UInt16; UInt32; UInt64; USize; ISize ]
+  [ Int8; Int16; Int32; Int64; UInt8; UInt16; UInt32; UInt64 ]
 
 let float_types : Intrinsic.builtin list = [ Float32; Float64 ]
 
@@ -90,11 +90,11 @@ let integer_bits type_ =
   | Some Int8 -> Some (8, true)
   | Some Int16 -> Some (16, true)
   | Some Int32 -> Some (32, true)
-  | Some (Int64 | ISize) -> Some (64, true)
+  | Some Int64 -> Some (64, true)
   | Some UInt8 -> Some (8, false)
   | Some UInt16 -> Some (16, false)
   | Some UInt32 -> Some (32, false)
-  | Some (UInt64 | USize) -> Some (64, false)
+  | Some UInt64 -> Some (64, false)
   | _ -> None
 
 let integer_range type_ =

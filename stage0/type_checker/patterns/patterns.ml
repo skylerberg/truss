@@ -35,11 +35,11 @@ let integer_range type_ =
   | Some Int8 -> bits true 8
   | Some Int16 -> bits true 16
   | Some Int32 -> bits true 32
-  | Some (Int64 | ISize) -> bits true 64
+  | Some Int64 -> bits true 64
   | Some UInt8 -> bits false 8
   | Some UInt16 -> bits false 16
   | Some UInt32 -> bits false 32
-  | Some (UInt64 | USize) -> bits false 64
+  | Some UInt64 -> bits false 64
   | Some Character -> Some (Z.zero, Z.of_int 0x10FFFF)
   | _ -> None
 

@@ -41,12 +41,12 @@ internal fn set_raw_mode(descriptor: Int32, enabled: Bool) -> Result[Unit, Int32
   calls::done(intrinsic::libc_tcsetattr(descriptor, settings: settings.slice().elements))
 }
 
-fn change(settings: mut List[UInt8], at: USize, size: USize, clear: UInt64, set: UInt64)
+fn change(settings: mut List[UInt8], at: UInt64, size: UInt64, clear: UInt64, set: UInt64)
   ensures settings.length() == old(settings.length())
 {
   let before = calls::number_at(settings.slice().elements, offset: at, size: size)
   var left = (before & ~clear) | set
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < size && index < 8
     invariant settings.length() == old(settings.length())
   {
@@ -56,7 +56,7 @@ fn change(settings: mut List[UInt8], at: USize, size: USize, clear: UInt64, set:
   }
 }
 
-fn put(settings: mut List[UInt8], at: USize, byte: UInt8)
+fn put(settings: mut List[UInt8], at: UInt64, byte: UInt8)
   ensures settings.length() == old(settings.length())
 {
   if at < settings.length() {

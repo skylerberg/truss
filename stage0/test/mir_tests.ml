@@ -1082,7 +1082,7 @@ let moves_of_g text =
     path.steps <> []
     ||
     match body.locals.(path.local).type_ with
-    | Named { path = Path.Top { name = "Int64" | "Bool" | "USize"; _ }; _ } -> false
+    | Named { path = Path.Top { name = "Int64" | "Bool" | "UInt64"; _ }; _ } -> false
     | Named { path = Path.Top { module_; _ }; _ } -> not (List.mem "intrinsic" module_.modules)
     | _ -> true
   in

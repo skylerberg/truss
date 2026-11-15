@@ -2,7 +2,7 @@ type Shelf(books: List[String])
 
 type First(title: String, rest: Slice[String])
 
-type Numbered(index: USize, title: String)
+type Numbered(index: UInt64, title: String)
 
 type Tagged(tag: String, book: String)
 

@@ -320,15 +320,15 @@ let program_main context (key : Instance.key) main_path : Emit_c.Builder.instanc
          ~type_arguments arguments ~destination
          ~site:{ definition = main_path; line = 0; column = 1 })
   in
-  let wanted = local builder (Value context.types.usize) in
-  emit builder (Assign (at wanted, Convert (Copy (at count), Integer USize)));
+  let wanted = local builder (Value context.types.uint64) in
+  emit builder (Assign (at wanted, Convert (Copy (at count), Integer UInt64)));
   lower Storage_with_capacity [ string_ty ]
     [ Value (Copy (at wanted)) ]
     (Some (list / Field storage_field));
   loop builder ~integer:Int32 ~index_type:(Raw (Integer Int32))
     ~count:(Copy (at count))
     (fun index ->
-      let length = local builder (Value context.types.usize)
+      let length = local builder (Value context.types.uint64)
       and bytes = local builder (Raw (Pointer Opaque)) in
       let call intrinsic arguments result =
         emit builder

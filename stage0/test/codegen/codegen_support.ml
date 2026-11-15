@@ -47,7 +47,6 @@ let shapes extra (ty : Ground.ty) : shape =
   | Named { path = Top { name = "Int64"; _ }; _ } -> Scalar (Integer Int64)
   | Named { path = Top { name = "UInt8"; _ }; _ } -> Scalar (Integer UInt8)
   | Named { path = Top { name = "UInt64"; _ }; _ } -> Scalar (Integer UInt64)
-  | Named { path = Top { name = "USize"; _ }; _ } -> Scalar (Integer USize)
   | Named { path = Top { name = "Float64"; _ }; _ } -> Scalar Float64
   | Named { path = Top { name = "Bool"; _ }; _ } -> Scalar Bool
   | Named { path = Top { name = "Character"; _ }; _ } -> Scalar Character
@@ -59,8 +58,8 @@ let shapes extra (ty : Ground.ty) : shape =
       Record
         [
           ("buffer", Raw (Pointer (Data element)));
-          field "length" (named "USize");
-          field "capacity" (named "USize");
+          field "length" (named "UInt64");
+          field "capacity" (named "UInt64");
         ]
   | Named { path = Top { name = "Array"; _ }; arguments = [ Type element; Value count ] } ->
       Array (element, Z.to_int count)
@@ -69,8 +68,8 @@ let shapes extra (ty : Ground.ty) : shape =
       Record
         [
           ("buffer", Raw (Pointer (Data element)));
-          ("length", Typed (named "USize"));
-          ("capacity", Typed (named "USize"));
+          ("length", Typed (named "UInt64"));
+          ("capacity", Typed (named "UInt64"));
         ]
   | Function function_type -> Convention.function_value_shape function_type
   | _ -> (
@@ -81,7 +80,7 @@ let shapes extra (ty : Ground.ty) : shape =
 let layout ?(extra = []) ty = of_type (create host ~shape_of:(shapes extra)) ty
 let describe ?extra ty = Memory_layout.For_testing.to_string (layout ?extra ty)
 let int32 = named "Int32"
-let usize = named "USize"
+let uint64 = named "UInt64"
 
 type local_info = { ty : Lowered.ty; name : string option }
 type block = { statements : Lowered.statement list; terminator : Lowered.terminator }

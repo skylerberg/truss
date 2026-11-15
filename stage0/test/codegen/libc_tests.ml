@@ -3,15 +3,8 @@ open Codegen_support
 
 let view_ty = named "View" ~arguments:[ Type uint8 ]
 let bytes_ty = Storage.of_elements uint8
-let isize = named "ISize"
-
-let extra =
-  [
-    (Ground.to_string view_ty, Storage.view_shape ~usize uint8);
-    (Ground.to_string isize, Memory_layout.Scalar (Integer ISize));
-  ]
-
-let intrinsic_types : Intrinsics.types = { usize; string_slice = named "StringSlice" }
+let extra = [ (Ground.to_string view_ty, Storage.view_shape ~uint64 uint8) ]
+let intrinsic_types : Intrinsics.types = { uint64; string_slice = named "StringSlice" }
 
 let operate builder ?destination ?(type_arguments = []) operation arguments =
   ignore
@@ -34,8 +27,8 @@ let view_of builder text =
   emit builder
     (Assign
        ( at view,
-         Storage.view view_ty ~elements:(Constant (Bytes text)) ~length:(usize (String.length text))
-       ));
+         Storage.view view_ty ~elements:(Constant (Bytes text))
+           ~length:(constant_uint64 (String.length text)) ));
   view
 
 let flags builder numbers =
@@ -96,7 +89,7 @@ let () =
       let path = local builder (value bytes_ty) in
       ignore
         (Intrinsics.lower env builder intrinsic_types (Libc Proc_pidpath) ~type_arguments:[]
-           [ Value (constant_int32 1); Place (at path); Value (usize 64) ]
+           [ Value (constant_int32 1); Place (at path); Value (constant_uint64 64) ]
            ~destination:(Some (at length))
            ~site:{ definition = definition "entry"; line = 0; column = 1 });
       finish builder (Return (Some (Copy (at length))));
@@ -130,7 +123,7 @@ let () =
           let name = Libc.function_name function_ in
           let passed role parameter =
             match List.assoc_opt parameter parameters with
-            | Some (Libc.Value USize) | Some (Written (UInt32, [ _ ])) -> ()
+            | Some (Libc.Value UInt64) | Some (Written (UInt32, [ _ ])) -> ()
             | _ -> fail "%s: %s is `%s`, which is no count the call is passed" name role parameter
           in
           Option.iter (passed "the bound of the result") at_most;
@@ -145,8 +138,8 @@ let () =
                   | Exactly count ->
                       if count < 1 then fail "%s: `%s` has no elements" name parameter
                   | Number number ->
-                      if Libc.number_type number <> USize then
-                        fail "%s: `%s` is counted by %s, which is no USize" name parameter
+                      if Libc.number_type number <> UInt64 then
+                        fail "%s: `%s` is counted by %s, which is no UInt64" name parameter
                           (Libc.number_name number)
                   | Through_zero -> ())
               | Value _ | Written _ | Always _ | Fixed _ -> ())
@@ -166,9 +159,9 @@ let () =
           [
             built_entry (fun builder ->
                 let view = view_of builder "written\n" in
-                let wrote = local builder (value isize) in
+                let wrote = local builder (value int64) in
                 operate builder ~destination:(at wrote) (Libc Write)
-                  [ Value (constant_int32 1); Place (at view); Value (usize 8) ];
+                  [ Value (constant_int32 1); Place (at view); Value (constant_uint64 8) ];
                 let status = local builder (value int32) in
                 emit builder (Assign (at status, Convert (Copy (at wrote), Integer Int32)));
                 status);
@@ -193,9 +186,9 @@ let () =
                 operate builder ~destination:(at copy) (Libc Fcntl_dupfd_cloexec)
                   [ Value (constant_int32 1); Value (constant_int32 10) ];
                 let view = view_of builder "through the copy\n" in
-                let wrote = local builder (value isize) in
+                let wrote = local builder (value int64) in
                 operate builder ~destination:(at wrote) (Libc Write)
-                  [ Value (Copy (at copy)); Place (at view); Value (usize 17) ];
+                  [ Value (Copy (at copy)); Place (at view); Value (constant_uint64 17) ];
                 copy);
           ]
       in
@@ -240,16 +233,18 @@ let () =
                 let storage = local builder (value bytes_ty) in
                 operate builder ~destination:(at storage) ~type_arguments:[ uint8 ]
                   Storage_with_capacity
-                  [ Value (usize 16) ];
+                  [ Value (constant_uint64 16) ];
                 operate builder ~type_arguments:[ uint8 ] Storage_push
                   [ Place (at storage); Value (Constant (Integer (UInt8, Z.of_int 1))) ];
-                let got = local builder (value isize) in
+                let got = local builder (value int64) in
                 operate builder ~destination:(at got) (Libc Read)
-                  [ Value (constant_int32 0); Place (at storage); Value (usize 15) ];
+                  [ Value (constant_int32 0); Place (at storage); Value (constant_uint64 15) ];
                 let first = local builder (value int32) and count = local builder (value int32) in
                 emit builder
                   (Assign
-                     (at first, Convert (Copy (Storage.at (at storage) (usize 1)), Integer Int32)));
+                     ( at first,
+                       Convert (Copy (Storage.at (at storage) (constant_uint64 1)), Integer Int32)
+                     ));
                 emit builder (Assign (at count, Convert (Copy (at got), Integer Int32)));
                 emit builder (Assign (at first, Binary (Add, Copy (at first), Copy (at count))));
                 free builder (at storage);
@@ -312,8 +307,8 @@ let () =
                          fields =
                            [
                              ("buffer", Constant (Bytes (String.make 28 '\000')));
-                             ("length", usize 28);
-                             ("capacity", usize 0);
+                             ("length", constant_uint64 28);
+                             ("capacity", constant_uint64 0);
                            ];
                        } ));
               let length = local builder (value uint32) in
@@ -330,7 +325,6 @@ let () =
         ]);
   test "an argument a row fixes is no argument of the Truss call" (fun () ->
       let open Emit_c.Builder in
-      let uint64 = named "UInt64" in
       expect_status ~extra 1
         [
           built_entry (fun builder ->
@@ -374,11 +368,11 @@ let () =
               operate builder (Libc Pipe) [ Place (at read_end); Place (at write_end) ];
               let view = view_of builder "x" in
               operate builder (Libc Write)
-                [ Value (Copy (at write_end)); Place (at view); Value (usize 1) ];
+                [ Value (Copy (at write_end)); Place (at view); Value (constant_uint64 1) ];
               let waited = local builder (value waited_ty) in
               operate builder ~destination:(at waited) ~type_arguments:[ int32 ]
                 Storage_with_capacity
-                [ Value (usize 2) ];
+                [ Value (constant_uint64 2) ];
               operate builder ~type_arguments:[ int32 ] Storage_push
                 [ Place (at waited); Value (Copy (at read_end)) ];
               let reading = flags builder [ Pollin ] in
@@ -386,13 +380,15 @@ let () =
                 [ Place (at waited); Value (Copy (at reading)) ];
               let ready = local builder (value int32) in
               operate builder ~destination:(at ready) (Libc Poll)
-                [ Place (at waited); Value (usize 1); Value (constant_int32 1000) ];
+                [ Place (at waited); Value (constant_uint64 1); Value (constant_int32 1000) ];
               let actual = local builder (value int32) in
               emit builder
                 (Assign
                    ( at actual,
-                     Binary (Shift_right, Copy (Storage.at (at waited) (usize 1)), constant_int32 16)
-                   ));
+                     Binary
+                       ( Shift_right,
+                         Copy (Storage.at (at waited) (constant_uint64 1)),
+                         constant_int32 16 ) ));
               emit builder
                 (Assign (at actual, Binary (Bit_and, Copy (at actual), Copy (at reading))));
               emit builder (Assign (at ready, Binary (Multiply, Copy (at ready), Copy (at actual))));
@@ -409,13 +405,13 @@ let () =
       let glue =
         Glue.create env
           ~representation:(Monomorphic.representation standard_context)
-          ~usize:(Monomorphic.builtin USize) ()
+          ~uint64:(Monomorphic.builtin UInt64) ()
       in
       let int32 = Monomorphic.builtin Int32 in
       let view_ty = Storage.view_of_elements (Monomorphic.builtin UInt8) in
       let handle_ty = Monomorphic.builtin Handle in
       let types : Intrinsics.types =
-        { usize = Monomorphic.builtin USize; string_slice = standard "text" "StringSlice" () }
+        { uint64 = Monomorphic.builtin UInt64; string_slice = standard "text" "StringSlice" () }
       in
       let entry =
         let builder = Emit_c.Builder.create env ~key:(key "entry") in
@@ -426,7 +422,7 @@ let () =
           (Assign
              ( at name,
                Storage.view view_ty ~elements:(Constant (Bytes text))
-                 ~length:(usize (String.length text)) ));
+                 ~length:(constant_uint64 (String.length text)) ));
         let opened () =
           let descriptor = local builder (value int32) in
           ignore
@@ -483,10 +479,10 @@ let () =
               let storage = local builder (value bytes_ty) in
               checked builder ~destination:(at storage) ~type_arguments:[ uint8 ]
                 Storage_with_capacity
-                [ Value (usize 4) ];
-              let got = local builder (value isize) in
+                [ Value (constant_uint64 4) ];
+              let got = local builder (value int64) in
               checked builder ~destination:(at got) (Libc Read)
-                [ Value (constant_int32 0); Place (at storage); Value (usize 100) ];
+                [ Value (constant_int32 0); Place (at storage); Value (constant_uint64 100) ];
               let status = local builder (value int32) in
               emit builder (Assign (at status, Use (constant_int32 0)));
               status);
@@ -498,9 +494,9 @@ let () =
         [
           built_entry (fun builder ->
               let view = view_of builder "short" in
-              let wrote = local builder (value isize) in
+              let wrote = local builder (value int64) in
               checked builder ~destination:(at wrote) (Libc Write)
-                [ Value (constant_int32 1); Place (at view); Value (usize 100) ];
+                [ Value (constant_int32 1); Place (at view); Value (constant_uint64 100) ];
               let status = local builder (value int32) in
               emit builder (Assign (at status, Use (constant_int32 0)));
               status);

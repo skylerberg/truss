@@ -1,4 +1,4 @@
-fn describe(present: Option[String], limit: USize) -> String {
+fn describe(present: Option[String], limit: UInt64) -> String {
   if present is Some(text) && text.length() > limit {
     text.copy()
   } else if !(present is Some(_)) || limit == 0 {

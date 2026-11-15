@@ -41,8 +41,8 @@ public type ParseError =
   | InvalidScheme
   | InvalidHost
   | InvalidPort
-  | InvalidCharacter(offset: USize)
-  | InvalidPercentEncoding(offset: USize)
+  | InvalidCharacter(offset: UInt64)
+  | InvalidPercentEncoding(offset: UInt64)
   derives Equal
 
 impl Display for ParseError {
@@ -105,7 +105,7 @@ internal fn UrlPart.allows(self, byte: UInt8) -> Bool
   }
 }
 
-internal fn find_first_of(text: StringSlice, from: USize, to: USize, first: UInt8, second: UInt8, third: UInt8) -> USize
+internal fn find_first_of(text: StringSlice, from: UInt64, to: UInt64, first: UInt8, second: UInt8, third: UInt8) -> UInt64
   requires from <= to
   requires to <= text.length()
   ensures from <= result
@@ -126,7 +126,7 @@ internal fn find_first_of(text: StringSlice, from: USize, to: USize, first: UInt
   index
 }
 
-internal fn find_last(text: StringSlice, from: USize, to: USize, byte: UInt8) -> USize
+internal fn find_last(text: StringSlice, from: UInt64, to: UInt64, byte: UInt8) -> UInt64
   requires from <= to
   requires to <= text.length()
   ensures from <= result
@@ -150,7 +150,7 @@ internal fn find_last(text: StringSlice, from: USize, to: USize, byte: UInt8) ->
   to
 }
 
-internal fn validate(text: StringSlice, from: USize, to: USize, place: UrlPart) -> Option[ParseError]
+internal fn validate(text: StringSlice, from: UInt64, to: UInt64, place: UrlPart) -> Option[ParseError]
   requires from <= to
   requires to <= text.length()
   cost time O(to - from)
@@ -180,7 +180,7 @@ internal fn validate(text: StringSlice, from: USize, to: USize, place: UrlPart) 
   None
 }
 
-internal fn scheme_end(text: StringSlice) -> USize
+internal fn scheme_end(text: StringSlice) -> UInt64
   ensures result <= text.length()
   cost time O(text.length())
   cost allocations == 0
@@ -192,7 +192,7 @@ internal fn scheme_end(text: StringSlice) -> USize
   if !((first >= 65 && first <= 90) || (first >= 97 && first <= 122)) {
     return text.length()
   }
-  var index: USize = 1
+  var index: UInt64 = 1
   while index < text.length()
     invariant index <= text.length()
     decreases text.length() - index
@@ -213,7 +213,7 @@ internal fn scheme_end(text: StringSlice) -> USize
   text.length()
 }
 
-internal fn parse_port(text: StringSlice, from: USize, to: USize) -> Result[Option[UInt16], ParseError]
+internal fn parse_port(text: StringSlice, from: UInt64, to: UInt64) -> Result[Option[UInt16], ParseError]
   requires from <= to
   requires to <= text.length()
   cost time O(to - from)
@@ -227,7 +227,7 @@ internal fn parse_port(text: StringSlice, from: USize, to: USize) -> Result[Opti
   }
 }
 
-internal fn parse_host(text: StringSlice, from: USize, to: USize) -> Result[Host, ParseError]
+internal fn parse_host(text: StringSlice, from: UInt64, to: UInt64) -> Result[Host, ParseError]
   requires from <= to
   requires to <= text.length()
   cost time O(to - from)
@@ -250,7 +250,7 @@ internal fn parse_host(text: StringSlice, from: USize, to: USize) -> Result[Host
 
 internal type Authority(user_information: Option[String], host: Host, port: Option[UInt16])
 
-internal fn parse_authority(text: StringSlice, from: USize, to: USize) -> Result[Authority, ParseError]
+internal fn parse_authority(text: StringSlice, from: UInt64, to: UInt64) -> Result[Authority, ParseError]
   requires from <= to
   requires to <= text.length()
   cost time O(to - from)
@@ -294,7 +294,7 @@ internal fn parse_authority(text: StringSlice, from: USize, to: USize) -> Result
 
 internal type PathQueryFragment(path: String, query: Option[String], fragment: Option[String])
 
-internal fn parse_path_query_fragment(text: StringSlice, from: USize) -> Result[PathQueryFragment, ParseError]
+internal fn parse_path_query_fragment(text: StringSlice, from: UInt64) -> Result[PathQueryFragment, ParseError]
   requires from <= text.length()
   cost time O(text.length() - from)
 {
@@ -326,7 +326,7 @@ internal fn parse_path_query_fragment(text: StringSlice, from: USize) -> Result[
   Ok(PathQueryFragment(path: text.part(from, to: path_end).to_string(), query: own query, fragment: own fragment))
 }
 
-internal fn starts_authority(text: StringSlice, from: USize) -> Bool
+internal fn starts_authority(text: StringSlice, from: UInt64) -> Bool
   requires from <= text.length()
   ensures result == (text.length() - from >= 2 && text.byte(from) == 47 && text.byte(from + 1) == 47)
   cost time O(1)
@@ -335,7 +335,7 @@ internal fn starts_authority(text: StringSlice, from: USize) -> Bool
   text.length() - from >= 2 && text.byte(from) == 47 && text.byte(from + 1) == 47
 }
 
-internal fn authority_end(text: StringSlice, from: USize) -> USize
+internal fn authority_end(text: StringSlice, from: UInt64) -> UInt64
   requires from <= text.length()
   requires starts_authority(text, from: from)
   ensures from + 2 <= result
@@ -396,11 +396,11 @@ internal fn EscapeSet.allows(self, byte: UInt8) -> Bool
 internal fn percent_encode(text: StringSlice, how: EscapeSet) -> String
   cost time O(text.length())
 {
-  if text.length() > USize.maximum / 8 {
+  if text.length() > UInt64.maximum / 8 {
     intrinsic::crash("a string cannot hold that many bytes".slice())
   }
   let form = how == EscapeSet.AsForm
-  var extra: USize = 0
+  var extra: UInt64 = 0
   for index in 0..text.length()
     invariant extra <= 2 * index
   {
@@ -431,7 +431,7 @@ internal fn percent_encode(text: StringSlice, how: EscapeSet) -> String
   String(storage: own output)
 }
 
-internal fn percent_decode_bytes(text: StringSlice, from: USize, to: USize, form: Bool) -> Result[List[UInt8], ParseError]
+internal fn percent_decode_bytes(text: StringSlice, from: UInt64, to: UInt64, form: Bool) -> Result[List[UInt8], ParseError]
   requires from <= to
   requires to <= text.length()
   ensures !(result is Ok(bytes) && bytes.length() > to - from)
@@ -467,7 +467,7 @@ internal fn percent_decode_bytes(text: StringSlice, from: USize, to: USize, form
   Ok(List(storage: own output))
 }
 
-internal fn percent_decode(text: StringSlice, from: USize, to: USize, form: Bool) -> Result[String, ParseError]
+internal fn percent_decode(text: StringSlice, from: UInt64, to: UInt64, form: Bool) -> Result[String, ParseError]
   requires from <= to
   requires to <= text.length()
   cost time O(to - from)
@@ -479,7 +479,7 @@ internal fn percent_decode(text: StringSlice, from: USize, to: USize, form: Bool
   }
 }
 
-internal fn parse_parameter(text: StringSlice, from: USize, to: USize) -> Result[Parameter, ParseError]
+internal fn parse_parameter(text: StringSlice, from: UInt64, to: UInt64) -> Result[Parameter, ParseError]
   requires from <= to
   requires to <= text.length()
   cost time O(to - from)
@@ -490,12 +490,12 @@ internal fn parse_parameter(text: StringSlice, from: USize, to: USize) -> Result
   Ok(Parameter(name: own name, value: own value))
 }
 
-internal fn count_byte(text: StringSlice, byte: UInt8) -> USize
+internal fn count_byte(text: StringSlice, byte: UInt8) -> UInt64
   ensures result <= text.length()
   cost time O(text.length())
   cost allocations == 0
 {
-  var count: USize = 0
+  var count: UInt64 = 0
   for index in 0..text.length()
     invariant count <= index
     cost allocations == 0
@@ -507,7 +507,7 @@ internal fn count_byte(text: StringSlice, byte: UInt8) -> USize
   count
 }
 
-internal fn find_last_slash(output: intrinsic::Storage[UInt8]) -> USize
+internal fn find_last_slash(output: intrinsic::Storage[UInt8]) -> UInt64
   ensures result <= intrinsic::storage_length(output)
   cost time O(intrinsic::storage_length(output) - result)
   cost allocations == 0
@@ -524,7 +524,7 @@ internal fn find_last_slash(output: intrinsic::Storage[UInt8]) -> USize
   if length > 0 { length - 1 } else { 0 }
 }
 
-internal fn is_dot(text: StringSlice, from: USize, to: USize) -> Bool
+internal fn is_dot(text: StringSlice, from: UInt64, to: UInt64) -> Bool
   requires from <= to
   requires to <= text.length()
   cost time O(1)
@@ -533,7 +533,7 @@ internal fn is_dot(text: StringSlice, from: USize, to: USize) -> Bool
   to - from == 1 && text.byte(from) == 46
 }
 
-internal fn is_double_dot(text: StringSlice, from: USize, to: USize) -> Bool
+internal fn is_double_dot(text: StringSlice, from: UInt64, to: UInt64) -> Bool
   requires from <= to
   requires to <= text.length()
   cost time O(1)
@@ -548,7 +548,7 @@ internal fn remove_dot_segments(path: StringSlice) -> String
 {
   let length = path.length()
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length)
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < length
     invariant index <= length
     invariant intrinsic::storage_length(output) <= index
@@ -655,7 +655,7 @@ public fn decode_query(text: StringSlice) -> Result[List[Parameter], ParseError]
   var output: intrinsic::Storage[Parameter] = intrinsic::storage_with_capacity(room)
   var failure: Option[ParseError] = None
   var failed = false
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < text.length() && !failed
     invariant index <= text.length()
     invariant intrinsic::storage_length(output) <= room
@@ -742,7 +742,7 @@ public fn Url.path_segments(self) -> List[String]
   }
   let room = count_byte(path, byte: 47) + 1
   var output: intrinsic::Storage[String] = intrinsic::storage_with_capacity(room)
-  var index: USize = if path.byte(0) == 47 { 1 } else { 0 }
+  var index: UInt64 = if path.byte(0) == 47 { 1 } else { 0 }
   var more = true
   while more && index <= path.length()
     invariant index <= path.length() + 1
@@ -806,7 +806,7 @@ public fn Url.join(self, reference: StringSlice) -> Result[Url, ParseError]
     absolute.path = remove_dot_segments(absolute.path.slice())
     return Ok(own absolute)
   }
-  var from: USize = 0
+  var from: UInt64 = 0
   var authority: Option[Authority] = None
   if starts_authority(reference, from: 0) {
     let end = find_first_of(reference, from: 2, to: reference.length(), first: 47, second: 63, third: 35)
@@ -997,7 +997,7 @@ impl FromTemplate for Url {
     requires is_valid_template(template.literals)
   {
     var text = ""
-    var index: USize = 0
+    var index: UInt64 = 0
     while index < template.literals.length()
       invariant index <= template.literals.length()
       decreases template.literals.length() - index
@@ -1027,7 +1027,7 @@ internal fn template_text(literals: Slice[text::Literal], part: StringSlice) -> 
   cost time finite
 {
   var text = ""
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < literals.length()
     invariant index <= literals.length()
     decreases literals.length() - index
@@ -1041,7 +1041,7 @@ internal fn template_text(literals: Slice[text::Literal], part: StringSlice) -> 
   text
 }
 
-internal fn path_start(text: StringSlice) -> USize
+internal fn path_start(text: StringSlice) -> UInt64
   ensures result <= text.length()
   cost time O(text.length())
 {

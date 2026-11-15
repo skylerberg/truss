@@ -1,6 +1,6 @@
-type Holder(items: List[Int64], count: USize)
+type Holder(items: List[Int64], count: UInt64)
 
-fn wait(count: USize) -> Result[USize, USize]
+fn wait(count: UInt64) -> Result[UInt64, UInt64]
   uses Clock
 {
   Ok(count)

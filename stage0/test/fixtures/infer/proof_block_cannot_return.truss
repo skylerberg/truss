@@ -1,4 +1,4 @@
-fn f(x: USize, divisor: USize) -> USize {
+fn f(x: UInt64, divisor: UInt64) -> UInt64 {
   proof {
     return 1
   }

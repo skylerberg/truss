@@ -9,8 +9,6 @@ type builtin =
   | UInt16
   | UInt32
   | UInt64
-  | USize
-  | ISize
   | Float32
   | Float64
   | Bool
@@ -34,8 +32,6 @@ let builtins =
     UInt16;
     UInt32;
     UInt64;
-    USize;
-    ISize;
     Float32;
     Float64;
     Bool;
@@ -59,8 +55,6 @@ let builtin_name = function
   | UInt16 -> "UInt16"
   | UInt32 -> "UInt32"
   | UInt64 -> "UInt64"
-  | USize -> "USize"
-  | ISize -> "ISize"
   | Float32 -> "Float32"
   | Float64 -> "Float64"
   | Bool -> "Bool"
@@ -87,8 +81,6 @@ let libc_builtin : Libc.scalar -> builtin = function
   | UInt32 -> UInt32
   | Int64 -> Int64
   | UInt64 -> UInt64
-  | USize -> USize
-  | ISize -> ISize
   | Float32 -> Float32
   | Float64 -> Float64
 

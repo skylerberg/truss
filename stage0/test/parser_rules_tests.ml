@@ -390,10 +390,10 @@ let () =
       if codes diagnostics <> [ "parser.as_conversion" ] then
         fail "got [%s]" (String.concat "; " (codes diagnostics)));
   test "a comparison in a function type inside angle brackets stays a comparison" (fun () ->
-      let statements, _ = body_of "let checks: List<(fn(index: USize) requires index < 3)> = []" in
+      let statements, _ = body_of "let checks: List<(fn(index: UInt64) requires index < 3)> = []" in
       if
         List.map Syntax_print.statement statements
-        <> [ "(let checks : List[(fn (index: USize) (requires (< index 3)))] (list))" ]
+        <> [ "(let checks : List[(fn (index: UInt64) (requires (< index 3)))] (list))" ]
       then fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
   test "Shape::Circle" (fun () ->
       body_error "let shape = Shape::Circle(radius: 1.0)" ~code:Path_separator ~at:"::"

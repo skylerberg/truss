@@ -58,7 +58,7 @@ fn checked(text: own String) -> Result[String, ParseError] {
   Ok(own text)
 }
 
-fn twice(text: String) -> Result[USize, ParseError] {
+fn twice(text: String) -> Result[UInt64, ParseError] {
   let value = checked(text.copy())?
   Ok(value.length() * 2)
 }

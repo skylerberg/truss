@@ -145,7 +145,7 @@ let () =
               local ~name:"count" (value int32);
               local (Environment 0);
               local (value (Function work));
-              local (value usize);
+              local (value uint64);
               local (Raw Bool);
               local (Raw Bool);
               local (value int32);

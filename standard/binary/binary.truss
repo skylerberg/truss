@@ -4,7 +4,7 @@ public type ByteOrder = BigEndian | LittleEndian
   derives Equal
 
 public type DecodeError =
-  | UnexpectedEnd(needed: USize, available: USize)
+  | UnexpectedEnd(needed: UInt64, available: UInt64)
   | Overlong
   derives Equal
 
@@ -24,7 +24,7 @@ impl Display for DecodeError {
   }
 }
 
-public opaque type Decoder(bytes: Slice[UInt8], position: USize)
+public opaque type Decoder(bytes: Slice[UInt8], position: UInt64)
   invariant position <= bytes.length()
 
 public fn Decoder.new(bytes: Slice[UInt8]) -> Decoder
@@ -34,7 +34,7 @@ public fn Decoder.new(bytes: Slice[UInt8]) -> Decoder
   Decoder(bytes: bytes, position: 0)
 }
 
-public fn Decoder.position(self) -> USize
+public fn Decoder.position(self) -> UInt64
   ensures result == (self.position)
   cost time O(1)
 {
@@ -54,7 +54,7 @@ public fn Decoder.is_at_end(self) -> Bool
   self.position == self.bytes.length()
 }
 
-public fn Decoder.skip(mut self, count: USize) -> Result[Unit, DecodeError]
+public fn Decoder.skip(mut self, count: UInt64) -> Result[Unit, DecodeError]
   cost time O(1)
 {
   let available = self.bytes.length() - self.position
@@ -65,7 +65,7 @@ public fn Decoder.skip(mut self, count: USize) -> Result[Unit, DecodeError]
   Ok(Unit)
 }
 
-public fn Decoder.bytes(mut self, count: USize) -> Result[Slice[UInt8], DecodeError]
+public fn Decoder.bytes(mut self, count: UInt64) -> Result[Slice[UInt8], DecodeError]
   ensures match result {
     Ok(chunk) => chunk.length() == count
     Err(_) => true
@@ -182,7 +182,7 @@ public fn Decoder.variable_uint64(mut self) -> Result[UInt64, DecodeError]
   cost time O(1)
 {
   var value: UInt64 = 0
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < 10
     invariant index <= 10
     invariant self.position <= self.bytes.length()
@@ -232,7 +232,7 @@ public fn Encoder.onto(bytes: own List[UInt8]) -> Encoder
   Encoder(bytes: own bytes)
 }
 
-public fn Encoder.length(self) -> USize
+public fn Encoder.length(self) -> UInt64
   ensures result == (self.bytes.length())
   cost time O(1)
 {
@@ -343,7 +343,7 @@ public fn Encoder.variable_uint64(mut self, value: UInt64)
   cost amortized time O(1)
 {
   var groups: Array[UInt8, 10] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-  var count: USize = 0
+  var count: UInt64 = 0
   var more = true
   while more
     invariant count <= 10

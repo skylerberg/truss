@@ -7,7 +7,7 @@ fn Holder.label(self) lends Option[String] {
 
 test "lent" {
   let holder = Holder(id: 1)
-  var count: USize = 0
+  var count: UInt64 = 0
   while count < 3 && holder.label() is Some(text) {
     assert text == "label 1"
     count = count.saturating_add(1)

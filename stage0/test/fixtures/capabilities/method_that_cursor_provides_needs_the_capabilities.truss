@@ -1,4 +1,4 @@
-fn length() -> USize {
+fn length() -> UInt64 {
   var cursor = readings(3)
   own cursor.count()
 }

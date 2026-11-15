@@ -3,11 +3,11 @@ type Shelf(titles: List[String])
 impl Iterable for Shelf {
   type Element = String
 
-  fn count(self) -> USize {
+  fn count(self) -> UInt64 {
     self.titles.count()
   }
 
-  fn element(self, position: USize) lends String {
+  fn element(self, position: UInt64) lends String {
     let label = "${self.titles.length()} titles on the shelf"
     let _ = label.length()
     self.titles[position]
@@ -18,7 +18,7 @@ fn any_negative(items: List[Int64]) -> Bool {
   exists item in items => item < 0
 }
 
-fn all_short(names: Slice[String], under: USize) -> Bool {
+fn all_short(names: Slice[String], under: UInt64) -> Bool {
   forall name in names => name.length() < under
 }
 

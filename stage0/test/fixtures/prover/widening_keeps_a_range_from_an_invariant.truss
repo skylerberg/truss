@@ -1,8 +1,8 @@
 type Digit(value: UInt8)
   invariant value >= 1 && value <= 9
 
-fn digit_index(digit: Digit) -> USize
+fn digit_index(digit: Digit) -> UInt64
   ensures result < 9
 {
-  USize.from(digit.value - 1)
+  UInt64.from(digit.value - 1)
 }

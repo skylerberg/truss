@@ -1,7 +1,7 @@
-fn greet(name: StringSlice = "world", tags: Slice[Int64] = [1, 2]) -> USize {
+fn greet(name: StringSlice = "world", tags: Slice[Int64] = [1, 2]) -> UInt64 {
   name.length() + tags.length()
 }
 
-fn f() -> USize {
+fn f() -> UInt64 {
   greet() + greet("you")
 }

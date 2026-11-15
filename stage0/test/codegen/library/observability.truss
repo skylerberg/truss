@@ -67,7 +67,7 @@ test "concurrent tasks add to one counter without losing an increment" {
   provide simulation::World.new() {
     let registry = metrics::Registry.new()
     let total = registry.counter("total")
-    let rounds: USize = 100
+    let rounds: UInt64 = 100
     concurrent {
       for _ in 0..rounds { total.add() }
       for _ in 0..rounds { total.add() }

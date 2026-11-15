@@ -1,4 +1,4 @@
-fn f(holder: mut Holder) -> Result[USize, USize]
+fn f(holder: mut Holder) -> Result[UInt64, UInt64]
   uses Tasks, Clock
 {
   let moved = own holder.items

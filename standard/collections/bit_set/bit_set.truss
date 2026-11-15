@@ -1,7 +1,7 @@
 use standard::collections
 use standard::intrinsic
 
-fn word_count(length: USize) -> USize
+fn word_count(length: UInt64) -> UInt64
   ensures result == length / 64 + (if length % 64 == 0 { 0 } else { 1 })
   cost time O(1)
   cost allocations == 0
@@ -9,7 +9,7 @@ fn word_count(length: USize) -> USize
   length / 64 + (if length % 64 == 0 { 0 } else { 1 })
 }
 
-fn used_bits(length: USize) -> UInt64
+fn used_bits(length: UInt64) -> UInt64
   ensures length % 64 == 0 ==> result == UInt64.maximum
   ensures length % 64 != 0 ==> result == power(2, length % 64) - 1
   cost time O(1)
@@ -23,7 +23,7 @@ fn used_bits(length: USize) -> UInt64
   if used == 0 { UInt64.maximum } else { (one << used) - 1 }
 }
 
-theorem ones_fit_below_the_bit_length(word: UInt64, bits: USize)
+theorem ones_fit_below_the_bit_length(word: UInt64, bits: UInt64)
   requires bits < 64
   requires word < power(2, bits)
   ensures word.count_ones() <= bits
@@ -31,7 +31,7 @@ theorem ones_fit_below_the_bit_length(word: UInt64, bits: USize)
 {
 }
 
-theorem lowest_one_is_below_the_bit_length(word: UInt64, bits: USize)
+theorem lowest_one_is_below_the_bit_length(word: UInt64, bits: UInt64)
   requires bits <= 64
   requires word != 0
   requires bits == 64 || word < power(2, bits)
@@ -40,7 +40,7 @@ theorem lowest_one_is_below_the_bit_length(word: UInt64, bits: USize)
 {
 }
 
-theorem all_ones_below_a_bit_are_counted(word: UInt64, bits: USize)
+theorem all_ones_below_a_bit_are_counted(word: UInt64, bits: UInt64)
   requires bits <= 64
   requires word == power(2, bits) - 1
   ensures word.count_ones() == bits
@@ -49,7 +49,7 @@ theorem all_ones_below_a_bit_are_counted(word: UInt64, bits: USize)
   assert power(2, bits) <= power(2, 64)
 }
 
-fn zero_words(count: USize) -> List[UInt64]
+fn zero_words(count: UInt64) -> List[UInt64]
   ensures result.length() == count
   ensures forall i in 0..count => result.model()[i] == 0
   cost time O(count)
@@ -70,7 +70,7 @@ fn fill_words(words: mut List[UInt64], value: UInt64)
   cost time O(words.length())
   cost allocations == 0
 {
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < words.length()
     invariant index <= words.length()
     invariant words.length() == old(words.length())
@@ -83,14 +83,14 @@ fn fill_words(words: mut List[UInt64], value: UInt64)
   }
 }
 
-fn copy_words(words: mut List[UInt64], source: List[UInt64], count: USize)
+fn copy_words(words: mut List[UInt64], source: List[UInt64], count: UInt64)
   requires count <= words.length()
   requires count <= source.length()
   ensures words.length() == old(words.length())
   cost time O(count)
   cost allocations == 0
 {
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < count
     invariant index <= count
     invariant words.length() == old(words.length())
@@ -127,7 +127,7 @@ fn combine_words(words: mut Slice[UInt64], other: Slice[UInt64], how: Combinatio
   cost time O(words.length())
   cost allocations == 0
 {
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < words.length()
     invariant index <= words.length()
     invariant words.length() == old(words.length())
@@ -145,7 +145,7 @@ fn invert_words(words: mut List[UInt64])
   cost time O(words.length())
   cost allocations == 0
 {
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < words.length()
     invariant index <= words.length()
     invariant words.length() == old(words.length())
@@ -158,7 +158,7 @@ fn invert_words(words: mut List[UInt64])
   }
 }
 
-fn clear_unused_bits(words: mut List[UInt64], length: USize)
+fn clear_unused_bits(words: mut List[UInt64], length: UInt64)
   requires words.length() == word_count(length)
   ensures words.length() == old(words.length())
   ensures length % 64 == 0 || words[words.length() - 1] < power(2, length % 64)
@@ -171,7 +171,7 @@ fn clear_unused_bits(words: mut List[UInt64], length: USize)
   }
 }
 
-public fn collections::BitSet.new(length: USize) -> collections::BitSet
+public fn collections::BitSet.new(length: UInt64) -> collections::BitSet
   ensures result.length() == length
   ensures result.count_ones() == 0
   cost time O(length)
@@ -179,7 +179,7 @@ public fn collections::BitSet.new(length: USize) -> collections::BitSet
   collections::BitSet(words: zero_words(word_count(length)), length: length)
 }
 
-public fn collections::BitSet.length(self) -> USize
+public fn collections::BitSet.length(self) -> UInt64
   ensures result == (self.length)
   cost time O(1)
 {
@@ -193,7 +193,7 @@ public fn collections::BitSet.is_empty(self) -> Bool
   self.length == 0
 }
 
-internal fn collections::BitSet.bit(self, index: USize) -> Bool
+internal fn collections::BitSet.bit(self, index: UInt64) -> Bool
   requires index < self.length
   cost time O(1)
   cost allocations == 0
@@ -201,7 +201,7 @@ internal fn collections::BitSet.bit(self, index: USize) -> Bool
   ((self.words[index / 64] >> (index % 64)) & 1) == 1
 }
 
-internal fn collections::BitSet.assign_bit(mut self, index: USize, value: Bool)
+internal fn collections::BitSet.assign_bit(mut self, index: UInt64, value: Bool)
   requires index < self.length
   ensures self.length == old(self.length)
   cost time O(1)
@@ -213,14 +213,14 @@ internal fn collections::BitSet.assign_bit(mut self, index: USize, value: Bool)
   self.words[index / 64] = if value { word | bit } else { word & ~bit }
 }
 
-public fn collections::BitSet.get(self, index: USize) -> Option[Bool]
+public fn collections::BitSet.get(self, index: UInt64) -> Option[Bool]
   ensures (result is Some(_)) == (index < self.length())
   cost time O(1)
 {
   if index < self.length { Some(self.bit(index)) } else { None }
 }
 
-public fn collections::BitSet.flip(mut self, index: USize)
+public fn collections::BitSet.flip(mut self, index: UInt64)
   requires index < self.length()
   ensures self.length() == old(self.length())
   cost time O(1)
@@ -239,7 +239,7 @@ public fn collections::BitSet.fill(mut self, value: Bool)
   clear_unused_bits(mut self.words, length: self.length)
 }
 
-public fn collections::BitSet.resize(mut self, length: USize)
+public fn collections::BitSet.resize(mut self, length: UInt64)
   ensures self.length() == length
   cost time O(length)
 {
@@ -250,7 +250,7 @@ public fn collections::BitSet.resize(mut self, length: USize)
   self = collections::BitSet(words: own words, length: length)
 }
 
-public fn collections::BitSet.count_ones(self) -> USize
+public fn collections::BitSet.count_ones(self) -> UInt64
   ensures result <= self.length()
   ensures (forall i in 0..self.words.length() => self.words.model()[i] == 0) ==> result == 0
   ensures ((forall i in 0..self.length / 64 => self.words.model()[i] == UInt64.maximum)
@@ -259,8 +259,8 @@ public fn collections::BitSet.count_ones(self) -> USize
   cost time O(self.length())
 {
   let full = self.length / 64
-  var count: USize = 0
-  var index: USize = 0
+  var count: UInt64 = 0
+  var index: UInt64 = 0
   while index < full
     invariant index <= full
     invariant count <= 64 * index
@@ -289,7 +289,7 @@ public fn collections::BitSet.count_ones(self) -> USize
   count
 }
 
-public fn collections::BitSet.count_zeros(self) -> USize
+public fn collections::BitSet.count_zeros(self) -> UInt64
   ensures result <= self.length()
   ensures result == self.length() - self.count_ones()
   cost time O(self.length())
@@ -297,14 +297,14 @@ public fn collections::BitSet.count_zeros(self) -> USize
   self.length - self.count_ones()
 }
 
-public fn collections::BitSet.first_one(self) -> Option[USize]
+public fn collections::BitSet.first_one(self) -> Option[UInt64]
   ensures match result {
     Some(index) => index < self.length()
     None => self.count_ones() == 0
   }
   cost time O(self.length())
 {
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < self.words.length() && self.words[index] == 0
     invariant index <= self.words.length()
     invariant forall i in 0..index => self.words.model()[i] == 0
@@ -326,7 +326,7 @@ public fn collections::BitSet.first_one(self) -> Option[USize]
   Some(index * 64 + self.words[index].trailing_zeros())
 }
 
-public fn collections::BitSet.first_zero(self) -> Option[USize]
+public fn collections::BitSet.first_zero(self) -> Option[UInt64]
   ensures match result {
     Some(index) => index < self.length()
     None => self.count_zeros() == 0
@@ -334,7 +334,7 @@ public fn collections::BitSet.first_zero(self) -> Option[USize]
   cost time O(self.length())
 {
   let full = self.length / 64
-  var index: USize = 0
+  var index: UInt64 = 0
   while index < full && self.words[index] == UInt64.maximum
     invariant index <= full
     invariant forall i in 0..index => self.words.model()[i] == UInt64.maximum
@@ -363,11 +363,11 @@ public fn collections::BitSet.first_zero(self) -> Option[USize]
   Some(full * 64 + zeros.trailing_zeros())
 }
 
-public fn collections::BitSet.ones(self) -> List[USize]
+public fn collections::BitSet.ones(self) -> List[UInt64]
   cost time O(self.length())
 {
-  var parts: List[USize] = []
-  var index: USize = 0
+  var parts: List[UInt64] = []
+  var index: UInt64 = 0
   while index < self.words.length()
     invariant index <= self.words.length()
     decreases self.words.length() - index
@@ -448,10 +448,10 @@ public fn collections::BitSet.complement(mut self)
 }
 
 impl Index for collections::BitSet {
-  type Key = USize
+  type Key = UInt64
   type Output = Bool
 
-  fn contains_key(self, key: USize) -> Bool
+  fn contains_key(self, key: UInt64) -> Bool
     ensures result == (key < self.length())
     cost time O(1)
     cost allocations == 0
@@ -459,7 +459,7 @@ impl Index for collections::BitSet {
     key < self.length
   }
 
-  fn at(self, key: USize) lends Bool
+  fn at(self, key: UInt64) lends Bool
     requires key < self.length()
     cost time O(1)
     cost allocations == 0
@@ -469,7 +469,7 @@ impl Index for collections::BitSet {
 }
 
 impl IndexAssign for collections::BitSet {
-  fn accepts_key(self, key: USize) -> Bool
+  fn accepts_key(self, key: UInt64) -> Bool
     ensures result == (key < self.length())
     cost time O(1)
     cost allocations == 0
@@ -477,7 +477,7 @@ impl IndexAssign for collections::BitSet {
     key < self.length
   }
 
-  fn assign(mut self, key: own USize, value: own Bool)
+  fn assign(mut self, key: own UInt64, value: own Bool)
     requires key < self.length()
     ensures self.length() == old(self.length())
     cost time O(1)
@@ -490,14 +490,14 @@ impl IndexAssign for collections::BitSet {
 impl Iterable for collections::BitSet {
   type Element = Bool
 
-  fn count(self) -> USize
+  fn count(self) -> UInt64
     ensures result == self.length()
     cost time O(1)
   {
     self.length
   }
 
-  fn element(self, position: USize) lends Bool
+  fn element(self, position: UInt64) lends Bool
     requires position < self.count()
     cost time O(1)
   {

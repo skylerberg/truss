@@ -64,7 +64,7 @@ type context = {
   mutable order : key list;  (** Registered keys, most recent first *)
   mutable registered : unit Keys.t;
   mutable environments : (string * Lowered.ty) list Keys.t;
-  mutable bytes : (string * string) list;  (** Text and name, most recent first *)
+  bytes : (string, int) Hashtbl.t;
   mutable prototypes : (string * string) list;  (** Symbol and declaration, most recent first *)
   mutable anchors : (string * Path.t) list;
   mutable references : key list option;  (** While defining a key, the keys its text names *)
@@ -85,7 +85,7 @@ let new_context env prefix =
     order = [];
     registered = Keys.empty;
     environments = Keys.empty;
-    bytes = [];
+    bytes = Hashtbl.create 16;
     prototypes = [];
     anchors = [];
     references = None;

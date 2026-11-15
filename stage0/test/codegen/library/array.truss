@@ -26,7 +26,7 @@ test "a loop goes over an array's elements in order, and can change them" {
   }
   assert same_items(changed[..], expected: [10, 20, 30])
   let words: Array[String, 2] = ["a${1}", "bb${2}"]
-  var lengths: USize = 0
+  var lengths: UInt64 = 0
   for word in words {
     lengths += word.length()
   }
@@ -91,7 +91,7 @@ test "an array is made of copies of one value, or of a function's result for eac
   assert none[..].length() == 0
 }
 
-fn counted_square(index: USize) -> Int64 {
+fn counted_square(index: UInt64) -> Int64 {
   var total = 0
   for _ in 0..index {
     for _ in 0..index {
@@ -106,7 +106,7 @@ test "an array's elements are each given to a function, which makes a new array"
   let doubled: Array[Int64, 3] = numbers.map_each(fn(item) { item * 2 })
   assert same_items(doubled[..], expected: [2, 4, 6])
   let words: Array[String, 2] = ["a${1}", "bb${2}"]
-  let lengths: Array[USize, 2] = own words.map_each(fn(word) { word.length() })
+  let lengths: Array[UInt64, 2] = own words.map_each(fn(word) { word.length() })
   assert lengths[0] == 2
   assert lengths[1] == 3
 }

@@ -1,4 +1,4 @@
-fn f() -> USize {
+fn f() -> UInt64 {
   var user: Option[String] = Some("a".copy())
   match user {
     Some(present) => {

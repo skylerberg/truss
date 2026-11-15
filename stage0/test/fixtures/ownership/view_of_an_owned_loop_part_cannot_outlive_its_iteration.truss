@@ -1,4 +1,4 @@
-fn f(texts: own List[String], other: String) -> USize {
+fn f(texts: own List[String], other: String) -> UInt64 {
   var outer = other.slice()
   for text in own texts {
     outer = text.slice()

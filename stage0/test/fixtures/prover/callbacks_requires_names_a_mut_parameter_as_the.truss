@@ -1,9 +1,9 @@
-fn grow(limit: mut USize, visit: (fn(index: USize) -> Int64 requires index < limit)) -> Int64 {
+fn grow(limit: mut UInt64, visit: (fn(index: UInt64) -> Int64 requires index < limit)) -> Int64 {
   if limit < 100 { limit = limit + 1 }
   visit(limit - 1)
 }
 
 fn f(items: List[Int64]) -> Int64 {
-  var n: USize = 0
+  var n: UInt64 = 0
   grow(mut n, visit: fn(i) { items[i] })
 }

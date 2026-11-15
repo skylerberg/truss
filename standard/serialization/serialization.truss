@@ -15,15 +15,15 @@ public trait Serializer {
   fn unsigned(mut self, value: UInt64)
   fn float(mut self, value: Float64)
   fn text(mut self, value: StringSlice)
-  fn begin_list(mut self, length: USize)
+  fn begin_list(mut self, length: UInt64)
   fn end_list(mut self)
-  fn begin_record(mut self, length: USize)
+  fn begin_record(mut self, length: UInt64)
   fn field(mut self, name: StringSlice)
   fn end_record(mut self)
-  fn begin_map(mut self, length: USize)
+  fn begin_map(mut self, length: UInt64)
   fn key(mut self, key: StringSlice)
   fn end_map(mut self)
-  fn begin_variant(mut self, name: StringSlice, length: USize)
+  fn begin_variant(mut self, name: StringSlice, length: UInt64)
   fn end_variant(mut self)
 }
 
@@ -168,21 +168,6 @@ impl Deserialize for Int64 {
   }
 }
 
-impl Serialize for ISize {
-  fn serialize[Sink: Serializer](self, sink: mut Sink) {
-    mut sink.integer(Int64.from(self))
-  }
-}
-
-impl Deserialize for ISize {
-  fn deserialize[Source: Deserializer](source: mut Source) -> Result[ISize, Error] {
-    match ISize.try_from(mut source.integer()?) {
-      Ok(number) => Ok(number)
-      Err(_) => Err(out_of_range(source, type_name: "ISize"))
-    }
-  }
-}
-
 impl Serialize for UInt8 {
   fn serialize[Sink: Serializer](self, sink: mut Sink) {
     mut sink.unsigned(UInt64.from(self))
@@ -237,21 +222,6 @@ impl Serialize for UInt64 {
 impl Deserialize for UInt64 {
   fn deserialize[Source: Deserializer](source: mut Source) -> Result[UInt64, Error] {
     mut source.unsigned()
-  }
-}
-
-impl Serialize for USize {
-  fn serialize[Sink: Serializer](self, sink: mut Sink) {
-    mut sink.unsigned(UInt64.from(self))
-  }
-}
-
-impl Deserialize for USize {
-  fn deserialize[Source: Deserializer](source: mut Source) -> Result[USize, Error] {
-    match USize.try_from(mut source.unsigned()?) {
-      Ok(number) => Ok(number)
-      Err(_) => Err(out_of_range(source, type_name: "USize"))
-    }
   }
 }
 
@@ -564,7 +534,7 @@ impl Serializer for TreeWriter[Node: Tree] {
     put(mut self, node: Node.from_text(value.to_string()))
   }
 
-  fn begin_list(mut self, length: USize) {
+  fn begin_list(mut self, length: UInt64) {
     mut self.open.push(Open.Items)
     mut self.items.push(List.with_capacity(length))
   }
@@ -577,7 +547,7 @@ impl Serializer for TreeWriter[Node: Tree] {
     }
   }
 
-  fn begin_record(mut self, length: USize) {
+  fn begin_record(mut self, length: UInt64) {
     open_members(mut self, open: Open.Members)
   }
 
@@ -590,7 +560,7 @@ impl Serializer for TreeWriter[Node: Tree] {
     put(mut self, node: Node.from_members(own members))
   }
 
-  fn begin_map(mut self, length: USize) {
+  fn begin_map(mut self, length: UInt64) {
     open_members(mut self, open: Open.Members)
   }
 
@@ -603,7 +573,7 @@ impl Serializer for TreeWriter[Node: Tree] {
     put(mut self, node: Node.from_members(own members))
   }
 
-  fn begin_variant(mut self, name: StringSlice, length: USize) {
+  fn begin_variant(mut self, name: StringSlice, length: UInt64) {
     if length == 0 {
       put(mut self, node: Node.from_text(name.to_string()))
       mut self.open.push(Open.UnitVariant)
@@ -635,7 +605,7 @@ impl Serializer for TreeWriter[Node: Tree] {
 }
 
 type Reading[Node] =
-  | Items(items: List[Node], next: USize)
+  | Items(items: List[Node], next: UInt64)
   | Members(members: Map[String, Node])
   | Entries(keys: List[String], values: List[Node])
 

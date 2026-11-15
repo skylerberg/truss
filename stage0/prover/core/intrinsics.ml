@@ -336,7 +336,7 @@ let buffer_operation context frame ~(site : Invocation.site) (operation : Intrin
     element operands ~changed known =
   let length sequence = sequence_length context element sequence in
   let fits value =
-    Logic.(Operation ("<=", [ int 0; value ]) &&& in_range (Types.builtin ISize) value)
+    Logic.(Operation ("<=", [ int 0; value ]) &&& in_range (Types.builtin Int64) value)
   in
   let model builtin term =
     let sequence = buffer_model context builtin element term in
@@ -566,7 +566,7 @@ let scalar_bytes element : int option =
   | Some (Int8 | UInt8 | Bool) -> Some 1
   | Some (Int16 | UInt16) -> Some 2
   | Some (Int32 | UInt32 | Float32 | Character) -> Some 4
-  | Some (Int64 | UInt64 | USize | ISize | Float64) -> Some 8
+  | Some (Int64 | UInt64 | Float64) -> Some 8
   | _ -> None
 
 let intrinsic context frame ~(site : Invocation.site) (operation : Intrinsic.operation) types

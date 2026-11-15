@@ -1,5 +1,5 @@
-fn widen(value: UInt8) -> USize
+fn widen(value: UInt8) -> UInt64
   cost time O(1)
 {
-  USize.from(value)
+  UInt64.from(value)
 }

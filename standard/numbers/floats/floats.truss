@@ -324,7 +324,7 @@ impl Negate for Float64 {
 
 impl Hash for Float64 {
   fn hash(self, hasher: mut Hasher) {
-    mut hasher.write(intrinsic::convert(intrinsic::to_bits[Float64, UInt64](self)))
+    mut hasher.write(intrinsic::to_bits[Float64, UInt64](self))
   }
 }
 

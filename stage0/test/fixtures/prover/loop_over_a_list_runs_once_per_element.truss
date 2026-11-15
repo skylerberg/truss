@@ -1,7 +1,7 @@
-fn f(items: List[Int64]) -> USize
+fn f(items: List[Int64]) -> UInt64
   ensures result == items.length()
 {
-  var seen: USize = 0
+  var seen: UInt64 = 0
   for item in items
     invariant seen == visited.length()
   {

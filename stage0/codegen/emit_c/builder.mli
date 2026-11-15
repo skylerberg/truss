@@ -48,8 +48,6 @@ val branch : t -> Lowered.operand -> yes:Lowered.block -> no:Lowered.block -> un
 (* Runs [then_] when [condition] is true, then goes on in a new block. *)
 val when_ : t -> Lowered.operand -> (unit -> unit) -> unit
 
-(* Runs [body] for each index from 0 to before [count]. The index is a local
-   of [index_type], an integer of the kind [integer], [USize] by default. *)
 val loop :
   t ->
   ?integer:Memory_layout.integer ->
@@ -68,4 +66,4 @@ val build : ?returns:bool -> t -> parameters:Lowered.local list -> result:Lowere
 val built : t -> instance
 val at : Lowered.local -> Lowered.place
 val ( / ) : Lowered.place -> Lowered.projection -> Lowered.place
-val usize : int -> Lowered.operand
+val constant_uint64 : int -> Lowered.operand

@@ -53,7 +53,7 @@ theorem ascending_above[Element: Ordered](
   }
 }
 
-fn collections::SortedSet[Element: Ordered].search(self, element: Element) -> Result[USize, USize]
+fn collections::SortedSet[Element: Ordered].search(self, element: Element) -> Result[UInt64, UInt64]
   ensures match result {
     Ok(index) => index < self.elements.length()
       && self.elements.model()[index] == element
@@ -65,7 +65,7 @@ fn collections::SortedSet[Element: Ordered].search(self, element: Element) -> Re
   }
   cost time O(log(self.elements.length()) * time(Element.compare))
 {
-  var low: USize = 0
+  var low: UInt64 = 0
   var high = self.elements.length()
   while low < high
     invariant low <= high
@@ -102,7 +102,7 @@ fn collections::SortedSet[Element: Ordered].search(self, element: Element) -> Re
   Err(low)
 }
 
-theorem present_where_equal[Element: Ordered](set: collections::SortedSet[Element], element: Element, position: USize)
+theorem present_where_equal[Element: Ordered](set: collections::SortedSet[Element], element: Element, position: UInt64)
   requires position < set.elements.length()
   requires set.elements.model()[position] == element
   ensures set.search(element) is Ok(_)
@@ -120,7 +120,7 @@ theorem present_where_equal[Element: Ordered](set: collections::SortedSet[Elemen
   }
 }
 
-theorem absent_where_split[Element: Ordered](set: collections::SortedSet[Element], element: Element, split: USize)
+theorem absent_where_split[Element: Ordered](set: collections::SortedSet[Element], element: Element, split: UInt64)
   requires split <= set.elements.length()
   requires forall i in 0..split => set.elements.model()[i] < element
   requires forall i in split..set.elements.length() => element < set.elements.model()[i]
@@ -139,7 +139,7 @@ theorem absent_where_split[Element: Ordered](set: collections::SortedSet[Element
   }
 }
 
-fn collections::SortedSet[Element: Ordered].index_at_or_after(self, element: Element) -> USize
+fn collections::SortedSet[Element: Ordered].index_at_or_after(self, element: Element) -> UInt64
   ensures result <= self.elements.length()
   ensures forall i in 0..result => self.elements.model()[i] < element
   ensures forall i in result..self.elements.length() => element <= self.elements.model()[i]
@@ -157,7 +157,7 @@ fn collections::SortedSet[Element: Ordered].index_at_or_after(self, element: Ele
   }
 }
 
-fn collections::SortedSet[Element: Ordered].index_after(self, element: Element) -> USize
+fn collections::SortedSet[Element: Ordered].index_after(self, element: Element) -> UInt64
   ensures result <= self.elements.length()
   ensures forall i in 0..result => self.elements.model()[i] <= element
   ensures forall i in result..self.elements.length() => element < self.elements.model()[i]
@@ -175,7 +175,7 @@ fn collections::SortedSet[Element: Ordered].index_after(self, element: Element) 
   }
 }
 
-type Numbered[Element](element: Element, ordinal: USize)
+type Numbered[Element](element: Element, ordinal: UInt64)
 
 fn set_of[Element: Ordered](elements: own List[Element]) -> collections::SortedSet[Element]
   cost time finite
@@ -285,8 +285,8 @@ fn combined[Element: Ordered + Copyable](
     Some(steps) => {
       let room = if keeps_second_only { steps } else { first.length() }
       var output: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(room)
-      var index: USize = 0
-      var other_index: USize = 0
+      var index: UInt64 = 0
+      var other_index: UInt64 = 0
       for _ in 0..steps
         invariant intrinsic::storage_capacity(output) == room
         invariant index <= first.length()
@@ -365,7 +365,7 @@ public fn collections::SortedSet[Element: Ordered].collect[Source: Cursor[Elemen
   set_of(List.collect(own source))
 }
 
-public fn collections::SortedSet[Element: Ordered].length(self) -> USize
+public fn collections::SortedSet[Element: Ordered].length(self) -> UInt64
   ensures result == (self.elements.length())
   cost time O(1)
 {
@@ -529,7 +529,7 @@ public fn collections::SortedSet[Element: Ordered].retain(mut self, keep: (fn(El
 {
   var elements = map::exchange(mut self.elements, value: [])
   let count = elements.length()
-  var retained: USize = 0
+  var retained: UInt64 = 0
   for index in 0..count
     invariant elements.length() == count
     invariant retained <= index
@@ -568,8 +568,8 @@ public fn collections::SortedSet[Element: Ordered].extend[Source: Cursor[Element
 public fn collections::SortedSet[Element: Ordered].is_subset_of(self, other: collections::SortedSet[Element]) -> Bool
   cost time O((self.length() + other.length()) * time(Element.compare))
 {
-  var index: USize = 0
-  var other_index: USize = 0
+  var index: UInt64 = 0
+  var other_index: UInt64 = 0
   while index < self.elements.length() && other_index < other.elements.length()
     invariant index <= self.elements.length()
     invariant other_index <= other.elements.length()
@@ -601,8 +601,8 @@ public fn collections::SortedSet[Element: Ordered].is_superset_of(self, other: c
 public fn collections::SortedSet[Element: Ordered].is_disjoint_from(self, other: collections::SortedSet[Element]) -> Bool
   cost time O((self.length() + other.length()) * time(Element.compare))
 {
-  var index: USize = 0
-  var other_index: USize = 0
+  var index: UInt64 = 0
+  var other_index: UInt64 = 0
   while index < self.elements.length() && other_index < other.elements.length()
     invariant index <= self.elements.length()
     invariant other_index <= other.elements.length()
@@ -681,14 +681,14 @@ public fn collections::SortedSet[Element: Ordered + Copyable].difference(
 impl Iterable for collections::SortedSet[Element: Ordered] {
   type Element = Element
 
-  fn count(self) -> USize
+  fn count(self) -> UInt64
     ensures result == self.length()
     cost time O(1)
   {
     self.elements.length()
   }
 
-  fn element(self, position: USize) lends Element
+  fn element(self, position: UInt64) lends Element
     requires position < self.count()
     cost time O(1)
   {

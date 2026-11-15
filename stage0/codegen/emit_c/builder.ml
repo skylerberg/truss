@@ -207,7 +207,7 @@ let at = Lowered.local_place
 let ( / ) (place : Lowered.place) projection : Lowered.place =
   { place with projections = place.projections @ [ projection ] }
 
-let usize number = Lowered.Constant (Integer (USize, Z.of_int number))
+let constant_uint64 number = Lowered.Constant (Integer (UInt64, Z.of_int number))
 
 let branch builder value ~yes ~no =
   finish builder (Switch { value; cases = [ (Z.one, yes) ]; default = Some no })
@@ -221,7 +221,7 @@ let when_ builder condition then_ =
   finish builder (Goto after);
   start builder after
 
-let loop builder ?(integer = Memory_layout.USize) ~index_type ~count body =
+let loop builder ?(integer = Memory_layout.UInt64) ~index_type ~count body =
   let constant number = Lowered.Constant (Integer (integer, Z.of_int number)) in
   let index = local builder ~name:"index" index_type in
   let going = local builder (Raw Bool) in

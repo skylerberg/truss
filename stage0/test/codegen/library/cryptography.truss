@@ -2,7 +2,7 @@ use standard::cryptography
 use standard::hex
 use standard::random
 
-fn letters(count: USize) -> List[UInt8] {
+fn letters(count: UInt64) -> List[UInt8] {
   List.filled(97, count: count)
 }
 
@@ -199,11 +199,11 @@ test "bytes compare equal only when they are the same bytes" {
   assert cryptography::constant_time_equal("".bytes(), second: "".bytes())
 }
 
-fn pattern(count: USize) -> List[UInt8] {
+fn pattern(count: UInt64) -> List[UInt8] {
   List.generate(count, make: fn(index) { pattern_byte(index) })
 }
 
-fn pattern_byte(index: USize) -> UInt8 {
+fn pattern_byte(index: UInt64) -> UInt8 {
   let small = index % 251
   match UInt8.try_from(small) {
     Ok(byte) => byte
@@ -242,7 +242,7 @@ fn keyed_blake3_of(bytes: Slice[UInt8]) -> String {
   var words: Array[UInt8, 32] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   ]
-  let count: USize = 32
+  let count: UInt64 = 32
   for index in 0..count {
     words[index] = key[index]
   }
@@ -288,18 +288,18 @@ fn sealing_nonce() -> cryptography::Nonce {
   cryptography::Nonce(bytes: [64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75])
 }
 
-fn associated_byte(index: USize) -> UInt8 {
+fn associated_byte(index: UInt64) -> UInt8 {
   match UInt8.try_from(160 + index % 7) {
     Ok(byte) => byte
     Err(_) => 0
   }
 }
 
-fn associated(count: USize) -> List[UInt8] {
+fn associated(count: UInt64) -> List[UInt8] {
   List.generate(count, make: fn(index) { associated_byte(index) })
 }
 
-fn seal_pattern(cipher: cryptography::Cipher, plain: USize, data: USize) -> List[UInt8] {
+fn seal_pattern(cipher: cryptography::Cipher, plain: UInt64, data: UInt64) -> List[UInt8] {
   cryptography::seal(
     sealing_key(),
     nonce: sealing_nonce(),
@@ -309,11 +309,11 @@ fn seal_pattern(cipher: cryptography::Cipher, plain: USize, data: USize) -> List
   )
 }
 
-fn sealed_text(cipher: cryptography::Cipher, plain: USize, data: USize) -> String {
+fn sealed_text(cipher: cryptography::Cipher, plain: UInt64, data: UInt64) -> String {
   hex::encode(seal_pattern(cipher, plain: plain, data: data))
 }
 
-fn sealed_digest(cipher: cryptography::Cipher, plain: USize, data: USize) -> String {
+fn sealed_digest(cipher: cryptography::Cipher, plain: UInt64, data: UInt64) -> String {
   sha256_of(seal_pattern(cipher, plain: plain, data: data))
 }
 
@@ -351,7 +351,7 @@ test "AES-256-GCM seals to the bytes OpenSSL produces" {
   assert sealed_digest(cipher, plain: 300, data: 0) == "f07eb869e75d33553f8185ebeedbb018f3df2b0e078a4bc128b87cd01713007c"
 }
 
-fn opens(cipher: cryptography::Cipher, sealed: Slice[UInt8], data: USize) -> Option[List[UInt8]] {
+fn opens(cipher: cryptography::Cipher, sealed: Slice[UInt8], data: UInt64) -> Option[List[UInt8]] {
   match cryptography::open(
     sealing_key(),
     nonce: sealing_nonce(),
@@ -415,7 +415,7 @@ fn stepped_32(start: UInt8, step: UInt8) -> Array[UInt8, 32] {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   ]
   var value = start
-  let count: USize = 32
+  let count: UInt64 = 32
   for index in 0..count {
     bytes[index] = value
     value = value.wrapping_add(step)
@@ -423,7 +423,7 @@ fn stepped_32(start: UInt8, step: UInt8) -> Array[UInt8, 32] {
   bytes
 }
 
-fn message_of(count: USize) -> List[UInt8] {
+fn message_of(count: UInt64) -> List[UInt8] {
   var message: List[UInt8] = []
   for index in 0..count {
     match UInt8.try_from(index % 253) {
@@ -528,7 +528,7 @@ test "Ed25519 rejects a response that is not below the group's order" {
   ]
   var malleated = signature.bytes
   var carry: UInt16 = 0
-  let count: USize = 32
+  let count: UInt64 = 32
   for index in 0..count {
     let sum = UInt16.from(malleated[index + 32]) + UInt16.from(order[index]) + carry
     match UInt8.try_from(sum & 255) {
@@ -580,7 +580,7 @@ test "signing keys and agreement keys are drawn from the random capability" {
   }
 }
 
-fn stepped_bytes(count: USize, start: USize, modulus: USize) -> List[UInt8] {
+fn stepped_bytes(count: UInt64, start: UInt64, modulus: UInt64) -> List[UInt8] {
   var bytes: List[UInt8] = []
   for index in 0..count {
     match UInt8.try_from(start + index % modulus) {
@@ -591,7 +591,7 @@ fn stepped_bytes(count: USize, start: USize, modulus: USize) -> List[UInt8] {
   bytes
 }
 
-fn password_hash_hex(password: USize, salt: USize, password_cost: cryptography::PasswordCost) -> String {
+fn password_hash_hex(password: UInt64, salt: UInt64, password_cost: cryptography::PasswordCost) -> String {
   let hash = cryptography::hash_password(
     stepped_bytes(password, start: 48, modulus: 77),
     salt: stepped_bytes(salt, start: 160, modulus: 53),

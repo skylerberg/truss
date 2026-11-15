@@ -22,7 +22,7 @@ type context = {
   mutable order : key list;
   mutable registered : unit Keys.t;
   mutable environments : (string * Lowered.ty) list Keys.t;
-  mutable bytes : (string * string) list;
+  bytes : (string, int) Hashtbl.t;
   mutable prototypes : (string * string) list;
   mutable anchors : (string * Path.t) list;
   mutable references : key list option;

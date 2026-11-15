@@ -1,7 +1,7 @@
 trait Sized {
-  fn size(self) -> USize
+  fn size(self) -> UInt64
 
-  fn double(self) -> USize
+  fn double(self) -> UInt64
     cost time O(time(Self.size))
   {
     self.size() + self.size()

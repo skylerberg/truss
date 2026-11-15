@@ -1,10 +1,10 @@
 type Ticker(ticks: List[Instant])
 
-fn Ticker.count(self) -> USize {
+fn Ticker.count(self) -> UInt64 {
   self.ticks.count()
 }
 
-fn Ticker.element(self, position: USize) lends Instant
+fn Ticker.element(self, position: UInt64) lends Instant
   uses Clock
 {
   let _ = Clock.now()

@@ -49,14 +49,15 @@ let float_literal ~suffix value =
 
 let float64_literal bits = float_literal ~suffix:"" (Int64.float_of_bits bits)
 let float32_literal bits = float_literal ~suffix:"f" (Int32.float_of_bits bits)
+let bytes_symbol context index = Printf.sprintf "%s_bytes_%d" context.prefix index
 
 let bytes_name context text =
-  match List.assoc_opt text context.bytes with
-  | Some name -> name
+  match Hashtbl.find_opt context.bytes text with
+  | Some index -> bytes_symbol context index
   | None ->
-      let name = Printf.sprintf "%s_bytes_%d" context.prefix (List.length context.bytes) in
-      context.bytes <- (text, name) :: context.bytes;
-      name
+      let index = Hashtbl.length context.bytes in
+      Hashtbl.replace context.bytes text index;
+      bytes_symbol context index
 
 let function_ref_symbol fc : Lowered.function_ref -> string = function
   | Instance key -> Instance.symbol key
@@ -163,9 +164,10 @@ and constant_c context : Lowered.constant -> string * Lowered.ty = function
   | Character code -> (Printf.sprintf "((uint32_t)0x%xU)" code, Raw Character)
   | Bytes text -> ("((void *)" ^ bytes_name context text ^ ")", Raw (Pointer Opaque))
   | Null -> ("((void *)0)", Raw (Nullable_pointer Opaque))
-  | Size_of ty -> (Printf.sprintf "((t_usize)sizeof(%s))" (value_c context ty), Raw (Integer USize))
+  | Size_of ty ->
+      (Printf.sprintf "((uint64_t)sizeof(%s))" (value_c context ty), Raw (Integer UInt64))
   | Alignment_of ty ->
-      (Printf.sprintf "((t_usize)_Alignof(%s))" (value_c context ty), Raw (Integer USize))
+      (Printf.sprintf "((uint64_t)_Alignof(%s))" (value_c context ty), Raw (Integer UInt64))
   | Site { definition; line; column } ->
       ( Printf.sprintf "((void *)&(const struct t_site){ %s, %d, %d })"
           (anchor_c context definition) line column,

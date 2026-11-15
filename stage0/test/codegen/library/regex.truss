@@ -7,7 +7,7 @@ fn compiled(pattern: StringSlice) -> regex::Regex {
   }
 }
 
-fn finds(pattern: StringSlice, text: StringSlice, start: USize, end: USize) -> Bool {
+fn finds(pattern: StringSlice, text: StringSlice, start: UInt64, end: UInt64) -> Bool {
   compiled(pattern).find(text) == Some(regex::Match(start: start, end: end))
 }
 
@@ -15,11 +15,11 @@ fn misses(pattern: StringSlice, text: StringSlice) -> Bool {
   regex::Regex.parse(pattern) is Ok(parsed) && parsed.find(text) is None && !parsed.is_match(text)
 }
 
-fn refuses(pattern: StringSlice, kind: regex::PatternErrorKind, offset: USize) -> Bool {
+fn refuses(pattern: StringSlice, kind: regex::PatternErrorKind, offset: UInt64) -> Bool {
   regex::Regex.parse(pattern) is Err(error) && error.kind == kind && error.offset == offset
 }
 
-fn group(captures: regex::Captures, index: USize, start: USize, end: USize) -> Bool {
+fn group(captures: regex::Captures, index: UInt64, start: UInt64, end: UInt64) -> Bool {
   captures.get(index) == Some(regex::Match(start: start, end: end))
 }
 

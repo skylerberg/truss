@@ -26,14 +26,14 @@ let () =
       let database =
         setup
           [
-            ("app::main", "fn count(items: List[Int64], limit: own Int64 = 3) -> USize { todo }\n");
+            ("app::main", "fn count(items: List[Int64], limit: own Int64 = 3) -> UInt64 { todo }\n");
           ]
       in
       match Query.demand database Interface.Environment.signature (app "count") with
       | Some { parameters = [ items; limit ]; output = Returns output; _ } ->
           if Types.show items.type_ <> "List[Int64]" then fail "items: %s" (Types.show items.type_);
           if limit.mode <> Own || not limit.has_default then fail "limit";
-          if not (Types.is_builtin USize output) then fail "output %s" (Types.show output)
+          if not (Types.is_builtin UInt64 output) then fail "output %s" (Types.show output)
       | _ -> fail "no signature");
   test "a method's receiver has its type's generic parameters" (fun () ->
       let database =

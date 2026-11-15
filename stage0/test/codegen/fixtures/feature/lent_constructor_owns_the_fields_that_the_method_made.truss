@@ -2,13 +2,13 @@ type Shelf(books: List[String])
 
 type Tagged(tag: String, book: String)
 
-type Report(count: USize, first: Tagged)
+type Report(count: UInt64, first: Tagged)
 
-fn Shelf.tagged(self, index: USize) lends Tagged {
+fn Shelf.tagged(self, index: UInt64) lends Tagged {
   Tagged(tag: "book ${index}", book: self.books[index])
 }
 
-fn Shelf.find(self, index: USize) lends Option[Tagged] {
+fn Shelf.find(self, index: UInt64) lends Option[Tagged] {
   if index < self.books.length() {
     Some(Tagged(tag: "book ${index}", book: self.books[index]))
   } else {
@@ -20,7 +20,7 @@ fn Shelf.report(self) lends Report {
   Report(count: self.books.length(), first: Tagged(tag: "first of ${self.books.length()}", book: self.books[0]))
 }
 
-fn length_of(tagged: Tagged) -> USize {
+fn length_of(tagged: Tagged) -> UInt64 {
   tagged.tag.length() + tagged.book.length()
 }
 
@@ -45,7 +45,7 @@ test "inside a variant, and inside another constructor" {
 
 test "each lend in a loop drops the field it made" {
   let shelf = Shelf(books: ["first", "second", "third"])
-  var total: USize = 0
+  var total: UInt64 = 0
   for index in 0..shelf.books.length() {
     total += length_of(shelf.tagged(index))
   }

@@ -1,4 +1,4 @@
-fn longest(words: own List[String], limit: USize) -> String
+fn longest(words: own List[String], limit: UInt64) -> String
   uses Tasks
 {
   concurrent for word in own words {
