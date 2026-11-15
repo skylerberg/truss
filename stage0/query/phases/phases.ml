@@ -1,5 +1,3 @@
-(* The compiler's phases, each declared after the one before it. *)
-
 let project = Query.phase ~name:"project" ~after:[]
 let syntax = Query.phase ~name:"syntax" ~after:[ project ]
 let declarations = Query.phase ~name:"declarations" ~after:[ syntax ]

@@ -1,7 +1,3 @@
-; The compiler's version: a digest of its own source, without the standard
-; library's text and the tests. The action runs in a sandbox, so it sees
-; source files only, and no generated file such as the embedded library.
-
 (executable
  (name digest)
  (modules digest))

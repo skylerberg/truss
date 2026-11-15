@@ -23,8 +23,6 @@ let audit ?(include_bases = false) ?before engine =
         ~finally:(fun () -> within_audit := false)
         (fun () -> create ~bases:(if include_bases then [] else engine.bases) ())
     in
-    (* The new engine reads stored values, and finds no facts, since a fact
-       this engine recorded would only be its own result again. *)
     fresh.store <-
       Option.map
         (fun store ->

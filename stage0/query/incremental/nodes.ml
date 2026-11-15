@@ -36,34 +36,32 @@ let phases = 16
 
 type t = {
   id : int;
-  bases : t list;  (** Frozen engines, each read where this one holds nothing *)
+  bases : t list;
   mutable frozen : bool;
-  mutable fixed : bool;  (** A frozen base whose inputs no engine over it replaces *)
-  tables : (int, binding) Hashtbl.t;  (** Each input's and query's cells here, by its number *)
+  mutable fixed : bool;
+  tables : (int, binding) Hashtbl.t;
   own : (int, node) Hashtbl.t;
   foreign : (int, (int, node) Hashtbl.t) Hashtbl.t;
-      (** This engine's readers of a base's node, by that node's id *)
-  shadows : (int, node) Hashtbl.t;  (** The copy here of a base's node, by that node's id *)
+  shadows : (int, node) Hashtbl.t;
   mutable clock : int;
   mutable frames : frame list;
-  seeds : node list array;  (** By phase: readers of a result that changed, to be marked *)
-  marks : node list array;  (** By phase: marked results, newest first *)
-  mutable waiting : int;  (** How many seeds and marks there are *)
-  mutable candidates : node list;  (** Nodes to collect, if still unnecessary, once no query runs *)
+  seeds : node list array;
+  marks : node list array;
+  mutable waiting : int;
+  mutable candidates : node list;
   logging : bool;
-  log : node Dynarray.t;  (** The results computed since the log was cleared *)
+  log : node Dynarray.t;
   computed : node Dynarray.t;
   changed : node Dynarray.t;
   tally : tally;
   mutable store : store option;
-  unsaved : (int, node) Hashtbl.t;  (** Saved nodes made or changed since the last write *)
-  mutable collected : (string * string) list;  (** Written nodes collected since the last write *)
-  mutable chain : string option;  (** The artifact last written, or opened from *)
+  unsaved : (int, node) Hashtbl.t;
+  mutable collected : (string * string) list;
+  mutable chain : string option;
   mutable on_whole : bool;
-      (** Whether the engine's bases hold the whole state its chain starts from *)
-  mutable whole : int;  (** How many nodes the chain's whole state holds *)
-  mutable differences : int;  (** How many the differences after it hold *)
-  mutable depth : int;  (** How many differences there are *)
+  mutable whole : int;
+  mutable differences : int;
+  mutable depth : int;
   mutable activity : int;
   mutable audited : int;
 }
@@ -74,30 +72,23 @@ and node = {
   id : int;
   engine : t;
   phase : int;
-  below : node option;  (** The base's node this one replaces *)
+  below : node option;
   mutable cell : cell;
-  mutable reads : node list;  (** In the order they were first read *)
-  readers : (int, node) Hashtbl.t;  (** In this node's own engine *)
+  mutable reads : node list;
+  readers : (int, node) Hashtbl.t;
   mutable marked : bool;
-  mutable busy : bool;  (** Being computed, or having its reads checked *)
+  mutable busy : bool;
   mutable changed_at : int;
   mutable verified_at : int;
-  mutable root : bool;  (** Demanded by a driver: maintained across changes, and never collected *)
+  mutable root : bool;
   mutable alive : bool;
   mutable fingerprint : fingerprint;
   mutable identity : string option;
   mutable written : written;
 }
 
-(* Where the chain of artifacts holds a node. *)
 and written = Unwritten | In_whole | In_difference
-
-and fingerprint =
-  | Unknown  (** Not computed yet, or forgotten since the outcome changed *)
-  | Hashed of { hash : string; stored : bool }
-      (** The hash of the outcome's bytes; [stored] when the store has them under it *)
-  | Opaque of string
-      (** An outcome with no bytes: a nonce, so that it equals no other computation's *)
+and fingerprint = Unknown | Hashed of { hash : string; stored : bool } | Opaque of string
 
 and cell =
   | Input : ('key, 'value) input * ('key, 'value) input_cell -> cell
@@ -114,8 +105,6 @@ and ('key, 'value) input = {
 }
 
 and ('key, 'value) input_cell = { input_key : 'key; input_node : node; mutable slot : 'value slot }
-
-(* [Stored]: the value is in the store, under the node's fingerprint. *)
 and 'value slot = Unset | Set of 'value | Stored
 
 and ('key, 'value) query = {
@@ -131,8 +120,6 @@ and ('key, 'value) query = {
   cells : ('key, ('key, 'value) result_cell) Hashtbl.t Type.Id.t;
 }
 
-(* An outcome of [None] is a result not computed yet, or, when the node has
-   a fingerprint, one whose value is in the store and not read yet. *)
 and ('key, 'value) result_cell = {
   key : 'key;
   node : node;
@@ -148,7 +135,6 @@ and frame = {
   mutable cyclic : string list option;
 }
 
-(* [observing]: a driver's context whose reads make no root. *)
 and context = { engine : t; frame : frame option; observing : bool }
 
 type ('key, 'value) cells = ('key, ('key, 'value) result_cell) Hashtbl.t
@@ -157,10 +143,6 @@ type ('key, 'value) input_cells = ('key, ('key, 'value) input_cell) Hashtbl.t
 let engines = ref 0
 let nodes_made = ref 0
 let numbers = ref 0
-
-(* Set once a state has been opened from a store. A query declared after
-   that was not there to restore its results, so every result that read
-   one was left out of the state, and is computed in every process. *)
 let sealed = ref false
 let seal () = sealed := true
 
@@ -172,8 +154,6 @@ let check_not_sealed name =
           initialized"
          name)
 
-(* Engines made while auditing, held weakly so that auditing keeps none
-   alive. *)
 let auditing = ref false
 let remembered : t Weak.t ref = ref (Weak.create 16)
 let remembered_count = ref 0
@@ -299,11 +279,6 @@ let subject (node : node) =
 
 let is_input (node : node) = match node.cell with Input _ -> true | Result _ | Unfilled -> false
 let is_fixed (node : node) = node.engine.fixed
-
-(* Bytes are written without sharing, so that they follow from the value
-   alone: which of a value's parts are one block in memory differs between a
-   value computed from results in memory and the same value computed from
-   results read back from the store. *)
 let bytes_of value = Marshal.to_string value [ Marshal.No_sharing ]
 
 let key_bytes (node : node) =
@@ -374,7 +349,6 @@ let result_cells engine (query : ('key, 'value) query) : ('key, 'value) cells =
 let input_cells engine (input : ('key, 'value) input) : ('key, 'value) input_cells =
   own_table engine input.input_number input.input_cells (fun () -> Hashtbl.create 64)
 
-(* A result as an engine sees it: its own, or else a base's. *)
 let find_result engine (query : ('key, 'value) query) (key : 'key) =
   let look engine =
     match find_table engine query.number query.cells with

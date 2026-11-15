@@ -32,8 +32,6 @@ let record_fact engine store (node : node) reads =
                   (Marshal.to_string
                      (List.map (fun (read, _) -> (name read, key_bytes read)) parts)
                      []))
-      (* A result that raised, or whose bytes are not in the store, is no
-         fact: there would be no value to give. *)
       | _ -> ())
   | _ -> ()
 
@@ -51,12 +49,10 @@ let record_facts engine =
         (fun node -> record_fact engine store node (lazy (current_reads engine node)))
         (unsaved_nodes engine)
 
-(* An artifact: a state, or its changes since an earlier artifact. Each
-   node is named by its input or query and its key, and its reads by places in the artifact's table of such names. *)
 type saved_node = {
   saved_name : string;
   saved_key : string;
-  saved_fingerprint : fingerprint;  (** [Unknown] for an input that is not set *)
+  saved_fingerprint : fingerprint;
   saved_reads : int list;
   saved_root : bool;
 }
@@ -73,7 +69,6 @@ type artifact = {
   difference_count : int;
 }
 
-(* The same reads in the same order name the same nodes. *)
 let same_reads engine reads (base : node) =
   List.map identity reads = List.map identity (current_reads engine base)
 
@@ -85,8 +80,6 @@ let write ?(full = false) ?stores_every_value engine =
   let full = full || engine.chain = None in
   let candidates =
     if full then begin
-      (* The nodes the roots and the set inputs reach, apart from the
-         fixed bases. *)
       let reached = Hashtbl.create 1024 in
       let rec reach (node : node) =
         if (not node.engine.fixed) && not (Hashtbl.mem reached node.id) then begin
@@ -99,10 +92,6 @@ let write ?(full = false) ?stores_every_value engine =
           let set =
             match node.cell with Input (_, { slot = Set _ | Stored; _ }) -> true | _ -> false
           in
-          (* A copy of a fixed base's node is the state's result where the
-             base's is not: it read an input the state replaced. It is
-             written whether or not anything reaches it, or a state opened
-             from this one would read the base's result in its place. *)
           let replaces_fixed =
             match node.below with Some base -> base.engine.fixed | None -> false
           in
@@ -112,9 +101,6 @@ let write ?(full = false) ?stores_every_value engine =
     end
     else unsaved_nodes engine
   in
-  (* A node that is written must find its dependencies when the state is
-     opened, so a node of the engine's own that the chain does not hold yet
-     is written with the first node that read it. *)
   let scheduled = Hashtbl.create 256 in
   List.iter (fun (node : node) -> Hashtbl.replace scheduled node.id ()) candidates;
   let more = Queue.create () in
@@ -171,7 +157,6 @@ let write ?(full = false) ?stores_every_value engine =
     | Result _ -> (
         match fingerprint engine node with
         | Some _ -> if as_below () then None else written node (List.map place (Lazy.force reads))
-        (* A result that was never computed. *)
         | None -> None)
     | Unfilled -> None
   in
@@ -215,18 +200,12 @@ let artifact (engine : t) = engine.chain
 let unwritten (engine : t) =
   engine.chain = None || Hashtbl.length engine.unsaved > 0 || engine.collected <> []
 
-(* An artifact's bytes start with the version that wrote it. They are marshaled, so
-   they mean something only to the same version: read by another, as when
-   a compiler collects a store that an earlier build of it wrote to, they
-   would be taken for another type's. *)
 let read_artifact store bytes : artifact option =
   let header = artifact_header store in
   if String.starts_with ~prefix:header bytes then
     Some (Marshal.from_string bytes (String.length header))
   else None
 
-(* The artifacts from the whole state a chain starts with to its last;
-   [None] if the store lacks one, or another version wrote one. *)
 let chain_of store name =
   let rec back name chain =
     match Option.bind (store.get name) (read_artifact store) with
@@ -249,11 +228,6 @@ let values_in store name =
                artifact.saved)
         chain
 
-(* Fills an engine with artifacts' nodes, each the last of its name and key,
-   apart from those collected after. A node of a query this program does not
-   declare is left out, and so is one that read a node that cannot be
-   found, with everything that read it, since its result could not be
-   checked. *)
 let fill engine (artifacts : artifact list) =
   let last : (string * string, saved_node * artifact) Hashtbl.t = Hashtbl.create 1024 in
   let order = ref [] in
@@ -349,9 +323,6 @@ let fill engine (artifacts : artifact list) =
   in
   Hashtbl.iter (fun _ node -> remove node) broken
 
-(* Frozen bases, shared by every engine opened from the same whole state
-   over the same bases, and held weakly, so that one no engine uses is
-   freed. *)
 let shared_bases : (string * string * bool * int list, t Weak.t) Hashtbl.t = Hashtbl.create 8
 let forget_bases () = Hashtbl.reset shared_bases
 
