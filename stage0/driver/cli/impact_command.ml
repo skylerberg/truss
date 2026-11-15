@@ -11,7 +11,7 @@ module Names = Resolve.Names
 
 type change = {
   path : Path.t;
-  status : [ `Added | `Removed | `Changed of string list ];  (** The parts that changed *)
+  status : [ `Added | `Removed | `Changed of Query.part list ];  (** The parts that changed *)
   before : string option;  (** The signature at the base, when it changed *)
   after : string option;  (** The signature now *)
   dependents : Graph_types.edge list;
@@ -38,7 +38,6 @@ let changes session base =
       if difference <> Same then begin
         if not (Hashtbl.mem changed path) then order := path :: !order;
         let parts = Option.value (Hashtbl.find_opt changed path) ~default:[] in
-        let part = Option.value part ~default:"definition" in
         Hashtbl.replace changed path (if List.mem part parts then parts else parts @ [ part ])
       end)
     (Database.changes mine base);
@@ -132,8 +131,8 @@ let dependents_json dependents =
          Json.Object
            [
              ("reader", Json.String (Path.show edge.dependent));
-             ("part", Json.String edge.dependent_part);
-             ("reads", Json.String edge.dependency_part);
+             ("part", Json.String (Query.show_part edge.dependent_part));
+             ("reads", Json.String (Query.show_part edge.dependency_part));
            ])
        dependents)
 
@@ -145,7 +144,7 @@ let change_json change =
       ( "parts",
         Json.List
           (match change.status with
-          | `Changed parts -> List.map (fun part -> Json.String part) parts
+          | `Changed parts -> List.map (fun part -> Json.String (Query.show_part part)) parts
           | _ -> []) );
       ("before", Json.option (fun text -> Json.String text) change.before);
       ("after", Json.option (fun text -> Json.String text) change.after);
@@ -155,7 +154,7 @@ let change_json change =
 let print_change change =
   Output.printf "  %s: %s\n" (Path.show change.path)
     (match change.status with
-    | `Changed parts -> String.concat ", " parts
+    | `Changed parts -> String.concat ", " (List.map Query.show_part parts)
     | status -> status_word status);
   Option.iter (fun text -> Output.print_line (Signatures.labeled "was:" text)) change.before;
   Option.iter (fun text -> Output.print_line (Signatures.labeled "now:" text)) change.after;

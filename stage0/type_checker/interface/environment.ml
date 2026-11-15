@@ -527,7 +527,7 @@ let lowered_interface = Lazy.force lowered_interface
 
 let interface =
   Query.query ~name:"interface" ~phase:Phases.interfaces ~show:Path.show ~saved:true
-    ~about:(fun path -> Some { Query.path; part = Some "interface" })
+    ~about:(fun path -> Some { Query.path; part = Interface })
     (fun database path ->
       match Query.demand database Summary.key path with
       | Some key ->
@@ -597,7 +597,7 @@ let builtin_shape builtin : Types.type_interface =
 
 let type_interface =
   Query.query ~name:"type_interface" ~phase:Phases.interfaces ~show:Path.show ~saved:true
-    ~about:(fun path -> Some { Query.path; part = Some "shape" })
+    ~about:(fun path -> Some { Query.path; part = Shape })
     (fun database path ->
       match Intrinsic.builtin_of_path path with
       | Some builtin -> Some (builtin_shape builtin)
@@ -610,7 +610,7 @@ let type_interface =
 
 let signature =
   Query.query ~name:"signature" ~phase:Phases.interfaces ~show:Path.show ~saved:true
-    ~about:(fun path -> Some { Query.path; part = Some "signature" })
+    ~about:(fun path -> Some { Query.path; part = Signature })
     (fun database (path : Path.t) ->
       match Query.demand database interface path with
       | Some (Function_interface signature | Theorem_interface signature) -> Some signature

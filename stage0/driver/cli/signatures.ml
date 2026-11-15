@@ -110,7 +110,7 @@ let kind_word : Resolve.Names.kind -> string = function
   | Test -> "test"
   | Law_proof -> "law proof"
 
-let parts = [ "interface"; "signature"; "shape" ]
+let parts : Query.part list = [ Interface; Signature; Shape ]
 
 (* The signature of the definition at [path], as [text] prints it. *)
 let of_path context path =

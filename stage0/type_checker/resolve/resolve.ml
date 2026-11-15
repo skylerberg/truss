@@ -73,7 +73,7 @@ let declared_name (definition : Syntax.definition) : Syntax.name option =
 
 let resolved =
   Query.query ~name:"resolved" ~phase:Phases.resolution ~show:Names.show_key ~saved:true
-    ~about:(fun (key : Names.key) -> Some { path = key.path; part = Some "resolved" })
+    ~about:(fun (key : Names.key) -> Some { path = key.path; part = Resolved })
     (fun database (key : Names.key) ->
       match
         (Query.demand database Names.definition key, Query.demand database Names.file_of key)

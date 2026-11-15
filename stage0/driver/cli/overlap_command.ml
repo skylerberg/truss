@@ -3,9 +3,8 @@
    [--merge], the diagnostics that only the merge result has. *)
 
 let describe (place : Graph_types.place) =
-  match place.path with
-  | Some path ->
-      Printf.sprintf "the %s of %s" (Option.value place.part ~default:"definition") (Path.show path)
+  match place.subject with
+  | Some { path; part } -> Printf.sprintf "the %s of %s" (Query.show_part part) (Path.show path)
   | None -> place.label
 
 let sentence : Graph_types.overlap -> string = function
@@ -25,8 +24,14 @@ type comparison = {
 let place_json (place : Graph_types.place) =
   Json.Object
     [
-      ("path", Json.option (fun path -> Json.String (Path.show path)) place.path);
-      ("part", Json.option (fun path -> Json.String path) place.part);
+      ( "path",
+        Json.option
+          (fun (subject : Query.subject) -> Json.String (Path.show subject.path))
+          place.subject );
+      ( "part",
+        Json.option
+          (fun (subject : Query.subject) -> Json.String (Query.show_part subject.part))
+          place.subject );
     ]
 
 let overlap_json : Graph_types.overlap -> Json.t = function

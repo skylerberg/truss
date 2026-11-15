@@ -76,8 +76,7 @@ let check database (key : Resolve.Names.key) : result option =
 
 let ownership =
   Query.query ~name:"ownership" ~phase:Phases.bodies ~show:Resolve.Names.show_key ~saved:true
-    ~about:(fun (key : Resolve.Names.key) ->
-      Some { Query.path = key.path; part = Some "ownership" })
+    ~about:(fun (key : Resolve.Names.key) -> Some { Query.path = key.path; part = Ownership })
     check
 
 let diagnostics database file =

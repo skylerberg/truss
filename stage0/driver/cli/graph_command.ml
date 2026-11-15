@@ -24,8 +24,8 @@ let run ~direction ~name =
                         Json.Object
                           [
                             ("reader", Json.String (Path.show edge.dependent));
-                            ("part", Json.String edge.dependent_part);
-                            ("reads", Json.String edge.dependency_part);
+                            ("part", Json.String (Query.show_part edge.dependent_part));
+                            ("reads", Json.String (Query.show_part edge.dependency_part));
                             ("of", Json.String (Path.show edge.dependency));
                           ])
                       edges) );
@@ -39,6 +39,8 @@ let run ~direction ~name =
         List.iter
           (fun (edge : Graph_types.edge) ->
             Output.printf "%s: its %s reads the %s of %s\n" (Path.show edge.dependent)
-              edge.dependent_part edge.dependency_part (Path.show edge.dependency))
+              (Query.show_part edge.dependent_part)
+              (Query.show_part edge.dependency_part)
+              (Path.show edge.dependency))
           edges;
       0

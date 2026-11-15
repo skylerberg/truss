@@ -1,7 +1,5 @@
 open Graph_types
 
-let part_of (subject : Query.subject) = Option.value subject.part ~default:""
-
 let passes_through ?dependent node =
   (not (Engine.is_fixed node))
   &&
@@ -21,7 +19,7 @@ let edges_of_node engine node (subject : Query.subject) =
           Hashtbl.replace visited identity ();
           match Engine.subject read with
           | Some read_subject when not (Path.equal read_subject.path subject.path) ->
-              Hashtbl.replace dependencies (read_subject.path, part_of read_subject) ()
+              Hashtbl.replace dependencies (read_subject.path, read_subject.part) ()
           | Some _ | None -> if passes_through ~dependent:subject.path read then traverse read
         end)
       (Engine.reads engine node)
@@ -29,7 +27,7 @@ let edges_of_node engine node (subject : Query.subject) =
   traverse node;
   Hashtbl.fold
     (fun (dependency, dependency_part) () edges ->
-      { dependent = subject.path; dependent_part = part_of subject; dependency; dependency_part }
+      { dependent = subject.path; dependent_part = subject.part; dependency; dependency_part }
       :: edges)
     dependencies []
 
@@ -73,9 +71,9 @@ let dependents engine paths =
                       Hashtbl.replace edges
                         {
                           dependent;
-                          dependent_part = part_of subject;
+                          dependent_part = subject.part;
                           dependency = dependency.path;
-                          dependency_part = part_of dependency;
+                          dependency_part = dependency.part;
                         }
                         ()
                   | _ -> ());
@@ -159,11 +157,7 @@ let overlaps ~base mine theirs =
     table
   in
   let mine_table = by_identity mine_changed and theirs_table = by_identity theirs_changed in
-  let describe node =
-    match Engine.subject node with
-    | Some subject -> { path = Some subject.path; part = subject.part; label = Engine.label node }
-    | None -> { path = None; part = None; label = Engine.label node }
-  in
+  let describe node = { subject = Engine.subject node; label = Engine.label node } in
   let both =
     List.filter_map
       (fun node ->
