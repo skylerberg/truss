@@ -482,6 +482,8 @@ public trait SignedInteger: FixedWidthInteger + Negate[Output = Self] {
 
   fn format(self, radix: UInt32 = 10, minimum_digits: UInt64 = 1, uppercase: Bool = false) -> String
     requires 2 <= radix && radix <= 36
+    ensures result.length() >= 1
+    ensures result.length() <= minimum_digits + 66
     cost time O(minimum_digits + Self.bit_width())
   {
     integer_text::format_magnitude(
@@ -657,6 +659,8 @@ public trait UnsignedInteger: FixedWidthInteger {
 
   fn format(self, radix: UInt32 = 10, minimum_digits: UInt64 = 1, uppercase: Bool = false) -> String
     requires 2 <= radix && radix <= 36
+    ensures result.length() >= 1
+    ensures result.length() <= minimum_digits + 66
     cost time O(minimum_digits + Self.bit_width())
   {
     integer_text::format_magnitude(
