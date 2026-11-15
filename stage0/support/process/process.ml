@@ -142,7 +142,7 @@ let run ?(environment = []) ?input ?on_output ?time_limit_ms program arguments =
         Some { stdin; text; written = 0; is_open = true }
     | _ -> None
   in
-  let deadline =
+  let deadline_after_reading =
     Fun.protect
       ~finally:(fun () ->
         Unix.close stdout_read;
@@ -151,8 +151,11 @@ let run ?(environment = []) ?input ?on_output ?time_limit_ms program arguments =
       (fun () ->
         exchange (Bytes.create piece_length) pid ~readers:[ output; errors ] ~writer ~deadline)
   in
-  let status = await pid deadline in
-  (exit_code status, Buffer.contents output.contents, Buffer.contents errors.contents)
+  let is_cut_off = Option.is_some deadline && Option.is_none deadline_after_reading in
+  let status = await pid deadline_after_reading in
+  ( exit_code (if is_cut_off then WSIGNALED Sys.sigkill else status),
+    Buffer.contents output.contents,
+    Buffer.contents errors.contents )
 
 let run_attached program arguments =
   let pid =
