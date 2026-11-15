@@ -31,7 +31,7 @@ let () =
             List.map
               (fun (span : Source.Definition_span.t) ->
                 String.sub text (item.base + span.start) (span.stop - span.start))
-              item.value.recovered
+              item.positions.recovered
         | _ -> [ "wrong definitions" ]
       in
       if recovered "fn f() {\n  x as Int64\n}" <> [ "as" ] then fail "the habit is not recorded";
@@ -45,31 +45,38 @@ let () =
       match
         Parser.For_testing.parse_definition tokens (List.hd (Parser.For_testing.split tokens))
       with
-      | { definition = { value = { kind = Function { body; _ }; recovered; _ }; _ }; _ }, _ ->
+      | ( {
+            definition =
+              { value = { kind = Function { body; _ }; _ }; positions = { spans; recovered }; _ };
+            _;
+          },
+          _ ) ->
+          let body_start = spans.(body.id).start in
           if
             List.map (fun (span : Source.Definition_span.t) -> (span.start, span.stop)) recovered
-            <> [ (body.span.start, body.span.start) ]
+            <> [ (body_start, body_start) ]
           then fail "recovered at the wrong place"
       | _ -> fail "the signature was not kept");
   test "a recovery at the end of a body lies in the body" (fun () ->
       match items (fst (parse "fn f() {\n  let x = (1 +\nfn g() {}\n")) with
-      | { value = { kind = Function { body; _ }; recovered; _ }; _ } :: _ ->
+      | { value = { kind = Function { body; _ }; _ }; positions = { spans; recovered }; _ } :: _ ->
+          let body_span = spans.(body.id) in
           if
             not
               (List.exists
                  (fun (span : Source.Definition_span.t) ->
-                   span.start < span.stop && body.span.start <= span.start
-                   && span.start < body.span.stop)
+                   span.start < span.stop && body_span.start <= span.start
+                   && span.start < body_span.stop)
                  recovered)
           then fail "no recovery inside the body"
       | _ -> fail "wrong definitions");
   test "a failed clause at the end lies in the signature" (fun () ->
       match items (fst (parse "fn f() requires")) with
-      | { value = { kind = Function { body; _ }; recovered; _ }; _ } :: _ ->
+      | { value = { kind = Function { body; _ }; _ }; positions = { spans; recovered }; _ } :: _ ->
           if
             not
               (List.exists
-                 (fun (span : Source.Definition_span.t) -> span.start < body.span.start)
+                 (fun (span : Source.Definition_span.t) -> span.start < spans.(body.id).start)
                  recovered)
           then fail "no recovery in the signature"
       | _ -> fail "wrong definitions");
@@ -117,7 +124,8 @@ let () =
       match items (fst (parse "fn f() {}\n\nfn g() {}")) with
       | [ _; second ] ->
           if second.base <> 11 then fail "base %d" second.base;
-          if second.value.span.start <> 0 || second.value.span.stop <> 9 then fail "span";
+          let span = second.positions.spans.(second.value.id) in
+          if span.start <> 0 || span.stop <> 9 then fail "span";
           if second.stop <> 20 then fail "stop %d" second.stop
       | _ -> fail "expected two definitions");
   test "moving a definition changes nothing in its tree" (fun () ->
@@ -128,7 +136,9 @@ let () =
          }"
       in
       match (items (fst (parse text)), items (fst (parse ("fn g() {}\n\n\n" ^ text)))) with
-      | [ alone ], [ _; moved ] -> if alone.value <> moved.value then fail "the trees differ"
+      | [ alone ], [ _; moved ] ->
+          if alone.value <> moved.value then fail "the trees differ";
+          if alone.positions <> moved.positions then fail "the positions differ"
       | _ -> fail "wrong definitions");
   test "interpolations are parsed with the definition's base" (fun () ->
       match items (fst (parse "fn g() {}\nfn f() { \"${x + 1}\" }")) with
@@ -155,10 +165,12 @@ let () =
                  };
              _;
            };
+         positions = { spans; _ };
          _;
        };
       ] ->
-          if value.span.start <> 12 then fail "interpolation span %d" value.span.start
+          let start = spans.(value.id).start in
+          if start <> 12 then fail "interpolation span %d" start
       | _ -> fail "wrong tree");
   test "nesting deeper than the limit is one error, not a stack overflow" (fun () ->
       let text = "fn f() { " ^ String.make 300 '(' ^ "1" ^ String.make 300 ')' ^ " }" in

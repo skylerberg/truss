@@ -78,7 +78,6 @@ type state = {
   mutable receiver_modes : (Syntax.id * Types.mode) list;
   yielded : (Syntax.id, Types.mode) Hashtbl.t;
   lent_tails : (Syntax.id, unit) Hashtbl.t;
-  binding_spans : (Syntax.id, Source.Definition_span.t) Hashtbl.t;
   mutable lambdas : Source.Definition_span.t list;
   mutable unsolved : Diagnostic.reported option;
   mutable capability_constraints : subset_constraint list;
@@ -99,6 +98,7 @@ val report :
 
 val is_formula : env -> bool
 val reject_in_formula : state -> env -> Source.Definition_span.t -> string -> unit
+val read_span : state -> Syntax.id -> Source.Definition_span.t
 val bug : ('a, unit, string, 'b) format4 -> 'a
 
 val error :

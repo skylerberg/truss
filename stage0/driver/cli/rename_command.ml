@@ -90,13 +90,15 @@ let occurrences pipeline snapshot packages =
       List.concat_map
         (fun declaration ->
           let key = Names.key_of declaration in
-          match (names.place key, names.definition key, Pipeline.resolved pipeline key) with
-          | Some { file; base }, Some definition, Some resolved ->
+          match
+            (names.place key, names.definition key, names.spans key, Pipeline.resolved pipeline key)
+          with
+          | Some { file; base }, Some definition, Some spans, Some resolved ->
               let tables = Pipeline.tables pipeline key in
               List.map
                 (fun ({ span; target } : References.occurrence) ->
                   (file, Source.Definition_span.to_file ~base span, target))
-                (References.occurrences ~path:key.path definition resolved tables)
+                (References.occurrences ~path:key.path spans definition resolved tables)
           | _ -> [])
         (names.declarations_in file))
     (Command_packages.files snapshot packages)

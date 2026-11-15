@@ -6,11 +6,16 @@ type unfinished = {
   span : Source.Definition_span.t;
 }
 
-val unfinished : Syntax.definition -> unfinished list
+val unfinished : Source.Definition_span.t array -> Syntax.definition -> unfinished list
 
 type hole = { offset : int; expected : string option; scope : (string * string) list }
 
-val holes : Syntax.definition -> Resolve.resolved -> Infer.tables option -> hole list
+val holes :
+  Source.Definition_span.t array ->
+  Syntax.definition ->
+  Resolve.resolved ->
+  Infer.tables option ->
+  hole list
 
 type explanation = {
   text : string;
@@ -21,6 +26,7 @@ type explanation = {
 
 val explain_at :
   path:Path.t ->
+  Source.Definition_span.t array ->
   Syntax.definition ->
   Resolve.resolved ->
   Infer.tables option ->

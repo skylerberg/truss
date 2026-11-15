@@ -7,7 +7,6 @@ val create :
 
 val interpolation : t -> Token.interpolation -> t
 val index : t -> int
-val fresh_id : t -> int
 val token_at : t -> int -> Token.t
 val peek : t -> Token.t
 val peek_kind : t -> Token.kind
@@ -23,7 +22,11 @@ val accept_keyword : t -> Token.keyword -> bool
 val definition_span : t -> Source.span -> Source.Definition_span.t
 val previous_token : t -> Token.t option
 val previous_stop : t -> int
-val span_from : t -> int -> Source.Definition_span.t
+val allocate_id : t -> Source.Definition_span.t -> Syntax.id
+val allocate_id_from : t -> int -> Syntax.id
+val read_span : t -> Syntax.id -> Source.Definition_span.t
+val set_span : t -> Syntax.id -> Source.Definition_span.t -> unit
+val read_file_span : t -> Syntax.id -> Source.span
 val file_span : t -> Source.Definition_span.t -> Source.span
 val spelling : t -> ?insertions:(int * string) list -> Source.span -> string option
 val recovers : Diagnostic.Code.parser -> bool
@@ -51,4 +54,4 @@ val skip_piece : t -> Split.piece
 val is_after_inserted_closer : t -> bool
 val bracketed : t -> item:(t -> 'a) -> recover:(Source.Definition_span.t -> 'a) -> 'a list
 val lines : t -> item:(t -> 'a) -> recover:(Source.Definition_span.t -> 'a) -> 'a list
-val recovered : t -> Source.Definition_span.t list
+val collect_positions : t -> Syntax.positions

@@ -178,12 +178,13 @@ let numeric_literal state (id : id) : Core.kind =
 let type_of state (value : expression) =
   match state.tables.types.(value.id) with
   | Some type_ -> type_
-  | None -> bug "`%s` has a core node but no recorded type" (source state value.span)
+  | None ->
+      bug "`%s` has a core node but no recorded type" (source state (read_span state value.id))
 
 let function_value state (value : expression) : Core.kind =
   match state.tables.resolutions.(value.id) with
   | Some (Global { path; type_arguments }) -> Function_value { path; type_arguments }
-  | _ -> bug "`%s` is not recorded as a function" (source state value.span)
+  | _ -> bug "`%s` is not recorded as a function" (source state (read_span state value.id))
 
 let variant_value state (value : expression) type_path variant : Core.kind =
   match type_of state value with

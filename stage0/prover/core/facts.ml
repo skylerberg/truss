@@ -137,12 +137,18 @@ let assume context frame term =
         add_fact context guarded
       else in_scope context frame guarded
 
+let span_of (source : source) origin =
+  let spans = Lazy.force source.spans in
+  if origin >= 0 && origin < Array.length spans then spans.(origin)
+  else Source.Definition_span.make 0 0
+
 let add_requires context frame required =
   let text = Lazy.force frame.source.text in
   let brace =
     match Option.bind frame.source.key context.lookups.interface.names.definition with
-    | Some { kind = Function { body; _ }; _ } when body.span.start < String.length text ->
-        Some body.span.start
+    | Some { kind = Function { body; _ }; _ } ->
+        let start = (span_of frame.source body.id).start in
+        if start < String.length text then Some start else None
     | _ -> None
   in
   let edit at before =
@@ -298,11 +304,6 @@ and make_obligation ?template_clause context frame code span message goal =
         | _ -> []);
     template_clause;
   }
-
-let span_of (source : source) origin =
-  let spans = Lazy.force source.spans in
-  if origin >= 0 && origin < Array.length spans then spans.(origin)
-  else Source.Definition_span.make 0 0
 
 let quote source origin =
   match source.key with Some key -> Quote (key, origin) | None -> Text "this expression"

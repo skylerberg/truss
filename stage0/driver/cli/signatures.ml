@@ -1,27 +1,25 @@
 open Syntax
 
-let bodies ~opaque (definition : definition) =
+let bodies ~opaque (spans : Source.Definition_span.t array) (definition : definition) =
   let function_body (function_definition : function_definition) =
-    [ function_definition.body.span ]
+    [ spans.(function_definition.body.id) ]
   in
   match definition.kind with
   | Function function_definition -> function_body function_definition
-  | Theorem { body; _ } -> [ body.span ]
-  | Test { body; _ } -> [ body.span ]
-  | Law_proof { body; _ } -> [ body.span ]
+  | Theorem { body; _ } | Test { body; _ } | Law_proof { body; _ } -> [ spans.(body.id) ]
   | Trait { members; _ } ->
       List.concat_map
         (fun (member : trait_member node) ->
-          match member.kind with Law law -> [ law.body.span ] | _ -> [])
+          match member.kind with Law law -> [ spans.(law.body.id) ] | _ -> [])
         members
   | Type_definition { name; generics; _ } when opaque ->
       let stop =
         List.fold_left
-          (fun stop (generic : generic_parameter) -> max stop generic.span.stop)
-          name.span.stop generics
+          (fun stop (generic : generic_parameter) -> max stop spans.(generic.id).stop)
+          spans.(name.id).stop generics
       in
       let stop = if generics = [] then stop else stop + 1 in
-      [ Source.Definition_span.make stop definition.span.stop ]
+      [ Source.Definition_span.make stop spans.(definition.id).stop ]
   | Method_declaration _ | Type_definition _ | Impl _ | Capability _ | Constant _
   | Definition_error _ ->
       []
@@ -57,25 +55,26 @@ let cut text spans =
   |> String.concat "\n"
 
 let text (names : Resolve.Names.lookups) ~body ~opaque (key : Resolve.Names.key) =
-  match (names.text key, names.definition key) with
-  | Some text, Some definition ->
+  match (names.text key, names.definition key, names.spans key) with
+  | Some text, Some definition, Some spans ->
       let contained =
         match names.place key with
         | Some { base; _ } ->
             List.concat_map
               (fun member ->
-                match (names.place member, names.definition member) with
-                | Some { base = member_base; _ }, Some written ->
+                match (names.place member, names.definition member, names.spans member) with
+                | Some { base = member_base; _ }, Some written, Some member_spans ->
                     List.map
                       (fun (span : Source.Definition_span.t) ->
                         Source.Definition_span.of_file ~base
                           (Source.Definition_span.to_file ~base:member_base span))
-                      (bodies ~opaque:false written)
+                      (bodies ~opaque:false member_spans written)
                 | _ -> [])
               (names.contained key)
         | None -> []
       in
-      Some (if body then String.trim text else cut text (bodies ~opaque definition @ contained))
+      Some
+        (if body then String.trim text else cut text (bodies ~opaque spans definition @ contained))
   | _ -> None
 
 let kind_word : Resolve.Names.kind -> string = function

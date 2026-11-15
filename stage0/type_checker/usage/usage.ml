@@ -4,6 +4,7 @@ module Lookups = Lookups
 type context = {
   resolved : Resolve.resolved;
   tables : Infer.tables;
+  spans : Source.Definition_span.t array;
   text : string Lazy.t;
   mutable diagnostics : Diagnostic.in_definition list;
 }
@@ -93,12 +94,13 @@ let check_unused context (definition : definition) =
         && not (Hashtbl.mem counts name.id)
       then
         let replacement = if bare_field then name.text ^ ": _" else "_" in
-        report context Unused_variable name.span
+        let span = context.spans.(name.id) in
+        report context Unused_variable span
           ~fixes:
             [
               Diagnostic.fix
                 (Printf.sprintf "Write `%s`." replacement)
-                [ Diagnostic.replace name.span replacement ];
+                [ Diagnostic.replace span replacement ];
             ]
           (Printf.sprintf "`%s` is never used. Bind it to `_` instead." name.text))
     (pattern_bindings definition)
@@ -136,13 +138,17 @@ let check_block context (written : block) =
     | first :: (next :: _ as rest) ->
         if statement_diverges context first then begin
           let last = List.nth rest (List.length rest - 1) in
-          let start = Source.fragment_line_start (Lazy.force context.text) next.span.start in
+          let unreachable = context.spans.(next.id) in
+          let start = Source.fragment_line_start (Lazy.force context.text) unreachable.start in
           let start = if start > 0 then start - 1 else start in
-          report context Unreachable_code next.span
+          report context Unreachable_code unreachable
             ~fixes:
               [
                 Diagnostic.fix "Delete the code that cannot run."
-                  [ Diagnostic.delete (Source.Definition_span.make start last.span.stop) ];
+                  [
+                    Diagnostic.delete
+                      (Source.Definition_span.make start context.spans.(last.id).stop);
+                  ];
               ]
             "This code can never run: the statement before it never finishes."
         end
@@ -184,12 +190,18 @@ let check_unreachable context (definition : definition) =
   Syntax_walk.definition ~statement expression definition
 
 let check (lookups : Lookups.t) key =
-  match (lookups.names.definition key, Resolve.whole lookups.resolved key, lookups.tables key) with
-  | Some definition, Some resolved, Some tables ->
+  match
+    ( lookups.names.definition key,
+      lookups.names.spans key,
+      Resolve.whole lookups.resolved key,
+      lookups.tables key )
+  with
+  | Some definition, Some spans, Some resolved, Some tables ->
       let context =
         {
           resolved;
           tables;
+          spans;
           text = lazy (Option.value ~default:"" (lookups.names.text key));
           diagnostics = [];
         }

@@ -48,14 +48,16 @@ let name_at database name text occurrence =
         let key = Resolve.Names.key_of declaration in
         match
           ( (Support.names database key.module_.package).definition key,
+            (Support.names database key.module_.package).spans key,
             (Support.names database key.module_.package).place key,
             Pipeline.resolved (Support.pipeline database) key )
         with
-        | Some definition, Some { base; _ }, Some resolved ->
-            let names = Syntax_walk.collect_names definition in
+        | Some definition, Some spans, Some { base; _ }, Some resolved ->
             Option.map
-              (fun (name : Syntax.name) -> (name, names, base, resolved))
-              (List.find_opt (fun (name : Syntax.name) -> base + name.span.start = offset) names)
+              (fun (name : Syntax.name) -> (name, spans, base, resolved))
+              (List.find_opt
+                 (fun (name : Syntax.name) -> base + spans.(name.id).start = offset)
+                 (Syntax_walk.collect_names spans definition))
         | _ -> None)
       ((Support.names database file.module_.package).declarations_in file)
   in
@@ -63,12 +65,8 @@ let name_at database name text occurrence =
   | Some located -> located
   | None -> failwith (Printf.sprintf "no name at %S" text)
 
-let describe names base (target : Resolve.target option) =
-  let offset id =
-    match List.find_opt (fun (name : Syntax.name) -> name.id = id) names with
-    | Some name -> base + name.span.start
-    | None -> -1
-  in
+let describe (spans : Source.Definition_span.t array) base (target : Resolve.target option) =
+  let offset id = base + spans.(id).start in
   match target with
   | None -> "nothing"
   | Some Binding -> "binding"
@@ -90,16 +88,16 @@ let describe names base (target : Resolve.target option) =
 
 let refers ?(others = []) text ~name:(written, occurrence) expected =
   let database = setup (("app::main", text) :: others) in
-  let name, names, base, resolved = name_at database "app::main" written occurrence in
-  let actual = describe names base resolved.names.(name.id) in
+  let name, spans, base, resolved = name_at database "app::main" written occurrence in
+  let actual = describe spans base resolved.names.(name.id) in
   if actual <> expected then fail "`%s` #%d is %s, not %s" written occurrence actual expected
 
 let refers_to_binding text ~use ~binding =
   let database = setup [ ("app::main", text) ] in
   let source = text in
   let binding_offset = Option.get (Substring.find ~occurrence:(snd binding) source (fst binding)) in
-  let name, names, base, resolved = name_at database "app::main" (fst use) (snd use) in
-  let actual = describe names base resolved.names.(name.id) in
+  let name, spans, base, resolved = name_at database "app::main" (fst use) (snd use) in
+  let actual = describe spans base resolved.names.(name.id) in
   let expected = Printf.sprintf "local at %d" binding_offset in
   if actual <> expected then fail "`%s` is %s, not %s" (fst use) actual expected
 
@@ -240,15 +238,16 @@ let bracket_of text written occurrence =
       let key = Resolve.Names.key_of declaration in
       match
         ( (Support.names database key.module_.package).definition key,
+          (Support.names database key.module_.package).spans key,
           (Support.names database key.module_.package).place key,
           Pipeline.resolved (Support.pipeline database) key )
       with
-      | Some definition, Some { base; _ }, Some resolved ->
+      | Some definition, Some spans, Some { base; _ }, Some resolved ->
           let bracket = ref None in
           Syntax_walk.definition
             (let rec visit (value : Syntax.expression) =
                (match value.kind with
-               | Bracket _ when base + value.span.start = offset ->
+               | Bracket _ when base + spans.(value.id).start = offset ->
                    bracket := resolved.brackets.(value.id)
                | _ -> ());
                Syntax_walk.children visit value

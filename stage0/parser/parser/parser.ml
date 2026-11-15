@@ -9,16 +9,21 @@ let recovers = Cursor.recovers
 let parse_piece (tokens : Token.t array) piece parse =
   let diagnostics = Diagnostic.Collector.create () in
   let base = tokens.(piece.first).span.start in
-  let value = parse (Cursor.create ~diagnostics ~base tokens ~first:piece.first ~stop:piece.stop) in
-  (value, Diagnostic.Collector.to_list diagnostics)
-
-let item (tokens : Token.t array) piece value : _ Syntax.item =
-  { base = tokens.(piece.first).span.start; stop = tokens.(piece.stop - 1).span.stop; value }
+  let cursor = Cursor.create ~diagnostics ~base tokens ~first:piece.first ~stop:piece.stop in
+  let value = parse cursor in
+  ( ({
+       base;
+       stop = tokens.(piece.stop - 1).span.stop;
+       value;
+       positions = Cursor.collect_positions cursor;
+     }
+      : _ Syntax.item),
+    Diagnostic.Collector.to_list diagnostics )
 
 let checked cursor (definition : Syntax.definition) =
   Precedence.definition cursor definition;
   Check.definition cursor definition;
-  { definition with recovered = Cursor.recovered cursor }
+  definition
 
 let parse_methods tokens (container : Syntax.definition) pieces =
   let kind : Parse_definition.container option =
@@ -32,23 +37,21 @@ let parse_methods tokens (container : Syntax.definition) pieces =
   | Some kind ->
       List.map
         (fun piece ->
-          let definition, diagnostics =
-            parse_piece tokens piece (fun cursor ->
-                checked cursor
-                  (Parse_definition.method_ cursor ~container:kind ~visibility:container.visibility))
-          in
-          (item tokens piece definition, diagnostics))
+          parse_piece tokens piece (fun cursor ->
+              checked cursor
+                (Parse_definition.method_ cursor ~container:kind ~visibility:container.visibility)))
         pieces
   | None -> []
 
 let parse_definition tokens piece : Syntax.top_level * Diagnostic.t list =
-  let (definition, method_pieces), diagnostics =
+  let parsed, diagnostics =
     parse_piece tokens piece (fun cursor ->
         let definition, methods = Parse_definition.definition cursor in
         (checked cursor definition, methods))
   in
+  let definition, method_pieces = parsed.value in
   let methods = parse_methods tokens definition method_pieces in
-  ( { definition = item tokens piece definition; methods = List.map fst methods },
+  ( { definition = { parsed with value = definition }; methods = List.map fst methods },
     diagnostics @ List.concat_map snd methods )
 
 let use_path cursor : Syntax.path option =
@@ -94,8 +97,7 @@ let parse tokens =
     match pieces with
     | [] -> (List.rev uses, List.rev definitions, List.concat (List.rev diagnostics))
     | piece :: rest when is_use tokens piece ->
-        let path, line_diagnostics = parse_use_line tokens piece in
-        let line = item tokens piece path in
+        let line, line_diagnostics = parse_use_line tokens piece in
         let moved, destination =
           match (definitions, destination) with
           | [], _ -> ([], Some (line_stop tokens piece))
@@ -104,7 +106,7 @@ let parse tokens =
           | _ :: _, None -> ([], None)
         in
         let uses =
-          match path with Some path -> { line with value = path } :: uses | None -> uses
+          match line.value with Some path -> { line with value = path } :: uses | None -> uses
         in
         gather rest ~uses ~definitions
           ~diagnostics:((line_diagnostics @ moved) :: diagnostics)
@@ -138,7 +140,7 @@ module For_testing = struct
   let parse_definition = parse_definition
 
   let parse_example_definition tokens piece =
-    let (example, container), diagnostics =
+    let parsed, diagnostics =
       parse_piece tokens piece (fun cursor ->
           match Parse_definition.example cursor with
           | Whole (definition, methods) ->
@@ -148,6 +150,7 @@ module For_testing = struct
               Check.signature cursor signature;
               (Example_signature, None))
     in
+    let example, container = parsed.value in
     let method_diagnostics =
       match container with
       | Some (container, pieces) -> List.concat_map snd (parse_methods tokens container pieces)
@@ -156,7 +159,7 @@ module For_testing = struct
     (example, diagnostics @ method_diagnostics)
 
   let parse_example_statement tokens piece =
-    let (), diagnostics =
+    let _, diagnostics =
       parse_piece tokens piece (fun cursor ->
           match
             let statement = Parse_expression.statement_line cursor ~previous:None in

@@ -10,7 +10,7 @@ let parse text =
     && List.exists
          (fun (top_level : Syntax.top_level) ->
            List.exists
-             (fun (item : Syntax.definition Syntax.item) -> item.value.recovered <> [])
+             (fun (item : Syntax.definition Syntax.item) -> item.positions.recovered <> [])
              (top_level.definition :: top_level.methods))
          file.definitions
   then fail "the parser recovered in %S with no error" text;

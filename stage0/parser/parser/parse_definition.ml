@@ -2,13 +2,7 @@ open Token
 open Syntax
 
 let definition_node cursor start visibility kind : definition =
-  {
-    visibility;
-    kind;
-    span = Cursor.span_from cursor start;
-    recovered = [];
-    id = Cursor.fresh_id cursor;
-  }
+  { visibility; kind; id = Cursor.allocate_id_from cursor start }
 
 type written_visibility = {
   visibility : visibility;
@@ -50,7 +44,7 @@ let type_head cursor : type_head =
   let start = Cursor.index cursor in
   let path = Atoms.upper_path cursor "a type name" in
   let generics = Parse_expression.generics cursor in
-  { path; generics; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor }
+  { path; generics; id = Cursor.allocate_id_from cursor start }
 
 let definition_name cursor =
   match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
@@ -79,26 +73,26 @@ let parameter cursor : parameter =
         in
         Named_parameter { name; mode; type_; default }
   in
-  { kind; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor }
+  { kind; id = Cursor.allocate_id_from cursor start }
 
 let parameters cursor ~method_ =
   if not (Cursor.is_punctuation cursor (Open Paren)) then
     Cursor.fail cursor "`(` to start the parameters";
   let parameters =
     Cursor.bracketed cursor ~item:parameter ~recover:(fun span ->
-        { kind = Parameter_error; span; id = Cursor.fresh_id cursor })
+        { kind = Parameter_error; id = Cursor.allocate_id cursor span })
   in
   List.iteri
     (fun index (parameter : parameter) ->
       match parameter.kind with
       | Self_parameter _ when not method_ ->
           Cursor.report cursor Misplaced_self
-            (Cursor.file_span cursor parameter.span)
+            (Cursor.read_file_span cursor parameter.id)
             "Only a method takes `self`: one written `fn Type.name`, or one in a trait or an \
              `impl`."
       | Self_parameter _ when index > 0 ->
           Cursor.report cursor Misplaced_self
-            (Cursor.file_span cursor parameter.span)
+            (Cursor.read_file_span cursor parameter.id)
             "`self` must be the first parameter."
       | _ -> ())
     parameters;
@@ -142,11 +136,7 @@ let clauses cursor =
                   skip ()
             in
             skip ();
-            {
-              kind = Clause_error;
-              span = Cursor.span_from cursor start;
-              id = Cursor.fresh_id cursor;
-            }
+            { kind = Clause_error; id = Cursor.allocate_id_from cursor start }
       in
       let once same message =
         if List.exists (fun (earlier : clause) -> same earlier.kind) clauses then
@@ -191,9 +181,8 @@ let body cursor =
             ];
         let at = Cursor.definition_span cursor (Source.zero_width stop) in
         {
-          statements = [ { kind = Statement_error; span = at; id = Cursor.fresh_id cursor } ];
-          span = at;
-          id = Cursor.fresh_id cursor;
+          statements = [ { kind = Statement_error; id = Cursor.allocate_id cursor at } ];
+          id = Cursor.allocate_id cursor at;
         }
       end
       else Cursor.fail cursor "`{` to start the body"
@@ -218,8 +207,8 @@ let members cursor ~member ~error =
          if Cursor.is_keyword cursor Fn then Either.Right (Cursor.skip_piece cursor)
          else
            let kind = member cursor in
-           Either.Left { kind; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor })
-       ~recover:(fun span -> Either.Left { kind = error; span; id = Cursor.fresh_id cursor }))
+           Either.Left { kind; id = Cursor.allocate_id_from cursor start })
+       ~recover:(fun span -> Either.Left { kind = error; id = Cursor.allocate_id cursor span }))
 
 let trait_member cursor =
   match Cursor.peek_kind cursor with
@@ -278,7 +267,7 @@ let method_kind cursor ~(container : container) ~name =
             match parameter.kind with
             | Self_parameter _ ->
                 Cursor.report cursor Misplaced_self
-                  (Cursor.file_span cursor parameter.span)
+                  (Cursor.read_file_span cursor parameter.id)
                   "A capability's methods take no `self`; they are called as \
                    `Capability.method(...)`, and only an implementation's methods take `self`."
             | _ -> ())
@@ -313,14 +302,10 @@ let fields cursor : field list =
       if Cursor.accept_punctuation cursor Equal then Some (Parse_expression.expression cursor)
       else None
     in
-    {
-      kind = Field_declaration { name; type_; default };
-      span = Cursor.span_from cursor start;
-      id = Cursor.fresh_id cursor;
-    }
+    { kind = Field_declaration { name; type_; default }; id = Cursor.allocate_id_from cursor start }
   in
   Cursor.bracketed cursor ~item:field ~recover:(fun span ->
-      { kind = Field_error; span; id = Cursor.fresh_id cursor })
+      { kind = Field_error; id = Cursor.allocate_id cursor span })
 
 let variants cursor =
   ignore (Cursor.accept_punctuation cursor Bar);
@@ -329,7 +314,7 @@ let variants cursor =
     let indirect = Cursor.accept_keyword cursor Indirect in
     let name = Atoms.upper_name cursor "the name of a variant" in
     let fields = if Cursor.is_punctuation cursor (Open Paren) then Some (fields cursor) else None in
-    { indirect; name; fields; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor }
+    { indirect; name; fields; id = Cursor.allocate_id_from cursor start }
   in
   Cursor.separated cursor ~separator:Bar variant
 
@@ -337,9 +322,7 @@ let type_clauses cursor =
   let rec gather clauses =
     let start = Cursor.index cursor in
     let clause kind =
-      gather
-        (({ kind; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor } : type_clause)
-        :: clauses)
+      gather (({ kind; id = Cursor.allocate_id_from cursor start } : type_clause) :: clauses)
     in
     match Cursor.peek_kind cursor with
     | Keyword Invariant ->

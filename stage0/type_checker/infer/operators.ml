@@ -10,7 +10,7 @@ open Name_lookup
 open Pattern_typing
 
 let rec try_ state env (value : expression) (inner : expression) =
-  reject_in_formula state env value.span "`?`";
+  reject_in_formula state env (read_span state value.id) "`?`";
   let inner_type = normalize state (expression state env inner) in
   let output =
     match env.output with Some (Returns output) -> Some (normalize state output) | _ -> None
@@ -24,7 +24,7 @@ let rec try_ state env (value : expression) (inner : expression) =
       Some (Types.Named { path = output_path; arguments = [ _; Types.Type output_error ] }) )
     when Well_known.is Result path && Well_known.is Result output_path ->
       if not (unify state error output_error) then
-        report state Wrong_try value.span
+        report state Wrong_try (read_span state value.id)
           (Printf.sprintf
              "`?` returns the error unchanged, so it needs the function's error type `%s`, not \
               `%s`. Convert it first with `map_error`."
@@ -36,7 +36,7 @@ let rec try_ state env (value : expression) (inner : expression) =
       some
   | (Types.Error _ | Types.Hole), _ -> inner_type
   | _ ->
-      error state Wrong_try value.span
+      error state Wrong_try (read_span state value.id)
         "`?` works on a `Result` in a function that returns a `Result`, and on an `Option` in a \
          function that returns an `Option`. Convert between them with `ok_or` or `ok`."
 
@@ -45,7 +45,7 @@ and with_ state env (value : expression) (base : expression) updates =
   (match base_type with
   | Types.Named { path; _ }
     when not (Members.fields_visible state.lookups ~package:state.package path) ->
-      report state Private_field value.span
+      report state Private_field (read_span state value.id)
         (Printf.sprintf "`%s` is opaque, so only its own package can update its fields."
            (Types.show base_type))
   | _ -> ());
@@ -66,12 +66,12 @@ and with_ state env (value : expression) (base : expression) updates =
                     with
                     | Some written -> field_type written.field_type rest
                     | None ->
-                        report state Unknown_member name.span
+                        report state Unknown_member (read_span state name.id)
                           (Printf.sprintf "`%s` has no field `%s`." (show state record_type)
                              name.text);
                         None)
                 | None ->
-                    report state Not_a_record name.span
+                    report state Not_a_record (read_span state name.id)
                       (Printf.sprintf "`with` works on records, and `%s` is not one."
                          (show state record_type));
                     None)
@@ -87,7 +87,8 @@ and with_ state env (value : expression) (base : expression) updates =
                       match Hashtbl.find_opt state.locals id with
                       | Some local ->
                           if not (unify state type_ local.type_) then
-                            mismatch state first.span ~expected:type_ ~actual:local.type_
+                            mismatch state (read_span state first.id) ~expected:type_
+                              ~actual:local.type_
                       | None -> ())
                   | _ -> ()))
           | None -> Option.iter (fun new_value -> ignore (expression state env new_value)) new_value
@@ -136,7 +137,7 @@ and prefix state env ?expected (value : expression) operator (inner : expression
           | Types.Literal (Integer_literal, _) -> true
           | _ -> false)
       then
-        report state No_impl value.span
+        report state No_impl (read_span state value.id)
           (Printf.sprintf "`~` works on built-in integers, not `%s`." (show state type_));
       type_
   | Negate -> (
@@ -156,7 +157,7 @@ and prefix state env ?expected (value : expression) operator (inner : expression
                     && (not (signed_type state resolved))
                     && not (Z.equal number Z.zero)
                   then
-                    report state Negated_unsigned value.span
+                    report state Negated_unsigned (read_span state value.id)
                       (Printf.sprintf "`%s` is unsigned, so it cannot be negated."
                          (Types.show resolved))
                   else check_literal_fits state value (Z.neg number) type_;
@@ -167,7 +168,7 @@ and prefix state env ?expected (value : expression) operator (inner : expression
           let resolved = normalize state type_ in
           if resolved = Types.Hole then Types.Hole
           else if integer_type state resolved && not (signed_type state resolved) then begin
-            report state Negated_unsigned value.span
+            report state Negated_unsigned (read_span state value.id)
               (Printf.sprintf "`%s` is unsigned, so it cannot be negated." (Types.show resolved));
             type_
           end
@@ -225,10 +226,10 @@ and operator_call ?(operands = []) state (value : expression) ~trait ~method_ ~l
       else begin
         (match implements state left reference with
         | Some evidence ->
-            let output = associated state left reference "Output" ~at:value.span in
+            let output = associated state left reference "Output" ~at:(read_span state value.id) in
             let decided = zonk state result in
             if not (unify state result output) then
-              report state Mismatch value.span
+              report state Mismatch (read_span state value.id)
                 (Printf.sprintf "This operator gives `%s`, and `%s` is expected."
                    (Types.show (zonk state output))
                    (Types.show decided));
@@ -254,7 +255,7 @@ and operator_call ?(operands = []) state (value : expression) ~trait ~method_ ~l
             let unknown =
               if Types.is_error left then left
               else
-                error state No_impl value.span
+                error state No_impl (read_span state value.id)
                   (Printf.sprintf "`%s` does not implement `%s`, so the operator does not apply."
                      (Types.show left) (Types.show_trait reference))
             in
@@ -309,7 +310,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
   match operator with
   | And | Or | Implies ->
       if operator = Implies && not env.specification then
-        report state Specification_only value.span
+        report state Specification_only (read_span state value.id)
           "`==>` is only for specifications and the bodies of functions for specifications only; \
            in code, write `!a || b`.";
       check state env left Types.bool;
@@ -331,13 +332,13 @@ and binary state env ?expected (value : expression) operator (left : expression)
           Form.operator state value (Form.operation_of operator) [ left; right ]);
       literal_operands state ~left:left_type ~right:right_type;
       if not (unify state left_type right_type) then
-        mismatch state right.span ~expected:left_type ~actual:right_type;
+        mismatch state (read_span state right.id) ~expected:left_type ~actual:right_type;
       defer state (fun () ->
           match normalize state left_type with
           | Types.Literal _ | Types.Variable _ -> false
           | resolved ->
               if not (integer_type state resolved || Types.is_error resolved) then
-                report state No_impl value.span
+                report state No_impl (read_span state value.id)
                   (Printf.sprintf "Bitwise operators work on built-in integers, not `%s`."
                      (Types.show resolved));
               true);
@@ -357,7 +358,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
               false
           | left_resolved, right_resolved ->
               if not (integer_type state left_resolved || Types.is_error left_resolved) then
-                report state No_impl left.span
+                report state No_impl (read_span state left.id)
                   (Printf.sprintf "Shifts work on built-in integers, not `%s`."
                      (Types.show left_resolved));
               if
@@ -365,7 +366,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
                   ((integer_type state right_resolved && not (signed_type state right_resolved))
                   || Types.is_error right_resolved)
               then
-                report state Mismatch right.span
+                report state Mismatch (read_span state right.id)
                   (Printf.sprintf "A shift amount is an unsigned integer, not `%s`."
                      (Types.show right_resolved));
               true);
@@ -444,20 +445,20 @@ and binary state env ?expected (value : expression) operator (left : expression)
         let piece (side : expression) =
           match side.kind with
           | String { tag = None; form = Ordinary; first; rest = []; _ } ->
-              Some (source state first.span)
+              Some (source state (read_span state first.id))
           | String _ -> None
-          | _ -> Some ("${" ^ source state side.span ^ "}")
+          | _ -> Some ("${" ^ source state (read_span state side.id) ^ "}")
         in
         let fixes =
           match (piece left, piece right) with
           | Some left, Some right ->
               [
                 fix "Join them with interpolation."
-                  [ replace value.span (Printf.sprintf "\"%s%s\"" left right) ];
+                  [ replace (read_span state value.id) (Printf.sprintf "\"%s%s\"" left right) ];
               ]
           | _ -> []
         in
-        report state String_addition value.span ~fixes
+        report state String_addition (read_span state value.id) ~fixes
           "Strings have no `+`. Join them with interpolation, or with methods such as `push`.";
         string_type
       end
@@ -545,8 +546,9 @@ and mismatched_operands state (value : expression) (left : expression) (right : 
           fix
             (Printf.sprintf "Convert the right side to `%s`." (Types.show left_type))
             [
-              replace right.span
-                (Printf.sprintf "%s.from(%s)" (Types.show left_type) (source state right.span));
+              replace (read_span state right.id)
+                (Printf.sprintf "%s.from(%s)" (Types.show left_type)
+                   (source state (read_span state right.id)));
             ];
         ]
       else if
@@ -558,18 +560,19 @@ and mismatched_operands state (value : expression) (left : expression) (right : 
           fix
             (Printf.sprintf "Convert the left side to `%s`." (Types.show right_type))
             [
-              replace left.span
-                (Printf.sprintf "%s.from(%s)" (Types.show right_type) (source state left.span));
+              replace (read_span state left.id)
+                (Printf.sprintf "%s.from(%s)" (Types.show right_type)
+                   (source state (read_span state left.id)));
             ];
         ]
       else []
     in
-    reported_mismatch state Mismatched_integers value.span ~sides ~fixes
+    reported_mismatch state Mismatched_integers (read_span state value.id) ~sides ~fixes
       (Printf.sprintf
          "Integer types never convert implicitly: this compares or combines `%s` with `%s`."
          (Types.show left_type) (Types.show right_type))
   end
-  else mismatched state right.span ~expected:left_type ~actual:right_type
+  else mismatched state (read_span state right.id) ~expected:left_type ~actual:right_type
 
 and any_ state env ?expected (value : expression) (inner : expression) =
   match Option.map (normalize state) expected with
@@ -581,8 +584,8 @@ and any_ state env ?expected (value : expression) (inner : expression) =
           | Types.Any trait, Some implementation ->
               To_any { value = inner; trait; evidence = Form.evidence (evidence_of implementation) }
           | _ -> bug "`any` of a value whose type does not implement the trait");
-      require state ~at:value.span inner_type trait ~unmet:(fun inner_type other ->
-          report state No_impl value.span
+      require state ~at:(read_span state value.id) inner_type trait ~unmet:(fun inner_type other ->
+          report state No_impl (read_span state value.id)
             (match other with
             | None ->
                 Printf.sprintf "`%s` does not implement `%s`." (Types.show inner_type)
@@ -610,7 +613,7 @@ and any_ state env ?expected (value : expression) (inner : expression) =
                           with
                           | [] -> ()
                           | set ->
-                              report state No_impl value.span
+                              report state No_impl (read_span state value.id)
                                 (Printf.sprintf
                                    "`%s` cannot be an `%s`: its `%s` is %s, and code that holds an \
                                     `any` value has no capability to give to its methods."
@@ -628,5 +631,5 @@ and any_ state env ?expected (value : expression) (inner : expression) =
       any_type
   | _ ->
       ignore (expression state env inner);
-      error state Cannot_infer value.span
+      error state Cannot_infer (read_span state value.id)
         "`any value` needs an expected type `any Trait`, from an annotation or a parameter."

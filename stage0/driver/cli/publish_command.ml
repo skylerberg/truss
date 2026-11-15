@@ -10,9 +10,8 @@ let unfinished snapshot pipeline packages =
       List.concat_map
         (fun declaration ->
           let key = Names.key_of declaration in
-          match (names.place key, names.definition key) with
-          | None, _ | _, None -> []
-          | Some { base; _ }, Some definition ->
+          match (names.place key, names.definition key, names.spans key) with
+          | Some { base; _ }, Some definition, Some spans ->
               List.map
                 (fun ({ keyword; span; _ } : Inspect.unfinished) ->
                   let line, column =
@@ -22,7 +21,8 @@ let unfinished snapshot pipeline packages =
                     Source.path source,
                     line,
                     column ))
-                (Inspect.unfinished definition))
+                (Inspect.unfinished spans definition)
+          | _ -> [])
         (names.declarations_in file))
     (Command_packages.files snapshot packages)
 

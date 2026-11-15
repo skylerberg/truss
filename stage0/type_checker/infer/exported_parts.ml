@@ -40,20 +40,19 @@ let check (state : state) =
     | Function { signature; _ } | Method_declaration signature ->
         (signature.clauses, Names.signature_name signature)
     | Theorem { name; clauses; _ } -> (clauses, name)
-    | _ -> ([], { text = ""; span = state.definition.span; id = state.definition.id })
+    | _ -> ([], { text = ""; id = state.definition.id })
   in
   let requires_and_costs =
     List.filter_map
       (fun (clause : clause) ->
         match clause.kind with
-        | Requires _ | Cost _ -> Some clause.span
+        | Requires _ | Cost _ -> Some (read_span state clause.id)
         | Ensures _ | Uses _ | Decreases _ | Clause_error -> None)
       clauses
   in
   if called_from_other_packages state && requires_and_costs <> [] then begin
-    let spans = Syntax_walk.span_table state.definition in
     let named id (path : Path.t) =
-      let span = spans.(id) in
+      let span = read_span state id in
       if
         List.exists
           (fun (clause : Source.Definition_span.t) ->

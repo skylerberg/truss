@@ -11,7 +11,7 @@ type t = {
   diagnostics : Diagnostic.Collector.t;
   mutable index : int;
   mutable nesting_depth : int;
-  next_id : int ref;
+  spans : Source.Definition_span.t Dynarray.t;
   recoveries : Source.span list ref;
   mutable after_inserted_closer : bool;
   is_unterminated_interpolation : bool;
@@ -45,7 +45,7 @@ let create ~diagnostics ~base tokens ~first ~stop =
     diagnostics;
     index = first;
     nesting_depth = 0;
-    next_id = ref 0;
+    spans = Dynarray.create ();
     recoveries = ref [];
     after_inserted_closer = false;
     is_unterminated_interpolation = false;
@@ -58,16 +58,11 @@ let interpolation cursor (inner : Token.interpolation) =
     with
     nesting_depth = cursor.nesting_depth;
     recoveries = cursor.recoveries;
-    next_id = cursor.next_id;
+    spans = cursor.spans;
     is_unterminated_interpolation = not inner.is_closed;
   }
 
 let index cursor = cursor.index
-
-let fresh_id cursor =
-  let id = !(cursor.next_id) in
-  cursor.next_id := id + 1;
-  id
 
 let end_token cursor =
   let position =
@@ -149,6 +144,15 @@ let span_from cursor start_index =
   definition_span cursor (Source.span start stop)
 
 let file_span cursor span = Source.Definition_span.to_file ~base:cursor.base span
+
+let allocate_id cursor span =
+  Dynarray.add_last cursor.spans span;
+  Dynarray.length cursor.spans - 1
+
+let allocate_id_from cursor start_index = allocate_id cursor (span_from cursor start_index)
+let read_span cursor id = Dynarray.get cursor.spans id
+let set_span cursor id span = Dynarray.set cursor.spans id span
+let read_file_span cursor id = file_span cursor (read_span cursor id)
 
 let rec tokens_within (tokens : Token.t array) ~first ~stop (span : Source.span) =
   let inside = ref [] and enclosing = ref None in
@@ -364,5 +368,8 @@ let lines cursor ~item ~recover =
   skip_to cursor (closer_index + 1);
   items
 
-let recovered cursor =
-  List.sort_uniq compare (List.map (definition_span cursor) !(cursor.recoveries))
+let collect_positions cursor : Syntax.positions =
+  {
+    spans = Dynarray.to_array cursor.spans;
+    recovered = List.sort_uniq compare (List.map (definition_span cursor) !(cursor.recoveries));
+  }

@@ -9,12 +9,11 @@ let tasks : Types.capability = Capability (Well_known.path Tasks)
 
 type checking = {
   state : state;
-  spans : Source.Definition_span.t array;
   mutable provides : (Types.capability_set * Core.implementation list * Core.block) list;
 }
 
 let report checking ?(fixes = []) code (origin : Core.origin) message =
-  let span = checking.spans.(origin) in
+  let span = read_span checking.state origin in
   checking.state.diagnostics <-
     Diagnostic.make ~fixes ~code:(Capabilities code) span message :: checking.state.diagnostics
 
@@ -295,7 +294,7 @@ and check_provide checking scope implementations body =
       in
       let provided_mut = implementation.mode = Mut in
       let is_place = match implementation.value with Place _ -> true | Value _ -> false in
-      let start = checking.spans.(implementation.origin).start in
+      let start = (read_span checking.state implementation.origin).start in
       if is_place && mutates && not provided_mut then
         report checking Provide_mode implementation.origin
           ~fixes:
@@ -518,7 +517,7 @@ let check_monitor_callbacks checking implementations =
     implementations
 
 let check (state : state) (lowered : Environment.lowered_interface) (form : Core.t) =
-  let checking = { state; spans = Syntax_walk.span_table state.definition; provides = [] } in
+  let checking = { state; provides = [] } in
   let function_body ?implemented_capability available =
     { available; kind = Function_body; implemented_capability }
   in

@@ -24,34 +24,36 @@ let proof context = { context with is_specification = true; allows_assert = true
 let may_be_specification context = context.is_specification || context.is_function_body
 let quantifier_word = function Forall -> "forall" | Exists -> "exists"
 
-let report cursor code (span : Source.Definition_span.t) message =
-  Cursor.report cursor code (Cursor.file_span cursor span) message
+let report cursor code id message =
+  Cursor.report cursor code (Cursor.read_file_span cursor id) message
 
-let try_operator_span (span : Source.Definition_span.t) =
-  Source.Definition_span.make (max span.start (span.stop - 1)) span.stop
+let try_operator_span cursor id =
+  let span = Cursor.read_span cursor id in
+  Cursor.file_span cursor (Source.Definition_span.make (max span.start (span.stop - 1)) span.stop)
 
 let rec expression cursor context (value : expression) =
   (match value.kind with
   | Quantified { quantifier; binder = Binder_type _; _ } when not (may_be_specification context) ->
-      report cursor Specification_only value.span
+      report cursor Specification_only value.id
         (Printf.sprintf
            "`%s` over a whole type cannot run, so it is only for specifications and the bodies of \
             functions for specifications only. Quantify over a range or a collection, as in `%s i \
             in 0..count => ...`."
            (quantifier_word quantifier) (quantifier_word quantifier))
-  | Binary { operator = Implies; operator_span; _ } when not (may_be_specification context) ->
-      report cursor Specification_only operator_span
+  | Binary { operator = Implies; operator_id; _ } when not (may_be_specification context) ->
+      report cursor Specification_only operator_id
         "`==>` is only for specifications and the bodies of functions for specifications only; in \
          code, write `!a || b`."
   | Echo _ when context.is_specification ->
-      report cursor Echo_in_specification value.span
+      report cursor Echo_in_specification value.id
         "`echo` is not allowed in specifications, which never run."
   | Try _ when context.is_in_parallel ->
-      report cursor Exits_parallel (try_operator_span value.span)
+      Cursor.report cursor Exits_parallel
+        (try_operator_span cursor value.id)
         "`?` cannot exit a `parallel` block or a `parallel for`; return a `Result` from the branch \
          and use `?` after it."
   | Return _ when context.is_in_parallel ->
-      report cursor Exits_parallel value.span
+      report cursor Exits_parallel value.id
         "`return` cannot exit a `parallel` block or a `parallel for`."
   | Break | Continue -> loop_exit cursor context value
   | _ -> ());
@@ -74,16 +76,15 @@ and loop_exit cursor context (value : expression) =
   match (context.enclosing_loop, value.kind) with
   | In_loop, _ | In_parallel_for, Continue -> ()
   | No_loop, _ ->
-      report cursor Misplaced_loop_exit value.span
+      report cursor Misplaced_loop_exit value.id
         (Printf.sprintf "`%s` is only allowed in a loop." word)
   | Across_lambda, _ ->
-      report cursor Misplaced_loop_exit value.span
+      report cursor Misplaced_loop_exit value.id
         (Printf.sprintf "`%s` cannot reach a loop outside the lambda it is in." word)
   | In_parallel_for, _ ->
-      report cursor Exits_parallel value.span
-        "`break` cannot exit a `parallel for`; `continue` can."
+      report cursor Exits_parallel value.id "`break` cannot exit a `parallel for`; `continue` can."
   | Across_parallel_branch, _ ->
-      report cursor Exits_parallel value.span
+      report cursor Exits_parallel value.id
         (Printf.sprintf "`%s` cannot leave a branch of a `parallel` block." word)
 
 and block cursor context (body : block) = List.iter (statement cursor context) body.statements
@@ -100,7 +101,7 @@ and requires_placement cursor ~top (type_ : type_expression) =
           (fun (clause : clause) ->
             match clause.kind with
             | Requires _ ->
-                report cursor Misplaced_requires clause.span
+                report cursor Misplaced_requires clause.id
                   "A function type has a `requires` only as the type of a parameter, where it \
                    constrains the arguments the callee passes its callback."
             | _ -> ())
@@ -151,12 +152,12 @@ and statement cursor context (statement : statement) =
   | Concurrent body -> block cursor context body
   | Proof body ->
       if not context.is_function_body then
-        report cursor Misplaced_proof statement.span
+        report cursor Misplaced_proof statement.id
           "A `proof` block is only allowed in a function's body.";
       block cursor (proof context) body
   | Assert _ ->
       if not context.allows_assert then
-        report cursor Misplaced_assert statement.span
+        report cursor Misplaced_assert statement.id
           "`assert` is only allowed in tests, theorems, and proofs.";
       statement_parts cursor context statement
   | Expression _ | Assignment _ | Statement_error -> statement_parts cursor context statement
@@ -171,11 +172,11 @@ let parameters ?(lends = false) cursor (parameters : parameter list) =
       match parameter.kind with
       | Named_parameter { name; type_; default; _ } ->
           if name.text = "result" then
-            report cursor Reserved_specification_name name.span
+            report cursor Reserved_specification_name name.id
               "A parameter cannot be named `result`, which names the return value in `ensures` and \
                `cost`.";
           if lends && name.text = "final" then
-            report cursor Reserved_specification_name name.span
+            report cursor Reserved_specification_name name.id
               "A parameter of a lending method cannot be named `final`: in the method's `ensures`, \
                `final(result)` is the part as the caller left it.";
           types ~parameter:true cursor plain type_;
@@ -192,11 +193,11 @@ let generic_parameters cursor generics =
 let function_name cursor (name : definition_name) =
   let name = match name with Plain_name name | Member_name (_, name) -> name in
   if name.text = "old" then
-    report cursor Reserved_specification_name name.span
+    report cursor Reserved_specification_name name.id
       "A function cannot be named `old`, which names a value as it was when a function was called, \
        in specifications."
   else if name.text = "identical" then
-    report cursor Reserved_specification_name name.span
+    report cursor Reserved_specification_name name.id
       "A function cannot be named `identical`, which tests whether two values are the same value, \
        in specifications."
 

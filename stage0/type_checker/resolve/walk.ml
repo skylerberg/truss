@@ -71,6 +71,7 @@ type section_names = {
 type state = {
   lookups : Names.lookups;
   key : Names.key;
+  spans : Source.Definition_span.t array;
   interface : section_names;
   contract : section_names;
   body : section_names;
@@ -87,10 +88,12 @@ let section_names size =
     used_imports = [];
   }
 
-let create lookups key ~size ~walked =
+let create lookups key ~spans ~walked =
+  let size = Array.length spans in
   {
     lookups;
     key;
+    spans;
     interface = section_names size;
     contract = section_names size;
     body = section_names size;
@@ -104,6 +107,7 @@ let names_of state = function
   | Body -> state.body
 
 let current state = names_of state state.section
+let read_span state id = state.spans.(id)
 
 let in_section state section walk =
   if section = state.walked then begin
@@ -129,13 +133,13 @@ let unknown state (name : name) ~expected candidates =
         [
           Diagnostic.fix
             (Printf.sprintf "Write `%s`." candidate)
-            [ Diagnostic.replace name.span candidate ];
+            [ Diagnostic.replace (read_span state name.id) candidate ];
         ]
     | None -> []
   in
   set state name
     (Unknown
-       (reported state ~fixes Unknown_name name.span
+       (reported state ~fixes Unknown_name (read_span state name.id)
           (Printf.sprintf "Nothing named `%s` is %s." name.text expected)))
 
 let module_item state text = state.lookups.find state.key.module_ text
@@ -157,21 +161,21 @@ let module_of_names state (first : name) (rest : name list) =
   | Found_module (module_, `Package)
     when module_ = Intrinsic.module_ && state.key.module_.package <> Path.standard_package ->
       failed
-        (reported state Intrinsic_import first.span
+        (reported state Intrinsic_import (read_span state first.id)
            "Only the `standard` package can use `standard::intrinsic`.")
   | Found_module (module_, _) ->
       set state first (Module module_);
       Ok module_
   | Ambiguous_module (imported, package) ->
       failed
-        (reported state Ambiguous_module first.span
+        (reported state Ambiguous_module (read_span state first.id)
            (Printf.sprintf
               "`%s` could be the imported module `%s` or the module `%s`. Write the imported one's \
                full path, or remove its `use`."
               first.text (Path.show_module imported) (Path.show_module package)))
   | No_module text ->
       failed
-        (reported state Unknown_module first.span
+        (reported state Unknown_module (read_span state first.id)
            (Printf.sprintf "No module `%s` is imported or exists." text))
   end
 
@@ -186,7 +190,7 @@ let in_module state module_ (name : name) ~types =
       else begin
         set state name
           (Unknown
-             (reported state Not_visible name.span
+             (reported state Not_visible (read_span state name.id)
                 (Printf.sprintf "`%s::%s` is %s." (Path.show_module module_) name.text
                    (match item.visibility with
                    | Private -> "private to its module, so it cannot be used here"
@@ -274,7 +278,7 @@ and associated_base state scope (base : name) (member : name) kind =
   | None ->
       set state base
         (Unknown
-           (reported state Not_a_generic_parameter base.span
+           (reported state Not_a_generic_parameter (read_span state base.id)
               (Printf.sprintf
                  "`%s.%s` names an associated %s, so `%s` must be a generic parameter here."
                  base.text member.text kind base.text)))
@@ -307,7 +311,7 @@ and count_name state scope (name : name) =
       | _ ->
           set state name
             (Unknown
-               (reported state Not_a_constant name.span
+               (reported state Not_a_constant (read_span state name.id)
                   (Printf.sprintf
                      "`%s` in a type argument must be a value generic parameter or a constant."
                      name.text))))
@@ -360,7 +364,7 @@ and local_value state scope (name : name) =
       else if List.mem text scope.specification.elements then
         set state name
           (Unknown
-             (reported state Unknown_name name.span
+             (reported state Unknown_name (read_span state name.id)
                 (Printf.sprintf
                    "`%s` is the loop's element, which is bound only in the loop's body: the loop's \
                     clauses hold before the first element and after the last. Name the elements so \
@@ -375,9 +379,12 @@ and local_value state scope (name : name) =
             if text = "null" || text = "nil" then begin
               set state name
                 (Unknown
-                   (reported state Null name.span
+                   (reported state Null (read_span state name.id)
                       ~fixes:
-                        [ Diagnostic.fix "Write `None`." [ Diagnostic.replace name.span "None" ] ]
+                        [
+                          Diagnostic.fix "Write `None`."
+                            [ Diagnostic.replace (read_span state name.id) "None" ];
+                        ]
                       (Printf.sprintf
                          "Truss has no `%s`. A value that may be missing is an `Option`, and \
                           `None` is its empty case."
@@ -426,7 +433,7 @@ and bracket state scope (value : expression) base items =
               match state.lookups.find module_ name with Some item -> item.generic | None -> false
             in
             if not generic then
-              report state Not_generic value.span
+              report state Not_generic (read_span state value.id)
                 (Printf.sprintf
                    "`%s` is a function without generic parameters, so `[...]` cannot give it type \
                     arguments, and a function cannot be indexed."
@@ -466,12 +473,15 @@ and check_place state (written : expression) (inner : expression) =
   match head inner with
   | `Place _ | `Unknown -> ()
   | `Not_a_place _ ->
-      let keyword_end = inner.span.start in
-      report state Not_a_place written.span
+      let keyword_end = (read_span state inner.id).start in
+      report state Not_a_place (read_span state written.id)
         ~fixes:
           [
             Diagnostic.fix "Remove the keyword."
-              [ Diagnostic.delete (Source.Definition_span.make written.span.start keyword_end) ];
+              [
+                Diagnostic.delete
+                  (Source.Definition_span.make (read_span state written.id).start keyword_end);
+              ];
           ]
         "Only a place, such as a variable, a field, or an element, can take `mut` or `own`. A \
          temporary value is always passed as owned."
@@ -594,7 +604,7 @@ and arm state scope (arm_ : arm) =
 
 and declare_value state scope (name : name) =
   let shadows existing =
-    report state Shadowed_name name.span
+    report state Shadowed_name (read_span state name.id)
       (Printf.sprintf "`%s` is already %s, and a name cannot shadow another. Choose another name."
          name.text existing)
   in
@@ -644,7 +654,7 @@ and pattern state scope bound (pattern_ : pattern) =
           List.iter
             (fun ((alternative : pattern), names) ->
               if texts names <> texts first then
-                report state Alternative_bindings alternative.span
+                report state Alternative_bindings (read_span state alternative.id)
                   (Printf.sprintf
                      "Every alternative of a pattern must bind the same names. The first binds %s, \
                       and this one binds %s."
@@ -742,7 +752,7 @@ and statement state scope (statement_ : statement) =
           String_map.iter
             (fun key _ ->
               if String_map.mem key after.values then
-                report state Shadowed_name branch.span
+                report state Shadowed_name (read_span state branch.id)
                   (Printf.sprintf
                      "Another branch of this `%s` block already binds `%s`, and a name cannot \
                       shadow another. Choose another name."
@@ -770,11 +780,11 @@ and loop_clause ?(for_loop = false) ?(elements = []) state scope (written : loop
   match written.kind with
   | Invariant value -> expression state specification value
   | Loop_decreases measures -> List.iter (expression state specification) measures
-  | Loop_cost cost -> clause state scope { kind = Cost cost; span = written.span; id = written.id }
+  | Loop_cost cost -> clause state scope { kind = Cost cost; id = written.id }
 
 let declare_type state scope (name : name) target =
   let shadows existing =
-    report state Shadowed_name name.span
+    report state Shadowed_name (read_span state name.id)
       (Printf.sprintf "`%s` is already %s, and a name cannot shadow another. Choose another name."
          name.text existing)
   in
@@ -914,7 +924,7 @@ let inherited scope ~(owner : Path.t) (generics : generic_parameter list) =
 
 let definition state ~(path : Path.t) ?(container : (Path.t * definition) option)
     (definition_ : definition) =
-  let broken part = Parts.broken definition_ part in
+  let broken part = Names.is_broken state.lookups state.key part in
   let header_broken = broken Header and body_broken = broken Body in
   let scope =
     match container with

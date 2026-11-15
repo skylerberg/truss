@@ -2,10 +2,10 @@ open Token
 open Syntax
 
 let expression_node cursor start kind : expression =
-  { kind; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor }
+  { kind; id = Cursor.allocate_id_from cursor start }
 
 let type_node cursor start kind : type_expression =
-  { kind; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor }
+  { kind; id = Cursor.allocate_id_from cursor start }
 
 let error_expression cursor start : expression = expression_node cursor start Expression_error
 
@@ -28,7 +28,7 @@ let mode cursor =
   else None
 
 let name cursor (token : Token.t) text : Syntax.name =
-  { text; span = Cursor.definition_span cursor token.span; id = Cursor.fresh_id cursor }
+  { text; id = Cursor.allocate_id cursor (Cursor.definition_span cursor token.span) }
 
 let lower_name cursor expected =
   match Cursor.peek_kind cursor with
@@ -56,7 +56,7 @@ let upper_path cursor expected : Syntax.path =
   { modules; last = upper_name cursor expected }
 
 let text cursor (text : Token.text) : Syntax.text =
-  { value = text.value; span = Cursor.definition_span cursor text.span }
+  { value = text.value; id = Cursor.allocate_id cursor (Cursor.definition_span cursor text.span) }
 
 let string_literal cursor ~start ~modules (literal : Token.string_literal) ~interpolation :
     Syntax.string_literal =
@@ -66,7 +66,7 @@ let string_literal cursor ~start ~modules (literal : Token.string_literal) ~inte
       (fun (text, span) : Syntax.path ->
         {
           modules;
-          last = { text; span = Cursor.definition_span cursor span; id = Cursor.fresh_id cursor };
+          last = { text; id = Cursor.allocate_id cursor (Cursor.definition_span cursor span) };
         })
       literal.tag
   in
@@ -77,6 +77,5 @@ let string_literal cursor ~start ~modules (literal : Token.string_literal) ~inte
     rest =
       Array.to_list
         (Array.map (fun (inner, piece) -> (interpolation inner, text cursor piece)) literal.rest);
-    span = Cursor.span_from cursor start;
-    id = Cursor.fresh_id cursor;
+    id = Cursor.allocate_id_from cursor start;
   }

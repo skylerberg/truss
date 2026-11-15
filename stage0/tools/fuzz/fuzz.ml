@@ -82,29 +82,35 @@ let check_tree text (item : Syntax.definition Syntax.item) =
   let contains_span (outer : Source.Definition_span.t) (inner : Source.Definition_span.t) =
     outer.start <= inner.start && inner.stop <= outer.stop
   in
+  let spans = item.positions.spans in
   let ids = Hashtbl.create 64 in
   let rec expression (outer : Source.Definition_span.t) (value : Syntax.expression) =
-    if not (contains_span outer value.span) then
+    let span = spans.(value.id) in
+    if not (contains_span outer span) then
       fail "an expression's span is outside its parent in %s" quoted;
     if Hashtbl.mem ids value.id then fail "an id repeats in %s" quoted;
     Hashtbl.replace ids value.id ();
     if value.id >= item.value.id then fail "an id is not before its definition's in %s" quoted;
-    let previous = ref value.span.start in
+    let previous = ref span.start in
     Syntax_walk.children
       (fun (inner : Syntax.expression) ->
-        if inner.span.start < !previous then fail "expressions out of order in %s" quoted;
-        previous := inner.span.start;
-        expression value.span inner)
+        let inner_start = spans.(inner.id).start in
+        if inner_start < !previous then fail "expressions out of order in %s" quoted;
+        previous := inner_start;
+        expression span inner)
       value
   in
   let length = item.stop - item.base in
-  if item.value.span.start <> 0 || item.value.span.stop > length then
+  if Array.length spans <> item.value.id + 1 then
+    fail "the span table does not end at the definition's id in %s" quoted;
+  let definition_span = spans.(item.value.id) in
+  if definition_span.start <> 0 || definition_span.stop > length then
     fail "a definition's span is out of bounds in %s" quoted;
   List.iter
     (fun (span : Source.Definition_span.t) ->
       if span.stop > length then fail "a recovery is out of bounds in %s" quoted)
-    item.value.recovered;
-  Syntax_walk.definition (expression item.value.span) item.value
+    item.positions.recovered;
+  Syntax_walk.definition (expression definition_span) item.value
 
 let check_parse_robust text =
   match parse text with
@@ -121,7 +127,7 @@ let check_parse_robust text =
       if
         diagnostics = []
         && List.exists
-             (fun (item : Syntax.definition Syntax.item) -> item.value.recovered <> [])
+             (fun (item : Syntax.definition Syntax.item) -> item.positions.recovered <> [])
              items
       then fail "the parser recovered with no error in %s" (Diagnostic.quote text)
 

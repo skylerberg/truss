@@ -18,22 +18,22 @@ let expression_at text written occurrence =
         let key = Resolve.Names.key_of declaration in
         match
           ( (Support.names database key.module_.package).definition key,
+            (Support.names database key.module_.package).spans key,
             (Support.names database key.module_.package).place key,
             Pipeline.For_testing.checked_body (pipeline database) key )
         with
-        | Some definition, Some { base; _ }, Some result ->
+        | Some definition, Some spans, Some { base; _ }, Some result ->
             let best = ref None in
-            let exact (value : Syntax.expression) =
-              value.span.stop - value.span.start = String.length written
+            let length (value : Syntax.expression) =
+              let span : Source.Definition_span.t = spans.(value.id) in
+              span.stop - span.start
             in
+            let exact value = length value = String.length written in
             let rec visit (value : Syntax.expression) =
-              (if base + value.span.start = offset then
+              (if base + spans.(value.id).start = offset then
                  match !best with
                  | Some (other : Syntax.expression)
-                   when exact other
-                        || (not (exact value))
-                           && other.span.stop - other.span.start
-                              <= value.span.stop - value.span.start ->
+                   when exact other || ((not (exact value)) && length other <= length value) ->
                      ()
                  | _ -> best := Some value);
               Syntax_walk.children visit value

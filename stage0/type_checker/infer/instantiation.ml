@@ -17,7 +17,7 @@ let check_evidence_grants state (span : Source.Definition_span.t) evidence =
 let error_at state ?fixes code (value : expression) message =
   match head state value with
   | Some { target = Unknown report; _ } -> Types.Error report
-  | _ -> error state ?fixes code value.span message
+  | _ -> error state ?fixes code (read_span state value.id) message
 
 type static_ =
   | Static_type of Types.ty
@@ -109,7 +109,7 @@ let rec static_ state (value : expression) : static_ option =
       Some (Static_type (named_type state value path type_arguments))
   | _, Some { target = Type_parameter parameter; name; type_arguments } ->
       if Option.is_some type_arguments then
-        report state Arity value.span
+        report state Arity (read_span state value.id)
           (Printf.sprintf "`%s` is a generic parameter, which takes no arguments." name.text);
       Some (Static_type (Types.Parameter parameter))
   | _, Some { target = Definition (Trait, path); type_arguments; _ } ->
@@ -126,19 +126,19 @@ and named_type state (value : expression) path type_arguments =
     | _ -> Types.Named { path; arguments }
   in
   match type_arguments with
-  | None -> type_ (instantiate_type state value.span path)
+  | None -> type_ (instantiate_type state (read_span state value.id) path)
   | Some items ->
       let arguments = written_arguments state items in
       (match Resolve.Names.generics_of state.lookups.interface.names path with
       | Some expected when List.length expected <> List.length arguments ->
-          report state Arity value.span
+          report state Arity (read_span state value.id)
             (Printf.sprintf "`%s` takes %d %s, and %d %s given."
                (Types.show (Named { path; arguments = [] }))
                (List.length expected)
                (if List.length expected = 1 then "argument" else "arguments")
                (List.length arguments)
                (if List.length arguments = 1 then "is" else "are"))
-      | _ -> require_type_bounds state value.span path arguments);
+      | _ -> require_type_bounds state (read_span state value.id) path arguments);
       type_ arguments
 
 and written_arguments state items =
@@ -146,7 +146,7 @@ and written_arguments state items =
     (function
       | Item item -> Some (type_argument_of_expression state item)
       | Item_constraint (name, _) ->
-          report state Arity name.span
+          report state Arity (read_span state name.id)
             "An associated type is fixed where a type is written, as in `any Trait[Name = Type]`, \
              not among type arguments in an expression.";
           None)
@@ -161,7 +161,7 @@ and type_argument_of_expression state (value : expression) : Types.argument =
       | Some value -> Types.Value (Known value)
       | None ->
           Types.Type
-            (error state Arity value.span
+            (error state Arity (read_span state value.id)
                (Printf.sprintf
                   "The value of `%s` cannot be computed: a constant used in a type cannot refer to \
                    itself, and is made of literals, arithmetic, and other such constants."

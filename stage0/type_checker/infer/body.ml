@@ -28,11 +28,12 @@ let body state env (written : block) =
         | Some (Returns output) ->
             if not (unify state output Types.unit) then
               report state Mismatch
-                (Source.Definition_span.make written.span.stop written.span.stop)
+                (Source.Definition_span.make (read_span state written.id).stop
+                   (read_span state written.id).stop)
                 (Printf.sprintf "This body must end with a value of type `%s`." (show state output))
         | _ -> ())
     | [ (last : statement) ] ->
-        in_statement state env last.span (fun () ->
+        in_statement state env (read_span state last.id) (fun () ->
             match (last.kind, env.output) with
             | Expression _, Some (Returns output) when resolve state output = Types.unit ->
                 statement state env last ~last:false
@@ -43,15 +44,17 @@ let body state env (written : block) =
             | _, Some (Returns output) ->
                 statement state env last ~last:true;
                 if not (statement_diverges state last || unify state output Types.unit) then
-                  report state Mismatch last.span
+                  report state Mismatch (read_span state last.id)
                     (Printf.sprintf "This body must end with a value of type `%s`."
                        (show state output))
             | _ -> statement state env last ~last:false)
     | (first : statement) :: rest ->
-        in_statement state env first.span (fun () -> statement state env first ~last:false);
+        in_statement state env (read_span state first.id) (fun () ->
+            statement state env first ~last:false);
         check_statements rest
   in
-  in_statement state env written.span (fun () -> check_statements written.statements)
+  in_statement state env (read_span state written.id) (fun () ->
+      check_statements written.statements)
 
 let declare_parameters state (written : parameter list) (signature : Types.signature) =
   List.iter
@@ -93,7 +96,7 @@ let check_clauses state env (clauses : clause list) =
     clauses;
   List.iter
     (fun ((value : expression), kind) ->
-      in_statement state env value.span (fun () ->
+      in_statement state env (read_span state value.id) (fun () ->
           match kind with
           | `Bool -> check state env value Types.bool
           | `Cost_function -> ignore (expression state env value)))
@@ -123,7 +126,8 @@ let check_function_type_requires state env (written : parameter list) (signature
                 (fun (clause : clause) ->
                   match clause.kind with
                   | Requires value ->
-                      in_statement state env value.span (fun () -> check state env value Types.bool)
+                      in_statement state env (read_span state value.id) (fun () ->
+                          check state env value Types.bool)
                   | _ -> ())
                 clauses
           | _ -> ())
@@ -141,7 +145,7 @@ let check_defaults state env (written : parameter list) (signature : Types.signa
               signature.parameters
           with
           | Some info ->
-              in_statement state env value.span (fun () ->
+              in_statement state env (read_span state value.id) (fun () ->
                   let actual = expression state env ~expected:info.type_ value in
                   Name_lookup.coerce state env ~argument:info.mode value ~actual
                     ~expected:info.type_);
@@ -270,12 +274,11 @@ let check_deserialized_invariants state (lowered : Environment.lowered_interface
   match (form.definition, lowered.interface) with
   | Type { invariants; _ }, Type_interface interface
     when List.exists (Well_known.is Deserialize) interface.derives ->
-      let spans = lazy (Syntax_walk.span_table state.definition) in
       List.iter
         (fun (invariant : Core.condition) ->
           if not invariant.executable then
             report state Cannot_derive
-              (Lazy.force spans).(invariant.value.origin)
+              (read_span state invariant.value.origin)
               "This invariant cannot be checked at run time, so `serialization::Deserialize` \
                cannot be derived: a value read from data might break it. Write the `impl`, which \
                checks the value another way.")
@@ -285,7 +288,7 @@ let check_deserialized_invariants state (lowered : Environment.lowered_interface
 let check_definition state (lowered : Environment.lowered_interface) ~checks_body =
   let definition = state.definition in
   let broken (part : Resolve.Parts.part) =
-    Resolve.Parts.broken definition part || (part = Body && not checks_body)
+    Names.is_broken state.lookups.interface.names state.key part || (part = Body && not checks_body)
   in
   if not (broken Header) then
     match (definition.kind, lowered.interface) with
@@ -303,9 +306,11 @@ let check_definition state (lowered : Environment.lowered_interface) ~checks_bod
           (fun (clause : type_clause) ->
             match clause.kind with
             | Type_invariant value ->
-                in_statement state env value.span (fun () -> check state env value Types.bool)
+                in_statement state env (read_span state value.id) (fun () ->
+                    check state env value Types.bool)
             | Potential value ->
-                in_statement state env value.span (fun () -> ignore (expression state env value))
+                in_statement state env (read_span state value.id) (fun () ->
+                    ignore (expression state env value))
             | Derives _ -> ())
           clauses;
         let defaulted variant (fields : field list) =
@@ -365,7 +370,7 @@ let check_definition state (lowered : Environment.lowered_interface) ~checks_bod
                       lowered_fields
                   with
                   | Some lowered ->
-                      in_statement state constant_expression value.span (fun () ->
+                      in_statement state constant_expression (read_span state value.id) (fun () ->
                           check state constant_expression value lowered.field_type);
                       Constant.check state ~default:true value
                   | None -> ())
@@ -444,7 +449,7 @@ let check_definition state (lowered : Environment.lowered_interface) ~checks_bod
                     law.parameters;
                   List.iter
                     (fun (requirement : expression) ->
-                      in_statement state env requirement.span (fun () ->
+                      in_statement state env (read_span state requirement.id) (fun () ->
                           check state env requirement Types.bool))
                     law.requires;
                   if not (broken (Member_body index)) then
@@ -457,7 +462,7 @@ let check_definition state (lowered : Environment.lowered_interface) ~checks_bod
             (fun ~holds_body ->
               Constant (if holds_body then Some (build_expression state value) else None));
         if not (broken Body) then begin
-          in_statement state constant_expression value.span (fun () ->
+          in_statement state constant_expression (read_span state value.id) (fun () ->
               check state constant_expression value constant.constant_type);
           Constant.check state ~default:false value
         end
@@ -650,19 +655,16 @@ let integer_literal_range (bounds : Types.trait_reference list) =
 let check (lookups : Lookups.t) (key : Names.key) ~checks_body =
   match
     ( lookups.interface.names.definition key,
+      lookups.interface.names.spans key,
       Resolve.whole
         ~sections:(if checks_body then Resolve.sections else [ Interface; Contract ])
         lookups.interface.resolved key,
       lookups.interface.lowered_interface key )
   with
-  | Some definition, Some resolved, Some lowered ->
+  | Some definition, Some spans, Some resolved, Some lowered ->
       let module_ = key.module_ in
-      let context = Interface.Lower.create lookups.interface resolved lowered.scope in
+      let context = Interface.Lower.create lookups.interface resolved ~spans lowered.scope in
       let text = lazy (Option.value ~default:"" (lookups.interface.names.text key)) in
-      let binding_spans = Hashtbl.create 64 in
-      List.iter
-        (fun (name : name) -> Hashtbl.replace binding_spans name.id name.span)
-        (Syntax_walk.collect_names definition);
       let state : state =
         {
           lookups;
@@ -692,7 +694,6 @@ let check (lookups : Lookups.t) (key : Names.key) ~checks_body =
           receiver_modes = [];
           yielded = Hashtbl.create 4;
           lent_tails = Hashtbl.create 4;
-          binding_spans;
           lambdas = [];
           unsolved = None;
           capability_constraints = [];
@@ -711,9 +712,7 @@ let check (lookups : Lookups.t) (key : Names.key) ~checks_body =
       state.diagnostics <- !(context.diagnostics) @ state.diagnostics;
       state.diagnostics <-
         Interface.Check.bound_diagnostics lookups.interface ~package:state.package
-          ~bounds:(bounds state)
-          ~spans:(lazy (Syntax_walk.span_table definition))
-          !(context.named)
+          ~bounds:(bounds state) ~spans !(context.named)
         @ state.diagnostics;
       finalize state;
       Exported_parts.check state;
@@ -738,8 +737,8 @@ let check (lookups : Lookups.t) (key : Names.key) ~checks_body =
       in
       let is_clean () =
         state.diagnostics = []
-        && (not (Resolve.Parts.broken definition Header))
-        && (not (checks_body && Resolve.Parts.broken definition Body))
+        && (not (Names.is_broken lookups.interface.names key Header))
+        && (not (checks_body && Names.is_broken lookups.interface.names key Body))
         && not (any_type Types.is_error)
       in
       let build () : Core.t =

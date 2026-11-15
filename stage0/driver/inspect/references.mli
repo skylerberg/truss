@@ -4,7 +4,12 @@ type occurrence = { span : Source.Definition_span.t; target : target }
 val declared_name : Syntax.definition -> Syntax.name option
 
 val occurrences :
-  path:Path.t -> Syntax.definition -> Resolve.resolved -> Infer.tables option -> occurrence list
+  path:Path.t ->
+  Source.Definition_span.t array ->
+  Syntax.definition ->
+  Resolve.resolved ->
+  Infer.tables option ->
+  occurrence list
 
 val uses :
   used_module:(Syntax.path -> Path.module_) ->

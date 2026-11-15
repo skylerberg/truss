@@ -23,7 +23,7 @@ let rec function_value_call state env (value : expression) (callee : expression)
   match callee_type with
   | Types.Function function_type ->
       if List.length function_type.inputs <> List.length arguments then
-        report state Too_many_arguments value.span
+        report state Too_many_arguments (read_span state value.id)
           (Printf.sprintf "This function takes %d arguments, and %d are given."
              (List.length function_type.inputs)
              (List.length arguments));
@@ -35,13 +35,14 @@ let rec function_value_call state env (value : expression) (callee : expression)
           (fun index (argument : argument) ->
             (match argument.label with
             | Some label ->
-                report state Unknown_label label.span
+                report state Unknown_label (read_span state label.id)
                   ~fixes:
                     [
                       fix "Remove the label."
                         [
                           Diagnostic.delete
-                            (Source.Definition_span.make label.span.start argument.value.span.start);
+                            (Source.Definition_span.make (read_span state label.id).start
+                               (read_span state argument.value.id).start);
                         ];
                     ]
                   "A call through a function value passes its arguments by position, without \
@@ -76,7 +77,7 @@ let rec function_value_call state env (value : expression) (callee : expression)
   | Types.Error _ | Types.Hole -> arguments_alone state env arguments callee_type
   | _ ->
       arguments_alone state env arguments
-        (error state Not_callable callee.span
+        (error state Not_callable (read_span state callee.id)
            (Printf.sprintf "`%s` is not a function, so it cannot be called."
               (show state callee_type)))
 
@@ -124,14 +125,14 @@ and match_arguments state (value : expression) (parameters : Types.parameter_inf
               match List.assoc_opt label.text named with
               | Some index -> Some index
               | None ->
-                  report state Unknown_label label.span
+                  report state Unknown_label (read_span state label.id)
                     ~fixes:
                       (match Diagnostic.closest label.text (List.map fst named) with
                       | Some candidate ->
                           [
                             fix
                               (Printf.sprintf "Write `%s`." candidate)
-                              [ replace label.span candidate ];
+                              [ replace (read_span state label.id) candidate ];
                           ]
                       | None -> [])
                     (Printf.sprintf "No parameter is named `%s`." label.text);
@@ -179,11 +180,13 @@ and match_arguments state (value : expression) (parameters : Types.parameter_inf
                           [
                             fix
                               (Printf.sprintf "Label it `%s`." label)
-                              [ insert argument.value.span.start (label ^ ": ") ];
+                              [ insert (read_span state argument.value.id).start (label ^ ": ") ];
                           ]
                       | _ -> []
                     in
-                    report state Missing_label argument.value.span ~fixes
+                    report state Missing_label
+                      (read_span state argument.value.id)
+                      ~fixes
                       (if record then
                          "Every field after the first needs a label or a variable of its name, \
                           since fields have no order."
@@ -196,7 +199,8 @@ and match_arguments state (value : expression) (parameters : Types.parameter_inf
         (match parameter_index with
         | Some index ->
             if Hashtbl.mem assigned index then begin
-              report state Repeated_argument argument.value.span
+              report state Repeated_argument
+                (read_span state argument.value.id)
                 (Printf.sprintf "`%s` is given more than once." (List.nth parameters index).name)
             end
             else Hashtbl.replace assigned index ()
@@ -219,23 +223,24 @@ and match_arguments state (value : expression) (parameters : Types.parameter_inf
            let written (argument : argument) =
              let start =
                match argument.label with
-               | Some label -> label.span.start
-               | None -> argument.value.span.start
+               | Some label -> (read_span state label.id).start
+               | None -> (read_span state argument.value.id).start
              in
-             source state (Source.Definition_span.make start argument.value.span.stop)
+             source state
+               (Source.Definition_span.make start (read_span state argument.value.id).stop)
            in
            let start =
              match first.label with
-             | Some label -> label.span.start
-             | None -> first.value.span.start
+             | Some label -> (read_span state label.id).start
+             | None -> (read_span state first.value.id).start
            in
-           report state Out_of_order value.span
+           report state Out_of_order (read_span state value.id)
              ~fixes:
                [
                  fix "Put the arguments in the order of the parameters."
                    [
                      replace
-                       (Source.Definition_span.make start last.value.span.stop)
+                       (Source.Definition_span.make start (read_span state last.value.id).stop)
                        (String.concat ", " (List.map written ordered));
                    ];
                ]
@@ -250,7 +255,7 @@ and match_arguments state (value : expression) (parameters : Types.parameter_inf
   if List.for_all (fun (_, parameter_index) -> Option.is_some parameter_index) matched then
     List.iter
       (fun (name, _) ->
-        report state Missing_argument value.span
+        report state Missing_argument (read_span state value.id)
           (Printf.sprintf "`%s` is not given, and has no default." name))
       missing;
   let left_out =
@@ -291,7 +296,7 @@ and check_arguments state env (parameters : Types.parameter_info list) matched ~
 
 and named_call state env ?expected (value : expression) path (signature : Types.signature)
     ~type_arguments arguments =
-  let instance = instantiate state value.span signature in
+  let instance = instantiate state (read_span state value.id) signature in
   explicit_type_arguments state value instance type_arguments;
   (match (expected, instance.signature.output) with
   | Some expected, Returns output -> unify_as_hint state output expected
@@ -312,7 +317,7 @@ and construct state env ?expected ?type_arguments (value : expression) type_path
   let type_arguments =
     match type_arguments with
     | Some written -> written
-    | None -> instantiate_type state value.span type_path
+    | None -> instantiate_type state (read_span state value.id) type_path
   in
   let type_ = Types.Named { path = type_path; arguments = type_arguments } in
   (match expected with Some expected -> unify_as_hint state type_ expected | None -> ());
@@ -322,7 +327,7 @@ and construct state env ?expected ?type_arguments (value : expression) type_path
         match Members.fields state.lookups type_path type_arguments with
         | Some fields -> Some fields
         | None ->
-            report state Not_a_record value.span
+            report state Not_a_record (read_span state value.id)
               (Printf.sprintf "`%s` is not a record, so it cannot be built this way."
                  (show state type_));
             None)
@@ -336,17 +341,17 @@ and construct state env ?expected ?type_arguments (value : expression) type_path
             with
             | Some { fields = Some fields; _ } -> Some fields
             | Some { fields = None; _ } ->
-                report state Too_many_arguments value.span
+                report state Too_many_arguments (read_span state value.id)
                   (Printf.sprintf "`%s` has no fields." variant);
                 None
             | None ->
-                report state Unknown_variant value.span
+                report state Unknown_variant (read_span state value.id)
                   (Printf.sprintf "`%s` has no variant `%s`." (show state type_) variant);
                 None)
         | None -> None)
   in
   if not (Members.fields_visible state.lookups ~package:state.package type_path) then
-    report state Private_field value.span
+    report state Private_field (read_span state value.id)
       (Printf.sprintf "`%s` is opaque, so only its own package can build it." (show state type_));
   match fields with
   | None ->

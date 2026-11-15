@@ -67,7 +67,7 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
               | Some rounded_value ->
                   state.tables.literals.(value.id) <- Some (Float_value rounded_value)
               | None ->
-                  report state Literal_out_of_range value.span
+                  report state Literal_out_of_range (read_span state value.id)
                     (Printf.sprintf
                        "This literal is too large for `%s`; it would round to infinity."
                        (Types.show resolved)));
@@ -92,7 +92,7 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
       let (kind : Core.kind), word =
         match value.kind with Break -> (Break, "`break`") | _ -> (Continue, "`continue`")
       in
-      reject_in_formula state env value.span word;
+      reject_in_formula state env (read_span state value.id) word;
       register_expression state value (fun () -> kind);
       Types.Never
   | Self_value -> (
@@ -101,10 +101,10 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
       match env.self with
       | Some self -> self
       | None ->
-          error state Not_a_value value.span
+          error state Not_a_value (read_span state value.id)
             "`self` is a method's receiver, and this is not a method that takes one.")
   | Self_type_value ->
-      error state Not_a_value value.span
+      error state Not_a_value (read_span state value.id)
         "`Self` is a type. Build a value of it, or call one of its methods."
   | Name path -> (
       match head state value with
@@ -131,7 +131,7 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
   | Binary { operator; left; right; _ } -> binary state env ?expected value operator left right
   | Is { value = tested; pattern = written; _ } ->
       let tested_type =
-        in_statement state env tested.span (fun () -> expression state env tested)
+        in_statement state env (read_span state tested.id) (fun () -> expression state env tested)
       in
       let mode = scrutinee_mode state tested in
       pattern state env written tested_type ~mode;
@@ -150,7 +150,7 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
             let stop_type = expression state env ~expected:element stop in
             literal_operands state ~left:element ~right:stop_type;
             if not (unify state element stop_type) then
-              mismatch state stop.span ~expected:element ~actual:stop_type;
+              mismatch state (read_span state stop.id) ~expected:element ~actual:stop_type;
             element
         | Some only, None | None, Some only -> expression state env only
         | None, None -> fresh state
@@ -165,7 +165,7 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
           pattern state env written element ~mode:Types.Read
       | Binder_type (bound, written) ->
           if not env.specification then
-            report state Specification_only value.span
+            report state Specification_only (read_span state value.id)
               "A quantifier over a whole type cannot run, so it is only for specifications and the \
                bodies of functions for specifications only. Quantify over a range or a collection.";
           declare state bound (Lower.type_ state.context written) ~is_var:false ~mode:Types.Read);
@@ -210,7 +210,7 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
       register_expression state value (fun () -> Echo (build_expression state inner));
       type_
   | Return inner ->
-      reject_in_formula state env value.span "`return`";
+      reject_in_formula state env (read_span state value.id) "`return`";
       register_expression state value (fun () ->
           match (inner, env.output) with
           | Some inner, Some (Lends (mode, _)) ->
@@ -232,7 +232,7 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
           check state env inner part
       | None, Some (Returns output) ->
           if not (unify state output Types.unit) then
-            mismatch state value.span ~expected:output ~actual:Types.unit
+            mismatch state (read_span state value.id) ~expected:output ~actual:Types.unit
       | Some inner, _ -> ignore (expression state env inner)
       | None, _ -> ());
       Types.Never
@@ -252,13 +252,13 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
   | Block body ->
       register_expression state value (fun () -> Block (build_block state body));
       block_value state env ?expected body
-  | Expression_error -> Types.Error (Resolve.Parts.recovery_report value.span)
+  | Expression_error -> Types.Error (Resolve.Parts.recovery_report (read_span state value.id))
 
 and member_value state env (value : expression) (base : expression) (member : name) =
   match static_ state base with
   | Some (Static_type type_) -> static_member state value type_ member
   | Some (Static_trait _ | Static_capability _) ->
-      error state Not_a_value value.span
+      error state Not_a_value (read_span state value.id)
         (Printf.sprintf "`%s` is a method; call it with `(...)`." member.text)
   | None -> (
       let base_type = normalize state (expression state env base) in
@@ -288,7 +288,7 @@ and bracket state env ?expected (value : expression) (base : expression) items =
         when Option.is_none (static_ state inner) && is_field state env inner member ->
           index state env ?expected value base items
       | _ ->
-          error state Not_a_value value.span
+          error state Not_a_value (read_span state value.id)
             "A method with type arguments is called: write `(...)` after it.")
   | Some Index | None -> index state env ?expected value base items
 
@@ -332,15 +332,15 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
              || Intrinsic.builtin_of_path path = Some Array ->
           Types.Named { path = Well_known.path Slice; arguments = [ Types.Type element ] }
       | Types.Named { path; _ } when Well_known.is String path || Well_known.is String_slice path ->
-          error state Not_indexable value.span
+          error state Not_indexable (read_span state value.id)
             "Strings cannot be indexed: say which you mean with `bytes()` or `characters()`."
       | Types.Error _ | Types.Hole -> base_type
       | _ ->
-          error state Not_indexable value.span
+          error state Not_indexable (read_span state value.id)
             (Printf.sprintf "`%s` cannot be sliced." (show state base_type)))
   | [ Item key ] -> (
       if Types.is_well_known String base_type || Types.is_well_known String_slice base_type then begin
-        error state Not_indexable value.span
+        error state Not_indexable (read_span state value.id)
           "Strings cannot be indexed: say which you mean with `bytes()` or `characters()`."
       end
       else
@@ -352,7 +352,9 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
             let index_trait = trait_reference (Well_known.path Index) in
             match implements state base_type index_trait with
             | Some evidence ->
-                let associated name = associated state base_type index_trait name ~at:value.span in
+                let associated name =
+                  associated state base_type index_trait name ~at:(read_span state value.id)
+                in
                 let key_type = associated "Key" and output = associated "Output" in
                 let actual = expression state env ~expected:key_type key in
                 coerce state env ~argument:Read key ~actual ~expected:key_type;
@@ -392,9 +394,9 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
                 output
             | None ->
                 ignore (expression state env key);
-                error state Not_indexable value.span
+                error state Not_indexable (read_span state value.id)
                   (Printf.sprintf "`%s` cannot be indexed." (show state base_type))))
-  | _ -> error state Not_indexable value.span "An index is one value."
+  | _ -> error state Not_indexable (read_span state value.id) "An index is one value."
 
 let () =
   Hooks.expression_hook := expression;
