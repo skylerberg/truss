@@ -5,3 +5,4 @@ type overlap = Disjoint | Overlapping | Maybe_disjoint of Core.origin * Core.ori
 
 val overlap : t -> t -> overlap
 val is_slice_type : Types.ty -> bool
+val is_storage_type : Types.ty -> bool
