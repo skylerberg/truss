@@ -14,7 +14,7 @@ let () =
       (fun ((file : Path.file), _) ->
         let pipeline = Pipeline.create [ standard ] in
         Pipeline.check pipeline [ file.module_.package ];
-        match Pipeline.file_diagnostics pipeline file with
+        match List.concat_map snd (Pipeline.file_diagnostics pipeline [ file ]) with
         | _ :: _ -> None
         | [] ->
             let runs_before = Solver.queries_run solver in

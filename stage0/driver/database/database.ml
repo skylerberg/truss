@@ -123,14 +123,13 @@ let standard_state =
      in
      let pipeline = Pipeline.create ~loaded:[ standard.state ] [] in
      let rendered =
-       List.concat_map
-         (fun ((file : Path.file), text) ->
-           match Pipeline.file_diagnostics pipeline file with
-           | [] -> []
-           | diagnostics ->
-               let source = Source.create ~path:(Path.show_file file) text in
-               List.map (Diagnostic.render source) diagnostics)
-         Standard_library.files
+       List.concat
+         (List.map2
+            (fun ((file : Path.file), text) (_, diagnostics) ->
+              let source = Source.create ~path:(Path.show_file file) text in
+              List.map (Diagnostic.render source) diagnostics)
+            Standard_library.files
+            (Pipeline.file_diagnostics pipeline (List.map fst Standard_library.files)))
      in
      if rendered <> [] then
        Compiler_bug.bug ~stage:"Database" "the standard library has diagnostics:\n%s"

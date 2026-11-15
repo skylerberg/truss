@@ -219,19 +219,21 @@ let run ~from_ ~to_ =
   let pipeline = Database.pipeline (trial snapshot after) in
   Pipeline.check pipeline packages;
   let caused =
-    List.filter_map
-      (fun (_, file, text) ->
-        match Diagnostic.shown (Pipeline.file_diagnostics pipeline file) with
-        | [] -> None
-        | diagnostics ->
-            Some
-              {
-                Report.file;
-                source =
-                  Source.create ~path:(Shown_path.shown (path_of snapshot packages file)) text;
-                diagnostics;
-              })
-      after
+    List.filter_map Fun.id
+      (List.map2
+         (fun (_, _, text) (file, diagnostics) ->
+           match Diagnostic.shown diagnostics with
+           | [] -> None
+           | diagnostics ->
+               Some
+                 {
+                   Report.file;
+                   source =
+                     Source.create ~path:(Shown_path.shown (path_of snapshot packages file)) text;
+                   diagnostics;
+                 })
+         after
+         (Pipeline.file_diagnostics pipeline (List.map (fun (_, file, _) -> file) after)))
   in
   match caused with
   | _ :: _ ->

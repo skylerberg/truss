@@ -13,7 +13,7 @@ val unsaved : t -> (string * string option) list
 val mark_saved : t -> unit
 val restore : loaded:state list -> texts:(Path.file -> string option) -> (string * string) list -> t
 val check : t -> Path.package list -> unit
-val file_diagnostics : t -> Path.file -> Diagnostic.t list
+val file_diagnostics : t -> Path.file list -> (Path.file * Diagnostic.t list) list
 val manifest_problems : t -> Path.package -> Package_checks.manifest_problem list
 val code_packages : t -> Path.package -> Path.package list option
 val tables : t -> Resolve.Names.key -> Infer.tables option

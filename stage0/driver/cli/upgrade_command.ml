@@ -151,12 +151,12 @@ let new_errors snapshot trial =
     Pipeline.check pipeline own;
     List.map Project.show_problem (Database.problems snapshot)
     @ List.concat_map
-        (fun file ->
+        (fun (file, diagnostics) ->
           List.map
             (fun (diagnostic : Diagnostic.t) ->
               Printf.sprintf "%s: %s" (Database.file_path snapshot file) diagnostic.message)
-            (Pipeline.file_diagnostics pipeline file))
-        (List.concat_map (Database.package_files snapshot) own)
+            diagnostics)
+        (Pipeline.file_diagnostics pipeline (List.concat_map (Database.package_files snapshot) own))
   in
   let now = diagnostics snapshot in
   List.filter (fun diagnostic -> not (List.mem diagnostic now)) (diagnostics trial)

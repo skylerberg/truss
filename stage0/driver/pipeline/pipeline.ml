@@ -2430,24 +2430,60 @@ let without_duplicates diagnostics =
       compare (left.span, left.code, left.message) (right.span, right.code, right.message))
     diagnostics
 
-let failed table key =
-  match Hashtbl.find_opt table key with
-  | Some (Failed diagnostics) -> diagnostics
-  | Some (Value _ | Blocked) | None -> []
+let list_failures pipeline package =
+  let state = owner pipeline package in
+  let failures = ref [] in
+  let add stage key (part : _ part) =
+    match part with
+    | Failed diagnostics -> failures := (key, stage, diagnostics) :: !failures
+    | Value _ | Blocked -> ()
+  in
+  Hashtbl.iter (fun (key, _) part -> add Resolve key part) state.resolved_names;
+  Hashtbl.iter (add Interface) state.headers;
+  Hashtbl.iter (add Interface) state.interfaces;
+  Hashtbl.iter (add Interface) state.signature_checks;
+  Hashtbl.iter (add Infer) state.contracts;
+  Hashtbl.iter (add Infer) state.checked_bodies;
+  Hashtbl.iter (add Patterns) state.patterns;
+  Hashtbl.iter (add Usage) state.usage;
+  Hashtbl.iter (add Ownership) state.ownership;
+  Hashtbl.iter
+    (fun (check : Package_checks.check) outcome ->
+      match (check, outcome) with
+      | (Sealed key | Impl key | Type key), Value (Package_checks.Declared diagnostics) ->
+          failures := (key, Package_checks, diagnostics) :: !failures
+      | _, Value (Package_checks.Placed placed) ->
+          List.iter
+            (fun (placed : Package_checks.placed) ->
+              failures := (placed.key, Package_checks, [ placed.diagnostic ]) :: !failures)
+            placed
+      | _, (Value (Declared _ | Problems _ | Packages _) | Failed _ | Blocked) -> ())
+    state.package_checks;
+  !failures
 
-let definition_diagnostics pipeline (key : Names.key) stage =
-  let owner = owner pipeline key.module_.package in
-  match stage with
-  | Resolve ->
-      List.concat_map (fun section -> failed owner.resolved_names (key, section)) Resolve.sections
-  | Interface ->
-      without_duplicates
-        (failed owner.headers key @ failed owner.interfaces key @ failed owner.signature_checks key)
-  | Infer -> failed owner.contracts key @ failed owner.checked_bodies key
-  | Patterns -> failed owner.patterns key
-  | Usage -> failed owner.usage key
-  | Ownership -> failed owner.ownership key
-  | Package_checks -> []
+let place_failures pipeline packages =
+  let names = names_lookups pipeline in
+  let placed = Hashtbl.create 64 in
+  List.iter
+    (fun package ->
+      List.iter
+        (fun (key, stage, diagnostics) ->
+          match names.place key with
+          | Some { file; base } ->
+              Hashtbl.replace placed file
+                (List.map
+                   (fun diagnostic ->
+                     (stage, Diagnostic.map_spans (Source.Definition_span.to_file ~base) diagnostic))
+                   diagnostics
+                @ Option.value ~default:[] (Hashtbl.find_opt placed file))
+          | None -> ())
+        (list_failures pipeline package))
+    packages;
+  fun file -> Option.value ~default:[] (Hashtbl.find_opt placed file)
+
+let read_import_checks pipeline (file : Path.file) =
+  Option.value ~default:[]
+    (Hashtbl.find_opt (owner pipeline file.module_.package).import_checks file)
 
 let by_span_and_code diagnostics =
   List.sort
@@ -2466,49 +2502,6 @@ let read_outcomes pipeline package checks =
       | Some (Failed _ | Blocked) | None -> None)
     checks
 
-let stage_diagnostics pipeline (file : Path.file) stage =
-  let names = names_lookups pipeline in
-  let state = owner pipeline file.module_.package in
-  let place key = function
-    | [] -> []
-    | diagnostics -> (
-        match names.place key with
-        | Some { file = home; base } when home = file ->
-            List.map (Diagnostic.map_spans (Source.Definition_span.to_file ~base)) diagnostics
-        | Some _ | None -> [])
-  in
-  let of_definitions () =
-    List.concat_map
-      (fun key -> place key (definition_diagnostics pipeline key stage))
-      (file_keys pipeline file)
-  in
-  by_span_and_code
-    (match stage with
-    | Resolve ->
-        Option.value ~default:[] (Hashtbl.find_opt state.import_checks file) @ of_definitions ()
-    | Package_checks ->
-        let package = file.module_.package in
-        List.concat_map
-          (fun (declaration : Names.declaration) ->
-            List.concat_map
-              (function
-                | Package_checks.Declared diagnostics ->
-                    place (Names.key_of declaration) diagnostics
-                | Placed _ | Problems _ | Packages _ -> [])
-              (read_outcomes pipeline package (Package_checks.list_declaration_checks declaration)))
-          (names.declarations_in file)
-        @ List.concat_map
-            (function
-              | Package_checks.Placed diagnostics ->
-                  List.concat_map
-                    (fun (diagnostic : Package_checks.placed) ->
-                      place diagnostic.key [ diagnostic.diagnostic ])
-                    diagnostics
-              | Declared _ | Problems _ | Packages _ -> [])
-            (read_outcomes pipeline package Package_checks.package_wide_checks)
-    | Interface | Infer | Patterns | Usage | Ownership -> of_definitions ())
-
-let stages = [ Resolve; Interface; Infer; Patterns; Usage; Ownership; Package_checks ]
 let check pipeline packages = drain pipeline ~through:Package_checks packages
 
 let tables pipeline (key : Names.key) =
@@ -2517,11 +2510,20 @@ let tables pipeline (key : Names.key) =
   | Some (Value checked) -> Some checked.tables
   | Some (Failed _ | Blocked) | None -> None
 
-let file_diagnostics pipeline (file : Path.file) =
-  drain pipeline ~through:Package_checks [ file.module_.package ];
-  without_duplicates
-    ((parsed_file pipeline file).diagnostics
-    @ List.concat_map (stage_diagnostics pipeline file) stages)
+let file_diagnostics pipeline files =
+  let packages =
+    List.sort_uniq Path.compare_package
+      (List.map (fun (file : Path.file) -> file.module_.package) files)
+  in
+  drain pipeline ~through:Package_checks packages;
+  let placed_in = place_failures pipeline packages in
+  List.map
+    (fun file ->
+      ( file,
+        without_duplicates
+          ((parsed_file pipeline file).diagnostics @ read_import_checks pipeline file
+          @ List.map snd (placed_in file)) ))
+    files
 
 let manifest_problems pipeline package =
   drain pipeline ~through:Package_checks [ package ];
@@ -2776,7 +2778,17 @@ module For_testing = struct
       else Import_checks
     in
     drain pipeline ~through [ file.module_.package ];
-    List.concat_map (stage_diagnostics pipeline file) stages
+    let placed = place_failures pipeline [ file.module_.package ] file in
+    List.concat_map
+      (fun stage ->
+        by_span_and_code
+          ((if stage = Resolve then read_import_checks pipeline file else [])
+          @ without_duplicates
+              (List.filter_map
+                 (fun (placed_stage, diagnostic) ->
+                   if placed_stage = stage then Some diagnostic else None)
+                 placed)))
+      stages
 
   let checked_body pipeline (key : Names.key) =
     drain pipeline ~through:Checked_bodies [ key.module_.package ];

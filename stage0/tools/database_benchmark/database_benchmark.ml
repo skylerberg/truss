@@ -191,10 +191,9 @@ let snapshot_of root =
 let own_packages snapshot = List.map snd (Database.packages snapshot)
 
 let diagnostics snapshot pipeline =
-  List.concat_map
-    (fun package ->
-      List.concat_map (Pipeline.file_diagnostics pipeline) (Database.package_files snapshot package))
-    (own_packages snapshot)
+  List.concat_map snd
+    (Pipeline.file_diagnostics pipeline
+       (List.concat_map (Database.package_files snapshot) (own_packages snapshot)))
 
 let tests snapshot pipeline =
   let packages = own_packages snapshot in

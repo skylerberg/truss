@@ -103,15 +103,15 @@ let keyed_diagnostics snapshot =
   let packages = List.map snd (Database.packages snapshot) in
   Pipeline.check pipeline packages;
   List.concat_map
-    (fun file ->
+    (fun (file, diagnostics) ->
       List.map
         (fun (diagnostic : Diagnostic.t) ->
           ( ( Database.file_path snapshot file,
               Diagnostic.Code.name diagnostic.code,
               diagnostic.message ),
             diagnostic ))
-        (Pipeline.file_diagnostics pipeline file))
-    (Command_packages.files snapshot packages)
+        diagnostics)
+    (Pipeline.file_diagnostics pipeline (Command_packages.files snapshot packages))
 
 let merge_diagnostics snapshot (side : Database.side) =
   Result.map

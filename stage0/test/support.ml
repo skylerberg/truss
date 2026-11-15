@@ -59,7 +59,7 @@ let parse_errors database file =
 
 let diagnostics pipeline (file : Path.file) =
   Pipeline.check pipeline [ file.module_.package ];
-  Pipeline.file_diagnostics pipeline file
+  List.concat_map snd (Pipeline.file_diagnostics pipeline [ file ])
 
 let codes diagnostics =
   List.map (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code) diagnostics
