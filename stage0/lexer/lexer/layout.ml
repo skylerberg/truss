@@ -1,10 +1,3 @@
-(* Inserts NEWLINE tokens and matches brackets, taking raw tokens from the
-   scanner one at a time.
-
-   The line-break rule is Scala's: outside ( and [, a line break becomes a
-   NEWLINE when the token before it can end a statement and the token after
-   it can begin one. *)
-
 open Token
 
 let can_end = function
@@ -13,12 +6,7 @@ let can_end = function
   | Keyword (True | False | Self_value | Self_type | Todo | Unreachable | Break | Continue | Return)
     ->
       true
-  (* No grammar rule accepts the foreign tokens. Because `++` and `--` can
-     both end and begin a statement, `i++` on a line of its own is a
-     statement of its own, which the parser reports before it continues. *)
   | Foreign (Plus_plus | Minus_minus) -> true
-  (* The other foreign tokens are binary operators in the languages they
-     come from, so they continue a line as a binary operator does. *)
   | Foreign (Star_star | Colon_equal | Pipe_greater) -> false
   | Keyword _ | Reserved _ | Punctuation _ | Newline | End_of_file -> false
 
@@ -39,13 +27,6 @@ let can_begin = function
       false
   | Punctuation _ | Newline | End_of_file -> false
 
-(* Layout's input from the scanner: the next token with the line breaks
-   before it, or the end of the input. [unterminated_string] marks a string
-   that ends at the end of its line with no closing quote.
-   [ends_unterminated] says that the input ends inside an unterminated
-   construct, an error the scanner already reported: an interpolation that
-   a line break ended, or a file that ends inside a comment or a raw
-   string. Brackets left open then are closed without another error. *)
 type input =
   | Next of {
       kind : Token.kind;
@@ -98,36 +79,16 @@ let indentation_of source offset =
   in
   String.sub text start (stop start - start)
 
-(* A definition keyword first on an unindented line; trivia before it is not
-   indentation. *)
 let token_starts_definition source ~first_line_break (kind : Token.kind) offset =
   first_line_break <> None
   && indentation_of source offset = ""
   && match kind with Keyword keyword -> List.mem keyword definition_keywords | _ -> false
 
-(* The offset of the zero-width closers inserted before a token: the first
-   line break before the token, so that the closers precede the NEWLINE
-   that may follow them and the tokens stay ordered by offset. *)
 let closer_position first_line_break position =
   match first_line_break with Some (line_break : span) -> line_break.start | None -> position
 
-(* An open bracket: its token's span, and its token's index in the output. *)
 type opener = { bracket : bracket; span : span; index : int }
 
-(* Where to insert the closer for the unclosed bracket [opener]: the offset,
-   and whether it follows an indented line, or [None] if there is no good
-   place. The indentation says where the bracket was meant to close: after
-   the last line, among the elements directly inside it, indented more than
-   the opener's line, or else on the opener's line. An element is a token or
-   a whole nested group, so the closer is never put inside a nested group,
-   or inside a comment that ends the line. An unterminated string probably
-   contains the closer, and closing the string is the fix that matters, so
-   then there is no good place.
-
-   [tokens] is the output so far, and [closers] holds, for each opener in
-   it that is closed, the index of its closer, so that a nested group is
-   one step. The scan therefore visits only the bracket's own elements,
-   which keeps closing every open bracket linear in the number of tokens. *)
 let closing_position source tokens ~closers ~is_unterminated_string (opener : opener) =
   let opener_line = Source.line_start source opener.span.start in
   let indentation = String.length (indentation_of source opener.span.start) in
@@ -146,7 +107,6 @@ let closing_position source tokens ~closers ~is_unterminated_string (opener : op
       | Newline -> scan (index + 1)
       | Punctuation (Open _) ->
           let closer = Dynarray.get closers index in
-          (* A nested bracket that is still open holds every token after it. *)
           if closer >= 0 then begin
             element ~start:token.span.start ~stop:(Dynarray.get tokens closer).span.stop
               ~contains_closer:false;
@@ -162,10 +122,6 @@ let closing_position source tokens ~closers ~is_unterminated_string (opener : op
   | Some place -> Option.map (fun stop -> (stop, true)) place
   | None -> Option.map (fun stop -> (stop, false)) !last_on_opener_line
 
-(* The edits that close [openers], innermost first, or [None] if one has no
-   good place. Each closer comes at or after the ones inside it. A `}`
-   closing after an indented line goes on a line of its own, at the
-   opener's indentation. *)
 let closing_edits source tokens ~closers ~is_unterminated_string openers =
   let rec edits earliest reversed = function
     | [] -> Some (List.rev reversed)
@@ -190,16 +146,11 @@ let bracket_index = function Paren -> 0 | Square -> 1 | Curly -> 2
 
 let run ~source ~diagnostics ~mode next_input =
   let output = Dynarray.create () in
-  (* For each opener in [output] that is closed, the index of its closer;
-     for every other token, -1. *)
   let closers = Dynarray.create () in
-  (* Open brackets, innermost first, and how many of each bracket are open,
-     so that a closer that matches nothing is found without a search. *)
   let stack : opener list ref = ref [] in
   let open_count = Array.make 3 0 in
   let previous = ref None in
   let open_at_end = ref false in
-  (* The start offset of each unterminated string. *)
   let unterminated_strings = Hashtbl.create 4 in
   let is_unterminated_string (span : span) = Hashtbl.mem unterminated_strings span.start in
   let emit token =
@@ -212,7 +163,6 @@ let run ~source ~diagnostics ~mode next_input =
     stack := { bracket; span; index = Dynarray.length output } :: !stack;
     open_count.(bracket_index bracket) <- open_count.(bracket_index bracket) + 1
   in
-  (* Emits [closer] for the innermost open bracket. *)
   let pop closer =
     match !stack with
     | opener :: rest ->
@@ -237,9 +187,6 @@ let run ~source ~diagnostics ~mode next_input =
     | Some edits -> [ Diagnostic.fix title edits ]
     | None -> []
   in
-  (* Closes every open bracket with zero-width closers at [position]. The
-     innermost is reported, with one fix that closes them all where the
-     indentation says each was meant to close. *)
   let close_all ~position ~reason =
     match !stack with
     | [] -> ()
@@ -271,7 +218,6 @@ let run ~source ~diagnostics ~mode next_input =
            (Printf.sprintf "This `%s` has no `%s` to close." (closer_spelling bracket)
               (opener_spelling bracket)))
     else begin
-      (* Openers above the match were never closed. *)
       let rec close_unclosed () =
         match !stack with
         | opener :: _ when opener.bracket <> bracket ->

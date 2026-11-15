@@ -1,10 +1,3 @@
-(* The scanner and layout run as one pipeline. A file with brackets still
-   open at its end is scanned twice, the second time with bracket recovery.
-
-   A file's tokens are those of its text with its machine-applicable fixes
-   applied, mapped back to its offsets, so it recovers as its fixes write.
-   Its diagnostics are those of the text as written. *)
-
 let attempt source ~recovery =
   let diagnostics = Diagnostic.Collector.create () in
   let scanner = Scanner.create source diagnostics in
@@ -32,8 +25,6 @@ let rec iter_names visit (tokens : Token.t array) =
       | _ -> ())
     tokens
 
-(* Withholds a rename to a spelling the file already has, or that two names
-   share, which would make two names one. *)
 let without_colliding_renames text (tokens : Token.t array) (diagnostics : Diagnostic.t list) =
   let written = Hashtbl.create 64 in
   iter_names (fun name -> Hashtbl.replace written name ()) tokens;
@@ -76,8 +67,6 @@ let placed_edits (edits : Diagnostic.span Diagnostic.edit list) =
   in
   Array.of_list (List.rev placed)
 
-(* The offset in the file of [offset] in the fixed text. Text an edit wrote
-   maps to the text it replaced. *)
 let original_offset (placed : placed array) ~is_stop offset =
   let starts_before (edit : placed) =
     if is_stop then edit.fixed_start < offset else edit.fixed_start <= offset
@@ -97,7 +86,6 @@ let original_offset (placed : placed array) ~is_stop offset =
       else edit.original.start
 
 let rec original_token placed (token : Token.t) =
-  (* A zero-width span maps as a stop, to stay inside a span ending there. *)
   let span (span : Source.span) =
     let stop = original_offset placed ~is_stop:true span.stop in
     if span.start = span.stop then Source.zero_width stop
@@ -126,7 +114,6 @@ let rec original_token placed (token : Token.t) =
   in
   { token with kind; span = span token.span }
 
-(* The tokens of [fixed] that overlap two or more of [written]. *)
 let rec joined ~(written : Token.t array) ~(fixed : Token.t array) =
   let tokens array =
     List.filter
@@ -163,8 +150,6 @@ let rec joined ~(written : Token.t array) ~(fixed : Token.t array) =
   in
   walk (tokens written) (tokens fixed)
 
-(* The tokens of the text with [fixes] applied, each a diagnostic's fix, if
-   that text adds no error and joins or splits no neighboring token. *)
 let works source tokens diagnostics fixes =
   let edits =
     List.concat_map (fun (_, (fix : Diagnostic.span Diagnostic.fix)) -> fix.edits) fixes
@@ -183,8 +168,6 @@ let works source tokens diagnostics fixes =
   | [] when Diagnostic.adds_none ~before:others ~after:remaining -> Some fixed_tokens
   | _ -> None
 
-(* A fix that joins or splits a neighboring token, or adds an error, is
-   withheld, and the file is lexed again without it. *)
 let rec recover source tokens diagnostics =
   let fixes =
     List.filter_map
@@ -206,8 +189,6 @@ let rec recover source tokens diagnostics =
       in
       match works source tokens diagnostics fixes with
       | Some fixed_tokens -> (
-          (* A fix may work only with another, as `..<` fixed to `..` before
-             `.0` does; each must work alone too. *)
           match fixes with
           | [ _ ] -> (fixed_tokens, diagnostics)
           | _ -> (
@@ -219,7 +200,6 @@ let rec recover source tokens diagnostics =
               | [] -> (fixed_tokens, diagnostics)
               | wrong -> withhold wrong))
       | None ->
-          (* Each fix that breaks the ones before it. *)
           let wrong =
             snd
               (List.fold_left
@@ -231,9 +211,6 @@ let rec recover source tokens diagnostics =
           in
           if wrong = [] then (tokens, diagnostics) else withhold wrong)
 
-(* A diagnostic's alternative fixes, which recovery does not apply, are
-   each checked alone. One left alone would be applied without review, so
-   fewer than two leave none. *)
 let with_working_alternatives source tokens diagnostics =
   List.map
     (fun (diagnostic : Diagnostic.t) ->

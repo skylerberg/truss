@@ -1,21 +1,12 @@
-(* Checks on the source text: UTF-8, forbidden characters, and line breaks,
-   in code and in strings alike. *)
-
 open Cursor
 
 type context = Code | Ordinary_string | Raw_string
 
-(* The edit that removes trivia: [start, stop) holds text that the scanner
-   treats like whitespace, such as a comment, a `;`, or forbidden
-   characters. The whitespace around it goes too, and the whole line if
-   nothing else is on it. Between two tokens it becomes a space, or a line
-   break if it acted as one ([line_break]), so that the tokens stay separate.
-   Every rejected sequence that lexes as whitespace is removed this way. *)
 let remove_trivia cursor ~start ~stop ~line_break =
   let before = spaces_before cursor start in
   let after = skip_spaces cursor stop in
   let code_before = not (only_spaces_before cursor start) in
-  let code_after = not (is_end_of_line (byte cursor after)) in
+  let code_after = not (is_end_of_line cursor after) in
   match (code_before, code_after) with
   | true, true ->
       Diagnostic.replace (span before after)
@@ -24,18 +15,17 @@ let remove_trivia cursor ~start ~stop ~line_break =
   | false, true -> Diagnostic.delete (span start after)
   | false, false ->
       let line_start = Source.line_start cursor.source start in
-      let stop = if byte cursor after < 0 then after else after + line_break_length cursor after in
+      let stop = if at_end cursor after then after else after + line_break_length cursor after in
       Diagnostic.delete (span line_start stop)
 
-(* A run of forbidden characters starting at the cursor: one error, and the
-   characters are skipped. *)
 let forbidden_run cursor ~context =
   let start = cursor.position in
   let rec collect characters =
-    let packed = decode cursor cursor.position in
-    if packed >= 0 && Unicode.is_forbidden (Unicode.decoded_code_point packed) then begin
-      cursor.position <- cursor.position + Unicode.decoded_length packed;
-      collect (Unicode.decoded_code_point packed :: characters)
+    let decoded = decode cursor cursor.position in
+    if Unicode.Decoded.is_valid decoded && Unicode.is_forbidden (Unicode.Decoded.code_point decoded)
+    then begin
+      cursor.position <- cursor.position + Unicode.Decoded.length decoded;
+      collect (Unicode.Decoded.code_point decoded :: characters)
     end
     else List.rev characters
   in
@@ -84,26 +74,26 @@ let forbidden_run cursor ~context =
   in
   report cursor ~fixes ~code:Forbidden_character (span start stop) message
 
-(* A run of bytes that are not valid UTF-8: one error, and they are skipped. *)
 let invalid_run cursor =
   let start = cursor.position in
-  while cursor.position < cursor.length && decode cursor cursor.position < 0 do
+  while
+    (not (at_end cursor cursor.position))
+    && not (Unicode.Decoded.is_valid (decode cursor cursor.position))
+  do
     cursor.position <- cursor.position + 1
   done;
   report cursor ~code:Invalid_utf8 (span start cursor.position)
     "Source files must be UTF-8, and these bytes are not valid UTF-8."
 
-(* Copies the run of plain ASCII text at the cursor into [buffer] with one
-   call: printable characters and tabs, up to the next byte that needs
-   decoding or checking. [special] is true of the bytes that the string
-   form gives a meaning, such as a quote. *)
 let copy_plain cursor buffer ~special =
   let start = cursor.position in
   let rec stop index =
-    let current = byte cursor index in
-    if current >= 0x20 && current < 0x7F && not (special current) then stop (index + 1)
-    else if current = 0x09 then stop (index + 1)
-    else index
+    if at_end cursor index then index
+    else
+      let current = char cursor index in
+      if (current >= ' ' && current < '\x7F' && not (special current)) || current = '\t' then
+        stop (index + 1)
+      else index
   in
   let stop = stop start in
   if stop > start then begin
@@ -111,25 +101,20 @@ let copy_plain cursor buffer ~special =
     cursor.position <- stop
   end
 
-(* Reads one character of text at the cursor into [buffer], checking it. A
-   forbidden or invalid character is reported and left out. *)
 let read_character cursor buffer ~context =
-  let packed = decode cursor cursor.position in
-  if packed < 0 then invalid_run cursor
-  else if Unicode.is_forbidden (Unicode.decoded_code_point packed) then
+  let decoded = decode cursor cursor.position in
+  if not (Unicode.Decoded.is_valid decoded) then invalid_run cursor
+  else if Unicode.is_forbidden (Unicode.Decoded.code_point decoded) then
     forbidden_run cursor ~context
   else begin
-    Buffer.add_substring buffer cursor.text cursor.position (Unicode.decoded_length packed);
-    cursor.position <- cursor.position + Unicode.decoded_length packed
+    Buffer.add_substring buffer cursor.text cursor.position (Unicode.Decoded.length decoded);
+    cursor.position <- cursor.position + Unicode.Decoded.length decoded
   end
 
-(* Consumes the line break at the cursor and returns its span. A carriage
-   return on its own is an error, and still a line break, so that the lines
-   after it lex normally. *)
 let consume_line_break cursor =
   let start = cursor.position in
   let length = line_break_length cursor start in
-  if length = 1 && byte cursor start = 0x0D then
+  if length = 1 && is_at cursor start '\r' then
     report cursor ~code:Carriage_return
       ~fixes:
         [
@@ -146,7 +131,6 @@ let note_line_break cursor line_break =
   if cursor.first_line_break = None then cursor.first_line_break <- Some line_break;
   cursor.line_is_blank <- true
 
-(* Reports and skips [length] bytes that cannot start a token. *)
 let reject ?(code = Diagnostic.Code.Unexpected_character) cursor ~length message =
   let start = cursor.position in
   cursor.position <- start + length;
