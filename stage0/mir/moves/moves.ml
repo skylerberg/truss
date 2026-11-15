@@ -84,8 +84,8 @@ let uses ~moving (statement : Mir.statement) =
   let origin = statement.origin in
   match statement.kind with
   | Assign { value; _ } -> rvalue_uses ~moving ~origin value
-  | Call { call; _ } | Lend { call; _ } | Template { call; _ } -> call_uses ~moving call
-  | Slice { base; call; _ } -> read ~origin base :: call_uses ~moving call
+  | Call { call; _ } | Lend { call; _ } | Slice { call; _ } | Template { call; _ } ->
+      call_uses ~moving call
   | Assert { condition = operand; _ } | Echo operand -> operand_use ~moving ~by_value:false operand
   | Provide { provided; _ } ->
       List.concat_map
@@ -600,22 +600,9 @@ let place_locals (place : Mir.place) =
 let use_locals uses = List.concat_map (fun use -> place_locals use.place) uses
 let every _ = true
 
-(* The locals a statement reads and those it gives a whole value, in
-   [state], where it runs. A write to a part of a local reads the rest of
-   it. Where [drops], an end of a local that may hold a value with something
-   to drop reads it, since its drop does. *)
-let reads_and_writes analysis ~drops state (statement : Mir.statement) =
+let reads_and_writes (statement : Mir.statement) =
   match statement.kind with
   | Live locals -> ([], locals)
-  | Dead locals ->
-      ( List.filter
-          (fun local ->
-            drops && owns analysis local
-            && List.exists
-                 (fun position -> state.maybe_holds.(position))
-                 (affected_local analysis local))
-          locals,
-        [] )
   | _ ->
       let given = inits statement in
       ( use_locals (uses ~moving:every statement)
@@ -627,7 +614,7 @@ let reads_and_writes analysis ~drops state (statement : Mir.statement) =
             match place with { root = Local local; projections = [] } -> Some local | _ -> None)
           given )
 
-let live analysis (body : Mir.Graph.body) ~drops =
+let live_after analysis (body : Mir.Graph.body) =
   let count = Array.length body.locals in
   (* The locals whose places a local is bound to, or holds views of: a use
      of the local uses them too. *)
@@ -656,15 +643,8 @@ let live analysis (body : Mir.Graph.body) ~drops =
   in
   let reads locals = with_sources [] locals in
   let effects =
-    Array.mapi
-      (fun block (basic : Mir.Graph.basic_block) ->
-        let state = copy analysis.entries.(block) in
-        List.map
-          (fun statement ->
-            let read_and_written = reads_and_writes analysis ~drops state statement in
-            apply analysis state statement;
-            read_and_written)
-          basic.statements)
+    Array.map
+      (fun (basic : Mir.Graph.basic_block) -> List.map reads_and_writes basic.statements)
       body.blocks
   in
   (* Each iteration of a loop gives its part a value where its body starts,
@@ -725,7 +705,7 @@ let live analysis (body : Mir.Graph.body) ~drops =
       end
     done
   done;
-  fun block index local -> before.(block).(index).(local)
+  fun block step local -> before.(block).(step + 1).(local)
 
 let terminator_uses analysis basic =
   terminator_uses ~moving:analysis.moving ~owns:analysis.owner basic

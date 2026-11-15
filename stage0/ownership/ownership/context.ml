@@ -1,12 +1,10 @@
-type kind = Owned | Borrowed | Borrowed_mut
-
 type context = {
   database : Query.context;
   bounds : Types.parameter -> Types.trait_reference list;
   spans : Syntax.span array;
   mode_keywords : (Core.origin, Types.mode * Core.mode_keyword) Hashtbl.t;
   names : (Core.local, string) Hashtbl.t;
-  kinds : (Core.local, kind) Hashtbl.t;
+  binding_modes : (Core.local, Types.mode) Hashtbl.t;
   types : (Core.local, Types.ty) Hashtbl.t;
   mutable parameters : Core.local list;
   implements_capability : bool;
@@ -51,20 +49,20 @@ let span context (origin : Core.origin) : Syntax.span =
   else Syntax.Span.make 0 0
 
 let report context ?(fixes = []) ?(notes = []) code (at : Syntax.span) message =
-  context.diagnostics <-
-    Diagnostic.make ~fixes ~notes ~code:(Ownership code) at message :: context.diagnostics
+  let is_reported =
+    List.exists
+      (fun (reported : _ Diagnostic.diagnostic) -> reported.span = at && reported.message = message)
+      context.diagnostics
+  in
+  if not is_reported then
+    context.diagnostics <-
+      Diagnostic.make ~fixes ~notes ~code:(Ownership code) at message :: context.diagnostics
 
-let kind_of_mode : Types.mode -> kind = function
-  | Own -> Owned
-  | Read -> Borrowed
-  | Mut -> Borrowed_mut
-
-let kind context (root : Place.root) =
+let binding_mode context (root : Place.root) : Types.mode =
   match root with
-  | Constant _ -> Borrowed
-  | Environment -> Owned
-  | Local local -> Option.value ~default:Owned (Hashtbl.find_opt context.kinds local)
-  | Temporary _ -> Owned
+  | Constant _ -> Read
+  | Environment | Temporary _ -> Own
+  | Local local -> Option.value ~default:Types.Own (Hashtbl.find_opt context.binding_modes local)
 
 let show_root context (root : Place.root) =
   match root with
@@ -101,7 +99,7 @@ let collect context (mir : Mir.Graph.t) =
         | Source { local = core; mode; name = Some name; is_var }
           when not (List.mem local body.captures) ->
             Hashtbl.replace context.names core name;
-            Hashtbl.replace context.kinds core (kind_of_mode mode);
+            Hashtbl.replace context.binding_modes core mode;
             Hashtbl.replace context.types core info.type_;
             if is_var then context.mutable_locals <- core :: context.mutable_locals
         | Source _ | Temporary | Lent _ -> ())

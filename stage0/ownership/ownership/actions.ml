@@ -203,16 +203,16 @@ let operand_borrows builder (operand : Mir.operand) =
 let result_may_view builder (mode : Types.mode) type_ =
   (mode <> Own && not (plain builder.context type_)) || is_view builder.context type_
 
+let viewable_argument builder (argument : Mir.argument) =
+  match argument with
+  | Passed { mode; value; _ } -> (
+      match operand_type value with
+      | Some type_ when result_may_view builder mode type_ -> Some (mode, value)
+      | _ -> None)
+  | Default -> None
+
 let viewable_arguments builder (call : Mir.call) =
-  List.filter_map
-    (fun (argument : Mir.argument) ->
-      match argument with
-      | Passed { mode; value; _ } -> (
-          match operand_type value with
-          | Some type_ when result_may_view builder mode type_ -> Some (mode, value)
-          | _ -> None)
-      | Default -> None)
-    call.arguments
+  List.filter_map (viewable_argument builder) call.arguments
 
 let written_slice builder ~whole (place : Mir.place) type_ =
   if whole && Place.is_slice_type type_ then tracked builder place
@@ -358,11 +358,12 @@ let call_result builder (call : Mir.call) =
 let lent_part builder (call : Mir.call) ~part_type =
   if is_view builder.context part_type then call_result builder call
   else
-    match viewable_arguments builder call with
-    | (mode, receiver) :: _
-      when match call.arguments with Passed { value; _ } :: _ -> value == receiver | _ -> false ->
-        { nothing with views = views_of_argument builder mode receiver }
-    | _ -> nothing
+    let receiver =
+      match call.arguments with first :: _ -> viewable_argument builder first | [] -> None
+    in
+    match receiver with
+    | Some (mode, receiver) -> { nothing with views = views_of_argument builder mode receiver }
+    | None -> nothing
 
 let hold builder (place : Mir.place) (value : held) =
   match place with
@@ -662,7 +663,7 @@ let statement builder (statement : Mir.statement) =
       in
       match element with
       | Some (place, collection, receiver) ->
-          read_uses builder (List.tl uses);
+          read_uses builder uses;
           builder.element_receivers <- receiver :: builder.element_receivers;
           hold builder
             { Mir.root = Local part; projections = [] }
@@ -677,7 +678,7 @@ let statement builder (statement : Mir.statement) =
               is_loop_part = is_loop_element;
             })
   | Slice { destination; base; call = called } ->
-      read_uses builder ~skip:(fun use -> use.operand = None) uses;
+      read_uses builder uses;
       call builder called origin;
       let base_type =
         match called.arguments with
@@ -879,6 +880,7 @@ let of_body context moves (body : Mir.Graph.body) ~returns_to_caller : t =
         { block; index = List.length basic.statements }
         (fun () -> terminator builder ~returns_to_caller basic))
     body.blocks;
+  let is_terminator { block; index } = index = List.length body.blocks.(block).statements in
   let positions_of ?(from = fun _ -> None) blocks =
     List.concat_map
       (fun block ->
@@ -915,9 +917,10 @@ let of_body context moves (body : Mir.Graph.body) ~returns_to_caller : t =
                 keyword = (if loop.schedule = Parallel_loop then "parallel" else "concurrent");
                 body =
                   List.filter
-                    (fun { block; index } ->
-                      index < shape.(block) - 1
-                      || Mir.Graph.iteration_loop body.blocks.(block).terminator <> Some loop_block)
+                    (fun position ->
+                      (not (is_terminator position))
+                      || Mir.Graph.iteration_loop body.blocks.(position.block).terminator
+                         <> Some loop_block)
                     (positions_of
                        ~from:(fun block ->
                          if block = inside then Hashtbl.find_opt builder.loop_body_starts inside
