@@ -34,15 +34,39 @@ let called_from_other_packages (state : state) =
           | _ -> true)
       | _ -> false)
 
-let check_names (state : state) (parts : span list) ~message =
-  if parts <> [] then begin
+let check (state : state) =
+  let clauses, name =
+    match state.definition.kind with
+    | Function { signature; _ } | Method_declaration signature ->
+        (signature.clauses, Names.signature_name signature)
+    | Theorem { name; clauses; _ } -> (clauses, name)
+    | _ -> ([], { text = ""; span = state.definition.span; id = state.definition.id })
+  in
+  let requires_and_costs =
+    List.filter_map
+      (fun (clause : clause) ->
+        match clause.kind with
+        | Requires _ | Cost _ -> Some clause.span
+        | Ensures _ | Uses _ | Decreases _ | Clause_error -> None)
+      clauses
+  in
+  if called_from_other_packages state && requires_and_costs <> [] then begin
     let spans = Syntax_walk.spans state.definition in
     let named id (path : Path.t) =
       let span = spans.(id) in
       if
-        List.exists (fun (part : span) -> part.start <= span.start && span.stop <= part.stop) parts
+        List.exists
+          (fun (clause : span) -> clause.start <= span.start && span.stop <= clause.stop)
+          requires_and_costs
         && not (visible_to_other_packages state.database path)
-      then report state Private_in_public span (message (Path.show path))
+      then
+        let hidden = Path.show path in
+        report state Private_in_public span
+          (Printf.sprintf
+             "Other packages can call `%s`, so the proofs of its callers there read this clause, \
+              and those packages cannot see `%s`. Make `%s` public, or state the clause with \
+              functions and constants that are public."
+             name.text hidden hidden)
     in
     Array.iteri
       (fun id (call : Tables.call option) ->
@@ -53,26 +77,3 @@ let check_names (state : state) (parts : span list) ~message =
         match resolution with Some (Global { path; _ }) -> named id path | _ -> ())
       state.tables.resolutions
   end
-
-let check (state : state) =
-  let clauses, name =
-    match state.definition.kind with
-    | Function { signature; _ } | Method_declaration signature ->
-        (signature.clauses, Names.signature_name signature)
-    | Theorem { name; clauses; _ } -> (clauses, name)
-    | _ -> ([], { text = ""; span = state.definition.span; id = state.definition.id })
-  in
-  if called_from_other_packages state then
-    check_names state
-      (List.filter_map
-         (fun (clause : clause) ->
-           match clause.kind with
-           | Requires _ | Cost _ -> Some clause.span
-           | Ensures _ | Uses _ | Decreases _ | Clause_error -> None)
-         clauses)
-      ~message:(fun hidden ->
-        Printf.sprintf
-          "Other packages can call `%s`, so the proofs of its callers there read this clause, and \
-           those packages cannot see `%s`. Make `%s` public, or state the clause with functions \
-           and constants that are public."
-          name.text hidden hidden)

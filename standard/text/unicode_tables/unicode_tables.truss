@@ -169,27 +169,19 @@ fn range_value(ranges: Slice[UInt32], code: UInt32) -> Option[UInt32]
 internal fn category_number_of(code: UInt32) -> UInt32
   cost time O(1)
 {
-  var number: UInt32 = 10
   match range_value(unicode_data::category_ranges[..], code: code) {
-    Some(value) => {
-      number = value
-    }
-    None => {}
+    Some(value) => value
+    None => 10
   }
-  number
 }
 
 internal fn combining_class_of(code: UInt32) -> UInt32
   cost time O(1)
 {
-  var class: UInt32 = 0
   match range_value(unicode_data::combining_class_ranges[..], code: code) {
-    Some(value) => {
-      class = value
-    }
-    None => {}
+    Some(value) => value
+    None => 0
   }
-  class
 }
 
 internal type PoolRange(start: UInt32, length: UInt32)
@@ -266,16 +258,14 @@ internal fn composition_of(first: UInt32, second: UInt32) -> Option[UInt32]
 internal fn grapheme_properties_of(code: UInt32) -> UInt32
   cost time O(1)
 {
-  var properties: UInt32 = 0
   if code >= 44032 && code < 55204 {
-    properties = if (code - 44032) % 28 == 0 { 12 } else { 13 }
+    if (code - 44032) % 28 == 0 { 12 } else { 13 }
   } else if code < 32 || code >= 127 {
     match range_value(unicode_data::grapheme_ranges[..], code: code) {
-      Some(value) => {
-        properties = value
-      }
-      None => {}
+      Some(value) => value
+      None => 0
     }
+  } else {
+    0
   }
-  properties
 }

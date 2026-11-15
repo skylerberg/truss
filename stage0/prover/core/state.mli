@@ -151,7 +151,6 @@ type context = {
   axioms_of : (Logic.symbol, open_axiom) Hashtbl.t;
   disjoint : (int * int) list;
   mutable indexes : (int * (place_value * span)) list;
-  mutable evaluated_keys : (Core.id * Logic.term) list;
   mutable yielded_part : Types.ty option;
   mutable yield_ensures : (Mir.formula list * Mir.formula list) option;
   home : Names.key;

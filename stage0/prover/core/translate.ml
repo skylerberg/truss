@@ -76,7 +76,6 @@ let new_context database ~home ~current ~terminates ~measures =
         | Some ownership -> ownership.must_be_disjoint
         | None -> []);
       indexes = [];
-      evaluated_keys = [];
     }
   in
   context

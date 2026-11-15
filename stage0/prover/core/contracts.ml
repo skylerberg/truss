@@ -132,23 +132,20 @@ let make_contract database path ~own ~others ~definition =
   in
   { parts = own :: others; is_logic_function; result_kind; definition }
 
-let definition_code ?reading_package database (path : Path.t) =
+let definition_code ~reading_package database (path : Path.t) =
   match
     Query.demand database
-      (match reading_package with
-      | Some package when package <> Path.package path -> Mir.exported_definition_of_path
-      | _ -> Mir.definition_of_path)
+      (if reading_package = Path.package path then Mir.definition_of_path
+       else Mir.exported_definition_of_path)
       path
   with
   | Some (Functional definition) -> Some definition
   | Some Not_functional | None -> None
 
-let function_contract ?reading_package database (path : Path.t) =
+let function_contract database (path : Path.t) =
   Option.bind (source_at database path) (fun (callee, _, _) ->
       Option.map
-        (fun own ->
-          make_contract database path ~own ~others:[]
-            ~definition:(definition_code ?reading_package database path))
+        (fun own -> make_contract database path ~own ~others:[] ~definition:None)
         (part_of database path callee))
 
 let trait_part database (trait : Path.t) name receiver =
@@ -171,7 +168,7 @@ let capability_part database (capability : Path.t) name =
   let path = Path.Method { owner = capability; name; receiver = Static } in
   Option.bind (source_at database path) (fun (callee, _, _) -> part_of database path callee)
 
-let method_contract ?reading_package database (trait : Types.trait_reference) name receiver
+let method_contract ~reading_package database (trait : Types.trait_reference) name receiver
     (evidence : evidence) =
   let trait_side = trait_part database trait.trait name receiver in
   match evidence with
@@ -182,14 +179,15 @@ let method_contract ?reading_package database (trait : Types.trait_reference) na
           Option.map
             (fun own ->
               make_contract database path ~own ~others:(Option.to_list trait_side)
-                ~definition:(definition_code ?reading_package database path))
+                ~definition:(definition_code ~reading_package database path))
             (part_of database path callee)
       | Some (_, _, Inherited _) | None ->
           Option.map
             (fun own ->
               make_contract database path ~own ~others:[]
                 ~definition:
-                  (definition_code database (Path.Method { owner = trait.trait; name; receiver })))
+                  (definition_code ~reading_package database
+                     (Path.Method { owner = trait.trait; name; receiver })))
             trait_side)
   | Bound | Dynamic ->
       Option.map

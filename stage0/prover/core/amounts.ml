@@ -586,8 +586,8 @@ let method_time_bound context (method_ : Path.t) self_type =
               | None -> false
             in
             match
-              method_contract ?reading_package:(reading_package context) context.database reference
-                name receiver
+              method_contract ~reading_package:(Path.package context.current) context.database
+                reference name receiver
                 (Impl { impl; arguments })
             with
             | Some contract when makes_no_potential ->

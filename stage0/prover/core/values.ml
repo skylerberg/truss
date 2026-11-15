@@ -172,7 +172,7 @@ let apply_template context frame (site : Invocation.site) ~trait ~name ~receiver
   | Impl { impl; _ } -> (
       let path = Path.Method { owner = impl; name; receiver } in
       match
-        method_contract ?reading_package:(reading_package context) context.database trait name
+        method_contract ~reading_package:(Path.package context.current) context.database trait name
           receiver evidence
       with
       | Some contract ->
@@ -406,36 +406,12 @@ let named_function context frame (site : Invocation.site) path type_arguments co
   | Types.Function function_type when in_the_logic function_type && contract.is_logic_function ->
       let parameters = parameters_of context frame function_type in
       let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
-      let defined =
-        match contract.definition with
-        | Some (part, body)
-          when part.requires = [] && instance = []
-               && not (List.exists (Path.equal path) context.instantiating) ->
-            context.instantiating <- path :: context.instantiating;
-            Fun.protect
-              ~finally:(fun () -> context.instantiating <- List.tl context.instantiating)
-              (fun () ->
-                body_over context frame parameters body (fun inside ->
-                    part_frame inside part
-                      ~arguments:(List.mapi (fun index input -> (index, input)) inputs)
-                      ~substitution:[]))
-        | _ -> None
-      in
-      let value =
-        match defined with
-        | Some defined -> defined
-        | None ->
-            let output =
-              match function_type.output with Returns output -> output | _ -> Types.unit
-            in
-            let function_symbol = Symbol.Function { callee = path; instance } in
-            declare context
-              (Logic.Function (function_symbol, List.map snd parameters, sort_of context output));
-            let value = Logic.Apply (function_symbol, inputs) in
-            if instance = [] then
-              contract_for_every_argument context frame contract parameters value;
-            value
-      in
+      let output = match function_type.output with Returns output -> output | _ -> Types.unit in
+      let function_symbol = Symbol.Function { callee = path; instance } in
+      declare context
+        (Logic.Function (function_symbol, List.map snd parameters, sort_of context output));
+      let value = Logic.Apply (function_symbol, inputs) in
+      if instance = [] then contract_for_every_argument context frame contract parameters value;
       fact context frame
         (Logic.forall (parameters, Logic.equal (applied context function_type term inputs) value))
   | _ -> ());
@@ -457,7 +433,7 @@ let named_function context frame (site : Invocation.site) path type_arguments co
   term
 
 let global_value context frame (site : Invocation.site) path type_arguments ~is_argument =
-  match function_contract ?reading_package:(reading_package context) context.database path with
+  match function_contract context.database path with
   | Some contract -> named_function context frame site path type_arguments contract ~is_argument
   | None ->
       unsupported

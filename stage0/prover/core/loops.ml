@@ -595,8 +595,8 @@ let own_cursor_loop ~(for_loop : for_loop) context frame (cursor_access : passed
   in
   let contract =
     match
-      method_contract ?reading_package:(reading_package context) context.database trait "next" Mut
-        evidence
+      method_contract ~reading_package:(Path.package context.current) context.database trait "next"
+        Mut evidence
     with
     | Some contract -> contract
     | None ->

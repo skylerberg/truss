@@ -147,7 +147,7 @@ let written_equal context ty left right =
   | Some (((Impl _ : Path.t) as impl), arguments) -> (
       let evidence : evidence = Impl { impl; arguments } in
       match
-        method_contract ?reading_package:(reading_package context) context.database
+        method_contract ~reading_package:(Path.package context.current) context.database
           { trait = equal_trait; trait_arguments = []; associated = [] }
           "equal" Read evidence
       with
