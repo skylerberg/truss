@@ -1,5 +1,3 @@
-(* The tests of exhaustiveness and reachability. *)
-
 open Harness
 open Support
 
@@ -53,8 +51,6 @@ let () =
   test "a constant in a pattern is its value" (fun () ->
       fine Fixtures.Patterns.constant_in_a_pattern_is_its_value)
 
-(* Constants in patterns *)
-
 let () =
   let codes_of text =
     let database = setup [ ("app::main", text) ] in
@@ -83,8 +79,6 @@ let () =
   test "a constant whose value is not evaluated at compile time covers only itself" (fun () ->
       expect Fixtures.Patterns.constant_whose_value_is_not_evaluated_at_compile [])
 
-(* Errors reported once *)
-
 let () =
   let codes_of text = codes (check (setup [ ("app::main", text) ]) (file_of "app::main")) in
   test "a record constant covers the record it is" (fun () ->
@@ -96,8 +90,6 @@ let () =
           fail "found [%s]" (String.concat "; " actual)
       | _ -> ());
   test "code that builds a type that failed to parse reports nothing more" (fun () ->
-      (* The definition that builds the value has no error of its own. It
-         must still have no core form, or building one stops the compiler. *)
       List.iter
         (fun argument ->
           match
@@ -116,8 +108,6 @@ let () =
       | actual when List.exists (fun code -> String.starts_with ~prefix:"patterns." code) actual ->
           fail "found [%s]" (String.concat "; " actual)
       | _ -> ())
-
-(* Alternatives *)
 
 let () =
   test "an alternative that an earlier arm covers is unreachable, even the first" (fun () ->

@@ -1,5 +1,3 @@
-(* Truss source compiled with the standard library and run: the basics. *)
-
 open Codegen_support
 
 let () =
@@ -97,7 +95,6 @@ let () =
           (String.split_on_char '\n' c
           |> List.filter (fun line -> String.starts_with ~prefix:"  switch (" line))
       in
-      (* The last field's comparison is the result, so nothing branches on it. *)
       if branches <> 1 then
         fail "expected a branch after each field but the last, got %d:\n%s" branches c)
 

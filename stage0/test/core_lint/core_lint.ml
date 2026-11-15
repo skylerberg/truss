@@ -7,18 +7,13 @@ let callee_name : Core.callee -> string = function
   | Intrinsic { operation; _ } -> "intrinsic::" ^ Intrinsic.operation_name operation
   | Indirect _ -> "a function value"
 
-(* The checks of types, of which code is a specification, and of what a
-   lambda captures. *)
-
 type context = {
   database : Query.context;
   wrong : 'a. ('a, unit, string, unit) format4 -> 'a;
-  at : Core.origin option ref;  (** The origin of the node being checked, which [wrong] quotes. *)
+  at : Core.origin option ref;
   bounds : Interface.Impls.bounds;
 }
 
-(* A visitor that records the origin of each node in [at] before it checks
-   the node. *)
 let located at (visit : Core_walk.visit) : Core_walk.visit =
   {
     visit with
@@ -36,8 +31,6 @@ let located at (visit : Core_walk.visit) : Core_walk.visit =
         visit.pattern node);
   }
 
-(* The first line of a node's source text, cut to a length that fits in a
-   message. *)
 let excerpt text =
   let line =
     match String.index_opt text '\n' with Some stop -> String.sub text 0 stop | None -> text
@@ -50,8 +43,6 @@ let operand_type (operand : Core.operand) =
 
 let normal context ty = Interface.Impls.normalize context.database ~bounds:context.bounds ty
 
-(* Whether a value of the type [found] fits where [expected] is: the types
-   are equal once normalized, or [found] is [Never]. *)
 let fits context ~expected ~found =
   match found with
   | Types.Never -> true
@@ -65,8 +56,6 @@ let substitution context generics arguments ~subject =
         (List.length arguments) (List.length generics);
       []
 
-(* The types of a callee's parameters, a method's receiver first, and its
-   result, with the call's type arguments substituted. *)
 let instantiated context (callee : Core.callee) =
   let subject = "a call of `" ^ callee_name callee ^ "`" in
   let of_signature ?(has_receiver = true) substitution (signature : Types.signature) =
@@ -145,9 +134,6 @@ let is_integer_trait path =
     (fun known -> Well_known.is known path)
     [ Fixed_width_integer; Signed_integer; Unsigned_integer ]
 
-(* Whether a type is built in, or is a built-in integer for every
-   instantiation: a parameter that an integer trait bounds, [Self] in an
-   integer trait, or an associated type of one. *)
 let is_built_in context (ty : Types.ty) =
   match ty with
   | Integer | Never -> true
@@ -192,9 +178,6 @@ let compare_types context (left : Core.expression) (right : Core.expression) =
     context.wrong "a `Compare` compares the type `%s`, which is not built in"
       (Types.show left.type_)
 
-(* A construct lists each field of its record or variant once: the fields
-   the code gives, each with the field's type, and then the omitted fields,
-   each of which has a default. *)
 let construct_fields context (node : Core.expression) variant fields =
   match node.type_ with
   | Named { path; arguments } -> (
@@ -250,8 +233,6 @@ let construct_fields context (node : Core.expression) variant fields =
       context.wrong "a construct has the type `%s`, which is not a named type"
         (Types.show node.type_)
 
-(* The locals of the enclosing function that a lambda reads, in order of
-   first use: every local its body uses that the lambda does not bind. *)
 let free_locals (parameters : Core.pattern list) (body : Core.block) =
   let bound = Hashtbl.create 8 and read = ref [] in
   let bind_pattern (pattern : Core.pattern) =
@@ -289,9 +270,6 @@ let free_locals (parameters : Core.pattern list) (body : Core.block) =
     body;
   List.rev !read
 
-(* Whether a condition can be evaluated at run time: it has no quantifier,
-   no value of type [Integer], no [old] or [result], and no call of a
-   specification-only function. *)
 let is_executable context (condition : Core.expression) =
   not
     (Core_walk.expression_exists
@@ -307,9 +285,6 @@ let is_executable context (condition : Core.expression) =
          | _ -> false)
        condition)
 
-(* The ids of the expressions that only a specification holds: the
-   contract, the type's invariants, the laws, [proof] blocks, assertions
-   outside a test, and loop clauses. *)
 let specification_expressions (definition : Core.definition) =
   let ids = Hashtbl.create 64 in
   let mark =
@@ -356,10 +331,7 @@ let specification_expressions (definition : Core.definition) =
           match node.kind with
           | Proof body -> Core_walk.block mark body
           | Assert { condition; _ } -> (
-              (* A test runs its assertions. *)
-              match definition with
-              | Test _ -> ()
-              | _ -> mark.expression condition.value)
+              match definition with Test _ -> () | _ -> mark.expression condition.value)
           | For { clauses; _ } | While { clauses; _ } ->
               List.iter (Core_walk.loop_clause mark) clauses
           | _ -> ());
@@ -487,8 +459,6 @@ let check database (key : Resolve.Names.key) (form : Core.t) =
       | _ -> []
     in
     declared key.path
-    (* A derived method has no interface of its own: its signature gives
-       the generics of the type and of the trait method. *)
     @ (match Interface.Impls.signature database key.path with
       | Some signature -> of_generics signature.generics
       | None -> [])
@@ -572,8 +542,6 @@ let check database (key : Resolve.Names.key) (form : Core.t) =
         List.iter (argument "an intrinsic's type argument") type_arguments
     | Capability_method _ | Indirect _ -> ()
   in
-  (* Each parameter of a callee, a method's receiver first, with its mode
-     and whether it has a default. [None] if the callee has no signature. *)
   let callee_parameters (callee : Core.callee) : (T.mode * bool) list option =
     let of_signature ~has_receiver (signature : T.signature) =
       let receiver =
@@ -596,8 +564,6 @@ let check database (key : Resolve.Names.key) (form : Core.t) =
             of_signature ~has_receiver:true method_.method_signature)
           (Infer.Members.trait_method database reference.trait name receiver)
     | Capability_method { capability; name } -> (
-        (* A capability method's receiver is the capability, which no
-           argument passes. *)
         match Infer.Members.trait_methods database capability name with
         | [ method_ ] -> Some (of_signature ~has_receiver:false method_.method_signature)
         | _ -> None)
@@ -634,7 +600,6 @@ let check database (key : Resolve.Names.key) (form : Core.t) =
           (List.combine parameters call.arguments)
   in
   let compound_assignments = ref 0 and current_targets = ref 0 in
-  (* The calls that create a [Slice], whose bounds are passed as values. *)
   let slice_calls = Hashtbl.create 8 in
   let local_types : (Core.local, T.ty) Hashtbl.t = Hashtbl.create 16 in
   let parameters =

@@ -1,7 +1,3 @@
-(* With [TRUSS_SKIP_SUITES] naming this executable, such as
-   [prover_tests,database_tests], it says it is skipped and runs no test:
-   CI runs the slowest suites in jobs of their own, and skips a suite that
-   builds no C where it runs the codegen tests under sanitizers. *)
 let () =
   let suite = Filename.remove_extension (Filename.basename Sys.executable_name) in
   match Sys.getenv_opt "TRUSS_SKIP_SUITES" with
@@ -10,10 +6,6 @@ let () =
       exit 0
   | _ -> ()
 
-(* With [TRUSS_TEST_SHARE] set to [index/count], the process runs every
-   [count]th test, from the [index]th on, so that several processes run
-   one executable's tests at once. A step that [always] runs runs in each
-   of them. *)
 let share =
   match Sys.getenv_opt "TRUSS_TEST_SHARE" with
   | None | Some "" -> None
@@ -35,14 +27,8 @@ let fail format =
       Printf.printf "FAIL %s: %s\n" !current_test message)
     format
 
-(* Every engine a test makes is audited when the test ends: each result it
-   holds is computed again in a new engine with the same inputs, and must
-   come out the same. So every test of every stage also tests that the
-   code database kept each result current. *)
 let () = Engine.For_testing.auditing := true
 
-(* With [TRUSS_TEST] set, only the tests whose names contain it run, for
-   working on one. *)
 let wanted =
   match Sys.getenv_opt "TRUSS_TEST" with
   | None | Some "" -> fun _ -> true
@@ -61,7 +47,6 @@ let always name body =
   (match body () with
   | () -> ()
   | exception exception_ ->
-      (* With OCAMLRUNPARAM=b, the backtrace says where. *)
       fail "raised %s%s" (Printexc.to_string exception_) (Printexc.get_backtrace ()));
   match Engine.For_testing.audit_all () with
   | problems ->
@@ -95,9 +80,6 @@ let expect_not_recomputed engine ~first ~again query keys =
         fail "%s was computed again" (Engine.For_testing.result_label query key))
     keys
 
-(* The workspace root: the nearest directory above the executable that
-   holds [dune-project]. The executable is built under [_build/default],
-   which has no copy of it. *)
 let workspace_root =
   lazy
     (let rec up directory =
@@ -124,11 +106,6 @@ let () =
       end
       else Printf.printf "%d tests pass\n" !count)
 
-(* The root is under /tmp, not TMPDIR. A test binds a Unix socket in its
-   scratch directory, and macOS limits a socket's path ([sun_path]) to 104
-   bytes. Dune on macOS sets TMPDIR for each action to a path of about 67
-   bytes, which leaves too few for the rest, so [listen_local] fails under
-   [dune test]. *)
 let scratch_root =
   lazy
     (let root = Filename.temp_dir ~temp_dir:"/tmp" "truss-tests" "" in

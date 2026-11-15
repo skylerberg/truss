@@ -1,6 +1,3 @@
-(* The command line's tests. Each gives a small package or input and states
-   one fact about the command's result. *)
-
 open Cli
 
 let test = Harness.test
@@ -9,9 +6,6 @@ let expect_string = Harness.expect_string
 let expect_strings = Harness.expect_strings
 let contains = Substring.contains
 
-(* Packages on disk *)
-
-(* A new directory holding the files, each a path under it and its text. *)
 let directory files =
   let root = Harness.scratch "package" in
   Harness.write_files root files;
@@ -22,9 +16,6 @@ let manifest = ("truss.toml", manifest_of "demo")
 let package files = directory (manifest :: files)
 let read root path = In_channel.with_open_bin (Filename.concat root path) In_channel.input_all
 
-(* Runs [f] with its output kept, and returns its result and its output,
-   then saves the sessions it opened, as the command line does after each
-   command. *)
 let captured work =
   let out = Buffer.create 256 and err = Buffer.create 256 in
   let result =
@@ -41,8 +32,6 @@ let captured work =
   Database.save_opened ();
   (result, Buffer.contents out ^ Buffer.contents err)
 
-(* Runs [truss] with the arguments, and returns its exit status and its
-   output. A program that [truss run] built is not run, and counts as 0. *)
 let truss arguments =
   match captured (fun () -> Main.For_testing.run_command_line arguments) with
   | Outcome.Exit status, output -> (status, output)
@@ -51,8 +40,6 @@ let truss arguments =
       (0, output)
 
 let quietly arguments = fst (truss arguments)
-
-(* The JSON document a command writes with [--json]. *)
 let document arguments = Json.parse (snd (truss (arguments @ [ "--json" ])))
 
 let strings = function
@@ -62,21 +49,13 @@ let strings = function
 let objects = function Json.List items -> items | _ -> []
 let text_field name value = match Json.field name value with Json.String text -> text | _ -> ""
 
-(* The text of each definition [truss show] prints for a path. *)
 let shown root path =
   List.map (text_field "text")
     (objects (Json.field "definitions" (document [ "show"; "-C"; root; path ])))
 
-(* The holes [truss holes] lists. *)
 let holes root = objects (Json.field "holes" (document [ "holes"; "-C"; root ]))
-
-(* The changes [truss impact] lists since the worktree's base commit. *)
 let impact root = objects (Json.field "changes" (document [ "impact"; "-C"; root ]))
-
-(* The tests' sessions are in a store of their own, apart from the user's. *)
 let () = Unix.putenv "TRUSS_CACHE" (Harness.scratch "store")
-
-(* Arguments *)
 
 let () =
   test "-C before the command is read as an option of the command" (fun () ->
@@ -95,10 +74,6 @@ let () =
         ~expected:[ "truss"; "run"; "--no-server"; "--release"; "--"; "input.txt" ]
         (Arguments.prepare [ "truss"; "run"; "--no-server"; "--release"; "input.txt" ]))
 
-(* Finding the package *)
-
-(* The result of [Command_packages.load]: a session and the packages a
-   command acts on. *)
 let names (_, packages) = List.sort compare (List.map Path.show_package packages)
 let modules (session, packages) = Command_packages.modules session packages
 let files (session, packages) = Command_packages.files session packages
@@ -113,7 +88,6 @@ let () =
         (names (Command_packages.load (Filename.concat root "forecast"))));
   test "a directory with no manifest at or above it cannot run a command" (fun () ->
       let root = directory [ ("main.truss", "") ] in
-      (* The temporary directory is not inside a package. *)
       match Command_packages.load root with
       | exception Outcome.Cannot_run _ -> ()
       | _ -> fail "found a package");
@@ -238,13 +212,10 @@ let () =
       expect_string ~expected:"../weather/forecast.truss"
         (Shown_path.relative ~from:"/code/app" "/code/weather/forecast.truss"))
 
-(* Errors between manifests *)
-
 let problems files =
   let project = Command_packages.load (directory files) in
   Database.problems (fst project)
 
-(* The manifest problems in a report, as its JSON document lists them. *)
 let report_problems report =
   match Json.field "problems" (Report.document report []) with
   | Json.List problems ->
@@ -300,8 +271,6 @@ let () =
         ]
         "two/truss.toml: The package name `same` is already used by one/truss.toml")
 
-(* A dependency that nothing uses *)
-
 let () =
   test "a dependency nothing uses is a problem, which check --fix fixes by deleting its entry"
     (fun () ->
@@ -334,8 +303,6 @@ let () =
         contains manifest "other" || contains manifest "Clock"
         || not (contains manifest "library = []")
       then fail "wrote %s" manifest)
-
-(* A package with an owner in its name *)
 
 let owned =
   [
@@ -396,8 +363,6 @@ let () =
       match Manifest.parse "[package]\nname = \"a\"\n[test]\ntime_limit = 0\n" with
       | exception Manifest.Malformed (4, _) -> ()
       | _ -> fail "accepted")
-
-(* Checking and fixing *)
 
 let edit start stop replacement = Diagnostic.replace (Source.span start stop) replacement
 
@@ -460,8 +425,6 @@ let () =
       if not (contains output "main.truss:3:5: `todo` in a proof can be reached") then
         fail "%s" output)
 
-(* The test runner's report *)
-
 let () =
   test "a report's records come back in the order of the tests, however they ended" (fun () ->
       let records =
@@ -483,8 +446,6 @@ let () =
   test "the status line is cut by characters, never inside one" (fun () ->
       expect_string ~expected:"café" (Status_line.For_testing.cut "café au lait" 4))
 
-(* Selecting tests *)
-
 let suite = Fixtures.suite
 
 let () =
@@ -503,8 +464,6 @@ let () =
            (fun (test : Test_command.test) -> test.name)
            (select project ~paths:[ Filename.concat root "other.truss" ] ~match_:None)))
 
-(* Signatures *)
-
 let () =
   test "a function's signature is its text without its body" (fun () ->
       let root =
@@ -520,8 +479,6 @@ let () =
       expect_strings
         ~expected:[ "public type Point(x: Int64, y: Int64)"; "public fn Point.sum(self) -> Int64" ]
         (shown root "demo::Point"))
-
-(* Holes *)
 
 let unfinished = Fixtures.unfinished
 
@@ -553,8 +510,6 @@ let () =
       match holes (package [ ("main.truss", "type Session = todo\n") ]) with
       | [ hole ] -> if text_field "kind" hole <> "type" then fail "kind %s" (text_field "kind" hole)
       | found -> fail "found %d holes" (List.length found))
-
-(* Building *)
 
 let lowering (session, _) = Compiler.lowering_only session (Database.context session)
 
@@ -640,8 +595,6 @@ let () =
       | Ok reached -> fail "found %d" (List.length reached)
       | Error message -> fail "%s" message)
 
-(* Renaming *)
-
 let two_files =
   [ ("weather/weather.truss", Fixtures.two_files_weather); ("main.truss", Fixtures.two_files) ]
 
@@ -702,12 +655,9 @@ let () =
       if not (contains text "fn Point.value(self)" && contains text "Point(x: 1).value()") then
         fail "wrote %s" text)
 
-(* Comparing with a commit, and other worktrees *)
-
 let git = Harness.git
 let doubling = Fixtures.doubling
 
-(* A repository whose one commit holds the package. *)
 let repository text =
   let root = package [ ("main.truss", text) ] in
   git root [ "init"; "-q"; "-b"; "main" ];
@@ -715,7 +665,6 @@ let repository text =
   git root [ "commit"; "-q"; "-m"; "base" ];
   root
 
-(* The text with its one occurrence of [part] replaced. *)
 let replace text part by =
   let part_length = String.length part in
   let rec at position =
@@ -727,12 +676,9 @@ let replace text part by =
 
 let rewrite root path text =
   Out_channel.with_open_bin (Filename.concat root path) (fun out -> output_string out text);
-  (* A rewrite within one second must still look changed. *)
   let now = Unix.gettimeofday () in
   Unix.utimes (Filename.concat root path) now (now +. 10.)
 
-(* A repository whose one commit holds the package in a directory below
-   its top, with another project beside it. *)
 let nested_repository text =
   let top =
     directory
@@ -800,8 +746,6 @@ let () =
       let root = repository (one ^ "\n" ^ two) in
       rewrite root "main.truss" (two ^ "\n" ^ one);
       match impact root with [] -> () | changes -> fail "found %d changes" (List.length changes))
-
-(* Dependencies, and positions *)
 
 let () =
   test "references list a definition's readers, part by part" (fun () ->
@@ -884,9 +828,6 @@ let () =
                 reads = place "double" "signature";
               })))
 
-(* Registry packages *)
-
-(* A registry in a directory of its own, which commands then use. *)
 let registry_root = ref ""
 
 let registry () =
@@ -894,14 +835,10 @@ let registry () =
   Unix.putenv Registry.Index.variable !registry_root;
   Option.get (Registry.Index.current ())
 
-(* A version's files in the last registry made, at [owner/name/VERSION/]. *)
 let version_directory (package : Path.package) version =
   List.fold_left Filename.concat !registry_root
     (Path.package_parts package @ [ Registry.Version.show version ])
 
-(* Adds a version of a package to a registry: its modules, the packages it
-   depends on, each with its grants, and the versions it was published
-   with, which the registry must hold already. *)
 let publish registry name version ?(dependencies = []) ?(record = []) modules =
   let manifest =
     manifest_of name
@@ -935,8 +872,6 @@ let units text =
 
 let geometry = [ ("vector/vector.truss", Fixtures.geometry_vector) ]
 
-(* A registry with [acme::units] at 1.0.0 and 1.1.0, and [acme::geometry]
-   1.0.0, published with the first. *)
 let stocked () =
   let registry = registry () in
   publish registry "acme::units" (1, 0, 0) (units "1");
@@ -979,8 +914,6 @@ let () =
       let registry = stocked () in
       let root = package [ uses_geometry ] in
       ignore (add root [ "acme::geometry" ]);
-      (* A package published with a newer version of a dependency of the
-         build brings that version with it. *)
       publish registry "acme::shapes" (1, 0, 0)
         ~dependencies:[ ("acme::units", []) ]
         ~record:[ ({ Path.owner = Some "acme"; name = "units" }, (1, 1, 0)) ]
@@ -1019,7 +952,6 @@ let () =
       let _ = stocked () in
       let root = package [ uses_geometry ] in
       ignore (add root [ "acme::geometry" ]);
-      (* Granting a package a capability changes its holdings. *)
       rewrite root "truss.toml"
         (manifest_of "demo" ^ "[dependencies]\n\"acme::geometry\" = [\"Clock\"]\n");
       expect_problem_in root
@@ -1092,8 +1024,6 @@ let () =
              (List.map (Database.file_path (fst project)) (files project)))
       then fail "the project's package is not the one in the build")
 
-(* Upgrading *)
-
 let upgrade root names = truss ([ "upgrade"; "-C"; root ] @ names)
 
 let () =
@@ -1151,11 +1081,8 @@ let () =
       if not (contains output "`acme::units` would hold Clock, which it did not") then
         fail "said %s" output)
 
-(* Publishing *)
-
 let publish_from root = truss [ "publish"; "-C"; root ]
 
-(* A package of its own project, named [acme::angles], with one module. *)
 let angles text =
   directory [ ("truss.toml", manifest_of "acme::angles"); ("degrees/degrees.truss", text) ]
 
@@ -1168,7 +1095,6 @@ let published registry name =
 
 let expect_published registry name expected = expect_strings ~expected (published registry name)
 
-(* Publishes a package and expects it to be refused, with the reason. *)
 let expect_refused root part =
   let status, output = publish_from root in
   if status <> 1 then fail "status %d: %s" status output;
@@ -1280,8 +1206,6 @@ let () =
       if status <> 0 then fail "status %d: %s" status output;
       expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0" ])
 
-(* A package's dependencies at publication *)
-
 let () =
   test "a package is published with the versions of the packages its code uses" (fun () ->
       let _ = stocked () in
@@ -1371,12 +1295,9 @@ let () =
       in
       let walls = Filename.concat root "walls" in
       expect_refused walls "publish `acme::angles` first";
-      (* Once it is published, the project's copy is that version. *)
       ignore (publish_from (Filename.concat root "angles"));
       let status, output = publish_from walls in
       if status <> 0 then fail "status %d: %s" status output)
-
-(* The command line as a whole *)
 
 let () =
   test "a command line is parsed and run as the client would run it" (fun () ->
@@ -1388,8 +1309,6 @@ let () =
   test "an unknown command is a bad argument" (fun () ->
       let status, _ = captured (fun () -> Main.client [ "truss"; "--no-server"; "bogus" ]) in
       if status <> 2 then fail "did not exit with 2")
-
-(* Tagged templates *)
 
 let () =
   test "check accepts an HTML template that interpolates into text and quoted attributes" (fun () ->
@@ -1436,8 +1355,6 @@ let () =
           "<a href=${own code}>x</a>";
         ])
 
-(* Making a package *)
-
 let () =
   test "a name that is not a package's makes nothing" (fun () ->
       let root = directory [] in
@@ -1455,8 +1372,6 @@ let () =
       if quietly [ "new"; "-C"; root; "weather" ] <> 0 then fail "not made";
       let project = Command_packages.load (Filename.concat root "weather") in
       if not (Report.clean (gather ~proofs:true project)) then fail "has diagnostics")
-
-(* The language server *)
 
 let () =
   test "JSON with escapes and a surrogate pair is read" (fun () ->

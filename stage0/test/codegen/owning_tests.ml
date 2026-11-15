@@ -1,7 +1,3 @@
-(* Truss source compiled and run: every value is dropped exactly once, on
-   every way out of the code that owns it. A test passes only if it frees
-   each block it allocates, which the runner checks. *)
-
 open Codegen_support
 
 let () =

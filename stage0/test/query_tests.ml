@@ -1,10 +1,5 @@
-(* The tests of the engine: which queries are computed again after a change,
-   a change's reach, phase by phase, and the results an engine over a base
-   holds. *)
-
 open Harness
 
-(* An input's value, raising [Not_found] when it is not set. *)
 let get database input key =
   match Query.find database input key with Some value -> value | None -> raise Not_found
 
@@ -19,9 +14,6 @@ let unit_query ?(phase = Phases.syntax) name compute =
 
 type build = { files : (string, string) Query.input; total : (unit, int) Query.query }
 
-(* A small build: two "files" as inputs, a length per file, and a total that
-   reads the lengths' parities. The lengths are of an earlier phase than
-   their readers. *)
 let build () =
   let files = Query.input ~name:"file" ~show:Fun.id () in
   let length =
@@ -98,8 +90,6 @@ let () =
       Engine.remove engine files "a";
       if Engine.get engine present "a" then fail "present after it was removed")
 
-(* Pushing *)
-
 let () =
   test "stabilizing brings every root up to date" (fun () ->
       let engine, files, total = setup () in
@@ -156,10 +146,6 @@ let () =
         fail "reads";
       if labels (Engine.readers engine (node "length(a)")) <> [ "parity(a)" ] then fail "readers")
 
-(* Phases *)
-
-(* [count] results of a later phase that all read one result of an earlier
-   phase, which comes out the same whatever the input is. *)
 let fan count =
   let engine = Engine.create () in
   let source = Query.input ~name:"source" ~show:(fun () -> "") () in
@@ -176,7 +162,6 @@ let fan count =
   done;
   (engine, source)
 
-(* The work one change of the input costs. *)
 let work (engine, source) =
   let before = Engine.counters engine in
   Engine.set engine source () 2;
@@ -216,7 +201,6 @@ let () =
       let engine, files, total = setup () in
       ignore (Engine.get engine total ());
       let before = Engine.counters engine in
-      (* The length is the same, so its parity is marked and then confirmed. *)
       Engine.set engine files "b" "seven";
       ignore (Engine.stabilize engine);
       let after = Engine.counters engine in
@@ -224,13 +208,8 @@ let () =
         fail "computed %d" (after.computed - before.computed);
       if after.marked - before.marked <> 1 then fail "marked %d" (after.marked - before.marked))
 
-(* Dropping *)
-
 let () =
   test "a result a running query has read is not collected before the query ends" (fun () ->
-      (* [n] reads [x] and then [y]. [y] used to read [x] and no longer
-         does, and nothing else reads [x], so while [n] is computed again
-         [x] loses its last reader before [n] counts as one. *)
       let engine = Engine.create () in
       let flag = Query.input ~name:"flag" ~show:(fun () -> "") () in
       let value = Query.input ~name:"value" ~show:(fun () -> "") () in
@@ -299,8 +278,6 @@ let () =
       match !created with
       | Some weak -> if Weak.check weak 0 then fail "the engine is still held"
       | None -> fail "no engine was made")
-
-(* Cycles and exceptions *)
 
 let () =
   test "a query that asks for itself is a cycle naming each query on it" (fun () ->
@@ -412,7 +389,6 @@ let () =
       if one <> 1 || two <> 2 then fail "read %d and %d" one two);
   test "an input cannot change while a query runs" (fun () ->
       let engine = Engine.create () in
-      (* The query changes an engine, so it is no function of its reads. *)
       Engine.skip_audit engine;
       let value = Query.input ~name:"value" ~show:(fun () -> "") () in
       let writer = unit_query "writer" (fun _ () -> Engine.set engine value () 1) in
@@ -420,10 +396,6 @@ let () =
       | () -> fail "the input changed"
       | exception Invalid_argument _ -> ())
 
-(* Bases *)
-
-(* A base holding the small build with its total computed, and an engine
-   over it. *)
 let over_base () =
   let build = build () in
   let base = Engine.create () in
@@ -454,7 +426,6 @@ let () =
         fail "holds [%s]" (String.concat "; " held));
   test "a result over a base that comes out the same is the last one copied" (fun () ->
       let _, engine, build = over_base () in
-      (* The same length, so nothing of the later phase is reached. *)
       Engine.set engine build.files "b" "seven";
       if Engine.get engine build.total () <> 2 then fail "another total";
       let held = List.sort compare (labels (Engine.For_testing.differing engine)) in
@@ -512,8 +483,6 @@ let () =
       | _ -> fail "made over an engine that can still change"
       | exception Invalid_argument _ -> ())
 
-(* Checking the engine *)
-
 let () =
   test "an audit finds nothing in an engine whose queries are pure functions of their reads"
     (fun () ->
@@ -541,8 +510,6 @@ let () =
       | [] -> ()
       | problems -> fail "found [%s]" (String.concat "; " problems))
 
-(* A source, a result of an early phase that reads it, and a result of a
-   later phase that reads that. *)
 let two_phases ?(fail_when = fun () -> false) () =
   let source = Query.input ~name:"known_source" ~show:Fun.id () in
   let early =
@@ -654,7 +621,6 @@ let () =
       in
       Engine.set engine source "a" "one";
       ignore (Engine.get engine late "a");
-      (* The later result now differs from a new engine's. *)
       hidden := 2;
       if Engine.audit ~before:Phases.proofs engine <> [] then
         fail "the audit computed a result of a later phase";

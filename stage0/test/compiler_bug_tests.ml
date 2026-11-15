@@ -1,5 +1,3 @@
-(* The tests of how the compiler reports its own failures. *)
-
 open Harness
 
 let expect_bug work check =

@@ -1,9 +1,4 @@
 module Lower = Compile.For_testing.Lower
-
-(* Lowering from the MIR: a program for each kind of statement and
-   terminator, whose test passes when the code lowered from it runs
-   correctly. *)
-
 open Codegen_support
 
 let () =
@@ -158,8 +153,6 @@ let () =
   passes "a function with a default, called through a function value, uses its arguments"
     Fixtures.Lowering.function_with_a_default_called_through_a_function
 
-(* Checks which of a module's constants fold and which are computed by
-   running their evaluators, and that the module's test passes. *)
 let folds name ~folded ~run source =
   test name (fun () ->
       let database, _ = load source in

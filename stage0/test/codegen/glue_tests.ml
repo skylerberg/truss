@@ -1,9 +1,5 @@
-(* The functions generated for each type, and debug output. *)
-
 open Memory_layout
 open Codegen_support
-
-(* Generated functions for each type *)
 
 let storage element = named "Storage" ~arguments:[ Type element ]
 
@@ -15,8 +11,6 @@ let representation extra (ty : Ground.ty) : Memory_layout.representation =
 let glue ?(extra = []) () =
   Glue.create (shape_env ~extra ()) ~representation:(representation extra) ~usize ()
 
-(* Statements that allocate a storage of [Int32]s holding [values] into
-   local [target], using local [buffer]. *)
 let fill_storage ~target ~buffer values =
   let count = List.length values in
   let usize_constant number = Lowered.Constant (Integer (USize, Z.of_int number)) in

@@ -1,8 +1,4 @@
 module Intrinsics = Compile.For_testing.Intrinsics
-
-(* Calling the C library: its table against the system's headers, and
-   programs that call its functions. *)
-
 open Codegen_support
 
 let view_ty = named "View" ~arguments:[ Type uint8 ]
@@ -23,8 +19,6 @@ let operate builder ?destination ?(type_arguments = []) operation arguments =
        arguments ~destination
        ~site:{ definition = definition "entry"; line = 0; column = 1 })
 
-(* An [entry] built with the builder: [body] writes its statements and
-   returns the local to exit with. *)
 let built_entry body : instance =
  fun env ->
   let builder = Emit_c.Builder.create env ~key:(key "entry") in
@@ -44,7 +38,6 @@ let view_of builder text =
        ));
   view
 
-(* The C library's numbers, joined with [or]. *)
 let flags builder numbers =
   let open Emit_c.Builder in
   let all = local builder (value int32) in
@@ -253,7 +246,6 @@ let () =
                 let got = local builder (value isize) in
                 operate builder ~destination:(at got) (Libc Read)
                   [ Value (constant_int32 0); Place (at storage); Value (usize 15) ];
-                (* The first byte read comes after the one the storage had. *)
                 let first = local builder (value int32) and count = local builder (value int32) in
                 emit builder
                   (Assign
@@ -272,15 +264,12 @@ let () =
           built_entry (fun builder ->
               let seconds = local builder (value int64)
               and nanoseconds = local builder (value int64) in
-              (* A [Written] argument keeps its value where the function
-                 writes nothing, so it holds one before the call. *)
               emit builder (Assign (at seconds, Use (constant_int64 0)));
               emit builder (Assign (at nanoseconds, Use (constant_int64 0)));
               let clock = flags builder [ Clock_realtime ] in
               let failed = local builder (value int32) in
               operate builder ~destination:(at failed) (Libc Clock_gettime)
                 [ Value (Copy (at clock)); Place (at seconds); Place (at nanoseconds) ];
-              (* Later than 2023, and less than a second of nanoseconds. *)
               let recent = local builder (Raw Bool) and whole = local builder (Raw Bool) in
               emit builder
                 (Assign
@@ -305,8 +294,6 @@ let () =
              ~type_arguments:[] arguments ~destination
              ~site:{ definition = definition "entry"; line = 0; column = 1 })
       in
-      (* A new socket's name is 16 bytes. The system is told there is room
-         for 28, which it could not know from a number it only writes. *)
       expect_status ~extra 16
         [
           built_entry (fun builder ->
@@ -347,7 +334,6 @@ let () =
       expect_status ~extra 1
         [
           built_entry (fun builder ->
-              (* Two draws of eight random bytes differ. *)
               let draw () =
                 let value = local builder (value uint64) and failed = local builder (value int32) in
                 emit builder (Assign (at value, Use (Constant (Integer (UInt64, Z.zero)))));
@@ -401,7 +387,6 @@ let () =
               let ready = local builder (value int32) in
               operate builder ~destination:(at ready) (Libc Poll)
                 [ Place (at waited); Value (usize 1); Value (constant_int32 1000) ];
-              (* The returned events are the high half of the second number. *)
               let actual = local builder (value int32) in
               emit builder
                 (Assign
@@ -415,7 +400,6 @@ let () =
               ready);
         ])
 
-(* With the standard library's own types, whose drop code generation makes. *)
 let () =
   test "dropping a handle closes its descriptor" (fun () ->
       let open Emit_c.Builder in
@@ -443,8 +427,6 @@ let () =
              ( at name,
                Storage.view view_ty ~elements:(Constant (Bytes text))
                  ~length:(usize (String.length text)) ));
-        (* [open] gives the lowest descriptor that is free, so the second
-           gets the first's exactly when the first was closed. *)
         let opened () =
           let descriptor = local builder (value int32) in
           ignore
@@ -479,15 +461,12 @@ let () =
       in
       if status <> 1 then fail "the descriptor was not free again (status %d, %s)" status errors)
 
-(* The checks of a build that does not wait for proofs *)
-
 let checked builder ?destination ?(type_arguments = []) operation arguments =
   ignore
     (Intrinsics.lower ~checks:true (shape_env ~extra ()) builder intrinsic_types operation
        ~type_arguments arguments ~destination
        ~site:{ definition = definition "entry"; line = 0; column = 1 })
 
-(* The position that a panic in [entry] reports. *)
 let anchors = [ { Positions.definition = definition "entry"; path = "test.truss"; first_line = 1 } ]
 
 let expect_panic ~saying instances =

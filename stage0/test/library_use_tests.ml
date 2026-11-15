@@ -1,8 +1,3 @@
-(* The standard library's contracts, read from another package. Each test
-   is a small program a user might write, proven against the library as it
-   stands, so a contract that only the library's own package can read
-   fails here. *)
-
 open Harness
 
 let solver = Lazy.force Support.solver

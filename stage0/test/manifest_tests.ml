@@ -1,5 +1,3 @@
-(* The tests of reading truss.toml. *)
-
 open Harness
 module Manifest = Manifest
 

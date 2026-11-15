@@ -1,6 +1,3 @@
-(* The tests of capabilities: capability checking, lambdas' uses,
-   capability parameters, provide, and dependency grants. *)
-
 open Harness
 open Support
 
@@ -155,10 +152,6 @@ let () =
   test "an implementation of a capability may hand the capability to a function value" (fun () ->
       fine Fixtures.Capabilities.implementation_of_a_capability_may_hand_the)
 
-(* A grant wherever a dependency's code is named *)
-
-(* The codes of [app::main], whose manifest lists the dependencies given,
-   each with its grants. *)
 let codes_with_grants files grants =
   let database = setup files in
   Database.For_testing.set_manifest (Engine.of_context database)
@@ -215,8 +208,6 @@ let () =
              ({ owner = None; name = "plugins" }, []);
            ]))
 
-(* Grant names *)
-
 let ledger = ("store::ledger", Fixtures.Capabilities.ledger_ledger)
 let pays = ("app::main", Fixtures.Capabilities.pays)
 
@@ -242,8 +233,6 @@ let () =
       expect_codes ~expected:[ "capabilities.not_granted" ]
         (codes_with_grants [ pays; ledger ]
            [ ({ Path.owner = None; name = "store" }, [ "Clock" ]) ]))
-
-(* A dependency that nothing uses *)
 
 let () =
   test "a dependency that nothing in the package names is reported" (fun () ->
@@ -299,8 +288,6 @@ let () =
           [ ({ Path.owner = None; name = "clock_library" }, []) ]
       in
       if problems database <> [] then fail "reported")
-
-(* Function values and the capabilities their types list *)
 
 let ticks = Fixtures.Capabilities.ticks
 
@@ -381,8 +368,6 @@ let () =
       one_diagnostic (repeat "Mine") "capabilities.not_available";
       fine (repeat "Mine, Clock"))
 
-(* A capability parameter in a call's arguments, and in a type *)
-
 let later = ticks ^ Fixtures.Capabilities.later
 
 let () =
@@ -412,11 +397,6 @@ let () =
         "types.misplaced_capability_parameter";
       fine "type Holder(action: (fn() -> Instant uses Clock))\n")
 
-(* Function values and the costs their types promise *)
-
-(* How many conversions of a function value to a function type with weaker
-   costs the first definition of a text has. The prover must show that the
-   given costs imply the expected ones at each. *)
 let widenings text =
   List.length
     (List.filter
@@ -434,8 +414,6 @@ let () =
   test "function types inside a type must promise the same costs" (fun () ->
       one_diagnostic Fixtures.Capabilities.function_types_inside_a_type_must_promise_the_same
         "types.mismatch")
-
-(* A cursor whose [next] uses a capability *)
 
 let readings = Fixtures.Capabilities.readings
 
@@ -471,8 +449,6 @@ let () =
       one_diagnostic
         (readings ^ Fixtures.Capabilities.cursor_whose_next_uses_a_capability_cannot_be_an)
         "types.no_impl")
-
-(* Associated capability sets *)
 
 let feed = Fixtures.Capabilities.feed
 

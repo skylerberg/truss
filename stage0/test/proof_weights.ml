@@ -1,7 +1,3 @@
-(* Each standard library module's proof cost, for dealing the modules out to the
-   processes that prove them. `TRUSS_PROOF_WEIGHTS=all ./standard_library_tests.exe` prints this file's
-   definitions again, and a list of module names in place of `all` measures those modules only. *)
-
 let weights =
   [
     ("standard::arguments", 167);

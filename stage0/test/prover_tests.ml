@@ -1,6 +1,3 @@
-(* The prover, against the pinned solver. Each test gives a few small
-   definitions and states which obligation is proven or is not. *)
-
 open Harness
 
 let solver = Lazy.force Support.solver
@@ -17,15 +14,12 @@ let codes text =
   let database = Support.setup [ ("app::main", text) ] in
   Support.codes (check database (Support.file_of "app::main"))
 
-(* A file with diagnostics, all of one code, as a cycle of the call graph
-   gives at each call in it. *)
 let only_code text code =
   match codes text with
   | [] -> fail "no diagnostics"
   | actual ->
       if List.exists (fun other -> other <> code) actual then fail "%s" (String.concat ", " actual)
 
-(* The message of a file's one diagnostic. *)
 let message text =
   let database = Support.setup [ ("app::main", text) ] in
   match check database (Support.file_of "app::main") with
@@ -35,8 +29,6 @@ let message text =
         (String.concat "; " (Support.codes actual))
 
 let contains = Substring.contains
-
-(* Operations that could fail *)
 
 let () =
   test "an addition that can overflow" (fun () ->
@@ -52,15 +44,10 @@ let () =
       proven Fixtures.Prover.requires_rules_out_the_overflow);
   test "a requires clause read from its code holds or fails at a call as the clause written does"
     (fun () ->
-      (* The clause can run, so the prover reads its MIR: a short circuit on each side, a field
-         read, and a pattern that binds a name the clause then reads. *)
       proven Fixtures.Prover.requires_clause_read_from_its_code_holds_at_a_call;
       not_proven Fixtures.Prover.requires_clause_read_from_its_code_holds_at_a_call_2
         "prover.requires");
   test "a name that `is` binds in an `&&` is read by the operands after it" (fun () ->
-      (* [a && b is Ok(x) && c] is [(a && b is Ok(x)) && c], so [c] reads a name that the
-         right operand of the first [&&] binds. The callee's [ensures] says nothing where the
-         prover cannot read it, so the proof needs it read. *)
       proven Fixtures.Prover.name_that_is_binds_in_an_and_is_read_after_it);
   test "a check in an if rules out the overflow" (fun () ->
       proven Fixtures.Prover.check_in_an_if_rules_out_the_overflow);
@@ -76,8 +63,6 @@ let () =
       not_proven Fixtures.Prover.unreachable_that_can_be_reached "prover.unreachable");
   test "an unreachable after a check" (fun () -> proven Fixtures.Prover.unreachable_after_a_check)
 
-(* Contracts *)
-
 let () =
   test "a call must meet its callee's requires" (fun () ->
       not_proven Fixtures.Prover.call_must_meet_its_callees_requires "prover.requires");
@@ -92,8 +77,6 @@ let () =
       proven Fixtures.Prover.callees_ensures_is_a_fact_after_the_call);
   test "a mut argument is mutated only through the callee's ensures" (fun () ->
       not_proven Fixtures.Prover.mut_argument_is_mutated_only_through_the_callees "prover.ensures")
-
-(* Loops and recursion *)
 
 let () =
   test "a loop with an invariant" (fun () -> proven Fixtures.Prover.loop_with_an_invariant);
@@ -163,8 +146,6 @@ let () =
       not_proven Fixtures.Prover.match_with_guards_ends_in_an_unreachable_that_is_2
         "prover.unreachable")
 
-(* Proofs *)
-
 let () =
   test "a theorem the solver proves alone" (fun () ->
       proven Fixtures.Prover.theorem_the_solver_proves_alone);
@@ -174,8 +155,6 @@ let () =
       proven Fixtures.Prover.assert_in_a_test_is_a_fact_not_an_obligation);
   test "an assert in a theorem is an obligation" (fun () ->
       not_proven Fixtures.Prover.assert_in_a_theorem_is_an_obligation "prover.assertion")
-
-(* Data *)
 
 let shape = Fixtures.Prover.shape
 let point = "type Point(x: Int64, y: Int64)\n  derives Equal\n\n"
@@ -202,8 +181,6 @@ let () =
   test "? continues with the value inside" (fun () ->
       not_proven Fixtures.Prover.continues_with_the_value_inside "prover.overflow");
   test "? returns an error unchanged" (fun () -> proven Fixtures.Prover.returns_an_error_unchanged)
-
-(* Collections, definitions, and impls *)
 
 let () =
   test "an index must be in bounds" (fun () ->
@@ -241,8 +218,6 @@ let () =
         (measured ^ Fixtures.Prover.impls_requires_may_not_be_stronger_than_its_traits)
         "prover.requires")
 
-(* Lambdas and callbacks *)
-
 let each_index = Fixtures.Prover.each_index
 
 let () =
@@ -257,8 +232,6 @@ let () =
       not_proven Fixtures.Prover.function_must_keep_its_promise_to_its_callback "prover.requires");
   test "a function that keeps its promise to its callback" (fun () ->
       proven Fixtures.Prover.function_that_keeps_its_promise_to_its_callback)
-
-(* Models *)
 
 let () =
   test "a push's contract, through the list's model" (fun () ->
@@ -278,7 +251,6 @@ let () =
   test "a loop over a list does not run once more" (fun () ->
       not_proven Fixtures.Prover.loop_over_a_list_does_not_run_once_more "prover.ensures");
   test "a loop over the elements of a constant is proven" (fun () ->
-      (* The collection's place is the constant itself, which has the type the constant declares. *)
       proven Fixtures.Prover.loop_over_the_elements_of_a_constant_is_proven)
 
 let couple = Fixtures.Prover.couple
@@ -331,9 +303,6 @@ let () =
         "prover.termination");
   test "a loop over a cursor in a field calls its next" (fun () ->
       proven Fixtures.Prover.loop_over_a_cursor_in_a_field_calls_its_next);
-  (* The loop holds the potential of [output], which the body's amortized
-     callee spends and saves, and not the cursor's, which its [next] leaves
-     alone. *)
   test "a loop over a cursor counts a body that calls an amortized callee" (fun () ->
       proven Fixtures.Prover.loop_over_a_cursor_counts_a_body_that_calls_an);
   (let samples = Fixtures.Prover.samples in
@@ -360,8 +329,6 @@ let () =
       not_proven
         (digit ^ Fixtures.Prover.compound_assignment_evaluates_its_operand_then_its_2)
         "prover.ensures")
-
-(* Laws *)
 
 let monoid = Fixtures.Prover.monoid
 
@@ -393,9 +360,6 @@ let () =
 let () =
   test "an impl's method keeps its trait's time clause, so its body is its definition" (fun () ->
       proven (monoid ^ Fixtures.Prover.impls_method_keeps_its_traits_time_clause_so_its))
-
-(* The standard library's integer methods, by the intrinsic operations
-   they call *)
 
 let () =
   test "wrapping arithmetic is a remainder" (fun () ->
@@ -445,8 +409,6 @@ let () =
   test "a replacement that gives another result" (fun () ->
       not_proven (doubling ^ amount_impl "self.cents >= 0") "prover.ensures")
 
-(* Type invariants *)
-
 let span = "type Span(low: Int64, high: Int64)\n  invariant low <= high\n\n"
 
 let () =
@@ -477,8 +439,6 @@ let () =
   test "a private method that takes mut self is a step of an update" (fun () ->
       proven (span ^ Fixtures.Prover.private_method_that_takes_mut_self_is_a_step_of_an))
 
-(* Functions named as values *)
-
 let run = Fixtures.Prover.run
 
 let () =
@@ -496,8 +456,6 @@ let () =
       not_proven
         (run ^ Fixtures.Prover.naming_a_function_that_reaches_back_is_recursion)
         "prover.termination")
-
-(* Sequences *)
 
 let () =
   test "a list literal has its elements in order" (fun () ->
@@ -517,8 +475,6 @@ let () =
   test "sequences that differ in one element are not identical" (fun () ->
       not_proven Fixtures.Prover.sequences_that_differ_in_one_element_are_not "prover.ensures")
 
-(* Bitwise operations *)
-
 let () =
   test "a value or itself is itself, bit for bit" (fun () ->
       proven Fixtures.Prover.value_or_itself_is_itself_bit_for_bit);
@@ -534,8 +490,6 @@ let () =
   test "a bitwise fact that does not hold has a counterexample" (fun () ->
       not_proven Fixtures.Prover.bitwise_fact_that_does_not_hold_has_a "prover.ensures")
 
-(* Slices *)
-
 let () =
   test "a slice's elements are its collection's, from its start" (fun () ->
       proven Fixtures.Prover.slices_elements_are_its_collections_from_its_start);
@@ -547,8 +501,6 @@ let () =
       not_proven Fixtures.Prover.two_slices_lent_together_must_not_overlap "prover.disjoint");
   test "two halves of a list can be lent together" (fun () ->
       proven Fixtures.Prover.two_halves_of_a_list_can_be_lent_together)
-
-(* Strings *)
 
 let () =
   test "a string literal's length is its bytes'" (fun () ->
@@ -562,8 +514,6 @@ let () =
   test "an interpolated string is a string about which little is known" (fun () ->
       not_proven Fixtures.Prover.interpolated_string_is_a_string_about_which_little "prover.ensures")
 
-(* Tagged templates *)
-
 let shout = Fixtures.Prover.shout
 
 let () =
@@ -575,8 +525,6 @@ let () =
       not_proven
         (shout ^ Fixtures.Prover.tagged_template_that_does_not_meet_its_tags)
         "prover.requires")
-
-(* Floats *)
 
 let () =
   test "float equality is reflexive, even for NaN" (fun () ->
@@ -599,8 +547,6 @@ let () =
       let actual = message Fixtures.Prover.float_counterexample_is_written_as_truss_writes in
       if not (contains actual "infinity" || contains actual "NaN") then fail "message %S" actual)
 
-(* Capabilities *)
-
 let dice = Fixtures.Prover.dice
 
 let () =
@@ -613,8 +559,6 @@ let () =
   test "a call must meet a capability method's requires" (fun () ->
       not_proven Fixtures.Prover.call_must_meet_a_capability_methods_requires "prover.requires")
 
-(* Sets and maps *)
-
 let () =
   test "a set contains its inserted elements" (fun () ->
       proven Fixtures.Prover.set_contains_its_inserted_elements);
@@ -626,8 +570,6 @@ let () =
       proven Fixtures.Prover.map_holds_an_inserted_value_under_its_key);
   test "a map keeps its other keys' values" (fun () ->
       proven Fixtures.Prover.map_keeps_its_other_keys_values)
-
-(* Literals of maps and sets, any, provide, and let else *)
 
 let () =
   test "a map literal holds each key's value" (fun () ->
@@ -656,8 +598,6 @@ let () =
   test "a quantifier over a list ranges over its elements" (fun () ->
       proven Fixtures.Prover.quantifier_over_a_list_ranges_over_its_elements)
 
-(* Places lent together *)
-
 let swap = Fixtures.Prover.swap
 
 let () =
@@ -671,15 +611,11 @@ let () =
       not_proven Fixtures.Prover.parallel_branches_that_change_elements_must_change
         "prover.disjoint")
 
-(* Where paths join *)
-
 let () =
   test "self mutated on one path is joined with the other" (fun () ->
       not_proven Fixtures.Prover.self_mutated_on_one_path_is_joined_with_the_other "prover.ensures");
   test "a lending method's `ensures` holds for the part lent on each path" (fun () ->
       not_proven Fixtures.Prover.lending_methods_ensures_holds_for_the_part_lent_on "prover.ensures")
-
-(* Loop changes *)
 
 let () =
   test "a loop forgets a list it mutates through a method" (fun () ->
@@ -688,8 +624,6 @@ let () =
       not_proven Fixtures.Prover.loop_forgets_a_record_whose_field_it_assigns "prover.assertion");
   test "a loop forgets self when it mutates it" (fun () ->
       not_proven Fixtures.Prover.loop_forgets_self_when_it_mutates_it "prover.assertion")
-
-(* Costs *)
 
 let constant_step = Fixtures.Prover.constant_step
 
@@ -772,8 +706,6 @@ let () =
   test "an impl's method keeps its trait's cost" (fun () ->
       not_proven Fixtures.Prover.impls_method_keeps_its_traits_cost "prover.cost")
 
-(* Amortized costs *)
-
 let meter = Fixtures.Prover.meter
 
 let () =
@@ -815,9 +747,6 @@ let () =
   test "a potential its invariant keeps at or above zero" (fun () ->
       proven Fixtures.Prover.potential_its_invariant_keeps_at_or_above_zero)
 
-(* Holes *)
-
-(* The number of holes in a file's proofs. *)
 let holes text =
   let database = Support.setup [ ("app::main", text) ] in
   List.fold_left
@@ -848,8 +777,6 @@ let () =
   test "a type that contains itself through a map's values is read" (fun () ->
       proven Fixtures.Prover.type_that_contains_itself_through_a_maps_values_is)
 
-(* Code that does not run *)
-
 let () =
   test "a lambda's result is in range only for arguments in range" (fun () ->
       not_proven Fixtures.Prover.lambdas_result_is_in_range_only_for_arguments_in "prover.ensures");
@@ -867,8 +794,6 @@ let () =
       in
       proven text;
       if holes text <> 1 then fail "%d holes" (holes text))
-
-(* A caller assumes only proven facts *)
 
 let () =
   test "a trait's ensures holds of an impl's method only where the trait's requires does" (fun () ->
@@ -894,8 +819,6 @@ let () =
       not_proven Fixtures.Prover.iteration_must_keep_the_validity_of_each_value_the
         "prover.invariant")
 
-(* Each expression runs once, and its changes are kept *)
-
 let () =
   test "a guessed measure is not read from a condition with a mut argument" (fun () ->
       not_proven Fixtures.Prover.guessed_measure_is_not_read_from_a_condition_with
@@ -915,8 +838,6 @@ let () =
   test "a match mut binding's new value is in the scrutinee after the arm" (fun () ->
       proven Fixtures.Prover.match_mut_bindings_new_value_is_in_the_scrutinee)
 
-(* A function value's requires *)
-
 let () =
   test "a function with a requires bound to a local must accept every argument" (fun () ->
       not_proven Fixtures.Prover.function_with_a_requires_bound_to_a_local_must "prover.requires");
@@ -933,8 +854,6 @@ let () =
   test "a callback with a requires bound to a local must accept every argument" (fun () ->
       not_proven Fixtures.Prover.callback_with_a_requires_bound_to_a_local_must "prover.requires")
 
-(* Recursion through traits *)
-
 let () =
   test "provided methods that call each other are recursion" (fun () ->
       only_code Fixtures.Prover.provided_methods_that_call_each_other_are "prover.termination");
@@ -944,23 +863,17 @@ let () =
       not_proven Fixtures.Prover.method_that_calls_itself_through_any_is_recursion
         "prover.termination")
 
-(* Constants *)
-
 let () =
   test "a constant's value is well defined" (fun () ->
       not_proven "let shifted: UInt8 = 1 << 8\n" "prover.shift");
   test "a constant whose value is in range proves" (fun () ->
       proven "let shifted: UInt8 = 1 << 7\n")
 
-(* Integer operations of the intrinsic module *)
-
 let () =
   test "generic negation needs the trait method's precondition" (fun () ->
       not_proven Fixtures.Prover.generic_negation_needs_the_trait_methods "prover.requires");
   test "generic negation proves where the trait method's precondition holds" (fun () ->
       proven Fixtures.Prover.generic_negation_proves_where_the_trait_methods)
-
-(* Text literals *)
 
 let () =
   test "two literals with the same text are the same value" (fun () ->
@@ -970,29 +883,21 @@ let () =
   test "a map built with a literal key contains the same literal" (fun () ->
       proven Fixtures.Prover.map_built_with_a_literal_key_contains_the_same)
 
-(* Bitwise operations *)
-
 let () =
   test "a bit set below a symbolic width keeps the bits above it clear" (fun () ->
       proven Fixtures.Prover.bit_set_below_a_symbolic_width_keeps_the_bits);
   test "an exclusive or may be below its first operand" (fun () ->
       not_proven Fixtures.Prover.exclusive_or_may_be_below_its_first_operand "prover.ensures")
 
-(* Derived implementations *)
-
 let () =
   test "a derived ordering is the one a law of another trait reads" (fun () ->
       proven Fixtures.Prover.derived_ordering_is_the_one_a_law_of_another_trait)
-
-(* Equality through written impls *)
 
 let () =
   test "a derived equality compares a list field as the list's equal does" (fun () ->
       proven Fixtures.Prover.derived_equality_compares_a_list_field_as_the);
   test "a law reads an impl of Equal whose bounds hold in the impl it is proven for" (fun () ->
       proven Fixtures.Prover.law_reads_an_impl_of_equal_whose_bounds_hold_in)
-
-(* Amortized moves and copies *)
 
 let () =
   test "a deque's potential pays for moving half of one list to the other" (fun () ->
@@ -1002,10 +907,6 @@ let () =
   test "a loop of pushed copies is amortized over the copies' time" (fun () ->
       proven Fixtures.Prover.loop_of_pushed_copies_is_amortized_over_the_copies)
 
-(* Bodies across packages *)
-
-(* The diagnostics of [app::main], in a package that depends on [lib], whose
-   one module is [lib::numbers]. *)
 let across library program =
   let database =
     Support.setup
@@ -1040,20 +941,16 @@ let () =
       match across (public_doubling "") Fixtures.Prover.call_in_another_package_is_not_run with
       | [ _ ] -> ()
       | actual -> fail "%d diagnostics" (List.length actual))
-(* Plain and amortized bounds together *)
 
 let () =
   test "a recursive function proves a plain and an amortized bound, each by its own counting"
     (fun () -> proven Fixtures.Prover.recursive_function_proves_a_plain_and_an_amortized)
-
-(* Clauses in other files *)
 
 let () =
   test "a callee's clause in another file is named by its file and line" (fun () ->
       let actual = message Fixtures.Prover.callees_clause_in_another_file_is_named_by_its in
       if not (contains actual "The clause that must hold is at `standard/list/list.truss:") then
         fail "message %S" actual)
-(* Collections from another package *)
 
 let () =
   test "an insertion into a set of integers is amortized in its length" (fun () ->
@@ -1062,8 +959,6 @@ let () =
       proven Fixtures.Prover.insertion_into_a_set_of_any_elements_is_amortized);
   test "a list filled with integers is linear in its count" (fun () ->
       proven Fixtures.Prover.list_filled_with_integers_is_linear_in_its_count)
-
-(* Fixes *)
 
 let () =
   test "a callee's requires about the caller's parameters is offered as the caller's" (fun () ->
@@ -1082,8 +977,6 @@ let () =
                       (List.map (fun (fix : _ Diagnostic.fix) -> fix.title) diagnostic.fixes))
                   actual)))
 
-(* Facts under a quantifier *)
-
 let () =
   test "a fact made in a quantifier's body is a hypothesis of the goal" (fun () ->
       proven Fixtures.Prover.fact_made_in_a_quantifiers_body_is_a_hypothesis_of);
@@ -1092,21 +985,15 @@ let () =
   test "a fact made in a quantifier's body proves nothing false" (fun () ->
       not_proven Fixtures.Prover.fact_made_in_a_quantifiers_body_proves_nothing "prover.ensures")
 
-(* Contracts under a quantifier *)
-
 let () =
   test "a callee's ensures under its requires holds for every bound value" (fun () ->
       proven Fixtures.Prover.callees_ensures_under_its_requires_holds_for_every)
-
-(* Early exits from concurrent loops *)
 
 let () =
   test "a concurrent for may return early, with a value known by its type" (fun () ->
       proven Fixtures.Prover.concurrent_for_may_return_early_with_a_value_known);
   test "a value returned from a concurrent for is not known to be any one iteration's" (fun () ->
       not_proven Fixtures.Prover.value_returned_from_a_concurrent_for_is_not_known "prover.ensures")
-
-(* Overflow fixes *)
 
 let () =
   let fix_titles text =
@@ -1171,8 +1058,6 @@ let () =
       let actual = message Fixtures.Prover.overflow_names_the_fixes_that_change_the_codes in
       if not (contains actual "checked operation") then fail "message %S" actual)
 
-(* Counterexample paths *)
-
 let () =
   test "a counterexample says which way each if on its path goes" (fun () ->
       let actual = message Fixtures.Prover.counterexample_says_which_way_each_if_on_its_path in
@@ -1183,13 +1068,9 @@ let () =
       if not (contains actual "On that path, the arm `Some(count)` is taken.") then
         fail "message %S" actual)
 
-(* Ranges under a quantifier *)
-
 let () =
   test "a pure call's result is in its type's range for every bound value" (fun () ->
       proven Fixtures.Prover.pure_calls_result_is_in_its_types_range_for_every)
-
-(* Lambdas under a quantifier *)
 
 let () =
   test "a lambda in a quantifier that captures a bound value is known for each one" (fun () ->
@@ -1197,13 +1078,9 @@ let () =
   test "a lambda in a quantifier that captures no bound value is known for every argument"
     (fun () -> proven Fixtures.Prover.lambda_in_a_quantifier_that_captures_no_bound)
 
-(* Maps from another package *)
-
 let () =
   test "an insertion into a map, of a new key or one it has, is amortized" (fun () ->
       proven Fixtures.Prover.insertion_into_a_map_of_a_new_key_or_one_it_has_is)
-
-(* Lambdas inside lambdas *)
 
 let applying = Fixtures.Prover.applying
 
@@ -1217,8 +1094,6 @@ let () =
         (applying ^ Fixtures.Prover.functional_lambda_inside_that_captures_the)
         "prover.ensures")
 
-(* Definitions under a quantifier *)
-
 let () =
   test "a contract with branches, called under a quantifier on no bound value, holds there"
     (fun () -> proven Fixtures.Prover.definition_with_branches_called_under_a_quantifier);
@@ -1226,8 +1101,6 @@ let () =
       proven Fixtures.Prover.derived_ordering_of_a_one_field_record_is_its);
   test "a derived ordering compares fields in order, for every value" (fun () ->
       proven Fixtures.Prover.derived_ordering_compares_fields_in_order_for)
-
-(* Counts of bits *)
 
 let () =
   test "zero has no ones" (fun () -> proven Fixtures.Prover.zero_has_no_ones);
@@ -1240,20 +1113,13 @@ let () =
   test "a value may have ones" (fun () ->
       not_proven Fixtures.Prover.value_may_have_ones "prover.ensures")
 
-(* Proofs of laws *)
-
 let () =
   test "a proof for a generic impl names its own generic parameters" (fun () ->
       proven Fixtures.Prover.proof_for_a_generic_impl_names_its_own_generic);
   test "a law's proof names the law's parameters, where its requires hold" (fun () ->
       proven Fixtures.Prover.laws_proof_names_the_laws_parameters_where_its);
   test "a law's proof reads the specifications that its own body holds" (fun () ->
-      (* The proof is run while its [impl] is proven, and its body holds an [assert] of a
-         quantifier and an [assert] that bit vectors prove: each is read by its id in the proof's
-         definition, not in the [impl]'s. *)
       proven Fixtures.Prover.laws_proof_reads_the_specifications_that_its_own)
-
-(* Concurrent code *)
 
 let early_return ensures =
   "fn f(first: mut Int64, second: mut Int64) -> Int64\n  requires second < 100\n" ^ ensures
@@ -1266,8 +1132,6 @@ let () =
       not_proven (early_return "  ensures second == old(second)\n") "prover.ensures");
   test "a concurrent block with no early exit is read as its branches in order" (fun () ->
       proven Fixtures.Prover.concurrent_block_with_no_early_exit_is_read_as_its)
-
-(* Diagnostics *)
 
 let () =
   test "a counterexample gives the values of the locals where it fails" (fun () ->
@@ -1297,8 +1161,6 @@ let () =
   test "the same failure on another path is reported once" (fun () ->
       let actual = codes Fixtures.Prover.same_failure_on_another_path_is_reported_once in
       if actual <> [ "prover.requires" ] then fail "%s" (String.concat ", " actual))
-
-(* Unproven code *)
 
 let () =
   test "a construct the prover cannot read yet" (fun () ->
@@ -1394,14 +1256,7 @@ let () =
   test "a mut lend in the right operand of && changes the element" (fun () ->
       not_proven Fixtures.Prover.mut_lend_in_a_right_operand_changes_the_element "prover.ensures")
 
-(* Queries *)
-
 let () =
-  (* A query of one integer whose goal compares it with itself. A query's
-     text names its symbols canonically, so two of these differ only in
-     their operators, and each test of the cache uses an operator no other
-     test does, so that no other test has solved its query in this
-     process. *)
   let compared_with_itself operator =
     let symbol = Logic.Symbol.Variable { label = "compared"; numbers = [] } in
     {
@@ -1468,8 +1323,6 @@ let () =
       let second = key_of Fixtures.Prover.renaming_a_function_and_its_parameter_gives_the_2 in
       if first <> second || first = "none" then fail "%s and %s" first second)
 
-(* Arrays *)
-
 let () =
   test "a slice of a whole array is within it" (fun () ->
       proven Fixtures.Prover.slice_of_a_whole_array_is_within_it);
@@ -1477,8 +1330,6 @@ let () =
       proven Fixtures.Prover.loop_that_mutates_an_arrays_elements_keeps_their);
   test "a slice of an array is within it only as far as its count" (fun () ->
       not_proven Fixtures.Prover.slice_of_an_array_is_within_it_only_as_far_as_its "prover.requires")
-
-(* Deep definitions *)
 
 let () =
   test "a nested call's arguments are written once, however deep it nests" (fun () ->
@@ -1537,8 +1388,6 @@ let () =
       not_proven Fixtures.Prover.callee_with_an_ensures_is_known_by_its_contract "prover.ensures");
   test "a contract that states the body gives what the body would" (fun () ->
       proven Fixtures.Prover.contract_that_states_the_body_gives_what_the_body)
-
-(* Triggers *)
 
 let variable label = Logic.Symbol.Variable { label; numbers = [] }
 
@@ -1652,8 +1501,6 @@ let () =
       in
       if patterns text <> 2 then fail "%s" text)
 
-(* Short-circuit operators *)
-
 let bump = Fixtures.Prover.bump
 
 let () =
@@ -1663,8 +1510,6 @@ let () =
       not_proven
         (bump ^ Fixtures.Prover.mutation_on_the_right_of_is_not_known_to_have)
         "prover.ensures")
-
-(* Function values in the logic *)
 
 let apply_function = Fixtures.Prover.apply_function
 
@@ -1705,8 +1550,6 @@ let () =
   test "a specification spends nothing, whatever it calls" (fun () ->
       proven Fixtures.Prover.specification_spends_nothing_whatever_it_calls)
 
-(* Sums over sequences *)
-
 let () =
   test "appending adds the new element's measure to a sum" (fun () ->
       proven Fixtures.Prover.appending_adds_the_new_elements_measure_to_a_sum);
@@ -1716,10 +1559,6 @@ let () =
       proven Fixtures.Prover.loop_whose_iterations_cost_different_amounts_is);
   test "a loop's bound that leaves out its iterations' sum does not hold" (fun () ->
       not_proven Fixtures.Prover.loops_bound_that_leaves_out_its_iterations_sum "prover.cost")
-
-(* Incremental work: after an edit, which definitions are proven again,
-   and how many queries reach the solver rather than its cache. Each test's
-   definitions are its own, so no other test has solved its queries. *)
 
 let again before after =
   let solver = Lazy.force Support.solver in
@@ -1806,10 +1645,6 @@ let () =
       expect_again (text "result < 4000000000") (text "result <= amount / 2")
         ~proven:[ "halve"; "halve_and_add" ] ~solved:2)
 
-(* Addresses of views *)
-
-(* A module of the standard library, which alone can import
-   [standard::intrinsic]: its diagnostics. *)
 let in_standard text =
   let database = Engine.context (Engine.create ~log:true ()) in
   Database.load_package (Engine.of_context database)
@@ -1829,8 +1664,6 @@ let proven_in_standard text =
 let () =
   test "a view of a scalar ends within the address space and is not at zero" (fun () ->
       proven_in_standard Fixtures.Prover.view_of_a_scalar_ends_within_the_address_space_and)
-
-(* Intrinsic operations *)
 
 let () =
   test "an intrinsic operation has its operator's facts" (fun () ->

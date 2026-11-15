@@ -1,7 +1,3 @@
-(* [intrinsic::Shared] and its operations. Only the standard library can
-   name the intrinsic module, so the tests' source is one more module of the
-   [standard] package, checked and compiled with the library. *)
-
 open Codegen_support
 
 let probe : Path.file =
@@ -9,8 +5,6 @@ let probe : Path.file =
 
 let source = Fixtures.Shared.shared_probe
 
-(* The standard library with the probe module, checked, and a compiler for
-   it. *)
 let loaded =
   lazy
     (let engine = Engine.create () in
@@ -56,8 +50,6 @@ let () =
           | Error message -> failwith message)
         worker_counts)
 
-(* Where the capability check allows [shared_update] and [shared_key],
-   which require [Tasks], and the [Storable] bound on [Shared]'s value. *)
 let checks : Path.file =
   { module_ = { package = Path.standard_package; modules = [ "shared_checks" ] }; name = "checks" }
 

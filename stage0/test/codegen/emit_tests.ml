@@ -1,13 +1,7 @@
 module Intrinsics = Compile.For_testing.Intrinsics
-
-(* Statements, the C they become, and the intrinsic operations. *)
-
 open Memory_layout
 open Codegen_support
 
-(* Lowered IR and C *)
-
-(* A file holding the instances, each with its linkage. *)
 let c_file env instances =
   Emit_c.file env Development
     (List.map
@@ -102,7 +96,6 @@ let () =
               block [] (Return (Some (constant_int32 3)));
             ];
         ]);
-  (* Returns a [Bool] local as the exit status. *)
   let return_bool locals statements =
     entry
       (locals @ [ local (value int32) ])
@@ -492,12 +485,8 @@ let () =
       expect_int ~expected:(180 + 6 + 32) (String.length left);
       if left = right then fail "two long names give one symbol")
 
-(* Intrinsic operations *)
-
 let intrinsic_types : Intrinsics.types = { usize; string_slice = named "StringSlice" }
 
-(* An [entry] built with the builder: [body] writes its statements and
-   returns the local to exit with. *)
 let built_entry body : instance =
  fun env ->
   let builder = Emit_c.Builder.create env ~key:(key "entry") in
@@ -689,12 +678,9 @@ let () =
         ]
       in
       expect_status ~anchors 46 (program_with [ 40; 5; 6 ]);
-      (* A storage of another length stops a checked build. *)
       expect_status ~anchors 101 (program_with [ 40; 5 ]));
   test "a float fits an integer type where the whole number it is cut down to does" (fun () ->
       let open Emit_c.Builder in
-      (* Each case is a bit of the status, set where the answer is the one
-         expected. *)
       let all_right cases =
         expect_status
           ((1 lsl List.length cases) - 1)
@@ -774,7 +760,6 @@ let () =
                   (checked builder Storage_set_capacity
                      [ Place (at storage); Value (usize capacity) ]);
               ignore (checked builder Storage_shorten [ Place (at storage); Value (usize to_) ]);
-              (* The length, the capacity, and the last element kept. *)
               let status = local builder (value int32) in
               let part place =
                 let read = local builder (value int32) in
@@ -790,9 +775,7 @@ let () =
       in
       expect_status ~anchors (2 + 8 + Char.code 'b') (shortened ~capacity:8 ~to_:2);
       expect_status ~anchors (3 + 0 + Char.code 'c') (shortened ~capacity:0 ~to_:3);
-      (* More than its length stops a checked build. *)
       expect_status ~anchors 101 (shortened ~capacity:8 ~to_:6);
-      (* Elements that own something cannot be forgotten. *)
       match (Intrinsic_signatures.signature Storage_shorten).generics with
       | [ { kind = Type_generic [ { trait = Top { name = "Plain"; _ }; _ } ]; _ } ] -> ()
       | _ -> fail "storage_shorten takes elements that are not known to be Plain");
@@ -814,8 +797,6 @@ let () =
              ~site:{ definition = definition "entry"; line = 0; column = 1 })
       in
       let byte : Lowered.operand = Constant (Integer (UInt8, Z.of_int 1)) in
-      (* [operation] is given a storage of three elements with room for no
-         more, and a view of them. *)
       let stops saying operation =
         let status, _, errors =
           run_program ~extra ~anchors
@@ -986,7 +967,6 @@ let () =
       ~type_arguments:[ uint8 ] arguments ~destination
       ~site:{ definition = definition "entry"; line = 0; column = 1 }
   in
-  (* Takes back, into storage of "abc", a view that [view_of] makes. *)
   let taking_back view_of =
     [
       built_entry (fun builder ->

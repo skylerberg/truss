@@ -1,11 +1,5 @@
-(* The parser's tests of whole definitions, precedence and the combinations
-   that need parentheses, the checks on a whole definition, recovery, and
-   the habits of other languages it recognizes. *)
-
 open Harness
 open Parse_support
-
-(* Definitions *)
 
 let () =
   test "a method, its receiver, and its result" (fun () ->
@@ -131,10 +125,7 @@ let () =
       error "public opaque impl A for B {}" ~code:Misplaced_visibility ~at:"public"
         ~fixed:"impl A for B {}")
 
-(* Precedence and combinations that need parentheses *)
-
 let () =
-  (* The error points at [at], the operator that cannot take its operand. *)
   let combination text ~at ~code ~fixes =
     match fixes with
     | fixed :: alternatives ->
@@ -190,8 +181,6 @@ let () =
   test "each combination in a chain is reported" (fun () ->
       let _, diagnostics = body_of "let x = a < b < c < d" in
       if List.length diagnostics <> 2 then fail "got %d diagnostics" (List.length diagnostics))
-
-(* Checks on a whole definition *)
 
 let () =
   test "a quantifier over a range is an expression in code" (fun () ->
@@ -279,8 +268,6 @@ let () =
   test "echo in a proof" (fun () ->
       body_error "proof {\n  echo x\n}" ~code:Echo_in_specification ~at:"echo")
 
-(* Recovery *)
-
 let () =
   test "an error in a statement leaves the next one parsed" (fun () ->
       let statements, diagnostics = body_of "let x = 1 2 3\nlet y = 2" in
@@ -323,8 +310,6 @@ let () =
         fail "got [%s]" (String.concat "; " (codes diagnostics)));
   test "a reserved word is reported as reserved" (fun () ->
       error "fn f[T]() where T: Hash {}" ~code:Reserved_word ~at:"where")
-
-(* Syntax from other languages *)
 
 let () =
   test "i++" (fun () -> body_error "count++" ~code:Increment ~at:"++" ~fixed:"count += 1");

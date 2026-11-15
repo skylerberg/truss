@@ -1,8 +1,4 @@
 module Compatibility = Cli.Compatibility
-
-(* Each test gives a module before and after a release, and states the
-   compatibility changes. *)
-
 open Harness
 open Support
 

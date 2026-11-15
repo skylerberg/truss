@@ -1,17 +1,8 @@
-(* The standard library's tests, written in Truss. Each file of [library]
-   is a module of one package, and the tests of all of them are built into
-   one program and run, so a test costs its own code and no build of its
-   own. With [TRUSS_TEST] set, only the tests it names are built.
-
-   A test of the module [panics] must panic, with a message that contains
-   the test's name. Every other test must pass. *)
-
 open Harness
 open Codegen_support
 
 let directory = Harness.workspace_path "stage0/test/codegen/library"
 
-(* Each file is a module of its own, named after the file. *)
 let files =
   Sys.readdir directory |> Array.to_list
   |> List.filter (fun file -> Filename.check_suffix file ".truss")
@@ -28,8 +19,6 @@ let name_of (path : Path.t) =
   | Test { module_; name } -> Printf.sprintf "%s: %s" (String.concat "::" module_.modules) name
   | _ -> Path.show path
 
-(* The tests could not be built. This is reported whatever [TRUSS_TEST]
-   names, since none of the tests it names can run. *)
 let not_built message = always "the library's tests build" (fun () -> fail "%s" message)
 
 let expected_panic (path : Path.t) =

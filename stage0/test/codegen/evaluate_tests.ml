@@ -1,10 +1,5 @@
-(* The prover deciding a tagged template's check by running it, through
-   code generation. *)
-
 open Codegen_support
 
-(* The oracles' responses, recorded in the engine, as the database does for
-   a session. *)
 let record database responses =
   let engine = Engine.of_context database in
   List.iter (fun (key, response) -> Engine.set engine Prover.oracle_response key response) responses
@@ -12,8 +7,6 @@ let record database responses =
 let solver =
   lazy (match Solver.find () with Ok solver -> solver | Error message -> failwith message)
 
-(* The prover's diagnostics of a module, deciding template checks by
-   running them. *)
 let proven_with_running text =
   let database, compile = load text in
   Prover.diagnostics
@@ -103,8 +96,6 @@ let () =
       | [ _ ] -> ()
       | actual -> fail "%d diagnostics for the default's value" (List.length actual))
 
-(* The same tag at the same path with the same text, checked by code that
-   differs: a check is kept under the code that ran, not under its name. *)
 let () =
   test "a template's check is done again when the code it runs has changed" (fun () ->
       let use = Fixtures.Evaluate.use in
@@ -129,9 +120,6 @@ let () =
             (String.concat "; "
                (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)))
 
-(* The same call with the same arguments, in one database, before and
-   after the callee's body changes: a stale value would prove a false
-   [ensures]. *)
 let () =
   test "a call is run again when the callee's body has changed" (fun () ->
       let source body =
@@ -156,9 +144,6 @@ let () =
       | actual ->
           fail "expected the changed callee to fail, got %d diagnostics" (List.length actual))
 
-(* A timeout is not kept: the next check runs the template's check again,
-   with the code unchanged. The evaluator here times out on its first run
-   only, as a run on a loaded machine may. *)
 let () =
   test "a template check that timed out is run again on the next check" (fun () ->
       let database, _ =
@@ -190,7 +175,6 @@ let () =
                (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)));
       if !runs <> 2 then fail "expected 2 runs, got %d" !runs)
 
-(* Only a proof that used a value from running code trusts compiled code. *)
 let () =
   test "a state says whether its proof trusts compiled code" (fun () ->
       let database, compile =

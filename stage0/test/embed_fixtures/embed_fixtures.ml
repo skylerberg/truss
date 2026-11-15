@@ -1,8 +1,3 @@
-(* Writes a directory of Truss fixtures into an OCaml module, so a test names
-   each fixture by an identifier and a fixture that is missing fails to
-   compile. The file [fixtures/prover/overflow.truss] becomes the string
-   [Prover.overflow], and [fixtures/overflow.truss] becomes [overflow]. *)
-
 let rec under_fixtures = function
   | "fixtures" :: rest -> rest
   | _ :: rest -> under_fixtures rest

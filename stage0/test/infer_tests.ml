@@ -1,7 +1,3 @@
-(* The tests of checking bodies. Each gives a small definition and states
-   one fact: a diagnostic with its fix, or one fact about the tables or the
-   core form. *)
-
 open Harness
 open Support
 
@@ -10,8 +6,6 @@ let one_diagnostic = one_diagnostic ~check
 let no_diagnostics = no_diagnostics ~check
 let fine text = no_diagnostics [ ("app::main", text) ]
 
-(* The type check result of the definition that holds the [occurrence]th
-   appearance of [written], and the innermost expression that starts there. *)
 let expression_at text written occurrence =
   let database = setup [ ("app::main", text) ] in
   let file = file_of "app::main" in
@@ -26,8 +20,6 @@ let expression_at text written occurrence =
             Query.demand database Infer.type_check_result key )
         with
         | Some definition, Some (_, base), Some result ->
-            (* The expression whose span is exactly the text, or else the
-               innermost one that starts there. *)
             let best = ref None in
             let exact (value : Syntax.expression) =
               value.span.stop - value.span.start = String.length written
@@ -53,15 +45,12 @@ let expression_at text written occurrence =
   | Some actual -> actual
   | None -> failwith (Printf.sprintf "no expression at %S" written)
 
-(* Whether the core form of the first definition has an integer literal
-   with this value. *)
 let has_integer text value =
   List.exists
     (fun (node : Core.expression) ->
       match node.kind with Integer actual -> Z.equal actual (Z.of_int value) | _ -> false)
     (first_core_nodes text).expressions
 
-(* The core nodes built from the [occurrence]th appearance of [written]. *)
 let core_at text written occurrence =
   let value, (result : Infer.type_check_result) = expression_at text written occurrence in
   match result.core with
@@ -77,8 +66,6 @@ let core_at text written occurrence =
         form.definition;
       List.rev !nodes
 
-(* The call built from the [occurrence]th appearance of [written], with its
-   type. *)
 let core_call_at text written occurrence =
   match
     List.find_map
@@ -89,8 +76,6 @@ let core_call_at text written occurrence =
   | Some call -> call
   | None -> failwith (Printf.sprintf "%S is not a call" written)
 
-(* Whether an argument is the view of an owned collection: a call of its
-   [slice]. *)
 let is_view : Core.argument -> bool = function
   | Passed
       {
@@ -109,8 +94,6 @@ let has_type text written ?(occurrence = 1) expected =
       if Types.show type_ <> expected then
         fail "`%s` has type %s, not %s" written (Types.show type_) expected
   | None -> fail "`%s` has no type" written
-
-(* Literals *)
 
 let () =
   test "a literal takes the type of the other operand" (fun () ->
@@ -197,8 +180,6 @@ let () =
         ~says:"`base` took its default type, `Int64`, at an earlier method call."
         ~fixed:Fixtures.Infer.local_given_its_default_type_by_a_method_call_fixed)
 
-(* Operators *)
-
 let () =
   test "comparing integer types that differ is an error with a fix that converts" (fun () ->
       one_diagnostic Fixtures.Infer.comparing_integer_types_that_differ_is_an_error
@@ -229,8 +210,6 @@ let () =
       fine Fixtures.Infer.operand_can_be_the_result_of_an_operators_method);
   test "a type without the operator's trait is an error" (fun () ->
       one_diagnostic Fixtures.Infer.type_without_the_operators_trait_is_an_error "types.no_impl")
-
-(* Calls and arguments *)
 
 let () =
   let functions = "fn copy_file(source: Int64, destination: Int64) {}\n\n" in
@@ -284,8 +263,6 @@ let () =
       has_type Fixtures.Infer.generic_functions_type_arguments_are_solved_from "wrap(5)"
         "Option[Int64]")
 
-(* Modes *)
-
 let () =
   test "a mut parameter needs mut at the call, with a fix that adds it" (fun () ->
       one_diagnostic Fixtures.Infer.mut_parameter_needs_mut_at_the_call_with_a_fix
@@ -307,8 +284,6 @@ let () =
       one_diagnostic Fixtures.Infer.place_calling_a_method_that_takes_mut_self_needs
         "types.missing_mode"
         ~fixed:Fixtures.Infer.place_calling_a_method_that_takes_mut_self_needs_fixed)
-
-(* Statements *)
 
 let () =
   test "a statement's value must be used, with a fix that discards it" (fun () ->
@@ -362,8 +337,6 @@ let () =
   test "if without else has type Unit" (fun () ->
       has_type Fixtures.Infer.if_without_else_has_type_unit "if ready { }" "Unit")
 
-(* Members *)
-
 let () =
   test "an unknown field is an error with a fix to the closest" (fun () ->
       one_diagnostic Fixtures.Infer.unknown_field_is_an_error_with_a_fix_to_the
@@ -392,8 +365,6 @@ let () =
   test "a trait method through a type chooses the impl by the argument" (fun () ->
       fine Fixtures.Infer.trait_method_through_a_type_chooses_the_impl_by)
 
-(* Patterns *)
-
 let () =
   test "an unknown variant in a pattern is an error" (fun () ->
       one_diagnostic Fixtures.Infer.unknown_variant_in_a_pattern_is_an_error "types.unknown_variant");
@@ -402,8 +373,6 @@ let () =
   test "a bare name that names no field of a record with several is an error" (fun () ->
       one_diagnostic Fixtures.Infer.bare_name_that_names_no_field_of_a_record_with
         "types.unknown_member")
-
-(* Lambdas *)
 
 let () =
   test "a lambda with nothing to give its parameter types is an error" (fun () ->
@@ -450,8 +419,6 @@ let () =
         "resolve.unknown_name";
       one_diagnostic Fixtures.Infer.visited_is_not_named_outside_a_for_loops_clauses
         "resolve.unknown_name");
-  (* [Index] lends an element read-only, [IndexMut] lends it [mut], and
-     [IndexAssign] replaces it. *)
   (let readings = Fixtures.Infer.readings in
    let assign = Fixtures.Infer.readings_assign in
    test "an element of a type that implements `Index` alone is read" (fun () ->
@@ -512,8 +479,6 @@ let () =
       | [ actual ] -> fail "%d captures" (List.length actual)
       | actual -> fail "%d lambdas" (List.length actual))
 
-(* Strings and collections *)
-
 let () =
   test "an interpolated value must implement Display" (fun () ->
       one_diagnostic Fixtures.Infer.interpolated_value_must_implement_display "types.no_impl");
@@ -521,8 +486,6 @@ let () =
       one_diagnostic Fixtures.Infer.array_literal_must_have_its_types_length "types.mismatch");
   test "a list literal is a set where a set is expected" (fun () ->
       fine Fixtures.Infer.list_literal_is_a_set_where_a_set_is_expected)
-
-(* Specifications *)
 
 let () =
   test "deriving Deserialize needs every invariant clause to run" (fun () ->
@@ -537,8 +500,6 @@ let () =
   test "a lambda in a specification may give a built-in integer for an Integer" (fun () ->
       fine Fixtures.Infer.lambda_in_a_specification_may_give_a_built_in)
 
-(* Loops *)
-
 let () =
   test "a for loop over a range of integers is a counted loop" (fun () ->
       let text = Fixtures.Infer.for_loop_over_a_range_of_integers_is_a_counted in
@@ -551,8 +512,6 @@ let () =
       then fail "no counted loop");
   test "a for loop over a list visits its positions" (fun () ->
       fine Fixtures.Infer.for_loop_over_a_list_visits_its_positions)
-
-(* Incremental work and determinism *)
 
 let () =
   test "editing a function's body re-checks no caller" (fun () ->
@@ -745,8 +704,6 @@ let () =
   test "a lambda cannot mutate a captured variable" (fun () ->
       one_diagnostic Fixtures.Infer.lambda_cannot_mutate_a_captured_variable "types.not_assignable")
 
-(* Specifications on loops and on function-typed parameters *)
-
 let () =
   test "a function-typed parameter's requires is a Bool over its inputs" (fun () ->
       fine Fixtures.Infer.function_typed_parameters_requires_is_a_bool_over);
@@ -793,9 +750,6 @@ let () =
         Fixtures.Infer.provided_method_without_a_time_clause_cannot_be "types.not_overridable");
   test "a loop's cost bound is checked" (fun () ->
       one_diagnostic Fixtures.Infer.loops_cost_bound_is_checked "resolve.unknown_name")
-
-(* Every error type carries its report, so nothing is accepted of code that
-   reported nothing: an error that once had no report is reported. *)
 
 let identity = Fixtures.Infer.identity
 
@@ -847,8 +801,6 @@ let () =
   test "a `todo` that nothing decides keeps the hole type in the tables" (fun () ->
       has_type Fixtures.Infer.todo_that_nothing_decides_keeps_the_hole_type_in "todo"
         "an undecided type")
-
-(* Bounds wherever generic parameters are filled in *)
 
 let shape = Fixtures.Infer.shape
 let source = Fixtures.Infer.source
@@ -944,8 +896,6 @@ let () =
         (source ^ Fixtures.Infer.associated_type_a_bound_fixes_must_be_the_one_the)
         "types.unsatisfied_bound")
 
-(* Constant expressions *)
-
 let point = "type Point(x: Int64, y: Int64)\n\n"
 
 let () =
@@ -991,8 +941,6 @@ let () =
         "types.default_not_constant");
   test "a field's default's arithmetic must stay within its type" (fun () ->
       one_diagnostic "type Settings(retries: UInt8 = 250 + 10)\n" "types.constant_overflow")
-
-(* What other packages' proofs read *)
 
 let () =
   let helper visibility =
@@ -1068,8 +1016,6 @@ let () =
       fine (implemented "internal "));
   test "a function's body can call a function that other packages cannot" (fun () ->
       fine (helper "internal " ^ Fixtures.Infer.functions_body_can_call_a_function_that_other))
-
-(* Bit-vector assertions *)
 
 let () =
   test "a bit-vector assertion names only integers and booleans" (fun () ->

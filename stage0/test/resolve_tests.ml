@@ -1,13 +1,8 @@
-(* The tests of name resolution. Each gives a few small files and states one
-   fact: a name's referent, or the one diagnostic, with its code and the
-   text after applying its fix. *)
-
 open Harness
 
 let module_of = Support.module_of
 let file_of = Support.file_of
 
-(* A small standard library, enough for the prelude names these tests use. *)
 let standard =
   [
     ("standard::option", "public type Option[Value] = Some(value: Value) | None\n");
@@ -55,15 +50,8 @@ let no_diagnostics files =
                (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) reported)))
     files
 
-(* The one diagnostic of the file [app::main], with its code, and, if
-   [fixed] is given, the text after applying its first fix, which must
-   resolve with no diagnostic left. *)
 let one_diagnostic = Support.one_diagnostic ~setup ~check:Resolve.diagnostics
 
-(* Finding names *)
-
-(* The name at the [occurrence]th appearance of [text] in the file, with the
-   resolved form of the definition it is in. *)
 let name_at database name text occurrence =
   let file = file_of name in
   let source = Source.text (Query.demand database Packages.source file) in
@@ -121,8 +109,6 @@ let refers ?(others = []) text ~name:(written, occurrence) expected =
   let actual = describe names base resolved.names.(name.id) in
   if actual <> expected then fail "`%s` #%d is %s, not %s" written occurrence actual expected
 
-(* [refers_to_binding]: the name at one occurrence refers to the local bound
-   at another. *)
 let refers_to_binding text ~use ~binding =
   let database = setup [ ("app::main", text) ] in
   let source = text in
@@ -131,8 +117,6 @@ let refers_to_binding text ~use ~binding =
   let actual = describe names base resolved.names.(name.id) in
   let expected = Printf.sprintf "local at %d" binding_offset in
   if actual <> expected then fail "`%s` is %s, not %s" (fst use) actual expected
-
-(* Locals and scopes *)
 
 let () =
   test "a local refers to the let that binds it" (fun () ->
@@ -181,8 +165,6 @@ let () =
   test "a local is not in scope after its block" (fun () ->
       one_diagnostic Fixtures.Resolve.local_is_not_in_scope_after_its_block "resolve.unknown_name")
 
-(* No name shadows another *)
-
 let () =
   test "a local cannot shadow a local of an enclosing block" (fun () ->
       one_diagnostic Fixtures.Resolve.local_cannot_shadow_a_local_of_an_enclosing_block
@@ -209,8 +191,6 @@ let () =
   test "locals in sibling blocks may share a name" (fun () ->
       no_diagnostics [ ("app::main", Fixtures.Resolve.locals_in_sibling_blocks_may_share_a_name) ])
 
-(* Modules of several files *)
-
 let () =
   test "a file names a private definition of another file of its module without a module" (fun () ->
       refers "fn f() -> Int64 {\n  size()\n}\n"
@@ -229,8 +209,6 @@ let () =
           ]
         "resolve.unknown_module")
 
-(* Patterns *)
-
 let () =
   test "a bare name in a pattern binds where a constant has its name" (fun () ->
       refers Fixtures.Resolve.bare_name_in_a_pattern_binds_where_a_constant_has ~name:("limit", 2)
@@ -245,8 +223,6 @@ let () =
       refers_to_binding Fixtures.Resolve.alternatives_name_refers_to_the_first_alternatives
         ~use:("value", 3) ~binding:("value", 1))
 
-(* Unknown names *)
-
 let () =
   test "an unknown name is an error with a fix to the closest name" (fun () ->
       one_diagnostic Fixtures.Resolve.unknown_name_is_an_error_with_a_fix_to_the_closest
@@ -258,8 +234,6 @@ let () =
   test "an unknown type is an error" (fun () ->
       one_diagnostic "fn f(value: Strng) {}\n" "resolve.unknown_name")
 
-(* The prelude *)
-
 let () =
   test "a prelude type is the standard library's" (fun () ->
       refers "fn f(value: Option[Int64]) {}\n" ~name:("Option", 1) "standard::option::Option");
@@ -268,8 +242,6 @@ let () =
   test "a prelude variant is written bare" (fun () ->
       refers Fixtures.Resolve.prelude_variant_is_written_bare ~name:("Some", 1)
         "variant Some of standard::option::Option")
-
-(* Brackets *)
 
 let bracket_of text written occurrence =
   let database = setup [ ("app::main", text) ] in
@@ -317,8 +289,6 @@ let () =
       one_diagnostic Fixtures.Resolve.brackets_after_a_function_without_generic
         "resolve.not_generic")
 
-(* Places *)
-
 let () =
   test "mut before a call to a function is an error with a fix that removes it" (fun () ->
       one_diagnostic Fixtures.Resolve.mut_before_a_call_to_a_function_is_an_error_with_a
@@ -334,8 +304,6 @@ let () =
       one_diagnostic Fixtures.Resolve.before_any_method_call_does_not_make_a_place
         "resolve.not_a_place")
 
-(* Specifications *)
-
 let () =
   test "result in ensures is the return value" (fun () ->
       refers Fixtures.Resolve.result_in_ensures_is_the_return_value ~name:("result", 1) "result");
@@ -350,8 +318,6 @@ let () =
   test "a record's fields are in scope in its invariant" (fun () ->
       refers "type Range(low: Int64, high: Int64)\n  invariant low <= high\n" ~name:("low", 2)
         "field low")
-
-(* Modules and imports *)
 
 let others = [ ("app::shapes", Fixtures.Resolve.others_shapes) ]
 
@@ -402,8 +368,6 @@ let () =
       one_diagnostic Fixtures.Resolve.only_the_standard_package_can_import_standard
         "resolve.intrinsic_import")
 
-(* Definitions *)
-
 let () =
   test "a second definition with one name is an error" (fun () ->
       one_diagnostic Fixtures.Resolve.second_definition_with_one_name_is_an_error
@@ -435,8 +399,6 @@ let () =
       match Resolve.diagnostics database file with
       | [] -> ()
       | reported -> fail "resolved the broken body: %s" (String.concat "; " (codes reported)))
-
-(* Incremental work *)
 
 let () =
   test "editing one body resolves only that definition again" (fun () ->
@@ -560,8 +522,6 @@ let () =
       match Resolve.diagnostics database (file_of "app::main") with
       | [] -> ()
       | reported -> fail "found [%s]" (String.concat "; " (codes reported)))
-
-(* A package with an owner in its name *)
 
 let () =
   let geometry : Path.module_ =

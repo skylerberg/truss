@@ -1,12 +1,6 @@
-(* The instances a build reaches, test keys, and the test runner. *)
-
 open Memory_layout
 open Codegen_support
 
-(* Reachable instances, and test keys *)
-
-(* A program whose [entry] calls [helper], under the given names, and whose
-   [helper] returns [value]. *)
 let named_program ~entry_name ~helper_name returned =
   let helper =
     instance helper_name
@@ -20,7 +14,6 @@ let named_program ~entry_name ~helper_name returned =
   in
   [ main; helper ]
 
-(* An instance of a small program, as C. *)
 let lookup instances key =
   let env = shape_env () in
   Emit_c.fragment env
@@ -29,11 +22,8 @@ let lookup instances key =
           (fun instance -> Instance.equal (Emit_c.Builder.instance_key instance) key)
           (List.map (fun instance -> instance env) instances)))
 
-(* Each instance's references in a small program. *)
 let references program key = Emit_c.references (lookup program key)
 
-(* The key of everything an instance can reach, composed as the queries of
-   [Compile] compose it. *)
 let reach_key program root =
   let own key = Reachable.own_hash (lookup program key) in
   let groups = Reachable.groups ~edges:(references program) [ root ] in
@@ -47,8 +37,6 @@ let reach_key program root =
   in
   reach root
 
-(* A program whose [start] calls [ping], which calls [pong], which calls
-   [ping] and a helper that returns [returned]. *)
 let ping_pong ?(ping = "ping") ?(pong = "pong") returned =
   let calls name callees =
     instance name
@@ -129,15 +117,10 @@ let () =
       if reach_key (ping_pong 1) (key "start") <> reach_key renamed (key "start") then
         fail "the keys differ")
 
-(* The test runner *)
-
 let () =
   test
     "the test runner reports each test's outcome, message, and echo output, a leak, and a worker \
      that ends without a word" (fun () ->
-      (* The tests are made by hand, so that one can leave a block
-         allocated, which no source compiles to. They report positions in a
-         definition of a module that is loaded. *)
       let _, compile = load "fn suite() {\n}\n" in
       let site : Lowered.site =
         { definition = Top { module_ = example; name = "suite" }; line = 2; column = 3 }

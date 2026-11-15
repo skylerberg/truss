@@ -45,7 +45,6 @@ let statement text expected = statements text [ expected ]
 let error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
   match snd (parse text) with
   | [ diagnostic ] -> (
-      (* Every message is written in sentences, as Diagnostic.t says. *)
       let message = diagnostic.message in
       if
         message = ""

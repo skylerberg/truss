@@ -1,16 +1,7 @@
-(* Tests of the MIR. The graph of every definition of the standard library
-   keeps the builder's promises, which a validator checks, and the MIR of
-   small programs and its graph have each construct's structure. The tests
-   read properties of the MIR, never its text, so renumbering blocks or
-   locals breaks none. *)
-
 open Harness
 open Support
 
-(* The control-flow graph that ownership and code generation read. *)
 let mir_of database key = Query.demand database Mir.graph key
-
-(* What code reads *)
 
 let place_locals (place : Mir.place) =
   match place.root with Local local -> [ local ] | Constant _ -> []
@@ -25,8 +16,6 @@ let call_locals (call : Mir.call) =
       (function Mir.Passed { value; _ } -> operand_locals value | Default -> [])
       call.arguments
 
-(* A write to a whole local gives it a value; a write to a part of one reads
-   the local. *)
 let written (place : Mir.place) =
   match place with
   | { root = Local local; projections = [] } -> ([], [ local ])
@@ -70,7 +59,6 @@ let rec rvalue_locals : Mir.rvalue -> Mir.local list = function
         cases
   | Connective { left; right; _ } -> operand_locals left @ block_locals right
 
-(* The locals a block reads that the code before it gives values. *)
 and block_locals (block : Mir.block) =
   let read, given =
     List.fold_left
@@ -84,8 +72,6 @@ and block_locals (block : Mir.block) =
     (Option.fold ~none:[] ~some:operand_locals block.value)
   @ read
 
-(* The locals a statement reads, the locals it gives values, and the locals
-   it ends. *)
 and effects (statement : Mir.statement) =
   match statement.kind with
   | Assign { target; value; _ } ->
@@ -131,20 +117,9 @@ let terminator_reads : Mir.Graph.terminator -> Mir.local list = function
   | Unreachable | Written_unreachable | Todo ->
       []
 
-(* The validator *)
-
 let alive = 1
 let ended = 2
 
-(* Checks a body's graph against the builder's promises. It holds no statement
-   that holds blocks or jumps. Jumps reach blocks of the body, and locals and
-   loans exist. A local is never read where some path
-   has ended it. Leaving scopes ends what they hold: where a function
-   returns, every local is ended but its parameters, captures, loop parts,
-   and returned value, and every loan is ended; where an iteration ends,
-   only what was alive or open when the loop started still is. A loop's
-   blocks and a branch's blocks are closed: control leaves them only by the
-   loop's end, a [Join], or an exit from tasks. *)
 let validate definition (body : Mir.Graph.body) =
   let count = Array.length body.blocks and locals = Array.length body.locals in
   let problem format = Printf.ksprintf (fun text -> fail "%s: %s" definition text) format in
@@ -205,9 +180,6 @@ let validate definition (body : Mir.Graph.body) =
           most basic.statements)
       0 body.blocks
   in
-  (* A statement binds a local to a place only where the local is declared as one: the move
-     analysis reads the declaration to tell a local that owns its value. A local that more
-     than one statement binds says so. *)
   let bindings = Array.make locals 0 in
   Array.iter
     (fun (basic : Mir.Graph.basic_block) ->
@@ -251,7 +223,6 @@ let validate definition (body : Mir.Graph.body) =
           Option.iter block join
       | _ -> ())
     body.blocks;
-  (* Closed loops and branches *)
   let parts = ref [] in
   Array.iteri
     (fun index (basic : Mir.Graph.basic_block) ->
@@ -270,7 +241,6 @@ let validate definition (body : Mir.Graph.body) =
           List.iter
             (fun inner ->
               match body.blocks.(inner).terminator with
-              (* An early exit from a task around the loop ends that task. *)
               | Cancel _ -> ()
               | terminator ->
                   List.iter
@@ -340,8 +310,6 @@ let validate definition (body : Mir.Graph.body) =
     if !changed then Queue.add target pending
   in
   let entered = Hashtbl.create 4 in
-  (* Runs a block from the state that reaches it, and reports what it
-     breaks where [report] holds. *)
   let run ~report node =
     let state = Array.copy locals_in.(node) and open_loans = Array.copy loans_in.(node) in
     let read at local =
@@ -399,7 +367,6 @@ let validate definition (body : Mir.Graph.body) =
       | None -> ()
     in
     if node >= count then begin
-      (* A loop's head: an iteration of its body, or its end. *)
       let loop = node - count in
       match body.blocks.(loop).terminator with
       | For { part; body = inside; after; _ } ->
@@ -459,11 +426,6 @@ let () =
   test "the standard library has MIR" (fun () ->
       if !built < 500 then fail "only %d of its definitions have MIR" !built)
 
-(* The structure of constructs *)
-
-(* The MIR of the function [g] of a program, validated. *)
-(* The MIR of the function [g] of a program, and its graph, which the
-   validator checks. *)
 let both_of_g text =
   let database = setup [ ("app::main", text) ] in
   match
@@ -485,7 +447,6 @@ let both_of_g text =
 
 let mir_of_g text = snd (both_of_g text)
 
-(* The local a name is bound to. *)
 let named (body : Mir.Graph.body) name =
   let found = ref None in
   Array.iteri
@@ -496,7 +457,6 @@ let named (body : Mir.Graph.body) name =
     body.locals;
   match !found with Some local -> local | None -> failwith ("no local is named " ^ name)
 
-(* The blocks reachable from [from], without passing a block in [avoid]. *)
 let reachable (body : Mir.Graph.body) ~from ?(avoid = []) () =
   let seen = Array.make (Array.length body.blocks) false in
   let rec visit block =
@@ -617,9 +577,6 @@ let () =
                    && List.mem after (Mir.Graph.successors body.blocks.(block).terminator))
                  blocks)
           then fail "the break does not leave the loop");
-  (* The local that a slice's base is, through the alias that holds the
-     base's borrow while the slice's bounds are evaluated. [compare] is
-     given where in the body's statements the base and a named local end. *)
   let slice_base_ends body name compare =
     let all = statements body in
     let rec base_root (local : Mir.local) =
@@ -700,7 +657,6 @@ let () =
       let mir = mir_of_g Fixtures.Mir.match_tests_its_arms_in_order_and_a_guard_that in
       let body = mir.body in
       let x = named body "x" in
-      (* x, and the temporaries that hold its value. *)
       let holding_x =
         x
         :: List.filter_map
@@ -728,7 +684,6 @@ let () =
             | _ -> None)
           (statements body)
       in
-      (* The guard's value, and the local that holds it past the guard's scope. *)
       let guard_values =
         match guard with
         | Some guard ->
@@ -761,8 +716,6 @@ let () =
       match failed with
       | None -> fail "nothing branches on the guard"
       | Some failed ->
-          (* Each path from the failed guard ends x before it tests a
-             pattern again. *)
           let rec walk visited block =
             if not (List.mem block visited) then
               let basic = body.blocks.(block) in
@@ -785,7 +738,6 @@ let () =
         | Assign { value = Conditional _ | Cases _ | Connective _; _ } -> true
         | _ -> false
       in
-      (* As built: the [if] and the [&&] are values, and nothing jumps but the return. *)
       let chosen = ref 0 and jumps = ref [] in
       Mir.iter_code
         (fun (statement : Mir.statement) ->
@@ -797,7 +749,6 @@ let () =
       (match !jumps with
       | [ Return (Some _) ] -> ()
       | jumps -> fail "the body holds %d jumps" (List.length jumps));
-      (* The graph: branches, and no such value. *)
       if List.exists chooses (statements graph.body) then
         fail "the graph holds a value that chooses between blocks";
       if
@@ -809,8 +760,6 @@ let () =
       then fail "nothing in the graph branches");
   test "a loop is one statement that holds its body, and a break is a jump in it" (fun () ->
       let built, graph = both_of_g Fixtures.Mir.loop_is_one_statement_and_a_break_a_jump in
-      (* As built: the body's code holds the loop, and the loop's body the [if], one of whose
-         blocks control leaves by the [break]. *)
       let loops =
         List.filter_map
           (fun (statement : Mir.statement) ->
@@ -837,7 +786,6 @@ let () =
           then fail "the loop's body holds no `if` that a `break` leaves"
       | loops -> fail "the body's code holds %d loops" (List.length loops));
       if built.body.code.value <> None then fail "control reaches the end of the body's code";
-      (* The graph: a block that some block after it jumps back to. *)
       if
         not
           (List.exists
@@ -909,8 +857,6 @@ let () =
         | Some mir -> mir
         | None -> failwith "the default method has no MIR"
       in
-      (* Physical equality: the inherited methods hold the default method's MIR itself, not a
-         MIR built again for each [impl]. *)
       List.iter
         (fun type_name ->
           if by_path (method_of (impl_for type_name) "doubled") != default_mir then
@@ -918,7 +864,6 @@ let () =
         [ "Square"; "Cube" ];
       if by_path default_method != default_mir then
         fail "the default method's MIR by its path is not its definition's";
-      (* A method an [impl] writes has its own definition's MIR. *)
       if
         by_path (method_of (impl_for "Square") "side")
         == by_path (method_of (impl_for "Cube") "side")
@@ -932,7 +877,6 @@ let () =
         | Some defaults -> defaults
         | None -> failwith (Path.show path ^ " has no defaults")
       in
-      (* The value a default's body returns, where it is a literal. *)
       let returned (default : Mir.Graph.t) =
         validate "a default" default.body;
         List.find_map
@@ -947,12 +891,10 @@ let () =
             List.map (fun (position, default) -> (position, returned default)) defaults
         | Field_defaults _ -> failwith "a function with field defaults"
       in
-      (* A capability's method has no body, and its callers evaluate its default. *)
       let add : Path.t = Method { owner = top "Tally"; name = "add"; receiver = Static } in
       if Query.demand database Mir.of_path add <> None then fail "`Tally.add` has a body's MIR";
       if positions (defaults_of add) <> [ (0, Some 5) ] then
         fail "`Tally.add` does not have its default at position 0";
-      (* A method's positions count [self] first, as a call's arguments do. *)
       let advance : Path.t = Method { owner = top "Counter"; name = "advance"; receiver = Mut } in
       if positions (defaults_of advance) <> [ (1, Some 3) ] then
         fail "`Counter.advance` does not have its default at position 1";
@@ -972,7 +914,6 @@ let () =
             | Temporary | Lent _ -> None)
           clause.parameters
       in
-      (* Every value of a specification in a clause, the ones in its blocks included. *)
       let specifications (clause : Mir.formula) =
         let found = ref [] in
         Mir.iter_formula
@@ -983,8 +924,6 @@ let () =
           clause;
         List.rev !found
       in
-      (* Every value of a clause that chooses between blocks, the ones in its blocks
-         included. *)
       let choosing (clause : Mir.formula) =
         let found = ref [] in
         Mir.iter_formula
@@ -1009,31 +948,24 @@ let () =
               if parameters clause <> [ Some "count"; Some "items" ] then
                 fail "a clause does not take `count` and `items`")
             [ quantified.clause; connected.clause; chosen.clause; ensured ];
-          (* A clause that can run is code too, which a template's check runs. *)
           if quantified.is_executable then fail "the quantified clause can run";
           if connected.is_executable then
             validate "a clause that runs" (Mir.code_of_formula connected.clause).body
           else fail "the clause of comparisons cannot run";
-          (* [result], and [count] as it was on entry. *)
           (match specifications ensured with
           | [ Result; Entry count ] | [ Entry count; Result ] ->
               if not (List.mem count ensured.parameters) then fail "`old` reads no parameter"
           | values -> fail "the `ensures` holds %d specification values" (List.length values));
-          (* [&&] is one value: its right operand is a block, which holds the comparison
-             that is read only where the left operand holds. *)
           (match choosing connected.clause with
           | [ Connective { connective = And; right; _ } ] ->
               if not (computes_a_comparison right) then
                 fail "the right operand of `&&` is not computed in its block"
           | values -> fail "the clause of comparisons holds %d values" (List.length values));
-          (* [if] is one value, with a block for each case. *)
           (match choosing chosen.clause with
           | [ Conditional { then_; else_; if_condition = Some _; _ } ] ->
               if not (computes_a_comparison then_ && computes_a_comparison else_) then
                 fail "a case of the `if` is not computed in its block"
           | values -> fail "the clause with an `if` holds %d values" (List.length values));
-          (* The quantifier is a formula over a range. Its body is a block of the clause
-             that reads the index in a local of the clause, and is no body of its own. *)
           if quantified.clause.lambdas <> [||] then
             fail "the quantifier's body is a body of its own";
           match specifications quantified.clause with
@@ -1071,10 +1003,8 @@ let () =
         mir;
       (match !loops with
       | [ ({ clauses = [ Invariant invariant ]; _ }, compared) ] -> (
-          (* The invariant reads [index] and [items], which are its formula's parameters. *)
           if List.length invariant.parameters <> 2 then
             fail "the invariant's formula takes %d locals" (List.length invariant.parameters);
-          (* The condition compares functional operands, from which a measure is guessed. *)
           match compared with
           | Some { comparison = Less; _ } -> ()
           | Some _ -> fail "the loop's condition is another comparison"
@@ -1083,7 +1013,6 @@ let () =
       (match !proofs with
       | [ proof ] -> validate "the proof block" (Mir.For_testing.expanded proof).body
       | proofs -> fail "%d proof blocks" (List.length proofs));
-      (* A functional body is its function's definition, and a body with a loop is none. *)
       let doubled : Path.t =
         Method { owner = Top { module_; name = "Shape" }; name = "doubled"; receiver = Read }
       in
@@ -1094,8 +1023,6 @@ let () =
   test "an early exit from concurrent code ends the tasks it leaves" (fun () ->
       let mir = mir_of_g Fixtures.Mir.early_exit_from_concurrent_code_ends_the_tasks_it_leaves in
       let blocks = mir.body.blocks in
-      (* Where the exit that cancels with [number] goes on once its group of
-         tasks has ended. *)
       let resume winner number =
         Array.to_list blocks
         |> List.find_map (fun (basic : Mir.Graph.basic_block) ->
@@ -1104,7 +1031,6 @@ let () =
                 Some (List.nth exits (number - 1)).resume
             | _ -> None)
       in
-      (* What an exit does once every task it leaves has ended. *)
       let rec taken winner number =
         match resume winner number with
         | None -> "lost"
@@ -1132,7 +1058,6 @@ let () =
           if not (List.mem expected exits) then
             fail "no exit from a %s that is a %s" (fst expected) (snd expected))
         [ ("branch", "return"); ("branch", "jump"); ("iteration", "return"); ("iteration", "jump") ];
-      (* Before a group's tasks start, its winner is given a value. *)
       Array.iter
         (fun (basic : Mir.Graph.basic_block) ->
           match basic.terminator with
@@ -1150,10 +1075,6 @@ let () =
           | _ -> ())
         blocks)
 
-(* The move analysis *)
-
-(* The analysis of [g]'s MIR, with each value that is not a number or a
-   [Bool] having something to drop. *)
 let moves_of_g text =
   let mir = mir_of_g text in
   let body = mir.body in
@@ -1167,7 +1088,6 @@ let moves_of_g text =
   in
   (body, Moves.analyse ~tracks:needs_drop body)
 
-(* What a path holds where its local is first ended. *)
 let status_where_ended (body : Mir.Graph.body) moves (path : Moves.path) =
   let found = ref None in
   Array.iteri

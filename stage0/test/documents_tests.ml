@@ -1,17 +1,7 @@
-(* The documents' examples, type-checked and proven. Every ```truss block
-   that parses as a file is checked through every stage. Most blocks are
-   excerpts: they use names defined elsewhere, show a definition of the
-   standard library's, or redefine a prelude name to show how it is written.
-   Those diagnostics say the block is an excerpt, and such a block is
-   skipped, as is one that uses a feature stage0 has not built. Every other block
-   is a whole program and must check cleanly and prove. *)
-
 open Harness
 
 let solver = Lazy.force Support.solver
 let markdown_files = Harness.markdown_documents ()
-
-(* The codes that mean the block needs context it does not have. *)
 let source_of database file = Query.demand database Packages.source file
 
 let excerpt_codes =

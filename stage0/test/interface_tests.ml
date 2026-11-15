@@ -1,19 +1,12 @@
-(* The tests of checking interfaces: signatures, types, traits, [impl]s, the
-   properties of types, and finding [impl]s. Each gives a few definitions
-   and states one fact. *)
-
 open Harness
 open Support
 
-(* Everything the checker reports so far: resolution and interfaces. *)
 let check = Checks.For_testing.through Interface
 let one_diagnostic = one_diagnostic ~check
 let no_diagnostics = no_diagnostics ~check
 let app name : Path.t = Top { module_ = module_of "app::main"; name }
 let standard = Path.standard
 let int64 = Types.builtin Int64
-
-(* The standard library *)
 
 let () =
   let database = setup [] in
@@ -27,8 +20,6 @@ let () =
             (fun diagnostic -> fail "%s" (Diagnostic.render source diagnostic))
             (Interface.diagnostics database file)))
     Standard_library.files
-
-(* Signatures *)
 
 let () =
   test "a function's signature is lowered" (fun () ->
@@ -93,8 +84,6 @@ let () =
           if Types.show output <> "Option[Items.Element]" then fail "output %s" (Types.show output)
       | _ -> fail "no signature")
 
-(* Types *)
-
 let () =
   test "two fields with one name are an error" (fun () ->
       one_diagnostic "type Point(x: Int64, x: Int64)\n" "types.duplicate_field");
@@ -125,8 +114,6 @@ let () =
     (fun () ->
       one_diagnostic "type Point(x: Int64)\n  derives Copyable\n" "types.derives_inferred"
         ~fixed:"type Point(x: Int64)\n  \n")
-
-(* Traits and impls *)
 
 let () =
   test "an impl must give every method without a body" (fun () ->
@@ -174,8 +161,6 @@ let () =
   test "a trait may add an overload of a method of a trait it requires" (fun () ->
       no_diagnostics
         [ ("app::main", Fixtures.Interface.trait_may_add_an_overload_of_a_method_of_a_trait_it) ])
-
-(* Properties *)
 
 let property name expected text type_ check =
   test name (fun () ->
@@ -243,8 +228,6 @@ let () =
     (fun _ -> Types.named (app "Session") [])
     Interface.Impls.copyable
 
-(* Properties of types that hold types of their own kind *)
-
 let holder = "type Holder[Value](value: Value)\n"
 let held type_ = Types.named (app "Holder") [ type_ ]
 let chain = Fixtures.Interface.chain
@@ -309,8 +292,6 @@ let () =
     (fun _ -> Types.named (app "Tree") [])
     Interface.Impls.is_view
 
-(* Finding impls *)
-
 let trait name arguments : Types.trait_reference =
   {
     trait = standard [ "core" ] name;
@@ -365,8 +346,6 @@ let () =
              (trait "From" [ Types.builtin Int32 ]))
       then fail "no impl")
 
-(* Methods at an [impl] *)
-
 let () =
   let text = Fixtures.Interface.described in
   let impl_of database type_ wanted : Path.t =
@@ -416,8 +395,6 @@ let () =
       | [ Capability _ ] -> ()
       | uses -> fail "%d uses" (List.length uses))
 
-(* Law proofs *)
-
 let () =
   let monoid = Fixtures.Interface.monoid in
   test "a law's proof names a law of its trait and a type that implements the trait" (fun () ->
@@ -437,8 +414,6 @@ let () =
         "types.unsatisfied_bound");
   test "a law's proof names every generic parameter of its type" (fun () ->
       one_diagnostic (boxed ^ "proof Joined.associative for Box {\n}\n") "types.arity")
-
-(* Incremental work *)
 
 let () =
   test "adding an impl of one trait re-checks nothing that asked about another" (fun () ->
@@ -551,9 +526,6 @@ let () =
              (trait "From" [ Types.builtin Int32 ]))
       then fail "it does")
 
-(* Every error type carries its report: these once lowered to an error with
-   no report. *)
-
 let () =
   test "`Self.Item` outside a trait and an impl of one is an error" (fun () ->
       one_diagnostic Fixtures.Interface.self_item_outside_a_trait_and_an_impl_of_one_is_an
@@ -571,8 +543,6 @@ let () =
   test "a method of an unknown type keeps its head's generic parameters" (fun () ->
       one_diagnostic Fixtures.Interface.method_of_an_unknown_type_keeps_its_heads_generic
         "resolve.unknown_name")
-
-(* Well-known definitions *)
 
 let () =
   test "every definition the compiler names is in the standard library" (fun () ->

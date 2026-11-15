@@ -1,8 +1,4 @@
-(* Test results kept by key, the checks in place of proofs, and whole programs. *)
-
 open Codegen_support
-
-(* Test results kept by key *)
 
 let () =
   test "a passing test's result is kept by its key, and only a changed test runs again" (fun () ->
@@ -52,8 +48,6 @@ let () =
           if Hashtbl.length table > 0 then fail "kept a result"
       | _ -> fail "did not pass, or came from the kept results")
 
-(* Checks a build makes in place of proofs *)
-
 let () =
   test "a build checks each primitive operation that could fail, and evaluates no requires clause"
     (fun () ->
@@ -82,8 +76,6 @@ let () =
           "test 6 passed\n";
           "test 7 passed\n";
         ])
-
-(* Programs *)
 
 let () =
   test "a program prints through the real console and exits with its code" (fun () ->
@@ -297,8 +289,6 @@ let () =
         let path = Filename.concat directory name in
         (path, fun () -> In_channel.with_open_text path In_channel.input_all)
       in
-      (* [script] runs a program with a terminal of its own, which this test
-         may not have. *)
       let path, in_terminal = report "terminal-report.txt" in
       let status, _, errors =
         Process.run ~input:"" "script"
@@ -321,8 +311,6 @@ let () =
                "";
              ])
         (in_terminal ());
-      (* Run as it is, the program has this test's terminal, which a run
-         under CI lacks. Only there can the test report its findings. *)
       match Unix.openfile "/dev/tty" [ O_RDWR ] 0 with
       | terminal -> Unix.close terminal
       | exception Unix.Unix_error _ ->
@@ -346,9 +334,6 @@ let () =
 
 let () =
   test "a program waits for the signals it is sent" (fun () ->
-      (* The program is started with the two signals held back, as a child
-         is started with its parent's, so that the first, sent before the
-         program waits for it, does not end the program. *)
       let before = Unix.sigprocmask SIG_BLOCK [ Sys.sigusr1; Sys.sigterm ] in
       let status, output, _ =
         Fun.protect
@@ -455,9 +440,6 @@ fn main(arguments: List[String]) -> ExitCode
         output)
 
 let () =
-  (* A refusal can arrive before the first system call after [connect]. On
-     macOS a [setsockopt] then fails, so a connect that set an option
-     before it read its result reported that failure for some of these. *)
   test "every connection to a port that nothing listens on is refused" (fun () ->
       let status, output, _ =
         run_main Fixtures.Program.every_connection_to_a_port_that_nothing_listens_on
@@ -467,9 +449,6 @@ let () =
 
 let () =
   test "a program finds a host's addresses by its name" (fun () ->
-      (* Only names the system answers by itself, so that the test asks no
-         server: addresses, [localhost], and a name too long to be asked
-         about. *)
       let status, output, _ =
         run_main Fixtures.Program.program_finds_a_hosts_addresses_by_its_name
       in
@@ -590,10 +569,6 @@ let () =
       if status <> 0 then fail "status %d: %s" status errors;
       expect_string ~expected:"inside\nnamed\nkept\n" output)
 
-(* The documents' examples: in every block that checks cleanly, each
-   function that is not generic, and not only for specifications, lowers,
-   and each test passes or reaches a [todo]. Most blocks are excerpts,
-   which do not check alone. *)
 let () =
   Harness.markdown_documents ()
   |> List.iter (fun name ->

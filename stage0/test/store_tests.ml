@@ -1,9 +1,5 @@
-(* The tests of the store, and of the states and facts the engine keeps in
-   it. *)
-
 open Harness
 
-(* An input's value, raising [Not_found] when it is not set. *)
 let get database input key =
   match Query.find database input key with Some value -> value | None -> raise Not_found
 
@@ -193,8 +189,6 @@ let () =
       Store.compact store;
       if List.length (segment_files directory) <> 5 then fail "the segments were rewritten")
 
-(* States and facts *)
-
 let version = "test"
 let value_input = Query.input ~name:"saved_value" ~show:(fun () -> "") ()
 
@@ -222,8 +216,6 @@ let attached store =
   Engine.attach engine store ~version;
   engine
 
-(* A store holding one state: two inputs, two saved results of the first,
-   and one of the second. *)
 let written () =
   let store = Store.open_ (fresh_directory ()) in
   let engine = attached store in
@@ -278,7 +270,6 @@ let () =
       let changed = Engine.write engine in
       let chain_size = Engine.chain_size engine in
       if chain_size.depth <> 1 then fail "%d differences" chain_size.depth;
-      (* The input and the three results that read it, of the six nodes. *)
       if chain_size.whole <> 6 then fail "the whole state holds %d nodes" chain_size.whole;
       if chain_size.differences <> 4 then
         fail "the difference holds %d nodes" chain_size.differences;
@@ -305,7 +296,6 @@ let () =
       if Engine.unwritten engine then fail "something to write after writing");
   test "a result whose value is gone from the store is computed again" (fun () ->
       let store, artifact = written () in
-      (* Another store holding the artifact, and none of the values. *)
       let empty = Store.open_ (fresh_directory ()) in
       let copied = Store.put empty (Option.get (Store.get store artifact)) in
       let engine = opened empty copied in
@@ -338,8 +328,6 @@ let () =
       Engine.set engine value_input () 4;
       if Engine.get engine doubled () <> 8 then fail "another result";
       if Engine.get engine reads_through () <> 50 then fail "another result read through";
-      (* The results that are not saved are computed, being cheap; the saved
-         ones are found. *)
       if
         Engine.For_testing.computed engine doubled <> []
         || Engine.For_testing.computed engine reads_through <> []
@@ -352,8 +340,6 @@ let () =
       Engine.set engine value_input () 9;
       let value = Engine.get engine reads_through () in
       if value <> 100 then fail "result %d after the change" value)
-
-(* Fingerprints follow from a value, not from its layout in memory *)
 
 let pair_input = Query.input ~name:"saved_pair" ~show:(fun () -> "") ()
 
@@ -394,7 +380,6 @@ let () =
     (fun () ->
       let store = Store.open_ (fresh_directory ()) in
       let engine = attached store in
-      (* Both halves are one block here, and two when each is read back. *)
       let shared = String.make 3 'a' in
       Engine.set engine pair_input () (shared, shared);
       ignore (Engine.get engine reads_both ());
@@ -426,7 +411,6 @@ let () =
       Engine.set engine value_input () 1;
       if Engine.get engine top () <> 1 then fail "another result";
       ignore (Engine.write engine);
-      (* The leaf is collected, and the input it read changes after. *)
       Engine.set engine switch_input () false;
       if Engine.get engine top () <> 0 then fail "another result without the leaf";
       Engine.set engine value_input () 5;
@@ -449,8 +433,6 @@ let () =
       let engine = attached store in
       Engine.set engine value_input () 4;
       ignore (Engine.get engine doubled ());
-      (* An input that is set and removed is held, and not written, since
-         nothing reads it yet. *)
       Engine.set engine maybe_input () 1;
       Engine.remove engine maybe_input ();
       ignore (Engine.write engine);
@@ -477,11 +459,9 @@ let () =
       Engine.set engine value_input () 1;
       ignore (Engine.get engine top ());
       ignore (Engine.write engine);
-      (* The leaf is new in a difference, and only [top] reads it. *)
       Engine.set engine switch_input () true;
       ignore (Engine.get engine top ());
       ignore (Engine.write engine);
-      (* A request keeps it, and then nothing reads it. *)
       ignore (Engine.get engine leaf ());
       Engine.set engine switch_input () false;
       ignore (Engine.get engine top ());
@@ -549,13 +529,9 @@ let () =
 let () =
   test "a result of a fixed base that reads a replaced input is not read from the base again"
     (fun () ->
-      (* [hundreds] comes out the same for both inputs, so the change stops
-         there, and nothing of the engine's own reads the copy of
-         [doubled]. *)
       let hundreds =
         unit_query "fixed_hundreds" (fun database () -> Query.demand database doubled () / 100)
       in
-      (* The root is of a later phase, so it is not copied with them. *)
       let top =
         unit_query "fixed_top" ~phase:Phases.bodies (fun database () ->
             Query.demand database hundreds ())
@@ -608,7 +584,6 @@ let () =
       Engine.set engine raising_input () (-2);
       if Engine.get engine handles () <> 0 then fail "the handler's result";
       Engine.For_testing.clear_log engine;
-      (* Another input that raises the same exception. *)
       Engine.set engine raising_input () (-4);
       ignore (Engine.stabilize engine);
       if Engine.For_testing.executed engine <> [ "raising()" ] then
