@@ -2,8 +2,6 @@ type cleanup =
   | Drop_value of Lowered.place
   | Drop_flagged of { place : Lowered.place; flag : Lowered.place }
   | Free_pointed of Lowered.place
-  | Free_blocks of { place : Lowered.place; variants : string list }
-  | Write_back of { destination : Lowered.place; source : Lowered.place; ty : Ground.ty }
   | Join_group of Lowered.statement
 
 type scope_kind = Bindings | Statement
@@ -16,11 +14,18 @@ type loop = {
   break_depth : int;
 }
 
+type lending = {
+  slot : Lowered.place option;
+  part : Ground.ty;
+  record : Lowered.operand;
+  site : Lowered.operand;
+}
+
+type lent_call = { mark : Lowered.place; record : Lowered.operand }
+
 type frame = {
   code : Definitions.code;
   mutable self_place : Lowered.place option;
-  inlined : Path.t list;
-  reported : Lowered.site option;
   exit : (Lowered.block * int) option;
   mir : mir_frame option;
 }
@@ -38,6 +43,14 @@ and mir_frame = {
   flags : (Moves.path * Lowered.place) list;
       (** The [Bool] local that says whether each flagged path holds a value *)
   mutable state : Moves.state;
+  lending : lending option;
+  called_parts : Mir.local list;
+  lent_calls : (Mir.local, lent_call) Hashtbl.t;
+  placed_parts : (Mir.local, unit) Hashtbl.t;
+  mutable forwarded_locals : int;
+  ended_after_lend : Mir.local list;
+  after_lend : bool array;
+  mutable block : Mir.Graph.block;
 }
 
 type task = { id : Core.task; group : Lowered.place; end_block : Lowered.block; scope_depth : int }
@@ -63,9 +76,10 @@ type state = {
   mutable evidence : (Path.t * Lowered.operand) list;
   mutable tasks : task list;
   mutable moved : Lowered.place list;
+  mutable lend_record : Lowered.operand option;
 }
 
-val frame_of : Definitions.code -> inlined:Path.t list -> frame
+val frame_of : Definitions.code -> frame
 val enter : Definitions.context -> ?nested:int ref -> builder:Emit_c.Builder.t -> frame -> state
 val may_fork : state -> bool
 
@@ -130,7 +144,5 @@ val looping :
   state -> continue_:Lowered.block -> break_:Lowered.block -> depth:int -> (unit -> unit) -> unit
 
 val place_type : state -> Lowered.place -> Lowered.ty option
-val lent_at : state -> Lowered.place -> Ground.lent option
-val project : state -> Lowered.place -> Lowered.projection -> Lowered.place
 val constant_int : Memory_layout.integer -> Z.t -> Lowered.operand
 val scalar_of : state -> Ground.ty -> Memory_layout.scalar

@@ -24,6 +24,25 @@ let () =
     (fun () ->
       expect_output Fixtures.Feature.associated_capability_set_gives_each_instance_the
         (String.concat "" (List.init 8 (Printf.sprintf "test %d passed\n"))));
+  test "a lending method that calls itself lends a part of its receiver" (fun () ->
+      expect_output Fixtures.Feature.lending_method_that_calls_itself_lends_a_part_of
+        (String.concat "" (List.init 5 (Printf.sprintf "test %d passed\n"))));
+  test "a lending method that calls itself lends a value that the innermost call made" (fun () ->
+      expect_output Fixtures.Feature.lending_method_that_calls_itself_lends_a_value_it
+        (String.concat "" (List.init 2 (Printf.sprintf "test %d passed\n"))));
+  test "a lent constructor owns the fields that the method made, beside the places it lends"
+    (fun () ->
+      expect_output Fixtures.Feature.lent_constructor_owns_the_fields_that_the_method_made
+        (String.concat "" (List.init 3 (Printf.sprintf "test %d passed\n"))));
+  test "a constructor lent `mut` writes each place back when the lend ends, at any depth" (fun () ->
+      expect_output Fixtures.Feature.constructor_lent_mut_writes_each_place_back_at_any_depth
+        (String.concat "" (List.init 2 (Printf.sprintf "test %d passed\n"))));
+  test "a lending method forwards a part of another lending method's part" (fun () ->
+      expect_output Fixtures.Feature.lending_method_forwards_a_part_of_another_lending
+        (String.concat "" (List.init 3 (Printf.sprintf "test %d passed\n"))));
+  test "a lending method is called through an `any` value" (fun () ->
+      expect_output Fixtures.Feature.lending_method_is_called_through_an_any_value
+        (String.concat "" (List.init 2 (Printf.sprintf "test %d passed\n"))));
   passes "a lending method lends a local it owns, which lives until the caller's statement ends"
     Fixtures.Feature.lending_method_lends_a_local_it_owns_which_lives;
   (* The caller continues from either path, and only the first has [label]

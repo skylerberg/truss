@@ -68,8 +68,12 @@ val call_through_any :
   name:string ->
   any:Lowered.place ->
   arguments:(Types.mode * Ground.ty * Lowered.place) list ->
+  ?lending:Lowered.operand list ->
   Lowered.place ->
   unit
+
+val any_substitution :
+  Definitions.context -> any:Types.trait_reference -> Path.t -> Types.substitution
 
 val in_type_definition : Lowering.state -> Ground.ty -> (unit -> 'a) -> 'a
 val echo : Lowering.state -> Lowered.place -> Ground.ty -> site:Lowered.site -> unit
@@ -97,6 +101,7 @@ val call_instance :
   substitution:Types.substitution ->
   arguments:(Types.mode * Ground.ty * Lowered.place) list ->
   ?mask:int ->
+  ?lending:Lowered.operand list ->
   destination:Lowered.place ->
   unit ->
   unit

@@ -1,0 +1,65 @@
+trait Titled {
+  fn title(self) lends String
+
+  fn subtitle(self, index: USize) lends Option[String]
+
+  fn retitle(mut self) lends mut String
+}
+
+type Book(title: String, chapters: List[String])
+
+type Sign(text: String)
+
+impl Titled for Book {
+  fn title(self) lends String {
+    self.title
+  }
+
+  fn subtitle(self, index: USize) lends Option[String] {
+    self.chapters.get(index)
+  }
+
+  fn retitle(mut self) lends mut String {
+    mut self.title
+  }
+}
+
+impl Titled for Sign {
+  fn title(self) lends String {
+    "sign: ${self.text}"
+  }
+
+  fn subtitle(self, index: USize) lends Option[String] {
+    if index == 0 {
+      Some(self.text)
+    } else {
+      None
+    }
+  }
+
+  fn retitle(mut self) lends mut String {
+    mut self.text
+  }
+}
+
+fn title_length(titled: any Titled) -> USize {
+  titled.title().length()
+}
+
+test "a place, a value that the method made, and a constructor" {
+  let book: any Titled = any Book(title: "${1}st", chapters: ["one", "two"])
+  let sign: any Titled = any Sign(text: "${2}nd")
+  assert book.title() == "1st"
+  assert sign.title() == "sign: 2nd"
+  assert title_length(book) == 3
+  assert title_length(sign) == 9
+  assert book.subtitle(1) == Some("two")
+  assert book.subtitle(2) is None
+  assert sign.subtitle(0) == Some("2nd")
+}
+
+test "a place lent to be mutated" {
+  var book: any Titled = any Book(title: "${1}st", chapters: [])
+  mut book.retitle() = "${3}rd"
+  assert book.title() == "3rd"
+}
