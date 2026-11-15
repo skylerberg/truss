@@ -423,13 +423,10 @@ let walk_constant walk path =
 let walk_real walk capabilities =
   List.iter
     (fun capability ->
-      match
-        Interface.Impls.impl_interface walk.context.lookups.interface
-          (Generated.real_implementation capability)
-      with
-      | Some interface -> (
-          add_type walk [] interface.for_type;
-          match Monomorphic.ground walk.context.monomorphic [] interface.for_type with
+      match Generated.find_real_implementation walk.context.lookups.interface capability with
+      | Some (_, impl_interface) -> (
+          add_type walk [] impl_interface.for_type;
+          match Monomorphic.ground walk.context.monomorphic [] impl_interface.for_type with
           | Named { path; _ } ->
               walk_signature walk (Method { owner = path; name = "new"; receiver = Static }) []
           | Function _ | Any _ | Never -> ())

@@ -197,7 +197,10 @@ let by_path = Path.Map.of_seq (List.to_seq (List.map (fun known -> (path known, 
 let of_path path = Path.Map.find_opt path by_path
 let is known path = of_path path = Some known
 let specification = Path.standard_module [ "specification" ]
-let system_module name = Path.standard_module [ "system"; name ]
+
+let is_system_module (module_ : Path.module_) =
+  module_.package = Path.standard_package
+  && match module_.modules with [ "system"; _ ] -> true | _ -> false
 
 module For_testing = struct
   let all = all

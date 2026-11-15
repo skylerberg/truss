@@ -621,3 +621,16 @@ let () =
           expect_string ~expected:"counted 5\n" output;
           if not (contains errors "many arguments") then fail "panicked with %S" errors
       | status, _, errors -> fail "ended with status %d: %s" status errors)
+
+let () =
+  test "a main that uses a capability with no real implementation is not built" (fun () ->
+      let _, compile = load Fixtures.Program.main_that_uses_a_capability_with_no_real in
+      match
+        Compile.For_testing.run_program compile
+          ~main:(Top { module_ = example; name = "main" })
+          ~arguments:[]
+      with
+      | Ok _ -> fail "the program ran"
+      | Error message ->
+          if not (contains message "main uses Greeter, which has no real implementation") then
+            fail "failed with: %s" message)
