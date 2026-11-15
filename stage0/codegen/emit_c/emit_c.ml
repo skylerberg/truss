@@ -51,6 +51,31 @@ let is_small fragment =
   | Functions { nested; weight } -> nested = 0 && weight <= small
   | Static_data | Table_entries _ -> false
 
+let is_identifier_start character =
+  character = '_' || (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z')
+
+let is_identifier_part character =
+  is_identifier_start character || (character >= '0' && character <= '9')
+
+let iter_identifiers text ~identifier ~other =
+  let length = String.length text in
+  let rec scan position =
+    if position < length then
+      if is_identifier_start text.[position] then begin
+        let stop = ref position in
+        while !stop < length && is_identifier_part text.[!stop] do
+          incr stop
+        done;
+        identifier (String.sub text position (!stop - position));
+        scan !stop
+      end
+      else begin
+        other text.[position];
+        scan (position + 1)
+      end
+  in
+  scan 0
+
 let text fragment =
   let names = Hashtbl.create 64 in
   let number prefix list =
@@ -89,46 +114,12 @@ let text fragment =
       @ List.map snd fragment.prototypes @ fragment.statics @ fragment.helpers)
   in
   let buffer = Buffer.create (String.length whole) in
-  let is_start character =
-    character = '_'
-    || (character >= 'a' && character <= 'z')
-    || (character >= 'A' && character <= 'Z')
-  in
-  let is_part character = is_start character || (character >= '0' && character <= '9') in
-  let length = String.length whole in
-  let rec scan position =
-    if position < length then
-      if is_start whole.[position] then begin
-        let stop = ref position in
-        while !stop < length && is_part whole.[!stop] do
-          incr stop
-        done;
-        Buffer.add_string buffer (rename (String.sub whole position (!stop - position)));
-        scan !stop
-      end
-      else begin
-        Buffer.add_char buffer whole.[position];
-        scan (position + 1)
-      end
-  in
-  scan 0;
+  iter_identifiers whole
+    ~identifier:(fun identifier -> Buffer.add_string buffer (rename identifier))
+    ~other:(Buffer.add_char buffer);
   Buffer.contents buffer
 
 module Builder = Builder
-
-let contains text part =
-  let length = String.length part and total = String.length text in
-  let rec matches position offset =
-    offset = length || (text.[position + offset] = part.[offset] && matches position (offset + 1))
-  in
-  let rec from position =
-    position + length <= total
-    &&
-    match String.index_from_opt text position part.[0] with
-    | Some found -> (found + length <= total && matches found 0) || from (found + 1)
-    | None -> false
-  in
-  length = 0 || from 0
 
 let bytes_definition (text, name) =
   let bytes =
@@ -137,6 +128,20 @@ let bytes_definition (text, name) =
   Printf.sprintf "static const uint8_t %s[%d] = { %s };\n" name
     (max 1 (String.length text))
     (if bytes = [] then "0" else String.concat ", " bytes)
+
+let named_bytes context ~texts =
+  let named = Hashtbl.create 64 in
+  List.iter
+    (fun text ->
+      iter_identifiers text
+        ~identifier:(fun identifier -> Hashtbl.replace named identifier ())
+        ~other:ignore)
+    texts;
+  Hashtbl.fold (fun text index entries -> (index, text) :: entries) context.bytes []
+  |> List.sort compare
+  |> List.filter_map (fun (index, text) ->
+      let name = C_values.bytes_symbol context index in
+      if Hashtbl.mem named name then Some (bytes_definition (text, name)) else None)
 
 type compiled = Code of Builder.instance | Data of Lowered.data | Table of Lowered.table
 
@@ -182,12 +187,7 @@ let fragment env (compiled : compiled) =
     environments;
     prototypes = List.rev context.prototypes;
     statics =
-      List.rev_map bytes_definition
-        (List.filter
-           (fun (_, name) ->
-             List.exists (fun (_, body) -> contains body name) functions || contains definition name)
-           context.bytes)
-      @ List.rev context.statics;
+      named_bytes context ~texts:(definition :: List.map snd functions) @ List.rev context.statics;
     anchors = List.rev context.anchors;
     helpers = context.helpers_used;
     references =
