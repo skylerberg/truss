@@ -290,19 +290,15 @@ let call builder (call : Mir.call) origin =
          call.arguments)
   in
   let view_arguments =
-    match call.callee with
-    | Intrinsic { operation = Storage_take_view | View_take_view | Array_take_view; _ } -> []
-    | _ ->
-        List.concat
-          (List.mapi
-             (fun position (argument : Mir.argument) ->
-               match argument with
-               | Passed
-                   { value = (Use { type_; origin; _ } | Borrow { type_; origin; _ }) as value; _ }
-                 when is_view builder.context type_ ->
-                   [ { position; views = views_of_operand builder value; origin } ]
-               | Passed _ | Default -> [])
-             call.arguments)
+    List.concat
+      (List.mapi
+         (fun position (argument : Mir.argument) ->
+           match argument with
+           | Passed { value = (Use { type_; origin; _ } | Borrow { type_; origin; _ }) as value; _ }
+             when is_view builder.context type_ ->
+               [ { position; views = views_of_operand builder value; origin } ]
+           | Passed _ | Default -> [])
+         call.arguments)
   in
   if List.length borrowed_arguments > 1 || (borrowed_arguments <> [] && view_arguments <> []) then
     emit builder (Arguments { borrowed_arguments; view_arguments; is_yielded = false }) origin;

@@ -14,6 +14,13 @@ let sequence element =
 
 let signature (operation : Intrinsic.operation) : Types.signature =
   let generic name = { Types.generic = parameter operation name; kind = Type_generic [] } in
+  let bounded known name =
+    {
+      Types.generic = parameter operation name;
+      kind =
+        Type_generic [ { trait = Well_known.path known; trait_arguments = []; associated = [] } ];
+    }
+  in
   let parameter_type name = Types.Parameter (parameter operation name) in
   let input ?(mode = Types.Read) name type_ = { Types.name; mode; type_; has_default = false } in
   let make ?(generics = []) ?(output = Types.Returns Types.unit) parameters : Types.signature =
@@ -61,6 +68,9 @@ let signature (operation : Intrinsic.operation) : Types.signature =
   let with_storage ?(mode = Types.Read) ?(output = Types.Returns Types.unit) rest =
     make ~generics:[ "Element" ] ~output (input ~mode "storage" (storage element) :: rest)
   in
+  let with_plain_storage rest =
+    { (with_storage ~mode:Mut rest) with generics = [ bounded Plain "Element" ] }
+  in
   match operation with
   | Add | Subtract | Multiply | Divide | Remainder | Wrapping_add | Wrapping_subtract
   | Wrapping_multiply | Bit_and | Bit_or | Bit_xor | Multiply_high ->
@@ -104,16 +114,8 @@ let signature (operation : Intrinsic.operation) : Types.signature =
       make ~generics:[ "Element" ] ~output:(Returns (storage element)) [ input "capacity" uint64 ]
   | Storage_length | Storage_capacity -> with_storage ~output:(Returns uint64) []
   | Storage_set_capacity -> with_storage ~mode:Mut [ input "capacity" uint64 ]
-  | Storage_lengthen -> with_storage ~mode:Mut [ input "by" uint64 ]
-  | Storage_shorten ->
-      let plain : Types.trait_reference =
-        { trait = Well_known.path Plain; trait_arguments = []; associated = [] }
-      in
-      {
-        (with_storage ~mode:Mut [ input "length" uint64 ]) with
-        generics =
-          [ { Types.generic = parameter operation "Element"; kind = Type_generic [ plain ] } ];
-      }
+  | Storage_lengthen -> with_plain_storage [ input "by" uint64 ]
+  | Storage_shorten -> with_plain_storage [ input "length" uint64 ]
   | Storage_push -> with_storage ~mode:Mut [ input ~mode:Own "value" element ]
   | Storage_pop -> with_storage ~mode:Mut ~output:(Returns element) []
   | Storage_insert ->
@@ -137,7 +139,6 @@ let signature (operation : Intrinsic.operation) : Types.signature =
   | Storage_at -> with_storage ~output:(Lends (Read, element)) [ input "index" uint64 ]
   | Storage_at_mut -> with_storage ~mode:Mut ~output:(Lends (Mut, element)) [ input "index" uint64 ]
   | Storage_view -> with_storage ~output:(Returns (view element)) []
-  | Storage_view_mut -> with_storage ~mode:Mut ~output:(Returns (view element)) []
   | View_length ->
       make ~generics:[ "Element" ] ~output:(Returns uint64) [ input "view" (view element) ]
   | View_at ->
@@ -151,14 +152,6 @@ let signature (operation : Intrinsic.operation) : Types.signature =
   | View_swap ->
       make ~generics:[ "Element" ]
         [ input ~mode:Mut "view" (view element); input "first" uint64; input "second" uint64 ]
-  | Storage_take_view ->
-      with_storage ~mode:Mut [ input "view" (view element); input "start" uint64 ]
-  | View_take_view ->
-      make ~generics:[ "Element" ]
-        [ input ~mode:Mut "view" (view element); input "part" (view element); input "start" uint64 ]
-  | Array_take_view ->
-      over_array (fun array ->
-          [ input ~mode:Mut "array" array; input "view" (view element); input "start" uint64 ])
   | View_slice ->
       make ~generics:[ "Element" ]
         ~output:(Returns (view element))
@@ -211,12 +204,6 @@ let signature (operation : Intrinsic.operation) : Types.signature =
       make ~generics:[ "Value" ] ~output:(Returns bool)
         [ input "value" value; input "clause" uint64 ]
   | Shared_new | Shared_update | Shared_key -> (
-      let storable : Types.trait_reference =
-        { trait = Well_known.path Storable; trait_arguments = []; associated = [] }
-      in
-      let bounded name =
-        { Types.generic = parameter operation name; kind = Type_generic [ storable ] }
-      in
       let shared =
         Types.Named { path = Intrinsic.builtin_path Shared; arguments = [ Types.Type value ] }
       in
@@ -224,7 +211,7 @@ let signature (operation : Intrinsic.operation) : Types.signature =
       | Shared_new ->
           {
             (make ~output:(Returns shared) [ input ~mode:Own "value" value ]) with
-            generics = [ bounded "Value" ];
+            generics = [ bounded Storable "Value" ];
           }
       | Shared_update ->
           let change : Types.function_type =
@@ -244,12 +231,12 @@ let signature (operation : Intrinsic.operation) : Types.signature =
                  input "change" (Types.Function change);
                ])
             with
-            generics = [ bounded "Value"; generic "Input"; bounded "Result" ];
+            generics = [ bounded Storable "Value"; generic "Input"; bounded Storable "Result" ];
           }
       | _ ->
           {
             (make ~output:(Returns (Types.builtin UInt64)) [ input "shared" shared ]) with
-            generics = [ bounded "Value" ];
+            generics = [ bounded Storable "Value" ];
           })
   | Coroutine_resume -> make ~output:(Returns bool) [ input "coroutine" uint64 ]
   | Coroutine_suspend -> make []
@@ -297,12 +284,11 @@ let cost (operation : Intrinsic.operation) =
   | Convert | Fits | Square_root | Fused_multiply_add | Floor | Ceiling | Truncate | Round_to_even
   | To_bits | From_bits | Is_nan | Leading_zeros | Trailing_zeros | Count_ones | Swap_bytes
   | Rotate_left | Rotate_right | Multiply_high | Storage_empty | Storage_length | Storage_capacity
-  | Storage_pop | Storage_swap | Storage_at | Storage_at_mut | Storage_view | Storage_view_mut
-  | View_length | View_at | View_at_mut | View_swap | Storage_take_view | View_take_view
-  | Array_take_view | View_slice | View_address | Array_view | Array_at_mut | Array_from_storage
-  | Storage_model | View_model | Array_model | Crash | Storage_lengthen | Storage_shorten
-  | Storage_push | Handle_from | Handle_descriptor | Handle_release | Report_tests_to | Live_blocks
-  | Libc_number _ | System_is_os _ | System_is_architecture _ ->
+  | Storage_pop | Storage_swap | Storage_at | Storage_at_mut | Storage_view | View_length | View_at
+  | View_at_mut | View_swap | View_slice | View_address | Array_view | Array_at_mut
+  | Array_from_storage | Storage_model | View_model | Array_model | Crash | Storage_lengthen
+  | Storage_shorten | Storage_push | Handle_from | Handle_descriptor | Handle_release
+  | Report_tests_to | Live_blocks | Libc_number _ | System_is_os _ | System_is_architecture _ ->
       { time = Constant_time; allocations = No_allocations }
   | Holds_invariant -> { time = Unbounded_time; allocations = Unknown_allocations }
   | Compare_bytes | Storage_remove | Storage_insert | Environment_entry ->

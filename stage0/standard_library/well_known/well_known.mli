@@ -1,6 +1,3 @@
-(** The definitions of the standard library that the compiler names by path. A definition that the
-    library renames or moves is renamed or moved here. *)
-
 type t =
   | Equal
   | Ordered
@@ -52,22 +49,15 @@ type t =
   | Deserialize_required
   | Deserialize_optional
   | Unknown_variant
-      (** The error a derived [deserialize] returns for a variant name it does not know. *)
-  | Write_fully  (** The function that writes a program's output. *)
-  | Text_copied_from  (** The function that makes a [String] from a C string. *)
-  | Run_tests  (** The entry point of a test executable. *)
+  | Write_fully
+  | Text_copied_from
+  | Run_tests
 
 val path : t -> Path.t
 val of_path : Path.t -> t option
-
 val is : t -> Path.t -> bool
-(** Whether a path is that of the definition: [is Equal path]. *)
-
 val specification : Path.module_
-(** [standard::specification], whose types exist only in specifications. *)
-
 val system_module : string -> Path.module_
-(** A module of [standard::system], which holds the system implementation of each capability. *)
 
 module For_testing : sig
   val all : t list

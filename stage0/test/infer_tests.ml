@@ -574,6 +574,19 @@ let () =
       match codes (check database (file_of "app::main")) with
       | [ "types.unsatisfied_bound"; "types.unsatisfied_bound" ] -> ()
       | actual -> fail "found [%s]" (String.concat "; " actual));
+  test
+    "storage_lengthen rejects an element type with a drop, which would free memory that nothing \
+     wrote" (fun () ->
+      let in_standard files =
+        let database = Engine.context (Engine.create ()) in
+        Database.load_package (Engine.of_context database) ~name:Path.standard_package
+          ~dependencies:[]
+          (Standard_library.files @ List.map (fun (name, text) -> (file_of name, text)) files);
+        database
+      in
+      one_diagnostic ~setup:in_standard ~file:"standard::probe"
+        Fixtures.Infer.storage_lengthen_rejects_an_element_type_with_a_drop
+        "types.unsatisfied_bound");
   test "a type written in a body that is not a type is an error" (fun () ->
       one_diagnostic Fixtures.Infer.type_written_in_a_body_that_is_not_a_type_is_an
         "types.not_a_type");
