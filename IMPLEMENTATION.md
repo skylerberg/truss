@@ -109,11 +109,13 @@ develop as well as make it easier to bootstrap the compiler in parts.
   how the text lexes only between the tokens on either side of its edits,
   so fixes whose edits an untouched token separates are independent, and
   one lex checks them all. When the lex fails, halving the group finds the
-  fixes that fail. Each fix must also work alone, which is checked in
-  rounds that take one fix from each set of fixes whose edits touch. A set
-  of more than eight touching fixes is withheld unchecked, so the rounds
-  are few. A check that lexes once for each fix makes a file with a fix on
-  every line quadratic.
+  fixes that fail. Fixes whose edits touch form a set, and each round takes
+  one fix from each set: the fix is applied if it works alone and with the
+  fixes its set already applied. A set of more than eight touching fixes is
+  withheld unchecked, so the rounds are few. If the applied fixes then fail
+  together, the fixes were not independent, which is a compiler bug. A
+  check that lexes once for each fix makes a file with a fix on every line
+  quadratic.
 
 ### Stages
 
