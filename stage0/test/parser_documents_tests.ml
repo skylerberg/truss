@@ -24,17 +24,17 @@ let () =
         | _ -> count
       in
       let listed = entries 0 (section (String.split_on_char '\n' (document "SPECIFICATION.md"))) in
-      if listed <> Reference.conflicts_resolved_by_precedence then
+      if listed <> Reference_parser.conflicts_resolved_by_precedence then
         fail
           "Menhir resolves %d conflicts by precedence, and \"Ambiguities in the grammar\" lists %d"
-          Reference.conflicts_resolved_by_precedence listed)
+          Reference_parser.conflicts_resolved_by_precedence listed)
 
 let markdown_files = Harness.markdown_documents ()
 
 let snippet text =
   let source = source text in
   let tokens, lexer_diagnostics = Lexer.lex source in
-  let items, parser_diagnostics = Reference.Snippet.parse tokens in
+  let items, parser_diagnostics = Reference_parser.Snippet.parse tokens in
   (tokens, items, lexer_diagnostics @ parser_diagnostics)
 
 let () =
@@ -66,12 +66,12 @@ let () =
             (fun () ->
               let tokens, items, _ = snippet text in
               List.iter
-                (fun (item : Reference.Snippet.item) ->
+                (fun (item : Reference_parser.Snippet.item) ->
                   let slice =
                     Array.to_list (Array.sub tokens item.first (item.stop - item.first))
                   in
-                  if not (Reference.accepts (Reference.Snippet.entry item.kind) slice) then
-                    fail "the grammar rejects tokens %d to %d of %S" item.first item.stop text)
+                  if not (Reference_parser.accepts (Reference_parser.Snippet.entry item.kind) slice)
+                  then fail "the grammar rejects tokens %d to %d of %S" item.first item.stop text)
                 items))
         (Documents.truss_blocks (document name)))
     markdown_files
@@ -88,14 +88,15 @@ let () =
           let _, parser_diagnostics = Parser.parse tokens in
           if
             lexer_diagnostics = [] && parser_diagnostics = []
-            && not (Reference.accepts Reference.file (Array.to_list tokens))
+            && not (Reference_parser.accepts Reference_parser.file (Array.to_list tokens))
           then fail "the grammar rejects %s" path)
         (truss_files ()));
   test "the grammar rejects every input the parser rejects" (fun () ->
       List.iter
         (fun text ->
           let tokens, _ = Lexer.lex (source text) in
-          if Reference.accepts Reference.file (Array.to_list tokens) then fail "accepted %S" text)
+          if Reference_parser.accepts Reference_parser.file (Array.to_list tokens) then
+            fail "accepted %S" text)
         [
           "fn f() { a & b == c }\n";
           "fn f() { a && b || c }\n";

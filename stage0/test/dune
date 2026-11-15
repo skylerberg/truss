@@ -48,7 +48,7 @@
   mir
   moves
   parser
-  reference
+  reference_parser
   cbor
   blake3
   database

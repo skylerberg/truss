@@ -1,6 +1,6 @@
 (library
- (name reference)
- (modules reference truss menhir_log)
+ (name reference_parser)
+ (modules reference_parser truss menhir_log)
  (libraries diagnostic token parser))
 
 (rule

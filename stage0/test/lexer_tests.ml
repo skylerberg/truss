@@ -746,21 +746,30 @@ let document = Parse_support.document
 let truss_blocks name = Documents.truss_blocks (document name)
 let block_after = Documents.block_after
 let words = Documents.words
-let between = Documents.between
-let backticked = Documents.backticked
+
+let between text first second =
+  let start = Option.get (Substring.find text first) + String.length first in
+  let rest = String.sub text start (String.length text - start) in
+  String.sub rest 0 (Option.get (Substring.find rest second))
+  |> String.split_on_char '\n' |> List.map String.trim |> String.concat " "
+
+let backticked text =
+  match String.split_on_char '`' text with
+  | [] -> []
+  | _ :: rest -> List.filteri (fun index _ -> index mod 2 = 0) rest
 
 let () =
-  let grammar = document "SPECIFICATION.md" in
+  let specification = document "SPECIFICATION.md" in
   let spellings list = List.sort_uniq compare (List.map fst list) in
   test "SPECIFICATION.md lists the keywords" (fun () ->
       equal_lists Fun.id "keywords" (spellings Token.keywords)
-        (words (block_after grammar "Reserved everywhere:")));
+        (words (block_after specification "Reserved everywhere:")));
   test "SPECIFICATION.md lists the reserved words" (fun () ->
       equal_lists Fun.id "reserved" (spellings Token.reserved_words)
-        (words (block_after grammar "Reserved for later use")));
+        (words (block_after specification "Reserved for later use")));
   test "SPECIFICATION.md lists the punctuation" (fun () ->
       equal_lists Fun.id "punctuation" (spellings Token.punctuation)
-        (words (block_after grammar "### Punctuation")));
+        (words (block_after specification "### Punctuation")));
   test "SPECIFICATION.md's line-break lists match Layout" (fun () ->
       let kind_of spelling =
         match Token.word spelling with
@@ -773,7 +782,7 @@ let () =
                 (List.assoc_opt spelling Token.punctuation)
       in
       let listed first second =
-        List.filter_map kind_of (backticked (between grammar first second))
+        List.filter_map kind_of (backticked (between specification first second))
       in
       let can_end = listed "**can end a statement**:" "- the first token after it" in
       let can_begin = listed "**can begin a statement**:" "3. Several line feeds" in
