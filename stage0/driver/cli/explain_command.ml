@@ -37,7 +37,11 @@ let run ~position =
               -> (
                 match (names.definition key, names.spans key, Pipeline.resolved pipeline key) with
                 | Some definition, Some spans, Some resolved ->
-                    let tables = Pipeline.tables pipeline key in
+                    let tables =
+                      Option.map
+                        (fun (checked : Infer.checked) -> checked.tables)
+                        (Pipeline.read_checked_body pipeline key)
+                    in
                     Inspect.explain_at ~path:key.path spans definition resolved tables ~text
                       (offset - base)
                 | _ -> None)

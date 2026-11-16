@@ -4,7 +4,7 @@ open Support
 let core_of database key =
   Option.map
     (fun (checked : Infer.checked) -> checked.form)
-    (Pipeline.For_testing.checked_body (pipeline database) key)
+    (Pipeline.read_checked_body (pipeline database) key)
 
 type form = { core : Core.t; names : (Core.local, string) Hashtbl.t }
 

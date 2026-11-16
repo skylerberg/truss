@@ -2,11 +2,9 @@ module Compatibility = Cli.Compatibility
 open Harness
 open Support
 
-let changes before after =
+let changes ?(modules = []) before after =
   let package : Path.package = { owner = None; name = "lib" } in
-  let state text =
-    Pipeline.interface_lookups (pipeline (setup [ ("lib::shapes", text) ])) [ package ]
-  in
+  let state text = pipeline (setup (("lib::shapes", text) :: modules)) in
   Compatibility.compare ~before:(state before) ~after:(state after) package
 
 let show actual =
@@ -17,8 +15,8 @@ let show actual =
       | Grows addition -> Printf.sprintf "grows: %s %s" (Path.show path) addition)
     actual
 
-let expect before after expected =
-  let actual = show (changes before after) in
+let expect ?modules before after expected =
+  let actual = show (changes ?modules before after) in
   if actual <> expected then
     fail "found [%s], expected [%s]" (String.concat "; " actual) (String.concat "; " expected)
 
@@ -101,6 +99,9 @@ let () =
       expect "public type Square(side: Int64)\n  invariant side > 0\n"
         "public type Square(side: Int64)\n  invariant side >= 0\n"
         [ "breaks: lib::shapes::Square changed its invariant" ]);
+  test "invariants written in another order are no change" (fun () ->
+      expect "public type Square(side: Int64)\n  invariant side > 0\n  invariant side < 100\n"
+        "public type Square(side: Int64)\n  invariant side < 100\n  invariant side > 0\n" []);
   test "a derived trait that is dropped breaks, and one that is added grows" (fun () ->
       let plain = "public type Square(side: Int64)\n"
       and equal = "public type Square(side: Int64)\n  derives Equal\n" in
@@ -180,3 +181,48 @@ let () =
         [ "breaks: lib::shapes::Feed lost an associated capability set" ];
       expect (feed "") (feed "  capability Uses\n")
         [ "grows: lib::shapes::Feed gained an associated capability set" ])
+
+let sized law =
+  Printf.sprintf
+    "public trait Sized {\n\
+    \  fn size(self) -> Int64\n\
+    \    cost time finite\n\n\
+    \  law bounded(value: Self) {\n\
+     %s  }\n\
+     }\n"
+    law
+
+let () =
+  test "a requires that only gains parentheses is no change" (fun () ->
+      expect (area "  requires side > 0\n") (area "  requires (side > 0)\n") []);
+  test "a dropped requires leaves the ensures after it unchanged" (fun () ->
+      expect
+        (area "  requires side > 0\n  ensures result == side\n")
+        (area "  ensures result == side\n")
+        [ "grows: lib::shapes::area has fewer `requires` clauses" ]);
+  test "a requires whose name another use makes refer elsewhere breaks" (fun () ->
+      let modules =
+        [
+          ("lib::one::limits", "public let bound: Int64 = 10\n");
+          ("lib::two::limits", "public let bound: Int64 = 20\n");
+        ]
+      in
+      let guarded imported =
+        Printf.sprintf "use lib::%s::limits\n\n%s" imported
+          (area "  requires side < limits::bound\n")
+      in
+      expect ~modules (guarded "one") (guarded "two")
+        [ "breaks: lib::shapes::area has a `requires` clause it did not have" ]);
+  test "a law whose body changes breaks" (fun () ->
+      expect (sized "    value.size() >= 0\n") (sized "    value.size() >= 1\n")
+        [ "breaks: lib::shapes::Sized changed its laws" ]);
+  test "a law that renames a binder of its body is no change" (fun () ->
+      expect
+        (sized "    let measured = value.size()\n    measured >= 0\n")
+        (sized "    let counted = value.size()\n    counted >= 0\n")
+        []);
+  test "a constant the evaluator cannot compute keeps its written value" (fun () ->
+      let name = "public let name: String = \"square\"\n" in
+      expect name "public let name: String = \"cube\"\n"
+        [ "breaks: lib::shapes::name changed its value" ];
+      expect name "public let name: String = (\"square\")\n" [])

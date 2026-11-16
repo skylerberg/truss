@@ -30,7 +30,10 @@ let of_declaration snapshot packages pipeline (names : Names.lookups)
             in_scope = hole.scope;
             blocks = [];
           })
-        (Inspect.holes spans definition resolved (Pipeline.tables pipeline key))
+        (Inspect.holes spans definition resolved
+           (Option.map
+              (fun (checked : Infer.checked) -> checked.tables)
+              (Pipeline.read_checked_body pipeline key)))
   | _ -> []
 
 let gather snapshot packages pipeline paths =

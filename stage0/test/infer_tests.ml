@@ -20,7 +20,7 @@ let expression_at text written occurrence =
           ( (Support.names database key.module_.package).definition key,
             (Support.names database key.module_.package).spans key,
             (Support.names database key.module_.package).place key,
-            Pipeline.For_testing.checked_body (pipeline database) key )
+            Pipeline.read_checked_body (pipeline database) key )
         with
         | Some definition, Some spans, Some { base; _ }, Some result ->
             let best = ref None in
@@ -527,7 +527,7 @@ let () =
           Resolve.Names.key_of
             (List.hd (Support.declarations database (Support.module_of "app::main")))
         in
-        Pipeline.For_testing.checked_body (pipeline database) key
+        Pipeline.read_checked_body (pipeline database) key
       in
       if type_check_result () <> type_check_result () then fail "different")
 
@@ -539,8 +539,7 @@ let () =
           List.iter
             (fun (declaration : Resolve.Names.declaration) ->
               match
-                Pipeline.For_testing.checked_body (pipeline database)
-                  (Resolve.Names.key_of declaration)
+                Pipeline.read_checked_body (pipeline database) (Resolve.Names.key_of declaration)
               with
               | Some { tables; _ } ->
                   List.iter

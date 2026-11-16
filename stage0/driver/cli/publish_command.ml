@@ -143,14 +143,15 @@ let decide pipeline snapshot registry (package : Path.package) =
           match Database.published name version with
           | Error message -> Refused [ message ]
           | Ok published ->
-              let before = Pipeline.interface_lookups (Database.pipeline published) [ name ]
-              and after = Pipeline.interface_lookups pipeline [ name ] in
-              let changes = Compatibility.compare ~before ~after name in
+              let published_pipeline = Database.pipeline published in
+              let changes = Compatibility.compare ~before:published_pipeline ~after:pipeline name in
+              let before = Pipeline.names published_pipeline [ name ]
+              and after = Pipeline.names pipeline [ name ] in
               let breaks =
                 List.map
                   (fun (path, description) ->
-                    let was = Signatures.of_path before.names path
-                    and now = Signatures.of_path after.names path in
+                    let was = Signatures.of_path before path
+                    and now = Signatures.of_path after path in
                     String.concat ""
                       (Printf.sprintf "%s %s." (Path.show path) description
                       ::

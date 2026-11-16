@@ -94,7 +94,11 @@ let occurrences pipeline snapshot packages =
             (names.place key, names.definition key, names.spans key, Pipeline.resolved pipeline key)
           with
           | Some { file; base }, Some definition, Some spans, Some resolved ->
-              let tables = Pipeline.tables pipeline key in
+              let tables =
+                Option.map
+                  (fun (checked : Infer.checked) -> checked.tables)
+                  (Pipeline.read_checked_body pipeline key)
+              in
               List.map
                 (fun ({ span; target } : References.occurrence) ->
                   (file, Source.Definition_span.to_file ~base span, target))
