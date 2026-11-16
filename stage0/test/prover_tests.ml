@@ -26,19 +26,18 @@ let message text =
       Printf.sprintf "%d diagnostics: %s" (List.length actual)
         (String.concat "; " (Support.codes actual))
 
-let contains = Substring.contains
-
 let () =
   Harness.test "an addition that can overflow" (fun () ->
       not_proven Fixtures.Prover.addition_that_can_overflow "prover.overflow");
   Harness.test "an overflow's counterexample names the value" (fun () ->
       let actual = message Fixtures.Prover.addition_that_can_overflow in
-      if not (contains actual "`count` is 255") then Harness.fail "message %S" actual);
+      if not (String.includes ~affix:"`count` is 255" actual) then Harness.fail "message %S" actual);
   Harness.test "code generic over an integer trait is proven for each type that implements it"
     (fun () ->
       proven Fixtures.Prover.twice_of_a_signed_integer;
       let actual = message Fixtures.Prover.twice_of_an_unsigned_integer in
-      if not (contains actual "`Number` is `UInt8`") then Harness.fail "message %S" actual);
+      if not (String.includes ~affix:"`Number` is `UInt8`" actual) then
+        Harness.fail "message %S" actual);
   Harness.test "a requires rules out the overflow" (fun () ->
       proven Fixtures.Prover.increment_bounded_by_the_requires);
   Harness.test
@@ -290,7 +289,7 @@ let () =
       not_proven (shape ^ Fixtures.Prover.circle_radius_squared) "prover.overflow");
   Harness.test "a counterexample shows a variant by its name" (fun () ->
       let actual = message (shape ^ Fixtures.Prover.circle_radius_plus_one) in
-      if not (contains actual "`shape` is Circle(radius: 9223372036854775807)") then
+      if not (String.includes ~affix:"`shape` is Circle(radius: 9223372036854775807)" actual) then
         Harness.fail "message %S" actual);
   Harness.test "a requires can match on a parameter" (fun () ->
       proven (shape ^ Fixtures.Prover.requires_matching_a_shape));
@@ -633,7 +632,7 @@ let () =
       not_proven Fixtures.Prover.float_points_equal_and_identical "prover.ensures");
   Harness.test "a float counterexample is written as Truss writes floats" (fun () ->
       let actual = message Fixtures.Prover.float_times_zero in
-      if not (contains actual "infinity" || contains actual "NaN") then
+      if not (String.includes ~affix:"infinity" actual || String.includes ~affix:"NaN" actual) then
         Harness.fail "message %S" actual)
 
 let dice = Fixtures.Prover.dice
@@ -673,7 +672,7 @@ let () =
       not_proven (dice ^ Fixtures.Prover.loaded_dice_rolling_nine) "prover.ensures");
   Harness.test "a capability's broken contract is named as the capability's" (fun () ->
       let actual = message (dice ^ Fixtures.Prover.loaded_dice_rolling_nine) in
-      if not (contains actual "The capability's `result >= 1 && result <= 6`") then
+      if not (String.includes ~affix:"The capability's `result >= 1 && result <= 6`" actual) then
         Harness.fail "found: %s" actual);
   Harness.test "an implementation of a capability that keeps its contract proves" (fun () ->
       proven (dice ^ Fixtures.Prover.fair_dice));
@@ -1020,8 +1019,11 @@ let () =
 let () =
   Harness.test "a callee's clause in another file is named by its file and line" (fun () ->
       let actual = message Fixtures.Prover.first_element_of_a_list in
-      if not (contains actual "The clause that must hold is at `standard/list/list.truss:") then
-        Harness.fail "message %S" actual)
+      if
+        not
+          (String.includes ~affix:"The clause that must hold is at `standard/list/list.truss:"
+             actual)
+      then Harness.fail "message %S" actual)
 
 let () =
   Harness.test "an insertion into a set of integers is amortized in its length" (fun () ->
@@ -1129,16 +1131,17 @@ let () =
       | actual -> Harness.fail "%d diagnostics" (List.length actual));
   Harness.test "an overflow names the fixes that change the code's semantics" (fun () ->
       let actual = message Fixtures.Prover.next_count in
-      if not (contains actual "checked operation") then Harness.fail "message %S" actual)
+      if not (String.includes ~affix:"checked operation" actual) then
+        Harness.fail "message %S" actual)
 
 let () =
   Harness.test "a counterexample says which way each if on its path goes" (fun () ->
       let actual = message Fixtures.Prover.step_up_or_down in
-      if not (contains actual "On that path, `up` is true, `count > 100` is true.") then
-        Harness.fail "message %S" actual);
+      if not (String.includes ~affix:"On that path, `up` is true, `count > 100` is true." actual)
+      then Harness.fail "message %S" actual);
   Harness.test "a counterexample says which arm of a match its path takes" (fun () ->
       let actual = message Fixtures.Prover.bump_of_an_option in
-      if not (contains actual "On that path, the arm `Some(count)` is taken.") then
+      if not (String.includes ~affix:"On that path, the arm `Some(count)` is taken." actual) then
         Harness.fail "message %S" actual)
 
 let () =
@@ -1190,7 +1193,8 @@ let () =
       match check packages (Support.file_of "app::main") with
       | [ ({ notes = [ (cited, _) ]; _ } : Diagnostic.t) ] ->
           let quoted = String.sub text cited.start (cited.stop - cited.start) in
-          if not (contains quoted "(bits & 15) < 8") then Harness.fail "cites %S" quoted
+          if not (String.includes ~affix:"(bits & 15) < 8" quoted) then
+            Harness.fail "cites %S" quoted
       | actual -> Harness.fail "%s" (String.concat ", " (Support.codes actual)))
 
 let early_return ensures =
@@ -1208,7 +1212,7 @@ let () =
 let () =
   Harness.test "a counterexample gives the values of the locals where it fails" (fun () ->
       let text = message Fixtures.Prover.element_read_at_a_branch_local in
-      if not (contains text "`at` is") then Harness.fail "%s" text);
+      if not (String.includes ~affix:"`at` is" text) then Harness.fail "%s" text);
   Harness.test "a file's proof states list proven and unproven obligations" (fun () ->
       let packages =
         Support.setup [ ("app::main", Fixtures.Prover.element_sum_with_one_unchecked_index) ]
@@ -1369,7 +1373,7 @@ let () =
       with
       | Obligations { obligations = [ obligation ]; _ } ->
           let text = Logic.show_query obligation.query in
-          if contains text "count" then Harness.fail "the text names `count`: %s" text
+          if String.includes ~affix:"count" text then Harness.fail "the text names `count`: %s" text
       | _ -> Harness.fail "expected one obligation");
   Harness.test "renaming a function and its parameter gives the same query" (fun () ->
       let key_of text =
@@ -1435,14 +1439,7 @@ let () =
             List.fold_left
               (fun most (obligation : Prover.State.obligation) ->
                 let text = Logic.show_query obligation.query in
-                let rec count from actual =
-                  match String.index_from_opt text from '1' with
-                  | Some at when at + 5 <= String.length text && String.sub text at 5 = "12345" ->
-                      count (at + 5) (actual + 1)
-                  | Some at -> count (at + 1) actual
-                  | None -> actual
-                in
-                max most (count 0 0))
+                max most (String.find_all ~sub:"12345" (fun _ matches -> matches + 1) text 0))
               0 obligations
         | _ ->
             Harness.fail "expected obligations";
@@ -1487,7 +1484,8 @@ let () =
   let positive term = Operation (">", [ term; int 0 ]) in
   let expect fact fragment =
     let text = triggered fact in
-    if not (contains text fragment) then Harness.fail "expected %s in %s" fragment text
+    if not (String.includes ~affix:fragment text) then
+      Harness.fail "expected %s in %s" fragment text
   in
   Harness.test "a quantified fact triggers on an application of its variable" (fun () ->
       expect
@@ -1501,7 +1499,7 @@ let () =
           (forall
              ([ (variable "i", Int) ], positive (applied_f (Operation ("+", [ i_term; int 1 ])))))
       in
-      if contains text ":pattern" then Harness.fail "%s" text);
+      if String.includes ~affix:":pattern" text then Harness.fail "%s" text);
   Harness.test "a trigger that would match its own body's larger term is passed over" (fun () ->
       expect
         (forall
@@ -1516,8 +1514,10 @@ let () =
              ( [ (variable "i", Int) ],
                equal (applied_f i_term) (Operation ("+", [ applied_g i_term; int 1 ])) ))
       in
-      if (not (contains text ":pattern ((x0 b0)))")) || contains text ":pattern ((x1" then
-        Harness.fail "%s" text);
+      if
+        (not (String.includes ~affix:":pattern ((x0 b0)))" text))
+        || String.includes ~affix:":pattern ((x1" text
+      then Harness.fail "%s" text);
   let query fact =
     {
       declarations =
@@ -1548,14 +1548,7 @@ let () =
            ( [ (variable "i", Int); (variable "j", Int) ],
              Operation ("<", [ applied_f i_term; applied_g j_term ]) ))
         ":pattern ((x0 b0) (x2 b1))");
-  let patterns text =
-    let rec count occurrence =
-      match Substring.For_testing.find ~occurrence text ":pattern" with
-      | Some _ -> count (occurrence + 1)
-      | None -> occurrence - 1
-    in
-    count 1
-  in
+  let patterns text = String.find_all ~sub:":pattern" (fun _ matches -> matches + 1) text 0 in
   Harness.test
     "transitivity triggers on all three of its applications, so it makes no matching loop"
     (fun () ->
@@ -1569,7 +1562,9 @@ let () =
              ( [ (variable "i", Int); (variable "j", Int); (variable "k", Int) ],
                at_most i_term j_term &&& at_most j_term k_term ==> at_most i_term k_term ))
       in
-      if patterns text <> 1 || not (contains text ":pattern ((x2 b0 b1) (x2 b0 b2) (x2 b1 b2))")
+      if
+        patterns text <> 1
+        || not (String.includes ~affix:":pattern ((x2 b0 b1) (x2 b0 b2) (x2 b1 b2))" text)
       then Harness.fail "%s" text);
   Harness.test "an equation between two applications triggers on either" (fun () ->
       let text =

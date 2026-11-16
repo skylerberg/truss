@@ -131,10 +131,10 @@ let () =
       let square = "public type Square(side: Int64)\n" in
       let with_impl = square ^ Fixtures.Compatibility.default_impl_for_square in
       (match show (changes with_impl square) with
-      | [ actual ] when Substring.contains actual "was removed: the `impl` of" -> ()
+      | [ actual ] when String.includes ~affix:"was removed: the `impl` of" actual -> ()
       | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
       match show (changes square with_impl) with
-      | [ actual ] when Substring.contains actual "is new: the `impl` of" -> ()
+      | [ actual ] when String.includes ~affix:"is new: the `impl` of" actual -> ()
       | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
   Harness.test "an impl whose associated capability set gains a capability breaks" (fun () ->
       let feed uses =
@@ -155,14 +155,14 @@ let () =
       let gains = show (changes (feed "") (feed "  capability Uses = Clock\n")) in
       (match gains with
       | [ actual ]
-        when Substring.For_testing.find actual "breaks:" = Some 0
-             && Substring.contains actual "added `Clock` to its `Uses`" ->
+        when String.starts_with ~prefix:"breaks:" actual
+             && String.includes ~affix:"added `Clock` to its `Uses`" actual ->
           ()
       | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
       (match show (changes (feed "  capability Uses = Clock\n") (feed "")) with
       | [ actual ]
-        when Substring.For_testing.find actual "grows:" = Some 0
-             && Substring.contains actual "removed capabilities from its `Uses`" ->
+        when String.starts_with ~prefix:"grows:" actual
+             && String.includes ~affix:"removed capabilities from its `Uses`" actual ->
           ()
       | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
       expect (feed "  capability Uses = Clock\n") (feed "  capability Uses = Clock\n") []);

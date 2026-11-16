@@ -1,6 +1,7 @@
 val module_of : string -> Path.module_
 val top : string -> string -> Path.t
 val file_of : string -> Path.file
+val find_occurrence : sub:string -> occurrence:int -> string -> int
 val setup : ?dependencies:(string * string) list -> (string * string) list -> Project.package list
 
 val with_dependencies :

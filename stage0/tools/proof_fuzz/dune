@@ -10,7 +10,6 @@
   lexer
   documents
   file_system
-  substring
   workspace
   resolve
   types
