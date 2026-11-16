@@ -1923,7 +1923,7 @@ The database stores three relationships:
 |---|---|---|
 | A part read a part of another definition | The lookup that answered the read | Propagation, when the part read changes. The tools that list a definition's dependents and dependencies. The tests and `main` that a type defined as `todo` blocks. |
 | A definition's lowered code refers to an instance | The stage that lowered it, in its output | Test keys, which hash the code a test reaches |
-| A function's MIR calls a function, names it as a value, passes an `impl` to a bound, or runs a field default or an invariant that does | The stage that built the MIR, in its output | Recursion groups, lowering's check of each call it emits, and the tests and `main` that a `todo` in a body blocks |
+| A function's MIR calls a function, names it as a value, passes an `impl` to a bound, or runs a field default or an invariant that does | The MIR call edges stage, from the MIR | Recursion groups, lowering's check of each call it emits, and the tests and `main` that a `todo` in a body blocks |
 
 ### Propagation
 

@@ -74,7 +74,7 @@ type package_database = {
   body_parts : (Names.key, Mir.body_part part) Hashtbl.t;
   contract_parts : (Names.key, Mir.contract_part part) Hashtbl.t;
   generated_parts : (Mir.body_part * Mir.contract_part) part Path_table.t;
-  call_edges : Path.t list part Path_table.t;
+  mir_call_edges : Path.t list part Path_table.t;
   patterns : (Names.key, unit part) Hashtbl.t;
   usage : (Names.key, unit part) Hashtbl.t;
   ownership : (Names.key, (Core.origin * Core.origin) list part) Hashtbl.t;
@@ -130,7 +130,7 @@ let make_empty_package_database name ~dependencies =
     body_parts = Hashtbl.create 256;
     contract_parts = Hashtbl.create 256;
     generated_parts = Path_table.create 16;
-    call_edges = Path_table.create 256;
+    mir_call_edges = Path_table.create 256;
     patterns = Hashtbl.create 64;
     usage = Hashtbl.create 64;
     ownership = Hashtbl.create 64;
@@ -259,7 +259,7 @@ let copy_package_database (package_database : package_database) =
     body_parts = Hashtbl.copy package_database.body_parts;
     contract_parts = Hashtbl.copy package_database.contract_parts;
     generated_parts = Path_table.copy package_database.generated_parts;
-    call_edges = Path_table.copy package_database.call_edges;
+    mir_call_edges = Path_table.copy package_database.mir_call_edges;
     patterns = Hashtbl.copy package_database.patterns;
     usage = Hashtbl.copy package_database.usage;
     ownership = Hashtbl.copy package_database.ownership;
@@ -691,7 +691,7 @@ let package_parts database (names : Names.lookups) package : Part.computed list 
       (fun path -> [ Part.Derived_form path; Generated_mir path ])
       (list_derived_methods names package)
   @ List.concat_map
-      (fun path -> [ Part.Call_edges path; Callees (path, package) ])
+      (fun path -> [ Part.Mir_call_edges path; Call_edges (path, package) ])
       (List.sort_uniq Path.compare paths)
   @ List.map
       (fun dependency -> Part.Grant (package, dependency))
@@ -745,9 +745,9 @@ let mir_lookups database note : Mir.lookups =
 let call_edge_lookups database note : Mir.Call_edges.lookups =
   { interface = interface_lookups database note ~is_checked:true; mir = mir_lookups database note }
 
-let read_call_edges database note path =
-  read database note (Call_edges path);
-  match Path_table.find_opt (owner database (Path.package path)).call_edges path with
+let read_mir_call_edges database note path =
+  read database note (Mir_call_edges path);
+  match Path_table.find_opt (owner database (Path.package path)).mir_call_edges path with
   | Some part -> part
   | None -> Blocked
 
@@ -806,12 +806,12 @@ let import_diagnostics database note (file : Path.file) =
     ~text:(Source.text (source database file))
     ~used:(used_imports database note file)
 
-let list_callees database note ~viewer path =
-  match read_call_edges database note path with
+let list_call_edges database note ~viewer path =
+  match read_mir_call_edges database note path with
   | Failed _ | Blocked -> None
-  | Value call_edges -> (
+  | Value mir_call_edges -> (
       match Mir.Call_edges.list_implementations (call_edge_lookups database note) ~viewer path with
-      | implementations -> Some (List.sort_uniq Path.compare (call_edges @ implementations))
+      | implementations -> Some (List.sort_uniq Path.compare (mir_call_edges @ implementations))
       | exception Reads_failed_part -> None)
 
 let recursion_group database note path =
@@ -996,8 +996,8 @@ let stored database (part : Part.stored) =
           keyed ~is_failed:failed (fun package_database -> package_database.contract_parts) key
       | Generated_mir path ->
           at_path ~is_failed:failed (fun package_database -> package_database.generated_parts) path
-      | Call_edges path ->
-          at_path ~is_failed:failed (fun package_database -> package_database.call_edges) path
+      | Mir_call_edges path ->
+          at_path ~is_failed:failed (fun package_database -> package_database.mir_call_edges) path
       | Patterns key ->
           keyed ~is_failed:failed (fun package_database -> package_database.patterns) key
       | Usage key -> keyed ~is_failed:failed (fun package_database -> package_database.usage) key
@@ -1007,16 +1007,16 @@ let stored database (part : Part.stored) =
           keyed ~is_failed:failed (fun package_database -> package_database.used_packages) key
       | Package_check (_, check) ->
           keyed ~is_failed:failed (fun package_database -> package_database.package_checks) check
-      | Callees (path, viewer) ->
-          let callees database =
+      | Call_edges (path, viewer) ->
+          let call_edges database =
             Option.bind (Hashtbl.find_opt database.graphs viewer) (fun graph ->
                 Call_graph.successors graph path)
           in
           {
             is_failed = false;
             remove = (fun () -> Call_graph.remove_successors (call_graph database viewer) path);
-            is_equal_in = (fun other -> callees other = callees database);
-            saved = (fun () -> Option.map marshalled (callees database));
+            is_equal_in = (fun other -> call_edges other = call_edges database);
+            saved = (fun () -> Option.map marshalled (call_edges database));
             restore =
               (fun bytes ->
                 ignore
@@ -1264,13 +1264,13 @@ let compute_namespace database (package_database : package_database) =
   let graph = call_graph database package in
   List.iter
     (function
-      | Part.Callees (root, _) as part when not (is_implied part) ->
+      | Part.Call_edges (root, _) as part when not (is_implied part) ->
           Call_graph.remove_root graph root
       | _ -> ())
     implied_before;
   List.iter
     (function
-      | Part.Callees (root, _) as part when not (was_implied part) ->
+      | Part.Call_edges (root, _) as part when not (was_implied part) ->
           ignore (Call_graph.add_root graph root)
       | _ -> ())
     implied;
@@ -1474,8 +1474,8 @@ let compute_part database (part : Part.computed) =
                         path form )
               | Failed _ | Blocked -> Blocked)
             (Path_table.find_opt package_database.derived_forms path))
-  | Call_edges path ->
-      into (at_path package_database.call_edges path) (fun note ->
+  | Mir_call_edges path ->
+      into (at_path package_database.mir_call_edges path) (fun note ->
           Some (computed (Mir.Call_edges.of_path (call_edge_lookups database note)) path))
   | Patterns key ->
       into (keyed package_database.patterns key) (fun note ->
@@ -1500,19 +1500,19 @@ let compute_part database (part : Part.computed) =
   | Package_check (package, check) ->
       into (keyed package_database.package_checks check) (fun note ->
           Some (computed (Package_checks.run (package_checks_lookups database note) package) check))
-  | Callees (path, viewer) ->
+  | Call_edges (path, viewer) ->
       let graph = call_graph database viewer in
       into
         {
           stored = Call_graph.successors graph path;
           replace =
-            (fun callees ->
+            (fun call_edges ->
               List.iter
-                (fun node -> mark_stale database (Callees (node, viewer)))
-                (Call_graph.set_successors graph path callees));
+                (fun node -> mark_stale database (Call_edges (node, viewer)))
+                (Call_graph.set_successors graph path call_edges));
           remove = (fun () -> Call_graph.remove_successors graph path);
         }
-        (fun note -> Some (list_callees database note ~viewer path))
+        (fun note -> Some (list_call_edges database note ~viewer path))
   | Proof key ->
       into (keyed package_database.proofs key) (fun note ->
           Some (computed (Prover.proof (proof_lookups database note)) key));
@@ -1588,7 +1588,7 @@ let update_groups database package =
       let { Call_graph.touched; removed } = Call_graph.update graph in
       List.iter
         (fun node ->
-          let part = Part.Callees (node, package) in
+          let part = Part.Call_edges (node, package) in
           mark_unsaved database (Value (Computed part));
           discard database part)
         removed;
@@ -1851,7 +1851,7 @@ let list_stored_parts (package_database : package_database) : Part.stored list =
            keyed package_database.body_parts (fun key -> Part.Body_mir key);
            keyed package_database.contract_parts (fun key -> Part.Contract_mir key);
            at_paths package_database.generated_parts (fun path -> Part.Generated_mir path);
-           at_paths package_database.call_edges (fun path -> Part.Call_edges path);
+           at_paths package_database.mir_call_edges (fun path -> Part.Mir_call_edges path);
            keyed package_database.patterns (fun key -> Part.Patterns key);
            keyed package_database.usage (fun key -> Part.Usage key);
            keyed package_database.ownership (fun key -> Part.Ownership key);
@@ -2090,7 +2090,8 @@ let restore_namespaces database =
         in
         let graph = call_graph database name in
         List.iter
-          (function Part.Callees (root, _) -> ignore (Call_graph.add_root graph root) | _ -> ())
+          (function
+            | Part.Call_edges (root, _) -> ignore (Call_graph.add_root graph root) | _ -> ())
           implied
       end)
     (in_dependency_order database database.project)
@@ -2373,7 +2374,7 @@ let check_calls database interface viewers key = function
           Option.iter
             (fun graph ->
               Compile.check_calls interface
-                ~list_callees:(fun path -> Option.join (Call_graph.successors graph path))
+                ~list_call_edges:(fun path -> Option.join (Call_graph.successors graph path))
                 key lowered)
             (Hashtbl.find_opt database.graphs viewer))
         viewers

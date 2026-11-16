@@ -44,14 +44,14 @@ type computed =
   | Body_mir of Resolve.Names.key
   | Contract_mir of Resolve.Names.key
   | Generated_mir of Path.t
-  | Call_edges of Path.t
+  | Mir_call_edges of Path.t
   | Patterns of Resolve.Names.key
   | Usage of Resolve.Names.key
   | Ownership of Resolve.Names.key
   | Used_packages of Resolve.Names.key
   | Import_check of Path.file
   | Package_check of Path.package * Package_checks.check
-  | Callees of Path.t * Path.package
+  | Call_edges of Path.t * Path.package
   | Proof of Resolve.Names.key
   | Lowering of lowering
 
