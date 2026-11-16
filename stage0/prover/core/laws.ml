@@ -44,7 +44,7 @@ let law_frame frame source ~substitution (law : Mir.law) terms =
   let locals, types =
     List.fold_left2
       (fun (locals, types_) ((local, _), ty) term ->
-        (Locals.add local term locals, Locals.add local ty types_))
+        (Locals.add (Core_local local) term locals, Locals.add (Core_local local) ty types_))
       (Locals.empty, Locals.empty)
       (List.combine law.parameters types)
       terms

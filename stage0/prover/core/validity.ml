@@ -170,7 +170,7 @@ let callback_arguments context frame inputs =
 let callback_contract_frame (frame : State.frame) inputs arguments =
   let locals =
     List.fold_left2
-      (fun locals (input, _) term -> Locals.add input term locals)
+      (fun locals (input, _) term -> Locals.add (Core_local input) term locals)
       frame.old_locals inputs arguments
   in
   { frame with locals; self = frame.old_self; makes_obligations = false }
@@ -194,7 +194,7 @@ let check_callback_contract context frame location ~name inputs requires argumen
     requires
 
 let escaping_callback context frame local =
-  match (own_callback context local, Facts.local_type context frame local) with
+  match (own_callback context local, Facts.local_type context frame (Core_local local)) with
   | ( Some (name, ({ inputs; requires = _ :: _ as requires } : Mir.callback)),
       Some (Types.Function function_type) )
     when List.length inputs = List.length function_type.inputs ->
@@ -218,7 +218,9 @@ let part_frame frame (part : State.part) ~arguments ~substitution =
         match (parameter.local, List.assoc_opt position arguments) with
         | Self, Some term -> (locals, types, Some (term, parameter.type_))
         | local, Some term ->
-            (Locals.add local term locals, Locals.add local parameter.type_ types, self)
+            ( Locals.add (Core_local local) term locals,
+              Locals.add (Core_local local) parameter.type_ types,
+              self )
         | _, None -> (locals, types, self))
       (Locals.empty, Locals.empty, None)
       (List.mapi (fun position parameter -> (position, parameter)) part.parameters)
@@ -270,7 +272,7 @@ let callback_facts (context : State.context) frame (invocation : Invocation.t) p
                   inside with
                   locals =
                     List.fold_left2
-                      (fun locals (local, _) term -> Locals.add local term locals)
+                      (fun locals (local, _) term -> Locals.add (Core_local local) term locals)
                       inside.locals inputs arguments;
                 }
               in

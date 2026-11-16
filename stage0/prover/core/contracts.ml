@@ -29,8 +29,7 @@ let trait_substitution (lookups : Lookups.t) (trait : Types.trait_reference) (ty
     | generic :: generics, argument :: arguments -> (generic, argument) :: pair generics arguments
     | _ -> []
   in
-  ({ Types.owner = trait.trait; name = "Self" }, Types.Type ty)
-  :: pair generics trait.trait_arguments
+  (Types.make_self_parameter trait.trait, Types.Type ty) :: pair generics trait.trait_arguments
 
 let part_of ?(inherited = false) (lookups : Lookups.t) path callee =
   Option.map
@@ -183,7 +182,9 @@ let resource_of (cost : Mir.cost) ~locals : Costs.resource option =
   | Allocations -> Some Allocations
   | Allocated_bytes -> Some Allocated_bytes
   | Calls (Function_parameter local) ->
-      Option.map (fun term -> Costs.Calls (Through term)) (Locals.find_opt local locals)
+      Option.map
+        (fun term -> Costs.Calls (Through term))
+        (Locals.find_opt (Core_local local) locals)
   | Calls (Capability path) -> Some (Calls (Capability path))
   | Calls (Capability_method (path, name)) -> Some (Calls (Capability_method (path, name)))
 

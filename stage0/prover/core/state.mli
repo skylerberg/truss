@@ -76,9 +76,9 @@ type frame = {
 }
 
 type changed = {
-  changed_locals : Core.local list;
+  changed_locals : Locals.local list;
   changes_self : bool;
-  reassigned : Core.local list;
+  reassigned : Locals.local list;
 }
 
 type place_value = One of Logic.term | Run of Logic.term * Logic.term
@@ -129,7 +129,7 @@ type context = {
   mutable obligations : obligation list;
   mutable fresh : int;
   mutable values : (Logic.symbol * string) list;
-  local_names : (Core.local, string) Hashtbl.t;
+  local_names : (Locals.local, string) Hashtbl.t;
   mutable returns : (frame * Logic.term option) list;
   mutable lent_back : (Types.ty * Logic.term * Logic.term) list;
   mutable instantiating : Path.t list;

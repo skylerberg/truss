@@ -1,6 +1,6 @@
 let make_trait_substitution (interface : Types.trait_interface) ~self
     (reference : Types.trait_reference) : Types.substitution =
-  (({ owner = reference.trait; name = "Self" } : Types.parameter), Types.Type self)
+  (Types.make_self_parameter reference.trait, Types.Type self)
   :: Option.value ~default:[]
        (Types.make_substitution interface.trait_generics reference.trait_arguments)
 
