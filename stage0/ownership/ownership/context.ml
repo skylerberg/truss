@@ -47,9 +47,7 @@ let stores_function context (callee : Mir.callee) position =
   | _ -> List.exists declared (callee_signatures context callee)
 
 let span context (origin : Core.origin) : Source.Definition_span.t =
-  let spans = Lazy.force context.spans in
-  if origin >= 0 && origin < Array.length spans then spans.(origin)
-  else Source.Definition_span.make 0 0
+  Source.Definition_span.locate (Lazy.force context.spans) origin
 
 let report context ?(fixes = []) ?(notes = []) code (at : Source.Definition_span.t) message =
   let is_reported =

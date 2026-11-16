@@ -634,13 +634,9 @@ let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                           let spans = lookups.interface.names.spans key in
                           let text = lookups.interface.names.text key in
                           let quoted (origin : Core.origin) =
-                            if origin >= 0 && origin < Array.length spans then
-                              let span = spans.(origin) in
-                              if span.stop > span.start && span.stop <= String.length text then
-                                with_single_spaces
-                                  (String.sub text span.start (span.stop - span.start))
-                              else "its type's invariant"
-                            else "its type's invariant"
+                            with_single_spaces
+                              (Source.Definition_span.quote text
+                                 (Source.Definition_span.locate spans origin))
                           in
                           List.mapi
                             (fun index (invariant : Core.condition) ->

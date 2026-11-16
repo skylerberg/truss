@@ -2570,7 +2570,7 @@ module For_testing = struct
               Option.map
                 (fun (checked : Infer.checked) -> checked.form)
                 (read_checked_body database key)
-          | Generated -> read_derived_form database path))
+          | Derived _ -> read_derived_form database path))
 
   let make_mir_lookups database package =
     drain database ~through:Mir [ package ];

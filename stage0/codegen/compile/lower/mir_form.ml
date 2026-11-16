@@ -8,13 +8,13 @@ let mir st =
 
 let mir_of context path : Mir.Graph.t =
   match Mir.graph_of_path context.lookups.mir path with
-  | Some mir -> mir
+  | Some { form; _ } -> form
   | None -> bug "%s has no MIR" (Path.show path)
 
-let parameter_defaults context path : (int * Mir.Graph.t) list =
+let parameter_defaults context path : (int * Mir.Graph.t) list Mir.sourced =
   match Mir.default_graphs_of_path context.lookups.mir path with
-  | Some (Parameter_defaults defaults) -> defaults
-  | Some (Field_defaults _) | None -> bug "%s is not a function" (Path.show path)
+  | Some { source; form = Parameter_defaults defaults } -> { source; form = defaults }
+  | Some { form = Field_defaults _; _ } | None -> bug "%s is not a function" (Path.show path)
 
 let parameter_of (body : Mir.Graph.body) local =
   match body.locals.(local) with
@@ -22,11 +22,7 @@ let parameter_of (body : Mir.Graph.body) local =
   | _ -> bug "a parameter that is no source local"
 
 let spans st = (require_written st).spans
-
-let site_of st (origin : Core.origin) =
-  let spans = spans st in
-  if origin >= 0 && origin < Array.length spans then site st spans.(origin)
-  else site st (Source.Definition_span.make 0 0)
+let site_of st (origin : Core.origin) = site st (Source.Definition_span.locate (spans st) origin)
 
 let reported_site st : Lowered.operand option =
   match st.frame.mir with
@@ -705,21 +701,21 @@ let intrinsic st ?reported (operation : Intrinsic.operation) ~type_arguments
       Intrinsics.lower ~checks:st.context.checks ~value_arguments ?reported st.context.env
         st.builder st.context.types operation ~type_arguments arguments ~destination ~site
 
-let field_default st (ty : Ground.ty) ~variant ~field : Types.ty * Mir.Graph.t =
+let field_default st (ty : Ground.ty) ~variant ~field : Mir.Graph.t Mir.field_default Mir.sourced =
   let path =
     match ty with Named { path; _ } -> path | _ -> bug "defaults of %s" (Ground.to_string ty)
   in
   match Mir.default_graphs_of_path st.context.lookups.mir path with
-  | Some (Field_defaults defaults) -> (
+  | Some { source; form = Field_defaults defaults } -> (
       match
         List.find_opt
           (fun (default : Mir.Graph.t Mir.field_default) ->
             default.variant = variant && default.field = field)
           defaults
       with
-      | Some default -> (default.type_, default.value)
+      | Some default -> { source; form = default }
       | None -> bug "%s has no default for %s" (Path.show path) field)
-  | Some (Parameter_defaults _) | None -> bug "%s is not a type" (Path.show path)
+  | Some { form = Parameter_defaults _; _ } | None -> bug "%s is not a type" (Path.show path)
 
 let tasks_call st name ?result (places : Lowered.place list) : Lowered.statement =
   let capability = Well_known.path Tasks in
@@ -1348,11 +1344,11 @@ and into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.place) ty ~or
   | Specification _ -> bug "a specification's expression in code that runs"
 
 and field_default_place st ty ~variant ~field =
-  let type_, value = field_default st ty ~variant ~field in
-  in_type_definition st ty (fun () ->
-      let default_ty = ground st type_ in
+  let { Mir.source; form = default } = field_default st ty ~variant ~field in
+  in_type_definition st ~source ty (fun () ->
+      let default_ty = ground st default.type_ in
       let place = temporary st default_ty in
-      mir_into st value place;
+      mir_into st default.value place;
       (place, default_ty))
 
 and mir_into ?(arguments = []) st (expression_mir : Mir.Graph.t) (destination : Lowered.place) =
@@ -1463,7 +1459,6 @@ and capability_defaults st ~capability ~name (arguments : Mir.argument list) eva
       | None -> bug "no interface for %s" (Path.show capability)
     in
     let defaults = parameter_defaults st.context (Method { owner = capability; name; receiver }) in
-    let key = key_of st.context capability in
     let caller = st.frame in
     st.frame <-
       {
@@ -1471,8 +1466,8 @@ and capability_defaults st ~capability ~name (arguments : Mir.argument list) eva
         code =
           {
             caller.code with
-            definition = capability;
-            written = Some (read_written st.context key);
+            definition = defaults.source.path;
+            written = Some (read_written st.context defaults.source);
             enclosing_impl = None;
             substitution = [];
           };
@@ -1480,7 +1475,7 @@ and capability_defaults st ~capability ~name (arguments : Mir.argument list) eva
       };
     List.iteri
       (fun position ((argument : Mir.argument), (_, ty, place)) ->
-        match (argument, List.assoc_opt position defaults) with
+        match (argument, List.assoc_opt position defaults.form) with
         | Default, Some default ->
             mir_into st default place;
             if not (is_trivial st ty) then
@@ -1505,16 +1500,18 @@ and holds_invariant st ~value ~clause ~destination =
     | Named { path; _ } -> path
     | ty -> bug "holds_invariant of %s, which has no invariant" (Ground.to_string ty)
   in
+  let ({ source; form = clauses } : Mir.type_clauses Mir.sourced) =
+    match Mir.type_clauses_of_path st.context.lookups.mir path with
+    | Some clauses -> clauses
+    | None -> bug "%s has no clauses" (Path.show path)
+  in
   let invariant =
-    match
-      Option.bind (Mir.type_clauses_of_path st.context.lookups.mir path)
-        (fun (clauses : Mir.type_clauses) -> List.nth_opt clauses.invariants index)
-    with
+    match List.nth_opt clauses.invariants index with
     | Some { clause; is_executable = true; _ } -> Mir.code_of_formula clause
     | Some { is_executable = false; _ } | None ->
         bug "%s has no clause %d that runs" (Path.show path) index
   in
-  in_type_definition st value_ty (fun () ->
+  in_type_definition st ~source value_ty (fun () ->
       mir_into ~arguments:[ value_place ] st invariant destination)
 
 and lend ?(forwards = 0) st part (call : Mir.call) ~origin =

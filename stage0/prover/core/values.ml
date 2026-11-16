@@ -466,7 +466,7 @@ let constant_type context path =
 
 let constant_value context frame path =
   match (source_at context.lookups path, Mir.initializer_of_path context.lookups.mir path) with
-  | Some (constant_source, _, _), Some code ->
+  | Some (constant_source, _, _), Some { form = code; _ } ->
       let symbol = Symbol.Constant path in
       let empty =
         {
@@ -495,7 +495,7 @@ let field_default context frame (site : Invocation.site) ty variant field =
   match (ty, type_source context ty) with
   | Types.Named { path; _ }, Some source -> (
       match Mir.defaults_of_path context.lookups.mir path with
-      | Some (Field_defaults defaults) -> (
+      | Some { form = Field_defaults defaults; _ } -> (
           match
             List.find_opt
               (fun (default : Mir.t Mir.field_default) ->
@@ -509,7 +509,7 @@ let field_default context frame (site : Invocation.site) ty variant field =
                    ~type_:(substituted context inside default.type_))
           | None ->
               unsupported (span_of frame.source site.origin) "a field left out without a default")
-      | Some (Parameter_defaults _) | None -> bug "a type with no MIR of its defaults")
+      | Some { form = Parameter_defaults _; _ } | None -> bug "a type with no MIR of its defaults")
   | _ -> unsupported (span_of frame.source site.origin) "a default of a type with errors"
 
 let check_built context frame (site : Invocation.site) ty term =

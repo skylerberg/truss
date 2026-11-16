@@ -16,41 +16,42 @@ type lookups = {
   generated_parts : Path.t -> body_part * contract_part;
 }
 
+type 'form sourced = { source : Resolve.Names.key; form : 'form }
+
 let code = function Body code -> Some code.tree | Initializer _ | No_code -> None
 let graph = function Body code -> Some code.graph | Initializer _ | No_code -> None
 
 let body_part_of_path lookups path =
-  match lookups.form_origin path with
-  | Some ((Written key | Inherited key), _) -> lookups.body_part key
-  | Some (Generated, _) -> fst (lookups.generated_parts path)
-  | None -> No_code
+  Option.map
+    (fun ((origin : Infer.form_origin), _) ->
+      match origin with
+      | Written key | Inherited key -> { source = key; form = lookups.body_part key }
+      | Derived type_key -> { source = type_key; form = fst (lookups.generated_parts path) })
+    (lookups.form_origin path)
 
 let contract_part_of_path lookups path =
-  match lookups.form_origin path with
-  | Some ((Written key | Inherited key), _) -> Some (lookups.contract_part key)
-  | Some (Generated, _) -> Some (snd (lookups.generated_parts path))
-  | None -> None
+  Option.map
+    (fun ((origin : Infer.form_origin), _) ->
+      match origin with
+      | Written key | Inherited key -> { source = key; form = lookups.contract_part key }
+      | Derived type_key -> { source = type_key; form = snd (lookups.generated_parts path) })
+    (lookups.form_origin path)
 
-let code_of_path lookups path = code (body_part_of_path lookups path)
-let graph_of_path lookups path = graph (body_part_of_path lookups path)
+let select read sourced = Option.map (fun form -> { sourced with form }) (read sourced.form)
+let of_body_part read lookups path = Option.bind (body_part_of_path lookups path) (select read)
+let code_of_path = of_body_part code
+let graph_of_path = of_body_part graph
 
-let initializer_of_path lookups path =
-  match body_part_of_path lookups path with
-  | Initializer code -> Some code.tree
-  | Body _ | No_code -> None
+let initializer_of_path =
+  of_body_part (function Initializer code -> Some code.tree | Body _ | No_code -> None)
 
-let initializer_graph_of_path lookups path =
-  match body_part_of_path lookups path with
-  | Initializer code -> Some code.graph
-  | Body _ | No_code -> None
+let initializer_graph_of_path =
+  of_body_part (function Initializer code -> Some code.graph | Body _ | No_code -> None)
 
-let of_contract_part read lookups path = Option.bind (contract_part_of_path lookups path) read
+let of_contract_part read lookups path =
+  Option.bind (contract_part_of_path lookups path) (select read)
+
 let contract_of_path = of_contract_part (fun part -> part.contract)
 let defaults_of_path = of_contract_part (fun part -> part.defaults)
 let default_graphs_of_path = of_contract_part (fun part -> part.default_graphs)
 let type_clauses_of_path = of_contract_part (fun part -> part.type_clauses)
-
-let is_generated lookups path =
-  match lookups.form_origin path with
-  | Some (Generated, _) -> true
-  | Some ((Written _ | Inherited _), _) | None -> false

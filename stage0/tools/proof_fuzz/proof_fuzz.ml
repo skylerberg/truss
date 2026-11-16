@@ -64,7 +64,7 @@ let runnable database =
       with
       | ( Some ({ generics = []; receiver = None; uses; output = Returns output; _ } as signature),
           source,
-          Some { requires; _ } )
+          Some { form = { requires; _ }; _ } )
         when uses = Types.no_capabilities
              && integer output <> None
              && List.for_all

@@ -326,13 +326,12 @@ let call_through_any st ~(any_type : Types.trait_reference) ~trait ~name ~(any :
        });
   if not c_signature.returns then unreachable_block st
 
-let in_type_definition st (ty : Ground.ty) nested_function =
+let in_type_definition st ~(source : Names.key) (ty : Ground.ty) nested_function =
   let path, arguments =
     match ty with
     | Named { path; arguments } -> (path, arguments)
     | _ -> bug "defaults of %s" (Ground.to_string ty)
   in
-  let key = key_of st.context path in
   let interface =
     match Interface.Definition.type_interface st.context.lookups.interface path with
     | Some position -> position
@@ -345,8 +344,8 @@ let in_type_definition st (ty : Ground.ty) nested_function =
       code =
         {
           caller.code with
-          definition = path;
-          written = Some (read_written st.context key);
+          definition = source.path;
+          written = Some (read_written st.context source);
           enclosing_impl = None;
           substitution = bind interface.type_generics arguments;
         };

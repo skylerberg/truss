@@ -102,6 +102,10 @@ let () =
     Fixtures.Lowering.capability_method_called_with_arguments_left_to
 
 let () =
+  passes "a capability default with arithmetic is lowered with its method's spans"
+    Fixtures.Lowering.capability_default_with_arithmetic_has_its_methods
+
+let () =
   passes "a slice of a range of a list, of a slice, and with a bound left out"
     Fixtures.Lowering.slice_of_a_range_of_a_list_of_a_slice_and_with_a
 

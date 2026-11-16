@@ -18,9 +18,7 @@ type context = {
 }
 
 let read_span context (origin : Core.origin) : Source.Definition_span.t =
-  let spans = Lazy.force context.spans in
-  if origin >= 0 && origin < Array.length spans then spans.(origin)
-  else Source.Definition_span.make 0 0
+  Source.Definition_span.locate (Lazy.force context.spans) origin
 
 let report context ?(fixes = []) code (span : Source.Definition_span.t) message =
   context.diagnostics <-

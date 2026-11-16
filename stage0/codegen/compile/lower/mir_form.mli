@@ -1,5 +1,5 @@
 val mir_of : Definitions.context -> Path.t -> Mir.Graph.t
-val parameter_defaults : Definitions.context -> Path.t -> (int * Mir.Graph.t) list
+val parameter_defaults : Definitions.context -> Path.t -> (int * Mir.Graph.t) list Mir.sourced
 val parameter_of : Mir.Graph.body -> Mir.local -> Types.mode * string * Types.ty
 
 val mir_into :

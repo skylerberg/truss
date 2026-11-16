@@ -86,12 +86,12 @@ let default_value context frame (part : part) position =
     Option.bind part.callee.key (fun (key : Names.key) ->
         Mir.defaults_of_path context.lookups.mir key.path)
   with
-  | Some (Parameter_defaults defaults) -> (
+  | Some { form = Parameter_defaults defaults; _ } -> (
       match (List.assoc_opt position defaults, List.nth_opt part.parameters position) with
       | Some default, Some parameter ->
           snd (code_value context frame default ~type_:(substituted context frame parameter.type_))
       | _ -> bug "a parameter's default has no MIR")
-  | Some (Field_defaults _) | None -> bug "a callee with no MIR of its defaults"
+  | Some { form = Field_defaults _; _ } | None -> bug "a callee with no MIR of its defaults"
 
 let is_datatype ty = match ty with Types.Named _ -> builtin ty = None | _ -> false
 

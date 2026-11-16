@@ -16,15 +16,16 @@ type lookups = {
   generated_parts : Path.t -> body_part * contract_part;
 }
 
+type 'form sourced = { source : Resolve.Names.key; form : 'form }
+
 val code : body_part -> Tree.t option
 val graph : body_part -> Graph.t option
-val body_part_of_path : lookups -> Path.t -> body_part
-val code_of_path : lookups -> Path.t -> Tree.t option
-val graph_of_path : lookups -> Path.t -> Graph.t option
-val initializer_of_path : lookups -> Path.t -> Tree.t option
-val initializer_graph_of_path : lookups -> Path.t -> Graph.t option
-val contract_of_path : lookups -> Path.t -> Tree.contract option
-val defaults_of_path : lookups -> Path.t -> Tree.t Tree.defaults option
-val default_graphs_of_path : lookups -> Path.t -> Graph.t Tree.defaults option
-val type_clauses_of_path : lookups -> Path.t -> Tree.type_clauses option
-val is_generated : lookups -> Path.t -> bool
+val body_part_of_path : lookups -> Path.t -> body_part sourced option
+val code_of_path : lookups -> Path.t -> Tree.t sourced option
+val graph_of_path : lookups -> Path.t -> Graph.t sourced option
+val initializer_of_path : lookups -> Path.t -> Tree.t sourced option
+val initializer_graph_of_path : lookups -> Path.t -> Graph.t sourced option
+val contract_of_path : lookups -> Path.t -> Tree.contract sourced option
+val defaults_of_path : lookups -> Path.t -> Tree.t Tree.defaults sourced option
+val default_graphs_of_path : lookups -> Path.t -> Graph.t Tree.defaults sourced option
+val type_clauses_of_path : lookups -> Path.t -> Tree.type_clauses sourced option

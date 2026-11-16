@@ -10,6 +10,8 @@ module Definition_span : sig
   val zero_width : int -> t
   val to_file : base:int -> t -> span
   val of_file : base:int -> span -> t
+  val locate : t array -> int -> t
+  val quote : string -> t -> string
 end
 
 type t

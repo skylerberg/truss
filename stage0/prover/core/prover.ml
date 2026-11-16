@@ -192,24 +192,26 @@ let proof (lookups : Lookups.t) (key : Names.key) =
         | Type -> (
             let has_defaults () =
               match Mir.defaults_of_path lookups.mir key.path with
-              | Some (Field_defaults (_ :: _)) -> true
-              | Some (Field_defaults [] | Parameter_defaults _) | None -> false
+              | Some { form = Field_defaults (_ :: _); _ } -> true
+              | Some { form = Field_defaults [] | Parameter_defaults _; _ } | None -> false
             in
             match Mir.type_clauses_of_path lookups.mir key.path with
-            | Some { invariants = _ :: _; _ } ->
+            | Some { form = { invariants = _ :: _; _ }; _ } ->
                 let outcome = Translate.type_ lookups source ~path:key.path in
                 Obligations
                   {
                     outcome with
                     obligations = outcome.obligations @ derived_default lookups key source;
                   }
-            | Some { potential; _ } when Option.is_some potential || has_defaults () ->
+            | Some { form = { potential; _ }; _ } when Option.is_some potential || has_defaults ()
+              ->
                 Obligations (Translate.type_ lookups source ~path:key.path)
             | Some _ | None -> Not_proven_here)
         | Trait | Capability | Member_constant | Law_proof -> Not_proven_here
       with
       | Facts.Unsupported (span, message) -> Unsupported (span, message)
-      | Facts.Foreign_unsupported message -> Unsupported (Source.Definition_span.make 0 0, message))
+      | Facts.Foreign_unsupported message -> Unsupported (Translate.definition_span source, message)
+      )
 
 let float_text bits =
   let shortest ~most ~same value =
@@ -359,17 +361,14 @@ let counterexample members (obligation : State.obligation) answer_values =
 
 let diagnostic code span message = Diagnostic.make ~code:(Diagnostic.Code.Prover code) span message
 
-let clamp_to_definition (lookups : Lookups.t) (key : Names.key) (span : Source.Definition_span.t) =
-  if span.stop <= String.length (lookups.interface.names.text key) then span
-  else Source.Definition_span.make 0 0
-
-let node_span (lookups : Lookups.t) (key : Names.key) origin =
-  let spans = lookups.interface.names.spans key in
-  if origin >= 0 && origin < Array.length spans then Some (lookups.interface.names.text key, spans)
-  else None
+let require_in_definition (lookups : Lookups.t) (key : Names.key) (span : Source.Definition_span.t)
+    =
+  if span.stop > String.length (lookups.interface.names.text key) then
+    Facts.bug "%s has no span %d..%d" (Names.show_key key) span.start span.stop;
+  span
 
 let substituted text spans clause replacements =
-  let clause_span = spans.(clause) in
+  let clause_span = Source.Definition_span.locate spans clause in
   let clause_text = Facts.quoted text clause_span in
   let buffer = Buffer.create (String.length clause_text) in
   let next =
@@ -384,28 +383,27 @@ let substituted text spans clause replacements =
         end)
       0
       (List.sort_uniq compare
-         (List.filter_map
-            (fun (origin, replacement) ->
-              if origin >= 0 && origin < Array.length spans then Some (spans.(origin), replacement)
-              else None)
+         (List.map
+            (fun (origin, replacement) -> (Source.Definition_span.locate spans origin, replacement))
             replacements))
   in
   Buffer.add_string buffer (String.sub clause_text next (String.length clause_text - next));
   Buffer.contents buffer
 
-let render lookups (message : State.message) =
+let render (lookups : Lookups.t) (message : State.message) =
   String.concat ""
     (List.map
        (function
          | State.Text text -> text
-         | Quote (key, origin) -> (
-             match node_span lookups key origin with
-             | Some (text, spans) -> Facts.quoted text spans.(origin)
-             | None -> "this expression")
-         | Substituted { key; clause; replacements } -> (
-             match node_span lookups key clause with
-             | Some (text, spans) -> substituted text spans clause replacements
-             | None -> "this expression"))
+         | Quote (key, origin) ->
+             Facts.quoted
+               (lookups.interface.names.text key)
+               (Source.Definition_span.locate (lookups.interface.names.spans key) origin)
+         | Substituted { key; clause; replacements } ->
+             substituted
+               (lookups.interface.names.text key)
+               (lookups.interface.names.spans key)
+               clause replacements)
        message)
 
 let rendered_fix lookups ({ title; edits } : State.fix) =
@@ -416,14 +414,10 @@ let rendered_fix lookups ({ title; edits } : State.fix) =
        edits)
 
 let cited_place (lookups : Lookups.t) ((key : Names.key), origin) =
-  let spans = lookups.interface.names.spans key in
-  if origin >= 0 && origin < Array.length spans then
-    let place = lookups.interface.names.place key in
-    Some
-      ( place,
-        Source.Definition_span.to_file ~base:place.base
-          (clamp_to_definition lookups key spans.(origin)) )
-  else None
+  let place = lookups.interface.names.place key in
+  ( place,
+    Source.Definition_span.to_file ~base:place.base
+      (Source.Definition_span.locate (lookups.interface.names.spans key) origin) )
 
 type answer = Solved of Solver.answer | Ran of bool | Run_failed of string
 
@@ -438,7 +432,7 @@ type 'span state = {
 type verdict = (Source.Definition_span.t state * (Names.key * Core.origin) option) list
 
 let definition_states lookups (key : Names.key) proof answers =
-  let clamp_to_definition span = clamp_to_definition lookups key span in
+  let require_in_definition span = require_in_definition lookups key span in
   match proof with
   | Not_proven_here -> []
   | Unsupported (span, construct) ->
@@ -449,9 +443,9 @@ let definition_states lookups (key : Names.key) proof answers =
       [
         ( {
             code = Unsupported;
-            span = clamp_to_definition span;
+            span = require_in_definition span;
             shows = message;
-            failure = Some (diagnostic Unsupported (clamp_to_definition span) message);
+            failure = Some (diagnostic Unsupported (require_in_definition span) message);
             trusts_compiled_code = false;
           },
           None );
@@ -459,7 +453,7 @@ let definition_states lookups (key : Names.key) proof answers =
   | Obligations outcome ->
       List.map2
         (fun (obligation : State.obligation) answer ->
-          let span = clamp_to_definition obligation.span in
+          let span = require_in_definition obligation.span in
           let message = render lookups obligation.message in
           let others =
             match obligation.code with
@@ -626,7 +620,7 @@ let file_states { lookups; verdicts } file =
       let ({ base; _ } : Names.place) = lookups.interface.names.place key in
       List.map
         (fun (state, cited) ->
-          let cited = Option.bind cited (cited_place lookups) in
+          let cited = Option.map (cited_place lookups) cited in
           let note =
             match cited with
             | Some ((place : Names.place), span) when place.file = file ->

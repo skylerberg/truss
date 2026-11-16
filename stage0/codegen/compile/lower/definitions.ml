@@ -68,11 +68,6 @@ let read_written context key =
     text = context.lookups.interface.names.text key;
   }
 
-let key_of context path =
-  match context.lookups.interface.names.key path with
-  | Some key -> key
-  | None -> bug "no definition for %s" (Path.show path)
-
 let bind = Monomorphic.substitution
 
 let impl_interface context impl =
@@ -90,14 +85,8 @@ let signature_of context (path : Path.t) =
   | Some signature -> signature
   | None -> bug "no signature for %s" (Path.show path)
 
-let written context path =
-  match Resolve.Names.definition_of_path context.lookups.interface.names path with
-  | Some (key, { kind = Function { signature; body }; _ }) -> Some (key, signature, body)
-  | _ -> None
-
 let code_of context (path : Path.t) type_arguments : code =
-  let function_code ~enclosing_impl ((key : Names.key), _, _) ~(interface : Types.signature)
-      ~substitution =
+  let function_code ~enclosing_impl (key : Names.key) ~(interface : Types.signature) ~substitution =
     {
       definition = key.path;
       written = Some (read_written context key);
@@ -136,38 +125,33 @@ let code_of context (path : Path.t) type_arguments : code =
         | Method { owner = (Impl _ | Derived _) as impl; _ } -> Some impl
         | _ -> None
       in
-      match (written context path, path) with
-      | Some code, _ -> function_code ~enclosing_impl code ~interface ~substitution
-      | None, Method { owner = Derived { type_; _ }; _ }
-        when Mir.is_generated context.lookups.mir path ->
+      match (context.lookups.mir.form_origin path, path) with
+      | Some (Written key, _), _ -> function_code ~enclosing_impl key ~interface ~substitution
+      | Some (Derived type_key, _), _ ->
           {
-            (unwritten ~definition:type_ ~substitution ~result:interface.output) with
-            written = Some (read_written context (key_of context type_));
+            (unwritten ~definition:type_key.path ~substitution ~result:interface.output) with
+            written = Some (read_written context type_key);
             enclosing_impl;
           }
-      | None, Method { owner = (Impl _ | Derived _) as impl; name; receiver } -> (
+      | Some (Inherited provided, _), Method { owner = (Impl _ | Derived _) as impl; _ } ->
           let trait = (impl_interface context impl).implements.trait in
-          let provided = Path.Method { owner = trait; name; receiver } in
-          match written context provided with
-          | Some code ->
-              let trait_signature = signature_of context provided in
-              let count = List.length (impl_interface context impl).impl_generics in
-              let of_impl = List.filteri (fun position _ -> position < count) substitution in
-              let of_trait =
-                List.map
-                  (fun (parameter, argument) ->
-                    (parameter, Types.substitute_argument of_impl argument))
-                  (trait_substitution context impl)
-              in
-              let own_generics =
-                List.filter
-                  (fun (generic : Types.generic) -> not (Path.equal generic.generic.owner trait))
-                  trait_signature.generics
-              in
-              let own = List.filteri (fun position _ -> position >= count) type_arguments in
-              function_code ~enclosing_impl code ~interface:trait_signature
-                ~substitution:(of_trait @ bind own_generics own @ substitution)
-          | None -> bug "%s neither writes nor is given %s" (Path.show impl) name)
+          let trait_signature = signature_of context provided.path in
+          let count = List.length (impl_interface context impl).impl_generics in
+          let of_impl = List.filteri (fun position _ -> position < count) substitution in
+          let of_trait =
+            List.map
+              (fun (parameter, argument) -> (parameter, Types.substitute_argument of_impl argument))
+              (trait_substitution context impl)
+          in
+          let own_generics =
+            List.filter
+              (fun (generic : Types.generic) -> not (Path.equal generic.generic.owner trait))
+              trait_signature.generics
+          in
+          let own = List.filteri (fun position _ -> position >= count) type_arguments in
+          function_code ~enclosing_impl provided ~interface:trait_signature
+            ~substitution:(of_trait @ bind own_generics own @ substitution)
+      | Some (Inherited _, _), _ -> bug "%s inherits a method outside an impl" (Path.show path)
       | None, _ -> bug "%s is not a function" (Path.show path))
   | Member_constant _ | Impl _ | Derived _ | Law_proof _ | Unresolved _ ->
       bug "%s is not code" (Path.show path)
@@ -212,7 +196,7 @@ let c_signature context substitution ~(parameters : (Types.mode * Types.ty) list
 
 let template_clauses context from_template clauses =
   match Mir.contract_of_path context.lookups.mir from_template with
-  | Some contract ->
+  | Some { form = contract; _ } ->
       List.map
         (fun position ->
           match List.nth_opt contract.requires position with

@@ -107,11 +107,7 @@ let reject_in_formula state env span what =
 let read_span state id = state.context.spans.(id)
 let bug format = Compiler_bug.bug ~stage:"Infer" format
 let error state ?fixes code span message = Types.Error (reported state ?fixes code span message)
-
-let source state (span : Source.Definition_span.t) =
-  let text = Lazy.force state.text in
-  if span.stop <= String.length text then String.sub text span.start (span.stop - span.start)
-  else ""
+let source state span = Source.Definition_span.quote (Lazy.force state.text) span
 
 let fresh_node_id state =
   let id = state.form.next_node_id in

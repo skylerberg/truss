@@ -88,7 +88,7 @@ let type_clauses context (ty : Types.ty) =
   match (ty, type_source context ty) with
   | Types.Named { path; _ }, Some source ->
       Option.map
-        (fun (clauses : Mir.type_clauses) -> (source, clauses))
+        (fun ({ form; _ } : Mir.type_clauses Mir.sourced) -> (source, form))
         (Mir.type_clauses_of_path context.lookups.mir path)
   | _ -> None
 
