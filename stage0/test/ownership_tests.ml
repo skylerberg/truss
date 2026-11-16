@@ -839,10 +839,17 @@ let () =
       expect_one_diagnostic (grid ^ Fixtures.Ownership.grid_cell_moved) "types.missing_mode");
   Harness.test "a lent part cannot be returned" (fun () ->
       expect_one_diagnostic (grid ^ Fixtures.Ownership.grid_cell_returned) "ownership.not_owned");
-  Harness.test "a `let` cannot bind a lent part" (fun () ->
+  Harness.test "a `let` cannot bind a lent part, with a fix that copies it at the lending call"
+    (fun () ->
       expect_one_diagnostic
         (grid ^ Fixtures.Ownership.let_of_a_grid_cell)
-        "ownership.lent_part_escapes");
+        "ownership.lent_part_escapes"
+        ~fixed:(grid ^ Fixtures.Ownership.let_of_a_grid_cell_fixed));
+  Harness.test
+    "a `let` pattern cannot bind a part of a lent part, with a fix that copies the lent part"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.let_else_of_a_lent_option
+        "ownership.lent_part_escapes" ~fixed:Fixtures.Ownership.let_else_of_a_lent_option_fixed);
   Harness.test "a `let` copies a `Plain` lent part" (fun () ->
       expect_fine (counter ^ Fixtures.Ownership.let_of_a_lent_count));
   Harness.test "a `match` on a lent part binds views of it, which cannot be moved" (fun () ->
