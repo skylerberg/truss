@@ -223,7 +223,7 @@ let list_contained_types (lookups : Lookups.t) path =
                     (if indirect then Indirect else In_place)
                     occurrence )
           | _ -> None)
-        (Interface.Impls.list_contents lookups.interface ~bounds field.field_type).contained)
+        (Interface.Impls.collect_contents lookups.interface ~bounds field.field_type).contained)
     (snd (list_type_fields lookups path))
 
 let memoize compute =
@@ -303,7 +303,7 @@ let not_strictly_positive_message =
    function with a `time` clause might not terminate. Remove the `time` clause from the function \
    type, or pass the function the fields that it needs instead of the whole value."
 
-let find_written_variant (variants : Syntax.variant list) (variant : Types.variant) =
+let read_written_variant (variants : Syntax.variant list) (variant : Types.variant) =
   match
     List.find_opt
       (fun (written : Syntax.variant) -> written.name.text = variant.variant_name)
@@ -331,7 +331,7 @@ let locate_field (spans : Source.Definition_span.t array) (body : Syntax.type_bo
   match (body, variant) with
   | Fields fields, None -> among fields
   | Variants variants, Some variant -> (
-      match (find_written_variant variants variant).fields with
+      match (read_written_variant variants variant).fields with
       | Some fields -> among fields
       | None -> missing ())
   | _ -> missing ()
@@ -360,7 +360,7 @@ let check_recursion lookups ~contained (declaration : Resolve.Names.declaration)
           (fun ((variant : Types.variant option), _) ->
             match (body, variant) with
             | Variants variants, Some variant ->
-                let span = spans.((find_written_variant variants variant).name.id) in
+                let span = spans.((read_written_variant variants variant).name.id) in
                 make_diagnostic key Needs_indirect span
                   ~fixes:
                     [
@@ -456,7 +456,7 @@ let check_associated_types (lookups : Lookups.t) ~contained
                   && not (reported_at_definition recursion)
                 then Some (recursion.recursive, recursion.occurrence)
                 else None)
-              (Interface.Impls.list_contents lookups.interface ~bounds type_).recursions)))
+              (Interface.Impls.collect_contents lookups.interface ~bounds type_).recursions)))
     impl.implements.associated
 
 let list_instantiation_edges (lookups : Lookups.t) (key : Resolve.Names.key) =
@@ -500,7 +500,7 @@ let check_instantiation (lookups : Lookups.t) (package : Path.package) =
   List.iteri
     (fun index members ->
       List.iter (fun path -> Path_table.replace component_index path index) members)
-    (Strongly_connected.find_components
+    (Strongly_connected.list_components
        (module Path)
        ~successors:(fun path -> List.map fst (outgoing path))
        (List.map (fun (declaration : Resolve.Names.declaration) -> declaration.path) generic));

@@ -295,7 +295,7 @@ let builtin_entries =
 
 type name_lookup = Found_name of entry * Path.t | Hidden_name of entry | No_name
 
-let find_in lookups ~(from : Path.module_) module_ name ~is_kind =
+let lookup_in lookups ~(from : Path.module_) module_ name ~is_kind =
   match lookups.find module_ name with
   | Some item when is_kind item.kind ->
       if is_visible ~from module_ item.visibility then Found_name (item, make_top_path module_ name)
@@ -322,7 +322,7 @@ let find_head_type lookups ~(from : Path.module_) ~imports (path : Syntax.path) 
           (List.map (fun (name : Syntax.name) -> name.text) rest)
       with
       | Found_module (module_, _) -> (
-          match find_in lookups ~from module_ path.last.text ~is_kind:is_type_kind with
+          match lookup_in lookups ~from module_ path.last.text ~is_kind:is_type_kind with
           | Found_name (item, path) -> Some (item, path)
           | Hidden_name _ | No_name -> None)
       | Ambiguous_module _ | No_module _ -> None)

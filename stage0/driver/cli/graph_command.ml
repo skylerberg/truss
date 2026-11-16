@@ -22,7 +22,7 @@ let matches (argument : Path_argument.t) (path : Path.t) =
       argument.prefix = [] && name = argument.last
   | _ -> false
 
-let find_definitions snapshot database argument =
+let list_definitions snapshot database argument =
   let packages = List.map snd (Workspace.list_packages snapshot) in
   let names = Database.make_name_lookups database packages in
   List.sort_uniq Path.compare
@@ -108,7 +108,7 @@ let run ~direction ~name =
   let argument = Path_argument.parse name in
   let snapshot, _ = Command_packages.load_current () in
   let database = Workspace.open_database snapshot in
-  match find_definitions snapshot database argument with
+  match list_definitions snapshot database argument with
   | [] -> Outcome.raise_cannot_run "No definition named %s in this worktree." name
   | targets ->
       let lines =

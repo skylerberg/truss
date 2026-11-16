@@ -324,7 +324,7 @@ module Make (Node : Strongly_connected.Node) = struct
         if List.exists is_with_node removed then begin
           let split = component_of graph node in
           replace
-            (Strongly_connected.find_components
+            (Strongly_connected.list_components
                (module Node)
                ~successors:(fun member ->
                  List.filter

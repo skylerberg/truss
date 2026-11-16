@@ -272,7 +272,7 @@ let render_discriminant_test context text (discriminant : Memory_layout.discrimi
           Printf.sprintf "((uint8_t)!(%s >= (%s)%sULL && %s < (%s)%sULL))" at c_type
             (Z.to_string niche.start) at c_type (Z.to_string stop))
 
-let is_variant_c context text sum variant =
+let render_variant_test context text sum variant =
   render_discriminant_test context text
     (Memory_layout.compute_discriminant (C_types.compute_layout context sum) variant)
 
@@ -433,7 +433,7 @@ let render_rvalue context fc (target : Lowered.ty) (rvalue : Lowered.rvalue) : b
   | Build { ty; variant; fields } -> build_c context fc ty variant fields
   | Is_variant (place, variant) -> (
       match render_place context fc place with
-      | Some (text, Value sum) -> Some (Expression (is_variant_c context text sum variant))
+      | Some (text, Value sum) -> Some (Expression (render_variant_test context text sum variant))
       | Some _ -> C_runtime.raise_bug "a variant test on a place that is not a value"
       | None -> Some (Expression "((uint8_t)1)"))
   | Function_value { code; environment } ->

@@ -91,7 +91,7 @@ let make_conformance lookups ~bounds ~(trait_span : Source.Definition_span.t)
             (function
               | Types.Projection { base; trait = projected; name }
                 when Types.equal base impl.for_type -> (
-                  let projected = Impls.find_declaring_type_trait lookups ~base projected name in
+                  let projected = Impls.read_declaring_type_trait lookups ~base projected name in
                   let is_declared_by_impl = Path.equal projected.trait impl.implements.trait in
                   match
                     ( List.assoc_opt name impl.implements.associated,
@@ -114,7 +114,7 @@ let make_conformance lookups ~bounds ~(trait_span : Source.Definition_span.t)
                 | Types.Capability_projection { base; trait = projected; name }
                   when Types.equal base impl.for_type
                        && Path.equal
-                            (Impls.find_declaring_capability_trait lookups ~base projected name)
+                            (Impls.read_declaring_capability_trait lookups ~base projected name)
                               .trait impl.implements.trait ->
                     Option.value ~default:Types.no_capabilities
                       (List.assoc_opt name impl.capability_sets)

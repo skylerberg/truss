@@ -49,10 +49,10 @@ val implements :
   Types.trait_reference ->
   evidence option
 
-val find_declaring_type_trait :
+val read_declaring_type_trait :
   Lookups.t -> base:Types.ty -> Types.trait_reference -> string -> Types.trait_reference
 
-val find_declaring_capability_trait :
+val read_declaring_capability_trait :
   Lookups.t -> base:Types.ty -> Types.trait_reference -> string -> Types.trait_reference
 
 val project_associated_type :
@@ -82,4 +82,4 @@ val is_copyable : Lookups.t -> bounds:bounds -> Types.ty -> bool
 val is_plain : Lookups.t -> bounds:bounds -> Types.ty -> bool
 val is_view : Lookups.t -> bounds:bounds -> Types.ty -> bool
 val holds_function : Lookups.t -> bounds:bounds -> Types.ty -> bool
-val list_contents : Lookups.t -> bounds:bounds -> Types.ty -> Properties.contents
+val collect_contents : Lookups.t -> bounds:bounds -> Types.ty -> Properties.contents

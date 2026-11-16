@@ -67,7 +67,7 @@ let is_capability_subset (smaller : capability_set) (larger : capability_set) =
 let subtract_capabilities (left : capability_set) (right : capability_set) =
   List.filter (fun capability -> not (List.mem capability right)) left
 
-let list_missing_capabilities ~(required : capability_set) ~(available : capability_set) =
+let compute_missing_capabilities ~(required : capability_set) ~(available : capability_set) =
   if has_capability_error required || has_capability_error available then no_capabilities
   else subtract_capabilities required available
 

@@ -297,7 +297,7 @@ let build_program_main context (key : Instance.key) main_path : Emit_c.Builder.i
     | [ info ] -> (Monomorphic.ground context.monomorphic [] info.type_, info.mode)
     | _ -> Definitions.raise_bug "main takes its arguments"
   in
-  let storage_field, _, string_ty = Targets.list_parts context.monomorphic list_ty in
+  let storage_field, _, string_ty = Targets.read_list_parts context.monomorphic list_ty in
   let list = Lowering.allocate_temporary st list_ty in
   let lower operation type_arguments arguments destination =
     ignore

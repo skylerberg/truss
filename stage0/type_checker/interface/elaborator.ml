@@ -103,7 +103,7 @@ let report_error_capability context code span message =
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Interface" format
 let find_target context (name : Syntax.name) = context.resolved.names.(name.id)
 
-let find_parameter context (name : Syntax.name) =
+let resolve_parameter context (name : Syntax.name) =
   match find_target context name with
   | Some (Type_parameter parameter) -> (
       match Parameter_table.find_opt context.broken_parameters parameter with
@@ -138,7 +138,7 @@ let rec elaborate_type context (written : Syntax.type_expression) : Types.ty =
       | Error report -> Types.Error report)
   | Self_type (Some key) -> elaborate_self_associated context context.spans.(written.id) key
   | Associated (base, key) -> (
-      match find_parameter context base with
+      match resolve_parameter context base with
       | Ok parameter -> elaborate_associated context (Types.Parameter parameter) parameter key
       | Error report -> Types.Error report)
   | Any_type path -> (
@@ -427,7 +427,7 @@ and elaborate_capability context (written : Syntax.capability_reference) : Types
                     (Printf.sprintf "`%s` declares no associated capability set `%s`."
                        (Types.show_trait trait) key.text))))
   | Associated_capabilities (base, key) -> (
-      match find_parameter context base with
+      match resolve_parameter context base with
       | Error report -> [ Types.Capability_error report ]
       | Ok parameter -> (
           let bounds = list_bounds context parameter in

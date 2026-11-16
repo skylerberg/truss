@@ -19,7 +19,7 @@ val build_range_record :
   inclusive:bool ->
   Core.kind
 
-val find_capability_impls : State.state -> Types.ty -> (Core.provided * Types.impl_interface) list
+val list_capability_impls : State.state -> Types.ty -> (Core.provided * Types.impl_interface) list
 val build_provide : State.state -> Syntax.expression list -> Syntax.block -> Core.kind
 val build_untagged_string : State.state -> origin:Core.origin -> Syntax.string_literal -> Core.kind
 

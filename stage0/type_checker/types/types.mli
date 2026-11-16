@@ -73,7 +73,7 @@ val union_capabilities : capability_set -> capability_set -> capability_set
 val is_capability_subset : capability_set -> capability_set -> bool
 val subtract_capabilities : capability_set -> capability_set -> capability_set
 
-val list_missing_capabilities :
+val compute_missing_capabilities :
   required:capability_set -> available:capability_set -> capability_set
 
 val flat_map_capabilities : (capability -> capability list) -> capability_set -> capability_set

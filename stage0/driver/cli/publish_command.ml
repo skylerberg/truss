@@ -41,7 +41,7 @@ let record database snapshot registry (package : Path.package) =
   let in_registry name = List.find_opt (fun (other, _, _) -> other = name) built in
   let dependencies ~code name =
     let used =
-      if code then Option.value ~default:[] (Database.list_code_packages database name) else []
+      if code then Option.value ~default:[] (Database.find_code_packages database name) else []
     in
     List.filter
       (fun dependency -> (not code) || List.mem dependency used)

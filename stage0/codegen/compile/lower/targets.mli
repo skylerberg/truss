@@ -117,7 +117,7 @@ type literal = Integer_value of Z.t | Float_value of float
 val lower_literal : Lowering.state -> Ground.ty -> literal -> Lowered.operand
 val lower_literal_place : Lowering.state -> Ground.ty -> string -> Lowered.place
 val lower_static_constant : Lowering.state -> Path.t -> Lowered.place
-val list_parts : Monomorphic.context -> Ground.ty -> string * Ground.ty * Ground.ty
+val read_list_parts : Monomorphic.context -> Ground.ty -> string * Ground.ty * Ground.ty
 
 val lower_template_value :
   Lowering.state ->

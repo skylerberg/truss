@@ -1,13 +1,13 @@
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Interface" format
 
-let find_declaring_type_trait lookups ~base (trait : Types.trait_reference) name =
+let read_declaring_type_trait lookups ~base (trait : Types.trait_reference) name =
   match Properties.find_trait_declaring_type lookups ~base trait name with
   | Some declaring -> declaring
   | None ->
       raise_bug "no trait among `%s` and its requirements declares `%s`" (Types.show_trait trait)
         name
 
-let find_declaring_capability_trait lookups ~base (trait : Types.trait_reference) name =
+let read_declaring_capability_trait lookups ~base (trait : Types.trait_reference) name =
   match Properties.find_trait_declaring_capability_set lookups ~base trait name with
   | Some declaring -> declaring
   | None ->
@@ -300,7 +300,7 @@ let rec implements lookups ~(bounds : bounds) ?(depth = 0) ?(checks_conditions =
 
 and project_associated_type lookups ~bounds ?defining type_ (trait : Types.trait_reference) name =
   project_declared_type lookups ~bounds ?defining type_
-    (find_declaring_type_trait lookups ~base:type_ trait name)
+    (read_declaring_type_trait lookups ~base:type_ trait name)
     name
 
 and project_declared_type lookups ~bounds ?defining type_ (trait : Types.trait_reference) name =
@@ -338,7 +338,7 @@ and project_declared_type lookups ~bounds ?defining type_ (trait : Types.trait_r
       | None -> None)
 
 and project_capability_set lookups ~bounds ?(depth = 0) type_ (trait : Types.trait_reference) name =
-  let trait = find_declaring_capability_trait lookups ~base:type_ trait name in
+  let trait = read_declaring_capability_trait lookups ~base:type_ trait name in
   let projection =
     Types.make_capability_set [ Types.Capability_projection { base = type_; trait; name } ]
   in
@@ -384,7 +384,7 @@ and normalize lookups ~bounds ?defining (type_ : Types.ty) : Types.ty =
     (function
       | Types.Projection { base; trait; name } -> (
           let base = normalize base in
-          let trait = find_declaring_type_trait lookups ~base trait name in
+          let trait = read_declaring_type_trait lookups ~base trait name in
           match base with
           | Types.Variable _ | Types.Hole -> Some (Types.Projection { base; trait; name })
           | Types.Error _ -> Some base
@@ -430,7 +430,7 @@ let is_plain = has_property Plain
 let is_view = has_property View
 let holds_function = has_property Holds_function
 
-let list_contents lookups ~bounds type_ =
+let collect_contents lookups ~bounds type_ =
   Properties.collect_contents lookups
     ~normalize:(fun type_ ->
       let defining = ref [] in
