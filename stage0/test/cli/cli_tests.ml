@@ -565,54 +565,55 @@ let () =
 let lowering (snapshot, packages) =
   Cli.Compiler.lowering_only (Workspace.open_database snapshot) packages
 
+let speaker_calling called =
+  package
+    [
+      ( "main.truss",
+        Printf.sprintf
+          "capability Speaker {\n\
+          \  fn say(text: StringSlice)\n\
+          \  fn shout(text: StringSlice)\n\
+           }\n\n\
+           type Quiet()\n\n\
+           impl Speaker for Quiet {\n\
+          \  fn say(self, text: StringSlice) {}\n\n\
+          \  fn shout(self, text: StringSlice) {\n\
+          \    todo\n\
+          \  }\n\
+           }\n\n\
+           fn speak()\n\
+          \  uses Speaker\n\
+           {\n\
+          \  Speaker.%s(\"hello\")\n\
+           }\n\n\
+           fn main(arguments: List[String]) -> ExitCode {\n\
+          \  provide Quiet() {\n\
+          \    speak()\n\
+          \  }\n\
+          \  ExitCode.success\n\
+           }\n\n\
+           test \"speaks\" {\n\
+          \  provide Quiet() {\n\
+          \    speak()\n\
+          \  }\n\
+           }\n"
+          called );
+    ]
+
 let () =
   test "a todo main can reach is refused, with the way from main to it" (fun () ->
       let project =
         Cli.Command_packages.load
           (package [ ("main.truss", Fixtures.main_reaching_a_todo_through_a_helper) ])
       in
-      match Compile.unshippable (lowering project) ~main:(List.hd (mains project)) with
-      | Ok [ { failure = `Todo; line = 6; way; _ } ] ->
+      match Compile.list_unshippable (lowering project) ~main:(List.hd (mains project)) with
+      | [ { failure = `Todo; line = 6; way; _ } ] ->
           expect_strings ~expected:[ "demo::main"; "demo::helper" ] (List.map Path.show way)
-      | Ok reached -> fail "found %d" (List.length reached)
-      | Error message -> fail "%s" message);
+      | reached -> fail "found %d" (List.length reached));
   test "a todo in a capability's method counts only where the method is called" (fun () ->
-      let program called =
-        Cli.Command_packages.load
-          (package
-             [
-               ( "main.truss",
-                 Printf.sprintf
-                   "capability Speaker {\n\
-                   \  fn say(text: StringSlice)\n\
-                   \  fn shout(text: StringSlice)\n\
-                    }\n\n\
-                    type Quiet()\n\n\
-                    impl Speaker for Quiet {\n\
-                   \  fn say(self, text: StringSlice) {}\n\n\
-                   \  fn shout(self, text: StringSlice) {\n\
-                   \    todo\n\
-                   \  }\n\
-                    }\n\n\
-                    fn speak()\n\
-                   \  uses Speaker\n\
-                    {\n\
-                   \  Speaker.%s(\"hello\")\n\
-                    }\n\n\
-                    fn main(arguments: List[String]) -> ExitCode {\n\
-                   \  provide Quiet() {\n\
-                   \    speak()\n\
-                   \  }\n\
-                   \  ExitCode.success\n\
-                    }\n"
-                   called );
-             ])
-      in
       let reached_from called =
-        let project = program called in
-        match Compile.unshippable (lowering project) ~main:(List.hd (mains project)) with
-        | Ok unshippable -> unshippable
-        | Error message -> failwith message
+        let project = Cli.Command_packages.load (speaker_calling called) in
+        Compile.list_unshippable (lowering project) ~main:(List.hd (mains project))
       in
       (match reached_from "say" with
       | [] -> ()
@@ -638,10 +639,9 @@ let () =
       let project =
         Cli.Command_packages.load (package [ ("main.truss", Fixtures.main_with_an_echo) ])
       in
-      match Compile.unshippable (lowering project) ~main:(List.hd (mains project)) with
-      | Ok [ { failure = `Echo; line = 2; _ } ] -> ()
-      | Ok reached -> fail "found %d" (List.length reached)
-      | Error message -> fail "%s" message)
+      match Compile.list_unshippable (lowering project) ~main:(List.hd (mains project)) with
+      | [ { failure = `Echo; line = 2; _ } ] -> ()
+      | reached -> fail "found %d" (List.length reached))
 
 let two_files =
   [ ("weather/weather.truss", Fixtures.two_files_weather); ("main.truss", Fixtures.two_files) ]
@@ -833,6 +833,30 @@ let () =
           expect_strings ~expected:[ "test demo \"renders\"" ]
             (strings (Cli.Json.field "blocks" hole))
       | found -> fail "found %d holes" (List.length found));
+  test "a hole in a capability's method blocks the tests and main that call the method" (fun () ->
+      let blocks called =
+        match holes (speaker_calling called) with
+        | [ hole ] -> strings (Cli.Json.field "blocks" hole)
+        | found -> failwith (Printf.sprintf "found %d holes" (List.length found))
+      in
+      expect_strings ~expected:[] (blocks "say");
+      expect_strings ~expected:[ "main"; "test demo \"speaks\"" ] (blocks "shout"));
+  test "a hole blocks a test that also reaches a type defined as todo" (fun () ->
+      match holes (package [ ("main.truss", Fixtures.hole_beside_a_type_defined_as_todo) ]) with
+      | [ session; greet ] ->
+          expect_strings
+            ~expected:[ "main"; "test demo \"greets\"" ]
+            (strings (Cli.Json.field "blocks" session));
+          expect_strings
+            ~expected:[ "main"; "test demo \"greets\"" ]
+            (strings (Cli.Json.field "blocks" greet))
+      | found -> fail "found %d holes" (List.length found));
+  test "a hole blocks the tests that can reach it while other code has errors" (fun () ->
+      match holes (package [ ("main.truss", Fixtures.hole_beside_an_error) ]) with
+      | [ hole ] ->
+          expect_strings ~expected:[ "test demo \"greets\"" ]
+            (strings (Cli.Json.field "blocks" hole))
+      | found -> fail "found %d holes" (List.length found));
   test "a hole whose type nothing fixes, such as one interpolated, is not decided yet" (fun () ->
       match holes (package [ ("main.truss", Fixtures.show_of_an_interpolated_todo) ]) with
       | [ hole ] ->
@@ -883,6 +907,18 @@ let () =
           (contains output
              "main.truss:1:6: `todo` can be reached from `main`, so the program cannot be built.\n\
              \    demo::main -> demo::Session")
+      then fail "%s" output);
+  test "build refuses a todo that main reaches beside a type defined as todo" (fun () ->
+      let status, output =
+        truss
+          [ "build"; "-C"; package [ ("main.truss", Fixtures.hole_beside_a_type_defined_as_todo) ] ]
+      in
+      if status <> 1 then fail "status %d: %s" status output;
+      if
+        not
+          (contains output
+             "main.truss:12:3: `todo` can be reached from `main`, so the program cannot be built.\n\
+             \    demo::main -> demo::greet")
       then fail "%s" output)
 
 let registry_root = ref ""

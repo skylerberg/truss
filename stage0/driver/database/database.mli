@@ -31,7 +31,6 @@ val read_resolved : t -> Resolve.Names.key -> Resolve.resolved option
 val make_interface_lookups : t -> Path.package list -> Interface.Lookups.t
 val make_lowering_requests : t -> Path.package list -> Compile.requests
 val find_main : t -> Path.package -> Path.t option
-val list_callers : t -> viewer:Path.package -> Path.t -> Path.t list
 
 type read = { dependent : Part.t; dependency : Part.t }
 

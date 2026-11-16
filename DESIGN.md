@@ -1585,6 +1585,7 @@ in place of an expression, a body, or a type definition.
 | A release build refuses a program that can reach a `todo`. | A `todo` that panicked when reached would be a failure that the signature does not show. |
 | A test that reaches a `todo` is incomplete, not failed. | Tests can be written first. |
 | The tools list every `todo` with its expected type, the names in scope, and the work it blocks. | Each `todo` is a self-contained task, so several agents can fill them in at once (*parallel agents*). |
+| A test or `main` reaches a capability's method only where the code it reaches calls that method. A constant computed by a run reaches the code of the run. | `truss build` refuses, and `truss holes` lists, the same `todo`s. The MIR's call edges cannot decide which: they hold no call of a capability's method, whose implementation is provided at run time. |
 
 ## Debug output
 
@@ -1923,8 +1924,8 @@ The database stores three relationships:
 | Relationship | Recorded by | Followed by |
 |---|---|---|
 | A part read a part of another definition | The lookup that answered the read | Propagation, when the part read changes. The tools that list a definition's dependents and dependencies. The tests and `main` that a type defined as `todo` blocks. |
-| A definition's lowered code refers to an instance | The stage that lowered it, in its output | Test keys, which hash the code a test reaches |
-| A function's MIR calls a function, names it as a value, passes an `impl` to a bound, or runs a field default or an invariant that does | The MIR call edges stage, from the MIR | Recursion groups, lowering's check of each call it emits, and the tests and `main` that a `todo` in a body blocks |
+| A definition's lowered code refers to an instance | The stage that lowered it, in its output | Test keys, which hash the code a test reaches. The `todo`s and `echo`s that a test or `main` reaches, for `truss build` and `truss holes` |
+| A function's MIR calls a function, names it as a value, passes an `impl` to a bound, or runs a field default or an invariant that does | The MIR call edges stage, from the MIR | Recursion groups and lowering's check of each call it emits |
 
 ### Propagation
 

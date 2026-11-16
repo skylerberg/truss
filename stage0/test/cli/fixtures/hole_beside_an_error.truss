@@ -1,0 +1,15 @@
+fn broken() -> Int64 {
+  "text"
+}
+
+fn greet() -> String {
+  todo
+}
+
+test "greets" {
+  assert greet() == "hi"
+}
+
+test "breaks" {
+  assert broken() == 1
+}
