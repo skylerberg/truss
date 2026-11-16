@@ -100,6 +100,24 @@ let () =
         (not (String.includes ~affix:"may overflow `UInt8`" actual))
         || String.includes ~affix:"uses Panic" actual
       then Harness.fail "message %S" actual);
+  Harness.test "an overflow in an impl names where the impl can declare `Panic`" (fun () ->
+      List.iter
+        (fun (text, declaration) ->
+          let actual = read_message text in
+          if not (String.includes ~affix:("allowed to stop the program with " ^ declaration) actual)
+          then Harness.fail "message %S" actual)
+        [
+          (Fixtures.Prover.increment_in_a_greeter_impl, "`uses Panic` on the `impl`.");
+          ( Fixtures.Prover.decrement_in_a_countdown_cursor,
+            "`capability Uses = Panic` in the `impl`." );
+        ]);
+  Harness.test "an overflow in an impl of a trait that fixes its method's capabilities omits Panic"
+    (fun () ->
+      let actual = read_message Fixtures.Prover.increment_in_a_describe_impl in
+      if
+        (not (String.includes ~affix:"may overflow `Int64`" actual))
+        || String.includes ~affix:"Panic" actual
+      then Harness.fail "message %S" actual);
   Harness.test "an index through a bound is proven, since its precondition cannot run" (fun () ->
       expect_not_proven Fixtures.Prover.index_through_a_bound_of_a_function_that_may_panic
         "prover.requires");
@@ -1175,6 +1193,18 @@ let () =
         List.map (fun (fix : _ Diagnostic.fix) -> fix.title) diagnostic.fixes)
       (check packages (Support.parse_file "app::main"))
   in
+  Harness.test "an impl's method offers no requires, since the trait's would have to imply it"
+    (fun () ->
+      List.iter
+        (fun text ->
+          match fix_titles text with
+          | [] -> ()
+          | actual -> Harness.fail "%s" (String.concat "; " actual))
+        [
+          Fixtures.Prover.increment_in_a_describe_impl;
+          Fixtures.Prover.increment_in_a_greeter_impl;
+          Fixtures.Prover.decrement_in_a_countdown_cursor;
+        ]);
   Harness.test "a divisor that may be zero offers a requires that it is not" (fun () ->
       match fix_titles Fixtures.Prover.halves_of_an_unchecked_divisor with
       | [ "Add `requires parts != 0`" ] -> ()

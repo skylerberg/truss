@@ -53,6 +53,7 @@ let make_context (lookups : Lookups.t) ~home ~current ~terminates ~measures =
       decisions = [];
       entry = [];
       proving = false;
+      inherits_precondition = false;
       holes = [];
       unfinished = [];
       call_targets = [];
@@ -227,7 +228,12 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
         substitution;
         panic =
           (match signature with
-          | Some { uses; _ } when not proof -> if Types.may_panic uses then Declared else Undeclared
+          | Some { uses; _ } when not proof -> (
+              if Types.may_panic uses then Declared
+              else
+                match Interface.Definition.find_capability_declaration lookups.interface path with
+                | Some (Declared_by clause) -> Undeclared clause
+                | Some (Fixed_by_trait _) | None -> Undeclarable)
           | Some _ | None -> Undeclarable);
       }
       parameters
@@ -299,6 +305,13 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
             } )
     | _ -> None
   in
+  context.inherits_precondition <-
+    (match find_trait_frame start ~result:None with
+    | Some (part, _) -> (
+        match part.callee.key with
+        | Some { path = Method { owner; _ }; _ } -> not (Path.equal owner Laws.template_trait)
+        | _ -> true)
+    | None -> false);
   let trait_requires =
     match find_trait_frame start ~result:None with
     | Some (part, inside) ->
@@ -328,49 +341,33 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
   let start =
     { start with spent = List.map (fun counter -> (counter, Costs.zero)) context.counters }
   in
+  if context.inherits_precondition then
+    if own_requires = [] then Facts.assume context start trait_requires
+    else
+      ignore
+        (List.fold_left
+           (fun frame (requirement : Mir.formula) ->
+             let frame, term = Validity.read_specification context frame requirement in
+             Facts.oblige context frame Requires
+               (Facts.locate context frame.source requirement.origin)
+               [
+                 Text "`";
+                 Facts.quote source requirement.origin;
+                 Text
+                   "` may not follow from the trait's precondition, which callers through the \
+                    trait show, and an `impl`'s precondition must.";
+               ]
+               term;
+             frame)
+           (Facts.restrict start trait_requires)
+           own_requires);
   let start =
-    match find_trait_frame start ~result:None with
-    | Some (part, _)
-      when not
-             (match part.callee.key with
-             | Some { path = Method { owner; _ }; _ } -> Path.equal owner Laws.template_trait
-             | _ -> false) ->
-        if own_requires = [] then begin
-          Facts.assume context start trait_requires;
-          start
-        end
-        else begin
-          ignore
-            (List.fold_left
-               (fun frame (requirement : Mir.formula) ->
-                 let frame, term = Validity.read_specification context frame requirement in
-                 Facts.oblige context frame Requires
-                   (Facts.locate context frame.source requirement.origin)
-                   [
-                     Text "`";
-                     Facts.quote source requirement.origin;
-                     Text
-                       "` may not follow from the trait's precondition, which callers through the \
-                        trait show, and an `impl`'s precondition must.";
-                   ]
-                   term;
-                 frame)
-               (Facts.restrict start trait_requires)
-               own_requires);
-          List.fold_left
-            (fun frame requirement ->
-              let frame, term = Validity.read_specification context frame requirement in
-              Facts.assume context frame term;
-              frame)
-            start own_requires
-        end
-    | _ ->
-        List.fold_left
-          (fun frame requirement ->
-            let frame, term = Validity.read_specification context frame requirement in
-            Facts.assume context frame term;
-            frame)
-          start own_requires
+    List.fold_left
+      (fun frame requirement ->
+        let frame, term = Validity.read_specification context frame requirement in
+        Facts.assume context frame term;
+        frame)
+      start own_requires
   in
   List.iter
     (fun (promise : promise) ->
