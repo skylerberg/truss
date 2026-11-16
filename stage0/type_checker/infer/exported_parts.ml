@@ -20,7 +20,7 @@ let is_called_from_other_packages (state : State.state) =
   match state.lookups.interface.names.find_container state.key with
   | None -> Resolve.Names.is_public state.definition.visibility
   | Some container -> (
-      match Interface.Definition.read_interface state.lookups.interface container.path with
+      match Interface.Definition.find_interface state.lookups.interface container.path with
       | Some (Trait_interface _) -> is_visible_to_other_packages state.lookups container.path
       | Some (Impl_interface impl) -> (
           is_visible_to_other_packages state.lookups impl.implements.trait

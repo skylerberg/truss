@@ -17,9 +17,9 @@ let find_source (lookups : Lookups.t) (path : Path.t) =
     (lookups.mir.find_form_origin path)
 
 let make_trait_substitution (lookups : Lookups.t) (trait : Types.trait_reference) (ty : Types.ty) =
-  match Interface.Definition.read_trait_interface lookups.interface trait.trait with
-  | Some interface -> Interface.Properties.make_trait_substitution interface ~self:ty trait
-  | None -> [ (Types.make_self_parameter trait.trait, Types.Type ty) ]
+  Interface.Properties.make_trait_substitution
+    (Interface.Definition.read_trait_interface lookups.interface trait.trait)
+    ~self:ty trait
 
 let find_part ?(inherited = false) (lookups : Lookups.t) path callee =
   Option.map
@@ -69,7 +69,7 @@ let list_law_proofs (lookups : Lookups.t) package (trait : Types.trait_reference
   in
   List.filter_map
     (fun (key : Resolve.Names.key) ->
-      match Interface.Definition.read_interface lookups.interface key.path with
+      match Interface.Definition.find_interface lookups.interface key.path with
       | Some (Interface.Environment.Law_proof_interface proven) -> (
           let variables =
             List.map (fun (generic : Types.generic) -> generic.generic) proven.generics
@@ -81,7 +81,7 @@ let list_law_proofs (lookups : Lookups.t) package (trait : Types.trait_reference
                    trait.trait_arguments ->
               Some (proven.law, (read_source_at_key lookups key, renaming))
           | _ -> None)
-      | _ -> None)
+      | _ -> Compiler_bug.raise_bug ~stage:"Prover" "%s is not a law proof" (Path.show key.path))
     named_laws
 
 let is_impl_unfinished (lookups : Lookups.t) (key : Resolve.Names.key) =

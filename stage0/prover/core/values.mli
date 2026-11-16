@@ -47,7 +47,6 @@ val translate_global_value :
   is_argument:bool ->
   Logic.term
 
-val compute_constant_type : State.context -> Path.t -> Types.ty
 val evaluate_constant : State.context -> State.frame -> Path.t -> Logic.term
 
 val apply_construct :

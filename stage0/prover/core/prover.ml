@@ -19,7 +19,7 @@ type proof =
 let find_inherited_part (lookups : Lookups.t) (path : Path.t) =
   match path with
   | Method { owner = impl; name; receiver } -> (
-      match Interface.Definition.read_interface lookups.interface impl with
+      match Interface.Definition.find_interface lookups.interface impl with
       | Some (Interface.Environment.Impl_interface interface) -> (
           let implemented = interface.implements.trait in
           let substitution =
@@ -35,18 +35,17 @@ let find_inherited_part (lookups : Lookups.t) (path : Path.t) =
   | _ -> None
 
 let translate_impl_laws (lookups : Lookups.t) (key : Resolve.Names.key) source =
-  match Interface.Definition.read_interface lookups.interface key.path with
-  | Some (Interface.Environment.Impl_interface interface)
-    when not (Contracts.is_impl_unfinished lookups key) ->
-      [
-        Translate.translate_laws lookups source ~impl:key.path ~trait:interface.implements
-          ~for_type:interface.for_type
-          ~proofs:
-            (Contracts.list_law_proofs lookups (Path.locate_package key.path) interface.implements
-               interface.for_type)
-          ~at:Whole_definition;
-      ]
-  | _ -> []
+  let interface = Interface.Definition.read_impl_interface lookups.interface key.path in
+  if Contracts.is_impl_unfinished lookups key then []
+  else
+    [
+      Translate.translate_laws lookups source ~impl:key.path ~trait:interface.implements
+        ~for_type:interface.for_type
+        ~proofs:
+          (Contracts.list_law_proofs lookups (Path.locate_package key.path) interface.implements
+             interface.for_type)
+        ~at:Whole_definition;
+    ]
 
 let is_specification_module (key : Resolve.Names.key) = key.module_ = Well_known.specification
 
@@ -93,10 +92,10 @@ let list_integer_instances (lookups : Lookups.t) (path : Path.t) =
 let translate_derived_default (lookups : Lookups.t) (key : Resolve.Names.key)
     (source : State.source) =
   let derives_default =
-    match Interface.Definition.read_interface lookups.interface key.path with
+    match Interface.Definition.find_interface lookups.interface key.path with
     | Some (Interface.Environment.Type_interface interface) ->
         List.exists (Well_known.is Default) interface.derives
-    | _ -> false
+    | _ -> Facts.raise_bug "%s is not a type" (Path.show key.path)
   in
   let path =
     Path.Method
@@ -200,9 +199,12 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
                 Obligations (Translate.translate_type lookups source ~path:key.path)
             | Some _ | None -> Not_proven_here)
         | Trait | Capability | Member_constant | Law_proof -> Not_proven_here
-      with
-      | Facts.Unsupported (span, message) -> Unsupported (span, message)
-      | Facts.Foreign_unsupported message -> Unsupported (Whole_definition, message))
+      with Facts.Unsupported { location; construct; foreign_definition } ->
+        Unsupported
+          ( location,
+            match foreign_definition with
+            | Some name -> Printf.sprintf "%s, in `%s`" construct name
+            | None -> construct ))
 
 let show_float bits =
   let spell_shortest ~most ~is_same value =
@@ -419,16 +421,19 @@ let list_definition_states (lookups : Lookups.t) (key : Resolve.Names.key) proof
           let span = resolve obligation.location in
           let message = render lookups obligation.message in
           let others =
-            match (obligation.code, obligation.may_stop_with_panic) with
-            | (Overflow | Division | Shift), true ->
-                " It can also be checked first with an `if`, done with the checked operation, or \
-                 allowed to stop the program with `uses Panic`."
-            | (Overflow | Division | Shift), false ->
+            let show_stopping clause =
+              "allowed to stop the program with "
+              ^ Interface.Definition.show_declaring_clause clause "Panic"
+            in
+            match (obligation.code, obligation.panic_clause) with
+            | (Overflow | Division | Shift), Some clause ->
+                " It can also be checked first with an `if`, done with the checked operation, or "
+                ^ show_stopping clause ^ "."
+            | (Overflow | Division | Shift), None ->
                 " It can also be checked first with an `if`, or done with the checked operation."
-            | _, true ->
-                " It can also be checked first with an `if`, or allowed to stop the program with \
-                 `uses Panic`."
-            | _, false -> ""
+            | _, Some clause ->
+                " It can also be checked first with an `if`, or " ^ show_stopping clause ^ "."
+            | _, None -> ""
           in
           let find_failure explained =
             Some

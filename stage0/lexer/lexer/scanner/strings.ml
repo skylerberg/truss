@@ -1,7 +1,5 @@
 let maximum_nesting = 32
 
-type scan = Cursor.t -> inline:bool -> nesting:int -> Cursor.item
-
 type builder = {
   buffer : Buffer.t;
   mutable text_start : int;

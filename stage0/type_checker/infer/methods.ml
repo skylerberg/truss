@@ -364,7 +364,7 @@ and check_trait_method_through_type state env ?expected:_ ?trait_arguments
     (value : Syntax.expression) self_type (trait : Types.trait_reference)
     (method_ : Types.trait_method) arguments =
   let trait_generics =
-    match Interface.Definition.read_trait_interface state.lookups.interface trait.trait with
+    match Interface.Definition.find_trait_interface state.lookups.interface trait.trait with
     | Some interface -> interface.trait_generics
     | None -> []
   in
@@ -528,9 +528,15 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
     | Some method_path -> Some (wanted, method_path)
     | None when lent_mode = Some Types.Mut && List.mem_assoc Path.Read overloads ->
         Some (Path.Read, List.assoc Path.Read overloads)
-    | None when (not has_mode_keyword) && ((not place) || State.is_plain state receiver_type) -> (
+    | None
+      when (not has_mode_keyword)
+           && ((not place)
+              || State.is_plain state receiver_type
+              || not (List.mem_assoc Path.Mut overloads)) -> (
         match List.assoc_opt Path.Own overloads with
-        | Some method_path -> Some (Path.Own, method_path)
+        | Some method_path ->
+            if State.is_place state base then Modes.note_place_without_own state env base;
+            Some (Path.Own, method_path)
         | None -> None)
     | None -> None
   in
@@ -554,19 +560,14 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
   in
   let report_missing_receiver_mode : 'a. (Path.receiver * 'a) list -> Types.ty =
    fun overloads ->
-    let has receiver = List.exists (fun (overload, _) -> overload = receiver) overloads in
-    if (not has_mode_keyword) && place && (has Path.Mut || has Path.Own) then begin
-      let keyword = if has Path.Mut then "mut" else "own" in
+    if (not has_mode_keyword) && place && List.mem_assoc Path.Mut overloads then
       State.make_error_type state Missing_mode (State.read_span state base.id)
         ~fixes:
           [
-            State.fix
-              (Printf.sprintf "Pass it `%s`." keyword)
-              [ State.insert (State.read_span state base.id).start (keyword ^ " ") ];
+            State.fix "Pass it `mut`." [ State.insert (State.read_span state base.id).start "mut " ];
           ]
-        (Printf.sprintf "`%s` takes `%s self`, so the call site passes its receiver `%s`."
-           member.text keyword keyword)
-    end
+        (Printf.sprintf "`%s` takes `mut self`, so the call site passes its receiver `mut`."
+           member.text)
     else report_wrong_receiver (List.map (fun (receiver, _) -> (receiver, ())) overloads)
   in
   match receiver_type with
@@ -695,7 +696,7 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
     ~(receiver : Syntax.expression) ~receiver_type (trait : Types.trait_reference)
     (method_ : Types.trait_method) ~type_arguments arguments =
   let trait_generics =
-    match Interface.Definition.read_trait_interface state.lookups.interface trait.trait with
+    match Interface.Definition.find_trait_interface state.lookups.interface trait.trait with
     | Some interface -> interface.trait_generics
     | None -> []
   in

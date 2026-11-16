@@ -140,9 +140,8 @@ let make_constant_state (context : Definitions.context) path =
     | None -> Definitions.raise_bug "%s is not a constant" (Path.show path)
   in
   let ty =
-    match Interface.Definition.read_constant_type context.lookups.interface path with
-    | Some ty -> Monomorphic.ground context.monomorphic [] ty
-    | None -> Definitions.raise_bug "%s has no type" (Path.show path)
+    Monomorphic.ground context.monomorphic []
+      (Interface.Definition.read_constant_type context.lookups.interface path)
   in
   let code =
     {

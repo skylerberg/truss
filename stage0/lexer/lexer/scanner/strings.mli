@@ -1,11 +1,3 @@
-type scan = Cursor.t -> inline:bool -> nesting:int -> Cursor.item
-
-type builder = {
-  buffer : Buffer.t;
-  mutable text_start : int;
-  mutable pairs : (Token.text * Token.interpolation) list;
-}
-
 val scan_string :
   Cursor.t ->
   scan:(Cursor.t -> inline:bool -> nesting:int -> Cursor.item) ->

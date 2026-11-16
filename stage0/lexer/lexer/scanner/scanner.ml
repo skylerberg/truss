@@ -1,5 +1,3 @@
-type t = Cursor.t
-
 let create = Cursor.create ~scan_foreign_escape:Habits.Escapes.scan
 
 let lex_punctuation (cursor : Cursor.t) current =
