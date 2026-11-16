@@ -157,26 +157,19 @@ let check_unreachable context (definition : definition) =
   Syntax_walk.definition ~statement expression definition
 
 let check (lookups : Lookups.t) key =
-  match
-    ( lookups.names.definition key,
-      lookups.names.spans key,
-      Resolve.whole lookups.resolved key,
-      lookups.tables key )
-  with
-  | Some definition, Some spans, Some resolved, Some tables ->
-      let context =
-        {
-          resolved;
-          tables;
-          spans;
-          text = lazy (Option.value ~default:"" (lookups.names.text key));
-          diagnostics = [];
-        }
-      in
-      check_unused context definition;
-      check_unreachable context definition;
-      List.sort
-        (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
-          compare left.span right.span)
-        context.diagnostics
-  | _ -> []
+  let definition = lookups.definition key in
+  let context =
+    {
+      resolved = lookups.resolved key;
+      tables = lookups.tables key;
+      spans = lookups.spans key;
+      text = lazy (lookups.text key);
+      diagnostics = [];
+    }
+  in
+  check_unused context definition;
+  check_unreachable context definition;
+  List.sort
+    (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
+      compare left.span right.span)
+    context.diagnostics

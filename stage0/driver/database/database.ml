@@ -589,6 +589,10 @@ let resolved database note section (key : Names.key) =
   Option.map value
     (Hashtbl.find_opt (owner database key.module_.package).resolved_names (key, section))
 
+let read_whole_resolution database note key =
+  Resolve.merge
+    (List.map (fun section -> value (resolved_part database note section key)) Resolve.sections)
+
 let lowered_interface database note ~is_checked (key : Names.key) =
   let owner = owner database key.module_.package in
   read database note (Interface key);
@@ -779,10 +783,16 @@ let patterns_lookups database note : Patterns.Lookups.t =
   }
 
 let usage_lookups database note : Usage.Lookups.t =
+  let names = recording_names database note in
+  let read_declared read part_of key =
+    match read key with Some value -> value | None -> unchecked (Part.show (part_of key))
+  in
   {
-    names = recording_names database note;
-    resolved = resolved database note;
-    tables = (fun key -> Some (checked_body database note key).tables);
+    definition = read_declared names.definition (fun key -> Part.Tree key);
+    spans = read_declared names.spans (fun key -> Part.Tree key);
+    text = read_declared names.text (fun key -> Part.Text key);
+    resolved = read_whole_resolution database note;
+    tables = (fun key -> (checked_body database note key).tables);
   }
 
 let ownership_lookups database note : Ownership.Lookups.t =
@@ -793,9 +803,7 @@ let ownership_lookups database note : Ownership.Lookups.t =
 
 let used_packages database note (key : Names.key) =
   let { Infer.form; evidence_packages; _ } = checked_body database note key in
-  match Resolve.whole (resolved database note) key with
-  | Some resolved -> Package_checks.used_packages resolved ~evidence_packages form
-  | None -> raise Reads_failed_part
+  Package_checks.used_packages (read_whole_resolution database note key) ~evidence_packages form
 
 let package_checks_lookups database note : Package_checks.Lookups.t =
   {
@@ -2495,15 +2503,15 @@ let read_resolved database (key : Names.key) =
   drain database ~through:Resolution [ key.module_.package ];
   let owner = owner database key.module_.package in
   match
-    List.filter
+    List.filter_map
       (fun section ->
         match Hashtbl.find_opt owner.resolved_names (key, section) with
-        | Some (Value _) -> true
-        | Some (Failed _ | Blocked) | None -> false)
+        | Some (Value resolved) -> Some resolved
+        | Some (Failed _ | Blocked) | None -> None)
       Resolve.sections
   with
   | [] -> None
-  | sections -> Resolve.whole ~sections (resolved database ignore) key
+  | parts -> Some (Resolve.merge parts)
 
 let request database packages ~through ~needs keys =
   drain database ~through packages;
