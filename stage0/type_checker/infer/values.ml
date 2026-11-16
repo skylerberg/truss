@@ -447,9 +447,11 @@ and check_collection_element state env ~(quantifier : Syntax.expression)
     (collection : Syntax.expression) =
   let collection_type = State.normalize state (Hooks.check_expression state env collection) in
   match (collection.kind, collection_type) with
-  | ( Range { start = Some _; stop = Some _; _ },
+  | ( Range { start = Some _; stop = Some _; inclusive; _ },
       Types.Named { path; arguments = [ Types.Type element ] } )
     when Well_known.is Range path ->
+      Statements.record_integer_range state ~loop:quantifier.id ~described:"A quantifier's"
+        ~admits_integer:true collection element ~inclusive;
       element
   | _, (Types.Error _ | Types.Hole) -> collection_type
   | _ -> (
