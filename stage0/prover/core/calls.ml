@@ -734,7 +734,8 @@ let function_value_amount context frame (function_type : Types.function_type) ca
             | Types.Capability used -> Path.equal used path
             | Types.Capability_parameter _ | Types.Capability_projection _
             | Types.Capability_variable _ ->
-                true)
+                true
+            | Types.Capability_error _ -> Facts.bug "the prover reads a capability with an error")
           (function_type.uses :> Types.capability list)
       then Operations.declare_unknown_amount context frame counter
       else Costs.zero

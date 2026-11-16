@@ -21,7 +21,8 @@ let capabilities context substitution (set : Types.capability_set) : Path.t list
                (Path.show parameter.owner)
          | Capability_projection { name; _ } ->
              bug "the associated capability set %s is not normalized" name
-         | Capability_variable _ -> bug "a set of capabilities the checker left unsolved")
+         | Capability_variable _ -> bug "a set of capabilities the checker left unsolved"
+         | Capability_error _ -> bug "a capability with an error reached code generation")
        (context.normalize_capabilities (Types.substitute_capabilities substitution set)
          :> Types.capability list))
 
