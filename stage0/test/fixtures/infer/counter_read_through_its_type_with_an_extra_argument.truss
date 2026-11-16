@@ -1,0 +1,9 @@
+type Counter(count: Int64)
+
+fn Counter.read(self) -> Int64 {
+  self.count
+}
+
+fn f(counter: Counter) -> Int64 {
+  Counter.read(counter, 1)
+}

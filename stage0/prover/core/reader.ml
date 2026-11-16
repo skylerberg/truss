@@ -521,15 +521,12 @@ let read_lend context (frame : State.frame) run part (call : Mir.call) =
   in
   let lent, write_back =
     match (invocation.lends, invocation.callee, receiver) with
-    | ( Some Types.Mut,
-        Intrinsic
-          { operation = (Storage_at_mut | Array_at_mut | View_at_mut) as operation; type_arguments },
-        Some receiver ) ->
+    | Some Types.Mut, Intrinsic { operation = Lend element_lend; type_arguments }, Some receiver ->
         let index = make_index_term () in
         ( lend frame,
           Some
             (fun frame final ->
-              Intrinsics.write_element_back context frame ~operation ~type_arguments
+              Intrinsics.write_element_back context frame ~lend:element_lend ~type_arguments
                 ~receiver:(make_passed_place context run receiver)
                 ~receiver_type:(compute_place_type context frame run receiver)
                 index final) )
@@ -746,9 +743,9 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
       let types = match types with [] -> [ ty ] | types -> types in
       let terms = List.map translate_operand operands in
       ( frame,
-        Intrinsics.translate_intrinsic context frame ~site operation types terms
-          ~arguments:(List.map find_operand_origin operands)
-          ~changed:terms ty )
+        Operations.translate_primitive_operation context frame ~site operation types terms
+          ~arguments:(List.map find_operand_origin operands) ~fallback:(fun () ->
+            Facts.arrive context frame "result" ty) )
   | Construct { variant; fields; type_ } ->
       Values.apply_construct context frame { site with type_ } variant
         (List.map (fun (name, field) -> (name, Option.map translate_operand field)) fields)
@@ -956,7 +953,7 @@ and read_statement context frame run (statement : Mir.statement) =
   let location = Facts.locate context frame.source statement.origin in
   match statement.kind with
   | Basic basic -> read_basic context frame run statement ~location basic
-  | Assert_by_bit_vector { condition; names; code } ->
+  | Assert_by_bit_vector { names; code; _ } ->
       let named =
         List.map
           (fun local ->
@@ -967,8 +964,7 @@ and read_statement context frame run (statement : Mir.statement) =
           names
       in
       let frame, term = read_value context frame run code in
-      Assertions.check_assertion context frame
-        ~origin:(Option.value (find_operand_origin condition) ~default:statement.origin)
+      Assertions.check_assertion context frame ~origin:statement.origin
         ~bit_vector:(Some (named, fun isolated -> snd (read_value context isolated run code)))
         term;
       Some frame
@@ -1321,9 +1317,7 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
         }
   | Lend { part; call } -> read_lend context frame run part call
   | Assert condition ->
-      Assertions.check_assertion context frame
-        ~origin:(Option.value (find_operand_origin condition) ~default:statement.origin)
-        ~bit_vector:None
+      Assertions.check_assertion context frame ~origin:statement.origin ~bit_vector:None
         (read_operand context frame run condition);
       Some frame
   | Ghost_assert { condition; by_bit_vector } ->

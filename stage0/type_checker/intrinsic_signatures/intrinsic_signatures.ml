@@ -75,108 +75,115 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
     { (with_storage ~mode:Mut rest) with generics = [ make_bounded_generic Plain "Element" ] }
   in
   match operation with
-  | Add | Subtract | Multiply | Divide | Remainder | Wrapping_add | Wrapping_subtract
-  | Wrapping_multiply | Bit_and | Bit_or | Bit_xor | Multiply_high ->
+  | Scalar
+      ( Add | Subtract | Multiply | Divide | Remainder | Wrapping_add | Wrapping_subtract
+      | Wrapping_multiply | Bit_and | Bit_or | Bit_xor | Multiply_high ) ->
       make_binary_signature value
-  | Add_overflows | Subtract_overflows | Multiply_overflows | Equal | Less | Ieee_equal | Ieee_less
-    ->
+  | Scalar
+      ( Add_overflows | Subtract_overflows | Multiply_overflows | Equal | Less | Ieee_equal
+      | Ieee_less ) ->
       make_binary_signature bool
-  | Negate | Complement | Square_root | Floor | Ceiling | Truncate | Round_to_even | Swap_bytes ->
+  | Scalar
+      (Negate | Complement | Square_root | Floor | Ceiling | Truncate | Round_to_even | Swap_bytes)
+    ->
       make_unary_signature value
-  | Is_nan -> make_unary_signature bool
-  | Leading_zeros | Trailing_zeros | Count_ones -> make_unary_signature uint64
-  | Shift_left | Shift_right ->
+  | Scalar Is_nan -> make_unary_signature bool
+  | Scalar (Leading_zeros | Trailing_zeros | Count_ones) -> make_unary_signature uint64
+  | Scalar (Shift_left | Shift_right) ->
       make ~generics:[ "Value"; "Amount" ] ~output:(Returns value)
         [ input "value" value; input "amount" (make_parameter_type "Amount") ]
-  | Rotate_left | Rotate_right ->
+  | Scalar (Rotate_left | Rotate_right) ->
       make ~generics:[ "Value" ] ~output:(Returns value)
         [ input "value" value; input "amount" uint64 ]
-  | Convert ->
+  | Scalar Convert ->
       make ~generics:[ "Source"; "Target" ]
         ~output:(Returns (make_parameter_type "Target"))
         [ input "value" (make_parameter_type "Source") ]
-  | Fits ->
+  | Scalar Fits ->
       make ~generics:[ "Source"; "Target" ] ~output:(Returns bool)
         [ input "value" (make_parameter_type "Source") ]
-  | Fused_multiply_add ->
+  | Scalar Fused_multiply_add ->
       make ~generics:[ "Value" ] ~output:(Returns value)
         [ input "value" value; input "multiplier" value; input "addend" value ]
-  | To_bits ->
+  | Scalar To_bits ->
       make ~generics:[ "Value"; "Bits" ]
         ~output:(Returns (make_parameter_type "Bits"))
         [ input "value" value ]
-  | From_bits ->
+  | Scalar From_bits ->
       make ~generics:[ "Bits"; "Value" ] ~output:(Returns value)
         [ input "bits" (make_parameter_type "Bits") ]
-  | Compare_bytes ->
+  | Buffer Compare_bytes ->
       make
         ~output:(Returns (Types.make_builtin Int8))
         [
           input "left" (make_view_type (Types.make_builtin UInt8));
           input "right" (make_view_type (Types.make_builtin UInt8));
         ]
-  | Storage_empty -> make ~generics:[ "Element" ] ~output:(Returns (make_storage_type element)) []
-  | Storage_with_capacity ->
+  | Buffer Storage_empty ->
+      make ~generics:[ "Element" ] ~output:(Returns (make_storage_type element)) []
+  | Buffer Storage_with_capacity ->
       make ~generics:[ "Element" ]
         ~output:(Returns (make_storage_type element))
         [ input "capacity" uint64 ]
-  | Storage_length | Storage_capacity -> with_storage ~output:(Returns uint64) []
-  | Storage_set_capacity -> with_storage ~mode:Mut [ input "capacity" uint64 ]
-  | Storage_lengthen -> with_plain_storage [ input "by" uint64 ]
-  | Storage_shorten -> with_plain_storage [ input "length" uint64 ]
-  | Storage_push -> with_storage ~mode:Mut [ input ~mode:Own "value" element ]
-  | Storage_pop -> with_storage ~mode:Mut ~output:(Returns element) []
-  | Storage_insert ->
+  | Buffer (Storage_length | Storage_capacity) -> with_storage ~output:(Returns uint64) []
+  | Buffer Storage_set_capacity -> with_storage ~mode:Mut [ input "capacity" uint64 ]
+  | Buffer Storage_lengthen -> with_plain_storage [ input "by" uint64 ]
+  | Buffer Storage_shorten -> with_plain_storage [ input "length" uint64 ]
+  | Buffer Storage_push -> with_storage ~mode:Mut [ input ~mode:Own "value" element ]
+  | Buffer Storage_pop -> with_storage ~mode:Mut ~output:(Returns element) []
+  | Buffer Storage_insert ->
       with_storage ~mode:Mut [ input "index" uint64; input ~mode:Own "value" element ]
-  | Storage_remove -> with_storage ~mode:Mut ~output:(Returns element) [ input "index" uint64 ]
-  | Storage_swap -> with_storage ~mode:Mut [ input "first" uint64; input "second" uint64 ]
-  | Storage_from_array ->
+  | Buffer Storage_remove ->
+      with_storage ~mode:Mut ~output:(Returns element) [ input "index" uint64 ]
+  | Buffer Storage_swap -> with_storage ~mode:Mut [ input "first" uint64; input "second" uint64 ]
+  | Buffer Storage_from_array ->
       make_array_signature
         ~make_output:(fun _ -> Returns (make_storage_type element))
         (fun array -> [ input ~mode:Own "array" array ])
-  | Array_from_storage ->
+  | Buffer Array_from_storage ->
       make_array_signature
         ~make_output:(fun array -> Returns array)
         (fun _ -> [ input ~mode:Own "storage" (make_storage_type element) ])
-  | Array_view ->
+  | Buffer Array_view ->
       make_array_signature
         ~make_output:(fun _ -> Returns (make_view_type element))
         (fun array -> [ input "array" array ])
-  | Array_at_mut ->
+  | Lend Array_at_mut ->
       make_array_signature
         ~make_output:(fun _ -> Lends (Mut, element))
         (fun array -> [ input ~mode:Mut "array" array; input "index" uint64 ])
-  | Storage_at -> with_storage ~output:(Lends (Read, element)) [ input "index" uint64 ]
-  | Storage_at_mut -> with_storage ~mode:Mut ~output:(Lends (Mut, element)) [ input "index" uint64 ]
-  | Storage_view -> with_storage ~output:(Returns (make_view_type element)) []
-  | View_length ->
+  | Lend Storage_at -> with_storage ~output:(Lends (Read, element)) [ input "index" uint64 ]
+  | Lend Storage_at_mut ->
+      with_storage ~mode:Mut ~output:(Lends (Mut, element)) [ input "index" uint64 ]
+  | Buffer Storage_view -> with_storage ~output:(Returns (make_view_type element)) []
+  | Buffer View_length ->
       make ~generics:[ "Element" ] ~output:(Returns uint64)
         [ input "view" (make_view_type element) ]
-  | View_at ->
+  | Lend View_at ->
       make ~generics:[ "Element" ]
         ~output:(Lends (Read, element))
         [ input "view" (make_view_type element); input "index" uint64 ]
-  | View_at_mut ->
+  | Lend View_at_mut ->
       make ~generics:[ "Element" ]
         ~output:(Lends (Mut, element))
         [ input ~mode:Mut "view" (make_view_type element); input "index" uint64 ]
-  | View_swap ->
+  | Buffer View_swap ->
       make ~generics:[ "Element" ]
         [
           input ~mode:Mut "view" (make_view_type element);
           input "first" uint64;
           input "second" uint64;
         ]
-  | View_slice ->
+  | Buffer View_slice ->
       make ~generics:[ "Element" ]
         ~output:(Returns (make_view_type element))
         [ input "view" (make_view_type element); input "start" uint64; input "stop" uint64 ]
-  | Storage_model ->
+  | Buffer Storage_model ->
       {
         (with_storage ~output:(Returns (make_sequence_type element)) []) with
         specification_only = true;
       }
-  | Array_model ->
+  | Buffer Array_model ->
       {
         (make_array_signature
            ~make_output:(fun _ -> Returns (make_sequence_type element))
@@ -184,7 +191,7 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
         with
         specification_only = true;
       }
-  | View_model ->
+  | Buffer View_model ->
       {
         (make ~generics:[ "Element" ]
            ~output:(Returns (make_sequence_type element))
@@ -192,53 +199,53 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
         with
         specification_only = true;
       }
-  | View_address ->
+  | Buffer View_address ->
       make ~generics:[ "Element" ] ~output:(Returns uint64)
         [ input "view" (make_view_type element) ]
-  | Crash ->
+  | Runtime Crash ->
       make ~output:(Returns Types.Never)
         [
           input "message" (Types.Named { path = Well_known.make_path String_slice; arguments = [] });
         ]
-  | Handle_from ->
+  | Runtime Handle_from ->
       make
         ~output:(Returns (Types.make_builtin Handle))
         [ input "descriptor" (Types.make_builtin Int32) ]
-  | Handle_descriptor ->
+  | Runtime Handle_descriptor ->
       make
         ~output:(Returns (Types.make_builtin Int32))
         [ input "handle" (Types.make_builtin Handle) ]
-  | Handle_release ->
+  | Runtime Handle_release ->
       make
         ~output:(Returns (Types.make_builtin Int32))
         [ input ~mode:Own "handle" (Types.make_builtin Handle) ]
-  | Run_test -> make [ input "index" (Types.make_builtin UInt32) ]
-  | Coroutine_start ->
+  | Runtime Run_test -> make [ input "index" (Types.make_builtin UInt32) ]
+  | Runtime Coroutine_start ->
       {
         (make ~output:(Returns uint64) [ input ~mode:Own "work" work; input "item" work_item ]) with
         capture_free_parameters = [ "work" ];
       }
-  | Tasks_spawn ->
+  | Runtime Tasks_spawn ->
       {
         (make ~output:(Returns bool)
            [ input "group" work_item; input ~mode:Own "work" work; input "item" work_item ])
         with
         capture_free_parameters = [ "work" ];
       }
-  | Holds_invariant ->
+  | Runtime Holds_invariant ->
       make ~generics:[ "Value" ] ~output:(Returns bool)
         [ input "value" value; input "clause" uint64 ]
-  | Shared_new | Shared_update | Shared_key -> (
+  | Runtime (Shared_new | Shared_update | Shared_key) -> (
       let shared =
         Types.Named { path = Intrinsic.make_builtin_path Shared; arguments = [ Types.Type value ] }
       in
       match operation with
-      | Shared_new ->
+      | Runtime Shared_new ->
           {
             (make ~output:(Returns shared) [ input ~mode:Own "value" value ]) with
             generics = [ make_bounded_generic Storable "Value" ];
           }
-      | Shared_update ->
+      | Runtime Shared_update ->
           let change : Types.function_type =
             {
               inputs = [ (Mut, value); (Own, make_parameter_type "Input") ];
@@ -268,16 +275,16 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
             (make ~output:(Returns (Types.make_builtin UInt64)) [ input "shared" shared ]) with
             generics = [ make_bounded_generic Storable "Value" ];
           })
-  | Coroutine_resume -> make ~output:(Returns bool) [ input "coroutine" uint64 ]
-  | Coroutine_suspend -> make []
-  | Report_tests_to -> make [ input "descriptor" (Types.make_builtin Int32) ]
-  | Live_blocks -> make ~output:(Returns uint64) []
-  | Environment_entry ->
+  | Runtime Coroutine_resume -> make ~output:(Returns bool) [ input "coroutine" uint64 ]
+  | Runtime Coroutine_suspend -> make []
+  | Runtime Report_tests_to -> make [ input "descriptor" (Types.make_builtin Int32) ]
+  | Runtime Live_blocks -> make ~output:(Returns uint64) []
+  | Runtime Environment_entry ->
       make
         ~output:(Returns (make_view_type (Types.make_builtin UInt8)))
         [ input "index" uint64; input ~mode:Mut "is_present" bool ]
-  | System_is_os _ | System_is_architecture _ -> make ~output:(Returns bool) []
-  | Libc function_ ->
+  | Runtime (System_is_os _ | System_is_architecture _) -> make ~output:(Returns bool) []
+  | Runtime (Libc function_) ->
       let { Libc.parameters; result; _ } = Libc.make_signature function_ in
       let presence = match result with Text -> [ input ~mode:Mut "is_present" bool ] | _ -> [] in
       make
@@ -300,7 +307,7 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
              | Always _ | Fixed _ -> [])
            parameters
         @ presence)
-  | Libc_number number ->
+  | Runtime (Libc_number number) ->
       make ~output:(Returns (make_libc_scalar_type (Libc.classify_number number))) []
 
 type time = Constant_time | Linear_in of int | Unbounded_time
@@ -310,24 +317,32 @@ type cost = { time : time; allocations : allocations }
 
 let classify_cost (operation : Intrinsic.operation) =
   match operation with
-  | Add | Subtract | Multiply | Divide | Remainder | Negate | Wrapping_add | Wrapping_subtract
-  | Wrapping_multiply | Add_overflows | Subtract_overflows | Multiply_overflows | Equal | Less
-  | Ieee_equal | Ieee_less | Bit_and | Bit_or | Bit_xor | Complement | Shift_left | Shift_right
-  | Convert | Fits | Square_root | Fused_multiply_add | Floor | Ceiling | Truncate | Round_to_even
-  | To_bits | From_bits | Is_nan | Leading_zeros | Trailing_zeros | Count_ones | Swap_bytes
-  | Rotate_left | Rotate_right | Multiply_high | Storage_empty | Storage_length | Storage_capacity
-  | Storage_pop | Storage_swap | Storage_at | Storage_at_mut | Storage_view | View_length | View_at
-  | View_at_mut | View_swap | View_slice | View_address | Array_view | Array_at_mut
-  | Array_from_storage | Storage_model | View_model | Array_model | Crash | Storage_lengthen
-  | Storage_shorten | Storage_push | Handle_from | Handle_descriptor | Handle_release
-  | Report_tests_to | Live_blocks | Libc_number _ | System_is_os _ | System_is_architecture _ ->
+  | Scalar
+      ( Add | Subtract | Multiply | Divide | Remainder | Negate | Wrapping_add | Wrapping_subtract
+      | Wrapping_multiply | Add_overflows | Subtract_overflows | Multiply_overflows | Equal | Less
+      | Ieee_equal | Ieee_less | Bit_and | Bit_or | Bit_xor | Complement | Shift_left | Shift_right
+      | Convert | Fits | Square_root | Fused_multiply_add | Floor | Ceiling | Truncate
+      | Round_to_even | To_bits | From_bits | Is_nan | Leading_zeros | Trailing_zeros | Count_ones
+      | Swap_bytes | Rotate_left | Rotate_right | Multiply_high )
+  | Buffer
+      ( Storage_empty | Storage_length | Storage_capacity | Storage_pop | Storage_swap
+      | Storage_view | View_length | View_swap | View_slice | View_address | Array_view
+      | Array_from_storage | Storage_model | View_model | Array_model | Storage_lengthen
+      | Storage_shorten | Storage_push )
+  | Lend (Storage_at | Storage_at_mut | View_at | View_at_mut | Array_at_mut)
+  | Runtime
+      ( Crash | Handle_from | Handle_descriptor | Handle_release | Report_tests_to | Live_blocks
+      | Libc_number _ | System_is_os _ | System_is_architecture _ ) ->
       { time = Constant_time; allocations = No_allocations }
-  | Holds_invariant -> { time = Unbounded_time; allocations = Unknown_allocations }
-  | Compare_bytes | Storage_remove | Storage_insert | Environment_entry ->
+  | Runtime Holds_invariant -> { time = Unbounded_time; allocations = Unknown_allocations }
+  | Buffer (Compare_bytes | Storage_remove | Storage_insert) | Runtime Environment_entry ->
       { time = Linear_in 0; allocations = No_allocations }
-  | Storage_set_capacity -> { time = Linear_in 0; allocations = Unknown_allocations }
-  | Storage_with_capacity -> { time = Constant_time; allocations = One_if_positive (Argument 0) }
-  | Storage_from_array -> { time = Constant_time; allocations = One_if_positive (Generic "count") }
-  | Run_test | Libc _ | Coroutine_start | Coroutine_resume | Coroutine_suspend | Tasks_spawn
-  | Shared_new | Shared_update | Shared_key ->
+  | Buffer Storage_set_capacity -> { time = Linear_in 0; allocations = Unknown_allocations }
+  | Buffer Storage_with_capacity ->
+      { time = Constant_time; allocations = One_if_positive (Argument 0) }
+  | Buffer Storage_from_array ->
+      { time = Constant_time; allocations = One_if_positive (Generic "count") }
+  | Runtime
+      ( Run_test | Libc _ | Coroutine_start | Coroutine_resume | Coroutine_suspend | Tasks_spawn
+      | Shared_new | Shared_update | Shared_key ) ->
       { time = Unbounded_time; allocations = Unknown_allocations }

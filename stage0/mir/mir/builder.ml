@@ -676,7 +676,7 @@ and plan_argument builder (argument : Core.argument) =
 and lower_call_value builder (node : Core.expression) (called : Core.call) =
   let origin = node.origin in
   match called.callee with
-  | Intrinsic { operation; type_arguments } when Intrinsic.is_primitive operation ->
+  | Intrinsic { operation = Scalar operation; type_arguments } ->
       let* operands =
         In_order.run builder
           (In_order.all
@@ -1269,7 +1269,7 @@ and lower_statement builder (node : Core.statement) =
             origin
       | Assert { condition = { value; executable = true }; by_bit_vector = false } -> (
           match lower_expression builder value with
-          | Some condition -> Emitter.emit builder (Basic (Assert condition)) origin
+          | Some condition -> Emitter.emit builder (Basic (Assert condition)) value.origin
           | None -> ())
       | Assert { condition = { value; executable = true }; by_bit_vector = true } -> (
           let code = Emitter.build_block builder (fun () -> lower_expression builder value) in
@@ -1281,7 +1281,7 @@ and lower_statement builder (node : Core.statement) =
                      (fun (local, _) -> Emitter.find_source builder local)
                      (list_names value))
               in
-              Emitter.emit builder (Assert_by_bit_vector { condition; names; code }) origin
+              Emitter.emit builder (Assert_by_bit_vector { condition; names; code }) value.origin
           | None -> ())
       | Assert { condition = { value; executable = false }; by_bit_vector } ->
           Emitter.emit builder

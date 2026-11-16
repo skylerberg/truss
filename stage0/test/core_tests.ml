@@ -45,7 +45,7 @@ and show_expression form (node : Core.expression) =
            (Passed { mode = Read; value = Place base; mode_keyword = None } :: bounds))
   | Operator { operation; arguments } ->
       Printf.sprintf "%s(%s)"
-        (Intrinsic.show_operation operation)
+        (Intrinsic.show_operation (Scalar operation))
         (list (show_expression form) arguments)
   | Call { callee; arguments; _ } ->
       let dispatch =

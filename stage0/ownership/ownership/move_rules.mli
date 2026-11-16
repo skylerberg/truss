@@ -4,7 +4,13 @@ type verdict =
   | Refused of (Context.context -> Source.Definition_span.t -> Types.ty -> unit)
 
 val decide_move :
-  Context.context -> Place.t -> type_:Types.ty -> is_returned:bool -> is_captured:bool -> verdict
+  Context.context ->
+  Place.t ->
+  origin:Core.origin ->
+  type_:Types.ty ->
+  is_returned:bool ->
+  is_captured:bool ->
+  verdict
 
 val copy_fix :
   Context.context ->

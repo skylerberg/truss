@@ -5,6 +5,52 @@ let check packages =
 let expect_one_diagnostic = Support.expect_one_diagnostic ~check
 let expect_fine text = Support.expect_no_diagnostics ~check [ ("app::main", text) ]
 
+let expect_not_available text ~message =
+  match check (Support.setup [ ("app::main", text) ]) (Support.parse_file "app::main") with
+  | [ diagnostic ]
+    when Diagnostic.Code.name diagnostic.code = "capabilities.not_available"
+         && diagnostic.message = message ->
+      ()
+  | reported ->
+      Harness.fail "expected %S, got [%s]" message
+        (String.concat "; "
+           (List.map
+              (fun (diagnostic : Diagnostic.t) ->
+                Diagnostic.Code.name diagnostic.code ^ " " ^ diagnostic.message)
+              reported))
+
+let () =
+  Harness.test "a call in a capability's impl declares the capability on the impl" (fun () ->
+      expect_not_available Fixtures.Capabilities.greeter_impl_calling_panic
+        ~message:
+          "This call uses `Panic`, which is not available here. Declare it with `uses Panic` on \
+           the `impl`.");
+  Harness.test "a call in an impl declares the capability in the set its trait's method uses"
+    (fun () ->
+      expect_not_available Fixtures.Capabilities.countdown_cursor_calling_panic
+        ~message:
+          "This call uses `Panic`, which is not available here. Declare it with `capability Uses = \
+           Panic` in the `impl`.";
+      expect_not_available Fixtures.Capabilities.countdown_cursor_using_random_calling_panic
+        ~message:
+          "This call uses `Panic`, which is not available here. Declare it with `Panic` in the \
+           `impl`'s `capability Uses`.");
+  Harness.test "a call in an impl of a trait that fixes its method's capabilities can only provide"
+    (fun () ->
+      expect_not_available Fixtures.Capabilities.describe_impl_calling_clock
+        ~message:
+          "This call uses `Clock`, but `describe` can use only the capabilities `Describe` \
+           declares for it. Provide an implementation with `provide`.";
+      expect_not_available Fixtures.Capabilities.describe_impl_calling_panic
+        ~message:
+          "This call uses `Panic`, but `describe` can use only the capabilities `Describe` \
+           declares for it.");
+  Harness.test "a provided implementation's capabilities are declared as a call's are" (fun () ->
+      expect_not_available Fixtures.Capabilities.provide_of_a_greeter_using_clock
+        ~message:
+          "This implementation uses `Clock`, which is not available here. Declare it with `uses \
+           Clock`, or `provide` an implementation.")
+
 let () =
   Harness.test "a capability call needs its capability, which it may declare or provide" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.clock_call_without_uses

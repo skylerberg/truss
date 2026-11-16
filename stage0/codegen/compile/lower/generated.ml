@@ -292,7 +292,7 @@ let build_program_main context (key : Instance.key) main_path : Emit_c.Builder.i
     (Assign
        ( Lowered.make_local_place wanted,
          Convert (Copy (Lowered.make_local_place count), Integer UInt64) ));
-  lower Storage_with_capacity [ string_ty ]
+  lower (Buffer Storage_with_capacity) [ string_ty ]
     [ Value (Copy (Lowered.make_local_place wanted)) ]
     (Some (Lowered.project list (Field storage_field)));
   Emit_c.Builder.emit_loop builder ~integer:Int32
@@ -328,7 +328,7 @@ let build_program_main context (key : Instance.key) main_path : Emit_c.Builder.i
         ~substitution:[]
         ~arguments:[ (Read, view_ty, view) ]
         ~destination:text ();
-      lower Storage_push [ string_ty ]
+      lower (Buffer Storage_push) [ string_ty ]
         [ Place (Lowered.project list (Field storage_field)); Value (Lowering.move_place st text) ]
         None);
   st.evidence <-

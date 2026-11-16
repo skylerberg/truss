@@ -15,14 +15,12 @@ type verdict =
   | Reads
   | Refused of (Context.context -> Source.Definition_span.t -> Types.ty -> unit)
 
-let decide_move context (place : Place.t) ~type_ ~is_returned ~is_captured : verdict =
+let decide_move context (place : Place.t) ~origin ~type_ ~is_returned ~is_captured : verdict =
   let shown = Context.show context place in
   let refuse message =
     Refused
       (fun context at type_ ->
-        Context.report context Not_owned at
-          ~fixes:(copy_fix context "Pass a copy." type_ at)
-          message)
+        Context.report context Not_owned at ~fixes:(copy_fix context "Copy it." type_ at) message)
   in
   let root_mode : Types.mode =
     if is_captured then Read else Context.classify_binding_mode context place.root
@@ -52,6 +50,18 @@ let decide_move context (place : Place.t) ~type_ ~is_returned ~is_captured : ver
         refuse
           (Printf.sprintf "`%s` is %s, so it cannot be moved. Copy it instead." shown
              (if place.steps = [] then "a view" else "part of a view"))
+    | (Own | Mut), _ when Hashtbl.mem context.places_without_own origin ->
+        Refused
+          (fun context at type_ ->
+            Context.report context Needs_owned at
+              ~fixes:
+                (Diagnostic.fix "Move it with `own`."
+                   [ Diagnostic.insert (Source.Definition_span.make_zero_width at.start) "own " ]
+                :: copy_fix context "Copy it." type_ at)
+              (Printf.sprintf
+                 "An owned value is needed here, and `%s` is a place. Pass it `own` to move it, or \
+                  copy it."
+                 shown))
     | (Own | Mut), _ -> Moves
 
 let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =

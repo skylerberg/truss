@@ -70,7 +70,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
       in
       if is_var then begin
         State.reject_in_formula state env (State.read_span state written.id) "A `var`";
-        Modes.check_owned state env value type_
+        Modes.note_owned_value state env value
       end;
       (match else_ with
       | Some block -> (
@@ -107,7 +107,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
               let target = State.make_place (State.build_expression state written_target) in
               Assign { target; value = State.build_expression state value });
           Hooks.check state env value target_type;
-          Modes.check_owned state env value target_type
+          Modes.note_owned_value state env value
       | Compound operation -> (
           let right_type = Hooks.check_expression state env ~expected:target_type value in
           Operators.check_literal_operands state ~left:target_type ~right:right_type;

@@ -192,7 +192,10 @@ let check_body context (actions : Actions.t) moves =
       | Assign place -> check_mutation here place ~verb:"be assigned"
       | Move { place; type_; is_returned; is_captured } -> (
           check_use here place;
-          match Move_rules.decide_move context place ~type_ ~is_returned ~is_captured with
+          match
+            Move_rules.decide_move context place ~origin:here.origin ~type_ ~is_returned
+              ~is_captured
+          with
           | Moves -> check_mutation here place ~verb:"be moved"
           | Reads -> ()
           | Refused refuse -> refuse context at type_)
@@ -489,7 +492,10 @@ let check_body context (actions : Actions.t) moves =
         | Assign place -> mutations := (place, here.origin) :: !mutations
         | Move { place; type_; is_returned; is_captured } -> (
             uses := place :: !uses;
-            match Move_rules.decide_move context place ~type_ ~is_returned ~is_captured with
+            match
+              Move_rules.decide_move context place ~origin:here.origin ~type_ ~is_returned
+                ~is_captured
+            with
             | Moves -> mutations := (place, here.origin) :: !mutations
             | Reads | Refused _ -> ())
         | Move_out_of_lent _ | Bind _ | Yield_point _ | Bind_views _ | Store _ | Return_view _

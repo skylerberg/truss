@@ -22,7 +22,7 @@ val translate_primitive_operation :
   State.context ->
   State.frame ->
   site:Invocation.site ->
-  Intrinsic.operation ->
+  Intrinsic.scalar ->
   Types.ty list ->
   Logic.term list ->
   arguments:Core.origin option list ->

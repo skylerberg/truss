@@ -147,10 +147,12 @@ let obtain_free_source builder (local : Core.local) ~type_ ~origin =
       free
   | None -> raise_bug "a local that nothing binds"
 
-let find_binding_scope builder =
-  match List.find_opt (fun scope -> scope.frame = builder.binds_into) builder.scopes with
+let find_scope builder frame =
+  match List.find_opt (fun scope -> scope.frame = frame) builder.scopes with
   | Some scope -> Some scope
   | None -> List.find_opt (fun scope -> scope.frame <> Condition) builder.scopes
+
+let find_binding_scope builder = find_scope builder builder.binds_into
 
 let register_binding builder local =
   Option.iter (fun scope -> scope.bound <- local :: scope.bound) (find_binding_scope builder)
@@ -279,7 +281,7 @@ let run_in_condition_scope :
     (unit -> 'value) ->
     'value * scope * scope * (Tree.local list * Tree.local list * int list) =
  fun ~lends builder evaluate ->
-  let naming = List.find_opt (fun scope -> scope.frame = Statement) builder.scopes in
+  let naming = find_scope builder Statement in
   let named_before = match naming with Some scope -> scope.bound | None -> [] in
   let scope = { frame = Condition; bound = []; loans = []; temporaries = []; provides = false } in
   builder.scopes <- scope :: builder.scopes;

@@ -832,6 +832,7 @@ let make_recording_usage_lookups database note : Usage.Lookups.t =
 let make_recording_ownership_lookups database note : Ownership.Lookups.t =
   {
     find_graph = (fun key -> Mir.find_graph (read_body_mir database note key));
+    list_places_without_own = (fun key -> (read_checked database note key).places_without_own);
     interface = make_recording_interface_lookups database note ~is_checked:true;
   }
 

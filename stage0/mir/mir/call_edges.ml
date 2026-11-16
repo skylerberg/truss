@@ -216,7 +216,7 @@ let list_edges (lookups : lookups) ~package ~may_panic (code : Tree.t) =
         (Parts.list_checked_requires lookups.mir path)
   and add_invariant_check (call : Tree.call) =
     match (call.callee, call.arguments) with
-    | ( Intrinsic { operation = Holds_invariant; type_arguments = [ Type checked ] },
+    | ( Intrinsic { operation = Runtime Holds_invariant; type_arguments = [ Type checked ] },
         [ _; Passed { value = Constant { value = Integer index; _ }; _ } ] ) -> (
         match
           (find_head checked, Option.bind (find_head checked) (Parts.read_type_clauses lookups.mir))

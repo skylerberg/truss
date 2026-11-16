@@ -11,21 +11,15 @@ val check_function_value_call :
 val check_argument :
   State.state -> State.env -> Syntax.expression -> Types.parameter_info -> Types.mode
 
-val match_arguments :
-  State.state ->
-  Syntax.expression ->
-  Types.parameter_info list ->
-  Syntax.argument list ->
-  record:bool ->
-  (Syntax.argument * int) list * string list
-
 val check_arguments :
   State.state ->
   State.env ->
+  ?constructor:string ->
+  Syntax.expression ->
   Types.parameter_info list ->
-  (Syntax.argument * int) list ->
-  offset:int ->
-  Tables.argument list
+  Syntax.argument list ->
+  has_receiver:bool ->
+  (Tables.argument list * string list, Types.ty) result
 
 val check_named_call :
   State.state ->
