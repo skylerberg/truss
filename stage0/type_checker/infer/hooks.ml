@@ -1,7 +1,7 @@
 open Syntax
 open State
 
-let not_set name _ = failwith ("Hooks." ^ name ^ " was not set")
+let not_set name _ = bug "Hooks.%s was called before Expressions set it" name
 
 let expression_hook : (state -> env -> ?expected:Types.ty -> expression -> Types.ty) ref =
   ref (fun _ _ ?expected:_ -> not_set "expression")

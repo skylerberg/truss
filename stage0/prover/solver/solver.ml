@@ -1,5 +1,6 @@
 let version = "5.3.3"
 let steps = 1_000_000
+let bug format = Compiler_bug.bug ~stage:"Solver" format
 
 type cache = { find : string -> string option; add : string -> string -> unit }
 type t = { program : string; cache : cache option; mutable queries_run : int }
@@ -179,7 +180,7 @@ let solve solver (request, query) =
   | None ->
       let text = Logic.text query in
       if request_key_of_text text request.value_arguments <> request.key then
-        invalid_arg "Solver.solve_all: the query is not the one its request was made from";
+        bug "the query is not the one its request was made from";
       let input =
         header ^ text
         ^
@@ -187,7 +188,7 @@ let solve solver (request, query) =
         else Printf.sprintf "(get-value (%s))\n" (String.concat " " request.value_arguments)
       in
       locked (fun () -> solver.queries_run <- solver.queries_run + 1);
-      let _, output, _ = Process.run ~input solver.program [ "-in"; "-smt2" ] in
+      let status, output, errors = Process.run ~input solver.program [ "-in"; "-smt2" ] in
       let answer =
         match parse_sexps output with
         | Atom "unsat" :: _ -> Proven_canonical
@@ -207,7 +208,11 @@ let solve solver (request, query) =
                   |> List.filter_map Fun.id
               | _ -> [])
         | Atom "unknown" :: _ -> Out_of_steps_canonical
-        | _ -> failwith ("Solver.solve_all: the solver rejected a query: " ^ String.trim output)
+        | _ ->
+            bug
+              "Z3 exited with status %d without answering a query, writing `%s` to stdout and `%s` \
+               to stderr"
+              status (String.trim output) (String.trim errors)
       in
       locked (fun () ->
           Hashtbl.replace answers request.key answer;
