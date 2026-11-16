@@ -1,6 +1,6 @@
 let main_of snapshot database packages (package : Path.package) =
   if List.mem { Path.package; modules = [] } (Command_packages.modules snapshot packages) then
-    Database.main database package
+    Database.find_main database package
   else None
 
 let mains snapshot packages =
@@ -38,7 +38,7 @@ let refuse_unshippable snapshot packages compile main proofs =
           (fun definition ->
             List.map
               (fun (file, line, column) -> (file, line, column, `Proof_hole, [ definition ]))
-              (Proofs.holes snapshot packages proofs definition))
+              (Proofs.list_holes snapshot packages proofs definition))
           definitions
   in
   match List.sort_uniq compare (in_code @ in_proofs) with

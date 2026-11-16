@@ -1930,7 +1930,7 @@ let is_of_other definition part =
 let drain_checks database = drain database ~through:Proofs database.project
 let is_checked part = not (Stage.is_lowering (Stage.of_part part))
 
-let dependencies database paths =
+let list_dependencies database paths =
   drain_checks database;
   let wanted = definition_set paths in
   Part_table.fold
@@ -1945,7 +1945,7 @@ let dependencies database paths =
       | Some _ | None -> found)
     database.reads []
 
-let dependents database paths =
+let list_dependents database paths =
   drain_checks database;
   let wanted = definition_set paths in
   Part_table.fold
@@ -1961,7 +1961,7 @@ let dependents database paths =
       | Some _ | None -> found)
     database.readers []
 
-let changes database other =
+let list_changes database other =
   drain_checks database;
   drain_checks other;
   let parts = Part_table.create 1024 in
@@ -2224,7 +2224,7 @@ let saved_value database (entry : Entry.t) =
       else None
   | Owned owner -> Option.map marshalled (Part_table.find_opt database.owned owner)
 
-let unsaved database =
+let list_unsaved database =
   drain database ~through:Namespaces database.project;
   List.iter (update_groups database) database.project;
   Entry_table.fold
@@ -2405,25 +2405,25 @@ let list_checker_diagnostics database (file : Path.file) checker =
 let checkers = [ Resolve; Interface; Infer; Patterns; Usage; Ownership; Package_checks ]
 let check database packages = drain database ~through:Package_checks packages
 
-let tables database (key : Names.key) =
+let read_tables database (key : Names.key) =
   drain database ~through:Checked_bodies [ key.module_.package ];
   match Hashtbl.find_opt (owner database key.module_.package).checked_bodies key with
   | Some (Value checked) -> Some checked.tables
   | Some (Failed _ | Blocked) | None -> None
 
-let file_diagnostics database (file : Path.file) =
+let list_file_diagnostics database (file : Path.file) =
   drain database ~through:Package_checks [ file.module_.package ];
   without_duplicates
     ((parsed_file database file).diagnostics
     @ List.concat_map (list_checker_diagnostics database file) checkers)
 
-let manifest_problems database package =
+let list_manifest_problems database package =
   drain database ~through:Package_checks [ package ];
   List.concat_map
     (function Package_checks.Problems problems -> problems | Placed _ | Packages _ -> [])
     (package_outcomes database package)
 
-let code_packages database package =
+let list_code_packages database package =
   drain database ~through:Package_checks [ package ];
   match package_check database package Code_packages with
   | Some (Value (Packages packages)) -> Some packages
@@ -2464,12 +2464,12 @@ let prove database files =
     keys;
   { database; keys }
 
-let proof proofs (key : Names.key) =
+let read_proof proofs (key : Names.key) =
   Hashtbl.find_opt (owner proofs.database key.module_.package).proofs key
 
-let holes proofs path =
+let list_holes proofs path =
   let names = names_lookups proofs.database in
-  match Option.bind (names.key path) (proof proofs) with
+  match Option.bind (names.key path) (read_proof proofs) with
   | Some (Value (Obligations { holes; _ })) ->
       List.filter_map
         (fun ((home : Names.key), (span : Source.Definition_span.t)) ->
@@ -2480,7 +2480,7 @@ let holes proofs path =
         holes
   | Some (Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked) | None -> []
 
-let template_checks (proofs : proofs) =
+let list_template_checks (proofs : proofs) =
   let database = proofs.database in
   match List.sort_uniq compare (List.concat_map (proof_template_checks database) proofs.keys) with
   | [] -> []
@@ -2498,22 +2498,22 @@ let template_checks (proofs : proofs) =
 let list_proofs (proofs : proofs) =
   List.filter_map
     (fun key ->
-      match proof proofs key with
+      match read_proof proofs key with
       | Some (Value proof) -> Some (key, proof)
       | Some (Failed _ | Blocked) | None -> None)
     proofs.keys
 
 let make_proof_lookups database = proof_lookups database ignore
 
-let parsed database (file : Path.file) =
+let read_parsed database (file : Path.file) =
   drain database ~through:Parse [ file.module_.package ];
   parsed_file database file
 
-let names database packages =
+let make_name_lookups database packages =
   drain database ~through:Namespaces packages;
   names_lookups database
 
-let resolved database (key : Names.key) =
+let read_resolved database (key : Names.key) =
   drain database ~through:Resolution [ key.module_.package ];
   let owner = owner database key.module_.package in
   match
@@ -2569,7 +2569,7 @@ let layouts database packages keys =
         (Ground.to_string ty);
     layout database ignore ty
 
-let interface_lookups database packages =
+let make_interface_lookups database packages =
   drain database ~through:Signature_checks packages;
   interface_lookups database ignore ~is_checked:true
 
@@ -2610,8 +2610,8 @@ let reached_todo_types database key =
   in
   List.sort_uniq Path.compare (visit [] (Test_key key))
 
-let lowering_requests database packages : Compile.requests =
-  let interface = interface_lookups database packages in
+let make_lowering_requests database packages : Compile.requests =
+  let interface = make_interface_lookups database packages in
   {
     settings = lowering_settings database;
     source = source database;
@@ -2634,11 +2634,11 @@ let lowering_requests database packages : Compile.requests =
     layouts = layouts database packages;
   }
 
-let main database package =
+let find_main database package =
   drain database ~through:Namespaces [ package ];
   entry_point (names_lookups database) package
 
-let callers database ~viewer path =
+let list_callers database ~viewer path =
   drain database ~through:Recursion_groups [ viewer ];
   match Hashtbl.find_opt database.graphs viewer with
   | None -> []
@@ -2664,7 +2664,7 @@ module For_testing = struct
     | Ownership
     | Package_checks
 
-  let diagnostics checkers database (file : Path.file) =
+  let list_diagnostics checkers database (file : Path.file) =
     let through : Stage.t =
       if List.mem Package_checks checkers then Package_checks
       else if List.exists (fun checker -> List.mem checker [ Patterns; Usage; Ownership ]) checkers
@@ -2676,33 +2676,35 @@ module For_testing = struct
     drain database ~through [ file.module_.package ];
     List.concat_map (list_checker_diagnostics database file) checkers
 
-  let checked_body database (key : Names.key) =
+  let read_checked_body database (key : Names.key) =
     drain database ~through:Checked_bodies [ key.module_.package ];
     match Hashtbl.find_opt (owner database key.module_.package).checked_bodies key with
     | Some (Value checked) -> Some checked
     | Some (Failed _ | Blocked) | None -> None
 
-  let derived database path =
+  let read_derived_form database path =
     drain database ~through:Derived_forms [ Path.package path ];
     match Path_table.find_opt (owner database (Path.package path)).derived_forms path with
     | Some (Value form) -> Some form
     | Some (Failed _ | Blocked) | None -> None
 
-  let core_of_path database path =
+  let read_core database path =
     drain database ~through:Derived_forms [ Path.package path ];
     Option.bind (form_origin database ignore path) (fun (origin, substitution) ->
         Option.map
           (fun form -> (form, substitution))
           (match origin with
           | Infer.Written key | Inherited key ->
-              Option.map (fun (checked : Infer.checked) -> checked.form) (checked_body database key)
-          | Generated -> derived database path))
+              Option.map
+                (fun (checked : Infer.checked) -> checked.form)
+                (read_checked_body database key)
+          | Generated -> read_derived_form database path))
 
-  let mir database package =
+  let make_mir_lookups database package =
     drain database ~through:Mir [ package ];
     mir_lookups database ignore
 
-  let reads database shown =
+  let list_reads database shown =
     match
       Part_table.fold
         (fun part reads found -> if Part.show part = shown then Some reads else found)
@@ -2711,7 +2713,7 @@ module For_testing = struct
     | Some reads -> List.sort compare (List.map Part.show reads)
     | None -> Compiler_bug.bug ~stage:"Database" "%s is not computed" shown
 
-  let differences hot cold =
+  let list_differences hot cold =
     let parts = Part_table.create 1024 in
     List.iter
       (fun database ->
@@ -2752,7 +2754,7 @@ module For_testing = struct
     own_roots database Packages
       (key :: Option.value (Part_table.find_opt database.owned Packages) ~default:[])
 
-  let ownership database (key : Names.key) =
+  let read_ownership database (key : Names.key) =
     match Hashtbl.find_opt (owner database key.module_.package).ownership key with
     | Some part -> part
     | None -> unchecked (Part.show (Ownership key))

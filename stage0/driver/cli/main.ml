@@ -429,7 +429,7 @@ let ask_running arguments : (string * (response, string) result) list =
   List.map
     (fun key ->
       (key, Workspace.call ~start_server:false ~key ~progress:Output.eprint (request arguments)))
-    (Workspace.servers ())
+    (Workspace.list_servers ())
 
 let wait_until_stopped answers =
   List.iter
@@ -470,7 +470,7 @@ let language_server ~no_server =
         Workspace.flush ();
         Ok response
       end
-      else Workspace.call ~key:(Workspace.server_key root) ~progress:ignore request
+      else Workspace.call ~key:(Workspace.make_server_key root) ~progress:ignore request
     in
     match response with Ok { output; outcome = Exit 0 } -> Some output | Ok _ | Error _ -> None
   in
@@ -513,7 +513,7 @@ let client argv =
   | Some _ -> (
       match
         (Workspace.call
-           ~key:(Workspace.server_key (directory_of arguments))
+           ~key:(Workspace.make_server_key (directory_of arguments))
            ~progress:Output.eprint (request arguments)
           : (response, string) result)
       with

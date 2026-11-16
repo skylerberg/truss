@@ -5,7 +5,7 @@ open Support
 let changes before after =
   let package : Path.package = { owner = None; name = "lib" } in
   let state text =
-    Database.interface_lookups (database (setup [ ("lib::shapes", text) ])) [ package ]
+    Database.make_interface_lookups (database (setup [ ("lib::shapes", text) ])) [ package ]
   in
   Compatibility.compare ~before:(state before) ~after:(state after) package
 

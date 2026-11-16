@@ -2,7 +2,7 @@ open Harness
 open Support
 
 let check packages =
-  Database.For_testing.(diagnostics [ Resolve; Interface; Infer; Patterns ])
+  Database.For_testing.(list_diagnostics [ Resolve; Interface; Infer; Patterns ])
     (Support.database packages)
 
 let one_diagnostic = one_diagnostic ~check

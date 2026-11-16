@@ -581,7 +581,7 @@ let () =
               (fun () ->
                 let checked = database packages in
                 let interface =
-                  Database.interface_lookups checked [ example_file.module_.package ]
+                  Database.make_interface_lookups checked [ example_file.module_.package ]
                 in
                 let functions =
                   List.filter_map
@@ -592,7 +592,7 @@ let () =
                       | Top _, Some { generics = []; specification_only = false; _ } ->
                           Some (Instance.Code { path = declaration.path; type_arguments = [] })
                       | _ -> None)
-                    ((Database.names checked [ example.package ]).declarations example)
+                    ((Database.make_name_lookups checked [ example.package ]).declarations example)
                 in
                 let database, compile = load ~roots:functions text in
                 List.iter (fun key -> ignore (Compile.For_testing.compiled compile key)) functions;

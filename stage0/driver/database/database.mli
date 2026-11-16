@@ -9,52 +9,52 @@ val read_package_database : t -> Path.package -> package_database
 val update : t -> (Path.file * string option) list -> unit
 val relayout : t -> loaded:package_database list -> Project.package list -> unit
 val propagate : ?on_bug:(Compiler_bug.t -> unit) -> t -> unit
-val unsaved : t -> (string * string option) list
+val list_unsaved : t -> (string * string option) list
 val mark_saved : t -> unit
 
 val restore :
   loaded:package_database list -> texts:(Path.file -> string option) -> (string * string) list -> t
 
 val check : t -> Path.package list -> unit
-val file_diagnostics : t -> Path.file -> Diagnostic.t list
-val manifest_problems : t -> Path.package -> Package_checks.manifest_problem list
-val code_packages : t -> Path.package -> Path.package list option
-val tables : t -> Resolve.Names.key -> Infer.tables option
-val parsed : t -> Path.file -> Parsed.t
-val names : t -> Path.package list -> Resolve.Names.lookups
-val resolved : t -> Resolve.Names.key -> Resolve.resolved option
-val interface_lookups : t -> Path.package list -> Interface.Lookups.t
-val lowering_requests : t -> Path.package list -> Compile.requests
-val main : t -> Path.package -> Path.t option
-val callers : t -> viewer:Path.package -> Path.t -> Path.t list
+val list_file_diagnostics : t -> Path.file -> Diagnostic.t list
+val list_manifest_problems : t -> Path.package -> Package_checks.manifest_problem list
+val list_code_packages : t -> Path.package -> Path.package list option
+val read_tables : t -> Resolve.Names.key -> Infer.tables option
+val read_parsed : t -> Path.file -> Parsed.t
+val make_name_lookups : t -> Path.package list -> Resolve.Names.lookups
+val read_resolved : t -> Resolve.Names.key -> Resolve.resolved option
+val make_interface_lookups : t -> Path.package list -> Interface.Lookups.t
+val make_lowering_requests : t -> Path.package list -> Compile.requests
+val find_main : t -> Path.package -> Path.t option
+val list_callers : t -> viewer:Path.package -> Path.t -> Path.t list
 
 type read = { dependent : Part.t; dependency : Part.t }
 
-val dependencies : t -> Path.t list -> read list
-val dependents : t -> Path.t list -> read list
-val changes : t -> t -> Part.t list
+val list_dependencies : t -> Path.t list -> read list
+val list_dependents : t -> Path.t list -> read list
+val list_changes : t -> t -> Part.t list
 
 type 'a part = Value of 'a | Failed of Diagnostic.in_definition list | Blocked
 type proofs
 
 val prove : t -> Path.file list -> proofs
-val proof : proofs -> Resolve.Names.key -> Prover.proof part option
-val holes : proofs -> Path.t -> (Path.file * int) list
-val template_checks : proofs -> Prover.State.template_check list
+val read_proof : proofs -> Resolve.Names.key -> Prover.proof part option
+val list_holes : proofs -> Path.t -> (Path.file * int) list
+val list_template_checks : proofs -> Prover.State.template_check list
 val list_proofs : proofs -> (Resolve.Names.key * Prover.proof) list
 val make_proof_lookups : t -> Prover.Lookups.t
 
 module For_testing : sig
   type checker = Resolve | Interface | Infer | Patterns | Usage | Ownership | Package_checks
 
-  val diagnostics : checker list -> t -> Path.file -> Diagnostic.t list
-  val checked_body : t -> Resolve.Names.key -> Infer.checked option
-  val derived : t -> Path.t -> Core.t option
-  val core_of_path : t -> Path.t -> (Core.t * Types.substitution) option
-  val mir : t -> Path.package -> Mir.lookups
-  val ownership : t -> Resolve.Names.key -> (Core.origin * Core.origin) list part
-  val reads : t -> string -> string list
-  val differences : t -> t -> string list
+  val list_diagnostics : checker list -> t -> Path.file -> Diagnostic.t list
+  val read_checked_body : t -> Resolve.Names.key -> Infer.checked option
+  val read_derived_form : t -> Path.t -> Core.t option
+  val read_core : t -> Path.t -> (Core.t * Types.substitution) option
+  val make_mir_lookups : t -> Path.package -> Mir.lookups
+  val read_ownership : t -> Resolve.Names.key -> (Core.origin * Core.origin) list part
+  val list_reads : t -> string -> string list
+  val list_differences : t -> t -> string list
 
   type observed = { recomputed : string list; collected : string list }
 

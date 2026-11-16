@@ -71,7 +71,7 @@ let manifest_problems snapshot database packages =
       if List.mem name packages then
         List.map
           (fun problem -> (Project.manifest_file directory, name, problem))
-          (Database.manifest_problems database name)
+          (Database.list_manifest_problems database name)
       else [])
     (Workspace.packages snapshot)
 

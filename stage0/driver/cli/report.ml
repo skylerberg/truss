@@ -23,7 +23,7 @@ let gather ?(proofs = false) database snapshot packages =
   {
     checked =
       List.filter_map
-        (fun file -> shown snapshot packages file (Database.file_diagnostics database file))
+        (fun file -> shown snapshot packages file (Database.list_file_diagnostics database file))
         files;
     proofs;
     proven =
@@ -32,7 +32,7 @@ let gather ?(proofs = false) database snapshot packages =
         | Some proofs ->
             let proofs = Lazy.force proofs in
             List.filter_map
-              (fun file -> shown snapshot packages file (Proofs.diagnostics proofs file))
+              (fun file -> shown snapshot packages file (Proofs.list_diagnostics proofs file))
               files
         | None -> []);
     problems =

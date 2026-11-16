@@ -3,7 +3,7 @@ module Version = Registry.Version
 module Lock = Registry.Lock
 
 let unfinished snapshot database packages =
-  let names = Database.names database packages in
+  let names = Database.make_name_lookups database packages in
   List.concat_map
     (fun file ->
       let source = Command_packages.source snapshot packages file in
@@ -43,7 +43,7 @@ let record database snapshot registry (package : Path.package) =
     let used =
       if code then begin
         Database.check database [ name ];
-        Option.value ~default:[] (Database.code_packages database name)
+        Option.value ~default:[] (Database.list_code_packages database name)
       end
       else []
     in
@@ -92,7 +92,7 @@ let record database snapshot registry (package : Path.package) =
   (entries, List.sort_uniq compare !problems)
 
 let failed_tests database snapshot packages =
-  let interface = Database.interface_lookups database packages in
+  let interface = Database.make_interface_lookups database packages in
   let tests =
     List.filter
       (fun (test : Test_command.test) ->
@@ -140,11 +140,12 @@ let decide database snapshot registry (package : Path.package) =
       | None -> Published { version = Version.first name; files; grows = [] }
       | Some (version, newest) when newest = hash -> Unchanged version
       | Some (((major, minor, patch) as version), _) -> (
-          match Workspace.published name version with
+          match Workspace.fetch_published name version with
           | Error message -> Refused [ message ]
           | Ok published ->
-              let before = Database.interface_lookups (Workspace.open_database published) [ name ]
-              and after = Database.interface_lookups database [ name ] in
+              let before =
+                Database.make_interface_lookups (Workspace.open_database published) [ name ]
+              and after = Database.make_interface_lookups database [ name ] in
               let changes = Compatibility.compare ~before ~after name in
               let breaks =
                 List.map

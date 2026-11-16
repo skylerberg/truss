@@ -59,7 +59,7 @@ let parse_errors packages file =
 
 let diagnostics database (file : Path.file) =
   Database.check database [ file.module_.package ];
-  Database.file_diagnostics database file
+  Database.list_file_diagnostics database file
 
 let codes diagnostics =
   List.map (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code) diagnostics
@@ -78,7 +78,7 @@ type core_nodes = {
 }
 
 let core_nodes packages (key : Resolve.Names.key) : core_nodes =
-  match Database.For_testing.checked_body (database packages) key with
+  match Database.For_testing.read_checked_body (database packages) key with
   | None -> failwith (Printf.sprintf "%s has no core form" (Resolve.Names.show_key key))
   | Some { form; _ } ->
       let expressions = ref [] and statements = ref [] and patterns = ref [] in
@@ -96,7 +96,8 @@ let core_nodes packages (key : Resolve.Names.key) : core_nodes =
         patterns = List.rev !patterns;
       }
 
-let names packages (package : Path.package) = Database.names (database packages) [ package ]
+let names packages (package : Path.package) =
+  Database.make_name_lookups (database packages) [ package ]
 
 let declarations packages (module_ : Path.module_) =
   (names packages module_.package).declarations module_
@@ -122,11 +123,11 @@ let no_diagnostics ~check files =
                   reported)));
       ignore
         (Core_lint.check_file
-           (Database.interface_lookups database [ (file_of name).module_.package ])
+           (Database.make_interface_lookups database [ (file_of name).module_.package ])
            ~core:(fun key ->
              Option.map
                (fun (checked : Infer.checked) -> checked.form)
-               (Database.For_testing.checked_body database key))
+               (Database.For_testing.read_checked_body database key))
            (file_of name)))
     files
 
@@ -183,7 +184,7 @@ let proof_states database file = Prover.list_states (verdicts database file) fil
 let proofs database file =
   let proofs = proven database file in
   fun key ->
-    match Database.proof proofs key with
+    match Database.read_proof proofs key with
     | Some (Value proof) -> proof
     | Some (Failed _ | Blocked) ->
         failwith ("the proof of " ^ Resolve.Names.show_key key ^ " is blocked")

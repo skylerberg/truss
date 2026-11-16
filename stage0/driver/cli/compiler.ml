@@ -10,7 +10,7 @@ let toolchain () =
 
 let requests database packages =
   match Libc.host with
-  | Some _ -> Database.lowering_requests database packages
+  | Some _ -> Database.make_lowering_requests database packages
   | None -> Outcome.cannot_run "Stage0 builds programs only for Linux and macOS."
 
 let results () : Compile.results =

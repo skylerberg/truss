@@ -120,7 +120,7 @@ let standard_package_database =
      let rendered =
        List.concat_map
          (fun ((file : Path.file), text) ->
-           match Database.file_diagnostics database file with
+           match Database.list_file_diagnostics database file with
            | [] -> []
            | diagnostics ->
                let source = Source.create ~path:(Path.show_file file) text in
@@ -428,7 +428,7 @@ let is_serving = ref false
 let log_bug bug = prerr_endline (Compiler_bug.to_string bug)
 
 let commit worktree =
-  match Database.unsaved worktree.database with
+  match Database.list_unsaved worktree.database with
   | entries -> (
       match Segments.commit worktree.segments ~header:(header worktree.loaded) entries with
       | () -> Database.mark_saved worktree.database
@@ -496,12 +496,12 @@ let over (snapshot : snapshot) files =
   let trial = with_files snapshot files in
   { trial with kind = Trial { root; database = lazy (copy_database root trial) } }
 
-let trial snapshot changes =
+let make_trial snapshot changes =
   over snapshot
     (List.filter (fun (path, _) -> not (List.mem_assoc path changes)) snapshot.files
     @ List.filter_map (fun (path, text) -> Option.map (fun text -> (path, text)) text) changes)
 
-let base_commit snapshot base =
+let find_base_commit snapshot base =
   let directory = root snapshot in
   match base with
   | Some revision -> Git.resolve ~directory revision
@@ -511,7 +511,7 @@ let base_commit snapshot base =
       | Some head, None -> Some head
       | None, _ -> None)
 
-let of_commit snapshot commit =
+let read_commit snapshot commit =
   match Git.files ~directory:(root snapshot) commit with
   | Some files -> Ok (over snapshot files)
   | None -> Error (Printf.sprintf "The files of commit %s cannot be read." commit)
@@ -539,16 +539,16 @@ let side snapshot ~head ~other ~mergeable =
                 | None, _ | _, None ->
                     Error "The files of the two cannot be committed to merge them.");
           })
-        (of_commit snapshot merge_base)
+        (read_commit snapshot merge_base)
 
-let branch snapshot name =
+let read_branch snapshot name =
   match Git.resolve ~directory:(root snapshot) name with
   | None -> Error (Printf.sprintf "No commit is named %s." name)
   | Some commit ->
-      Result.bind (of_commit snapshot commit) (fun other ->
+      Result.bind (read_commit snapshot commit) (fun other ->
           side snapshot ~head:commit ~other ~mergeable:(fun () -> Some commit))
 
-let other_worktree snapshot other =
+let read_other_worktree snapshot other =
   match Git.head ~directory:other with
   | None -> Error "The other worktree has no commit."
   | Some head ->
@@ -556,7 +556,7 @@ let other_worktree snapshot other =
         ~other:(over snapshot (Registry.Content.input_files other))
         ~mergeable:(fun () -> Git.snapshot ~directory:other)
 
-let other_worktrees snapshot =
+let list_other_worktrees snapshot =
   let root = root snapshot in
   match
     List.filter
@@ -794,7 +794,7 @@ let plan_lock snapshot ~set ~all =
             in
             Ok { text = Registry.Lock.print after; before; after })
 
-let published name version =
+let fetch_published name version =
   match
     Option.bind (Registry.Index.current ()) (fun registry ->
         Registry.Index.hash_of registry name version)
@@ -821,7 +821,7 @@ let published name version =
           | [] -> Ok snapshot
           | problem :: _ -> cannot (Project.show_problem problem)))
 
-let server_key directory = Option.value (root_of directory) ~default:""
+let make_server_key directory = Option.value (root_of directory) ~default:""
 
 let close_all () =
   List.iter
@@ -853,10 +853,10 @@ let serve ~key ~handle =
   is_serving := false
 
 let call ?program ?start_server ?key ~progress request =
-  let key = match key with Some key -> key | None -> server_key (Sys.getcwd ()) in
+  let key = match key with Some key -> key | None -> make_server_key (Sys.getcwd ()) in
   Server.call ?program ?start_server ~key ~progress request
 
-let servers = Server.serving
+let list_servers = Server.serving
 let stop = Server.stop
 let wait_until_ended = Server.wait_until_ended
 
@@ -870,7 +870,7 @@ module For_testing = struct
     match Hashtbl.find_opt worktrees root with
     | Some worktree ->
         Segments.For_testing.interrupted_commit worktree.segments ~header:(header worktree.loaded)
-          (Database.unsaved worktree.database);
+          (Database.list_unsaved worktree.database);
         close worktree
     | None -> Compiler_bug.bug ~stage:"Workspace" "%s has no open database" root
 end

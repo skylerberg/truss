@@ -20,13 +20,13 @@ let settings : Build.settings = { build = Development; optimization = O1; extra 
 let load text =
   let database = build_example_database text in
   Database.check database [ example_file.module_.package ];
-  if Database.file_diagnostics database example_file <> [] then None
+  if Database.list_file_diagnostics database example_file <> [] then None
   else
     Some
       ( database,
         lazy
           (Compile.create ~evaluation_time_limit_ms:2000
-             (Database.lowering_requests database [ example.package ])
+             (Database.make_lowering_requests database [ example.package ])
              (Lazy.force compiler) (Lazy.force cache) settings) )
 
 let integer (ty : Types.ty) =
@@ -51,8 +51,8 @@ type candidate = {
 }
 
 let runnable database =
-  let mir = Database.For_testing.mir database example.package in
-  let interface = Database.interface_lookups database [ example.package ] in
+  let mir = Database.For_testing.make_mir_lookups database example.package in
+  let interface = Database.make_interface_lookups database [ example.package ] in
   let lookups = Database.make_proof_lookups database in
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
@@ -131,7 +131,7 @@ let run_mutant ~samples text =
       let candidates =
         List.filter
           (fun candidate ->
-            proven (Database.names database [ example.package ]) candidate.key states)
+            proven (Database.make_name_lookups database [ example.package ]) candidate.key states)
           (runnable database)
       in
       let with_admitting =
@@ -255,7 +255,7 @@ let () =
             | None ->
                 let database = build_example_database text in
                 Database.check database [ example_file.module_.package ];
-                shown (Database.file_diagnostics database example_file);
+                shown (Database.list_file_diagnostics database example_file);
                 false)
           (if Filename.check_suffix file ".md" then Documents.truss_blocks (File_system.read file)
            else [ File_system.read file ]))

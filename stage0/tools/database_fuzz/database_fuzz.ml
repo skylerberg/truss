@@ -330,7 +330,7 @@ let () =
         match (propagated, outcome (fun () -> built edit.files)) with
         | Ok hot, Ok cold -> (
             current := edit.files;
-            match Database.For_testing.differences hot cold with
+            match Database.For_testing.list_differences hot cold with
             | [] -> (
                 match reopening root with
                 | Some (description, reopen) ->

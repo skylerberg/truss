@@ -2,14 +2,14 @@ open Harness
 open Support
 
 let check packages =
-  Database.For_testing.(diagnostics [ Resolve; Interface ]) (Support.database packages)
+  Database.For_testing.(list_diagnostics [ Resolve; Interface ]) (Support.database packages)
 
 let one_diagnostic = one_diagnostic ~check
 let no_diagnostics = no_diagnostics ~check
 let app name : Path.t = Top { module_ = module_of "app::main"; name }
 
 let interface packages =
-  Database.interface_lookups (Support.database packages) [ (module_of "app::main").package ]
+  Database.make_interface_lookups (Support.database packages) [ (module_of "app::main").package ]
 
 let standard = Path.standard
 let int64 = Types.builtin Int64
@@ -24,7 +24,7 @@ let () =
           let source = Source.create ~path:(Path.show_file file) text in
           List.iter
             (fun diagnostic -> fail "%s" (Diagnostic.render source diagnostic))
-            (Database.For_testing.(diagnostics [ Interface ]) (Support.database packages) file)))
+            (Database.For_testing.(list_diagnostics [ Interface ]) (Support.database packages) file)))
     Standard_library.files
 
 let () =
@@ -455,7 +455,7 @@ let () =
         setup [ ("app::main", Fixtures.Interface.trait_whose_header_did_not_parse_satisfies_every) ]
       in
       match
-        Database.For_testing.(diagnostics [ Interface ])
+        Database.For_testing.(list_diagnostics [ Interface ])
           (Support.database packages) (file_of "app::main")
       with
       | [] -> ()
@@ -491,7 +491,7 @@ let () =
         not
           (List.mem "types.arity"
              (codes
-                (Database.For_testing.(diagnostics [ Interface ])
+                (Database.For_testing.(list_diagnostics [ Interface ])
                    (Support.database packages) (file_of "app::main"))))
       then fail "accepted");
   test "any must fix every associated type" (fun () ->

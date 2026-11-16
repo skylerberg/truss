@@ -27,7 +27,7 @@ let loaded =
            (String.concat "" (List.map (Diagnostic.render text) diagnostics)));
      ( database,
        Compile.create
-         (Database.lowering_requests database [ Path.standard_package ])
+         (Database.make_lowering_requests database [ Path.standard_package ])
          (Lazy.force compiler) (Lazy.force cache) (Lazy.force settings) ))
 
 let () =

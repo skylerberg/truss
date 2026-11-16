@@ -14,16 +14,16 @@ val dependency_names : snapshot -> Path.package -> Path.package list
 val source : snapshot -> Path.file -> Source.t
 val file_path : snapshot -> Path.file -> string
 val list_package_databases : unit -> string list
-val trial : snapshot -> (string * string option) list -> snapshot
-val base_commit : snapshot -> string option -> string option
-val of_commit : snapshot -> string -> (snapshot, string) result
+val make_trial : snapshot -> (string * string option) list -> snapshot
+val find_base_commit : snapshot -> string option -> string option
+val read_commit : snapshot -> string -> (snapshot, string) result
 
 type side = { base : snapshot; other : snapshot; merged : unit -> (snapshot, string) result }
 
-val branch : snapshot -> string -> (side, string) result
-val other_worktree : snapshot -> string -> (side, string) result
-val other_worktrees : snapshot -> string list
-val published : Path.package -> Registry.Version.t -> (snapshot, string) result
+val read_branch : snapshot -> string -> (side, string) result
+val read_other_worktree : snapshot -> string -> (side, string) result
+val list_other_worktrees : snapshot -> string list
+val fetch_published : Path.package -> Registry.Version.t -> (snapshot, string) result
 val flush : unit -> unit
 
 type lock_plan = { text : string; before : Registry.Lock.t; after : Registry.Lock.t }
@@ -34,7 +34,7 @@ val plan_lock :
   all:bool ->
   (lock_plan, string) result
 
-val server_key : string -> string
+val make_server_key : string -> string
 val serve : key:string -> handle:(progress:(string -> unit) -> 'request -> 'response) -> unit
 
 val call :
@@ -45,7 +45,7 @@ val call :
   'request ->
   ('response, string) result
 
-val servers : unit -> string list
+val list_servers : unit -> string list
 val stop : unit -> unit
 val wait_until_ended : key:string -> unit
 val open_cache : unit -> Cache.t

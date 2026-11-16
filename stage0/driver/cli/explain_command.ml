@@ -27,7 +27,7 @@ let run ~position =
           (Workspace.source snapshot written)
           ~line:(line - 1) ~column:(column - 1)
       in
-      let names = Database.names database packages in
+      let names = Database.make_name_lookups database packages in
       let symbol_at =
         List.find_map
           (fun (declaration : Names.declaration) ->
@@ -35,9 +35,11 @@ let run ~position =
             match (names.place key, names.text key) with
             | Some { base; _ }, Some text when base <= offset && offset <= base + String.length text
               -> (
-                match (names.definition key, names.spans key, Database.resolved database key) with
+                match
+                  (names.definition key, names.spans key, Database.read_resolved database key)
+                with
                 | Some definition, Some spans, Some resolved ->
-                    let tables = Database.tables database key in
+                    let tables = Database.read_tables database key in
                     Inspect.explain_at ~path:key.path spans definition resolved tables ~text
                       (offset - base)
                 | _ -> None)

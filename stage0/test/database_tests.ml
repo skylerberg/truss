@@ -8,7 +8,7 @@ let checked text =
   database
 
 let expect_reads database part ~includes ~excludes =
-  let reads = Database.For_testing.reads database part in
+  let reads = Database.For_testing.list_reads database part in
   List.iter
     (fun read ->
       if not (List.mem read reads) then
@@ -48,7 +48,7 @@ let propagate ?roots hot ~before ~after =
         Database.update hot (changes ~before ~after);
         Database.propagate hot)
   in
-  (match Database.For_testing.differences hot (built ?roots after) with
+  (match Database.For_testing.list_differences hot (built ?roots after) with
   | [] -> ()
   | parts ->
       fail "the propagated database differs from a cold build in %s" (String.concat ", " parts));
@@ -91,7 +91,7 @@ let relaid ?(loaded = ([], [])) ~before ~after () =
         Database.relayout hot ~loaded:(Lazy.force standard :: snd loaded) after;
         Database.propagate hot)
   in
-  (match Database.For_testing.differences hot (settled (snd loaded) after) with
+  (match Database.For_testing.list_differences hot (settled (snd loaded) after) with
   | [] -> ()
   | parts -> fail "the relaid database differs from a cold build in %s" (String.concat ", " parts));
   observed.recomputed
@@ -103,7 +103,7 @@ let loaded_package files =
     (List.hd packages).name
 
 let saved database =
-  let entries = Database.unsaved database in
+  let entries = Database.list_unsaved database in
   Database.mark_saved database;
   entries
 
@@ -123,7 +123,7 @@ let reopened log files =
   database
 
 let expect_cold ?roots database files =
-  match Database.For_testing.differences database (built ?roots files) with
+  match Database.For_testing.list_differences database (built ?roots files) with
   | [] -> ()
   | parts -> fail "the reopened database differs from a cold build in %s" (String.concat ", " parts)
 
@@ -712,7 +712,7 @@ let settled_on_disk root =
   let observed = Database.For_testing.observe database (fun () -> Database.propagate database) in
   let cold = Workspace.For_testing.build_cold_database snapshot in
   Database.propagate cold;
-  (match Database.For_testing.differences database cold with
+  (match Database.For_testing.list_differences database cold with
   | [] -> ()
   | parts ->
       fail "the database in .truss differs from a cold build in %s" (String.concat ", " parts));
@@ -772,7 +772,7 @@ let () =
 let expect_cold database snapshot =
   let cold = Workspace.For_testing.build_cold_database snapshot in
   Database.propagate cold;
-  match Database.For_testing.differences database cold with
+  match Database.For_testing.list_differences database cold with
   | [] -> ()
   | parts -> fail "the database differs from a cold build in %s" (String.concat ", " parts)
 
@@ -782,7 +782,7 @@ let () =
       let snapshot = opened root in
       let worktree = Workspace.open_database snapshot in
       Database.propagate worktree;
-      let trial = Workspace.trial snapshot [ ("main/main.truss", Some edited_body) ] in
+      let trial = Workspace.make_trial snapshot [ ("main/main.truss", Some edited_body) ] in
       let database = Workspace.open_database trial in
       let recomputed =
         (Database.For_testing.observe database (fun () -> Database.propagate database)).recomputed
@@ -798,7 +798,7 @@ let () =
       let worktree = Workspace.open_database snapshot in
       Database.propagate worktree;
       let trial =
-        Workspace.trial snapshot
+        Workspace.make_trial snapshot
           [ ("truss.toml", Some "[package]\nname = \"tool\"\ntruss = \"0.1\"\n") ]
       in
       let database = Workspace.open_database trial in

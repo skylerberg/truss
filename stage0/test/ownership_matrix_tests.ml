@@ -2,7 +2,7 @@ open Harness
 open Support
 
 let check packages =
-  Database.For_testing.(diagnostics [ Resolve; Interface; Infer; Patterns; Usage; Ownership ])
+  Database.For_testing.(list_diagnostics [ Resolve; Interface; Infer; Patterns; Usage; Ownership ])
     (Support.database packages)
 
 let helpers = Fixtures.Ownership_matrix.helpers

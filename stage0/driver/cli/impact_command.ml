@@ -13,7 +13,7 @@ type change = {
 
 let declared snapshot database =
   let packages = List.map snd (Workspace.packages snapshot) in
-  let names = Database.names database packages in
+  let names = Database.make_name_lookups database packages in
   Path.Set.of_list
     (List.concat_map
        (fun package ->
@@ -24,7 +24,9 @@ let declared snapshot database =
        packages)
 
 let signature snapshot database path =
-  Signatures.of_path (Database.names database (List.map snd (Workspace.packages snapshot))) path
+  Signatures.of_path
+    (Database.make_name_lookups database (List.map snd (Workspace.packages snapshot)))
+    path
 
 let changes ~snapshot ~database ~base_snapshot ~base changed_parts =
   let own = List.map snd (Workspace.packages snapshot) in
@@ -42,7 +44,7 @@ let changes ~snapshot ~database ~base_snapshot ~base changed_parts =
   let signature_readers =
     List.filter
       (fun ({ dependency; _ } : Database.read) -> List.mem dependency signature_parts)
-      (Database.dependents database
+      (Database.list_dependents database
          (List.sort_uniq Path.compare (List.filter_map Part.definition signature_parts)))
   in
   List.sort
@@ -171,17 +173,17 @@ let run ~base =
   let snapshot, packages = Command_packages.current () in
   let database = Workspace.open_database snapshot in
   let report = Report.gather database snapshot packages in
-  match Workspace.base_commit snapshot base with
+  match Workspace.find_base_commit snapshot base with
   | None ->
       Outcome.cannot_run
         "No base commit: name one with --base, or work in a git worktree with a default branch."
   | Some commit -> (
-      match Workspace.of_commit snapshot commit with
+      match Workspace.read_commit snapshot commit with
       | Error message -> Outcome.cannot_run "%s" message
       | Ok base_snapshot ->
           let base = Workspace.open_database base_snapshot in
           let changes =
-            changes ~snapshot ~database ~base_snapshot ~base (Database.changes database base)
+            changes ~snapshot ~database ~base_snapshot ~base (Database.list_changes database base)
           in
           let tests =
             if Report.clean report then tests_changed ~snapshot ~database ~base_snapshot ~base

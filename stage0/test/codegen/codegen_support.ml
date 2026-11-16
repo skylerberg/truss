@@ -2,7 +2,7 @@ let test = Harness.test
 
 let diagnostics database (file : Path.file) =
   Database.check database [ file.module_.package ];
-  Database.file_diagnostics database file
+  Database.list_file_diagnostics database file
 
 let fail = Harness.fail
 let expect_string = Harness.expect_string
@@ -226,7 +226,7 @@ let example_package files : Project.package list =
 
 let compile ?results ?evaluation_time_limit_ms database =
   Compile.create ?results ?evaluation_time_limit_ms
-    (Database.lowering_requests database [ example.package ])
+    (Database.make_lowering_requests database [ example.package ])
     (Lazy.force compiler) (Lazy.force cache) (Lazy.force settings)
 
 let load_files ?results ?(roots = []) files =
@@ -240,11 +240,11 @@ let load_files ?results ?(roots = []) files =
       | [] ->
           ignore
             (Core_lint.check_file
-               (Database.interface_lookups database [ file.module_.package ])
+               (Database.make_interface_lookups database [ file.module_.package ])
                ~core:(fun key ->
                  Option.map
                    (fun (checked : Infer.checked) -> checked.form)
-                   (Database.For_testing.checked_body database key))
+                   (Database.For_testing.read_checked_body database key))
                file)
       | diagnostics ->
           fail "the source has diagnostics:\n%s"
@@ -258,7 +258,7 @@ let tests_in database (module_ : Path.module_) =
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
       match declaration.path with Test _ -> Some declaration.path | _ -> None)
-    ((Database.names database [ module_.package ]).declarations module_)
+    ((Database.make_name_lookups database [ module_.package ]).declarations module_)
 
 let tests_of database = tests_in database example
 
@@ -294,7 +294,8 @@ let drop_shapes =
     ("Counter", Record [ ("target", Raw (Pointer (Data int32))) ]);
   ]
 
-let standard_interface = lazy (Database.interface_lookups (database []) [ Path.standard_package ])
+let standard_interface =
+  lazy (Database.make_interface_lookups (database []) [ Path.standard_package ])
 
 let standard_context : Monomorphic.context =
   {

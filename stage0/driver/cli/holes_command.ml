@@ -14,7 +14,7 @@ let of_declaration snapshot packages database (names : Names.lookups)
     (declaration : Names.declaration) =
   let key = Names.key_of declaration in
   match
-    (names.definition key, names.spans key, names.place key, Database.resolved database key)
+    (names.definition key, names.spans key, names.place key, Database.read_resolved database key)
   with
   | Some definition, Some spans, Some { file; base }, Some resolved ->
       let source = Command_packages.source snapshot packages file in
@@ -30,11 +30,11 @@ let of_declaration snapshot packages database (names : Names.lookups)
             in_scope = hole.scope;
             blocks = [];
           })
-        (Inspect.holes spans definition resolved (Database.tables database key))
+        (Inspect.holes spans definition resolved (Database.read_tables database key))
   | _ -> []
 
 let gather snapshot packages database paths =
-  let names = Database.names database packages in
+  let names = Database.make_name_lookups database packages in
   List.concat_map
     (fun file ->
       List.concat_map
@@ -59,7 +59,7 @@ let with_blocks snapshot packages database holes =
       match Hashtbl.find_opt callers (viewer, definition) with
       | Some reached -> reached
       | None ->
-          let reached = Database.callers database ~viewer definition in
+          let reached = Database.list_callers database ~viewer definition in
           Hashtbl.replace callers (viewer, definition) reached;
           reached
     in

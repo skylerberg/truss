@@ -54,7 +54,7 @@ let target_of snapshot database packages from_ =
                 ->
                   Path.equal owner other_owner && name = other_name
               | candidate, path -> Path.equal candidate path)
-            (List.concat_map (Database.names database packages).declarations
+            (List.concat_map (Database.make_name_lookups database packages).declarations
                (Command_packages.modules snapshot packages))
         in
         let path : Path.t =
@@ -84,17 +84,20 @@ let new_name ~from_ to_ =
   name
 
 let occurrences database snapshot packages =
-  let names = Database.names database packages in
+  let names = Database.make_name_lookups database packages in
   List.concat_map
     (fun file ->
       List.concat_map
         (fun declaration ->
           let key = Names.key_of declaration in
           match
-            (names.place key, names.definition key, names.spans key, Database.resolved database key)
+            ( names.place key,
+              names.definition key,
+              names.spans key,
+              Database.read_resolved database key )
           with
           | Some { file; base }, Some definition, Some spans, Some resolved ->
-              let tables = Database.tables database key in
+              let tables = Database.read_tables database key in
               List.map
                 (fun ({ span; target } : References.occurrence) ->
                   (file, Source.Definition_span.to_file ~base span, target))
@@ -149,8 +152,10 @@ let plan_module database snapshot packages (old_module : Path.module_) to_ =
               if module_ = old_module then Some (file, Diagnostic.replace span full) else None)
             (References.uses
                ~used_module:
-                 (Names.used_module (Database.names database packages) ~from:file.module_)
-               (Database.parsed database file).file.uses))
+                 (Names.used_module
+                    (Database.make_name_lookups database packages)
+                    ~from:file.module_)
+               (Database.read_parsed database file).file.uses))
         (Command_packages.files snapshot packages)
   in
   { edits = by_file edits; moved = Some (old_module, new_module) }
@@ -188,7 +193,7 @@ let trial snapshot after =
         if List.mem_assoc old_path written then None else Some (old_path, None))
       after
   in
-  Workspace.trial snapshot (written @ removed)
+  Workspace.make_trial snapshot (written @ removed)
 
 let edits_json snapshot packages plan =
   List.concat_map
@@ -223,7 +228,7 @@ let run ~from_ ~to_ =
   let caused =
     List.filter_map
       (fun (_, file, text) ->
-        match Diagnostic.shown (Database.file_diagnostics database file) with
+        match Diagnostic.shown (Database.list_file_diagnostics database file) with
         | [] -> None
         | diagnostics ->
             Some

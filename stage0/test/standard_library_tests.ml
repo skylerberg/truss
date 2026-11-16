@@ -112,7 +112,7 @@ let measure database ~is_measured =
             (proven database
                (List.filter_map
                   (fun (file, _) ->
-                    if Database.file_diagnostics database file = [] then Some file else None)
+                    if Database.list_file_diagnostics database file = [] then Some file else None)
                   files));
           let spent = int_of_float (Float.round ((processor_time () -. start) *. 100.)) in
           (name, max 1 spent, module_letters files)
@@ -150,7 +150,8 @@ let () =
   let checked =
     List.map
       (fun (module_, files) ->
-        (module_, List.map (fun (file, _) -> (file, Database.file_diagnostics database file)) files))
+        ( module_,
+          List.map (fun (file, _) -> (file, Database.list_file_diagnostics database file)) files ))
       modules
   in
   let verdicts =

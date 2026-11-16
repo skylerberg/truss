@@ -41,7 +41,7 @@ let fix snapshot packages =
     let applied =
       List.concat_map
         (fun file ->
-          let diagnostics = Database.file_diagnostics database file in
+          let diagnostics = Database.list_file_diagnostics database file in
           match Diagnostic.machine_applicable diagnostics with
           | [] -> []
           | chosen ->

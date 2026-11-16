@@ -21,7 +21,7 @@ let run_template_checks compiler checks =
     checks
 
 let runs database snapshot packages proofs =
-  match Database.template_checks proofs with
+  match Database.list_template_checks proofs with
   | [] -> []
   | checks -> run_template_checks (Compiler.create database snapshot packages Development) checks
 
@@ -38,13 +38,13 @@ let check database snapshot packages files =
            solver (Database.list_proofs proofs));
   }
 
-let diagnostics checked file = Prover.list_diagnostics (Lazy.force checked.verdicts) file
-let states checked file = Prover.list_states (Lazy.force checked.verdicts) file
+let list_diagnostics checked file = Prover.list_diagnostics (Lazy.force checked.verdicts) file
+let list_states checked file = Prover.list_states (Lazy.force checked.verdicts) file
 
-let holes snapshot packages checked definition =
+let list_holes snapshot packages checked definition =
   List.map
     (fun (file, offset) ->
       let source = Command_packages.source snapshot packages file in
       let line, column = Source.position source offset in
       (Shown_path.shown (Source.path source), line, column))
-    (Database.holes checked.proofs definition)
+    (Database.list_holes checked.proofs definition)

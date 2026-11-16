@@ -86,7 +86,7 @@ let check ~root encoding (buffers : (string * string) list) =
   let snapshot, _ = Command_packages.load root in
   let base = Workspace.root snapshot in
   let trial =
-    Workspace.trial snapshot
+    Workspace.make_trial snapshot
       (List.map (fun (_, path, text) -> (Shown_path.relative ~from:base path, Some text)) buffers)
   in
   let packages = List.map snd (Workspace.packages trial) in
@@ -116,8 +116,9 @@ let check ~root encoding (buffers : (string * string) list) =
                  match file with
                  | Some file ->
                      ( Diagnostic.shown
-                         (Database.file_diagnostics database file @ Proofs.diagnostics proofs file),
-                       Proofs.states proofs file )
+                         (Database.list_file_diagnostics database file
+                         @ Proofs.list_diagnostics proofs file),
+                       Proofs.list_states proofs file )
                  | None -> ([], [])
                in
                Json.Object

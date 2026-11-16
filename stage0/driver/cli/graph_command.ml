@@ -20,7 +20,7 @@ let matches name (path : Path.t) =
 
 let definitions snapshot database name =
   let packages = List.map snd (Workspace.packages snapshot) in
-  let names = Database.names database packages in
+  let names = Database.make_name_lookups database packages in
   List.sort_uniq Path.compare
     (List.concat_map
        (fun package ->
@@ -90,8 +90,8 @@ let run ~direction ~name =
       let lines =
         lines
           (match direction with
-          | Dependents -> Database.dependents database targets
-          | Dependencies -> Database.dependencies database targets)
+          | Dependents -> Database.list_dependents database targets
+          | Dependencies -> Database.list_dependencies database targets)
       in
       if Output.json () then
         Json.print (Json.document ~diagnostics:[] [ ("reads", Json.List (List.map to_json lines)) ])

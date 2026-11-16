@@ -14,7 +14,7 @@ let () =
       (fun ((file : Path.file), _) ->
         let database = Database.create [ standard ] in
         Database.check database [ file.module_.package ];
-        match Database.file_diagnostics database file with
+        match Database.list_file_diagnostics database file with
         | _ :: _ -> None
         | [] ->
             let runs_before = Solver.queries_run solver in

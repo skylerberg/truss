@@ -13,18 +13,18 @@ let find_module (names : Names.lookups) written : Path.module_ option =
   | Some _ | None -> None
 
 let list_module_declarations database (module_ : Path.module_) =
-  (Database.names database [ module_.package ]).declarations module_
+  (Database.make_name_lookups database [ module_.package ]).declarations module_
   |> List.filter (fun (declaration : Names.declaration) -> declaration.ordinal = 0)
 
 let list_package_declarations database package =
-  (Database.names database [ package ]).package_declarations package
+  (Database.make_name_lookups database [ package ]).package_declarations package
   |> List.filter (fun (declaration : Names.declaration) -> declaration.ordinal = 0)
 
 let is_visible packages (declaration : Names.declaration) =
   List.mem declaration.module_.package packages || Names.is_public declaration.visibility
 
 let resolve database packages text =
-  let names = Database.names database packages in
+  let names = Database.make_name_lookups database packages in
   let argument = Path_argument.parse text in
   let module_ = if argument.member = None then find_module names argument.names else None in
   match (names.split_module argument.names, module_, argument.member) with
@@ -50,8 +50,8 @@ let resolve database packages text =
                   let package_declarations = list_package_declarations database module_.package in
                   let impls =
                     List.map snd
-                      ((Database.names database [ module_.package ]).impls_of_type module_.package
-                         path)
+                      ((Database.make_name_lookups database [ module_.package ]).impls_of_type
+                         module_.package path)
                   in
                   declaration
                   :: List.filter
@@ -86,7 +86,7 @@ let find snapshot database packages ~body text =
         declaration.visibility = Public_opaque
         && not (List.mem declaration.module_.package packages)
       in
-      let names = Database.names database [ key.module_.package ] in
+      let names = Database.make_name_lookups database [ key.module_.package ] in
       match Signatures.text names ~body ~opaque key with
       | None -> None
       | Some signature ->

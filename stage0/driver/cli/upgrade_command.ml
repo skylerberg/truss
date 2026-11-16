@@ -116,7 +116,7 @@ let signatures snapshot trial =
       (fun part ->
         Signatures.is_signature part
         && match Part.definition part with Some path -> not (is_own path) | None -> false)
-      (Database.changes database upgraded)
+      (Database.list_changes database upgraded)
   in
   let dependents = Hashtbl.create 16 in
   List.iter
@@ -126,10 +126,10 @@ let signatures snapshot trial =
           Hashtbl.replace dependents path
             (reader :: Option.value (Hashtbl.find_opt dependents path) ~default:[])
       | _ -> ())
-    (Database.dependents database
+    (Database.list_dependents database
        (List.sort_uniq Path.compare (List.filter_map Part.definition changed)));
   let text database path =
-    Signatures.of_path (Database.names database [ Path.package path ]) path
+    Signatures.of_path (Database.make_name_lookups database [ Path.package path ]) path
   in
   List.sort
     (fun left right -> Path.compare left.path right.path)
@@ -155,7 +155,7 @@ let new_errors snapshot trial =
           List.map
             (fun (diagnostic : Diagnostic.t) ->
               Printf.sprintf "%s: %s" (Workspace.file_path snapshot file) diagnostic.message)
-            (Database.file_diagnostics database file))
+            (Database.list_file_diagnostics database file))
         (List.concat_map (Workspace.package_files snapshot) own)
   in
   let now = diagnostics snapshot in
@@ -215,7 +215,7 @@ let run ~names =
         0
       end
       else begin
-        let trial = Workspace.trial snapshot [ (Project.lock_file, Some plan.text) ] in
+        let trial = Workspace.make_trial snapshot [ (Project.lock_file, Some plan.text) ] in
         let signatures = signatures snapshot trial in
         let broken = new_errors snapshot trial in
         Command_packages.write_file (lock_file snapshot) plan.text;

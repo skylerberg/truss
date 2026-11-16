@@ -12,7 +12,7 @@ let run_template_checks compile checks =
 let verdicts compile database =
   let proofs = Database.prove database [ example_file ] in
   Prover.decide
-    ~runs:(run_template_checks compile (Database.template_checks proofs))
+    ~runs:(run_template_checks compile (Database.list_template_checks proofs))
     (Database.make_proof_lookups database)
     (Lazy.force solver) (Database.list_proofs proofs)
 
@@ -56,7 +56,7 @@ let () =
       let database, compile =
         load Fixtures.Evaluate.check_that_reads_a_templates_parts_is_not_run
       in
-      (match Database.template_checks (Database.prove database [ example_file ]) with
+      (match Database.list_template_checks (Database.prove database [ example_file ]) with
       | [] -> ()
       | checks -> fail "%d template checks" (List.length checks));
       proven (diagnostics compile database));
@@ -67,7 +67,7 @@ let () =
              [ (example_file, Fixtures.Evaluate.template_check_whose_code_has_errors_is_not_run) ])
       in
       let proofs = Database.prove database [ example_file ] in
-      match Database.template_checks proofs with
+      match Database.list_template_checks proofs with
       | [] -> fails_saying "which its tag requires." (diagnostics (compile database) database)
       | checks -> fail "%d template checks" (List.length checks))
 

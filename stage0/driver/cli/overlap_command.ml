@@ -39,7 +39,7 @@ let own_changes snapshot database base =
          match Part.definition part with
          | Some path -> List.mem (Path.package path) own
          | None -> false)
-       (Database.changes database base))
+       (Database.list_changes database base))
 
 let places_of parts =
   let kinds = Hashtbl.create 16 in
@@ -72,7 +72,7 @@ let reading_overlaps ~this_worktree database ~changed ~changed_by_other =
             Hashtbl.replace groups (change, read)
               (Part.kind_name dependent :: changes, Part.kind_name dependency :: reads)
         | _ -> ())
-    (Database.dependencies database
+    (Database.list_dependencies database
        (List.sort_uniq Path.compare (List.filter_map Part.definition (Part_set.elements changed))));
   Hashtbl.fold
     (fun (change, read) (changes, reads) overlaps ->
@@ -110,7 +110,7 @@ let keyed_diagnostics snapshot =
               Diagnostic.Code.name diagnostic.code,
               diagnostic.message ),
             diagnostic ))
-        (Database.file_diagnostics database file))
+        (Database.list_file_diagnostics database file))
     (Command_packages.files snapshot packages)
 
 let merge_diagnostics snapshot (side : Workspace.side) =
@@ -191,8 +191,8 @@ let print comparisons =
 
 let worktree_sides snapshot =
   List.map
-    (fun other -> (Shown_path.shown other, Workspace.other_worktree snapshot other))
-    (Workspace.other_worktrees snapshot)
+    (fun other -> (Shown_path.shown other, Workspace.read_other_worktree snapshot other))
+    (Workspace.list_other_worktrees snapshot)
 
 let with_other_worktrees snapshot database =
   List.filter
@@ -205,7 +205,7 @@ let run ~with_ ~merge =
   let sides =
     match with_ with
     | Some name -> (
-        match Workspace.branch snapshot name with
+        match Workspace.read_branch snapshot name with
         | Ok side -> [ (name, Ok side) ]
         | Error message -> Outcome.cannot_run "%s" message)
     | None -> worktree_sides snapshot
