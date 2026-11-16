@@ -9,7 +9,7 @@ val infer_shift_result :
 
 val try_ : State.state -> State.env -> Syntax.expression -> Syntax.expression -> Types.ty
 
-val with_ :
+val check_record_update :
   State.state ->
   State.env ->
   Syntax.expression ->
@@ -17,7 +17,7 @@ val with_ :
   Syntax.update list ->
   Types.ty
 
-val prefix :
+val check_prefix :
   State.state ->
   State.env ->
   ?expected:Types.ty ->
@@ -26,7 +26,7 @@ val prefix :
   Syntax.expression ->
   Types.ty
 
-val operator_call :
+val check_operator_call :
   operands:Tables.argument list ->
   State.state ->
   Syntax.expression ->
@@ -36,9 +36,9 @@ val operator_call :
   right:Types.ty option ->
   Types.ty
 
-val literal_operands : State.state -> left:Types.ty -> right:Types.ty -> unit
+val check_literal_operands : State.state -> left:Types.ty -> right:Types.ty -> unit
 
-val binary :
+val check_binary :
   State.state ->
   State.env ->
   ?expected:Types.ty ->
@@ -48,7 +48,7 @@ val binary :
   Syntax.expression ->
   Types.ty
 
-val any_ :
+val check_any :
   State.state ->
   State.env ->
   ?expected:Types.ty ->

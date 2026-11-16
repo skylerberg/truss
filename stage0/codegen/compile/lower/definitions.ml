@@ -100,7 +100,7 @@ let code_of context (path : Path.t) type_arguments : code =
   in
   match path with
   | Test _ -> (
-      match Resolve.Names.definition_of_path context.lookups.interface.names path with
+      match Resolve.Names.find_definition context.lookups.interface.names path with
       | Some (key, { kind = Test _; _ }) ->
           {
             (unwritten ~definition:path ~substitution:[] ~result:(Returns Types.unit)) with

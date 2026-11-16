@@ -12,7 +12,7 @@ type hole = {
 
 let of_declaration snapshot packages database (names : Resolve.Names.lookups)
     (declaration : Resolve.Names.declaration) =
-  let key = Resolve.Names.key_of declaration in
+  let key = Resolve.Names.make_key declaration in
   match Database.read_resolved database key with
   | Some resolved ->
       let ({ file; base } : Resolve.Names.place) = names.place key in

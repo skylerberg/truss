@@ -91,9 +91,9 @@ let build_argument_expressions state (call : Tables.call) =
 let read_constructor_fields (state : State.state) type_ variant type_arguments =
   let fields =
     match variant with
-    | None -> Members.fields state.lookups type_ type_arguments
+    | None -> Members.find_fields state.lookups type_ type_arguments
     | Some variant ->
-        Option.bind (Members.variants state.lookups type_ type_arguments) (fun variants ->
+        Option.bind (Members.find_variants state.lookups type_ type_arguments) (fun variants ->
             Option.bind
               (List.find_opt
                  (fun (written : Types.variant) -> written.variant_name = variant)
@@ -150,7 +150,9 @@ let build_call_kind ?lends ?function_value state (value : Syntax.expression) : C
       let call = Core.Call (build_call state ~lends ?function_value recorded) in
       match lends with
       | Some _ ->
-          Use (Lent (State.synthetic_expression state ~origin:value.id recorded.callee_result call))
+          Use
+            (Lent
+               (State.make_synthetic_expression state ~origin:value.id recorded.callee_result call))
       | None -> call)
 
 let register_call ?function_value state (value : Syntax.expression) =
@@ -173,21 +175,21 @@ let read_type (state : State.state) (value : Syntax.expression) =
   | Some type_ -> type_
   | None ->
       State.bug "`%s` has a core node but no recorded type"
-        (State.source state (State.read_span state value.id))
+        (State.quote_span state (State.read_span state value.id))
 
 let build_function_value (state : State.state) (value : Syntax.expression) : Core.kind =
   match state.tables.resolutions.(value.id) with
   | Some (Global { path; type_arguments }) -> Function_value { path; type_arguments }
   | _ ->
       State.bug "`%s` is not recorded as a function"
-        (State.source state (State.read_span state value.id))
+        (State.quote_span state (State.read_span state value.id))
 
 let build_variant_value state (value : Syntax.expression) type_path variant : Core.kind =
   match read_type state value with
   | Types.Function { output = Types.Named { arguments; _ } as variant_type; _ } ->
       let fields =
         List.map
-          (fun (field : Types.field) -> (field, State.fresh_synthetic_local state))
+          (fun (field : Types.field) -> (field, State.allocate_synthetic_local state))
           (read_constructor_fields state type_path (Some variant) arguments)
       in
       Lambda
@@ -196,7 +198,7 @@ let build_variant_value state (value : Syntax.expression) type_path variant : Co
             List.map
               (fun ((field : Types.field), local) : Core.pattern ->
                 {
-                  id = State.fresh_node_id state;
+                  id = State.allocate_node_id state;
                   origin = value.id;
                   type_ = field.field_type;
                   kind = Bind { local; name = field.field_name; is_var = false; mode = Own };
@@ -208,7 +210,7 @@ let build_variant_value state (value : Syntax.expression) type_path variant : Co
               statements = [];
               value =
                 Some
-                  (State.synthetic_expression state ~origin:value.id variant_type
+                  (State.make_synthetic_expression state ~origin:value.id variant_type
                      (Construct
                         {
                           variant = Some variant;
@@ -218,7 +220,7 @@ let build_variant_value state (value : Syntax.expression) type_path variant : Co
                                 ( field.field_name,
                                   Some
                                     (Core.Value
-                                       (State.synthetic_expression state ~origin:value.id
+                                       (State.make_synthetic_expression state ~origin:value.id
                                           field.field_type
                                           (Core.Use
                                              (Local
@@ -248,7 +250,7 @@ let build_local_use state ~origin (id : Syntax.id) : Core.kind =
 
 let read_self_type state (env : State.env) =
   match env.self with
-  | Some type_ -> State.final_type state type_
+  | Some type_ -> State.finalize_type state type_
   | None -> State.bug "`self` is used outside a method"
 
 let build_self_local state (env : State.env) ~origin : Core.place =
@@ -272,7 +274,7 @@ let build_range_record state (value : Syntax.expression) start stop ~inclusive :
       let start = State.build_expression state start in
       let stop = State.build_expression state stop in
       let inclusive =
-        State.synthetic_expression state ~origin:value.id Types.bool (Core.Boolean inclusive)
+        State.make_synthetic_expression state ~origin:value.id Types.bool (Core.Boolean inclusive)
       in
       build_record [ ("start", start); ("stop", stop); ("inclusive", inclusive) ]
   | _ -> State.bug "a range without both bounds is valid only inside a slice"
@@ -282,8 +284,8 @@ let find_capability_impls (state : State.state) (type_ : Types.ty) =
   | Types.Named { path; _ } ->
       List.filter_map
         (fun (trait, _) ->
-          if Resolve.Names.kind_of state.lookups.interface.names trait = Some Capability then
-            match State.implements state type_ (State.trait_reference trait) with
+          if Resolve.Names.find_kind state.lookups.interface.names trait = Some Capability then
+            match State.implements state type_ (State.make_trait_reference trait) with
             | Some (Interface.Impls.From_impl { impl; substitution }) ->
                 Option.map
                   (fun interface ->
@@ -327,10 +329,12 @@ let build_untagged_string state ~origin (literal : Syntax.string_literal) : Core
   match literal.rest with
   | [] -> String literal.first.value
   | rest ->
-      let make = State.synthetic_expression state ~origin in
-      let make_statement kind : Core.statement = { id = State.fresh_node_id state; origin; kind } in
+      let make = State.make_synthetic_expression state ~origin in
+      let make_statement kind : Core.statement =
+        { id = State.allocate_node_id state; origin; kind }
+      in
       let builder_type = Types.make_named (Well_known.path Text_builder) [] in
-      let builder = State.fresh_synthetic_local state in
+      let builder = State.allocate_synthetic_local state in
       let builder_place : Core.place = Local { local = builder; type_ = builder_type; origin } in
       let make_call callee arguments : Core.kind =
         Call { callee; arguments; lends = None; uses = Types.no_capabilities }
@@ -341,7 +345,7 @@ let build_untagged_string state ~origin (literal : Syntax.string_literal) : Core
              {
                pattern =
                  {
-                   id = State.fresh_node_id state;
+                   id = State.allocate_node_id state;
                    origin;
                    type_ = builder_type;
                    kind = Bind { local = builder; name = "builder"; is_var = true; mode = Own };
@@ -413,12 +417,12 @@ let build_untagged_string state ~origin (literal : Syntax.string_literal) : Core
 
 let build_list_literal state ~origin (element : Types.ty) (elements : Core.expression list) :
     Core.kind =
-  let make = State.synthetic_expression state ~origin in
-  let make_statement kind : Core.statement = { id = State.fresh_node_id state; origin; kind } in
+  let make = State.make_synthetic_expression state ~origin in
+  let make_statement kind : Core.statement = { id = State.allocate_node_id state; origin; kind } in
   let storage_type =
     Types.Named { path = Intrinsic.builtin_path Storage; arguments = [ Types.Type element ] }
   in
-  let storage = State.fresh_synthetic_local state in
+  let storage = State.allocate_synthetic_local state in
   let make_intrinsic_call operation type_ arguments =
     make type_
       (Call
@@ -436,7 +440,7 @@ let build_list_literal state ~origin (element : Types.ty) (elements : Core.expre
          {
            pattern =
              {
-               id = State.fresh_node_id state;
+               id = State.allocate_node_id state;
                origin;
                type_ = storage_type;
                kind = Bind { local = storage; name = "storage"; is_var = true; mode = Own };
@@ -511,7 +515,7 @@ let build_tagged_string state (value : Syntax.expression) (literal : Syntax.stri
     | Some call -> call
     | None -> State.bug "a tagged string has no `from_template`"
   in
-  let make = State.synthetic_expression state ~origin:value.id in
+  let make = State.make_synthetic_expression state ~origin:value.id in
   let make_list element elements =
     make
       (Types.make_named (Well_known.path List) [ element ])
@@ -534,7 +538,7 @@ let build_tagged_string state (value : Syntax.expression) (literal : Syntax.stri
       (fun ((written : Syntax.expression), _) (conversion : Tables.call option) ->
         match conversion with
         | Some call ->
-            State.synthetic_expression state ~origin:written.id call.callee_result
+            State.make_synthetic_expression state ~origin:written.id call.callee_result
               (Call (build_call state ~lends:None call))
         | None -> State.build_expression state written)
       literal.rest recorded.part_conversions
@@ -572,7 +576,7 @@ let build_constant_pattern state (id : Syntax.id) (value : Core.pattern_constant
   let type_ = read_pattern_type state id in
   if is_built_in_scalar type_ then Literal value
   else
-    let equal = State.trait_reference (Well_known.path Equal) in
+    let equal = State.make_trait_reference (Well_known.path Equal) in
     match State.implements state type_ equal with
     | Some implementation ->
         Equal_to
@@ -586,7 +590,7 @@ let build_constant_pattern state (id : Syntax.id) (value : Core.pattern_constant
                   receiver = Read;
                   self_type = type_;
                   type_arguments = [];
-                  evidence = convert_evidence (State.evidence_of implementation);
+                  evidence = convert_evidence (State.convert_evidence implementation);
                 };
           }
     | None ->
@@ -628,9 +632,9 @@ let build_pattern_fields state (fields : Types.field list)
     fields
 
 let convert_to_integer state (node : Core.expression) : Core.expression =
-  if node.type_ = Types.Integer || not (State.integer_type state node.type_) then node
+  if node.type_ = Types.Integer || not (State.is_integer_type state node.type_) then node
   else
-    State.synthetic_expression state ~origin:node.origin Types.Integer
+    State.make_synthetic_expression state ~origin:node.origin Types.Integer
       (Convert { conversion = To_integer; value = node })
 
 let convert_to_operation : Syntax.operation -> Intrinsic.operation = function
@@ -682,7 +686,7 @@ let build_comparison state (value : Syntax.expression) comparison (left : Syntax
       build_built_in_comparison state comparison left right
   | _ -> (
       let call =
-        State.synthetic_expression state ~origin:value.id recorded.callee_result
+        State.make_synthetic_expression state ~origin:value.id recorded.callee_result
           (Call (build_call state ~lends:None recorded))
       in
       let make_matches_variant variant : Core.kind =
@@ -691,7 +695,7 @@ let build_comparison state (value : Syntax.expression) comparison (left : Syntax
             value = Operands.build Own call;
             pattern =
               {
-                id = State.fresh_node_id state;
+                id = State.allocate_node_id state;
                 origin = value.id;
                 type_ = recorded.callee_result;
                 kind = Variant { variant; fields = [] };
@@ -699,7 +703,7 @@ let build_comparison state (value : Syntax.expression) comparison (left : Syntax
           }
       in
       let make_not kind : Core.kind =
-        Not (State.synthetic_expression state ~origin:value.id Types.bool kind)
+        Not (State.make_synthetic_expression state ~origin:value.id Types.bool kind)
       in
       match comparison with
       | Equal -> call.kind
@@ -714,12 +718,12 @@ let binds_lent_part state (condition : Core.expression) =
     match pattern.kind with
     | Bind { mode = Mut; _ } -> true
     | Bind { mode = Read | Own; _ } ->
-        State.is_view state pattern.type_ || not (State.plain state pattern.type_)
+        State.is_view state pattern.type_ || not (State.is_plain state pattern.type_)
     | Wildcard | Variant _ | Record _ | Alternatives _ | Literal _ | Range _ | Equal_to _ -> false
   in
   let is_lent (place : Core.place) = match place with Lent _ -> true | _ -> false in
   let found_lend = ref false and found_alias = ref false in
-  Core_walk.expression
+  Core_walk.walk_expression
     {
       Core_walk.ignore_all with
       place = (fun place -> if is_lent place then found_lend := true);
@@ -733,18 +737,18 @@ let is_executable state (condition : Core.expression) =
   let is_specification_only (callee : Core.callee) =
     match callee with
     | Function { path; _ } -> (
-        match Instantiation.function_signature state path with
+        match Instantiation.find_function_signature state path with
         | Some signature -> signature.specification_only
         | _ -> false)
     | Trait_method { trait; name; receiver; _ } ->
         List.exists
           (fun (method_ : Types.trait_method) ->
             method_.method_receiver = receiver
-            && (Members.method_signature state.lookups trait.trait method_).specification_only)
-          (Members.trait_methods state.lookups trait.trait name)
+            && (Members.read_method_signature state.lookups trait.trait method_).specification_only)
+          (Members.list_trait_methods state.lookups trait.trait name)
     | Capability_method _ | Intrinsic _ | Indirect _ -> false
   in
-  Core_walk.expression
+  Core_walk.walk_expression
     {
       Core_walk.ignore_all with
       expression =
@@ -763,15 +767,15 @@ let is_executable state (condition : Core.expression) =
 
 let build_compound_assign state (written : Syntax.statement) (target : Syntax.expression)
     (value : Syntax.expression) operation : Core.statement_kind =
-  let place = State.place_of (State.build_expression state target) in
+  let place = State.make_place (State.build_expression state target) in
   let target_type = read_type state target in
   let current =
-    State.synthetic_expression state ~origin:written.id target_type Core.Current_target
+    State.make_synthetic_expression state ~origin:written.id target_type Core.Current_target
   in
   let right = State.build_expression state value in
-  let bound = State.fresh_synthetic_local state in
+  let bound = State.allocate_synthetic_local state in
   let bound_value =
-    State.synthetic_expression state ~origin:value.id right.type_
+    State.make_synthetic_expression state ~origin:value.id right.type_
       (Use (Local { local = bound; type_ = right.type_; origin = value.id }))
   in
   let make_built_in operation : Core.kind * Core.operand =
@@ -812,12 +816,12 @@ let build_compound_assign state (written : Syntax.statement) (target : Syntax.ex
       target = place;
       operand = right_operand;
       bound;
-      value = State.synthetic_expression state ~origin:written.id target_type kind;
+      value = State.make_synthetic_expression state ~origin:written.id target_type kind;
     }
 
 let rec lend_statements state (mode : Types.mode) (value : Core.expression) : Core.statement list =
   let make_statement kind : Core.statement list =
-    [ { id = State.fresh_node_id state; origin = value.origin; kind } ]
+    [ { id = State.allocate_node_id state; origin = value.origin; kind } ]
   in
   let make_branching kind =
     let type_ = if value.type_ = Types.Never then Types.Never else Types.unit in
@@ -863,11 +867,11 @@ let build_collection_place state (iterable : Syntax.expression) (mode : Types.mo
   match collection.kind with
   | Use place when is_fixed_place place -> (place, None)
   | _ ->
-      let local = State.fresh_synthetic_local state and origin = iterable.id in
+      let local = State.allocate_synthetic_local state and origin = iterable.id in
       let scrutinee = Operands.build mode collection in
       let pattern : Core.pattern =
         {
-          id = State.fresh_node_id state;
+          id = State.allocate_node_id state;
           origin;
           type_ = collection.type_;
           kind =
@@ -892,16 +896,17 @@ let build_collection_place state (iterable : Syntax.expression) (mode : Types.mo
 let build_elements state ~origin (collection : Core.place) ~(count : Tables.call)
     ~(element : Tables.call) ~(lends : Types.mode) : Core.elements =
   let uint64 = Types.make_builtin UInt64 in
-  let local = State.fresh_synthetic_local state in
+  let local = State.allocate_synthetic_local state in
   let make_receiver mode : Core.argument =
     Passed { mode; value = Place collection; mode_keyword = None }
   in
   let position =
-    State.synthetic_expression state ~origin uint64 (Use (Local { local; type_ = uint64; origin }))
+    State.make_synthetic_expression state ~origin uint64
+      (Use (Local { local; type_ = uint64; origin }))
   in
   {
     count =
-      State.synthetic_expression state ~origin uint64
+      State.make_synthetic_expression state ~origin uint64
         (Call
            {
              callee = convert_callee count.callee;
@@ -911,14 +916,14 @@ let build_elements state ~origin (collection : Core.place) ~(count : Tables.call
            });
     position =
       {
-        id = State.fresh_node_id state;
+        id = State.allocate_node_id state;
         origin;
         type_ = uint64;
         kind = Bind { local; name = "position"; is_var = false; mode = Own };
       };
     element =
       Lent
-        (State.synthetic_expression state ~origin element.callee_result
+        (State.make_synthetic_expression state ~origin element.callee_result
            (Call
               {
                 callee = convert_callee element.callee;
@@ -941,10 +946,13 @@ let quantify_over_elements state (collection : Syntax.expression) ~count ~elemen
   | None -> kind
   | Some wrap ->
       wrap ~type_:Types.bool
-        { statements = []; value = Some (State.synthetic_expression state ~origin Types.bool kind) }
+        {
+          statements = [];
+          value = Some (State.make_synthetic_expression state ~origin Types.bool kind);
+        }
 
 let build_cursor_next state (cursor : Types.ty) : Core.callee =
-  let trait = State.trait_reference (Well_known.path Cursor) in
+  let trait = State.make_trait_reference (Well_known.path Cursor) in
   match State.implements state cursor trait with
   | Some implementation ->
       Trait_method
@@ -954,7 +962,7 @@ let build_cursor_next state (cursor : Types.ty) : Core.callee =
           receiver = Mut;
           self_type = cursor;
           type_arguments = [];
-          evidence = convert_evidence (State.evidence_of implementation);
+          evidence = convert_evidence (State.convert_evidence implementation);
         }
   | None ->
       State.bug "a loop iterates over `%s`, which does not implement `Cursor`" (Types.show cursor)
@@ -975,10 +983,10 @@ let build_for_loop (state : State.state) (written : Syntax.statement) (iterable 
       | None -> elements_loop
       | Some wrap ->
           let statement : Core.statement =
-            { id = State.fresh_node_id state; origin = written.id; kind = elements_loop }
+            { id = State.allocate_node_id state; origin = written.id; kind = elements_loop }
           in
           Evaluate
-            (State.synthetic_expression state ~origin:written.id Types.unit
+            (State.make_synthetic_expression state ~origin:written.id Types.unit
                (wrap ~type_:Types.unit { statements = [ statement ]; value = None })))
   | Some (Pulled { cursor; cursor_call; remaining }), _ -> (
       let collection = State.build_expression state iterable in
@@ -986,7 +994,7 @@ let build_for_loop (state : State.state) (written : Syntax.statement) (iterable 
         match cursor_call with
         | None -> collection
         | Some cursor_call ->
-            State.synthetic_expression state ~origin:iterable.id cursor
+            State.make_synthetic_expression state ~origin:iterable.id cursor
               (Call
                  {
                    callee = convert_callee cursor_call.callee;
@@ -1007,7 +1015,8 @@ let build_for_loop (state : State.state) (written : Syntax.statement) (iterable 
             (fun (remaining : Tables.call) ->
               Core.Decreases
                 [
-                  State.synthetic_expression state ~origin:iterable.id (Types.make_builtin UInt64)
+                  State.make_synthetic_expression state ~origin:iterable.id
+                    (Types.make_builtin UInt64)
                     (Call
                        {
                          callee = convert_callee remaining.callee;
@@ -1030,12 +1039,12 @@ let build_for_loop (state : State.state) (written : Syntax.statement) (iterable 
       in
       match (pulled.kind, if states_measure then None else remaining) with
       | Use place, remaining when is_fixed_place place -> make_cursor_loop ?remaining place
-      | _, None -> make_cursor_loop (State.place_of pulled)
+      | _, None -> make_cursor_loop (State.make_place pulled)
       | _, Some remaining ->
-          let local = State.fresh_synthetic_local state and origin = iterable.id in
+          let local = State.allocate_synthetic_local state and origin = iterable.id in
           let binding : Core.pattern =
             {
-              id = State.fresh_node_id state;
+              id = State.allocate_node_id state;
               origin;
               type_ = pulled.type_;
               kind = Bind { local; name = "cursor"; is_var = true; mode = Own };
@@ -1043,13 +1052,13 @@ let build_for_loop (state : State.state) (written : Syntax.statement) (iterable 
           in
           let statement : Core.statement =
             {
-              id = State.fresh_node_id state;
+              id = State.allocate_node_id state;
               origin = written.id;
               kind = make_cursor_loop ~remaining (Local { local; type_ = pulled.type_; origin });
             }
           in
           Evaluate
-            (State.synthetic_expression state ~origin:written.id Types.unit
+            (State.make_synthetic_expression state ~origin:written.id Types.unit
                (Match
                   {
                     scrutinees = [ Operands.build Own pulled ];
@@ -1067,7 +1076,7 @@ let build_for_loop (state : State.state) (written : Syntax.statement) (iterable 
 
 let convert_resource state (written : Syntax.resource) : Core.resource =
   let resolve_capability (path : Syntax.path_type) =
-    match State.target state path.path.last with
+    match State.find_target state path.path.last with
     | Some (Definition (Capability, capability)) -> capability
     | _ -> State.bug "`calls` names something that is not a capability"
   in
@@ -1076,7 +1085,7 @@ let convert_resource state (written : Syntax.resource) : Core.resource =
   | Allocations -> Allocations
   | Allocated_bytes -> Allocated_bytes
   | Calls (Call_parameter name) -> (
-      match State.target state name with
+      match State.find_target state name with
       | Some (Local id) -> Calls (Function_parameter (Named id))
       | _ -> State.bug "`calls(%s)` names no parameter" name.text)
   | Calls (Call_capability path) -> Calls (Capability (resolve_capability path))
@@ -1108,22 +1117,22 @@ let build_try state (value : Syntax.expression) (inner : Syntax.expression) ~(ou
   let read_variants (type_ : Types.ty) =
     match type_ with
     | Types.Named { path; arguments } -> (
-        match Members.variants state.lookups path arguments with
+        match Members.find_variants state.lookups path arguments with
         | Some [ success; failure ] -> (success, failure)
         | _ -> State.bug "`?` on `%s`" (Types.show type_))
     | _ -> State.bug "`?` on `%s`" (Types.show type_)
   in
   let success, failure = read_variants scrutinee.type_ in
   let _, returned_failure = read_variants output in
-  let make = State.synthetic_expression state ~origin:value.id in
+  let make = State.make_synthetic_expression state ~origin:value.id in
   let bind_fields (variant : Types.variant) : Core.pattern * (string * Core.expression) list =
     let fields =
       List.map
-        (fun (field : Types.field) -> (field, State.fresh_synthetic_local state))
+        (fun (field : Types.field) -> (field, State.allocate_synthetic_local state))
         (Option.value ~default:[] variant.fields)
     in
     ( {
-        id = State.fresh_node_id state;
+        id = State.allocate_node_id state;
         origin = value.id;
         type_ = scrutinee.type_;
         kind =
@@ -1135,7 +1144,7 @@ let build_try state (value : Syntax.expression) (inner : Syntax.expression) ~(ou
                   (fun ((field : Types.field), local) : (string * Core.pattern) ->
                     ( field.field_name,
                       {
-                        id = State.fresh_node_id state;
+                        id = State.allocate_node_id state;
                         origin = value.id;
                         type_ = field.field_type;
                         kind = Bind { local; name = field.field_name; is_var = false; mode = Own };
@@ -1193,8 +1202,8 @@ let build_inserted_literal state ~origin (type_ : Types.ty) ~name ~insert
     | Types.Named { path; arguments } -> (path, arguments)
     | _ -> State.bug "a set or map literal of type `%s`" (Types.show type_)
   in
-  let make = State.synthetic_expression state ~origin in
-  let make_statement kind : Core.statement = { id = State.fresh_node_id state; origin; kind } in
+  let make = State.make_synthetic_expression state ~origin in
+  let make_statement kind : Core.statement = { id = State.allocate_node_id state; origin; kind } in
   let make_call name receiver arguments result =
     make result
       (Call
@@ -1210,7 +1219,7 @@ let build_inserted_literal state ~origin (type_ : Types.ty) ~name ~insert
   match entries with
   | [] -> created.kind
   | _ ->
-      let local = State.fresh_synthetic_local state in
+      let local = State.allocate_synthetic_local state in
       let collection : Core.place = Local { local; type_; origin } in
       let bind =
         make_statement
@@ -1218,7 +1227,7 @@ let build_inserted_literal state ~origin (type_ : Types.ty) ~name ~insert
              {
                pattern =
                  {
-                   id = State.fresh_node_id state;
+                   id = State.allocate_node_id state;
                    origin;
                    type_;
                    kind = Bind { local; name; is_var = true; mode = Own };

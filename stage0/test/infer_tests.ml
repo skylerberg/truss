@@ -12,7 +12,7 @@ let expression_at text written occurrence =
   let actual =
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
-        let key = Resolve.Names.key_of declaration in
+        let key = Resolve.Names.make_key declaration in
         match
           ( (Support.names packages key.module_.package).definition key,
             (Support.names packages key.module_.package).spans key,
@@ -54,7 +54,7 @@ let core_at text written occurrence =
   let value, (result : Infer.checked) = expression_at text written occurrence in
   let form = result.form in
   let nodes = ref [] in
-  Core_walk.definition
+  Core_walk.walk_definition
     {
       Core_walk.ignore_all with
       expression =
@@ -529,7 +529,7 @@ let () =
       let type_check_result () =
         let packages = Support.setup [ ("app::main", text) ] in
         let key =
-          Resolve.Names.key_of
+          Resolve.Names.make_key
             (List.hd (Support.declarations packages (Support.module_of "app::main")))
         in
         Database.read_checked_body (Support.database packages) key
@@ -545,7 +545,7 @@ let () =
             (fun (declaration : Resolve.Names.declaration) ->
               match
                 Database.read_checked_body (Support.database packages)
-                  (Resolve.Names.key_of declaration)
+                  (Resolve.Names.make_key declaration)
               with
               | Some { tables; _ } ->
                   List.iter

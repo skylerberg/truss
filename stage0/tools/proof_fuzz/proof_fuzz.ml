@@ -60,7 +60,7 @@ let runnable database =
   let lookups = Database.make_proof_lookups database in
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
-      let key = Resolve.Names.key_of declaration in
+      let key = Resolve.Names.make_key declaration in
       match
         ( Interface.Definition.read_declared_signature interface declaration.path,
           Mir.contract_of_path mir declaration.path )

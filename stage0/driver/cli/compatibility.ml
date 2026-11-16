@@ -4,7 +4,7 @@ type side = { database : Database.t; lookups : Interface.Lookups.t }
 
 let public (side : side) (declaration : Resolve.Names.declaration) =
   declaration.ordinal = 0
-  && side.lookups.names.container (Resolve.Names.key_of declaration) = None
+  && side.lookups.names.container (Resolve.Names.make_key declaration) = None
   && Resolve.Names.is_public declaration.visibility
 
 let declarations (side : side) package = side.lookups.names.package_declarations package
@@ -253,7 +253,7 @@ let compare ~before ~after package =
         | Some is when is.kind <> was.kind ->
             [ public_change path (Breaks "became another kind of definition") ]
         | Some is ->
-            let before_key = Resolve.Names.key_of was and after_key = Resolve.Names.key_of is in
+            let before_key = Resolve.Names.make_key was and after_key = Resolve.Names.make_key is in
             List.map (public_change path)
               (match
                  ( Interface.Definition.read_interface before.lookups path,

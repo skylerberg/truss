@@ -9,7 +9,7 @@ let form_of (core : Core.t) = { core; names = Core_walk.For_testing.local_names 
 
 let expressions form =
   let found = ref [] in
-  Core_walk.definition
+  Core_walk.walk_definition
     { Core_walk.ignore_all with expression = (fun node -> found := node :: !found) }
     form.core.definition;
   List.rev !found
@@ -89,7 +89,7 @@ let definition_form text (path : Path.t) =
   let definition =
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
-        let key = Resolve.Names.key_of declaration in
+        let key = Resolve.Names.make_key declaration in
         if Path.equal key.path path then Option.map (fun core -> (key, core)) (core_of packages key)
         else None)
       ((Support.names packages file.module_.package).declarations_in file)
@@ -234,11 +234,11 @@ let () =
       let actual = ref [] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
-          let key = Resolve.Names.key_of declaration in
+          let key = Resolve.Names.make_key declaration in
           if Path.equal key.path (Support.top "app::main" "g") then
             match core_of packages key with
             | Some form ->
-                Core_walk.definition
+                Core_walk.walk_definition
                   {
                     Core_walk.ignore_all with
                     expression =
@@ -263,11 +263,11 @@ let () =
       let actual = ref [] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
-          let key = Resolve.Names.key_of declaration in
+          let key = Resolve.Names.make_key declaration in
           if Path.equal key.path (Support.top "app::main" "g") then
             match core_of packages key with
             | Some form ->
-                Core_walk.definition
+                Core_walk.walk_definition
                   {
                     Core_walk.ignore_all with
                     pattern =
@@ -289,7 +289,7 @@ let () =
       let packages = Support.setup [ ("app::main", text) ] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
-          let key = Resolve.Names.key_of declaration in
+          let key = Resolve.Names.make_key declaration in
           match
             ( core_of packages key,
               (Support.names packages key.module_.package).spans key,
@@ -297,7 +297,7 @@ let () =
           with
           | Some form, spans, written ->
               let actual = ref [] in
-              Core_walk.definition
+              Core_walk.walk_definition
                 {
                   Core_walk.ignore_all with
                   statement =
@@ -393,7 +393,7 @@ let () =
       let packages = Support.setup [ ("app::main", text) ] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
-          let key = Resolve.Names.key_of declaration in
+          let key = Resolve.Names.make_key declaration in
           match
             ( core_of packages key,
               (Support.names packages key.module_.package).spans key,

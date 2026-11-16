@@ -82,7 +82,7 @@ let resolve database packages text =
 let find snapshot database packages ~body text =
   List.map
     (fun (declaration : Resolve.Names.declaration) ->
-      let key = Resolve.Names.key_of declaration in
+      let key = Resolve.Names.make_key declaration in
       let opaque =
         declaration.visibility = Public_opaque
         && not (List.mem declaration.module_.package packages)

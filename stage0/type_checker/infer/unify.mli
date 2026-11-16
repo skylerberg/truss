@@ -9,10 +9,10 @@ type t = {
 }
 
 val create : unit -> t
-val fresh : t -> Types.ty
-val fresh_literal : t -> Types.literal_kind -> Types.ty
-val fresh_value : t -> Types.value
-val fresh_capability_variable : t -> Types.capability_set
+val make_fresh_type : t -> Types.ty
+val make_fresh_literal : t -> Types.literal_kind -> Types.ty
+val make_fresh_value : t -> Types.value
+val make_fresh_capability_variable : t -> Types.capability_set
 val resolve : t -> Types.ty -> Types.ty
 val resolve_value : t -> Types.value -> Types.value
 val zonk : t -> Types.ty -> Types.ty
@@ -24,8 +24,8 @@ type unknown =
   | Unknown_literal of Types.literal_kind * int
   | Unknown_value of int
 
-val unknowns : t -> Types.ty -> unknown list
-val argument_unknowns : t -> Types.argument -> unknown list
+val list_unknowns : t -> Types.ty -> unknown list
+val list_argument_unknowns : t -> Types.argument -> unknown list
 val unify : t -> Types.ty -> Types.ty -> bool
 val unify_arguments : t -> Types.argument list -> Types.argument list -> bool
 val unify_value : t -> Types.value -> Types.value -> bool

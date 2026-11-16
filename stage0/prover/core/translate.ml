@@ -125,7 +125,7 @@ let list_promises context (source : State.source) locals (costs : Mir.cost list)
 let show_promiser_kind (lookups : Lookups.t) (source : State.source) =
   match source.key with
   | Some { path = Method { owner; _ }; _ }
-    when Resolve.Names.kind_of lookups.interface.names owner = Some Resolve.Names.Capability ->
+    when Resolve.Names.find_kind lookups.interface.names owner = Some Resolve.Names.Capability ->
       "capability"
   | _ -> "trait"
 

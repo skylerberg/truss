@@ -12,7 +12,7 @@ let select snapshot database packages ~paths ~match_ =
             when declaration.ordinal = 0
                  && match match_ with Some text -> Substring.contains name text | None -> true ->
               let line =
-                fst (Source.position source (names.place (Resolve.Names.key_of declaration)).base)
+                fst (Source.position source (names.place (Resolve.Names.make_key declaration)).base)
               in
               Some
                 {
