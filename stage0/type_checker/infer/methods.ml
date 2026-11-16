@@ -383,10 +383,7 @@ and check_trait_method_through_type state env ?expected:_ ?trait_arguments
         ~trait_arguments
   | None ->
       check_trait_method_call state env value self_type trait method_ arguments ~trait_generics
-        ~trait_arguments:
-          (List.map
-             (fun (_ : Types.generic) -> Types.Type (State.make_fresh_type state))
-             trait_generics)
+        ~trait_arguments:(Instantiation.make_fresh_generic_arguments state trait_generics)
 
 and check_trait_method_call state env (value : Syntax.expression) self_type
     (trait : Types.trait_reference) (method_ : Types.trait_method) arguments ~trait_generics

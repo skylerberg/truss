@@ -810,6 +810,10 @@ let () =
       fine Fixtures.Infer.add_of_two_literals_written_in_full);
   Harness.test "a generic parameter takes no type arguments" (fun () ->
       one_diagnostic Fixtures.Infer.generic_parameter_given_type_arguments "types.arity");
+  Harness.test "a trait's count argument is a value inferred from a call written in full" (fun () ->
+      fine Fixtures.Infer.full_call_of_a_trait_with_a_count);
+  Harness.test "a bound with a count argument gives an associated type its methods" (fun () ->
+      fine Fixtures.Infer.method_of_an_associated_type_bounded_by_a_count);
   Harness.test "a generic parameter given type arguments is an error type, not the parameter"
     (fun () ->
       one_diagnostic Fixtures.Infer.method_of_a_parameter_given_type_arguments "types.arity");
