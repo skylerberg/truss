@@ -11,6 +11,10 @@ let bug format = Compiler_bug.bug ~stage:"Prover" format
 let is_in_recursion_group (context : State.context) path =
   List.exists (Path.equal path) (context.lookups.recursion_group context.current)
 
+let has_method_in_recursion_group (context : State.context) impl =
+  List.exists (is_in_recursion_group context)
+    (Mir.Call_edges.list_written_methods context.lookups.interface.names impl)
+
 let list_clauses (requires : Mir.requirement list) =
   List.map (fun (requirement : Mir.requirement) -> requirement.clause) requires
 

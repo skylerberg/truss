@@ -708,7 +708,9 @@ let () =
   Harness.test "a loop forgets a record whose field it assigns" (fun () ->
       not_proven Fixtures.Prover.loop_assigning_a_box_field "prover.assertion");
   Harness.test "a loop forgets self when it mutates it" (fun () ->
-      not_proven Fixtures.Prover.box_fill_loop "prover.assertion")
+      not_proven Fixtures.Prover.box_fill_loop "prover.assertion");
+  Harness.test "a loop forgets a place that it provides `mut`" (fun () ->
+      not_proven Fixtures.Prover.marker_provided_mut_in_a_loop "prover.assertion")
 
 let constant_step = Fixtures.Prover.constant_step
 
@@ -938,6 +940,10 @@ let () =
 let () =
   Harness.test "provided methods that call each other are recursion" (fun () ->
       only_code Fixtures.Prover.ping_and_pong_provided_methods "prover.termination");
+  Harness.test "an implementation that calls the function providing it is recursion" (fun () ->
+      only_code Fixtures.Prover.looper_provided_by_its_own_caller "prover.termination");
+  Harness.test "a capability's implementation ends when the capability's method does" (fun () ->
+      only_code Fixtures.Prover.spinner_calling_a_function_without_time "prover.termination");
   Harness.test "a call through any that reaches back is recursion" (fun () ->
       only_code Fixtures.Prover.step_reaching_back_through_any "prover.termination");
   Harness.test "a method that calls itself through any is recursion" (fun () ->

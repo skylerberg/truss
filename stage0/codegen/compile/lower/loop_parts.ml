@@ -63,7 +63,9 @@ let list_tasks blocks (body : Mir.Graph.block list) : Mir.task list =
       | For { loop; _ } -> [ Mir.Iteration { loop = loop.origin } ]
       | Fork { fork; branches; _ } ->
           List.mapi (fun index _ -> Mir.Branch { block = fork; index }) branches
-      | _ -> [])
+      | Goto _ | Branch _ | Join _ | Iteration_end _ | Yield _ | Return _ | Cancel _ | Resume _
+      | Unreachable | Written_unreachable | Todo ->
+          [])
     body
 
 let end_on_exits blocks ~(body : Mir.Graph.block list) ~part ~origin =
@@ -95,7 +97,9 @@ let end_on_exits blocks ~(body : Mir.Graph.block list) ~part ~origin =
         | Cancel { task; _ } when not (List.mem task inside) ->
             { basic with statements = basic.statements @ [ dead ] }
         | Cancel _ | Iteration_end _ -> basic
-        | terminator -> { basic with terminator = retarget leave terminator }))
+        | ( Goto _ | Branch _ | For _ | Fork _ | Join _ | Yield _ | Resume _ | Unreachable
+          | Written_unreachable | Todo ) as terminator ->
+            { basic with terminator = retarget leave terminator }))
     body
 
 let end_body_parts (body : Mir.Graph.body) : Mir.Graph.body =
