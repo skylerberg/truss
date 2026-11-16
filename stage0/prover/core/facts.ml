@@ -408,20 +408,19 @@ let rec sort_of context (ty : Types.ty) : Logic.sort =
       end
 
 let rec structural context ?(seen = []) (ty : Types.ty) =
-  if is_numeric ty || is_bool ty || Types.is_builtin Character ty || Types.equal ty Types.unit then
-    true
-  else if List.exists (Types.equal ty) seen then true
-  else
-    match (visible_type context ty, constructors context ty) with
-    | Some (interface, _), Some shape ->
-        List.exists is_standard_equal interface.derives
-        && List.for_all
-             (fun (_, fields) ->
-               List.for_all
-                 (fun (_, field_type) -> structural context ~seen:(ty :: seen) field_type)
-                 fields)
-             shape
-    | _ -> false
+  is_numeric ty || is_bool ty || Types.is_builtin Character ty || Types.equal ty Types.unit
+  || List.exists (Types.equal ty) seen
+  ||
+  match (visible_type context ty, constructors context ty) with
+  | Some (interface, _), Some shape ->
+      List.exists is_standard_equal interface.derives
+      && List.for_all
+           (fun (_, fields) ->
+             List.for_all
+               (fun (_, field_type) -> structural context ~seen:(ty :: seen) field_type)
+               fields)
+           shape
+  | _ -> false
 
 let in_range ty term =
   match bounds ty with

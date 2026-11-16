@@ -210,14 +210,13 @@ and pattern_fields state env (written : pattern) (fields : Types.field list)
      with
      | [] -> ()
      | missing ->
-         if written_fields <> [] || List.length fields > 0 then
-           report state Missing_argument (read_span state written.id)
-             (Printf.sprintf "This pattern does not match %s. Name %s, or write `..` for the rest."
-                (String.concat ", "
-                   (List.map
-                      (fun (declared : Types.field) -> "`" ^ declared.field_name ^ "`")
-                      missing))
-                (if List.length missing = 1 then "it" else "them")));
+         report state Missing_argument (read_span state written.id)
+           (Printf.sprintf "This pattern does not match %s. Name %s, or write `..` for the rest."
+              (String.concat ", "
+                 (List.map
+                    (fun (declared : Types.field) -> "`" ^ declared.field_name ^ "`")
+                    missing))
+              (match missing with [ _ ] -> "it" | _ -> "them")));
   List.filter_map
     (fun (field : pattern_field) ->
       match field.kind with
