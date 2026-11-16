@@ -70,8 +70,6 @@ let make_impl_substitution lookups (impl : Path.t) =
           Properties.make_trait_substitution trait ~self:interface.for_type interface.implements)
         (Definition.read_trait_interface lookups interface.implements.trait))
 
-let is_open_type = function Types.Error _ | Types.Variable _ | Types.Hole -> true | _ -> false
-
 let is_open_value = function
   | Types.Value_variable _ -> true
   | Types.Known _ | Value_parameter _ -> false
@@ -81,10 +79,10 @@ let rec match_type ~variables (substitution : Types.substitution) pattern type_ 
   | Types.Parameter parameter, _ when List.mem parameter variables -> (
       match List.assoc_opt parameter substitution with
       | Some (Types.Type bound) ->
-          if Types.equal bound type_ || is_open_type type_ then Some substitution else None
+          if Types.equal bound type_ || Types.is_open_type type_ then Some substitution else None
       | Some (Types.Value _ | Types.Capabilities _) -> None
       | None -> Some ((parameter, Types.Type type_) :: substitution))
-  | _, argument_type when is_open_type argument_type -> Some substitution
+  | _, argument_type when Types.is_open_type argument_type -> Some substitution
   | Types.Named left, Types.Named right when Path.equal left.path right.path ->
       match_arguments ~variables substitution left.arguments right.arguments
   | _ -> if Types.equal pattern type_ then Some substitution else None
@@ -264,7 +262,7 @@ and list_matching_bounds lookups ~list_bounds (type_ : Types.ty) (wanted : Types
          (fun wanted actual ->
            match (wanted, actual) with
            | Types.Type wanted, Types.Type actual ->
-               is_open_type wanted || is_open_type actual
+               Types.is_open_type wanted || Types.is_open_type actual
                || Types.equal
                     (normalize lookups ~list_bounds wanted)
                     (normalize lookups ~list_bounds actual)
@@ -298,11 +296,12 @@ and has_matching_associated_types lookups ~list_bounds (wanted : Types.trait_ref
   List.for_all
     (fun (name, wanted_type) ->
       let wanted_type = normalize lookups ~list_bounds wanted_type in
-      if is_open_type wanted_type then true
+      if Types.is_open_type wanted_type then true
       else
         match List.assoc_opt name fixed with
         | Some defined ->
-            is_open_type defined || Types.equal (normalize lookups ~list_bounds defined) wanted_type
+            Types.is_open_type defined
+            || Types.equal (normalize lookups ~list_bounds defined) wanted_type
         | None -> (
             match (base, wanted_type) with
             | Some base, Types.Projection { base = projected; name = projected_name; _ } ->

@@ -303,6 +303,15 @@ let () =
   Harness.test "own on a place that copies implicitly is redundant" (fun () ->
       expect_one_diagnostic Fixtures.Infer.own_before_an_integer "types.redundant_mode"
         ~fixed:Fixtures.Infer.own_before_an_integer_fixed);
+  Harness.test "own on a place of the error type is not reported again as redundant" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.own_before_a_local_bound_to_a_misspelled_field
+        "types.unknown_member");
+  Harness.test "own on a place of an option of the error type is not reported again as redundant"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.own_before_an_option_of_a_misspelled_field
+        "types.unknown_member");
+  Harness.test "own on a place of a hole's type is not redundant" (fun () ->
+      expect_fine Fixtures.Infer.own_before_a_local_bound_to_todo);
   Harness.test "a mut receiver chooses the method's mut overload" (fun () ->
       expect_fine Fixtures.Infer.mut_push_onto_a_var_list);
   Harness.test
