@@ -1,4 +1,9 @@
-type checked = { form : Core.t; tables : Tables.published; used_packages : Path.package list }
+type checked = {
+  form : Core.t;
+  tables : Tables.published;
+  used_packages : Path.package list;
+  places_without_own : Core.origin list;
+}
 
 let no_output : State.env =
   {
@@ -728,6 +733,7 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       frames = [];
       locals_read = [];
       receiver_modes = [];
+      places_without_own = [];
       yielded = Hashtbl.create 4;
       lent_tails = Hashtbl.create 4;
       lambdas = [];
@@ -814,6 +820,7 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
           tables = Tables.publish state.tables;
           used_packages =
             list_used_packages resolved ~evidence_packages:state.evidence_packages form;
+          places_without_own = state.places_without_own;
         }
   | _ ->
       Error

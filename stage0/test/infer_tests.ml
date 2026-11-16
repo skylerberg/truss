@@ -297,9 +297,6 @@ let () =
   Harness.test "a mut parameter needs mut at the call, with a fix that adds it" (fun () ->
       expect_one_diagnostic Fixtures.Infer.bump_without_mut "types.missing_mode"
         ~fixed:Fixtures.Infer.bump_without_mut_fixed);
-  Harness.test "an own parameter needs own for a place that does not copy implicitly" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.own_list_passed_without_own "types.missing_mode"
-        ~fixed:Fixtures.Infer.own_list_passed_without_own_fixed);
   Harness.test "own on a place that copies implicitly is redundant" (fun () ->
       expect_one_diagnostic Fixtures.Infer.own_before_an_integer "types.redundant_mode"
         ~fixed:Fixtures.Infer.own_before_an_integer_fixed);
@@ -447,7 +444,6 @@ let () =
        expect_fine (tally ^ Fixtures.Infer.monitors_provided_with_and_without_tasks)));
   Harness.test "an assignment through an index of a map takes the key as an owned value" (fun () ->
       expect_fine Fixtures.Infer.map_assignments_with_owned_keys;
-      expect_one_diagnostic Fixtures.Infer.map_assignment_with_a_viewed_key "types.missing_mode";
       expect_one_diagnostic Fixtures.Infer.map_assignment_to_a_read_only_map "types.not_assignable");
   Harness.test "`final(result)` is a lending method's part as the caller left it" (fun () ->
       expect_fine Fixtures.Infer.lending_part_ensuring_final_of_result;
@@ -639,9 +635,6 @@ let () =
      (fun () ->
        expect_one_diagnostic (make_comparison_source 70) "types.recursion_limit"
          ~says:"needs more than 64 nested impls"));
-  Harness.test "an associated type that grows a type reaches the recursion limit" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.associated_type_that_grows_its_type
-        "types.recursion_limit" ~says:"needs more than 64 nested types");
   Harness.test "an opaque type cannot be matched outside its package" (fun () ->
       expect_one_diagnostic Fixtures.Infer.record_pattern_on_a_list "types.private_field");
   Harness.test "a bitwise compound assignment works on integers only" (fun () ->

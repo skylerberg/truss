@@ -1,0 +1,9 @@
+type Bag(items: List[Int64])
+
+fn Bag.into_items(own self) -> List[Int64] {
+  self.items
+}
+
+fn f(bag: Bag) -> List[Int64] {
+  bag.copy().into_items()
+}

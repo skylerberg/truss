@@ -98,7 +98,7 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
                   Instantiation.instantiate_type state (State.read_span state tag.last.id) tag_path;
               }
           in
-          List.iter (fun (part, part_type) -> Modes.check_owned state env part part_type) parts;
+          List.iter (fun (part, _) -> Modes.note_owned_value state env part) parts;
           (match expected with
           | Some expected -> ignore (State.unify state tag_type expected)
           | None -> ());
@@ -195,7 +195,7 @@ and check_list_literal state env ?expected (value : Syntax.expression) items =
             Types.Named { path = Well_known.make_path List; arguments = [ Types.Type element ] } )
   in
   List.iter (fun item -> Hooks.check state env item element) items;
-  List.iter (fun item -> Modes.check_owned state env item element) items;
+  List.iter (Modes.note_owned_value state env) items;
   State.register_expression state value (fun () ->
       Form.build_collection_literal state value (List.map (State.build_expression state) items));
   make element
@@ -218,8 +218,8 @@ and check_map_literal state env ?expected (value : Syntax.expression) entries =
     (fun (entry_key, entry_value) ->
       Hooks.check state env entry_key key;
       Hooks.check state env entry_value value_type;
-      Modes.check_owned state env entry_key key;
-      Modes.check_owned state env entry_value value_type)
+      Modes.note_owned_value state env entry_key;
+      Modes.note_owned_value state env entry_value)
     entries;
   State.register_expression state value (fun () ->
       Form.build_map_literal state value
