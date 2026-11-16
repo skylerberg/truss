@@ -102,11 +102,7 @@ let assume_laws (context : State.context) frame ~at (trait : Types.trait_referen
   if not (List.mem key context.laws_assumed) then begin
     context.laws_assumed <- key :: context.laws_assumed;
     List.iter
-      (fun path ->
-        let required =
-          if Path.equal path trait.trait then trait
-          else { Types.trait = path; trait_arguments = []; associated = [] }
-        in
+      (fun (required : Types.trait_reference) ->
         let substitution = Contracts.trait_substitution context.lookups required ty in
         let impl = Option.map fst (Operations.concrete_impl context required ty) in
         List.iter
@@ -119,8 +115,8 @@ let assume_laws (context : State.context) frame ~at (trait : Types.trait_referen
                 | _ -> ());
                 Facts.fact context frame fact_
             | None -> ())
-          (laws_of context path))
-      (Mir.Call_edges.traits_with_required context.lookups.interface trait.trait)
+          (laws_of context required.trait))
+      (Interface.Properties.list_bound_closure context.lookups.interface ~self:ty trait)
   end
 
 let template_trait : Path.t = Well_known.path From_template

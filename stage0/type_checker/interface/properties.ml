@@ -1,8 +1,7 @@
 let make_trait_substitution (interface : Types.trait_interface) ~self
     (reference : Types.trait_reference) : Types.substitution =
   (Types.make_self_parameter reference.trait, Types.Type self)
-  :: Option.value ~default:[]
-       (Types.make_substitution interface.trait_generics reference.trait_arguments)
+  :: Types.make_substitution interface.trait_generics reference.trait_arguments
 
 let list_bound_closure lookups ~self (bound : Types.trait_reference) =
   let closure = ref [] in
@@ -22,19 +21,42 @@ let list_bound_closure lookups ~self (bound : Types.trait_reference) =
   visit [] bound;
   List.rev !closure
 
-let list_associated_bounds lookups ~base (trait : Types.trait_reference) name =
-  match Definition.read_trait_interface lookups trait.trait with
-  | Some interface -> (
-      match
-        List.find_opt
-          (fun (associated : Types.associated_type) -> associated.associated_name = name)
-          interface.associated_types
-      with
-      | Some associated ->
-          List.map
-            (Types.substitute_trait (make_trait_substitution interface ~self:base trait))
-            associated.associated_bounds
-      | None -> [])
+let find_declaring_trait lookups ~base (trait : Types.trait_reference) ~is_declared =
+  List.find_opt
+    (fun (reference : Types.trait_reference) ->
+      match Definition.read_interface lookups reference.trait with
+      | Some (Environment.Trait_interface interface) -> is_declared interface
+      | Some (Environment.Error_interface _) -> true
+      | _ -> false)
+    (list_bound_closure lookups ~self:base trait)
+
+let find_trait_declaring_type lookups ~base trait name =
+  find_declaring_trait lookups ~base trait ~is_declared:(fun (interface : Types.trait_interface) ->
+      List.exists
+        (fun (associated : Types.associated_type) -> associated.associated_name = name)
+        interface.associated_types)
+
+let find_trait_declaring_capability_set lookups ~base trait name =
+  find_declaring_trait lookups ~base trait ~is_declared:(fun (interface : Types.trait_interface) ->
+      List.mem name interface.associated_capabilities)
+
+let list_associated_bounds lookups ~base trait name =
+  match
+    Option.bind (find_trait_declaring_type lookups ~base trait name)
+      (fun (declaring : Types.trait_reference) ->
+        Option.map
+          (fun interface -> (declaring, interface))
+          (Definition.read_trait_interface lookups declaring.trait))
+  with
+  | Some (declaring, interface) ->
+      List.concat_map
+        (fun (associated : Types.associated_type) ->
+          if associated.associated_name = name then
+            List.map
+              (Types.substitute_trait (make_trait_substitution interface ~self:base declaring))
+              associated.associated_bounds
+          else [])
+        interface.associated_types
   | None -> []
 
 let list_known_bounds lookups ~bounds (type_ : Types.ty) =
@@ -88,9 +110,7 @@ let list_type_arguments arguments =
   List.filter_map (function Types.Type type_ -> Some type_ | _ -> None) arguments
 
 let instantiate ~resolve (interface : Types.type_interface) arguments conditions =
-  let substitution =
-    Option.value ~default:[] (Types.make_substitution interface.type_generics arguments)
-  in
+  let substitution = Types.make_substitution interface.type_generics arguments in
   List.map (fun condition -> resolve (Types.substitute substitution condition)) conditions
 
 let combine_conditions find_conditions types =
@@ -213,10 +233,7 @@ let walk_contents lookups ~(facts_of : Path.t -> Environment.type_facts) ~resolv
                 if List.length enclosing > recursion_limit then
                   fail_at_recursion_limit
                     (Printf.sprintf "Listing the types that `%s` holds" (Types.show type_));
-                let substitution =
-                  Option.value ~default:[]
-                    (Types.make_substitution interface.type_generics arguments)
-                in
+                let substitution = Types.make_substitution interface.type_generics arguments in
                 List.iter
                   (fun (condition, step) ->
                     let condition, defining = resolve (Types.substitute substitution condition) in

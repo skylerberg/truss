@@ -1,0 +1,3 @@
+fn same[Number: FixedWidthInteger](value: Number) -> Number.Output {
+  value
+}

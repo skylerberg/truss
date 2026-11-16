@@ -104,7 +104,7 @@ type generic = { generic : parameter; kind : generic_kind }
 
 val list_generic_arguments : generic list -> argument list
 val list_bounds : generic list -> parameter -> trait_reference list
-val make_substitution : generic list -> argument list -> substitution option
+val make_substitution : generic list -> argument list -> substitution
 
 type parameter_info = { name : string; mode : mode; type_ : ty; has_default : bool }
 

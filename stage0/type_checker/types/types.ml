@@ -425,10 +425,12 @@ let list_bounds generics parameter =
       | _ -> [])
     generics
 
-let make_substitution (generics : generic list) arguments : substitution option =
+let make_substitution (generics : generic list) arguments : substitution =
   if List.length generics = List.length arguments then
-    Some (List.combine (List.map (fun generic -> generic.generic) generics) arguments)
-  else None
+    List.combine (List.map (fun generic -> generic.generic) generics) arguments
+  else
+    Compiler_bug.bug ~stage:"Types" "a substitution of %d arguments for %d generics"
+      (List.length arguments) (List.length generics)
 
 type parameter_info = { name : string; mode : mode; type_ : ty; has_default : bool }
 
@@ -520,9 +522,7 @@ type type_interface = {
 }
 
 let substitute_fields interface arguments fields =
-  let substitution =
-    Option.value ~default:[] (make_substitution interface.type_generics arguments)
-  in
+  let substitution = make_substitution interface.type_generics arguments in
   List.map
     (fun (field : field) -> { field with field_type = substitute substitution field.field_type })
     fields

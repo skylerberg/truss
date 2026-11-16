@@ -26,7 +26,11 @@ module Symbol : sig
     | Potential_measure of Types.ty
     | Block_bytes of { type_ : Types.ty; variant : string option }
     | Time of sort
-    | Method_time of { method_ : Path.t; self_type : Types.ty }
+    | Method_time of {
+        method_ : Path.t;
+        trait_arguments : Types.argument list;
+        self_type : Types.ty;
+      }
     | Opaque_operation of {
         operation : Intrinsic.operation;
         type_ : Types.ty;

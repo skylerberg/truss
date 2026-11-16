@@ -34,5 +34,12 @@ val has_potential : State.context -> ?seen:Types.ty list -> Types.ty -> bool
 val potential :
   State.context -> State.frame -> ?seen:Types.ty list -> Types.ty -> Logic.term -> Logic.term
 
-val trait_method_time : State.context -> State.frame -> Path.t -> Types.ty -> Logic.term
+val trait_method_time :
+  State.context ->
+  State.frame ->
+  Path.t ->
+  trait_arguments:Types.argument list ->
+  Types.ty ->
+  Logic.term
+
 val method_time : State.context -> State.frame -> Invocation.callee -> Logic.term
