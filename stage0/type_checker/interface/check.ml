@@ -219,23 +219,19 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
                             visible. Only an opaque type declares it."
                            shown)
                     else
-                      let property_holds =
-                        List.for_all
-                          (fun type_ ->
-                            if Well_known.is Plain trait then
-                              Impls.is_plain state.lookups ~bounds:(list_derived_bounds trait) type_
-                            else
-                              Impls.is_copyable state.lookups ~bounds:(list_derived_bounds trait)
-                                type_)
-                          field_types
+                      let self : Types.ty =
+                        Named
+                          {
+                            path = state.key.path;
+                            arguments = Types.list_generic_arguments interface.type_generics;
+                          }
                       in
-                      let allocates =
-                        match interface.shape with
-                        | Sum variants ->
-                            List.exists (fun (variant : Types.variant) -> variant.indirect) variants
-                        | _ -> false
+                      let bounds = list_derived_bounds trait in
+                      let holds =
+                        if Well_known.is Plain trait then Impls.is_plain state.lookups ~bounds self
+                        else Impls.is_copyable state.lookups ~bounds self
                       in
-                      if (not property_holds) || (Well_known.is Plain trait && allocates) then
+                      if not holds then
                         report state Cannot_derive state.spans.(written.id)
                           (Printf.sprintf "A field of this type is not `%s`, so the type cannot be."
                              shown)
