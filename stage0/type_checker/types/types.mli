@@ -60,6 +60,7 @@ val make_named : Path.t -> ty list -> ty
 val is_builtin : Intrinsic.builtin -> ty -> bool
 val find_builtin : ty -> Intrinsic.builtin option
 val is_well_known : Well_known.t -> ty -> bool
+val find_view : ty -> ty option
 val find_integer_bits : ty -> (int * bool) option
 val find_integer_range : ty -> (Z.t * Z.t) option
 val is_integer_type : ty -> bool

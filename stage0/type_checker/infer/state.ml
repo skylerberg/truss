@@ -1027,6 +1027,13 @@ let make_slice state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.
 
 type conversion = From_never | Owned_to_view | Function_widening | To_integer | From_integer
 
+let find_view_as state ~owned ~view =
+  match (Types.find_view (normalize state owned), normalize state view) with
+  | Some (Types.Named found as found_view), Types.Named wanted
+    when Path.equal found.path wanted.path ->
+      Some found_view
+  | _ -> None
+
 let convert state env ?argument ?expression (span : Source.Definition_span.t) ~actual ~expected =
   let is_argument = Option.is_some argument in
   let record_conversion (conversion : conversion option) =
@@ -1082,60 +1089,54 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
     report_mismatch state span ~expected ~actual;
     None
   in
-  match (actual_type, wanted, expression) with
-  | Types.Never, _, _ -> Some From_never
-  | Types.Named actual_named, Types.Named wanted_named, _
-    when is_argument
-         && List.exists
-              (fun (owned, view) ->
-                Path.equal actual_named.path owned && Path.equal wanted_named.path view)
-              [
-                (Well_known.make_path List, Well_known.make_path Slice);
-                (Well_known.make_path String, Well_known.make_path String_slice);
-              ] ->
-      if not (Unify.unify_arguments state.unifier wanted_named.arguments actual_named.arguments)
-      then report_mismatch state span ~expected ~actual;
+  match if is_argument then find_view_as state ~owned:actual ~view:expected else None with
+  | Some view ->
+      if not (Unify.unify state.unifier wanted view) then
+        report_mismatch state span ~expected ~actual;
       Some Owned_to_view
-  | Types.Integer, _, Some _ when is_argument && env.specification && is_integer_type state wanted
-    ->
-      Some From_integer
-  | Types.Literal (Integer_literal, index), Types.Integer, _
-    when env.specification && Hashtbl.mem state.unifier.code_literals index ->
-      Some To_integer
-  | _, Types.Integer, _ when env.specification && is_integer_type state actual_type ->
-      Some To_integer
-  | Types.Function actual_function, Types.Function wanted_function, _
-    when not (Types.has_same_clauses actual_function wanted_function) ->
-      let unlisted =
-        Types.compute_missing_capabilities ~required:actual_function.uses
-          ~available:wanted_function.uses
-      in
-      let unknown =
-        Types.has_unsolved_capabilities actual_function.uses
-        || Types.has_unsolved_capabilities wanted_function.uses
-      in
-      let proven =
-        Types.costs_imply ~provided:actual_function.costs ~required:wanted_function.costs
-      in
-      if
-        Unify.unify state.unifier wanted
-          (Types.Function
-             { actual_function with uses = wanted_function.uses; costs = wanted_function.costs })
-        && (unlisted = Types.no_capabilities || unknown)
-        && (proven || is_argument || Option.is_some expression)
-      then begin
-        if unlisted <> Types.no_capabilities then
-          state.capability_constraints <-
-            {
-              subset = actual_function.uses;
-              superset = wanted_function.uses;
-              report_missing =
-                (fun _ ->
-                  report_mismatch state span ~expected:(finalize_type state expected)
-                    ~actual:(finalize_type state actual));
-            }
-            :: state.capability_constraints;
-        Some Function_widening
-      end
-      else refuse ()
-  | _ -> if Unify.unify state.unifier wanted actual_type then None else refuse ()
+  | None -> (
+      match (actual_type, wanted, expression) with
+      | Types.Never, _, _ -> Some From_never
+      | Types.Integer, _, Some _
+        when is_argument && env.specification && is_integer_type state wanted ->
+          Some From_integer
+      | Types.Literal (Integer_literal, index), Types.Integer, _
+        when env.specification && Hashtbl.mem state.unifier.code_literals index ->
+          Some To_integer
+      | _, Types.Integer, _ when env.specification && is_integer_type state actual_type ->
+          Some To_integer
+      | Types.Function actual_function, Types.Function wanted_function, _
+        when not (Types.has_same_clauses actual_function wanted_function) ->
+          let unlisted =
+            Types.compute_missing_capabilities ~required:actual_function.uses
+              ~available:wanted_function.uses
+          in
+          let unknown =
+            Types.has_unsolved_capabilities actual_function.uses
+            || Types.has_unsolved_capabilities wanted_function.uses
+          in
+          let proven =
+            Types.costs_imply ~provided:actual_function.costs ~required:wanted_function.costs
+          in
+          if
+            Unify.unify state.unifier wanted
+              (Types.Function
+                 { actual_function with uses = wanted_function.uses; costs = wanted_function.costs })
+            && (unlisted = Types.no_capabilities || unknown)
+            && (proven || is_argument || Option.is_some expression)
+          then begin
+            if unlisted <> Types.no_capabilities then
+              state.capability_constraints <-
+                {
+                  subset = actual_function.uses;
+                  superset = wanted_function.uses;
+                  report_missing =
+                    (fun _ ->
+                      report_mismatch state span ~expected:(finalize_type state expected)
+                        ~actual:(finalize_type state actual));
+                }
+                :: state.capability_constraints;
+            Some Function_widening
+          end
+          else refuse ()
+      | _ -> if Unify.unify state.unifier wanted actual_type then None else refuse ())

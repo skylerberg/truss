@@ -808,6 +808,10 @@ let () =
   Harness.test "a quantifier in a body over a set reaches every member of the set" (fun () ->
       expect_proven Fixtures.Prover.quantifier_over_set_members_in_a_body)
 
+let () =
+  Harness.test "a postcondition of a view's method holds of the `String` it was called on"
+    (fun () -> expect_proven Fixtures.Prover.to_string_of_a_string_keeps_its_length)
+
 let swap = Fixtures.Prover.exchange
 
 let () =

@@ -213,6 +213,8 @@ val make_slice :
   inclusive:bool ->
   Core.kind
 
+val find_view_as : state -> owned:Types.ty -> view:Types.ty -> Types.ty option
+
 val convert :
   state ->
   env ->

@@ -816,8 +816,9 @@ A method can be overloaded on the mode of `self`, and on nothing else. One
 `iter`, `iter_mut`, and `into_iter`.
 
 **An overload set has one author.** The overloads of a name come only from
-the type's own methods, from the methods that an `impl` in the type's
-package writes, and from a trait together with the traits it requires. If
+the type's own methods, from the methods of its view, from the methods that
+an `impl` in the type's package writes, and from a trait together with the
+traits it requires. A type and its view are defined in one package. If
 overloads were collected from every visible `impl`, a package added to a
 build could capture an existing call. A temporary receiver takes the `own`
 overload when one exists, so a package that gave a type's `label(self)` an
@@ -1416,6 +1417,9 @@ Rules: [Method lookup](SPECIFICATION.md#method-lookup).
 | A trait method needs no import. | A forgotten import is a common error in the languages that need one. |
 | A method call finds only the traits of the standard library, of the calling package, and of the packages that its manifest lists. | An edit deep in the dependency graph cannot break a distant call. |
 | Two candidates for one name are an error, never a silent choice. | In Rust a type's own method wins over a trait's, so adding a method can silently change an existing call. In Truss an upgrade can break a call only with an error that names both candidates. A release that only adds names is still compatible, because otherwise no type could ever gain a method. |
+| A `String` has the methods of `StringSlice`, and a `List` those of `Slice`. | `self` is a parameter, and an argument of the owned type converts to its view. Without the rule, every method of a view needs a forwarding method on the owned type, whose contract is stated and proven a second time, and a view's method that has none cannot be called on the owned value. Rust reaches the methods of `str` from a `String` through `Deref`. |
+| A type's own method hides its view's method of the same name and mode. | The owned type can do better where it owns the storage: `String.to_bytes(own self)` hands over its buffer, and `StringSlice.to_bytes(self)` copies. Both are written in one package, so no other package can change which one a call reaches. |
+| An `impl` gives a type no method that its view has in that mode, and an `impl` in another package gives it none of that name. | Such a method would be found before the view's. A package added to a build could then capture a call that reached the view's method. |
 
 ### Dynamic dispatch
 
@@ -2049,10 +2053,11 @@ data, and not on the database.
 **A reference is to a fully qualified name, whether or not a definition
 holds the name.** A name that is not local and not in the prelude belongs to
 the body's module, so an unqualified name resolves without a search. A
-method call names one entry of its type's methods:
+method call names one entry of its type's methods, or of its view's methods
+where the type has none of that name and mode:
 [Method lookup](SPECIFICATION.md#method-lookup) rules out a trait method with
-the name and mode of one of the type's own methods, and makes two traits that
-give one name an error at the call. An `impl` is named by its trait and its
+the name and mode of one of the type's own methods or of its view's, and
+makes two traits that give one name an error at the call. An `impl` is named by its trait and its
 type, since `impl`s do not overlap and have one home. A law proof is named by
 its trait, its law, and its type, as `proof Ordered.transitive for Box[Item]`
 writes them, so a proof that assumes a law for a type refers to one name and

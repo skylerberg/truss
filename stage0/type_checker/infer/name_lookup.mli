@@ -1,8 +1,10 @@
 type overload =
   | Type_overload of Path.t
+  | View_overload of Path.t
   | Trait_overload of Types.trait_reference * Types.trait_method
 
 val classify_receiver : Syntax.expression -> Path.receiver
+val describe_missing_method : State.state -> Types.ty -> string -> string
 
 val coerce :
   State.state ->
