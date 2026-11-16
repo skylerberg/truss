@@ -122,6 +122,23 @@ let () =
         ~fixed:"type Point(x: Int64)\n  \n")
 
 let () =
+  test "an opaque type cannot declare Copyable when a field is not Copyable" (fun () ->
+      one_diagnostic
+        "public type Session = todo\n\
+         public opaque type Login(session: Session)\n\
+        \  derives Copyable\n"
+        "types.cannot_derive");
+  test "an opaque type cannot declare Plain when a variant is held indirectly" (fun () ->
+      one_diagnostic
+        "public opaque type Tree =\n\
+        \  | Leaf\n\
+        \  | indirect Node(left: Tree, right: Tree)\n\
+        \  derives Plain\n"
+        "types.cannot_derive");
+  test "an opaque type declares Copyable on the condition that its arguments are Copyable"
+    (fun () ->
+      no_diagnostics
+        [ ("app::main", "public opaque type Box[Value](inner: Value)\n  derives Copyable\n") ]);
   test "an impl must give every method without a body" (fun () ->
       one_diagnostic Fixtures.Interface.impl_must_give_every_method_without_a_body
         "types.missing_member");
