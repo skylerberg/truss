@@ -8,13 +8,10 @@ type result = {
 let implements_capability (lookups : Lookups.t) key =
   match lookups.interface.names.find_container key with
   | Some (container : Resolve.Names.key) -> (
-      match Interface.Definition.read_impl_interface lookups.interface container.path with
-      | Some impl -> (
-          match
-            Interface.Definition.read_trait_interface lookups.interface impl.implements.trait
-          with
-          | Some trait -> trait.is_capability
-          | None -> false)
+      match Interface.Definition.find_impl_interface lookups.interface container.path with
+      | Some impl ->
+          (Interface.Definition.read_trait_interface lookups.interface impl.implements.trait)
+            .is_capability
       | None -> false)
   | None -> false
 
@@ -45,7 +42,7 @@ let check_definition (lookups : Lookups.t) (key : Resolve.Names.key) : result =
   in
   Option.iter
     (fun (mir : Mir.Graph.t) ->
-      Context.collect context mir;
+      Context.collect context mir ~mode_keywords:(lookups.list_mode_keywords key);
       List.iter
         (fun origin -> Hashtbl.replace context.places_without_own origin ())
         (lookups.list_places_without_own key);

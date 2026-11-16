@@ -5,6 +5,7 @@ val retake : snapshot -> (snapshot, string) result
 val locate_root : snapshot -> string
 val open_database : ?checks:bool -> snapshot -> Database.t
 val problems : snapshot -> Project.problem list
+val list_dependency_problems : snapshot -> Database.t -> Project.problem list
 val list_packages : snapshot -> (string * Path.package) list
 val time_limit_ms : snapshot -> int
 val list_registry_packages : snapshot -> (Path.package * Registry.Version.t * string) list
@@ -37,7 +38,7 @@ val call :
   ('response, string) result
 
 val list_servers : unit -> string list
-val stop_servers : unit -> bool
+val stop_servers : ?key:string -> unit -> bool
 
 exception Unusable_cache of string
 

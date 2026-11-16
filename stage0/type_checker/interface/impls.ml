@@ -29,7 +29,7 @@ let list_impls_of_trait (lookups : Lookups.t) ~trait package =
 
 let derive_interface lookups ~type_ ~trait =
   match
-    (Definition.read_type_interface lookups type_, Definition.read_trait_interface lookups trait)
+    (Definition.find_type_interface lookups type_, Definition.find_trait_interface lookups trait)
   with
   | Some type_interface, Some trait_interface ->
       let trait_reference : Types.trait_reference =
@@ -63,12 +63,12 @@ let derive_interface lookups ~type_ ~trait =
   | _ -> None
 
 let make_impl_substitution lookups (impl : Path.t) =
-  Option.bind (Definition.read_impl_interface lookups impl)
+  Option.bind (Definition.find_impl_interface lookups impl)
     (fun (interface : Types.impl_interface) ->
       Option.map
         (fun trait ->
           Properties.make_trait_substitution trait ~self:interface.for_type interface.implements)
-        (Definition.read_trait_interface lookups interface.implements.trait))
+        (Definition.find_trait_interface lookups interface.implements.trait))
 
 let is_open_value = function
   | Types.Value_variable _ -> true
@@ -158,10 +158,15 @@ let list_required_bounds (generics : Types.generic list) (substitution : Types.s
       | _ -> [])
     generics
 
+let find_built_in_evidence : Properties.decision -> evidence option = function
+  | Holds -> Some Built_in
+  | Fails -> None
+  | Depends_on open_type -> Some (Accepted open_type)
+
 let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_conditions = true)
     (type_ : Types.ty) (wanted : Types.trait_reference) : evidence option =
   let broken_trait =
-    match Definition.read_interface lookups wanted.trait with
+    match Definition.find_interface lookups wanted.trait with
     | Some (Error_interface report) -> Some report
     | _ -> None
   in
@@ -178,19 +183,17 @@ let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_cond
     let property : Properties.property =
       if Well_known.is Plain wanted.trait then Plain else Copyable
     in
-    if
-      (not checks_conditions)
-      || Properties.has_property lookups ~list_bounds ~normalize:(normalize lookups ~list_bounds)
-           property type_
-    then Some Built_in
-    else None
+    if not checks_conditions then Some Built_in
+    else
+      find_built_in_evidence
+        (Properties.decide_property lookups ~list_bounds ~normalize:(normalize lookups ~list_bounds)
+           property type_)
   else if Well_known.is Storable wanted.trait then
-    if
-      (not checks_conditions)
-      || Properties.is_storable lookups ~list_bounds ~normalize:(normalize lookups ~list_bounds)
-           type_
-    then Some Built_in
-    else None
+    if not checks_conditions then Some Built_in
+    else
+      find_built_in_evidence
+        (Properties.decide_storable lookups ~list_bounds ~normalize:(normalize lookups ~list_bounds)
+           type_)
   else
     match type_ with
     | Types.Error _ | Types.Hole | Types.Variable _ -> Some (Accepted type_)
@@ -218,7 +221,7 @@ let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_cond
         in
         List.find_map
           (fun impl_path ->
-            match Definition.read_impl_interface lookups impl_path with
+            match Definition.find_impl_interface lookups impl_path with
             | None -> None
             | Some impl -> (
                 let variables =
@@ -322,7 +325,7 @@ and project_declared_type lookups ~list_bounds ?defining type_ (trait : Types.tr
   | None -> (
       match find_evidence lookups ~list_bounds ~checks_conditions:false type_ trait with
       | Some (From_impl { impl; substitution }) -> (
-          match Definition.read_impl_interface lookups impl with
+          match Definition.find_impl_interface lookups impl with
           | Some interface ->
               Option.iter (fun defining -> defining := impl :: !defining) defining;
               Option.map (Types.substitute substitution)
@@ -367,7 +370,7 @@ and project_capability_set lookups ~list_bounds ?(depth = 0) type_ (trait : Type
   else
     match find_evidence lookups ~list_bounds ~checks_conditions:false type_ trait with
     | Some (From_impl { impl; substitution }) -> (
-        match Definition.read_impl_interface lookups impl with
+        match Definition.find_impl_interface lookups impl with
         | Some interface ->
             normalize_capabilities lookups ~list_bounds ~depth:(depth + 1)
               (Types.substitute_capabilities substitution
@@ -416,11 +419,11 @@ and normalize lookups ~list_bounds ?defining (type_ : Types.ty) : Types.ty =
     type_
 
 let read_signature lookups (path : Path.t) =
-  match (Definition.read_declared_signature lookups path, path) with
+  match (Definition.find_declared_signature lookups path, path) with
   | Some signature, _ -> Some signature
   | None, Method { owner = (Impl _ | Derived _) as owner; name; receiver } -> (
       match
-        (Definition.read_impl_interface lookups owner, make_impl_substitution lookups owner)
+        (Definition.find_impl_interface lookups owner, make_impl_substitution lookups owner)
       with
       | Some impl, Some substitution ->
           Option.map
@@ -432,14 +435,24 @@ let read_signature lookups (path : Path.t) =
               in
               let list_bounds = Types.list_bounds signature.generics in
               { signature with uses = normalize_capabilities lookups ~list_bounds signature.uses })
-            (Definition.read_declared_signature lookups
+            (Definition.find_declared_signature lookups
                (Method { owner = impl.implements.trait; name; receiver }))
       | _ -> None)
   | None, _ -> None
 
+let decide_property property lookups ~list_bounds type_ =
+  Properties.decide_property lookups ~list_bounds ~normalize:(normalize lookups ~list_bounds)
+    property type_
+
 let has_property property lookups ~list_bounds type_ =
-  Properties.has_property lookups ~list_bounds ~normalize:(normalize lookups ~list_bounds) property
-    type_
+  match decide_property property lookups ~list_bounds type_ with
+  | Holds -> true
+  | Fails -> false
+  | Depends_on open_type ->
+      raise_bug "whether `%s` %s depends on the open type `%s`, so it has no bool answer"
+        (Types.show type_)
+        (Properties.show_property property)
+        (Types.show open_type)
 
 let is_copyable = has_property Copyable
 let is_plain = has_property Plain

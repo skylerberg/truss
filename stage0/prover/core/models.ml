@@ -1,12 +1,6 @@
 type quantified_range =
   | Range_of_type of Types.ty
   | Range_of_integers of { low : Logic.term; high : Logic.term; inclusive : bool; type_ : Types.ty }
-  | Range_of_collection of {
-      collection_type : Types.ty;
-      collected : Logic.term;
-      element : Types.ty;
-      location : State.location;
-    }
 
 let run_under_binder :
     'read.
@@ -116,7 +110,7 @@ let substitute_value_term context (value : Types.value) =
           Facts.add_fact context
             (Facts.make_in_range (Types.make_builtin UInt64) (Logic.Symbol symbol)));
       Logic.Symbol symbol
-  | Value_variable _ -> raise (Facts.Foreign_unsupported "an unsolved size")
+  | Value_variable _ -> Facts.raise_unsupported Whole_definition "an unsolved size"
 
 let rank_model (context : State.context) (ty : Types.ty) ~(model : Types.ty) symbol =
   if context.ranking then
@@ -170,11 +164,10 @@ let find_model_function (context : State.context) (ty : Types.ty) ~(model : Type
       Tables.Model_table.replace context.models key model_fn;
       model_fn
 
-let rec find_model context (ty : Types.ty) term ~element =
-  find_model_as context ty term ~model:(make_sequence_type element)
-
-and find_model_as context (ty : Types.ty) term ~(model : Types.ty) =
-  Option.map (fun model_of -> model_of term) (find_model_function context ty ~model)
+let find_model context (ty : Types.ty) term ~element =
+  Option.map
+    (fun model_of -> model_of term)
+    (find_model_function context ty ~model:(make_sequence_type element))
 
 let quantify_over (context : State.context) (frame : State.frame) (quantifier : Core.quantifier)
     (range : quantified_range) ~bind ~read =
@@ -216,20 +209,20 @@ let quantify_over (context : State.context) (frame : State.frame) (quantifier : 
       | Forall -> Logic.forall (bound, Logic.( ==> ) premise body_value)
       | Exists -> Logic.Exists (bound, Logic.( &&& ) premise body_value)
     in
-    Some (frame, with_facts term)
+    (frame, with_facts term)
   in
   let symbol = Facts.make_fresh_name context "bound" in
   let inner = { frame with bound = symbol :: frame.bound } in
   let each = Logic.Symbol symbol in
   match range with
   | Range_of_type ty ->
-      let _, inner = bind inner each ty in
+      let inner = bind inner each ty in
       make symbol (Facts.declare_sort context ty)
         (Logic.( &&& ) (Facts.make_in_range ty each)
            (Validity.make_validity context inner ~assuming:true ty each))
         inner each
   | Range_of_integers { low; high; inclusive; type_ } ->
-      let _, inner = bind inner each type_ in
+      let inner = bind inner each type_ in
       let premise =
         Logic.(
           Operation ("<=", [ low; each ])
@@ -239,55 +232,6 @@ let quantify_over (context : State.context) (frame : State.frame) (quantifier : 
         if inclusive then Costs.plus (Costs.minus high low) (Logic.int 1) else Costs.minus high low
       in
       make ~count symbol Int premise inner each
-  | Range_of_collection { collection_type; collected; element; location } -> (
-      let set_path = Well_known.make_path Set in
-      match collection_type with
-      | Types.Named { path; _ } when Path.equal path set_path || Path.equal path finite_set_path ->
-          let finite = Types.Named { path = finite_set_path; arguments = [ Types.Type element ] } in
-          let model =
-            if Path.equal path finite_set_path then Some collected
-            else find_model_as context collection_type collected ~model:finite
-          in
-          let model =
-            match model with
-            | Some model -> model
-            | None ->
-                Facts.raise_unsupported location "a quantifier over `%s`"
-                  (Types.show collection_type)
-          in
-          let matched, inner = bind inner each element in
-          make symbol
-            (Facts.declare_sort context element)
-            (Logic.( &&& )
-               (make_finite_function context finite "contains" Logic.Bool
-                  [ (each, Facts.declare_sort context element) ]
-                  model)
-               matched)
-            inner each
-      | _ -> (
-          let sequence =
-            match collection_type with
-            | Types.Named { path; _ } when Path.equal path sequence_path -> Some collected
-            | _ -> find_model context collection_type collected ~element
-          in
-          match sequence with
-          | Some sequence -> (
-              match index_sequence context element sequence each with
-              | Some element_value ->
-                  let length = make_sequence_length context element sequence in
-                  let matched, inner = bind inner element_value element in
-                  make ~count:length symbol Int
-                    Logic.(
-                      Operation ("<=", [ int 0; each ])
-                      &&& Operation ("<", [ each; length ])
-                      &&& matched)
-                    inner element_value
-              | None ->
-                  Facts.raise_unsupported location "a quantifier over `%s`"
-                    (Types.show collection_type))
-          | None ->
-              Facts.raise_unsupported location "a quantifier over `%s`" (Types.show collection_type)
-          ))
 
 let rec make_value_term context (frame : State.frame) (value : Types.value) =
   match value with
@@ -308,6 +252,5 @@ let make_array_model context frame (ty : Types.ty) term =
                (make_sequence_length context element sequence)
                (make_value_term context frame count));
           sequence
-      | None ->
-          raise (Facts.Foreign_unsupported (Printf.sprintf "the elements of `%s`" (Types.show ty))))
-  | _ -> raise (Facts.Foreign_unsupported (Printf.sprintf "the elements of `%s`" (Types.show ty)))
+      | None -> Facts.raise_unsupported Whole_definition "the elements of `%s`" (Types.show ty))
+  | _ -> Facts.raise_unsupported Whole_definition "the elements of `%s`" (Types.show ty)

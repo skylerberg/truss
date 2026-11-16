@@ -1,0 +1,5 @@
+fn f(items: own List[Int64]) -> UInt64 {
+  var held = items.copy()
+  mut held.push(1)
+  items.length()
+}

@@ -71,7 +71,7 @@ let resolve_call_node (interface : Interface.Lookups.t) (path : Path.t) =
     when not
            (List.exists (Path.equal path)
               (Mir.Call_edges.list_written_methods interface.names owner)) -> (
-      match Interface.Definition.read_impl_interface interface owner with
+      match Interface.Definition.find_impl_interface interface owner with
       | Some impl -> Path.Method { owner = impl.implements.trait; name; receiver }
       | None -> path)
   | _ -> path

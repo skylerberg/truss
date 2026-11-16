@@ -8,7 +8,13 @@ let rec find_offending_expression (state : State.state) (value : Syntax.expressi
         || Types.is_error type_
     | None -> true
   in
+  let is_rejected (expression : Syntax.expression) =
+    match state.tables.types.(expression.id) with
+    | Some type_ -> Types.is_error type_
+    | None -> false
+  in
   match value.kind with
+  | _ when is_rejected value -> None
   | Integer _ | Float _ | True | False | Todo | Expression_error -> None
   | String { rest = []; _ } -> None
   | String { rest = (interpolated, _) :: _; _ } -> Some interpolated

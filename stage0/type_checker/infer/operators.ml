@@ -180,7 +180,7 @@ and check_prefix state env ?expected (value : Syntax.expression) operator
       then type_
       else
         State.make_error_type state No_impl (State.read_span state value.id)
-          (Printf.sprintf "`~` works on built-in integers, not `%s`." (State.show state type_))
+          (Printf.sprintf "`~` works on built-in integers, not %s." (State.describe state type_))
   | Negate -> (
       match inner.kind with
       | Integer number ->
@@ -224,14 +224,7 @@ and check_prefix state env ?expected (value : Syntax.expression) operator
             Form.register_call state value;
             check_operator_call
               ~operands:
-                [
-                  {
-                    Tables.expression = inner.id;
-                    core_argument_index = 0;
-                    mode = Types.Read;
-                    mode_keyword = None;
-                  };
-                ]
+                [ { Tables.expression = inner.id; core_argument_index = 0; mode = Types.Read } ]
               state value ~trait:(Well_known.make_path Negate) ~method_:"negate" ~left:type_
               ~right:None
           end)
@@ -330,12 +323,7 @@ and check_built_in_operator state (value : Syntax.expression) (operands : Syntax
         arguments =
           List.mapi
             (fun index (operand : Syntax.expression) ->
-              {
-                Tables.expression = operand.id;
-                core_argument_index = index;
-                mode = Read;
-                mode_keyword = None;
-              })
+              { Tables.expression = operand.id; core_argument_index = index; mode = Read })
             operands;
         omitted_defaults = [];
         uses = Types.no_capabilities;
@@ -441,18 +429,8 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
                   };
               arguments =
                 [
-                  {
-                    expression = left.id;
-                    core_argument_index = 0;
-                    mode = Read;
-                    mode_keyword = None;
-                  };
-                  {
-                    expression = right.id;
-                    core_argument_index = 1;
-                    mode = Read;
-                    mode_keyword = None;
-                  };
+                  { expression = left.id; core_argument_index = 0; mode = Read };
+                  { expression = right.id; core_argument_index = 1; mode = Read };
                 ];
               omitted_defaults = [];
               uses = Types.no_capabilities;
@@ -536,18 +514,8 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
               check_operator_call
                 ~operands:
                   [
-                    {
-                      Tables.expression = left.id;
-                      core_argument_index = 0;
-                      mode = Types.Read;
-                      mode_keyword = None;
-                    };
-                    {
-                      Tables.expression = right.id;
-                      core_argument_index = 1;
-                      mode = Types.Read;
-                      mode_keyword = None;
-                    };
+                    { Tables.expression = left.id; core_argument_index = 0; mode = Types.Read };
+                    { Tables.expression = right.id; core_argument_index = 1; mode = Types.Read };
                   ]
                 state value ~trait ~method_ ~left:left_type ~right:(Some right_type)
             in
@@ -639,7 +607,7 @@ and check_any state env ?expected (value : Syntax.expression) (inner : Syntax.ex
               List.iter
                 (fun (bound : Types.trait_reference) ->
                   match
-                    Interface.Definition.read_trait_interface state.lookups.interface bound.trait
+                    Interface.Definition.find_trait_interface state.lookups.interface bound.trait
                   with
                   | Some interface ->
                       List.iter

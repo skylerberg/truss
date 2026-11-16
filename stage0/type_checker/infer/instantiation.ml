@@ -84,19 +84,19 @@ let make_fresh_generic_arguments (state : State.state) (generics : Types.generic
     generics
 
 let make_fresh_arguments (state : State.state) (path : Path.t) =
-  match Interface.Definition.read_type_interface state.lookups.interface path with
+  match Interface.Definition.find_type_interface state.lookups.interface path with
   | Some interface -> make_fresh_generic_arguments state interface.type_generics
   | None -> []
 
 let make_fresh_trait_reference (state : State.state) (trait : Path.t) =
   State.make_trait_reference trait
     ~arguments:
-      (match Interface.Definition.read_trait_interface state.lookups.interface trait with
+      (match Interface.Definition.find_trait_interface state.lookups.interface trait with
       | Some interface -> make_fresh_generic_arguments state interface.trait_generics
       | None -> [])
 
 let require_type_bounds (state : State.state) span path arguments =
-  match Interface.Definition.read_type_interface state.lookups.interface path with
+  match Interface.Definition.find_type_interface state.lookups.interface path with
   | Some interface ->
       require_bounds state span
         ~of_type:(Types.Named { path; arguments })
@@ -148,12 +148,10 @@ and check_named_type state (value : Syntax.expression) path type_arguments =
           match Resolve.Names.find_generics state.lookups.interface.names path with
           | Some expected when List.length expected <> List.length arguments ->
               State.make_error_type state Arity (State.read_span state value.id)
-                (Printf.sprintf "`%s` takes %d %s, and %d %s given."
+                (Printf.sprintf "`%s` takes %s, and %s given."
                    (Types.show (Named { path; arguments = [] }))
-                   (List.length expected)
-                   (if List.length expected = 1 then "argument" else "arguments")
-                   (List.length arguments)
-                   (if List.length arguments = 1 then "is" else "are"))
+                   (Diagnostic.show_count (List.length expected) "argument" "arguments")
+                   (Diagnostic.show_count (List.length arguments) "is" "are"))
           | _ ->
               require_type_bounds state (State.read_span state value.id) path arguments;
               make_type arguments))
@@ -229,4 +227,4 @@ let find_intrinsic_signature path =
 let find_function_signature (state : State.state) (path : Path.t) =
   match find_intrinsic_signature path with
   | Some signature -> Some signature
-  | None -> Interface.Definition.read_declared_signature state.lookups.interface path
+  | None -> Interface.Definition.find_declared_signature state.lookups.interface path

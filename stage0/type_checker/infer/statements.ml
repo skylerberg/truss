@@ -125,14 +125,8 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
                         Tables.expression = written_target.id;
                         core_argument_index = 0;
                         mode = Types.Read;
-                        mode_keyword = None;
                       };
-                      {
-                        Tables.expression = value.id;
-                        core_argument_index = 1;
-                        mode = Types.Read;
-                        mode_keyword = None;
-                      };
+                      { Tables.expression = value.id; core_argument_index = 1; mode = Types.Read };
                     ]
                   state call_site ~trait ~method_ ~left:target_type ~right:(Some right_type)
               in
@@ -156,10 +150,9 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
       State.reject_in_formula state env (State.read_span state written.id) "A `for` loop";
       let mode, inner =
         match iterable.kind with
-        | Mode (Mut, inner) when Option.is_none (State.find_call_with_mode_keyword state inner) ->
-            (Types.Mut, inner)
-        | Mode (Own, inner) when Option.is_none (State.find_call_with_mode_keyword state inner) ->
-            (Types.Own, inner)
+        | Mode (mode, inner) when Option.is_none (State.find_call_with_mode_keyword state inner) ->
+            State.note_mode_keyword state iterable mode inner;
+            ((match mode with Mut -> Types.Mut | Own -> Types.Own), inner)
         | _ -> (Types.Read, iterable)
       in
       let loop_element = ref None in
@@ -175,8 +168,8 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
                   (State.add_mismatch_diagnostic state Mismatch
                      (State.read_span state written_annotation.id)
                      ~sides:[ (element, annotated) ]
-                     (Printf.sprintf "The elements of this loop are `%s`, not `%s`."
-                        (State.show state element) (State.show state annotated)))
+                     (Printf.sprintf "Each element of this loop is %s, not %s."
+                        (State.describe state element) (State.describe state annotated)))
           | None -> (
               match written_pattern.kind with
               | Binding name -> Hashtbl.replace state.annotatable name.id ()
@@ -277,12 +270,7 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
           State.record state call Types.unit;
           let make_argument (argument_expression : Syntax.expression) position mode :
               Tables.argument =
-            {
-              expression = argument_expression.id;
-              core_argument_index = position;
-              mode;
-              mode_keyword = None;
-            }
+            { expression = argument_expression.id; core_argument_index = position; mode }
           in
           state.tables.calls.(written.id) <-
             Some
@@ -395,9 +383,9 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
                   (match mode with
                   | Types.Read ->
                       Printf.sprintf
-                        "A `for` loop cannot go over `%s`: it is not a `Cursor`, and it has no \
+                        "A `for` loop cannot go over %s: it is not a `Cursor`, and it has no \
                          `count` and `element` to visit it by position."
-                        (Types.show type_)
+                        (Types.describe type_)
                   | Mut ->
                       Printf.sprintf
                         "A `for` loop cannot mutate the elements of `%s`: it has no `element` that \

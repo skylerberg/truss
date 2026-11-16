@@ -122,8 +122,7 @@ let rec make_validity (context : State.context) frame ~assuming ?(deep = true) ?
           try
             Logic.conjunction
               (List.map (fun invariant -> snd (read_specification context inner invariant)) written)
-          with Facts.Unsupported _ | Facts.Foreign_unsupported _ when assuming ->
-            Logic.Boolean true)
+          with Facts.Unsupported _ when assuming -> Logic.Boolean true)
       | None -> Logic.Boolean true
     in
     let fields =

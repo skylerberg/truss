@@ -1809,7 +1809,7 @@ and `opaque`, the homes of methods and `impl`s, grants, and versions.
 | A package is not a unit of building. | Results are cached per definition, so splitting a package makes no build faster. A package is split only where a boundary should be checked. |
 | A project lists no members. | A list is one more file that every agent that adds a package must edit, and so one more place for a merge conflict (*parallel agents*). |
 | A dependency names a package, never a path to it. | Moving a directory breaks no dependency. |
-| A project's package replaces the registry's package of the same name. | This is how a dependency is patched before its owner releases a fix, with the patched copy in the repository for a reviewer to see. |
+| A project's package replaces the registry's package of the same name. A registry package that depends on it, directly or through other registry packages, is built in the project's database. | This is how a dependency is patched before its owner releases a fix, with the patched copy in the repository for a reviewer to see. A package that depends on the patched copy changes with the project's files, so no cached database can hold it. |
 | A registry package is named `owner::name`. | Much malware arrives by typosquatting: a name one letter away from a well-known name. LLMs make it worse by inventing package names, which attackers then publish. With an owner in the name, every path that uses the code says who published it. |
 
 ### Versions
@@ -1854,6 +1854,7 @@ Rules: [The registry](PACKAGES.md#the-registry).
 | The registry keeps an append-only public log of the hash of every version, as Go's checksum database does. | The registry cannot give two users different code under one version. |
 | The registry signs the proofs and test results that it computed for a release. | Proving a whole dependency tree on a machine that starts with nothing, such as an agent's new container, is the cost that GOALS.md sets out to remove. Each signed result is a function of its key, so a registry that signed a false result is caught by anyone who recomputes it. |
 | A new toolchain re-proves the registry, as far as the toolchain changed the proofs. | A toolchain that fails a proof of an approved package that the previous toolchain passed is not released. |
+| A package's database records, when it is built, the diagnostics that can block code that uses the package: its parse errors and the errors of its definitions, except its tests. A registry package with such a diagnostic is a problem on the lock file, which names the package. The standard library's are a compiler bug. | A part that reads a failed part is blocked and reports no error, so code that uses a broken dependency would stop checking with nothing to say why. A user never builds a dependency's tests, so their errors are the author's alone. The diagnostics are a function of the database's key, so they are listed once, when the database is built, and read on every load. |
 | A yanked release, one that is marked as not to use, still builds. | If yanking broke builds, one compromised account could stop every project that depends on the package. |
 
 ## Incremental builds
@@ -1878,7 +1879,7 @@ changes no definition.
 | Strengthen an `ensures` | The proofs of callers. No caller is type-checked. | A signature has two parts: the interface, which the types of callers depend on, and the contract, which only the proofs of callers depend on. |
 | Change the default of a parameter | The proofs and tests of the callers that omit the argument, and the code of the callee alone | The interface records only that the parameter has a default, and the callee applies it. |
 | Reorder the fields of a record | Nothing, unless the type derives `Ordered` | The compiler chooses the layout, and a record with more than one field is constructed with labeled arguments. |
-| Add a `derives` | Nothing that exists | Each derived implementation is a definition of its own, generated from the trait, the fields of the type, and the compiler's deriving rule. It has no source tree; its other parts are stored as any definition's are. A changed field therefore re-checks, of the derived code, only the code that compares, hashes, or orders the type. |
+| Add a `derives` | Nothing that exists | Each derived implementation is a definition of its own, generated from the trait, the fields of the type, and the compiler's deriving rule. It has no source tree and no checked body. Its parts are its interface and the MIR of each of its methods, which the database derives from the interfaces of the type and the trait. A changed field therefore re-checks, of the derived code, only the code that compares, hashes, or orders the type. |
 | Add, remove, or rename a definition | The parts that refer to its name, whether or not a definition held the name before | Each reference names one fully qualified name, so no lookup searches (see [References to names](#references-to-names)). |
 | Rename a definition, or move it to another module | The type checks and the code of its users. Their proofs and test results are cache hits. | A user names the definition, and an object file holds the names of the functions it calls. A solver query numbers its symbols, and a test's key numbers the references of the code it reaches, so neither holds a name. |
 | Rename a local variable | One body | Local names are part of identity, because diagnostics and `echo` output show them, and a cached result would show the old name. |
@@ -2040,6 +2041,7 @@ data, and not on the database.
 |---|---|
 | A program is built by following the references of its code. | A reference missing from a definition's output would leave a test's key unchanged by an edit to the code it calls. The program built from the same references fails to link, so the omission cannot go unnoticed. |
 | Lowering checks each call it emits against the caller's call edges. | A call edge missing from the termination check hides a recursive call, and the prover accepts a recursion that it never proved ends. The check makes the omission a compiler error at the first build. |
+| A read that no part records, by a request or by the ordering of a stage, is checked. Reading a stale part is a compiler bug, and so is reading a name from a stale namespace. | No propagation corrects such a read. A request that drained too little would report a value that the files no longer give. |
 
 ### References to names
 
@@ -2095,15 +2097,17 @@ input:
 
 | Result | Key |
 |---|---|
-| A solver answer: proven, unknown, or a model and the cardinality bound it was found at | The query's text, whose symbols are numbered in order of appearance |
-| The values of a counterexample | The query's text and the terms whose values are requested |
+| A solver answer: proven, unknown, or a model and the cardinality bound it was found at | Z3's version, its options and step limit, the cardinality bounds, the version of the entry format, and the query's text, whose symbols are numbered in order of appearance |
+| The values of a counterexample | The key of the solver answer and the terms whose values are requested |
 | An object file | The C text, the C compiler, and its flags |
 | A test result | The test's key: the code generator's version, the target system, the flags, and a hash of the code the test reaches, in which each reference is numbered |
 | The database of the standard library or of a registry package | The package's content hash, the content hashes of the versions selected for its dependencies, and the compiler |
 | A fetched registry package | Its content hash |
 
 A cache never makes a result wrong: deleting it only makes the next build
-slower. Every worktree and CI share the caches. The database itself caches
+slower. An entry is never replaced, so a change to the layout or the
+meaning of an entry must change its key. The solver's key therefore names
+the version of its entry format. Every worktree and CI share the caches. The database itself caches
 nothing, so a revert or a branch switch is a change to the files like any
 other. The database computes the cheap stages again, and the solver, the C
 compiler, and the tests are cache hits.

@@ -1,10 +1,18 @@
 let version = "5.3.3"
 let steps = 1_000_000
 let cardinality_bounds = [ 2; 3; 4 ]
+let entry_format_version = 1
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Solver" format
 
 type cache = { find : string -> string option; add : string -> string -> unit }
-type t = { program : string; cache : cache option; mutable queries_run : int }
+
+type t = {
+  program : string;
+  cache : cache option;
+  entries : (string, string) Hashtbl.t;
+  lock : Mutex.t;
+  mutable queries_run : int;
+}
 
 let find ?cache () =
   let program =
@@ -19,7 +27,8 @@ let find ?cache () =
            version program)
   | 0, output, _ ->
       let expected = "Z3 version " ^ version in
-      if String.starts_with ~prefix:expected output then Ok { program; cache; queries_run = 0 }
+      if String.starts_with ~prefix:expected output then
+        Ok { program; cache; entries = Hashtbl.create 256; lock = Mutex.create (); queries_run = 0 }
       else
         Error
           (Printf.sprintf
@@ -38,8 +47,8 @@ let header =
 
 let key_of_text text =
   Logic.hash
-    (Printf.sprintf
-       "z3 %s\nstatus of the query, with unknown retried at cardinality bounds %s\n%s%s" version
+    (Printf.sprintf "z3 %s\nentry format %d\ncardinality bounds %s\n%s%s" version
+       entry_format_version
        (String.concat ", " (List.map string_of_int cardinality_bounds))
        header text)
 
@@ -101,9 +110,7 @@ type request = {
 
 type status = Unsatisfiable | Satisfiable of { cardinality_bound : int option } | Undecided
 
-let entries : (string, string) Hashtbl.t = Hashtbl.create 256
-let lock = Mutex.create ()
-let run_locked work = Mutex.protect lock work
+let run_locked solver work = Mutex.protect solver.lock work
 
 let request ?(symbols = []) ?(terms = []) query =
   let rendering = Logic.render query in
@@ -165,19 +172,19 @@ let parse_values text =
     (String.split_on_char '\n' text)
 
 let find_entry solver key =
-  run_locked (fun () ->
-      match Hashtbl.find_opt entries key with
+  run_locked solver (fun () ->
+      match Hashtbl.find_opt solver.entries key with
       | Some entry -> Some entry
       | None -> (
           match Option.bind solver.cache (fun cache -> cache.find key) with
           | Some entry ->
-              Hashtbl.replace entries key entry;
+              Hashtbl.replace solver.entries key entry;
               Some entry
           | None -> None))
 
 let add_entry solver key entry =
-  run_locked (fun () ->
-      Hashtbl.replace entries key entry;
+  run_locked solver (fun () ->
+      Hashtbl.replace solver.entries key entry;
       Option.iter (fun cache -> cache.add key entry) solver.cache)
 
 let run_check solver request ?cardinality_bound text =
@@ -187,7 +194,7 @@ let run_check solver request ?cardinality_bound text =
     if request.requested = [] then ""
     else Printf.sprintf "(get-value (%s))\n" (String.concat " " request.value_arguments)
   in
-  run_locked (fun () -> solver.queries_run <- solver.queries_run + 1);
+  run_locked solver (fun () -> solver.queries_run <- solver.queries_run + 1);
   let status, output, errors = Process.run ~input solver.program [ "-in"; "-smt2" ] in
   match parse_sexps output with
   | Atom "unsat" :: _ -> (Unsatisfiable, [])
@@ -299,7 +306,7 @@ let solve_all solver requests =
   solve_distinct (fun request -> request.values_key);
   List.map (solve solver) requests
 
-let count_queries_run solver = run_locked (fun () -> solver.queries_run)
+let count_queries_run solver = run_locked solver (fun () -> solver.queries_run)
 
 module For_testing = struct
   let hash_query = hash_query

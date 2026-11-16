@@ -46,6 +46,10 @@ internal fn Map[Key: Hash + Ordered, Value].index_of(self, key: Key) -> UInt64
   ensures result < self.entries.length() ==> self.entries.model()[result].key == key
   ensures forall i in 0..self.entries.length() => i == result || !(self.entries.model()[i].key == key)
   ensures (result < self.entries.length()) == contains_equal_key(self.model(), key: key)
+  ensures result < self.entries.length() ==>
+    identical(self.model().get(self.entries.model()[result].key), self.entries.model()[result].value)
+  ensures result < self.entries.length() ==> forall other: Key =>
+    self.model().contains_key(other) && other == key ==> identical(other, self.entries.model()[result].key)
   cost time O(self.entries.length() * time(Key.equal))
 {
   var index: UInt64 = 0
@@ -68,6 +72,9 @@ internal fn Map[Key: Hash + Ordered, Value].index_of(self, key: Key) -> UInt64
     assert identical(self.model(), entries_model(self.entries.model()))
     assert forall i in 0..self.entries.model().length() =>
       self.model().contains_key(self.entries.model()[i].key)
+    assert forall i in 0..self.entries.model().length() =>
+      forall j in 0..self.entries.model().length() =>
+        i == j || !identical(self.entries.model()[i].key, self.entries.model()[j].key)
   }
   match_index
 }
@@ -148,8 +155,8 @@ public fn Map[Key: Hash + Ordered, Value].contains(self, key: Key) -> Bool
 }
 
 public fn Map[Key: Hash + Ordered, Value].insert(mut self, key: own Key, value: own Value)
-  ensures exists other: Key =>
-    self.model().contains_key(other) && other == key && identical(self.model().get(other), value)
+  ensures forall other: Key =>
+    self.model().contains_key(other) && other == key ==> identical(self.model().get(other), value)
   ensures forall other: Key =>
     !(other == key) ==> self.model().contains_key(other) == old(self.model()).contains_key(other)
   ensures forall other: Key =>
@@ -171,8 +178,9 @@ public fn Map[Key: Hash + Ordered, Value].insert(mut self, key: own Key, value: 
 
 internal fn Map[Key: Hash + Ordered, Value].insert_absent(mut self, key: own Key, value: own Value)
   requires !contains_equal_key(self.model(), key: key)
-  ensures exists other: Key =>
-    self.model().contains_key(other) && other == key && identical(self.model().get(other), value)
+  ensures contains_equal_key(self.model(), key: key)
+  ensures forall other: Key =>
+    self.model().contains_key(other) && other == key ==> identical(self.model().get(other), value)
   ensures forall other: Key =>
     !(other == key) ==> self.model().contains_key(other) == old(self.model()).contains_key(other)
   ensures forall other: Key =>
@@ -187,8 +195,9 @@ internal fn Map[Key: Hash + Ordered, Value].insert_absent(mut self, key: own Key
 
 internal fn Map[Key: Hash + Ordered, Value].push_entry(mut self, key: own Key, value: own Value)
   requires !contains_equal_key(self.model(), key: key)
-  ensures exists other: Key =>
-    self.model().contains_key(other) && other == key && identical(self.model().get(other), value)
+  ensures contains_equal_key(self.model(), key: key)
+  ensures forall other: Key =>
+    self.model().contains_key(other) && other == key ==> identical(self.model().get(other), value)
   ensures forall other: Key =>
     !(other == key) ==> self.model().contains_key(other) == old(self.model()).contains_key(other)
   ensures forall other: Key =>
@@ -294,6 +303,9 @@ public fn Map[Key: Hash + Ordered, Value].is_empty(self) -> Bool
 
 public fn Map[Key: Hash + Ordered, Value].get(self, key: Key) lends Option[Value]
   ensures (result is Some(_)) == self.contains(key)
+  ensures forall other: Key =>
+    !(result is Some(value) && self.model().contains_key(other) && other == key
+      && !identical(self.model().get(other), value))
   cost time O(self.length() * time(Key.equal))
 {
   let position = self.index_of(key)
@@ -436,6 +448,8 @@ impl Index for Map[Key: Hash + Ordered, Value] {
 
   fn at(self, key: Key) lends Value
     requires self.contains(key)
+    ensures forall other: Key =>
+      self.model().contains_key(other) && other == key ==> identical(self.model().get(other), result)
     cost time O(self.length() * time(Key.equal))
   {
     self.entries[self.index_of(key)].value
@@ -462,8 +476,8 @@ impl core::IndexAssign for Map[Key: Hash + Ordered, Value] {
   }
 
   fn assign(mut self, key: own Key, value: own Value)
-    ensures exists other: Key =>
-      self.model().contains_key(other) && other == key && identical(self.model().get(other), value)
+    ensures forall other: Key =>
+      self.model().contains_key(other) && other == key ==> identical(self.model().get(other), value)
     ensures forall other: Key =>
       !(other == key) ==> self.model().contains_key(other) == old(self.model()).contains_key(other)
     ensures forall other: Key =>

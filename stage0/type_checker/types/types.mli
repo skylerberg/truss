@@ -102,6 +102,7 @@ val terminates : function_type -> bool
 val has_same_clauses : function_type -> function_type -> bool
 val costs_imply : provided:cost list -> required:cost list -> bool
 val show : ty -> string
+val describe : ty -> string
 val show_capability : capability -> string
 val show_trait : trait_reference -> string
 val show_argument : argument -> string

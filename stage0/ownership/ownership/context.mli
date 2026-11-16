@@ -4,7 +4,7 @@ type context = {
   lookups : Lookups.t;
   list_bounds : Types.parameter -> Types.trait_reference list;
   spans : Source.Definition_span.t array Lazy.t;
-  mode_keywords : (Core.origin, Types.mode * Core.mode_keyword) Hashtbl.t;
+  mode_keywords : (Core.origin, Core.mode_keyword) Hashtbl.t;
   places_without_own : (Core.origin, unit) Hashtbl.t;
   names : string Local_table.t;
   binding_modes : Types.mode Local_table.t;
@@ -35,6 +35,6 @@ val report :
 val classify_binding_mode : context -> Place.root -> Types.mode
 val show_root : context -> Place.root -> string
 val show : context -> Place.t -> string
-val collect : context -> Mir.Graph.t -> unit
+val collect : context -> Mir.Graph.t -> mode_keywords:Core.mode_keyword list -> unit
 val copy_edits : context -> Core.origin -> Source.Definition_span.t Diagnostic.edit list
 val locate_with_mode_keyword : context -> Core.origin -> Source.Definition_span.t

@@ -21,6 +21,9 @@ val list_known_bounds :
   Types.trait_reference list
 
 type property = Copyable | Plain | View | Holds_function
+
+val show_property : property -> string
+
 type occurrence = Environment.occurrence = In_place | Indirect | Function_input
 
 val compose_occurrences : occurrence -> occurrence -> occurrence
@@ -33,20 +36,22 @@ val list_field_type_paths : package:Path.package -> Types.type_interface -> Path
 val compute_component_facts :
   Lookups.t -> (Path.t * Types.type_interface) list -> (Path.t * Environment.type_facts) list
 
-val has_property :
+type decision = Holds | Fails | Depends_on of Types.ty
+
+val decide_property :
   Lookups.t ->
   list_bounds:(Types.parameter -> Types.trait_reference list) ->
   normalize:(Types.ty -> Types.ty) ->
   property ->
   Types.ty ->
-  bool
+  decision
 
-val is_storable :
+val decide_storable :
   Lookups.t ->
   list_bounds:(Types.parameter -> Types.trait_reference list) ->
   normalize:(Types.ty -> Types.ty) ->
   Types.ty ->
-  bool
+  decision
 
 val collect_contents :
   Lookups.t -> normalize:(Types.ty -> Types.ty * Path.t list) -> Types.ty -> contents

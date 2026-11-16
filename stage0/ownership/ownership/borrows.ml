@@ -30,7 +30,7 @@ let describe_loan context (loan : Actions.loan) ~is_through_view (place : Place.
     match loan.duration with
     | Loop_body -> "the loop"
     | Provide_body -> "the `provide` block"
-    | Rest_of_statement -> "a lending call, until this statement ends,"
+    | Rest_of_statement -> "a lending call until this statement ends"
     | Operand_evaluation -> "an earlier operand of this expression"
   and through =
     if is_through_view then
@@ -39,10 +39,10 @@ let describe_loan context (loan : Actions.loan) ~is_through_view (place : Place.
   in
   match loan.mode with
   | Mut ->
-      Printf.sprintf "`%s` is borrowed `mut` by %s%s, so it cannot be used here."
+      Printf.sprintf "`%s` is lent `mut` to %s%s, so it cannot be used here."
         (Context.show context place) lender through
   | Read | Own ->
-      Printf.sprintf "`%s` cannot %s while %s borrows it%s." (Context.show context place) verb
+      Printf.sprintf "`%s` cannot %s while it is lent to %s%s." (Context.show context place) verb
         lender through
 
 let report_dangling_view context at ~views ~doing ~fix =
@@ -188,7 +188,7 @@ let check_body context (actions : Actions.t) moves =
       | Read place -> check_use here place
       | Mutate place ->
           check_use here place;
-          check_mutation here place ~verb:"be borrowed `mut`"
+          check_mutation here place ~verb:"be passed `mut`"
       | Assign place -> check_mutation here place ~verb:"be assigned"
       | Move { place; type_; is_returned; is_captured } -> (
           check_use here place;
@@ -201,7 +201,7 @@ let check_body context (actions : Actions.t) moves =
           | Refused refuse -> refuse context at type_)
       | Move_out_of_lent type_ ->
           Context.report context Not_owned at
-            ~fixes:(Move_rules.copy_fix context "Copy it." type_ at)
+            ~fixes:(Move_rules.copy_fix context "Copy it." type_ here.origin)
             "This part is lent, so it cannot be moved: the loan ends when the statement ends. Copy \
              it instead."
       | Arguments { borrowed_arguments; view_arguments; is_yielded } ->
@@ -222,7 +222,7 @@ let check_body context (actions : Actions.t) moves =
                                   "`%s` is lent `mut` to the yielded value, so `%s` cannot be lent \
                                    to it too."
                               else
-                                "`%s` is borrowed `mut` by this call, so the call cannot also use \
+                                "`%s` is passed `mut` to this call, so the call cannot also use \
                                  `%s`.")
                              (Context.show context exclusive.place)
                              (Context.show context also.place))))
@@ -240,8 +240,8 @@ let check_body context (actions : Actions.t) moves =
                             Context.report context Conflicting_loan
                               (Context.locate_with_mode_keyword context argument.origin)
                               (Printf.sprintf
-                                 "`%s` is borrowed `mut` by this call, so the call cannot also \
-                                  take a view of it."
+                                 "`%s` is passed `mut` to this call, so the call cannot also take \
+                                  a view of it."
                                  (Context.show context passed.place))))
                       viewed)
                 borrowed_arguments)
@@ -293,11 +293,9 @@ let check_body context (actions : Actions.t) moves =
                            holder))
               | _ -> ())
             dropped
-      | Bind_lent_part { lent_part; type_ } ->
+      | Bind_lent_part { scrutinee; lent_part_type } ->
           Context.report context Lent_part_escapes at
-            ~fixes:
-              (Move_rules.copy_fix context "Copy the lent part." type_
-                 (Context.locate_origin context lent_part))
+            ~fixes:(Move_rules.copy_fix context "Copy the scrutinee." lent_part_type scrutinee)
             "This part is lent only until the statement ends, so it cannot be bound to a name. Use \
              it in this statement, or copy it."
       | Pass_owned_function views -> (

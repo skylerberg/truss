@@ -118,36 +118,25 @@ let load_package_database (package : Project.package) ~hash ~visible =
 let standard_package : Project.package =
   { name = Path.standard_package; dependencies = []; files = Standard_library.files }
 
-let checked_standard_package : loaded option ref = ref None
+let standard_hash =
+  lazy
+    (Registry.Content.hash
+       (List.map
+          (fun (file, text) -> (Project.make_file_path ~directory:"" file, text))
+          Standard_library.files))
 
 let load_standard_package () =
-  match !checked_standard_package with
-  | Some standard -> standard
-  | None ->
-      let standard =
-        load_package_database standard_package ~visible:[]
-          ~hash:
-            (Registry.Content.hash
-               (List.map
-                  (fun (file, text) -> (Project.make_file_path ~directory:"" file, text))
-                  Standard_library.files))
-      in
-      let database = Database.create ~loaded:[ standard.package_database ] [] in
-      let rendered =
-        List.concat_map
-          (fun ((file : Path.file), text) ->
-            match Database.list_file_diagnostics database file with
-            | [] -> []
-            | diagnostics ->
-                let source = Source.create ~path:(Path.show_file file) text in
-                List.map (Diagnostic.render source) diagnostics)
-          Standard_library.files
-      in
-      if rendered <> [] then
-        Compiler_bug.raise_bug ~stage:"Workspace" "the standard library has diagnostics:\n%s"
-          (String.concat "" rendered);
-      checked_standard_package := Some standard;
-      standard
+  let standard =
+    load_package_database standard_package ~visible:[] ~hash:(Lazy.force standard_hash)
+  in
+  match Database.list_package_diagnostics standard.package_database with
+  | [] -> standard
+  | failed ->
+      Compiler_bug.raise_bug ~stage:"Workspace" "the standard library has diagnostics:\n%s"
+        (String.concat ""
+           (List.concat_map
+              (fun (source, diagnostics) -> List.map (Diagnostic.render source) diagnostics)
+              failed))
 
 let list_package_databases () =
   List.sort compare
@@ -333,7 +322,50 @@ let load_package_databases snapshot =
         Package_table.replace loaded_by_name name loaded;
         loaded
   in
-  standard :: List.map (fun (name, _) -> load_named name) hashes
+  let rec depends_on_project seen name =
+    (not (List.mem name seen))
+    && List.exists
+         (fun dependency ->
+           (not (List.mem_assoc dependency hashes)) || depends_on_project (name :: seen) dependency)
+         (list_dependency_names snapshot name)
+  in
+  standard
+  :: List.filter_map
+       (fun (name, _) -> if depends_on_project [] name then None else Some (load_named name))
+       hashes
+
+let describe_failed_dependency name version ~is_loaded failed =
+  match failed with
+  | (source, (first : Diagnostic.t) :: _) :: _ ->
+      let line, column = Source.compute_position source first.span.start in
+      Printf.sprintf "`%s` %s does not check %s. It has %s; the first is at %s:%d:%d: %s"
+        (Path.show_package name) (Registry.Version.show version)
+        (if is_loaded then "with this toolchain" else "against this project's packages")
+        (Diagnostic.show_count
+           (List.fold_left (fun total (_, diagnostics) -> total + List.length diagnostics) 0 failed)
+           "error" "errors")
+        (Source.path source) line column first.message
+  | _ -> Compiler_bug.raise_bug ~stage:"Workspace" "a failed package lists no diagnostic"
+
+let list_dependency_problems snapshot database =
+  let loaded =
+    List.map (fun (loaded : loaded) -> loaded.package) (load_package_databases snapshot)
+  in
+  List.filter_map
+    (fun (name, version, _) ->
+      match Database.list_dependency_diagnostics database name with
+      | [] -> None
+      | failed ->
+          Some
+            {
+              Project.file = Project.lock_file;
+              line = None;
+              message =
+                describe_failed_dependency name version ~is_loaded:(List.mem name loaded) failed;
+            })
+    (List.filter
+       (fun (name, _, _) -> Option.is_some (find_package snapshot name))
+       (list_registry_packages snapshot))
 
 let load_layout snapshot =
   let loaded = load_package_databases snapshot in
@@ -549,7 +581,7 @@ let list_changed_files root files paths =
     files
   @ List.concat_map list_with_prefix prefixes
 
-let refresh worktree =
+let refresh ~(read : Watcher.t -> Watcher.changes) worktree =
   let root = worktree.root in
   let update files =
     let before = worktree.snapshot in
@@ -563,7 +595,7 @@ let refresh worktree =
           (apply_changes worktree.database after changes);
         `Changed
   in
-  match Option.map Watcher.read_changes worktree.watcher with
+  match Option.map read worktree.watcher with
   | Some Removed -> `Removed
   | Some Overflow | None -> update (Registry.Content.list_input_files root)
   | Some (Changed []) -> `Unchanged
@@ -606,7 +638,7 @@ let rec load_worktree_snapshot root =
   match Hashtbl.find_opt worktrees root with
   | None -> Result.map (fun worktree -> worktree.snapshot) (open_worktree root)
   | Some worktree -> (
-      match refresh worktree with
+      match refresh ~read:Watcher.read_changes worktree with
       | `Removed ->
           close worktree;
           load_worktree_snapshot root
@@ -635,7 +667,7 @@ let propagate_changes descriptor =
   Hashtbl.iter
     (fun _ worktree ->
       if Option.map Watcher.extract_descriptor worktree.watcher = Some descriptor then
-        match refresh worktree with
+        match refresh ~read:Watcher.read_pending_changes worktree with
         | `Removed -> close worktree
         | `Unchanged -> ()
         | `Changed -> (
@@ -803,7 +835,7 @@ let serve ~key ~handle =
 
 let call = Server.call
 let list_servers = Server.list_servers
-let stop_servers () = Server.stop_servers ~wait:true ()
+let stop_servers ?key () = Server.stop_servers ?key ~wait:true ()
 
 module For_testing = struct
   let load_standard_package_database () = (load_standard_package ()).package_database

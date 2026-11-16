@@ -75,6 +75,7 @@ type state = {
   mutable locals_read : Syntax.id list;
   mutable receiver_modes : (Syntax.id * Types.mode) list;
   mutable places_without_own : Syntax.id list;
+  mutable mode_keywords : Core.mode_keyword list;
   yielded : (Syntax.id, Types.mode) Hashtbl.t;
   lent_tails : (Syntax.id, unit) Hashtbl.t;
   mutable lambdas : Source.Definition_span.t list;
@@ -150,9 +151,12 @@ val unify : state -> Types.ty -> Types.ty -> bool
 val unify_as_hint : state -> Types.ty -> Types.ty -> unit
 val find_evidence : state -> Types.ty -> Types.trait_reference -> Interface.Impls.evidence option
 val solve_trait_arguments : state -> Types.ty -> Types.trait_reference -> Types.trait_reference
+
+val decide_property :
+  state -> Interface.Properties.property -> Types.ty -> Interface.Properties.decision
+
 val is_plain : state -> Types.ty -> bool
 val is_view : state -> Types.ty -> bool
-val is_copyable : state -> Types.ty -> bool
 
 val resolve_associated_type :
   state -> Types.ty -> Types.trait_reference -> string -> at:Source.Definition_span.t -> Types.ty
@@ -175,6 +179,7 @@ val find_head : state -> Syntax.expression -> Resolve.head option
 val is_variant_name : Syntax.name -> bool
 val is_member_constant : state -> Syntax.expression -> bool
 val show : state -> Types.ty -> string
+val describe : state -> Types.ty -> string
 
 val add_mismatch_diagnostic :
   state ->
@@ -192,7 +197,11 @@ val report_mismatch :
   state -> Source.Definition_span.t -> expected:Types.ty -> actual:Types.ty -> unit
 
 val is_place : state -> Syntax.expression -> bool
-val find_call_with_mode_keyword : state -> Syntax.expression -> Syntax.id option
+
+val find_call_with_mode_keyword :
+  state -> Syntax.expression -> (Syntax.id * Syntax.expression) option
+
+val note_mode_keyword : state -> Syntax.expression -> Syntax.mode -> Syntax.expression -> unit
 val check_resource : state -> Syntax.resource -> unit
 
 val make_slice :
@@ -203,8 +212,6 @@ val make_slice :
   stop:Core.expression option ->
   inclusive:bool ->
   Core.kind
-
-type conversion = From_never | Owned_to_view | Function_widening | To_integer | From_integer
 
 val convert :
   state ->

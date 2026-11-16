@@ -67,13 +67,11 @@ and check_name (state : State.state) (env : State.env) (value : Syntax.expressio
                 Some (Global { path; type_arguments = instance.type_arguments });
               check_function_value state value instance.signature)
       | None -> State.raise_bug "`%s` has no signature" (Path.show path))
-  | Definition (Constant, path) -> (
+  | Definition (Constant, path) ->
       state.tables.resolutions.(value.id) <- Some (Global { path; type_arguments = [] });
       State.register_expression state value (fun () ->
           Use (Form.build_constant_place state ~origin:value.id path));
-      match Interface.Definition.read_constant_type state.lookups.interface path with
-      | Some type_ -> type_
-      | None -> State.raise_bug "the constant `%s` has no type" (Path.show path))
+      Interface.Definition.read_constant_type state.lookups.interface path
   | Definition (Type, path) ->
       if Intrinsic.builtin_of_path path = Some Unit then begin
         state.tables.resolutions.(value.id) <-
@@ -178,7 +176,9 @@ and check_field state (value : Syntax.expression) base_type (member : Syntax.nam
                 [ State.replace (State.read_span state member.id) candidate ];
             ]
         | None -> [])
-      (Printf.sprintf "`%s` has no field `%s`." (State.show state base_type) member.text)
+      (Printf.sprintf "%s has no field `%s`."
+         (String.capitalize_ascii (State.describe state base_type))
+         member.text)
   in
   match base_type with
   | Types.Named { path; arguments } -> (
@@ -234,14 +234,12 @@ and check_static_member state (value : Syntax.expression) type_ (member : Syntax
         check_variant_value state value path member.text ~arguments
       else
         begin match Members.find_own_constant state.lookups path member.text with
-        | Some constant -> (
+        | Some constant ->
             state.tables.resolutions.(value.id) <-
               Some (Global { path = constant; type_arguments = [] });
             State.register_expression state value (fun () ->
                 Use (Form.build_constant_place state ~origin:value.id constant));
-            match Interface.Definition.read_constant_type state.lookups.interface constant with
-            | Some type_ -> type_
-            | None -> State.raise_bug "the constant `%s` has no type" (Path.show constant))
+            Interface.Definition.read_constant_type state.lookups.interface constant
         | None -> (
             match Members.list_own_methods state.lookups path member.text with
             | (_, method_path) :: _ -> (
@@ -278,10 +276,9 @@ and check_explicit_type_arguments ?(head = 0) state (value : Syntax.expression) 
         if List.length written <> List.length own then
           Error
             (State.make_error_type state Arity (State.read_span state value.id)
-               (Printf.sprintf "This takes %d type %s, and %d %s given." (List.length own)
-                  (if List.length own = 1 then "argument" else "arguments")
-                  (List.length written)
-                  (if List.length written = 1 then "is" else "are")))
+               (Printf.sprintf "This takes %s, and %s given."
+                  (Diagnostic.show_count (List.length own) "type argument" "type arguments")
+                  (Diagnostic.show_count (List.length written) "is" "are")))
         else
           let errors =
             List.concat
@@ -342,7 +339,7 @@ and reject_specification_call state (env : State.env) (value : Syntax.expression
       (Types.Error
          (State.report_specification_only state (State.read_span state value.id)
             (match
-               (Interface.Definition.read_interface state.lookups.interface path, specification_type)
+               (Interface.Definition.find_interface state.lookups.interface path, specification_type)
              with
             | Some (Theorem_interface _), _ ->
                 Printf.sprintf

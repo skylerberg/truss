@@ -76,6 +76,7 @@ type state = {
   mutable locals_read : Syntax.id list;
   mutable receiver_modes : (Syntax.id * Types.mode) list;
   mutable places_without_own : Syntax.id list;
+  mutable mode_keywords : Core.mode_keyword list;
   yielded : (Syntax.id, Types.mode) Hashtbl.t;
   lent_tails : (Syntax.id, unit) Hashtbl.t;
   mutable lambdas : Source.Definition_span.t list;
@@ -485,9 +486,9 @@ let solve_trait_arguments state type_ (trait : Types.trait_reference) =
       | _ -> trait)
   | _ -> trait
 
-let is_copyable state type_ =
-  Interface.Impls.is_copyable state.lookups.interface ~list_bounds:(lookup_bounds state)
-    (zonk state type_)
+let decide_property state property type_ =
+  Interface.Impls.decide_property property state.lookups.interface
+    ~list_bounds:(lookup_bounds state) (zonk state type_)
 
 let is_plain state type_ =
   Interface.Impls.is_plain state.lookups.interface ~list_bounds:(lookup_bounds state)
@@ -828,6 +829,7 @@ let is_variant_name (member : Syntax.name) =
   member.text <> "" && member.text.[0] >= 'A' && member.text.[0] <= 'Z'
 
 let show state type_ = Types.show (zonk state type_)
+let describe state type_ = Types.describe (zonk state type_)
 
 let find_literal_decision state type_ =
   let rec follow (type_ : Types.ty) =
@@ -898,7 +900,7 @@ let add_mismatch state (span : Source.Definition_span.t) ~expected ~actual =
            (Types.show expected))
   | _ ->
       add_mismatch_diagnostic state Mismatch span ~sides
-        (Printf.sprintf "Expected `%s`, found `%s`." (Types.show expected) (Types.show actual))
+        (Printf.sprintf "Expected %s, found %s." (Types.describe expected) (Types.describe actual))
 
 let report_mismatch state span ~expected ~actual =
   ignore (add_mismatch state span ~expected ~actual)
@@ -929,9 +931,28 @@ let rec find_call_with_mode_keyword state (value : Syntax.expression) =
   match value.kind with
   | Call ({ kind = Member (base, _); _ }, _)
   | Call ({ kind = Bracket ({ kind = Member (base, _); _ }, _); _ }, _) ->
-      if is_place state base then Some value.id else find_call_with_mode_keyword state base
+      if is_place state base then Some (value.id, base) else find_call_with_mode_keyword state base
   | Member (base, _) | Bracket (base, _) | Try base -> find_call_with_mode_keyword state base
   | _ -> None
+
+let note_mode_keyword state (written : Syntax.expression) (mode : Syntax.mode)
+    (operand : Syntax.expression) =
+  let rec strip_parentheses (value : Syntax.expression) =
+    match value.kind with Parenthesized inner -> strip_parentheses inner | _ -> value
+  in
+  let place =
+    match find_call_with_mode_keyword state operand with
+    | Some (_, receiver) -> receiver
+    | None -> operand
+  in
+  state.mode_keywords <-
+    {
+      mode = (match mode with Mut -> Mut | Own -> Own);
+      written = written.id;
+      operand = operand.id;
+      place = (strip_parentheses place).id;
+    }
+    :: state.mode_keywords
 
 let check_resource state (resource : Syntax.resource) =
   let check_capability (path : Syntax.path_type) (method_ : Syntax.name option) =

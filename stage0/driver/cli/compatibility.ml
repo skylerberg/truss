@@ -229,7 +229,7 @@ let list_impls (side : side) package =
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
       if declaration.kind = Impl && declaration.ordinal = 0 then
-        match Interface.Definition.read_impl_interface side.lookups declaration.path with
+        match Interface.Definition.find_impl_interface side.lookups declaration.path with
         | Some (impl : Types.impl_interface) ->
             Some
               ( declaration.path,
@@ -261,8 +261,8 @@ let compare ~before ~after package =
             let before_key = Resolve.Names.make_key was and after_key = Resolve.Names.make_key is in
             List.map (make_public_change path)
               (match
-                 ( Interface.Definition.read_interface before.lookups path,
-                   Interface.Definition.read_interface after.lookups path )
+                 ( Interface.Definition.find_interface before.lookups path,
+                   Interface.Definition.find_interface after.lookups path )
                with
               | ( Some (Function_interface old_signature | Theorem_interface old_signature),
                   Some (Function_interface new_signature | Theorem_interface new_signature) ) ->

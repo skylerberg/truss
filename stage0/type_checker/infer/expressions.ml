@@ -14,7 +14,8 @@ and check_lent_part state env (value : Syntax.expression) : Types.ty =
   | Some (Lends (mode, part)) ->
       let inner =
         match value.kind with
-        | Mode (_, inner) when Option.is_none (State.find_call_with_mode_keyword state inner) ->
+        | Mode (mode, inner) when Option.is_none (State.find_call_with_mode_keyword state inner) ->
+            State.note_mode_keyword state value mode inner;
             inner
         | _ -> value
       in
@@ -108,8 +109,9 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
   | With (base, updates) -> Operators.check_record_update state env value base updates
   | Prefix (operator, inner) -> Operators.check_prefix state env ?expected value operator inner
   | Mode (mode, inner) ->
+      State.note_mode_keyword state value mode inner;
       (match State.find_call_with_mode_keyword state inner with
-      | Some call_id ->
+      | Some (call_id, _) ->
           state.receiver_modes <-
             (call_id, match mode with Mut -> Types.Mut | Own -> Types.Own) :: state.receiver_modes
       | None -> ());
@@ -196,10 +198,9 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
                     let start = State.build_expression state start in
                     Over_range
                       { pattern; start; stop = State.build_expression state stop; inclusive }
-                | Binder_in (written, collection) ->
-                    let pattern = State.build_pattern state written in
-                    Over_collection
-                      { pattern; collection = State.build_expression state collection }
+                | Binder_in _ ->
+                    State.raise_bug
+                      "the checker recorded no elements for a quantifier over a collection"
               in
               make_quantified binder);
       Types.bool
@@ -351,7 +352,8 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
       | Types.Error _ | Types.Hole -> base_type
       | _ ->
           State.make_error_type state Not_indexable (State.read_span state value.id)
-            (Printf.sprintf "`%s` cannot be sliced." (State.show state base_type)))
+            (Printf.sprintf "%s cannot be sliced."
+               (String.capitalize_ascii (State.describe state base_type))))
   | [ Item key ] -> (
       if Types.is_well_known String base_type || Types.is_well_known String_slice base_type then begin
         State.make_error_type state Not_indexable (State.read_span state value.id)
@@ -390,18 +392,8 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
                           };
                       arguments =
                         [
-                          {
-                            expression = base.id;
-                            core_argument_index = 0;
-                            mode = Read;
-                            mode_keyword = None;
-                          };
-                          {
-                            expression = key.id;
-                            core_argument_index = 1;
-                            mode = Read;
-                            mode_keyword = None;
-                          };
+                          { expression = base.id; core_argument_index = 0; mode = Read };
+                          { expression = key.id; core_argument_index = 1; mode = Read };
                         ];
                       omitted_defaults = [];
                       uses = Types.no_capabilities;
@@ -412,7 +404,8 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
             | None ->
                 ignore (check_expression state env key);
                 State.make_error_type state Not_indexable (State.read_span state value.id)
-                  (Printf.sprintf "`%s` cannot be indexed." (State.show state base_type))))
+                  (Printf.sprintf "%s cannot be indexed."
+                     (String.capitalize_ascii (State.describe state base_type)))))
   | _ ->
       State.make_error_type state Not_indexable (State.read_span state value.id)
         "An index is one value."

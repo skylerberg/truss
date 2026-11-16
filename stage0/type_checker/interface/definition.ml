@@ -1,4 +1,4 @@
-let read_interface (lookups : Lookups.t) path =
+let find_interface (lookups : Lookups.t) path =
   Option.map
     (fun key -> (lookups.read_elaborated_interface key).interface)
     (lookups.names.find_key path)
@@ -58,28 +58,43 @@ let make_builtin_shape builtin : Types.type_interface =
   in
   { type_generics; shape = Builtin_type builtin; opaque = true; derives = [] }
 
-let read_type_interface lookups (path : Path.t) =
+let find_type_interface lookups (path : Path.t) =
   match Intrinsic.builtin_of_path path with
   | Some builtin -> Some (make_builtin_shape builtin)
   | None -> (
-      match read_interface lookups path with Some (Type_interface type_) -> Some type_ | _ -> None)
+      match find_interface lookups path with Some (Type_interface type_) -> Some type_ | _ -> None)
 
-let read_declared_signature lookups (path : Path.t) =
-  match read_interface lookups path with
+let find_declared_signature lookups (path : Path.t) =
+  match find_interface lookups path with
   | Some (Function_interface signature | Theorem_interface signature) -> Some signature
   | _ -> None
 
-let read_trait_interface lookups (path : Path.t) =
-  match read_interface lookups path with Some (Trait_interface trait) -> Some trait | _ -> None
+let find_trait_interface lookups (path : Path.t) =
+  match find_interface lookups path with Some (Trait_interface trait) -> Some trait | _ -> None
 
-let read_impl_interface (lookups : Lookups.t) (path : Path.t) =
+let find_impl_interface (lookups : Lookups.t) (path : Path.t) =
   match path with
   | Derived { type_; trait } -> lookups.find_derived_interface ~type_ ~trait
   | _ -> (
-      match read_interface lookups path with Some (Impl_interface impl) -> Some impl | _ -> None)
+      match find_interface lookups path with Some (Impl_interface impl) -> Some impl | _ -> None)
+
+let read_type_interface lookups path =
+  match find_type_interface lookups path with
+  | Some interface -> interface
+  | None -> Compiler_bug.raise_bug ~stage:"Interface" "%s is not a type" (Path.show path)
+
+let read_trait_interface lookups path =
+  match find_trait_interface lookups path with
+  | Some interface -> interface
+  | None -> Compiler_bug.raise_bug ~stage:"Interface" "%s is not a trait" (Path.show path)
+
+let read_impl_interface lookups path =
+  match find_impl_interface lookups path with
+  | Some interface -> interface
+  | None -> Compiler_bug.raise_bug ~stage:"Interface" "%s is not an impl" (Path.show path)
 
 let read_test_uses lookups path =
-  match read_interface lookups path with
+  match find_interface lookups path with
   | Some (Test_interface uses) -> uses
   | _ -> Compiler_bug.raise_bug ~stage:"Interface" "%s has no test interface" (Path.show path)
 
@@ -98,16 +113,21 @@ let find_real_implementation (lookups : Lookups.t) capability =
         (Path.show capability) (List.length impls)
         (String.concat ", " (List.map Path.show impls))
 
-let read_constant_type lookups (path : Path.t) =
-  match read_interface lookups path with
+let find_constant_type lookups (path : Path.t) =
+  match find_interface lookups path with
   | Some (Constant_interface constant) -> Some constant.constant_type
   | _ -> None
+
+let read_constant_type lookups path =
+  match find_constant_type lookups path with
+  | Some ty -> ty
+  | None -> Compiler_bug.raise_bug ~stage:"Interface" "%s is not a constant" (Path.show path)
 
 let read_method_signature lookups ~owner (method_ : Types.trait_method) =
   let path =
     Path.Method { owner; name = method_.method_name; receiver = method_.method_receiver }
   in
-  match read_declared_signature lookups path with
+  match find_declared_signature lookups path with
   | Some signature -> signature
   | None ->
       Compiler_bug.raise_bug ~stage:"Interface" "the method `%s` has no signature" (Path.show path)
@@ -137,9 +157,9 @@ let find_capability_declaration lookups (path : Path.t) =
   let ( let* ) = Option.bind in
   match path with
   | Method { owner = (Impl _ | Derived _) as owner; name; receiver } ->
-      let* impl = read_impl_interface lookups owner in
+      let* impl = find_impl_interface lookups owner in
       let trait_path = impl.implements.trait in
-      let* trait = read_trait_interface lookups trait_path in
+      let* trait = find_trait_interface lookups trait_path in
       if trait.is_capability then Some (Declared_by (Impl_uses { capability = trait_path }))
       else
         let* declared =
@@ -148,7 +168,7 @@ let find_capability_declaration lookups (path : Path.t) =
             trait.methods
         in
         let* signature =
-          read_declared_signature lookups
+          find_declared_signature lookups
             (Method
                {
                  owner = trait_path;

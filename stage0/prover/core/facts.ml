@@ -1,10 +1,25 @@
 let make_variable ?(numbers = []) label = Logic.Symbol.Variable { label; numbers }
 
-exception Unsupported of State.location * string
-exception Foreign_unsupported of string
+type unsupported = {
+  location : State.location;
+  construct : string;
+  foreign_definition : string option;
+}
+
+exception Unsupported of unsupported
 
 let raise_unsupported location format =
-  Printf.ksprintf (fun message -> raise (Unsupported (location, message))) format
+  Printf.ksprintf
+    (fun construct -> raise (Unsupported { location; construct; foreign_definition = None }))
+    format
+
+let run_in_source (context : State.context) (source : State.source) read =
+  try read ()
+  with
+  | Unsupported ({ foreign_definition = None; _ } as unsupported)
+  when source.key <> Some context.home
+  ->
+    raise (Unsupported { unsupported with foreign_definition = Some source.name })
 
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Prover" format
 
@@ -296,8 +311,9 @@ and make_obligation ?template_clause (context : State.context) (frame : State.fr
        in
        Locals.fold
          (fun local term shown ->
-           match Tables.Local_table.find_opt context.local_names local with
-           | Some name when not (is_parameter term || List.mem_assoc term shown) ->
+           match (local, Tables.Local_table.find_opt context.local_names local) with
+           | Core_local (Named _), Some name
+             when not (is_parameter term || List.mem_assoc term shown) ->
                (term, name) :: shown
            | _ -> shown)
          frame.locals
@@ -381,7 +397,7 @@ let equal_trait = Well_known.make_path Equal
 let find_visible_type (context : State.context) (ty : Types.ty) =
   match ty with
   | Named { path; arguments } when Types.find_builtin ty = None -> (
-      match Interface.Definition.read_interface context.lookups.interface path with
+      match Interface.Definition.find_interface context.lookups.interface path with
       | Some (Interface.Environment.Type_interface interface)
         when (not interface.opaque)
              || Path.locate_package path = Path.locate_package context.current ->
@@ -489,6 +505,9 @@ let arrive context frame prefix ty =
   let value = declare_fresh context frame prefix (declare_sort context ty) in
   assume context frame (make_in_range ty value);
   value
+
+let read_or_arrive context frame prefix ty read =
+  try read frame with Unsupported _ -> arrive context frame prefix ty
 
 let bind (frame : State.frame) local ty term =
   {

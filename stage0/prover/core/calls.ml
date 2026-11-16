@@ -305,10 +305,9 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
     List.filter_map
       (fun (passed : State.passed) ->
         match (passed.mode, passed.passed_place) with
-        | Types.Mut, Some place -> (
-            try Some (passed.position, place.read after)
-            with Facts.Unsupported _ | Facts.Foreign_unsupported _ ->
-              Some (passed.position, Facts.arrive context after "changed" passed.type_))
+        | Types.Mut, Some place ->
+            Some
+              (passed.position, Facts.read_or_arrive context after "changed" passed.type_ place.read)
         | _ -> None)
       values
   in
@@ -434,7 +433,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       match snd (Validity.read_specification context inside clause) with
       | term when not (Facts.mentions_fresh_after context mark term) -> Some term
       | _ -> None
-      | exception (Facts.Unsupported _ | Facts.Foreign_unsupported _) -> None
+      | exception Facts.Unsupported _ -> None
     in
     let make_parameters_valid outside inputs =
       Logic.conjunction
@@ -664,7 +663,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                 in
                 match Validity.read_specification context frame_for_clause clause with
                 | _, term -> state (Logic.( ==> ) (compute_required part) term)
-                | exception Facts.Foreign_unsupported _ -> ())
+                | exception Facts.Unsupported _ -> ())
             part.ensures)
         contract.parts
     in
@@ -1039,7 +1038,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
           match (passed.mode, passed.passed_place) with
           | Types.Mut, Some place -> (
               try Validity.assume_valid context frame passed.type_ (place.read frame)
-              with Facts.Unsupported _ | Facts.Foreign_unsupported _ -> ())
+              with Facts.Unsupported _ -> ())
           | _ -> ())
         values;
       Some (frame, result)
@@ -1055,10 +1054,8 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
         List.map
           (fun (passed : State.passed) ->
             match (passed.mode, passed.passed_place) with
-            | Types.Mut, Some place -> (
-                try place.read frame
-                with Facts.Unsupported _ | Facts.Foreign_unsupported _ ->
-                  Facts.arrive context frame "changed" passed.type_)
+            | Types.Mut, Some place ->
+                Facts.read_or_arrive context frame "changed" passed.type_ place.read
             | _ -> passed.term)
           values
       in

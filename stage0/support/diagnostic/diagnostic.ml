@@ -555,6 +555,9 @@ let find_closest text candidates =
   | closest :: _ -> Some closest
   | [] -> None
 
+let show_count count singular plural =
+  Printf.sprintf "%d %s" count (if count = 1 then singular else plural)
+
 let map_spans convert diagnostic =
   {
     diagnostic with

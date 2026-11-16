@@ -152,9 +152,27 @@ let () =
       if status <> 0 then fail "exited with %d: %s" status output);
   test "stop ends the background process of another build" (fun () ->
       let root = make_package_served_by_other_build () in
-      let status, output = capture (fun () -> Cli.Main.run_client [ "truss"; "stop" ]) in
+      let status, output =
+        capture (fun () -> Cli.Main.run_client [ "truss"; "stop"; "-C"; root ])
+      in
       if status <> 0 then fail "exited with %d: %s" status output;
-      if is_database_open_elsewhere root then fail "the background process still runs")
+      if is_database_open_elsewhere root then fail "the background process still runs");
+  test "stop leaves the background processes of other projects running, and --all ends them"
+    (fun () ->
+      let stopped = make_package_served_by_other_build () in
+      let other = make_package_served_by_other_build () in
+      ignore (capture (fun () -> Cli.Main.run_client [ "truss"; "stop"; "-C"; stopped ]));
+      if is_database_open_elsewhere stopped then fail "the project's background process still runs";
+      if not (is_database_open_elsewhere other) then fail "stopped another project's process";
+      ignore (capture (fun () -> Cli.Main.run_client [ "truss"; "stop"; "--all" ]));
+      if is_database_open_elsewhere other then fail "--all left a background process running");
+  test "stop outside any project asks for --all, and exits with 2" (fun () ->
+      let directory = Harness.make_scratch_directory "no-project" in
+      let status, output =
+        capture (fun () -> Cli.Main.run_client [ "truss"; "stop"; "-C"; directory ])
+      in
+      if status <> 2 || not (String.includes ~affix:"use --all" output) then
+        fail "exited with %d: %s" status output)
 
 let list_server_files () =
   let directory = Filename.concat (Sys.getenv "TRUSS_CACHE") "servers" in
@@ -177,8 +195,8 @@ let wait_until_deadline ~is_done =
 let () =
   test "a background process that stops leaves none of its files in the cache" (fun () ->
       let before = list_server_files () in
-      ignore (make_package_served_by_other_build ());
-      ignore (capture (fun () -> Cli.Main.run_client [ "truss"; "stop" ]));
+      let root = make_package_served_by_other_build () in
+      ignore (capture (fun () -> Cli.Main.run_client [ "truss"; "stop"; "-C"; root ]));
       match list_server_files_added ~before with
       | [] -> ()
       | added -> fail "left %s" (String.concat ", " added));
@@ -194,7 +212,37 @@ let () =
       (match list_server_files_added ~before with
       | [] -> ()
       | added -> fail "left %s" (String.concat ", " added));
-      if Sys.file_exists root then fail "made the project's directory again")
+      if Sys.file_exists root then fail "made the project's directory again");
+  test "a background process that has answered a command removes the files of an ended one"
+    (fun () ->
+      let servers = Filename.concat (Sys.getenv "TRUSS_CACHE") "servers" in
+      (try Unix.mkdir servers 0o700 with Unix.Unix_error (EEXIST, _, _) -> ());
+      let ended = Filename.concat servers "0123456789abcdef-0123456789abcdef" in
+      let paths = List.map (fun suffix -> ended ^ suffix) [ ".key"; ".lock"; ".start" ] in
+      List.iter (fun path -> Out_channel.with_open_bin path ignore) paths;
+      ignore (make_package_served_by_other_build ());
+      let is_removed () = not (List.exists Sys.file_exists paths) in
+      wait_until_deadline ~is_done:is_removed;
+      if not (is_removed ()) then fail "the ended process's files are still there");
+  test "a background process does its periodic work while its project keeps changing" (fun () ->
+      let servers = Filename.concat (Sys.getenv "TRUSS_CACHE") "servers" in
+      (try Unix.mkdir servers 0o700 with Unix.Unix_error (EEXIST, _, _) -> ());
+      let ended = Filename.concat servers "fedcba9876543210-fedcba9876543210" in
+      let paths = List.map (fun suffix -> ended ^ suffix) [ ".key"; ".lock"; ".start" ] in
+      List.iter (fun path -> Out_channel.with_open_bin path ignore) paths;
+      let root = make_package_served_by_other_build () in
+      let notes = Filename.concat root "notes.txt" in
+      let deadline = Unix.gettimeofday () +. 10. in
+      let is_removed () = not (List.exists Sys.file_exists paths) in
+      let rec change_until_removed count =
+        if (not (is_removed ())) && Unix.gettimeofday () < deadline then begin
+          Out_channel.with_open_bin notes (fun out -> output_string out (string_of_int count));
+          Unix.sleepf 0.1;
+          change_until_removed (count + 1)
+        end
+      in
+      change_until_removed 0;
+      if not (is_removed ()) then fail "the ended process's files are still there")
 
 let () =
   test "a command refuses a cache that other users can write, and exits with 2" (fun () ->
@@ -1358,6 +1406,23 @@ let () =
           (List.mem "units/lengths/lengths.truss"
              (List.map (Workspace.locate_file (fst project)) (list_files project)))
       then fail "the project's package is not the one in the build")
+
+let () =
+  test "a registry package that does not check with this toolchain is a problem that names it"
+    (fun () ->
+      let registry = make_registry () in
+      publish registry "acme::broken" (1, 0, 0)
+        [ ("lengths/lengths.truss", "public fn meter() -> Int64 {\n  \"one\"\n}\n") ];
+      let root =
+        make_package
+          [
+            ( "main.truss",
+              "use acme::broken::lengths\n\nfn length() -> Int64 {\n  lengths::meter()\n}\n" );
+          ]
+      in
+      ignore (add root [ "acme::broken" ]);
+      expect_problem_in root
+        "`acme::broken` 1.0.0 does not check with this toolchain. It has 1 error; the first is at")
 
 let upgrade root names = run_truss ([ "upgrade"; "-C"; root ] @ names)
 
