@@ -122,7 +122,7 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
                       Variant
                         {
                           variant = variant.variant_name;
-                          fields = Form.pattern_fields state declared matched;
+                          fields = Form.build_pattern_fields state declared matched;
                         })
               | None ->
                   unknown
@@ -164,7 +164,7 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
               state.tables.patterns.(written.id) <- Some (Record_pattern { type_ });
               let matched = pattern_fields state env written record_fields fields ~is_var ~mode in
               register_pattern state written (fun () ->
-                  Record (Form.pattern_fields state record_fields matched))
+                  Record (Form.build_pattern_fields state record_fields matched))
           | None ->
               unknown
                 (error state Not_a_record (read_span state written.id)

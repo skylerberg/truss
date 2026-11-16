@@ -59,7 +59,7 @@ and call_named state env ?expected (value : expression) (callee : expression)
           let index = trait_reference (Well_known.path Index) in
           let evidence =
             match implements state parts index with
-            | Some evidence -> Form.evidence (evidence_of evidence)
+            | Some evidence -> Form.convert_evidence (evidence_of evidence)
             | None -> bug "`Sequence` does not implement `Index`"
           in
           state.tables.resolutions.(value.id) <- Some Specification_value;
