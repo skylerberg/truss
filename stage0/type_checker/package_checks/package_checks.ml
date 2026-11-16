@@ -136,9 +136,25 @@ let check_method_names (lookups : Lookups.t) (declaration : Resolve.Names.declar
       Interface.Definition.find_trait_interface lookups.interface impl.implements.trait )
   with
   | Types.Named { path; _ }, Some trait when not trait.is_capability ->
+      let view = Types.find_view impl.for_type in
       List.filter_map
         (fun (method_ : Types.trait_method) ->
-          let own = lookups.interface.names.list_members path method_.method_name in
+          let own = lookups.interface.names.list_members path method_.method_name
+          and of_view =
+            match view with
+            | Some (Types.Named view) ->
+                List.filter
+                  (fun (key : Resolve.Names.key) ->
+                    match key.path with Method { receiver; _ } -> receiver <> Static | _ -> false)
+                  (lookups.interface.names.list_members view.path method_.method_name)
+            | _ -> []
+          in
+          let describe_method ~is_own =
+            match view with
+            | Some view when not is_own ->
+                Printf.sprintf "the `%s` of its view `%s`" method_.method_name (Types.show view)
+            | _ -> Printf.sprintf "a `%s` of its own" method_.method_name
+          in
           let is_same_version (key : Resolve.Names.key) =
             match key.path with
             | Method { receiver; _ } -> receiver = method_.method_receiver
@@ -156,26 +172,29 @@ let check_method_names (lookups : Lookups.t) (declaration : Resolve.Names.declar
                  (Resolve.Names.make_key declaration)
                  Method_name_clash (locate_header spans definition) message)
           in
-          if own = [] then None
-          else if List.exists is_same_version own then
+          let is_own_version = List.exists is_same_version own in
+          if is_own_version || List.exists is_same_version of_view then
             make_clash
-              (Printf.sprintf
-                 "`%s` has a `%s` of its own that takes %s, so it cannot also get one from `%s`."
-                 (Types.show impl.for_type) method_.method_name
+              (Printf.sprintf "`%s` has %s, which takes %s, so it cannot also get one from `%s`."
+                 (Types.show impl.for_type)
+                 (describe_method ~is_own:is_own_version)
                  (Path.show_receiver method_.method_receiver)
                  (Types.show_trait impl.implements))
+          else if own = [] && of_view = [] then None
           else if declaration.module_.package <> Path.locate_package path then
             make_clash
               (Printf.sprintf
-                 "`%s` has a `%s` of its own, so only an `impl` in its own package can give it \
-                  another."
-                 (Types.show impl.for_type) method_.method_name)
+                 "`%s` has %s, so only an `impl` in its own package can give it another."
+                 (Types.show impl.for_type)
+                 (describe_method ~is_own:(own <> [])))
           else if not written then
             make_clash
               (Printf.sprintf
-                 "`%s` has a `%s` of its own, so this `impl` can give it another only by writing \
-                  it, and `%s` is left to the body `%s` provides."
-                 (Types.show impl.for_type) method_.method_name method_.method_name
+                 "`%s` has %s, so this `impl` can give it another only by writing it, and `%s` is \
+                  left to the body `%s` provides."
+                 (Types.show impl.for_type)
+                 (describe_method ~is_own:(own <> []))
+                 method_.method_name
                  (Types.show_trait impl.implements))
           else None)
         trait.methods

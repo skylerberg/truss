@@ -91,6 +91,14 @@ let find_builtin = function
 
 let is_builtin wanted type_ = find_builtin type_ = Some wanted
 let is_well_known wanted = function Named { path; _ } -> Well_known.is wanted path | _ -> false
+
+let find_view = function
+  | Named { path; arguments } when Well_known.is List path ->
+      Some (Named { path = Well_known.make_path Slice; arguments })
+  | Named { path; arguments = [] } when Well_known.is String path ->
+      Some (Named { path = Well_known.make_path String_slice; arguments = [] })
+  | _ -> None
+
 let signed_integer_types : Intrinsic.builtin list = [ Int8; Int16; Int32; Int64 ]
 let unsigned_integer_types : Intrinsic.builtin list = [ UInt8; UInt16; UInt32; UInt64 ]
 let integer_types = signed_integer_types @ unsigned_integer_types

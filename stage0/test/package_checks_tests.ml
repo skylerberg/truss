@@ -35,6 +35,18 @@ let () =
     (fun () ->
       expect_one_diagnostic Fixtures.Package_checks.impl_inheriting_a_label_overload
         "package.method_name_clash");
+  Harness.test "an impl cannot give a `String` a method that its view has in the same mode"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Package_checks.impl_giving_a_string_a_method_of_its_view
+        "package.method_name_clash" ~says:"the `to_string` of its view `StringSlice`");
+  Harness.test
+    "an impl in another package cannot give a `String` another overload of its view's method"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Package_checks.impl_giving_a_string_an_overload_of_a_method_of_its_view
+        "package.method_name_clash" ~says:"only an `impl` in its own package");
+  Harness.test "an impl may give a `String` a method that neither it nor its view has" (fun () ->
+      expect_fine Fixtures.Package_checks.impl_giving_a_string_a_method_that_its_view_lacks);
   Harness.test "a type's constant cannot share a name with a trait's method" (fun () ->
       expect_one_diagnostic Fixtures.Package_checks.constant_named_like_a_trait_method
         "package.method_name_clash");

@@ -842,6 +842,12 @@ let () =
       expect_one_diagnostic Fixtures.Ownership.is_on_a_parameter_kept "ownership.not_owned")
 
 let () =
+  Harness.test "a `String` cannot be mutated while a view that its view's method returned is live"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.string_mutated_while_its_trimmed_view_is_live
+        "ownership.mutated_while_viewed")
+
+let () =
   let make = Fixtures.Ownership.make_an_option_of_a_string in
   Harness.test "a binding inside a loop is a new one each time, so it may be moved" (fun () ->
       expect_fine (make ^ Fixtures.Ownership.binding_moved_inside_a_loop));

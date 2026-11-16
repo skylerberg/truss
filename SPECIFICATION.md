@@ -623,6 +623,7 @@ it. The compiler checks this within each function.
   the temporary or the local that it views is dropped.
 - **The one implicit conversion** is a `List` passed to a `Slice` parameter,
   or a `String` to a `StringSlice` parameter, which becomes a view of it.
+  `self` is such a parameter, so `StringSlice.trim(name)` takes a `String`.
 
 ## Constants
 
@@ -972,8 +973,8 @@ A method can have up to three overloads that differ only in the mode of
 `self`. The mode keyword at the call site selects the overload, no keyword
 selects the read-only one, and a temporary receiver takes the `own` overload
 if there is one. An overload may come from a trait that the type implements
-in its own package (see [Method lookup](#method-lookup)). Truss has no other
-overloading.
+in its own package, or from the type's view (see
+[Method lookup](#method-lookup)). Truss has no other overloading.
 
 ### Lending methods
 
@@ -2042,6 +2043,12 @@ type Priority =
 - A call with a dot finds the type's own methods, and the methods of the
   traits it implements from the standard library, the calling package, and
   the packages the calling package's manifest lists. No trait is imported.
+- A `String` has the methods of `StringSlice` too, and a `List` those of
+  `Slice`, in each mode of `self` that its own methods and its traits'
+  methods do not take. The receiver becomes a view of itself, so
+  `name.trim()` and `String.trim(name)` are `StringSlice.trim(name)`. A
+  method as a value is named through the view: `StringSlice.trim`. In the
+  rules below, the methods a type has from its view count as its own.
 - Two of those traits giving one name is an error at a call with a dot,
   which is then written in full: `Ordered.compare(first, second)`. A trait
   and a trait it requires are the exception.

@@ -313,6 +313,49 @@ let () =
       match locate_core_call text "Console.print_line(name)" 1 with
       | { arguments = [ argument ]; _ }, _ when is_view argument -> ()
       | _ -> Harness.fail "no conversion recorded");
+  Harness.test "a `String` receiver finds a method of `StringSlice` and is viewed" (fun () ->
+      let text = Fixtures.Infer.to_string_of_a_string_and_of_a_literal in
+      match locate_core_call text "name.to_string()" 1 with
+      | { arguments = [ receiver ]; _ }, _ when is_view receiver -> ()
+      | _ -> Harness.fail "no conversion recorded");
+  Harness.test "a string literal receiver finds a method of `StringSlice` and is viewed" (fun () ->
+      let text = Fixtures.Infer.to_string_of_a_string_and_of_a_literal in
+      match locate_core_call text "\"x\".to_string()" 1 with
+      | { arguments = [ receiver ]; _ }, _ when is_view receiver -> ()
+      | _ -> Harness.fail "no conversion recorded");
+  List.iter
+    (fun (type_name, written) ->
+      Harness.test
+        (Printf.sprintf
+           "a method of `StringSlice` written in full through `%s` views a `String` receiver"
+           type_name) (fun () ->
+          let text = Fixtures.Infer.string_slice_method_in_full_of_a_string in
+          match locate_core_call text written 1 with
+          | { arguments = [ receiver ]; _ }, _ when is_view receiver -> ()
+          | _ -> Harness.fail "no conversion recorded"))
+    [ ("StringSlice", "StringSlice.to_string(name)"); ("String", "String.to_string(name)") ];
+  Harness.test
+    "the receiver's mode chooses between a `String`'s own overload and its view's overload"
+    (fun () ->
+      let text = Fixtures.Infer.to_bytes_of_a_string_read_and_owned in
+      let find_owner occurrence =
+        match locate_core_call text "name.to_bytes()" occurrence with
+        | { callee = Function { path = Method { owner; receiver; _ }; _ }; _ }, _ ->
+            (Well_known.of_path owner, receiver)
+        | _ -> failwith "the callee is not a method"
+      in
+      if find_owner 1 <> (Some String_slice, Read) then
+        Harness.fail "a read-only receiver does not call the view's overload";
+      if find_owner 2 <> (Some String, Own) then
+        Harness.fail "an `own` receiver does not call the `String`'s own overload");
+  Harness.test "a method of a view takes no `mut` receiver" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.to_string_of_a_string_passed_mut "types.wrong_receiver");
+  Harness.test "an unknown method of a `String` is reported for it and for its view" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.unknown_method_of_a_string "types.unknown_member"
+        ~says:"neither has its view `StringSlice`");
+  Harness.test "a method value names the view that defines the method" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.to_string_of_string_as_a_value "types.unknown_member"
+        ~says:"`StringSlice.to_string`");
   Harness.test "a string literal is a StringSlice where one is expected, and a String elsewhere"
     (fun () ->
       let text = Fixtures.Infer.string_literals_kept_and_printed in
