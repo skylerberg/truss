@@ -65,7 +65,7 @@ let mangle_text value =
     (List.map
        (fun order ->
          match order with
-         | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' -> String.make 1 order
+         | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' -> String.of_char order
          | order -> Printf.sprintf "_C%02X_" (Char.code order))
        (List.of_seq (String.to_seq value)))
 

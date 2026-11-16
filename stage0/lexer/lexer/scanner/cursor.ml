@@ -25,10 +25,10 @@ type t = {
   mutable previous : token option;
   mutable held : item list;
   mutable semicolons : int list;
-  foreign_escape : t -> Buffer.t -> bool;
+  scan_foreign_escape : t -> Buffer.t -> bool;
 }
 
-let create ~foreign_escape source diagnostics =
+let create ~scan_foreign_escape source diagnostics =
   {
     source;
     text = Source.text source;
@@ -43,7 +43,7 @@ let create ~foreign_escape source diagnostics =
     previous = None;
     held = [];
     semicolons = [];
-    foreign_escape;
+    scan_foreign_escape;
   }
 
 let is_at_end cursor index = index >= cursor.length

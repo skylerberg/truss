@@ -272,7 +272,7 @@ and check_explicit_type_arguments ?(head = 0) state (value : Syntax.expression) 
     match Instantiation.check_written_arguments state items with
     | Error error -> Error error
     | Ok written -> (
-        let own = List.filteri (fun index _ -> index >= head) instance.type_arguments in
+        let own = List.drop head instance.type_arguments in
         if List.length written <> List.length own then
           Error
             (State.make_error_type state Arity (State.read_span state value.id)
@@ -373,7 +373,7 @@ and list_trait_static_methods (state : State.state) path name receiver =
               then Some (reference, method_)
               else None
           | None -> None)
-        (state.lookups.interface.names.traits_declaring package name))
+        (state.lookups.interface.names.list_traits_declaring package name))
     (Resolve.Names.list_visible_packages state.lookups.interface.names state.package)
 
 and resolve_evidence state (value : Syntax.expression) self_type (reference : Types.trait_reference)
@@ -458,7 +458,7 @@ and list_trait_candidates (state : State.state) receiver_type name =
                  if Option.is_some (State.implements state receiver_type reference) then
                    with_method reference
                  else None)
-               (state.lookups.interface.names.traits_declaring package name))
+               (state.lookups.interface.names.list_traits_declaring package name))
            (Resolve.Names.list_visible_packages state.lookups.interface.names state.package))
 
 and is_one_family (state : State.state) (traits : Types.trait_reference list) =

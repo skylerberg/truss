@@ -542,49 +542,16 @@ let replace span replacement = { span; replacement }
 let insert at replacement = { span = at; replacement }
 let delete span = { span; replacement = "" }
 
-let edit_distance left right =
-  let rows = String.length left + 1 and columns = String.length right + 1 in
-  let table = Array.make_matrix rows columns 0 in
-  for row = 0 to rows - 1 do
-    table.(row).(0) <- row
-  done;
-  for column = 0 to columns - 1 do
-    table.(0).(column) <- column
-  done;
-  for row = 1 to rows - 1 do
-    for column = 1 to columns - 1 do
-      let cost = if left.[row - 1] = right.[column - 1] then 0 else 1 in
-      let best =
-        min
-          (min (table.(row - 1).(column) + 1) (table.(row).(column - 1) + 1))
-          (table.(row - 1).(column - 1) + cost)
-      in
-      table.(row).(column) <-
-        (if
-           row > 1 && column > 1
-           && left.[row - 1] = right.[column - 2]
-           && left.[row - 2] = right.[column - 1]
-         then min best (table.(row - 2).(column - 2) + 1)
-         else best)
-    done
-  done;
-  table.(rows - 1).(columns - 1)
-
 let find_closest text candidates =
   let limit = max 1 (String.length text / 3) in
-  let best =
-    List.fold_left
-      (fun best candidate ->
-        let distance = edit_distance text candidate in
-        if candidate = text || distance > limit then best
-        else
-          match best with
-          | Some (_, best_distance) when best_distance <= distance -> best
-          | _ -> Some (candidate, distance))
-      None
+  let enumerate_candidates select =
+    List.iter
+      (fun candidate -> if candidate <> text then select candidate)
       (List.sort_uniq compare candidates)
   in
-  Option.map fst best
+  match String.spellcheck ~max_dist:(fun _ -> limit) enumerate_candidates text with
+  | closest :: _ -> Some closest
+  | [] -> None
 
 let map_spans convert diagnostic =
   {

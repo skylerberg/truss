@@ -4,7 +4,7 @@ type t = {
   value_solutions : (int, Types.value) Hashtbl.t;
   mutable capability_variable_count : int;
   mutable deferred_capability_equalities : (Types.capability_set * Types.capability_set) list;
-  mutable integer_range : Types.ty -> (Z.t * Z.t) option;
+  mutable find_integer_range : Types.ty -> (Z.t * Z.t) option;
   code_literals : (int, unit) Hashtbl.t;
 }
 
@@ -15,7 +15,7 @@ let create () =
     value_solutions = Hashtbl.create 4;
     capability_variable_count = 0;
     deferred_capability_equalities = [];
-    integer_range = (fun _ -> None);
+    find_integer_range = (fun _ -> None);
     code_literals = Hashtbl.create 4;
   }
 
@@ -109,7 +109,7 @@ let occurs unifier index =
 
 let literal_fits unifier (kind : Types.literal_kind) (type_ : Types.ty) =
   match (kind, type_) with
-  | Integer_literal, (Parameter _ | Projection _) -> unifier.integer_range type_ <> None
+  | Integer_literal, (Parameter _ | Projection _) -> unifier.find_integer_range type_ <> None
   | Integer_literal, _ -> Types.is_integer_type type_ || type_ = Types.Integer
   | Float_literal, _ -> Types.is_float_type type_
 

@@ -28,10 +28,12 @@ let calls_updating_helper (context : State.context) (invocation : Invocation.t) 
   | _ -> false
 
 let list_laws (context : State.context) trait =
-  match context.lookups.interface.names.key trait with
+  match context.lookups.interface.names.find_key trait with
   | Some key ->
       let source = Contracts.read_source_at_key context.lookups key in
-      List.map (fun (law : Mir.law) -> (source, law)) (context.lookups.mir.contract_part key).laws
+      List.map
+        (fun (law : Mir.law) -> (source, law))
+        (context.lookups.mir.read_contract_part key).laws
   | None -> []
 
 let list_law_parameter_types ~substitution (law : Mir.law) =

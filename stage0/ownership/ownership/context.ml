@@ -4,7 +4,7 @@ end))
 
 type context = {
   lookups : Lookups.t;
-  bounds : Types.parameter -> Types.trait_reference list;
+  list_bounds : Types.parameter -> Types.trait_reference list;
   spans : Source.Definition_span.t array Lazy.t;
   mode_keywords : (Core.origin, Types.mode * Core.mode_keyword) Hashtbl.t;
   names : string Local_table.t;
@@ -18,16 +18,16 @@ type context = {
 }
 
 let is_plain context type_ =
-  Interface.Impls.is_plain context.lookups.interface ~bounds:context.bounds type_
+  Interface.Impls.is_plain context.lookups.interface ~bounds:context.list_bounds type_
 
 let is_copyable context type_ =
-  Interface.Impls.is_copyable context.lookups.interface ~bounds:context.bounds type_
+  Interface.Impls.is_copyable context.lookups.interface ~bounds:context.list_bounds type_
 
 let is_view context type_ =
-  Interface.Impls.is_view context.lookups.interface ~bounds:context.bounds type_
+  Interface.Impls.is_view context.lookups.interface ~bounds:context.list_bounds type_
 
 let holds_function context type_ =
-  Interface.Impls.holds_function context.lookups.interface ~bounds:context.bounds type_
+  Interface.Impls.holds_function context.lookups.interface ~bounds:context.list_bounds type_
 
 let list_callee_signatures context (callee : Mir.callee) : Types.signature list =
   let signature path =

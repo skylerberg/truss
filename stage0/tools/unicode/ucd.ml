@@ -2,11 +2,9 @@ let read_lines directory name =
   In_channel.with_open_bin (Filename.concat directory name) In_channel.input_lines
 
 let strip_byte_order_mark line =
-  if String.starts_with ~prefix:"\xEF\xBB\xBF" line then String.sub line 3 (String.length line - 3)
-  else line
+  if String.starts_with ~prefix:"\xEF\xBB\xBF" line then String.drop_first 3 line else line
 
-let strip_comment line =
-  match String.index_opt line '#' with Some index -> String.sub line 0 index | None -> line
+let strip_comment line = String.take_first_while (fun character -> character <> '#') line
 
 let records directory name =
   read_lines directory name
@@ -18,10 +16,8 @@ let records directory name =
 let code_point text = int_of_string ("0x" ^ text)
 
 let code_point_range text =
-  match String.index_opt text '.' with
-  | Some index ->
-      ( code_point (String.sub text 0 index),
-        code_point (String.sub text (index + 2) (String.length text - index - 2)) )
+  match String.split_first ~sep:".." text with
+  | Some (first, last) -> (code_point first, code_point last)
   | None ->
       let value = code_point text in
       (value, value)

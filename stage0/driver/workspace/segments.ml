@@ -33,7 +33,7 @@ let parse_list text =
     Option.bind parsed (fun (header, segments) ->
         if String.starts_with ~prefix:header_prefix line then
           let length = String.length header_prefix in
-          Some (String.sub line length (String.length line - length) :: header, segments)
+          Some (String.drop_first length line :: header, segments)
         else
           match String.split_on_char ' ' line with
           | [ "segment"; number; size; digest ] -> (

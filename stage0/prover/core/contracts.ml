@@ -2,7 +2,7 @@ let make_source (key : Resolve.Names.key) =
   { State.key = Some key; name = Resolve.Names.show_key key }
 
 let read_source_at_key (lookups : Lookups.t) key =
-  ignore (lookups.mir.body_part key);
+  ignore (lookups.mir.read_body_part key);
   make_source key
 
 let find_source (lookups : Lookups.t) (path : Path.t) =
@@ -14,7 +14,7 @@ let find_source (lookups : Lookups.t) (path : Path.t) =
         | Derived _ -> { key = None; name = Path.show path }
       in
       (source, substitution, origin))
-    (lookups.mir.form_origin path)
+    (lookups.mir.find_form_origin path)
 
 let make_trait_substitution (lookups : Lookups.t) (trait : Types.trait_reference) (ty : Types.ty) =
   match Interface.Definition.read_trait_interface lookups.interface trait.trait with
@@ -43,7 +43,7 @@ let find_part ?(inherited = false) (lookups : Lookups.t) path callee =
        (Mir.read_contract lookups.mir path))
 
 let holds_todo (lookups : Lookups.t) (key : Resolve.Names.key) =
-  match Mir.find_code (lookups.mir.body_part key) with
+  match Mir.find_code (lookups.mir.read_body_part key) with
   | Some code ->
       let holds = ref false in
       Mir.iter_code
@@ -59,11 +59,11 @@ let list_law_proofs (lookups : Lookups.t) package (trait : Types.trait_reference
     match (left, right) with Type left, Type right -> Types.equal left right | _ -> left = right
   in
   let named_laws =
-    match (Interface.Impls.find_head for_type, lookups.interface.trait_header trait.trait) with
+    match (Interface.Impls.find_head for_type, lookups.interface.find_trait_header trait.trait) with
     | Some type_head, Some header ->
         List.concat_map
           (fun law ->
-            lookups.interface.names.law_proofs package { trait = trait.trait; law; type_head })
+            lookups.interface.names.list_law_proofs package { trait = trait.trait; law; type_head })
           header.laws
     | _ -> []
   in
@@ -85,11 +85,11 @@ let list_law_proofs (lookups : Lookups.t) package (trait : Types.trait_reference
     named_laws
 
 let is_impl_unfinished (lookups : Lookups.t) (key : Resolve.Names.key) =
-  List.exists (holds_todo lookups) (lookups.interface.names.contained key)
+  List.exists (holds_todo lookups) (lookups.interface.names.list_contained key)
 
 let law_unshown (lookups : Lookups.t) (impl : Path.t) (trait : Types.trait_reference) for_type name
     =
-  match lookups.interface.names.key impl with
+  match lookups.interface.names.find_key impl with
   | Some key ->
       is_impl_unfinished lookups key
       || List.exists
@@ -182,7 +182,9 @@ let find_resource (cost : Mir.cost) ~locals : Costs.resource option =
 let is_updating_helper (lookups : Lookups.t) (path : Path.t) =
   match path with
   | Method { receiver = Mut; _ } -> (
-      match Option.map lookups.interface.names.definition (lookups.interface.names.key path) with
+      match
+        Option.map lookups.interface.names.read_definition (lookups.interface.names.find_key path)
+      with
       | Some
           {
             visibility = Private;

@@ -253,11 +253,9 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                 Instantiation.instantiate state (State.read_span state value.id) signature
               in
               let head =
-                List.filteri
-                  (fun index _ ->
-                    index
-                    < List.length
-                        (match type_ with Types.Named { arguments; _ } -> arguments | _ -> []))
+                List.take
+                  (List.length
+                     (match type_ with Types.Named { arguments; _ } -> arguments | _ -> []))
                   instance.type_arguments
               in
               ignore
@@ -430,9 +428,7 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
   let reference = { trait with trait_arguments } in
   let result = Types.extract_result_type instance.signature.output in
   Modes.note_lending state value instance.signature.output;
-  let own_arguments =
-    List.filteri (fun index _ -> index < List.length signature.generics) instance.type_arguments
-  in
+  let own_arguments = List.take (List.length signature.generics) instance.type_arguments in
   state.tables.calls.(value.id) <-
     Some
       {

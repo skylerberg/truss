@@ -63,8 +63,7 @@ let lex_character_literal (cursor : Cursor.t) ~tag ~literal_start ~stop =
     | "\\'" -> "'"
     | escape when String.starts_with ~prefix:"\\u{" escape -> (
         match int_of_string_opt ("0x" ^ String.sub escape 3 (String.length escape - 4)) with
-        | Some value when value <= 0x10FFFF && (value < 0xD800 || value > 0xDFFF) ->
-            Unicode.of_code_points [ value ]
+        | Some value when Uchar.is_valid value -> Unicode.of_code_points [ value ]
         | _ -> "")
     | other -> other
   in
@@ -109,7 +108,7 @@ let format_field_edits cursor ~start ~stop =
       | '\\' -> edits (position + 2) reversed_edits
       | ('{' | '}') when Cursor.is_at cursor (position + 1) current ->
           edits (position + 2)
-            (Diagnostic.replace (Source.make_span position (position + 2)) (String.make 1 current)
+            (Diagnostic.replace (Source.make_span position (position + 2)) (String.of_char current)
             :: reversed_edits)
       | '{' -> (
           match field_end (position + 1) with

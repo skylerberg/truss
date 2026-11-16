@@ -364,8 +364,8 @@ let handle ~progress request =
   let outcome =
     Output.with_
       {
-        out = Buffer.add_string buffer;
-        err = progress;
+        print_out = Buffer.add_string buffer;
+        print_err = progress;
         terminal = request.terminal;
         columns = request.columns;
         json = false;
@@ -426,7 +426,7 @@ let locate_directory arguments =
   let rec named = function
     | "-C" :: directory :: _ -> Some directory
     | option :: _ when String.length option > 2 && String.starts_with ~prefix:"-C" option ->
-        Some (String.sub option 2 (String.length option - 2))
+        Some (String.drop_first 2 option)
     | _ :: rest -> named rest
     | [] -> None
   in

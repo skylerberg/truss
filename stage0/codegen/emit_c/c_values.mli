@@ -1,4 +1,4 @@
-type function_context = { symbol : string; local : Lowered.local -> string * Lowered.ty }
+type function_context = { symbol : string; render_local : Lowered.local -> string * Lowered.ty }
 
 val render_local_name : Lowered.local -> string option -> string
 val is_erased : C_types.context -> Lowered.ty -> bool

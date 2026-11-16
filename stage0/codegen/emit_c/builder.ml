@@ -115,7 +115,7 @@ let render_token local = Printf.sprintf "\001%d\002" local
 let make_function_context builder (function_ : function_) ~name =
   {
     C_values.symbol = Instance.make_symbol function_.code.key;
-    local =
+    render_local =
       (fun local ->
         name local;
         (render_token local, lookup_local_type builder local));

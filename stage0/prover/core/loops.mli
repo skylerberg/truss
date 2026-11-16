@@ -23,8 +23,8 @@ type for_loop = {
   collection : (State.frame -> Types.ty * Logic.term) option;
   element_call : (State.frame -> Logic.term) option;
   bind_element : State.frame -> Logic.term -> State.frame;
-  changed_in : State.frame -> State.changed;
-  changed_by_body : State.frame -> State.changed;
+  compute_changed_in : State.frame -> State.changed;
+  compute_changed_by_body : State.frame -> State.changed;
   run_body : State.frame -> Logic.term -> State.frame list * State.frame list;
   bind_parts : State.frame -> State.frame;
 }

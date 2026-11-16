@@ -559,8 +559,8 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
   (match (form.definition, state.definition.kind, elaborated.interface) with
   | Function { body; _ }, (Function _ | Method_declaration _), Function_interface signature ->
       let implemented_capability =
-        Option.bind (state.lookups.interface.names.container state.key) (fun container ->
-            match (state.lookups.interface.elaborated_interface container).interface with
+        Option.bind (state.lookups.interface.names.find_container state.key) (fun container ->
+            match (state.lookups.interface.read_elaborated_interface container).interface with
             | Impl_interface impl
               when Resolve.Names.find_kind state.lookups.interface.names impl.implements.trait
                    = Some Capability ->

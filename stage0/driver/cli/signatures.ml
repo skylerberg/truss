@@ -40,35 +40,29 @@ let cut text spans =
         else at)
       0 spans
   in
-  Buffer.add_string buffer (String.sub text at (String.length text - at));
+  Buffer.add_string buffer (String.drop_first at text);
   String.split_on_char '\n' (Buffer.contents buffer)
-  |> List.map (fun line ->
-      let rec stop position =
-        if position > 0 && (line.[position - 1] = ' ' || line.[position - 1] = '\t') then
-          stop (position - 1)
-        else position
-      in
-      String.sub line 0 (stop (String.length line)))
+  |> List.map (String.drop_last_while Char.Ascii.is_blank)
   |> List.filter (( <> ) "")
   |> String.concat "\n"
 
 let render_signature (names : Resolve.Names.lookups) ~body ~opaque (key : Resolve.Names.key) =
-  let text = names.text key in
+  let text = names.read_text key in
   if body then String.trim text
   else
-    let base = (names.place key).base in
+    let base = (names.read_place key).base in
     let contained =
       List.concat_map
         (fun member ->
-          let member_base = (names.place member).base in
+          let member_base = (names.read_place member).base in
           List.map
             (fun (span : Source.Definition_span.t) ->
               Source.Definition_span.of_file ~base
                 (Source.Definition_span.to_file ~base:member_base span))
-            (list_bodies ~opaque:false (names.spans member) (names.definition member)))
-        (names.contained key)
+            (list_bodies ~opaque:false (names.read_spans member) (names.read_definition member)))
+        (names.list_contained key)
     in
-    cut text (list_bodies ~opaque (names.spans key) (names.definition key) @ contained)
+    cut text (list_bodies ~opaque (names.read_spans key) (names.read_definition key) @ contained)
 
 let show_kind : Resolve.Names.kind -> string = function
   | Function -> "function"
@@ -84,7 +78,7 @@ let show_kind : Resolve.Names.kind -> string = function
   | Law_proof -> "law proof"
 
 let find_signature (names : Resolve.Names.lookups) path =
-  Option.map (render_signature names ~body:false ~opaque:false) (names.key path)
+  Option.map (render_signature names ~body:false ~opaque:false) (names.find_key path)
 
 let label_signature label signature =
   let indent = String.make (String.length label) ' ' in

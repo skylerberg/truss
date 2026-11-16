@@ -16,32 +16,23 @@ let encode_range encoding source (span : Source.span) =
   in
   Json.Object [ ("start", point span.start); ("end", point span.stop) ]
 
-let parse_hex_digit character =
-  match character with
-  | '0' .. '9' -> Some (Char.code character - Char.code '0')
-  | 'a' .. 'f' -> Some (Char.code character - Char.code 'a' + 10)
-  | 'A' .. 'F' -> Some (Char.code character - Char.code 'A' + 10)
-  | _ -> None
-
 let path_of_uri uri =
   let prefix = "file://" in
   if not (String.starts_with ~prefix uri) then None
   else
-    let encoded =
-      String.sub uri (String.length prefix) (String.length uri - String.length prefix)
-    in
+    let encoded = String.drop_first (String.length prefix) uri in
     let buffer = Buffer.create (String.length encoded) in
     let rec decode at =
       if at < String.length encoded then
         match encoded.[at] with
-        | '%' when at + 2 < String.length encoded -> (
-            match (parse_hex_digit encoded.[at + 1], parse_hex_digit encoded.[at + 2]) with
-            | Some high, Some low ->
-                Buffer.add_char buffer (Char.chr ((high * 16) + low));
-                decode (at + 3)
-            | _ ->
-                Buffer.add_char buffer '%';
-                decode (at + 1))
+        | '%'
+          when at + 2 < String.length encoded
+               && Char.Ascii.is_hex_digit encoded.[at + 1]
+               && Char.Ascii.is_hex_digit encoded.[at + 2] ->
+            let high = Char.Ascii.hex_digit_to_int encoded.[at + 1]
+            and low = Char.Ascii.hex_digit_to_int encoded.[at + 2] in
+            Buffer.add_char buffer (Char.chr ((high * 16) + low));
+            decode (at + 3)
         | character ->
             Buffer.add_char buffer character;
             decode (at + 1)
@@ -145,11 +136,9 @@ let read_message input =
         let line = String.trim line in
         if line = "" then length
         else
-          match String.index_opt line ':' with
-          | Some colon when String.lowercase_ascii (String.sub line 0 colon) = "content-length" ->
-              headers
-                (int_of_string_opt
-                   (String.trim (String.sub line (colon + 1) (String.length line - colon - 1))))
+          match String.split_first ~sep:":" line with
+          | Some (name, value) when String.lowercase_ascii name = "content-length" ->
+              headers (int_of_string_opt (String.trim value))
           | _ -> headers length)
   in
   match headers None with
@@ -273,7 +262,7 @@ let apply_changes encoding text changes =
             | _ -> 0
           in
           let start = point "start" and stop = point "end" in
-          String.sub text 0 start ^ replacement ^ String.sub text stop (String.length text - stop)
+          String.sub text 0 start ^ replacement ^ String.drop_first stop text
       | _ -> text)
     text changes
 

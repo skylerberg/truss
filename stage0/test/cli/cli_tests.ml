@@ -18,8 +18,8 @@ let captured work =
   let result =
     Cli.Output.with_
       {
-        out = Buffer.add_string out;
-        err = Buffer.add_string err;
+        print_out = Buffer.add_string out;
+        print_err = Buffer.add_string err;
         terminal = false;
         columns = None;
         json = false;
@@ -71,7 +71,9 @@ let () =
       let root = Harness.scratch "watched" in
       Unix.mkdir (Filename.concat root "src") 0o755;
       let watcher =
-        Watcher.start ~skipped:(fun name -> name = "skipped") ~cookie_directory:".truss" root
+        Watcher.start
+          ~is_skipped_name:(fun name -> name = "skipped")
+          ~cookie_directory:".truss" root
       in
       Fun.protect
         ~finally:(fun () -> Watcher.stop watcher)

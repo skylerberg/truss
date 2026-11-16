@@ -1,4 +1,4 @@
-type function_context = { symbol : string; local : Lowered.local -> string * Lowered.ty }
+type function_context = { symbol : string; render_local : Lowered.local -> string * Lowered.ty }
 
 let render_local_name local = function
   | Some name -> Printf.sprintf "l%d_%s" local name
@@ -77,7 +77,7 @@ let render_block_pointer context text sum variant =
 let rec render_place context fc (place : Lowered.place) : (string * Lowered.ty) option =
   let root =
     match place.root with
-    | Local local -> fc.local local
+    | Local local -> fc.render_local local
     | Static { key; ty } ->
         C_types.refer context key;
         let symbol = Instance.make_symbol key in

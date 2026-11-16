@@ -45,10 +45,7 @@ let located at (visit : Core_walk.visit) : Core_walk.visit =
   }
 
 let excerpt text =
-  let line =
-    match String.index_opt text '\n' with Some stop -> String.sub text 0 stop | None -> text
-  in
-  let line = String.trim line in
+  let line = String.trim (String.take_first_while (fun character -> character <> '\n') text) in
   if String.length line > 60 then String.sub line 0 57 ^ "..." else line
 
 let operand_type (operand : Core.operand) =
@@ -438,17 +435,19 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
   let bounds parameter =
     let of_key key =
       Option.value ~default:[]
-        (List.assoc_opt parameter (interface.elaborated_interface key).scope.bounds)
+        (List.assoc_opt parameter (interface.read_elaborated_interface key).scope.bounds)
     in
     match key with
-    | Some key -> of_key key @ Option.fold ~none:[] ~some:of_key (interface.names.container key)
+    | Some key ->
+        of_key key @ Option.fold ~none:[] ~some:of_key (interface.names.find_container key)
     | None -> []
   in
   let normalize = Interface.Impls.normalize interface ~bounds in
   let at = ref None in
   let name = match key with Some key -> Resolve.Names.show_key key | None -> Path.show path in
   let source =
-    lazy (Option.map (fun key -> (interface.names.spans key, interface.names.text key)) key)
+    lazy
+      (Option.map (fun key -> (interface.names.read_spans key, interface.names.read_text key)) key)
   in
   let quoted () =
     match (!at, Lazy.force source) with
@@ -478,7 +477,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
       | Some signature -> of_generics signature.generics
       | None -> [])
     @
-    match Option.bind key interface.names.container with
+    match Option.bind key interface.names.find_container with
     | Some container -> declared container.path
     | None -> []
   in
@@ -865,4 +864,4 @@ let check_file (interface : Interface.Lookups.t) ~core (file : Path.file) =
           count + 1
       | None -> count)
     0
-    (interface.names.declarations_in file)
+    (interface.names.list_declarations_in file)

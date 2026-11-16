@@ -37,7 +37,7 @@ let correct_misspelling cursor (token : Token.t) name ~words ~category =
       (String.concat ", " (List.map (fun word -> "`" ^ spell word ^ "`") words))
       name
   in
-  match List.filter (fun word -> Diagnostic.edit_distance name (spell word) <= 2) words with
+  match List.filter (fun word -> String.edit_distance name (spell word) <= 2) words with
   | [ word ] ->
       let spelling = spell word in
       Cursor.report cursor Diagnostic.Code.Cost_word token.span message

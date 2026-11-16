@@ -50,12 +50,11 @@ let starts_definition source offset =
 let extract_indentation source offset =
   let text = Source.text source in
   let start = Source.line_start source offset in
-  let rec stop index =
-    if index < String.length text && (text.[index] = ' ' || text.[index] = '\t') then
-      stop (index + 1)
-    else index
+  let stop =
+    Option.value ~default:(String.length text)
+      (String.find_first_index (Fun.negate Char.Ascii.is_blank) ~start text)
   in
-  String.sub text start (stop start - start)
+  String.sub text start (stop - start)
 
 let token_starts_definition source ~first_line_break (kind : Token.kind) offset =
   first_line_break <> None

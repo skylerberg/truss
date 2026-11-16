@@ -2,7 +2,7 @@ module Local_table : Hashtbl.S with type key = Core.local
 
 type context = {
   lookups : Lookups.t;
-  bounds : Types.parameter -> Types.trait_reference list;
+  list_bounds : Types.parameter -> Types.trait_reference list;
   spans : Source.Definition_span.t array Lazy.t;
   mode_keywords : (Core.origin, Types.mode * Core.mode_keyword) Hashtbl.t;
   names : string Local_table.t;

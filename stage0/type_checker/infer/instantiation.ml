@@ -183,7 +183,7 @@ and check_type_argument state (value : Syntax.expression) : Types.argument =
   | Integer value, _ -> Types.Value (Known value)
   | _, Some { target = Value_parameter parameter; _ } -> Types.Value (Value_parameter parameter)
   | _, Some { target = Definition (Constant, path); name; _ } -> (
-      match state.lookups.interface.constant_value path with
+      match state.lookups.interface.find_constant_value path with
       | Some value -> Types.Value (Known value)
       | None ->
           Types.Type

@@ -1,6 +1,6 @@
 type t = {
-  out : string -> unit;
-  err : string -> unit;
+  print_out : string -> unit;
+  print_err : string -> unit;
   terminal : bool;
   columns : int option;
   mutable json : bool;

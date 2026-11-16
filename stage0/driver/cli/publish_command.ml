@@ -10,7 +10,7 @@ let list_unfinished snapshot database packages =
       List.concat_map
         (fun declaration ->
           let key = Resolve.Names.make_key declaration in
-          let ({ base; _ } : Resolve.Names.place) = names.place key in
+          let ({ base; _ } : Resolve.Names.place) = names.read_place key in
           List.map
             (fun ({ keyword; span; _ } : Inspect.unfinished) ->
               let line, column =
@@ -20,8 +20,8 @@ let list_unfinished snapshot database packages =
                 Source.path source,
                 line,
                 column ))
-            (Inspect.list_unfinished (names.spans key) (names.definition key)))
-        (names.declarations_in file))
+            (Inspect.list_unfinished (names.read_spans key) (names.read_definition key)))
+        (names.list_declarations_in file))
     (Command_packages.list_files snapshot packages)
 
 let list_files directory (record : Registry.Lock.t) =

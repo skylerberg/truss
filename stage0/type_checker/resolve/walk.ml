@@ -151,14 +151,15 @@ let resolve_module_names state (first : Syntax.name) (rest : Syntax.name list) =
     Error report
   in
   if
-    List.mem_assoc first.text (state.lookups.imports state.key)
+    List.mem_assoc first.text (state.lookups.list_imports state.key)
     && not (List.mem first.text (lookup_current_names state).used_imports)
   then
     (lookup_current_names state).used_imports <-
       first.text :: (lookup_current_names state).used_imports;
   begin match
     Names.lookup_module state.lookups ~from:state.key.module_
-      ~imports:(state.lookups.imports state.key) first.text
+      ~imports:(state.lookups.list_imports state.key)
+      first.text
       (List.map (fun (name : Syntax.name) -> name.text) rest)
   with
   | Found_module (module_, `Package)
@@ -206,7 +207,7 @@ let find_in_module state module_ (name : Syntax.name) ~types =
               && Names.is_visible ~from:state.key.module_ module_ item.visibility
             then Some item.name
             else None)
-          (state.lookups.entries module_)
+          (state.lookups.list_entries module_)
       in
       report_unknown state name ~expected:("in `" ^ Path.show_module module_ ^ "`") candidates;
       None
@@ -215,7 +216,7 @@ let list_type_candidates state scope =
   List.map fst (String_map.bindings scope.types)
   @ List.filter_map
       (fun (item : Names.entry) -> if Names.is_type_kind item.kind then Some item.name else None)
-      (state.lookups.entries state.key.module_)
+      (state.lookups.list_entries state.key.module_)
   @ List.map fst Prelude.types
 
 let resolve_type_name state scope ?(variants = false) (path : Syntax.path) =
@@ -387,7 +388,7 @@ and resolve_local_value state scope (name : Syntax.name) =
                 @ List.filter_map
                     (fun (item : Names.entry) ->
                       if Names.is_value_kind item.kind then Some item.name else None)
-                    (state.lookups.entries state.key.module_))
+                    (state.lookups.list_entries state.key.module_))
         end
 
 and resolve_name_expression state scope (path : Syntax.path) =

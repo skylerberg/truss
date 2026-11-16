@@ -496,7 +496,7 @@ let make_name_lookups_over database ~namespace =
       module_ = Intrinsic.module_ || List.mem module_ (list_modules database module_.package))
     ~split_module:
       (Path.split_module ~is_package:(fun name -> Option.is_some (find_package database name)))
-    ~dependency_names:(list_dependency_names database)
+    ~list_dependency_names:(list_dependency_names database)
 
 let make_stored_name_lookups database =
   make_name_lookups_over database ~namespace:(find_namespace database)
@@ -512,14 +512,14 @@ let add_recording (names : Resolve.Names.lookups) (note : Part.t -> unit) : Reso
   in
   {
     find = (fun module_ name -> noting (Entry (module_, name)) (names.find module_ name));
-    entries = (fun module_ -> noting (Entries module_) (names.entries module_));
-    imports = (fun key -> noting (Imports key) (names.imports key));
+    list_entries = (fun module_ -> noting (Entries module_) (names.list_entries module_));
+    list_imports = (fun key -> noting (Imports key) (names.list_imports key));
     module_exists =
       (fun module_ -> noting_input (Modules module_.package) (names.module_exists module_));
     split_module = (fun parts -> noting_input Packages (names.split_module parts));
-    dependency_names =
-      (fun package -> noting_input (Dependencies package) (names.dependency_names package));
-    key =
+    list_dependency_names =
+      (fun package -> noting_input (Dependencies package) (names.list_dependency_names package));
+    find_key =
       (fun path ->
         (match path with
         | Top { module_; _ } | Impl { module_; _ } | Test { module_; _ } | Law_proof { module_; _ }
@@ -528,33 +528,36 @@ let add_recording (names : Resolve.Names.lookups) (note : Part.t -> unit) : Reso
         | Method { owner; name; _ } | Member_constant { owner; name } ->
             note (Name (Members (owner, name)))
         | Derived _ | Unresolved _ -> ());
-        names.key path);
-    declaration = (fun key -> noting (Declaration key) (names.declaration key));
-    declarations =
-      (fun module_ -> noting (Module_declarations module_) (names.declarations module_));
-    declarations_in = (fun file -> noting (File_declarations file) (names.declarations_in file));
-    package_declarations =
-      (fun package -> noting (Package_declarations package) (names.package_declarations package));
-    definition = (fun key -> noting (Tree key) (names.definition key));
-    text = (fun key -> noting (Text key) (names.text key));
-    spans = (fun key -> noting (Tree key) (names.spans key));
-    recovered = (fun key -> noting (Tree key) (names.recovered key));
-    place = (fun key -> noting (Place key) (names.place key));
-    container = (fun key -> noting (Container key) (names.container key));
-    contained = (fun key -> noting (Contained key) (names.contained key));
-    members = (fun owner name -> noting (Members (owner, name)) (names.members owner name));
-    traits_declaring =
+        names.find_key path);
+    read_declaration = (fun key -> noting (Declaration key) (names.read_declaration key));
+    list_declarations =
+      (fun module_ -> noting (Module_declarations module_) (names.list_declarations module_));
+    list_declarations_in =
+      (fun file -> noting (File_declarations file) (names.list_declarations_in file));
+    list_package_declarations =
+      (fun package ->
+        noting (Package_declarations package) (names.list_package_declarations package));
+    read_definition = (fun key -> noting (Tree key) (names.read_definition key));
+    read_text = (fun key -> noting (Text key) (names.read_text key));
+    read_spans = (fun key -> noting (Tree key) (names.read_spans key));
+    list_recovered = (fun key -> noting (Tree key) (names.list_recovered key));
+    read_place = (fun key -> noting (Place key) (names.read_place key));
+    find_container = (fun key -> noting (Container key) (names.find_container key));
+    list_contained = (fun key -> noting (Contained key) (names.list_contained key));
+    list_members =
+      (fun owner name -> noting (Members (owner, name)) (names.list_members owner name));
+    list_traits_declaring =
       (fun package name ->
-        noting (Traits_declaring (package, name)) (names.traits_declaring package name));
-    impls = (fun package -> noting (Impl_index package) (names.impls package));
-    impls_of_type =
+        noting (Traits_declaring (package, name)) (names.list_traits_declaring package name));
+    list_impls = (fun package -> noting (Impl_index package) (names.list_impls package));
+    list_impls_of_type =
       (fun package type_ ->
-        noting (Impls_of_type (package, type_)) (names.impls_of_type package type_));
-    impls_of_trait =
+        noting (Impls_of_type (package, type_)) (names.list_impls_of_type package type_));
+    list_impls_of_trait =
       (fun package trait ->
-        noting (Impls_of_trait (package, trait)) (names.impls_of_trait package trait));
-    law_proofs =
-      (fun package name -> noting (Law_proofs (package, name)) (names.law_proofs package name));
+        noting (Impls_of_trait (package, trait)) (names.list_impls_of_trait package trait));
+    list_law_proofs =
+      (fun package name -> noting (Law_proofs (package, name)) (names.list_law_proofs package name));
   }
 
 let make_recording_name_lookups database note =
@@ -585,7 +588,7 @@ let make_namespace database note (package_database : package_database) =
        package_database.modules)
 
 let list_file_keys database file =
-  List.map Resolve.Names.make_key ((make_stored_name_lookups database).declarations_in file)
+  List.map Resolve.Names.make_key ((make_stored_name_lookups database).list_declarations_in file)
 
 let read_resolution_part database note section (key : Resolve.Names.key) =
   read database note (Resolved (key, section));
@@ -622,38 +625,38 @@ let make_recording_interface_lookups database note ~is_checked : Interface.Looku
   let read_elaborated_interface = read_elaborated_interface database note ~is_checked in
   {
     names;
-    resolved = read_resolution database note;
-    trait_header =
+    read_resolved = read_resolution database note;
+    find_trait_header =
       (fun path ->
-        Option.bind (names.key path) (fun key ->
+        Option.bind (names.find_key path) (fun key ->
             read database note (Trait_header key);
             Option.map require_value
               (Key_table.find_opt (find_owner database key.module_.package).trait_headers key)));
-    constant_value =
+    find_constant_value =
       (fun path ->
         read database note (Constant_value path);
         Option.bind
           (Path_table.find_opt (find_owner database (Path.locate_package path)).constant_values path)
           require_value);
-    header =
+    find_header =
       (fun key ->
         read database note (Header key);
         Option.map require_value
           (Key_table.find_opt (find_owner database key.module_.package).headers key));
-    elaborated_interface = read_elaborated_interface;
-    derived_interface =
+    read_elaborated_interface;
+    find_derived_interface =
       (fun ~type_ ~trait ->
-        Option.iter (fun key -> ignore (read_elaborated_interface key)) (names.key type_);
+        Option.iter (fun key -> ignore (read_elaborated_interface key)) (names.find_key type_);
         read database note (Derived_interface { type_; trait });
         Option.map require_value
           (Type_trait_table.find_opt
              (find_owner database (Path.locate_package type_)).derived_interfaces (type_, trait)));
-    type_facts =
+    find_type_facts =
       (fun path ->
         read database note (Type_facts path);
         Option.map require_value
           (Path_table.find_opt (find_owner database (Path.locate_package path)).type_facts path));
-    granted =
+    find_grant =
       (fun package dependency ->
         read database note (Grant (package, dependency));
         Package_table.find_opt (find_owner database package).grants dependency);
@@ -673,20 +676,20 @@ let find_type_interface lookups path =
 let list_derived_methods (names : Resolve.Names.lookups) package =
   List.concat_map
     (fun (((trait : Path.t), _), (impl : Path.t)) ->
-      match (impl, names.key trait) with
+      match (impl, names.find_key trait) with
       | Derived _, Some trait_key ->
           List.filter_map
             (fun (member : Resolve.Names.key) ->
               match member.path with
               | Method { name; receiver; _ } -> Some (Path.Method { owner = impl; name; receiver })
               | _ -> None)
-            (names.contained trait_key)
+            (names.list_contained trait_key)
       | _ -> [])
-    (names.impls package)
+    (names.list_impls package)
 
 let list_package_parts database (names : Resolve.Names.lookups) package : Part.computed list =
   let package_database = find_owner database package in
-  let declarations = names.package_declarations package in
+  let declarations = names.list_package_declarations package in
   let paths =
     List.map (fun (declaration : Resolve.Names.declaration) -> declaration.path) declarations
   in
@@ -720,7 +723,7 @@ let list_package_parts database (names : Resolve.Names.lookups) package : Part.c
       (function
         | _, Path.Derived { type_; trait } -> Some (Part.Derived_interface { type_; trait })
         | _ -> None)
-      (names.impls package)
+      (names.list_impls package)
   @ List.concat_map
       (fun path -> [ Part.Derived_form path; Generated_mir path ])
       (list_derived_methods names package)
@@ -729,7 +732,7 @@ let list_package_parts database (names : Resolve.Names.lookups) package : Part.c
       (List.sort_uniq Path.compare paths)
   @ List.map
       (fun dependency -> Part.Grant (package, dependency))
-      (List.sort_uniq Path.compare_package (names.dependency_names package))
+      (List.sort_uniq Path.compare_package (names.list_dependency_names package))
   @ List.map (fun file -> Part.Import_check file) package_database.files
   @ List.map
       (fun check -> Part.Package_check (package, check))
@@ -743,7 +746,8 @@ let read_checked_form database note key = (read_checked database note key).form
 let make_recording_infer_lookups database note : Infer.Lookups.t =
   {
     interface = make_recording_interface_lookups database note ~is_checked:true;
-    contract = read_part database note (fun key -> Part.Contract key) (fun owner -> owner.contracts);
+    read_contract =
+      read_part database note (fun key -> Part.Contract key) (fun owner -> owner.contracts);
   }
 
 let type_check run lookups key =
@@ -764,11 +768,11 @@ let read_body_mir database note =
 
 let make_recording_mir_lookups database note : Mir.lookups =
   {
-    form_origin = make_form_origin database note;
-    body_part = read_body_mir database note;
-    contract_part =
+    find_form_origin = make_form_origin database note;
+    read_body_part = read_body_mir database note;
+    read_contract_part =
       read_part database note (fun key -> Part.Contract_mir key) (fun owner -> owner.contract_parts);
-    generated_parts =
+    read_generated_parts =
       (fun path ->
         read database note (Generated_mir path);
         match
@@ -795,28 +799,28 @@ let read_mir_call_edges database note path =
 
 let make_recording_patterns_lookups database note : Patterns.Lookups.t =
   {
-    core = read_checked_form database note;
+    read_core = read_checked_form database note;
     interface = make_recording_interface_lookups database note ~is_checked:true;
   }
 
 let make_recording_usage_lookups database note : Usage.Lookups.t =
   {
     names = make_recording_name_lookups database note;
-    resolved = read_whole_resolution database note;
-    tables = (fun key -> (read_checked database note key).tables);
+    read_resolved = read_whole_resolution database note;
+    read_tables = (fun key -> (read_checked database note key).tables);
   }
 
 let make_recording_ownership_lookups database note : Ownership.Lookups.t =
   {
-    graph = (fun key -> Mir.find_graph (read_body_mir database note key));
+    find_graph = (fun key -> Mir.find_graph (read_body_mir database note key));
     interface = make_recording_interface_lookups database note ~is_checked:true;
   }
 
 let make_recording_package_checks_lookups database note : Package_checks.Lookups.t =
   {
     interface = make_recording_interface_lookups database note ~is_checked:true;
-    core = read_checked_form database note;
-    used_packages = (fun key -> (read_checked database note key).used_packages);
+    read_core = read_checked_form database note;
+    list_used_packages = (fun key -> (read_checked database note key).used_packages);
   }
 
 let list_used_imports database note file =
@@ -866,16 +870,17 @@ let read_recursion_group database note path =
 
 let make_recording_proof_lookups database note : Prover.Lookups.t =
   {
-    source =
+    read_source =
       (fun file ->
         note (Part.Input (Source file));
         find_source database file);
     interface = make_recording_interface_lookups database note ~is_checked:true;
     mir = make_recording_mir_lookups database note;
-    patterns = read_part database note (fun key -> Part.Patterns key) (fun owner -> owner.patterns);
-    must_be_disjoint =
+    read_patterns =
+      read_part database note (fun key -> Part.Patterns key) (fun owner -> owner.patterns);
+    list_must_be_disjoint =
       read_part database note (fun key -> Part.Ownership key) (fun owner -> owner.ownership);
-    recursion_group = read_recursion_group database note;
+    list_recursion_group = read_recursion_group database note;
   }
 
 let make_recording_lowering_lookups database note : Compile.Lookups.t =
@@ -935,7 +940,7 @@ type stored = {
   is_failed : bool;
   remove : unit -> unit;
   is_equal_in : t -> bool;
-  saved : unit -> string option;
+  marshal : unit -> string option;
   restore : string -> unit;
 }
 
@@ -956,7 +961,7 @@ let make_stored database (part : Part.stored) =
       is_failed = Option.fold ~none:false ~some:is_failed (access current).stored;
       remove = (fun () -> (access current).remove ());
       is_equal_in = (fun other -> compare (access (owner other)).stored (access current).stored = 0);
-      saved = (fun () -> Option.map marshal (access current).stored);
+      marshal = (fun () -> Option.map marshal (access current).stored);
       restore = (fun bytes -> (access current).replace (Marshal.from_string bytes 0));
     }
   in
@@ -980,7 +985,7 @@ let make_stored database (part : Part.stored) =
             is_equal_in =
               (fun other ->
                 compare (find_owner other package).namespace package_database.namespace = 0);
-            saved = (fun () -> None);
+            marshal = (fun () -> None);
             restore = ignore;
           }
       | Resolved (key, section) ->
@@ -1061,7 +1066,7 @@ let make_stored database (part : Part.stored) =
             is_failed = false;
             remove = (fun () -> Call_graph.remove_successors (find_call_graph database viewer) path);
             is_equal_in = (fun other -> call_edges other = call_edges database);
-            saved = (fun () -> Option.map marshal (call_edges database));
+            marshal = (fun () -> Option.map marshal (call_edges database));
             restore =
               (fun bytes ->
                 ignore
@@ -1234,7 +1239,7 @@ let find_entry_point (names : Resolve.Names.lookups) package =
       | Top { name = "main"; _ } when declaration.kind = Function && declaration.ordinal = 0 ->
           Some declaration.path
       | _ -> None)
-    (names.declarations { package; modules = [] })
+    (names.list_declarations { package; modules = [] })
 
 let own_lowering_roots database (names : Resolve.Names.lookups) package =
   if Option.is_some database.lowering then
@@ -1244,7 +1249,7 @@ let own_lowering_roots database (names : Resolve.Names.lookups) package =
            (List.filter_map
               (fun (declaration : Resolve.Names.declaration) ->
                 match declaration.path with Test _ -> Some declaration.path | _ -> None)
-              (names.package_declarations package))
+              (names.list_package_declarations package))
          ~mains:(Option.to_list (find_entry_point names package)))
 
 let holds_position database (part : Part.computed) =
@@ -1406,7 +1411,7 @@ let compute_part database (part : Part.computed) =
       into (Key_table.make_slot package_database.trait_headers key) (fun note ->
           Some
             (match
-               ( (make_recording_name_lookups database note).definition key,
+               ( (make_recording_name_lookups database note).read_definition key,
                  read_resolution_part database note Interface key )
              with
             | definition, Value resolved -> (
@@ -2087,7 +2092,8 @@ let is_saved_part database (part : Part.stored) =
 
 let find_saved_value database (entry : Entry.t) =
   match entry with
-  | Value part -> if is_saved_part database part then (make_stored database part).saved () else None
+  | Value part ->
+      if is_saved_part database part then (make_stored database part).marshal () else None
   | Reads part ->
       if is_saved_part database (Computed part) then
         Option.map marshal (Computed_table.find_opt database.reads part)
@@ -2256,13 +2262,13 @@ let list_package_outcomes database package =
           | Some (Failed _ | Blocked) -> None
           | None -> report_uncomputed (Package_check (package, check)))
         (Package_checks.list_checks
-           ((make_stored_name_lookups database).package_declarations package))
+           ((make_stored_name_lookups database).list_package_declarations package))
 
 let list_checker_diagnostics database (file : Path.file) checker =
   let names = make_stored_name_lookups database in
   let package_database = find_owner database file.module_.package in
   let placed key diagnostics =
-    let ({ file = home; base } : Resolve.Names.place) = names.place key in
+    let ({ file = home; base } : Resolve.Names.place) = names.read_place key in
     if home = file then
       List.map (Diagnostic.map_spans (Source.Definition_span.to_file ~base)) diagnostics
     else []
@@ -2318,7 +2324,7 @@ let list_manifest_problems database package =
       | Some (grant : Interface.Environment.grant) ->
           List.map (fun name -> Not_a_capability { dependency; name }) grant.unknown
       | None -> report_uncomputed (Grant (package, dependency)))
-    ((make_stored_name_lookups database).dependency_names package)
+    ((make_stored_name_lookups database).list_dependency_names package)
   @ List.concat_map
       (function
         | Package_checks.Unused_dependencies dependencies ->
@@ -2340,7 +2346,7 @@ let list_code_packages database package =
         | None -> report_uncomputed (Checked_body key))
   in
   let used =
-    List.map read_used ((make_stored_name_lookups database).package_declarations package)
+    List.map read_used ((make_stored_name_lookups database).list_package_declarations package)
   in
   if List.mem None used then None
   else Some (List.sort_uniq Path.compare_package (List.concat_map Option.get used))
@@ -2381,11 +2387,11 @@ let read_proof proofs (key : Resolve.Names.key) =
 
 let list_holes proofs path =
   let names = make_stored_name_lookups proofs.database in
-  match Option.bind (names.key path) (read_proof proofs) with
+  match Option.bind (names.find_key path) (read_proof proofs) with
   | Some (Value (Obligations { holes; _ })) ->
       List.map
         (fun ((home : Resolve.Names.key), location) ->
-          let ({ file; base } : Resolve.Names.place) = names.place home in
+          let ({ file; base } : Resolve.Names.place) = names.read_place home in
           let span = Prover.resolve_location names home location in
           (file, (Source.Definition_span.to_file ~base span).start))
         holes
@@ -2516,10 +2522,10 @@ let make_lowering_requests database packages : Compile.requests =
   let interface = make_interface_lookups database packages in
   {
     settings = find_lowering_settings database;
-    source = find_source database;
+    read_source = find_source database;
     interface;
     mir = make_recording_mir_lookups database ignore;
-    lowered =
+    find_lowered =
       (fun key ->
         request database packages ~through:Lowered_code ~needs:(fun key -> [ Lowered key ]) [ key ];
         match Instance_table.find_opt database.lowered key with
@@ -2528,11 +2534,11 @@ let make_lowering_requests database packages : Compile.requests =
             Some lowered
         | Some (Failed _ | Blocked) -> None
         | None -> report_uncomputed (Lowering (Lowered key)));
-    test_key =
+    read_test_key =
       (fun key ->
         request database packages ~through:Test_keys ~needs:(fun key -> [ Test_key key ]) [ key ];
         read_requested database.test_keys (Test_key key) key);
-    reached_todo_types =
+    list_reached_todo_types =
       (fun key ->
         request database packages ~through:Test_keys ~needs:(fun key -> [ Test_key key ]) [ key ];
         list_reached_todo_types database key);

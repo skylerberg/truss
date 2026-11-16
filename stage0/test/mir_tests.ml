@@ -2,8 +2,8 @@ let mir_parts packages package =
   Database.For_testing.make_mir_lookups (Support.database packages) package
 
 let app_parts packages = mir_parts packages (Support.module_of "app::main").package
-let graph_of (parts : Mir.lookups) key = Mir.find_graph (parts.body_part key)
-let code_of (parts : Mir.lookups) key = Mir.find_code (parts.body_part key)
+let graph_of (parts : Mir.lookups) key = Mir.find_graph (parts.read_body_part key)
+let code_of (parts : Mir.lookups) key = Mir.find_code (parts.read_body_part key)
 
 let place_locals (place : Mir.place) =
   match place.root with Local local -> [ local ] | Constant _ | Literal _ -> []
@@ -429,7 +429,7 @@ let () =
                   validate definition mir.body;
                   Array.iter (validate definition) mir.lambdas
               | None -> ())
-            ((Support.names packages file.module_.package).declarations_in file)))
+            ((Support.names packages file.module_.package).list_declarations_in file)))
     Standard_library.files;
   Harness.test "the standard library has MIR" (fun () ->
       if !built < 500 then Harness.fail "only %d of its definitions have MIR" !built)
@@ -878,7 +878,7 @@ let () =
       let default_mir =
         match
           Option.bind
-            ((Support.names packages (Path.locate_package default_method)).key default_method)
+            ((Support.names packages (Path.locate_package default_method)).find_key default_method)
             (graph_of parts)
         with
         | Some mir -> mir
@@ -1024,7 +1024,7 @@ let () =
       let module_ = Support.module_of "app::main" in
       let g : Path.t = Top { module_; name = "g" } in
       let key =
-        match (Support.names packages (Path.locate_package g)).key g with
+        match (Support.names packages (Path.locate_package g)).find_key g with
         | Some key -> key
         | None -> failwith "the program has no g"
       in

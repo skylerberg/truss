@@ -1,5 +1,5 @@
 type t = {
   names : Resolve.Names.lookups;
-  resolved : Resolve.Names.key -> Resolve.resolved;
-  tables : Resolve.Names.key -> Infer.tables;
+  read_resolved : Resolve.Names.key -> Resolve.resolved;
+  read_tables : Resolve.Names.key -> Infer.tables;
 }

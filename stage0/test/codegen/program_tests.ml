@@ -625,7 +625,7 @@ let () =
                           Some (Instance.Code { path = declaration.path; type_arguments = [] })
                       | _ -> None)
                     ((Database.make_name_lookups checked [ Codegen_support.example.package ])
-                       .declarations Codegen_support.example)
+                       .list_declarations Codegen_support.example)
                 in
                 let database, compile = Codegen_support.load ~roots:functions text in
                 List.iter (fun key -> ignore (Compile.For_testing.compiled compile key)) functions;

@@ -9,9 +9,9 @@ module Package_table = Hashtbl.Make (Structural_key.Make (struct
 end))
 
 type files = {
-  tree : root -> string list option;
-  text : root -> string -> string option;
-  unavailable : string -> string option;
+  find_tree : root -> string list option;
+  find_text : root -> string -> string option;
+  find_unavailable_reason : string -> string option;
 }
 
 let lock_file = "truss.lock"
@@ -20,7 +20,7 @@ let make_manifest_path directory =
   if directory = "" then "truss.toml" else directory ^ "/truss.toml"
 
 let compute_parent path =
-  match String.rindex_opt path '/' with Some separator -> String.sub path 0 separator | None -> ""
+  match String.split_last ~sep:"/" path with Some (parent, _) -> parent | None -> ""
 
 let split_segments path = if path = "" then [] else String.split_on_char '/' path
 
@@ -67,7 +67,7 @@ type layout = {
   time_limit_ms : int;
 }
 
-let list_files (files : files) root = Option.value (files.tree root) ~default:[]
+let list_files (files : files) root = Option.value (files.find_tree root) ~default:[]
 
 let report_manifest_problem problems directory format =
   Printf.ksprintf
@@ -83,7 +83,7 @@ let lay_out (files_in : files) root =
     List.filter_map
       (fun path ->
         if Filename.basename path <> "truss.toml" then None
-        else Option.map (fun text -> (compute_parent path, text)) (files_in.text root path))
+        else Option.map (fun text -> (compute_parent path, text)) (files_in.find_text root path))
       files
   in
   let directories = Hashtbl.create 8 in
@@ -178,7 +178,7 @@ let select_packages (files : files) (own : layout) =
       (fun message -> problems := { file = lock_file; line = None; message } :: !problems)
       format
   in
-  let written_text = files.text Project lock_file in
+  let written_text = files.find_text Project lock_file in
   let written =
     match Registry.Lock.parse (Option.value ~default:"" written_text) with
     | entries -> Some entries
@@ -189,16 +189,16 @@ let select_packages (files : files) (own : layout) =
   let missing = ref [] and failed = ref [] in
   let load name version ~hash =
     let root = Registry hash in
-    match files.tree root with
+    match files.find_tree root with
     | None -> (
-        match files.unavailable hash with
+        match files.find_unavailable_reason hash with
         | Some reason ->
             failed := hash :: !failed;
             Error reason
         | None ->
             missing := (name, version, hash) :: !missing;
             Error "its files are not fetched yet")
-    | Some _ -> Registry.Selection.read_manifest_and_record ~read:(files.text root) name
+    | Some _ -> Registry.Selection.read_manifest_and_record ~read:(files.find_text root) name
   in
   let selected, selection_problems =
     Registry.Selection.choose
@@ -287,7 +287,7 @@ let make_package (files : files) ~(layout : root -> layout) { root; directory; m
       List.filter_map
         (fun (source : source_file) ->
           if source.directory = directory then
-            Option.map (fun text -> (source.file, text)) (files.text root source.path)
+            Option.map (fun text -> (source.file, text)) (files.find_text root source.path)
           else None)
         (layout root).files;
   }

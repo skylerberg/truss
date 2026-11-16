@@ -9,19 +9,12 @@ let fail format =
     format
 
 let records name = Ucd.records data_directory name
-let code_point = Ucd.code_point
 
 let each_in_range text action =
-  match String.index_opt text '.' with
-  | Some index ->
-      let first = code_point (String.sub text 0 index) in
-      let last = code_point (String.sub text (index + 2) (String.length text - index - 2)) in
-      for value = first to last do
-        action value
-      done
-  | None -> action (code_point text)
-
-let is_scalar value = value < 0xD800 || (value > 0xDFFF && value <= 0x10FFFF)
+  let first, last = Ucd.code_point_range text in
+  for value = first to last do
+    action value
+  done
 
 let check_property ~file ~name ~listed property =
   let expected = Array.make 0x110000 false in
@@ -32,7 +25,7 @@ let check_property ~file ~name ~listed property =
       | _ -> ())
     (records file);
   for value = 0 to 0x10FFFF do
-    if is_scalar value && property value <> expected.(value) then
+    if Uchar.is_valid value && property value <> expected.(value) then
       fail "%s: U+%04X: expected %b" name value expected.(value)
   done
 
@@ -60,7 +53,7 @@ let () =
   let bidi = listed "PropList.txt" "Bidi_Control" in
   let control = listed "DerivedGeneralCategory.txt" "Cc" in
   for value = 0 to 0x10FFFF do
-    if is_scalar value then begin
+    if Uchar.is_valid value then begin
       let expected =
         bidi.(value)
         || (control.(value) && value <> 0x09 && value <> 0x0A && value <> 0x0D)

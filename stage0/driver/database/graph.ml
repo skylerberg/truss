@@ -163,13 +163,13 @@ module Make (Node : Strongly_connected.Node) = struct
   type search = {
     visited : (int, component) Hashtbl.t;
     mutable frontier : component list;
-    next : t -> Node.t -> Node.t list;
+    list_next : t -> Node.t -> Node.t list;
   }
 
   let search next start =
     let visited = Hashtbl.create 16 in
     Hashtbl.replace visited start.id start;
-    { visited; frontier = [ start ]; next }
+    { visited; frontier = [ start ]; list_next = next }
 
   let step graph ?(within = fun _ -> true) search =
     match search.frontier with
@@ -184,7 +184,7 @@ module Make (Node : Strongly_connected.Node) = struct
                 neighbor :: frontier
               end)
             rest
-            (neighbors graph search.next component);
+            (neighbors graph search.list_next component);
         true
 
   let reached graph next ~within start =

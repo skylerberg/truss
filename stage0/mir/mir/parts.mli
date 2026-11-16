@@ -10,10 +10,10 @@ type contract_part = {
 }
 
 type lookups = {
-  form_origin : Path.t -> (Infer.form_origin * Types.substitution) option;
-  body_part : Resolve.Names.key -> body_part;
-  contract_part : Resolve.Names.key -> contract_part;
-  generated_parts : Path.t -> body_part * contract_part;
+  find_form_origin : Path.t -> (Infer.form_origin * Types.substitution) option;
+  read_body_part : Resolve.Names.key -> body_part;
+  read_contract_part : Resolve.Names.key -> contract_part;
+  read_generated_parts : Path.t -> body_part * contract_part;
 }
 
 type 'form sourced = { source : Resolve.Names.key; form : 'form }

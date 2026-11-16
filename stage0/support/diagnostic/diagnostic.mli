@@ -279,7 +279,6 @@ val fix : string -> 'span edit list -> 'span fix
 val replace : 'span -> string -> 'span edit
 val insert : 'span -> string -> 'span edit
 val delete : 'span -> 'span edit
-val edit_distance : string -> string -> int
 val find_closest : string -> string list -> string option
 
 type reported

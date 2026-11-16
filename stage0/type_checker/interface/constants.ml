@@ -33,7 +33,8 @@ and evaluate_path (lookups : Lookups.t) ~visiting path =
   else
     match Resolve.Names.find_definition lookups.names path with
     | Some (key, { kind = Constant { value; _ }; _ }) ->
-        evaluate_expression lookups ~visiting:(path :: visiting) (lookups.resolved Body key) value
+        evaluate_expression lookups ~visiting:(path :: visiting) (lookups.read_resolved Body key)
+          value
     | _ -> None
 
 let evaluate_constant lookups path = evaluate_path lookups ~visiting:[] path

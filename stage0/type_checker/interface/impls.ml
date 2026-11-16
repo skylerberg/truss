@@ -17,7 +17,7 @@ let find_declaring_capability_trait lookups ~base (trait : Types.trait_reference
 let find_head = function Types.Named { path; _ } -> Some path | _ -> None
 
 let list_impls_for_type (lookups : Lookups.t) (type_ : Path.t) package =
-  lookups.names.impls_of_type package type_
+  lookups.names.list_impls_of_type package type_
 
 let list_impls_of_trait_for_type lookups ~trait ~type_ package =
   List.filter_map
@@ -25,7 +25,7 @@ let list_impls_of_trait_for_type lookups ~trait ~type_ package =
     (list_impls_for_type lookups type_ package)
 
 let list_impls_of_trait (lookups : Lookups.t) ~trait package =
-  List.sort_uniq Path.compare (lookups.names.impls_of_trait package trait)
+  List.sort_uniq Path.compare (lookups.names.list_impls_of_trait package trait)
 
 let derive_interface lookups ~type_ ~trait =
   match

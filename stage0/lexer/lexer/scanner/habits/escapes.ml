@@ -7,7 +7,6 @@ let scan (cursor : Cursor.t) buffer =
     in
     if all 0 then Some (int_of_string ("0x" ^ String.sub cursor.text position count)) else None
   in
-  let is_scalar value = value <= 0x10FFFF && not (value >= 0xD800 && value <= 0xDFFF) in
   let for_character stop value =
     let replacement = Printf.sprintf "\\u{%X}" value in
     Cursor.report cursor ~code:Invalid_escape
@@ -28,7 +27,7 @@ let scan (cursor : Cursor.t) buffer =
   in
   let hex count =
     match hex_value (start + 2) count with
-    | Some value when is_scalar value -> for_character (start + 2 + count) value
+    | Some value when Uchar.is_valid value -> for_character (start + 2 + count) value
     | _ -> false
   in
   if Cursor.is_at_end cursor (start + 1) then false

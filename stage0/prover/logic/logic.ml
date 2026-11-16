@@ -509,7 +509,7 @@ type numbering = {
   declared : declaration Symbol_table.t;
   datatypes : (symbol * (symbol * sort) list) list Sort_table.t;
   member_of : (sort * string) Symbol_table.t;
-  triggering : symbol -> bool;
+  is_triggering : symbol -> bool;
   symbol_names : string Symbol_table.t;
   symbol_order : symbol Dynarray.t;
   sort_names : string Sort_table.t;
@@ -618,7 +618,7 @@ and render_quantifier numbering bound buffer word variables trigger body =
     named;
   add ") ";
   let bound = List.map (fun (name, canonical, _) -> (name, canonical)) named @ bound in
-  match choose_triggers ~triggering:numbering.triggering variables trigger body with
+  match choose_triggers ~triggering:numbering.is_triggering variables trigger body with
   | [] ->
       print numbering bound buffer body;
       add ")"
@@ -663,7 +663,7 @@ let number_symbols query =
     declared;
     datatypes;
     member_of;
-    triggering = make_triggering_test query.declarations;
+    is_triggering = make_triggering_test query.declarations;
     symbol_names = Symbol_table.create 64;
     symbol_order = Dynarray.create ();
     sort_names = Sort_table.create 8;

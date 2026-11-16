@@ -84,9 +84,9 @@ let runnable database =
               (fun (requirement : Mir.requirement) ->
                 "("
                 ^ Prover.Facts.quote_span
-                    (lookups.interface.names.text key)
+                    (lookups.interface.names.read_text key)
                     (Source.Definition_span.locate
-                       (lookups.interface.names.spans key)
+                       (lookups.interface.names.read_spans key)
                        requirement.clause.origin)
                 ^ ")")
               requires
@@ -98,10 +98,10 @@ let runnable database =
               Some { path = declaration.path; key; signature; admits; ranges = ranges_written }
           | _ -> None)
       | _ -> None)
-    (lookups.interface.names.declarations example)
+    (lookups.interface.names.list_declarations example)
 
 let proven (names : Resolve.Names.lookups) key states =
-  let base = (names.place key).base and text = names.text key in
+  let base = (names.read_place key).base and text = names.read_text key in
   List.for_all
     (fun (state : Source.span Prover.state) ->
       state.span.stop <= base
@@ -197,7 +197,7 @@ let run_mutant ~samples text =
 let mutants text =
   let tokens, _ = Lexer.lex (Source.create ~path:"seed.truss" text) in
   let replace (span : Source.span) by =
-    String.sub text 0 span.start ^ by ^ String.sub text span.stop (String.length text - span.stop)
+    String.sub text 0 span.start ^ by ^ String.drop_first span.stop text
   in
   Array.to_list tokens
   |> List.concat_map (fun (token : Token.t) ->
@@ -272,7 +272,7 @@ let () =
   let all = List.concat_map mutants seeds in
   let chosen =
     List.map snd (List.sort compare (List.map (fun mutant -> (Random.bits (), mutant)) all))
-    |> List.filteri (fun index _ -> index < !count)
+    |> List.take !count
   in
   Printf.printf "%d seeds, %d mutants, trying %d\n%!" (List.length seeds) (List.length all)
     (List.length chosen);

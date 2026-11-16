@@ -26,14 +26,14 @@ let check lookups (key : Resolve.Names.key) ~checks_body =
         Error
           [
             Diagnostic.make ~code:(Types Recursion_limit)
-              (names.spans key).((names.definition key).id)
+              (names.read_spans key).((names.read_definition key).id)
               message;
           ])
 
 let check_contract lookups key = check lookups key ~checks_body:false
 
 let check_body (lookups : Lookups.t) key =
-  ignore (lookups.contract key);
+  ignore (lookups.read_contract key);
   check lookups key ~checks_body:true
 
 let derive_form = Derived.derive_form
@@ -49,16 +49,16 @@ type form_origin =
   | Inherited of Resolve.Names.key
 
 let find_form_origin (interface : Interface.Lookups.t) ~is_derived (path : Path.t) =
-  match (interface.names.key path, path) with
+  match (interface.names.find_key path, path) with
   | Some key, _ -> Some (Written key, [])
   | None, Method { owner = Derived { type_; _ }; _ } when is_derived path ->
-      Option.map (fun type_key -> (Derived type_key, [])) (interface.names.key type_)
+      Option.map (fun type_key -> (Derived type_key, [])) (interface.names.find_key type_)
   | None, Method { owner = (Impl _ | Derived _) as owner; name; receiver } ->
       Option.bind (Interface.Definition.read_impl_interface interface owner)
         (fun (impl : Types.impl_interface) ->
           Option.bind (Interface.Impls.make_impl_substitution interface owner) (fun substitution ->
               Option.map
                 (fun key -> (Inherited key, substitution))
-                (interface.names.key
+                (interface.names.find_key
                    (Path.Method { owner = impl.implements.trait; name; receiver }))))
   | None, _ -> None

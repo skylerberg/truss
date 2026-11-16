@@ -373,8 +373,10 @@ let show_operation = function
       ^ Libc.show_function function_
   | Libc_number number ->
       let name = Libc.show_number number in
-      let from = if String.starts_with ~prefix:"_" name then 1 else 0 in
-      "libc_" ^ String.lowercase_ascii (String.sub name from (String.length name - from))
+      let unprefixed =
+        if String.starts_with ~prefix:"_" name then String.drop_first 1 name else name
+      in
+      "libc_" ^ String.lowercase_ascii unprefixed
 
 let make_operation_path operation = Path.Top { module_; name = show_operation operation }
 

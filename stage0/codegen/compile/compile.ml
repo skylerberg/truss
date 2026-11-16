@@ -9,12 +9,12 @@ type lowered =
 
 type requests = {
   settings : Lookups.settings;
-  source : Path.file -> Source.t;
+  read_source : Path.file -> Source.t;
   interface : Interface.Lookups.t;
   mir : Mir.lookups;
-  lowered : Instance.key -> (lowered, unsupported) result option;
-  test_key : Instance.key -> (string, unsupported) result;
-  reached_todo_types : Instance.key -> Path.t list;
+  find_lowered : Instance.key -> (lowered, unsupported) result option;
+  read_test_key : Instance.key -> (string, unsupported) result;
+  list_reached_todo_types : Instance.key -> Path.t list;
 }
 
 exception Todo_type = Monomorphic.Todo_type
@@ -50,7 +50,7 @@ let make (context : Lower.context) (key : Instance.key) : lowered =
 let lower (settings : Lookups.settings) (lookups : Lookups.t) key =
   let env =
     Memory_layout.create settings.system
-      ~shape_of:(Monomorphic.compute_shape (Lower.make_monomorphic_context lookups.interface))
+      ~compute_shape:(Monomorphic.compute_shape (Lower.make_monomorphic_context lookups.interface))
   in
   match
     Compiler_bug.run_while_doing ~stage:"Compile"
@@ -225,8 +225,8 @@ type t = {
   toolchain : Toolchain.t;
   cache : Build.cache;
   settings : Build.settings;
-  file_name : Path.file -> string;
-  worked_on : Path.package -> bool;
+  show_file : Path.file -> string;
+  is_worked_on : Path.package -> bool;
   results : results option;
   evaluation_time_limit_ms : int;
   programs : string;
@@ -235,16 +235,16 @@ type t = {
 
 let make_env compiler =
   Memory_layout.create compiler.requests.settings.system
-    ~shape_of:(Monomorphic.compute_shape compiler.monomorphic)
+    ~compute_shape:(Monomorphic.compute_shape compiler.monomorphic)
 
 let read_lowered compiler key =
-  match compiler.requests.lowered key with
+  match compiler.requests.find_lowered key with
   | Some (Ok lowered) -> lowered
   | Some (Error unsupported) -> raise (Lower.Unsupported unsupported)
   | None -> raise_bug "%s is requested from code with errors" (Instance.to_string key)
 
 let read_test_key compiler root =
-  match compiler.requests.test_key root with
+  match compiler.requests.read_test_key root with
   | Ok test_key -> test_key
   | Error unsupported -> raise (Lower.Unsupported unsupported)
 
@@ -272,10 +272,12 @@ let make_result_key compiler root =
 
 let locate_offset compiler (definition : Path.t) offset : Emit_c.position =
   let names = compiler.requests.interface.names in
-  match Option.map names.place (names.key definition) with
+  match Option.map names.read_place (names.find_key definition) with
   | Some { file; base } ->
-      let line, column = Source.compute_position (compiler.requests.source file) (base + offset) in
-      { file = compiler.file_name file; line; column }
+      let line, column =
+        Source.compute_position (compiler.requests.read_source file) (base + offset)
+      in
+      { file = compiler.show_file file; line; column }
   | None -> raise_bug "%s has no place in a file" (Path.show definition)
 
 let locate_site compiler (site : Lowered.site) = locate_offset compiler site.definition site.offset
@@ -285,20 +287,22 @@ let show_position (position : Emit_c.position) =
 
 let locate_todo_type compiler (path : Path.t) =
   let names = compiler.requests.interface.names in
-  match Option.map (fun key -> (names.definition key, names.spans key)) (names.key path) with
+  match
+    Option.map (fun key -> (names.read_definition key, names.read_spans key)) (names.find_key path)
+  with
   | Some ({ kind = Type_definition { name; _ }; _ }, spans) ->
       locate_offset compiler path spans.(name.id).start
   | Some _ | None ->
       raise_bug "%s is reached as a type defined as todo, and has no definition" (Path.show path)
 
-let list_small_callees ~find ~worked_on fragment =
+let list_small_callees ~find ~is_worked_on fragment =
   match Emit_c.key fragment with
   | Code _ ->
       List.filter_map
         (fun (key : Instance.key) ->
           match (key, find key) with
           | Code { path = callee; _ }, Some copy
-            when (not (worked_on (Path.locate_package callee))) && Emit_c.is_small copy ->
+            when (not (is_worked_on (Path.locate_package callee))) && Emit_c.is_small copy ->
               Some copy
           | _ -> None)
         (Emit_c.called fragment)
@@ -330,7 +334,7 @@ let rec build ?progress ?tests ?(supplied = []) compiler ~roots ~startup ~output
   let find key = Instance_table.find_opt units_by_key key in
   let copied =
     match compiler.settings.build with
-    | Development -> list_small_callees ~find ~worked_on:compiler.worked_on
+    | Development -> list_small_callees ~find ~is_worked_on:compiler.is_worked_on
     | Release -> fun _ -> []
   in
   match
@@ -472,7 +476,7 @@ let rec drain reader =
       let line = String.sub text 0 stop in
       let consume count =
         Buffer.clear reader.pending;
-        Buffer.add_string reader.pending (String.sub text count (String.length text - count))
+        Buffer.add_string reader.pending (String.drop_first count text)
       in
       match String.split_on_char ' ' line with
       | [ (("message" | "echo") as label); count ] ->
@@ -581,7 +585,7 @@ let run_tests ?(rerun = false) ?(progress = ignore) compiler ~time_limit_ms test
   let known =
     List.mapi
       (fun index (test, root) ->
-        match compiler.requests.reached_todo_types root with
+        match compiler.requests.list_reached_todo_types root with
         | _ :: _ as todo_types ->
             (index, root, None, Some (make_incomplete_record compiler todo_types))
         | [] ->
@@ -670,7 +674,7 @@ let make_root_key (root : Path.t) : Instance.key =
   match root with Test _ -> make_test_root root | _ -> Generated (Program_main root)
 
 let rec read_executed_fragment compiler key =
-  match compiler.requests.lowered key with
+  match compiler.requests.find_lowered key with
   | Some (Ok (Compiled fragment | Folded (_, fragment))) -> Some fragment
   | Some (Ok (Evaluate (path, _))) -> read_executed_fragment compiler (Instance.Evaluator path)
   | Some (Error _) | None -> None
@@ -706,7 +710,7 @@ let list_unshippable compiler ~main =
         (fun path ->
           let ({ file; line; column } : Emit_c.position) = locate_todo_type compiler path in
           { failure = `Todo; file; line; column; way = [ main; path ] })
-        (compiler.requests.reached_todo_types (make_root_key main))
+        (compiler.requests.list_reached_todo_types (make_root_key main))
       @ List.concat_map
           (fun (compiled, keys) ->
             List.map
@@ -741,7 +745,7 @@ let list_unshippable compiler ~main =
 
 let make_program_root compiler ~main =
   let root = make_root_key main in
-  match compiler.requests.reached_todo_types root with
+  match compiler.requests.list_reached_todo_types root with
   | [] -> root
   | todo_types ->
       raise_cannot_build "%s"
@@ -770,7 +774,7 @@ let build_program compiler ~main ~output =
     ~output
 
 let list_reached_todo_types compiler root =
-  compiler.requests.reached_todo_types (make_root_key root)
+  compiler.requests.list_reached_todo_types (make_root_key root)
 
 let run_template_check compiler ~from_template ~literals ~clauses =
   let ran =
@@ -800,18 +804,18 @@ let evaluate_call compiler ~function_ ~arguments =
           Encoding.decode (make_env compiler) ty encoded)
   | _ -> raise_bug "%s has no result to evaluate" (Path.show function_)
 
-let create ?(file_name = Path.show_file) ?results ?(evaluation_time_limit_ms = 10_000)
+let create ?(show_file = Path.show_file) ?results ?(evaluation_time_limit_ms = 10_000)
     ?(programs = Filename.get_temp_dir_name ())
-    ?(worked_on = fun package -> package <> Path.standard_package) requests toolchain cache settings
-    =
+    ?(is_worked_on = fun package -> package <> Path.standard_package) requests toolchain cache
+    settings =
   {
     requests;
     monomorphic = Lower.make_monomorphic_context requests.interface;
     toolchain;
     cache;
     settings;
-    file_name;
-    worked_on;
+    show_file;
+    is_worked_on;
     results;
     evaluation_time_limit_ms;
     programs;

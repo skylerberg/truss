@@ -12,7 +12,7 @@ type context = {
 
 let make_monomorphic_context (interface : Interface.Lookups.t) : Monomorphic.context =
   {
-    type_interface = Interface.Definition.read_type_interface interface;
+    find_type_interface = Interface.Definition.read_type_interface interface;
     normalize = Interface.Impls.normalize interface ~bounds:Interface.Impls.no_bounds;
     normalize_capabilities =
       Interface.Impls.normalize_capabilities interface ~bounds:Interface.Impls.no_bounds;
@@ -60,8 +60,8 @@ let make_unwritten_code ~definition ~substitution ~result =
 
 let read_written context key =
   {
-    spans = context.lookups.interface.names.spans key;
-    text = context.lookups.interface.names.text key;
+    spans = context.lookups.interface.names.read_spans key;
+    text = context.lookups.interface.names.read_text key;
   }
 
 let bind = Monomorphic.make_substitution
@@ -127,7 +127,7 @@ let make_code context (path : Path.t) type_arguments : code =
         | Method { owner = (Impl _ | Derived _) as impl; _ } -> Some impl
         | _ -> None
       in
-      match (context.lookups.mir.form_origin path, path) with
+      match (context.lookups.mir.find_form_origin path, path) with
       | Some (Written key, _), _ -> function_code ~enclosing_impl key ~interface ~substitution
       | Some (Derived type_key, _), _ ->
           {
@@ -139,7 +139,7 @@ let make_code context (path : Path.t) type_arguments : code =
           let trait = (read_impl_interface context impl).implements.trait in
           let trait_signature = read_signature context provided.path in
           let count = List.length (read_impl_interface context impl).impl_generics in
-          let of_impl = List.filteri (fun position _ -> position < count) substitution in
+          let of_impl = List.take count substitution in
           let of_trait =
             List.map
               (fun (parameter, argument) -> (parameter, Types.substitute_argument of_impl argument))
@@ -150,7 +150,7 @@ let make_code context (path : Path.t) type_arguments : code =
               (fun (generic : Types.generic) -> not (Path.equal generic.generic.owner trait))
               trait_signature.generics
           in
-          let own = List.filteri (fun position _ -> position >= count) type_arguments in
+          let own = List.drop count type_arguments in
           function_code ~enclosing_impl provided ~interface:trait_signature
             ~substitution:(of_trait @ bind own_generics own @ substitution)
       | Some (Inherited _, _), _ ->

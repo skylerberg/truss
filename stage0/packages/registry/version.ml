@@ -14,16 +14,9 @@ let show (major, minor, patch) = Printf.sprintf "%d.%d.%d" major minor patch
 let compare : t -> t -> int = Stdlib.compare
 
 let parse_major (package : Path.package) =
-  let last = package.name in
-  let rec suffix index =
-    if index < 0 then None
-    else
-      match last.[index] with
-      | '0' .. '9' -> suffix (index - 1)
-      | 'v' when index >= 1 && last.[index - 1] = '_' && index < String.length last - 1 ->
-          int_of_string_opt (String.sub last (index + 1) (String.length last - index - 1))
-      | _ -> None
-  in
-  match suffix (String.length last - 1) with Some number when number >= 1 -> number | _ -> 1
+  match String.split_last ~sep:"_v" package.name with
+  | Some (_, digits) when digits <> "" && String.for_all Char.Ascii.is_digit digits -> (
+      match int_of_string_opt digits with Some major when major >= 1 -> major | _ -> 1)
+  | _ -> 1
 
 let make_first_version name = (parse_major name, 0, 0)

@@ -81,7 +81,7 @@ let list_trait_closure (lookups : Lookups.t) path =
   let rec visit path =
     if not (List.exists (Path.equal path) !closure) then begin
       closure := path :: !closure;
-      match lookups.trait_header path with
+      match lookups.find_trait_header path with
       | Some header -> List.iter visit header.required
       | None -> ()
     end
@@ -125,7 +125,7 @@ let show_path (path : Syntax.path) =
 let is_uint64 (lookups : Lookups.t) path =
   match Resolve.Names.find_definition lookups.names path with
   | Some (key, { kind = Constant { type_ = { kind = Path_type written; _ }; _ }; _ }) ->
-      (lookups.resolved Interface key).names.(written.path.last.id)
+      (lookups.read_resolved Interface key).names.(written.path.last.id)
       = Some (Definition (Type, Intrinsic.make_builtin_path UInt64))
   | _ -> false
 
@@ -147,7 +147,7 @@ let rec elaborate_type context (written : Syntax.type_expression) : Types.ty =
           let open_names =
             List.concat_map
               (fun trait_path ->
-                match context.lookups.trait_header trait_path with
+                match context.lookups.find_trait_header trait_path with
                 | Some header ->
                     List.filter
                       (fun name -> not (List.mem_assoc name trait.associated))
@@ -203,7 +203,7 @@ and elaborate_self_associated context (span : Source.Definition_span.t) (key : S
 and find_declaring_trait ?(capability = false) context trait name =
   List.find_opt
     (fun path ->
-      match context.lookups.trait_header path with
+      match context.lookups.find_trait_header path with
       | Some header -> List.mem name (if capability then header.capabilities else header.associated)
       | None -> false)
     (list_trait_closure context.lookups trait)
@@ -246,7 +246,7 @@ and elaborate_count_name context (name : Syntax.name) : Types.argument =
              (Printf.sprintf "`%s` in a type argument must be a constant of type `UInt64`."
                 name.text))
       else
-        match context.lookups.constant_value path with
+        match context.lookups.find_constant_value path with
         | Some value -> Types.Value (Types.Known value)
         | None ->
             Types.Type
@@ -478,7 +478,7 @@ and elaborate_costs context clauses : (Types.cost list, Diagnostic.reported) Std
     match find_target context path.path.last with
     | Some (Definition (Capability, capability)) -> (
         match method_ with
-        | Some method_ when context.lookups.names.members capability method_.text = [] ->
+        | Some method_ when context.lookups.names.list_members capability method_.text = [] ->
             report_error Unknown_member context.spans.(method_.id)
               (Printf.sprintf "`%s` has no method `%s`." shown method_.text)
         | _ ->
@@ -813,7 +813,7 @@ let elaborate_container (context : t) (path : Path.t) (definition : Syntax.defin
               [] members
           in
           let declared =
-            match context.lookups.trait_header implements.trait with
+            match context.lookups.find_trait_header implements.trait with
             | Some header -> header.capabilities
             | None -> []
           in
@@ -844,13 +844,14 @@ let elaborate_container (context : t) (path : Path.t) (definition : Syntax.defin
   | _ -> (Ok Capability_parts, context)
 
 let elaborate_header (lookups : Lookups.t) (key : Resolve.Names.key) =
-  let resolved = lookups.resolved Interface key in
+  let resolved = lookups.read_resolved Interface key in
   if Resolve.Names.is_broken lookups.names key Header then Error []
   else
     match
       elaborate_container
-        (create lookups resolved ~spans:(lookups.names.spans key) empty_scope)
-        key.path (lookups.names.definition key)
+        (create lookups resolved ~spans:(lookups.names.read_spans key) empty_scope)
+        key.path
+        (lookups.names.read_definition key)
     with
     | _, context when !(context.diagnostics) <> [] -> Error (List.rev !(context.diagnostics))
     | Error _, _ -> Error []
@@ -873,13 +874,13 @@ let make_elaborated_interface context interface : Environment.elaborated_interfa
 let list_methods (lookups : Lookups.t) key =
   List.filter_map
     (fun (member : Resolve.Names.key) ->
-      match (member.path, lookups.names.definition member) with
+      match (member.path, lookups.names.read_definition member) with
       | Method { name; receiver; _ }, { kind = Function _; _ } ->
           Some { Types.method_name = name; method_receiver = receiver; provided = true }
       | Method { name; receiver; _ }, { kind = Method_declaration _; _ } ->
           Some { Types.method_name = name; method_receiver = receiver; provided = false }
       | _ -> None)
-    (lookups.names.contained key)
+    (lookups.names.list_contained key)
 
 let make_container_interface lookups key (header : Environment.header) :
     Environment.elaborated_interface =
@@ -944,13 +945,13 @@ let elaborate_member (lookups : Lookups.t) ~path ~spans resolved (definition : S
         match (path, header.container_scope.self_trait) with
         | Method { name; receiver; _ }, Some (implements : Types.trait_reference) -> (
             let implemented =
-              match Option.bind (lookups.names.key implements.trait) lookups.header with
+              match Option.bind (lookups.names.find_key implements.trait) lookups.find_header with
               | Some { container = Capability_parts; _ } ->
                   Path.make_capability_method implements.trait name
               | Some { container = Trait_parts _ | Impl_parts _; _ } | None ->
                   Method { owner = implements.trait; name; receiver }
             in
-            match Option.map lookups.names.definition (lookups.names.key implemented) with
+            match Option.map lookups.names.read_definition (lookups.names.find_key implemented) with
             | Some { kind = Function { signature = declared; _ } | Method_declaration declared; _ }
               ->
                 terminates declared.clauses
@@ -965,9 +966,9 @@ let elaborate_member (lookups : Lookups.t) ~path ~spans resolved (definition : S
         (Error_interface (Diagnostic.make_recovered spans.(definition.id)))
 
 let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
-  let resolved = lookups.resolved Interface key in
-  let definition = lookups.names.definition key in
-  let spans = lookups.names.spans key in
+  let resolved = lookups.read_resolved Interface key in
+  let definition = lookups.names.read_definition key in
+  let spans = lookups.names.read_spans key in
   let path = key.path in
   Compiler_bug.run_while_doing ~stage:"Interface" (Resolve.Names.show_key key) (fun () ->
       let context = create lookups resolved ~spans empty_scope in
@@ -977,7 +978,7 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
       in
       match
         ( Resolve.Names.find_recovery_report lookups.names key Header,
-          Option.map lookups.header (lookups.names.container key) )
+          Option.map lookups.find_header (lookups.names.find_container key) )
       with
       | Some report, _ -> make_elaborated_interface context (Error_interface report)
       | None, Some None -> recovered ()
@@ -985,7 +986,7 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
       | None, None -> (
           match definition.kind with
           | Trait _ | Capability _ | Impl _ -> (
-              match lookups.header key with
+              match lookups.find_header key with
               | Some header -> make_container_interface lookups key header
               | None -> raise_bug "`%s` has no header" (Resolve.Names.show_key key))
           | Method_declaration _ | Definition_error _ -> recovered ()

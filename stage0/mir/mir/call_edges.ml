@@ -22,9 +22,9 @@ let rec list_traits_with_required interface (trait : Path.t) =
   | _ -> [ trait ]
 
 let list_written_methods (names : Resolve.Names.lookups) impl =
-  match names.key impl with
+  match names.find_key impl with
   | Some impl_key ->
-      List.map (fun (member : Resolve.Names.key) -> member.path) (names.contained impl_key)
+      List.map (fun (member : Resolve.Names.key) -> member.path) (names.list_contained impl_key)
   | None -> []
 
 let list_impl_methods (interface : Interface.Lookups.t) impl =

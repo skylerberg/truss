@@ -47,7 +47,7 @@ let without_costs : 'a. _ -> (unit -> 'a) -> 'a =
   Fun.protect ~finally:(fun () -> context.counters <- saved) read
 
 let read_specification context frame (formula : Mir.formula) =
-  without_costs context (fun () -> context.formula_term frame formula ~arguments:[])
+  without_costs context (fun () -> context.read_formula frame formula ~arguments:[])
 
 let select_field context ty variant field term =
   match (term, Facts.find_constructors context ty) with

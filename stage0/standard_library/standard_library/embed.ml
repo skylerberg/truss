@@ -10,7 +10,7 @@ let () =
         | [] -> failwith ("not under standard/: " ^ file)
       in
       let names = after_standard (String.split_on_char '/' file) in
-      let modules = List.filteri (fun index _ -> index < List.length names - 1) names in
+      let modules = List.take (List.length names - 1) names in
       Printf.printf "  ([ %s ], %S, %S);\n"
         (String.concat "; " (List.map (Printf.sprintf "%S") modules))
         (Filename.chop_suffix (Filename.basename file) ".truss")

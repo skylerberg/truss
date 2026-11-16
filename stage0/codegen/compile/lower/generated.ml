@@ -225,7 +225,7 @@ let find_real_implementation (interface : Interface.Lookups.t) (capability : Pat
   match
     List.filter
       (function Path.Impl { module_; _ } -> Well_known.is_system_module module_ | _ -> false)
-      (interface.names.impls_of_trait Path.standard_package capability)
+      (interface.names.list_impls_of_trait Path.standard_package capability)
   with
   | [] -> None
   | [ impl ] -> (

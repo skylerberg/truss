@@ -82,7 +82,7 @@ let shapes extra (ty : Ground.ty) : Memory_layout.shape =
       | None -> invalid_arg ("no shape for " ^ Ground.to_string ty))
 
 let layout ?(extra = []) ty =
-  Memory_layout.of_type (Memory_layout.create host ~shape_of:(shapes extra)) ty
+  Memory_layout.of_type (Memory_layout.create host ~compute_shape:(shapes extra)) ty
 
 let describe ?extra ty = Memory_layout.For_testing.to_string (layout ?extra ty)
 let int32 = named "Int32"
@@ -156,7 +156,7 @@ let call name ?(result = Some (value int32)) ?(parameters = []) arguments place 
       result = (match place with Some place -> Returned place | None -> Discarded);
     }
 
-let shape_env ?(extra = []) () = Memory_layout.create host ~shape_of:(shapes extra)
+let shape_env ?(extra = []) () = Memory_layout.create host ~compute_shape:(shapes extra)
 let scratch = lazy (Harness.scratch "codegen")
 
 let compiler =
@@ -262,7 +262,7 @@ let tests_in database (module_ : Path.module_) =
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
       match declaration.path with Test _ -> Some declaration.path | _ -> None)
-    ((Database.make_name_lookups database [ module_.package ]).declarations module_)
+    ((Database.make_name_lookups database [ module_.package ]).list_declarations module_)
 
 let tests_of database = tests_in database example
 
@@ -303,7 +303,7 @@ let standard_interface =
 
 let standard_context : Monomorphic.context =
   {
-    type_interface =
+    find_type_interface =
       (fun path -> Interface.Definition.read_type_interface (Lazy.force standard_interface) path);
     normalize = Fun.id;
     normalize_capabilities = Fun.id;
@@ -315,5 +315,5 @@ let standard module_ name ?(arguments = []) () =
 let standard_layout ty =
   Memory_layout.For_testing.to_string
     (Memory_layout.of_type
-       (Memory_layout.create host ~shape_of:(Monomorphic.compute_shape standard_context))
+       (Memory_layout.create host ~compute_shape:(Monomorphic.compute_shape standard_context))
        ty)

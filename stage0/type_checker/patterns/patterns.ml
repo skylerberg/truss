@@ -117,10 +117,12 @@ and evaluate_pattern_constant context (value : Core.pattern_constant) : space =
 and evaluate_named_constant ?(seen = []) context path : space option =
   if List.exists (Path.equal path) seen then None
   else
-    match context.lookups.interface.constant_value path with
+    match context.lookups.interface.find_constant_value path with
     | Some value -> Some (Constructed (Interval (value, value), []))
     | None -> (
-        match Option.map context.lookups.core (context.lookups.interface.names.key path) with
+        match
+          Option.map context.lookups.read_core (context.lookups.interface.names.find_key path)
+        with
         | Some { definition = Constant (Some value); _ } ->
             evaluate_constant_expression context (path :: seen) value
         | _ -> None)
@@ -257,8 +259,7 @@ let rec find_witness context (types : Types.ty list) (rows : row list) : space l
         with
         | Some witness ->
             let count = List.length arguments in
-            let fields = List.filteri (fun index _ -> index < count) witness
-            and rest = List.filteri (fun index _ -> index >= count) witness in
+            let fields = List.take count witness and rest = List.drop count witness in
             Some (Constructed (constructor, fields) :: rest)
         | None -> None
       in
@@ -412,12 +413,11 @@ let has_error context type_ =
 
 let read_indentation text (position : int) =
   let line_start = Source.fragment_line_start text position in
-  let rec skip_spaces index =
-    if index < String.length text && (text.[index] = ' ' || text.[index] = '\t') then
-      skip_spaces (index + 1)
-    else index
+  let indentation_end =
+    Option.value ~default:(String.length text)
+      (String.find_first_index (Fun.negate Char.Ascii.is_blank) ~start:line_start text)
   in
-  String.sub text line_start (skip_spaces line_start - line_start)
+  String.sub text line_start (indentation_end - line_start)
 
 let rec list_or_patterns (written : Core.pattern) =
   match written.kind with
@@ -463,7 +463,7 @@ let check_match context (node : Core.expression) scrutinees (arms : Core.arm lis
                     let build_row_with only =
                       List.map (build_space ~replace:(group.id, only) context) arm.patterns
                     in
-                    let before = List.filteri (fun other _ -> other < index) alternatives in
+                    let before = List.take index alternatives in
                     let prior = if before = [] then !rows else !rows @ [ build_row_with before ] in
                     if not (is_useful context types prior (build_row_with [ alternative ])) then
                       let read_pattern_span (pattern : Core.pattern) =
@@ -570,12 +570,12 @@ let check (lookups : Lookups.t) key =
   let context =
     {
       lookups;
-      spans = lazy (lookups.interface.names.spans key);
-      text = lazy (lookups.interface.names.text key);
+      spans = lazy (lookups.interface.names.read_spans key);
+      text = lazy (lookups.interface.names.read_text key);
       diagnostics = [];
     }
   in
-  check_definition context (lookups.core key).definition;
+  check_definition context (lookups.read_core key).definition;
   List.sort
     (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
       compare left.span right.span)

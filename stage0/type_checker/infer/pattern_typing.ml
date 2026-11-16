@@ -376,7 +376,7 @@ and check_literal_fits state (value : Syntax.expression) number type_ =
       | resolved ->
           (match
              match resolved with
-             | Types.Parameter _ | Types.Projection _ -> state.unifier.integer_range resolved
+             | Types.Parameter _ | Types.Projection _ -> state.unifier.find_integer_range resolved
              | _ -> Types.find_integer_range resolved
            with
           | Some (low, high) when Z.lt number low || Z.gt number high ->

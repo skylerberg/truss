@@ -14,9 +14,9 @@ let expression_at text written occurrence =
       (fun (declaration : Resolve.Names.declaration) ->
         let key = Resolve.Names.make_key declaration in
         match
-          ( (Support.names packages key.module_.package).definition key,
-            (Support.names packages key.module_.package).spans key,
-            (Support.names packages key.module_.package).place key,
+          ( (Support.names packages key.module_.package).read_definition key,
+            (Support.names packages key.module_.package).read_spans key,
+            (Support.names packages key.module_.package).read_place key,
             Database.read_checked_body (Support.database packages) key )
         with
         | definition, spans, { base; _ }, Some result ->
@@ -38,7 +38,7 @@ let expression_at text written occurrence =
             Syntax_walk.visit_definition visit definition;
             Option.map (fun value -> (value, result)) !best
         | _ -> None)
-      ((Support.names packages file.module_.package).declarations_in file)
+      ((Support.names packages file.module_.package).list_declarations_in file)
   in
   match actual with
   | Some actual -> actual
@@ -558,7 +558,7 @@ let () =
                       | _ -> ()))
                     [ tables.types; tables.local_types ]
               | None -> ())
-            ((Support.names packages file.module_.package).declarations_in file))
+            ((Support.names packages file.module_.package).list_declarations_in file))
         Standard_library.files)
 
 let point = "type Point(x: Int64)\n\n"
