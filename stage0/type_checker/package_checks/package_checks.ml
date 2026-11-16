@@ -1,4 +1,21 @@
 module Lookups = Lookups
+module Path_table = Hashtbl.Make (Path)
+
+module Parameter_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Types.parameter
+end))
+
+module Occurrence_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Path.t * Interface.Properties.occurrence
+end))
+
+module Grown_node_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = (Path.t * int) * bool
+end))
+
+module Field_default_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Path.t * string option * string
+end))
 
 let bug format = Compiler_bug.bug ~stage:"Package_checks" format
 
@@ -69,11 +86,13 @@ let impls_overlap (first : Types.impl_interface) (second : Types.impl_interface)
       (fun (generic : Types.generic) -> generic.generic)
       (first.impl_generics @ second.impl_generics)
   in
-  let bindings = Hashtbl.create 8 in
+  let bindings = Parameter_table.create 8 in
   let rec resolve (type_ : Types.ty) =
     match type_ with
     | Types.Parameter parameter when List.mem parameter variables -> (
-        match Hashtbl.find_opt bindings parameter with Some bound -> resolve bound | None -> type_)
+        match Parameter_table.find_opt bindings parameter with
+        | Some bound -> resolve bound
+        | None -> type_)
     | _ -> type_
   in
   let occurs parameter =
@@ -83,7 +102,7 @@ let impls_overlap (first : Types.impl_interface) (second : Types.impl_interface)
     if other = Types.Parameter parameter then true
     else if occurs parameter other then false
     else begin
-      Hashtbl.replace bindings parameter other;
+      Parameter_table.replace bindings parameter other;
       true
     end
   in
@@ -207,23 +226,24 @@ let list_contained_types (lookups : Lookups.t) path =
     (snd (list_type_fields lookups path))
 
 let memoize compute =
-  let table = Hashtbl.create 64 in
+  let table = Path_table.create 64 in
   fun path ->
-    match Hashtbl.find_opt table path with
+    match Path_table.find_opt table path with
     | Some value -> value
     | None ->
         let value = compute path in
-        Hashtbl.replace table path value;
+        Path_table.replace table path value;
         value
 
 let list_self_occurrences ~contained (start : Path.t) =
-  let visited = Hashtbl.create 16 in
+  let visited = Occurrence_table.create 16 in
   let rec from path occurrence =
     if Path.equal path start then [ occurrence ]
-    else if Path.package path <> Path.package start || Hashtbl.mem visited (path, occurrence) then
-      []
+    else if
+      Path.package path <> Path.package start || Occurrence_table.mem visited (path, occurrence)
+    then []
     else begin
-      Hashtbl.replace visited (path, occurrence) ();
+      Occurrence_table.replace visited (path, occurrence) ();
       List.concat_map
         (fun (_, target, step) ->
           from target (Interface.Properties.compose_occurrences occurrence step))
@@ -262,12 +282,12 @@ let grows lookups (start : Path.t) =
         in
         List.concat_map (fun (_, (field : Types.field)) -> targets field.field_type) fields
   in
-  let visited = Hashtbl.create 16 in
+  let visited = Grown_node_table.create 16 in
   let rec walk ((path, _) as node) grown =
     if Path.equal path start && grown then true
-    else if Hashtbl.mem visited (node, grown) then false
+    else if Grown_node_table.mem visited (node, grown) then false
     else begin
-      Hashtbl.replace visited (node, grown) ();
+      Grown_node_table.replace visited (node, grown) ();
       List.exists (fun (target, growing) -> walk target (grown || growing)) (edges node)
     end
   in
@@ -466,23 +486,23 @@ let check_instantiation (lookups : Lookups.t) (package : Path.package) =
         && (declaration.kind = Function || declaration.kind = Method))
       (lookups.interface.names.package_declarations package)
   in
-  let edges = Hashtbl.create 64 in
+  let edges = Path_table.create 64 in
   List.iter
     (fun (declaration : Resolve.Names.declaration) ->
-      Hashtbl.replace edges declaration.path
+      Path_table.replace edges declaration.path
         (list_instantiation_edges lookups (Resolve.Names.make_key declaration)))
     generic;
-  let outgoing path = Option.value ~default:[] (Hashtbl.find_opt edges path) in
-  let component_index = Hashtbl.create 64 in
+  let outgoing path = Option.value ~default:[] (Path_table.find_opt edges path) in
+  let component_index = Path_table.create 64 in
   List.iteri
     (fun index members ->
-      List.iter (fun path -> Hashtbl.replace component_index path index) members)
+      List.iter (fun path -> Path_table.replace component_index path index) members)
     (Strongly_connected.find_components
        (module Path)
        ~successors:(fun path -> List.map fst (outgoing path))
        (List.map (fun (declaration : Resolve.Names.declaration) -> declaration.path) generic));
   let grows_on_cycle path (callee, grows) =
-    grows && Hashtbl.find component_index callee = Hashtbl.find component_index path
+    grows && Path_table.find component_index callee = Path_table.find component_index path
   in
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
@@ -607,7 +627,7 @@ type named_constant = { origin : Core.origin; constant : Path.t; omitted_field :
 
 let list_named_constants (lookups : Lookups.t) (value : Core.expression) =
   let named = ref [] in
-  let entered_defaults = Hashtbl.create 8 in
+  let entered_defaults = Field_default_table.create 8 in
   let rec visit ~through (value : Core.expression) =
     Core_walk.walk_expression
       {
@@ -632,8 +652,8 @@ let list_named_constants (lookups : Lookups.t) (value : Core.expression) =
                       match find_field_default lookups node.type_ variant field with
                       | Some (type_path, default) ->
                           let entered = (type_path, variant, field) in
-                          if not (Hashtbl.mem entered_defaults entered) then begin
-                            Hashtbl.replace entered_defaults entered ();
+                          if not (Field_default_table.mem entered_defaults entered) then begin
+                            Field_default_table.replace entered_defaults entered ();
                             let through =
                               match through with
                               | Some _ -> through
@@ -672,12 +692,12 @@ let check_constant (lookups : Lookups.t) (declaration : Resolve.Names.declaratio
   match read_constant_value lookups path with
   | None -> []
   | Some value ->
-      let visited = Hashtbl.create 16 in
+      let visited = Path_table.create 16 in
       let rec depends_on_constant named =
         Path.equal named path
-        || (not (Hashtbl.mem visited named))
+        || (not (Path_table.mem visited named))
            && begin
-             Hashtbl.replace visited named ();
+             Path_table.replace visited named ();
              match read_constant_value lookups named with
              | Some named_value ->
                  List.exists

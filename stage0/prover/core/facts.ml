@@ -17,8 +17,8 @@ let list_clauses (requires : Mir.requirement list) =
 let declare (context : State.context) (declaration : Logic.declaration) =
   match declaration with
   | Constant (name, _) | Function (name, _, _) ->
-      if not (Hashtbl.mem context.declared name) then begin
-        Hashtbl.replace context.declared name ();
+      if not (Tables.Symbol_table.mem context.declared name) then begin
+        Tables.Symbol_table.replace context.declared name ();
         context.declarations <- declaration :: context.declarations
       end
   | Datatype _ -> invalid_arg "Translate.declare: a datatype is declared by its sort"
@@ -41,12 +41,12 @@ let make_fresh_name (context : State.context) label =
 
 let declare_fresh context frame label sort =
   let name = make_fresh_name context label in
-  Hashtbl.replace context.fresh_order name context.fresh;
+  Tables.Symbol_table.replace context.fresh_order name context.fresh;
   declare_value_symbol context frame name sort
 
 let mentions_fresh_after (context : State.context) mark term =
   let is_fresh_after name =
-    match Hashtbl.find_opt context.fresh_order name with
+    match Tables.Symbol_table.find_opt context.fresh_order name with
     | Some order -> order > mark
     | None -> false
   in
@@ -96,7 +96,7 @@ let add_quantifier_facts ~binders (context : State.context) term =
       let bound = List.map fst symbols @ bound in
       ( bound,
         List.filter (stated bound)
-          (Option.value ~default:[] (Hashtbl.find_opt context.quantifier_facts term)) )
+          (Option.value ~default:[] (Tables.Term_table.find_opt context.quantifier_facts term)) )
     in
     match term with
     | Logic.Forall (symbols, trigger, body) when positive ->
@@ -296,7 +296,7 @@ and make_obligation ?template_clause context frame code location message goal =
     locals =
       Locals.fold
         (fun local term shown ->
-          match (term, Hashtbl.find_opt context.local_names local) with
+          match (term, Tables.Local_table.find_opt context.local_names local) with
           | Logic.Symbol symbol, Some name
             when not (List.mem_assoc symbol context.values || List.mem_assoc symbol shown) ->
               (symbol, name) :: shown
@@ -384,18 +384,18 @@ let rec declare_sort (context : State.context) (ty : Types.ty) : Logic.sort =
     match (ty, find_float_format ty) with
     | _, Some (exponent, significand) -> Float (exponent, significand)
     | _ when Types.equal ty Types.unit ->
-        if not (Hashtbl.mem context.datatypes ty) then begin
-          Hashtbl.replace context.datatypes ty ();
+        if not (Tables.Type_table.mem context.datatypes ty) then begin
+          Tables.Type_table.replace context.datatypes ty ();
           context.declarations <-
             Logic.Datatype (ty, [ (Logic.Symbol.Unit, []) ]) :: context.declarations
         end;
         Type_sort ty
     | Function function_type, _ -> Function_sort (List.length function_type.inputs)
     | _ -> begin
-        (if not (Hashtbl.mem context.datatypes ty) then
+        (if not (Tables.Type_table.mem context.datatypes ty) then
            match find_constructors context ty with
            | Some shape ->
-               Hashtbl.replace context.datatypes ty ();
+               Tables.Type_table.replace context.datatypes ty ();
                let declaration =
                  Logic.Datatype
                    ( ty,
@@ -444,8 +444,8 @@ let make_in_range ty term =
   | None -> Logic.Boolean true
 
 let run_once (context : State.context) stated make =
-  if not (Hashtbl.mem context.stated stated) then begin
-    Hashtbl.replace context.stated stated ();
+  if not (Tables.Stated_table.mem context.stated stated) then begin
+    Tables.Stated_table.replace context.stated stated ();
     make ()
   end
 

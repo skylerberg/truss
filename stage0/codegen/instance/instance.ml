@@ -43,9 +43,13 @@ let make_method_code (impl_method : impl_method) =
 
 type t = key
 
-let compare = Stdlib.compare
-let equal = ( = )
-let hash key = Hashtbl.hash_param 64 256 key
+module Key = Structural_key.Make (struct
+  type nonrec t = t
+end)
+
+let compare = Key.compare
+let equal = Key.equal
+let hash = Key.hash
 let marker word = "_" ^ word ^ "_"
 
 let module_path (module_ : Path.module_) =

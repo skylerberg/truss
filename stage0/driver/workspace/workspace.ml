@@ -1,3 +1,11 @@
+module File_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Path.file
+end))
+
+module Package_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Path.package
+end))
+
 let opened_cache : Cache.t option ref = ref None
 
 exception Unusable_cache of string
@@ -169,7 +177,7 @@ let load_published name version ~hash =
       let files = Registry.Content.all_files directory in
       Registry.Selection.manifest_and_record ~read:(fun file -> List.assoc_opt file files) name
 
-let indexed files =
+let indexed (files : (string * string) list) =
   let table = Hashtbl.create (List.length files) in
   List.iter (fun (path, text) -> Hashtbl.replace table path text) files;
   (List.sort compare (List.map fst files), table)
@@ -296,7 +304,7 @@ let load_package_databases snapshot =
         match place.root with Registry hash -> Some (name, hash) | Project -> None)
       snapshot.project.places
   in
-  let loaded_by_name = Hashtbl.create 8 in
+  let loaded_by_name = Package_table.create 8 in
   let rec visible name =
     List.concat_map
       (fun dependency ->
@@ -304,7 +312,7 @@ let load_package_databases snapshot =
       (dependency_names snapshot name)
   in
   let rec load_named name =
-    match Hashtbl.find_opt loaded_by_name name with
+    match Package_table.find_opt loaded_by_name name with
     | Some loaded -> loaded
     | None ->
         let loaded =
@@ -316,7 +324,7 @@ let load_package_databases snapshot =
                   :: List.map load_named (List.sort_uniq Path.compare_package (visible name)))
           | None -> Compiler_bug.bug ~stage:"Workspace" "%s has no files" (Path.show_package name)
         in
-        Hashtbl.replace loaded_by_name name loaded;
+        Package_table.replace loaded_by_name name loaded;
         loaded
   in
   standard :: List.map (fun (name, _) -> load_named name) hashes
@@ -390,12 +398,12 @@ let find_saved_package_databases segments ~current =
   | Some _ | None -> None
 
 let project_texts snapshot =
-  let texts = Hashtbl.create 256 in
+  let texts = File_table.create 256 in
   List.iter
     (fun (package : Project.package) ->
-      List.iter (fun (file, text) -> Hashtbl.replace texts file text) package.files)
+      List.iter (fun (file, text) -> File_table.replace texts file text) package.files)
     snapshot.project.packages;
-  Hashtbl.find_opt texts
+  File_table.find_opt texts
 
 let restore_database segments snapshot =
   let loaded, packages = layout snapshot in
@@ -458,24 +466,24 @@ let file_changes (before : snapshot) (after : snapshot) =
   if layout before <> layout after then None
   else
     let texts (snapshot : snapshot) =
-      let table = Hashtbl.create 256 in
+      let table = File_table.create 256 in
       List.iter
         (fun (package : Project.package) ->
-          List.iter (fun (file, text) -> Hashtbl.replace table file text) package.files)
+          List.iter (fun (file, text) -> File_table.replace table file text) package.files)
         snapshot.project.packages;
       table
     in
     let previous = texts before and current = texts after in
     Some
-      (Hashtbl.fold
+      (File_table.fold
          (fun file text changes ->
-           match Hashtbl.find_opt previous file with
+           match File_table.find_opt previous file with
            | Some old when String.equal old text -> changes
            | Some _ | None -> (file, Some text) :: changes)
          current
-         (Hashtbl.fold
+         (File_table.fold
             (fun file _ changes ->
-              if Hashtbl.mem current file then changes else (file, None) :: changes)
+              if File_table.mem current file then changes else (file, None) :: changes)
             previous []))
 
 let apply_changes database (after : snapshot) = function

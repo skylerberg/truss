@@ -1,3 +1,7 @@
+module Local_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Core.local
+end))
+
 let callee_name : Core.callee -> string = function
   | Function { path; _ } -> Path.show path
   | Trait_method { trait; name; _ } -> Path.show trait.trait ^ "." ^ name
@@ -244,9 +248,9 @@ let construct_fields context (node : Core.expression) variant fields =
         (Types.show node.type_)
 
 let free_locals (parameters : Core.pattern list) (body : Core.block) =
-  let bound = Hashtbl.create 8 and read = ref [] in
+  let bound = Local_table.create 8 and read = ref [] in
   let bind_pattern (pattern : Core.pattern) =
-    match pattern.kind with Bind { local; _ } -> Hashtbl.replace bound local () | _ -> ()
+    match pattern.kind with Bind { local; _ } -> Local_table.replace bound local () | _ -> ()
   in
   let visit =
     {
@@ -255,12 +259,12 @@ let free_locals (parameters : Core.pattern list) (body : Core.block) =
       statement =
         (fun (node : Core.statement) ->
           match node.kind with
-          | Compound_assign { bound = local; _ } -> Hashtbl.replace bound local ()
+          | Compound_assign { bound = local; _ } -> Local_table.replace bound local ()
           | _ -> ());
       expression =
         (fun (node : Core.expression) ->
           match node.kind with
-          | Quantified { binder = Over_type { local; _ }; _ } -> Hashtbl.replace bound local ()
+          | Quantified { binder = Over_type { local; _ }; _ } -> Local_table.replace bound local ()
           | _ -> ());
     }
   in
@@ -273,7 +277,7 @@ let free_locals (parameters : Core.pattern list) (body : Core.block) =
          place =
            (fun (place : Core.place) ->
              match place with
-             | Local { local; _ } when not (Hashtbl.mem bound local || List.mem local !read) ->
+             | Local { local; _ } when not (Local_table.mem bound local || List.mem local !read) ->
                  read := local :: !read
              | _ -> ());
        })
@@ -613,10 +617,10 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
           (List.combine parameters call.arguments)
   in
   let compound_assignments = ref 0 and current_targets = ref 0 in
-  let local_types : (Core.local, Types.ty) Hashtbl.t = Hashtbl.create 16 in
+  let local_types : Types.ty Local_table.t = Local_table.create 16 in
   let parameters =
     List.iter (fun (parameter : Core.parameter) ->
-        Hashtbl.replace local_types parameter.local parameter.type_)
+        Local_table.replace local_types parameter.local parameter.type_)
   in
   (match form.definition with
   | Function { parameters = declared; _ } -> parameters declared
@@ -630,12 +634,12 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
            (fun (node : Core.expression) ->
              match node.kind with
              | Quantified { binder = Over_type { local; type_; _ }; _ } ->
-                 Hashtbl.replace local_types local type_
+                 Local_table.replace local_types local type_
              | _ -> ());
          pattern =
            (fun (node : Core.pattern) ->
              match node.kind with
-             | Bind { local; _ } -> Hashtbl.replace local_types local node.type_
+             | Bind { local; _ } -> Local_table.replace local_types local node.type_
              | _ -> ());
        })
     form.definition;
@@ -643,7 +647,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
     match core_place with
     | Local { local; type_ = used; _ } -> (
         type_ "a local" used;
-        match Hashtbl.find_opt local_types local with
+        match Local_table.find_opt local_types local with
         | Some bound when not (Types.equal (normalize bound) (normalize used)) ->
             wrong "a local is used with the type `%s` and bound with the type `%s`"
               (Types.show used) (Types.show bound)

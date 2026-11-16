@@ -1,6 +1,7 @@
 (library
  (name resolve)
  (libraries
+  structural_key
   path
   intrinsic
   well_known

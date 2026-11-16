@@ -29,6 +29,8 @@ let lookup instances key =
 
 let references program key = Emit_c.references (lookup program key)
 
+module Instance_table = Hashtbl.Make (Instance)
+
 let find_components program root =
   Strongly_connected.find_components (module Instance) ~successors:(references program) [ root ]
 
@@ -38,14 +40,14 @@ let derive_component_keys program ~known component =
     ~known component
 
 let derive_test_key program root =
-  let known = Hashtbl.create 16 in
+  let known = Instance_table.create 16 in
   List.iter
     (fun component ->
       List.iter
-        (fun (key, test_key) -> Hashtbl.replace known key test_key)
-        (derive_component_keys program ~known:(Hashtbl.find known) component))
+        (fun (key, test_key) -> Instance_table.replace known key test_key)
+        (derive_component_keys program ~known:(Instance_table.find known) component))
     (find_components program root);
-  Hashtbl.find known root
+  Instance_table.find known root
 
 let show_components program root =
   List.map

@@ -1,6 +1,7 @@
 (library
  (name core_lint)
  (libraries
+  structural_key
   source
   harness
   path

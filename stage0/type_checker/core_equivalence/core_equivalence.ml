@@ -1,24 +1,26 @@
-type parameters = Core.parameter list * Core.parameter list
+module Local_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Core.local
+end))
 
-type renaming = {
-  forward : (Core.local, Core.local) Hashtbl.t;
-  backward : (Core.local, Core.local) Hashtbl.t;
-}
+type parameters = Core.parameter list * Core.parameter list
+type renaming = { forward : Core.local Local_table.t; backward : Core.local Local_table.t }
 
 let corresponds renaming before after =
-  match (Hashtbl.find_opt renaming.forward before, Hashtbl.find_opt renaming.backward after) with
+  match
+    (Local_table.find_opt renaming.forward before, Local_table.find_opt renaming.backward after)
+  with
   | Some paired, _ -> paired = after
   | None, Some _ -> false
   | None, None ->
-      Hashtbl.replace renaming.forward before after;
-      Hashtbl.replace renaming.backward after before;
+      Local_table.replace renaming.forward before after;
+      Local_table.replace renaming.backward after before;
       true
 
 let copy renaming =
-  { forward = Hashtbl.copy renaming.forward; backward = Hashtbl.copy renaming.backward }
+  { forward = Local_table.copy renaming.forward; backward = Local_table.copy renaming.backward }
 
 let rename_parameters ((before, after) : parameters) =
-  let renaming = { forward = Hashtbl.create 16; backward = Hashtbl.create 16 } in
+  let renaming = { forward = Local_table.create 16; backward = Local_table.create 16 } in
   ignore (corresponds renaming Self Self);
   let rec pair = function
     | (was : Core.parameter) :: before, (now : Core.parameter) :: after ->

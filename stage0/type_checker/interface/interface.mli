@@ -2,11 +2,14 @@ module Environment = Environment
 module Lookups = Lookups
 
 module Elaborator : sig
+  module Parameter_table :
+    Hashtbl.S with type key = Types.parameter and type 'a t = 'a Elaborator.Parameter_table.t
+
   type t = Elaborator.t = {
     lookups : Lookups.t;
     resolved : Resolve.resolved;
-    bounds : (Types.parameter, Types.trait_reference list) Hashtbl.t;
-    broken_parameters : (Types.parameter, Diagnostic.reported) Hashtbl.t;
+    bounds : Types.trait_reference list Parameter_table.t;
+    broken_parameters : Diagnostic.reported Parameter_table.t;
     self_type : Types.ty option;
     self_trait : Types.trait_reference option;
     self_associated : (string * Types.ty) list;

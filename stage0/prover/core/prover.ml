@@ -3,6 +3,14 @@ module Facts = Facts
 module Contracts = Contracts
 module Lookups = Lookups
 
+module Key_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Resolve.Names.key
+end))
+
+module Template_check_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = State.template_check
+end))
+
 type proof =
   | Obligations of State.outcome
   | Unsupported of State.location * string
@@ -517,12 +525,12 @@ let run_answer runs ({ check; clause } : State.template_clause) =
     (function
       | Ok holds -> Ran (List.assoc clause (List.combine check.clauses holds))
       | Error report -> Run_failed report)
-    (Hashtbl.find_opt runs check)
+    (Template_check_table.find_opt runs check)
 
-type verdicts = { lookups : Lookups.t; verdicts : (Resolve.Names.key, verdict) Hashtbl.t }
+type verdicts = { lookups : Lookups.t; verdicts : verdict Key_table.t }
 
 let decide ~runs lookups solver proofs =
-  let runs = Hashtbl.of_seq (List.to_seq runs) in
+  let runs = Template_check_table.of_seq (List.to_seq runs) in
   let question (obligation : State.obligation) =
     match Option.bind obligation.template_clause (run_answer runs) with
     | Some answer -> Decided answer
@@ -574,7 +582,7 @@ let decide ~runs lookups solver proofs =
     solve solver
       (List.concat_map (fun (_, _, questions) -> List.filter_map snd questions) local_questions)
   in
-  let verdicts = Hashtbl.create (List.length proofs) in
+  let verdicts = Key_table.create (List.length proofs) in
   List.iter
     (fun (key, proof, questions) ->
       let answers =
@@ -589,12 +597,12 @@ let decide ~runs lookups solver proofs =
                 | Proven | Out_of_steps -> Solved (plain_answer plain_request)))
           questions
       in
-      Hashtbl.replace verdicts key (list_definition_states lookups key proof answers))
+      Key_table.replace verdicts key (list_definition_states lookups key proof answers))
     local_questions;
   { lookups; verdicts }
 
 let file_states { lookups; verdicts } file =
-  let verdict key = Option.value (Hashtbl.find_opt verdicts key) ~default:[] in
+  let verdict key = Option.value (Key_table.find_opt verdicts key) ~default:[] in
   List.map
     (fun declaration ->
       let key = Resolve.Names.make_key declaration in

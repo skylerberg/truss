@@ -460,7 +460,7 @@ let contract_call context (frame : State.frame) (site : Invocation.site) (invoca
           axiom.hypotheses <- kept axiom.hypotheses;
           (stated, Logic.conjunction (kept !facts), axiom))
     in
-    let record_axiom symbol axiom = Hashtbl.add context.axioms_of symbol axiom in
+    let record_axiom symbol axiom = Tables.Symbol_table.add context.axioms_of symbol axiom in
     let contract_axiom ~is_triggered symbol sorts =
       Facts.run_once context (Contract_of symbol) (fun () ->
           let parameters = parameters_of "ensured" sorts in
@@ -522,7 +522,7 @@ let contract_call context (frame : State.frame) (site : Invocation.site) (invoca
                   (fun ((part : State.part), _, ensures) ->
                     List.iter
                       (fun ((clause : Mir.formula), _) ->
-                        Hashtbl.replace context.axiom_clauses
+                        Tables.Axiom_clause_table.replace context.axiom_clauses
                           (symbol, part.callee.name, clause.origin)
                           ())
                       ensures)
@@ -551,7 +551,8 @@ let contract_call context (frame : State.frame) (site : Invocation.site) (invoca
     let in_axiom (part : State.part) (clause : Mir.formula) =
       match axiom_symbol with
       | Some (symbol, _) ->
-          Hashtbl.mem context.axiom_clauses (symbol, part.callee.name, clause.origin)
+          Tables.Axiom_clause_table.mem context.axiom_clauses
+            (symbol, part.callee.name, clause.origin)
       | None -> false
     in
     let assume_ensures keep =
@@ -632,7 +633,7 @@ let contract_call context (frame : State.frame) (site : Invocation.site) (invoca
             (fun hypothesis -> Amounts.assume_typed context after (substitute hypothesis))
             axiom.hypotheses;
           List.iter (fun at_call -> at_call after substitute) axiom.at_calls)
-        (Hashtbl.find_all context.axioms_of symbol)
+        (Tables.Symbol_table.find_all context.axioms_of symbol)
   | _ -> ());
   let change () =
     List.fold_left

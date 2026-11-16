@@ -281,13 +281,17 @@ let traverse_indirect (change : 'a -> 'b option) : 'a Core.target -> 'b Core.tar
   | Indirect value -> Option.map (fun value -> Core.Indirect value) (change value)
 
 module For_testing = struct
+  module Local_table = Hashtbl.Make (Structural_key.Make (struct
+    type t = Core.local
+  end))
+
   let local_names core_definition =
-    let names = Hashtbl.create 16 in
+    let names = Local_table.create 16 in
     let parameter (declared : Core.parameter) =
-      Hashtbl.replace names declared.local declared.name;
+      Local_table.replace names declared.local declared.name;
       Option.iter
         (fun (contract : Core.callback_contract) ->
-          List.iter (fun (input, name) -> Hashtbl.replace names input name) contract.inputs)
+          List.iter (fun (input, name) -> Local_table.replace names input name) contract.inputs)
         declared.callback_contract
     in
     (match core_definition with
@@ -301,13 +305,13 @@ module For_testing = struct
         pattern =
           (fun (node : Core.pattern) ->
             match node.kind with
-            | Bind { local; name; _ } -> Hashtbl.replace names local name
+            | Bind { local; name; _ } -> Local_table.replace names local name
             | _ -> ());
         expression =
           (fun (node : Core.expression) ->
             match node.kind with
             | Quantified { binder = Over_type { local; name; _ }; _ } ->
-                Hashtbl.replace names local name
+                Local_table.replace names local name
             | _ -> ());
       }
       core_definition;

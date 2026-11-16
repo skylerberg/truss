@@ -1,3 +1,13 @@
+module Path_table = Hashtbl.Make (Path)
+
+module File_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Path.file
+end))
+
+module Item_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Path.file * int
+end))
+
 type kind =
   | Function
   | Type
@@ -587,12 +597,12 @@ let make_module_names entries =
   }
 
 let number_written (written : written list) =
-  let counts = Hashtbl.create 16 in
+  let counts = Path_table.create 16 in
   List.map
     (fun (written : written) ->
       let path = written.declaration.path in
-      let ordinal = Option.value ~default:0 (Hashtbl.find_opt counts path) in
-      Hashtbl.replace counts path (ordinal + 1);
+      let ordinal = Option.value ~default:0 (Path_table.find_opt counts path) in
+      Path_table.replace counts path (ordinal + 1);
       { written with declaration = { written.declaration with ordinal } })
     written
 
@@ -712,20 +722,20 @@ let build_namespace lookups package
       (List.map (fun (written : written) -> written.declaration) declarations)
   in
   let declarations = by_key written in
-  let by_file = Hashtbl.create 16 in
+  let by_file = File_table.create 16 in
   List.iter
     (fun (written : written) ->
-      Hashtbl.replace by_file written.file
-        (written :: Option.value ~default:[] (Hashtbl.find_opt by_file written.file)))
+      File_table.replace by_file written.file
+        (written :: Option.value ~default:[] (File_table.find_opt by_file written.file)))
     written;
-  let in_file file = List.rev (Option.value ~default:[] (Hashtbl.find_opt by_file file)) in
+  let in_file file = List.rev (Option.value ~default:[] (File_table.find_opt by_file file)) in
   let key_of_written (written : written) = make_key written.declaration in
-  let at_index = Hashtbl.create 64 and in_container = Hashtbl.create 64 in
+  let at_index = Item_table.create 64 and in_container = Item_table.create 64 in
   List.iter
     (fun (written : written) ->
-      Hashtbl.replace at_index (written.file, written.index) written;
+      Item_table.replace at_index (written.file, written.index) written;
       Option.iter
-        (fun container -> Hashtbl.add in_container (written.file, container) written)
+        (fun container -> Item_table.add in_container (written.file, container) written)
         written.container)
     written;
   let declared =
@@ -741,10 +751,10 @@ let build_namespace lookups package
             container =
               Option.map key_of_written
                 (Option.bind written.container (fun index ->
-                     Hashtbl.find_opt at_index (written.file, index)));
+                     Item_table.find_opt at_index (written.file, index)));
             contained =
               List.rev_map key_of_written
-                (Hashtbl.find_all in_container (written.file, written.index));
+                (Item_table.find_all in_container (written.file, written.index));
           }
           map)
       Key_map.empty written

@@ -83,15 +83,15 @@ let check_disjoint (context : Context.context) first second ~on_overlap =
 let check_body context (actions : Actions.t) moves =
   let states = Dataflow.forward context actions in
   let live_after = Moves.live_after moves actions.body in
-  let mir_local = Hashtbl.create 16 in
+  let mir_local = Context.Local_table.create 16 in
   Array.iteri
     (fun local (info : Mir.local_info) ->
       match info.kind with
-      | Source { local = core; _ } -> Hashtbl.replace mir_local core local
+      | Source { local = core; _ } -> Context.Local_table.replace mir_local core local
       | Temporary | Lent _ -> ())
     actions.body.locals;
   let is_live_after ({ block; index } : Actions.position) core =
-    match Hashtbl.find_opt mir_local core with
+    match Context.Local_table.find_opt mir_local core with
     | Some local -> live_after block index local
     | None -> false
   in
@@ -254,7 +254,7 @@ let check_body context (actions : Actions.t) moves =
                   Hashtbl.replace reported_owners dropped.origin ();
                   let named_holder =
                     match holder with
-                    | Local local when Hashtbl.mem context.names local ->
+                    | Local local when Context.Local_table.mem context.names local ->
                         Some (Context.show_root context holder)
                     | _ -> None
                   in
@@ -332,7 +332,7 @@ let check_body context (actions : Actions.t) moves =
             let views_borrowed_parameter (view : Actions.view) =
               match (Actions.viewed_place view).root with
               | Local local when local = Self || List.mem local context.parameters -> (
-                  match Hashtbl.find_opt context.types local with
+                  match Context.Local_table.find_opt context.types local with
                   | Some type_ -> not (Context.is_view context type_)
                   | None -> false)
               | Local _ | Temporary _ | Constant _ | Environment -> false

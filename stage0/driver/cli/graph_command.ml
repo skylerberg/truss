@@ -38,21 +38,30 @@ let find_definitions snapshot database argument =
 
 type line = { reader : Path.t; read_kinds : string list; read : Path.t; reader_kinds : string list }
 
-let grouped key value items =
-  let groups = Hashtbl.create 16 in
+module Kind_groups = Hashtbl.Make (Structural_key.Make (struct
+  type t = Path.t * string * Path.t
+end))
+
+module Reader_groups = Hashtbl.Make (Structural_key.Make (struct
+  type t = Path.t * Path.t * string list
+end))
+
+let grouped (type group) (module Groups : Hashtbl.S with type key = group) key value items =
+  let groups = Groups.create 16 in
   List.iter
     (fun item ->
       let group = key item in
-      Hashtbl.replace groups group
-        (value item :: Option.value (Hashtbl.find_opt groups group) ~default:[]))
+      Groups.replace groups group
+        (value item :: Option.value (Groups.find_opt groups group) ~default:[]))
     items;
-  Hashtbl.fold
+  Groups.fold
     (fun group values groups -> (group, List.sort_uniq compare values) :: groups)
     groups []
 
 let lines (reads : Database.read list) =
   let reader_kinds_by_read =
     grouped
+      (module Kind_groups)
       (fun (reader, read_kind, read, _) -> (reader, read_kind, read))
       (fun (_, _, _, reader_kind) -> reader_kind)
       (List.filter_map
@@ -72,6 +81,7 @@ let lines (reads : Database.read list) =
        (fun ((reader, read, reader_kinds), read_kinds) ->
          { reader; read_kinds; read; reader_kinds })
        (grouped
+          (module Reader_groups)
           (fun ((reader, _, read), reader_kinds) -> (reader, read, reader_kinds))
           (fun ((_, read_kind, _), _) -> read_kind)
           reader_kinds_by_read))
