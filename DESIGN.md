@@ -1877,7 +1877,7 @@ changes no definition.
 | Strengthen an `ensures` | The proofs of callers. No caller is type-checked. | A signature has two parts: the interface, which the types of callers depend on, and the contract, which only the proofs of callers depend on. |
 | Change the default of a parameter | The proofs and tests of the callers that omit the argument, and the code of the callee alone | The interface records only that the parameter has a default, and the callee applies it. |
 | Reorder the fields of a record | Nothing, unless the type derives `Ordered` | The compiler chooses the layout, and a record with more than one field is constructed with labeled arguments. |
-| Add a `derives` | Nothing that exists | Each derived implementation is a definition of its own, generated from the trait, the fields of the type, and the compiler's deriving rule. It has no source tree; its other parts are stored as any definition's are. A changed field therefore re-checks, of the derived code, only the code that compares, hashes, or orders the type. |
+| Add a `derives` | Nothing that exists | Each derived implementation is a definition of its own, generated from the trait, the fields of the type, and the compiler's deriving rule. It has no source tree and no checked body. Its parts are its interface and the MIR of each of its methods, which the database derives from the interfaces of the type and the trait. A changed field therefore re-checks, of the derived code, only the code that compares, hashes, or orders the type. |
 | Add, remove, or rename a definition | The parts that refer to its name, whether or not a definition held the name before | Each reference names one fully qualified name, so no lookup searches (see [References to names](#references-to-names)). |
 | Rename a definition, or move it to another module | The type checks and the code of its users. Their proofs and test results are cache hits. | A user names the definition, and an object file holds the names of the functions it calls. A solver query numbers its symbols, and a test's key numbers the references of the code it reaches, so neither holds a name. |
 | Rename a local variable | One body | Local names are part of identity, because diagnostics and `echo` output show them, and a cached result would show the old name. |
@@ -2039,6 +2039,7 @@ data, and not on the database.
 |---|---|
 | A program is built by following the references of its code. | A reference missing from a definition's output would leave a test's key unchanged by an edit to the code it calls. The program built from the same references fails to link, so the omission cannot go unnoticed. |
 | Lowering checks each call it emits against the caller's call edges. | A call edge missing from the termination check hides a recursive call, and the prover accepts a recursion that it never proved ends. The check makes the omission a compiler error at the first build. |
+| A read that no part records, by a request or by the ordering of a stage, is checked. Reading a stale part is a compiler bug, and so is reading a name from a stale namespace. | No propagation corrects such a read. A request that drained too little would report a value that the files no longer give. |
 
 ### References to names
 

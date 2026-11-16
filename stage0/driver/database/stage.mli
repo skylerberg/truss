@@ -24,6 +24,6 @@ type t =
 
 val all : t list
 val compare : t -> t -> int
-val of_part : Part.computed -> t
+val of_part : Part.any -> t
 val is_lowering : t -> bool
 val drains : through:t -> t -> bool

@@ -4,7 +4,6 @@ module Make (Node : Strongly_connected.Node) = struct
   type component = { id : int; members : Node.t list; mutable is_blocked : bool }
 
   type t = {
-    successors : Node.t list option Table.t;
     reflected : Node.t list Table.t;
     predecessors : unit Table.t Table.t;
     components : component Table.t;
@@ -20,7 +19,6 @@ module Make (Node : Strongly_connected.Node) = struct
   let create ~tracks_blocked =
     {
       tracks_blocked;
-      successors = Table.create 256;
       reflected = Table.create 64;
       predecessors = Table.create 256;
       components = Table.create 256;
@@ -46,7 +44,6 @@ module Make (Node : Strongly_connected.Node) = struct
     let components = Table.copy graph.components in
     Table.filter_map_inplace (fun _ component -> Some (copy_component component)) components;
     {
-      successors = Table.copy graph.successors;
       reflected = Table.copy graph.reflected;
       predecessors;
       components;
@@ -59,16 +56,12 @@ module Make (Node : Strongly_connected.Node) = struct
   let list_keys table = Table.fold (fun key _ keys -> key :: keys) table []
   let is_node graph node = Table.mem graph.components node
   let read_component graph node = Table.find graph.components node
+  let list_current_successors find_successors node = Option.value (find_successors node) ~default:[]
 
-  let list_stored_successors graph node =
-    match Table.find_opt graph.successors node with
-    | Some (Some successors) -> successors
-    | Some None | None -> []
-
-  let list_edges graph node =
+  let list_edges find_successors graph node =
     match Table.find_opt graph.reflected node with
     | Some edges -> edges
-    | None -> list_stored_successors graph node
+    | None -> list_current_successors find_successors node
 
   let list_predecessors graph node =
     match Table.find_opt graph.predecessors node with
@@ -115,22 +108,14 @@ module Make (Node : Strongly_connected.Node) = struct
       Table.replace graph.unreachable_candidates root ()
     end
 
-  let find_successors graph node = Table.find_opt graph.successors node
+  let add_node = add_if_new
 
-  let reflect graph node =
-    if not (Table.mem graph.reflected node) then
-      Table.replace graph.reflected node (list_stored_successors graph node)
-
-  let set_successors graph node successors =
-    reflect graph node;
-    Table.replace graph.successors node successors;
-    List.filter (add_if_new graph) (Option.value successors ~default:[])
-
-  let remove_successors graph node =
+  let change_successors graph node ~before ~after =
     if is_node graph node then begin
-      reflect graph node;
-      Table.remove graph.successors node
+      if not (Table.mem graph.reflected node) then Table.replace graph.reflected node before;
+      List.filter (add_if_new graph) after
     end
+    else []
 
   let has_changes graph =
     Table.length graph.reflected > 0 || Table.length graph.unreachable_candidates > 0
@@ -194,7 +179,8 @@ module Make (Node : Strongly_connected.Node) = struct
     done;
     Hashtbl.fold (fun _ component components -> component :: components) traversal.visited []
 
-  let find_cycle_through graph ~source ~target =
+  let find_cycle_through graph find_successors ~source ~target =
+    let list_edges = list_edges find_successors in
     let forward = start_search list_edges target
     and backward = start_search list_predecessors source in
     let rec step_until_exhausted () =
@@ -220,7 +206,8 @@ module Make (Node : Strongly_connected.Node) = struct
           (list_predecessors graph member))
       component.members
 
-  let list_unreachable graph candidates =
+  let list_unreachable graph find_successors candidates =
+    let list_edges = list_edges find_successors in
     let removed = ref [] in
     let rec visit = function
       | [] -> ()
@@ -241,7 +228,6 @@ module Make (Node : Strongly_connected.Node) = struct
               List.iter
                 (fun member ->
                   Table.remove graph.components member;
-                  Table.remove graph.successors member;
                   Table.remove graph.predecessors member;
                   Table.remove graph.reflected member;
                   removed := member :: !removed)
@@ -252,20 +238,15 @@ module Make (Node : Strongly_connected.Node) = struct
     visit candidates;
     !removed
 
-  let is_unknown graph node =
-    match Table.find_opt graph.successors node with
-    | Some (Some _) -> false
-    | Some None | None -> true
-
-  let blocks graph (component : component) =
+  let blocks graph find_successors (component : component) =
     List.exists
       (fun member ->
-        is_unknown graph member
+        Option.is_none (find_successors member)
         || List.exists
              (fun successor ->
                let other = read_component graph successor in
                other.id <> component.id && other.is_blocked)
-             (list_edges graph member))
+             (list_edges find_successors graph member))
       component.members
 
   let is_current graph (component : component) =
@@ -276,27 +257,27 @@ module Make (Node : Strongly_connected.Node) = struct
         | None -> false)
     | [] -> false
 
-  let rec settle graph touch = function
+  let rec settle graph find_successors touch = function
     | [] -> ()
     | (component, is_fresh) :: rest ->
         if is_current graph component then begin
-          let is_blocked = blocks graph component in
+          let is_blocked = blocks graph find_successors component in
           let is_flipped = is_blocked <> component.is_blocked in
           if is_flipped then begin
             component.is_blocked <- is_blocked;
             List.iter touch component.members
           end;
           if is_flipped || is_fresh then
-            settle graph touch
+            settle graph find_successors touch
               (List.map
                  (fun predecessor -> (predecessor, false))
                  (list_neighbors graph list_predecessors component)
               @ rest)
-          else settle graph touch rest
+          else settle graph find_successors touch rest
         end
-        else settle graph touch rest
+        else settle graph find_successors touch rest
 
-  let update graph =
+  let update graph ~find_successors =
     let touched = Table.create 64 in
     let touch node = Table.replace touched node () in
     let fresh = ref [] in
@@ -314,7 +295,7 @@ module Make (Node : Strongly_connected.Node) = struct
       (fun node ->
         let before = List.sort_uniq Node.compare (Table.find graph.reflected node) in
         Table.remove graph.reflected node;
-        let after = List.sort_uniq Node.compare (list_stored_successors graph node) in
+        let after = List.sort_uniq Node.compare (list_current_successors find_successors node) in
         let removed = subtract before after and added = subtract after before in
         List.iter (fun successor -> remove_predecessor graph successor node) removed;
         List.iter (fun successor -> add_predecessor graph successor node) added;
@@ -330,7 +311,7 @@ module Make (Node : Strongly_connected.Node) = struct
                ~list_successors:(fun member ->
                  List.filter
                    (fun successor -> (read_component graph successor).id = split.id)
-                   (list_edges graph member))
+                   (list_edges find_successors graph member))
                split.members)
         end;
         List.iter
@@ -343,14 +324,14 @@ module Make (Node : Strongly_connected.Node) = struct
                       List.sort Node.compare
                         (List.concat_map (fun (component : component) -> component.members) merged);
                     ])
-                (find_cycle_through graph ~source:(read_component graph node)
+                (find_cycle_through graph find_successors ~source:(read_component graph node)
                    ~target:(read_component graph successor)))
           added;
         candidates := removed @ !candidates)
       changed;
-    let removed = list_unreachable graph !candidates in
+    let removed = list_unreachable graph find_successors !candidates in
     if graph.tracks_blocked then
-      settle graph touch
+      settle graph find_successors touch
         (List.map (fun component -> (component, true)) !fresh
         @ List.filter_map
             (fun node ->
@@ -360,12 +341,12 @@ module Make (Node : Strongly_connected.Node) = struct
             changed);
     { touched = List.sort Node.compare (List.filter (is_node graph) (list_keys touched)); removed }
 
-  let group graph node =
+  let group graph ~find_successors node =
     match Table.find_opt graph.components node with
     | None -> Members []
     | Some { is_blocked = true; _ } -> Blocked
     | Some { members = [ single ]; _ } ->
-        if List.exists (Node.equal single) (list_stored_successors graph single) then
+        if List.exists (Node.equal single) (list_current_successors find_successors single) then
           Members [ single ]
         else Members []
     | Some { members; _ } -> Members members
