@@ -186,6 +186,29 @@ let () =
       one_diagnostic "fn size() -> Int64 { 9 }\n"
         ~others:[ ("app::main/grid", "fn size() -> Int64 { 3 }\n") ]
         ~says:"already defined in app/main/grid.truss" "resolve.duplicate_definition");
+  test "impls in two files that spell one trait the same but import different modules are two"
+    (fun () ->
+      no_diagnostics
+        [
+          ("app::one::codec", "public trait Marker {\n}\n");
+          ("app::two::codec", "public trait Marker {\n}\n");
+          ( "app::main",
+            "use app::one::codec\n\n\
+             public type Point(x: Int64)\n\n\
+             impl codec::Marker for Point {\n\
+             }\n" );
+          ("app::main/second", "use app::two::codec\n\nimpl codec::Marker for Point {\n}\n");
+        ]);
+  test "one impl written with two spellings of its trait is a duplicate" (fun () ->
+      one_diagnostic
+        "use app::one::codec\n\n\
+         public type Point(x: Int64)\n\n\
+         impl codec::Marker for Point {\n\
+         }\n\n\
+         impl app::one::codec::Marker for Point {\n\
+         }\n"
+        ~others:[ ("app::one::codec", "public trait Marker {\n}\n") ]
+        ~says:"already defined in this file" "resolve.duplicate_definition");
   test "a file names a module only through its own imports" (fun () ->
       one_diagnostic Fixtures.Resolve.file_without_the_use_cannot_name_the_module
         ~others:

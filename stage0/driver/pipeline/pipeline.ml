@@ -527,7 +527,7 @@ let recording (names : Names.lookups) (note : Part.t -> unit) : Names.lookups =
             note (Declaration { module_; path; ordinal = 0 })
         | Method { owner; name; _ } | Member_constant { owner; name } ->
             note (Members (owner, name))
-        | Derived _ -> ());
+        | Derived _ | Unresolved _ -> ());
         names.key path);
     declaration = (fun key -> noting (Declaration key) (names.declaration key));
     declarations =

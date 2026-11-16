@@ -849,7 +849,12 @@ let () =
       let module_ = module_of "app::main" in
       let method_of owner name : Path.t = Method { owner; name; receiver = Read } in
       let impl_for type_name : Path.t =
-        Impl { module_; trait = "Shape"; for_type = { type_name; generics = [] } }
+        Impl
+          {
+            module_;
+            trait = { path = Top { module_; name = "Shape" }; arguments = []; associated = [] };
+            for_type = Top { module_; name = type_name };
+          }
       in
       let parts = app_parts database in
       let by_path path =

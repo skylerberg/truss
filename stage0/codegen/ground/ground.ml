@@ -15,9 +15,10 @@ let builtin builtin = Named { path = Intrinsic.builtin_path builtin; arguments =
 
 let rec path_name : Path.t -> string = function
   | Top { name; _ } | Test { name; _ } -> name
-  | Impl { trait; for_type; _ } -> trait ^ " for " ^ Path.show_type_head for_type
+  | Impl { trait; for_type; _ } -> path_name trait.path ^ " for " ^ path_name for_type
   | Law_proof { trait; law; for_type; _ } ->
-      trait ^ "." ^ law ^ " for " ^ Path.show_type_head for_type
+      path_name trait.path ^ "." ^ law ^ " for " ^ path_name for_type
+  | Unresolved { names; _ } -> String.concat "::" names
   | Method { name; _ } | Member_constant { name; _ } -> name
   | Derived { trait; _ } -> path_name trait
 

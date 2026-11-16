@@ -215,6 +215,12 @@ let has_changed_value (before : side) (after : side) path ~before_key ~after_key
           not (Core_equivalence.equal_expression ~parameters:([], []) before after)
       | _ -> false)
 
+let is_same_impl (before : Path.t) (after : Path.t) =
+  match (before, after) with
+  | Impl before, Impl after ->
+      before.trait = after.trait && Path.equal before.for_type after.for_type
+  | _ -> Path.equal before after
+
 let impls (side : side) package =
   List.filter_map
     (fun (declaration : Names.declaration) ->
@@ -293,7 +299,7 @@ let compare ~before ~after package =
   let impl_changes =
     List.concat_map
       (fun (path, shown, old_sets) ->
-        match List.find_opt (fun (_, other, _) -> other = shown) new_impls with
+        match List.find_opt (fun (other, _, _) -> is_same_impl path other) new_impls with
         | None -> [ public_change path (Breaks (Printf.sprintf "was removed: %s" shown)) ]
         | Some (_, _, new_sets) ->
             let set name sets =
@@ -321,7 +327,7 @@ let compare ~before ~after package =
       old_impls
     @ List.filter_map
         (fun (path, shown, _) ->
-          if List.exists (fun (_, other, _) -> other = shown) old_impls then None
+          if List.exists (fun (other, _, _) -> is_same_impl other path) old_impls then None
           else Some (public_change path (Grows (Printf.sprintf "is new: %s" shown))))
         new_impls
   in

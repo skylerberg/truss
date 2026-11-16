@@ -52,16 +52,36 @@ let rec path : Path.t -> string = function
       path owner ^ "_" ^ name ^ receiver method_receiver
   | Member_constant { owner; name } -> path owner ^ marker "Member" ^ name
   | Impl { module_; trait; for_type } ->
-      module_path module_ ^ marker "Impl" ^ text trait ^ marker "For"
-      ^ text (Path.show_type_head for_type)
+      module_path module_ ^ marker "Impl" ^ reference trait ^ marker "For" ^ path for_type
       ^ marker "End"
   | Derived { type_; trait } ->
       marker "Derived" ^ path trait ^ marker "For" ^ path type_ ^ marker "End"
   | Test { module_; name } -> module_path module_ ^ marker "Test" ^ text name ^ marker "End"
   | Law_proof { module_; trait; law; for_type } ->
-      module_path module_ ^ marker "Proof" ^ text trait ^ marker "Law" ^ text law ^ marker "For"
-      ^ text (Path.show_type_head for_type)
-      ^ marker "End"
+      module_path module_ ^ marker "Proof" ^ reference trait ^ marker "Law" ^ text law
+      ^ marker "For" ^ path for_type ^ marker "End"
+  | Unresolved { names; _ } ->
+      marker "Unresolved" ^ String.concat (marker "In") (List.map text names) ^ marker "End"
+
+and reference ({ path = trait; arguments; associated } : Path.reference) =
+  match (arguments, associated) with
+  | [], [] -> path trait
+  | _ ->
+      path trait
+      ^ String.concat "" (List.map (fun argument -> marker "Of" ^ path_argument argument) arguments)
+      ^ String.concat ""
+          (List.map
+             (fun (name, argument) ->
+               marker "Where" ^ text name ^ marker "Is" ^ path_argument argument)
+             associated)
+      ^ marker "Done"
+
+and path_argument : Path.argument -> string = function
+  | Named named -> reference named
+  | Parameter name -> marker "Parameter" ^ text name
+  | Any trait -> marker "Any" ^ reference trait
+  | Count value -> marker "Count" ^ text (Z.to_string value)
+  | Constant constant -> marker "Constant" ^ path constant
 
 let mode : Ground.mode -> string = function Read -> "" | Mut -> marker "Mut" | Own -> marker "Own"
 

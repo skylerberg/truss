@@ -36,23 +36,26 @@ type file = { module_ : module_; name : string }
 let file_names file = file.module_.modules @ [ file.name ^ ".truss" ]
 let show_file file = String.concat "/" (package_parts file.module_.package @ file_names file)
 
-type type_head = { type_name : string; generics : string list }
-
-let show_type_head head =
-  match head.generics with
-  | [] -> head.type_name
-  | generics -> Printf.sprintf "%s[%s]" head.type_name (String.concat ", " generics)
-
 type receiver = Static | Read | Mut | Own
 
 type t =
   | Top of { module_ : module_; name : string }
   | Method of { owner : t; name : string; receiver : receiver }
   | Member_constant of { owner : t; name : string }
-  | Impl of { module_ : module_; trait : string; for_type : type_head }
+  | Impl of { module_ : module_; trait : reference; for_type : t }
   | Derived of { type_ : t; trait : t }
   | Test of { module_ : module_; name : string }
-  | Law_proof of { module_ : module_; trait : string; law : string; for_type : type_head }
+  | Law_proof of { module_ : module_; trait : reference; law : string; for_type : t }
+  | Unresolved of { file : file; names : string list }
+
+and reference = { path : t; arguments : argument list; associated : (string * argument) list }
+
+and argument =
+  | Named of reference
+  | Parameter of string
+  | Any of reference
+  | Count of Z.t
+  | Constant of t
 
 let standard_package = { owner = None; name = "standard" }
 let standard_module modules = { package = standard_package; modules }
@@ -63,6 +66,7 @@ let rec package = function
       module_.package
   | Method { owner; _ } | Member_constant { owner; _ } -> package owner
   | Derived { type_; _ } -> package type_
+  | Unresolved { file; _ } -> file.module_.package
 
 let show_receiver = function
   | Static -> "no `self`"
@@ -80,12 +84,29 @@ let rec show = function
       | Own -> base ^ "(own self)")
   | Member_constant { owner; name } -> show owner ^ "." ^ name
   | Impl { module_; trait; for_type } ->
-      Printf.sprintf "%s::impl %s for %s" (show_module module_) trait (show_type_head for_type)
+      Printf.sprintf "%s::impl %s for %s" (show_module module_) (show_reference trait)
+        (show for_type)
   | Derived { type_; trait } -> Printf.sprintf "derived %s for %s" (show trait) (show type_)
   | Test { module_; name } -> Printf.sprintf "%s::test %S" (show_module module_) name
   | Law_proof { module_; trait; law; for_type } ->
-      Printf.sprintf "%s::proof %s.%s for %s" (show_module module_) trait law
-        (show_type_head for_type)
+      Printf.sprintf "%s::proof %s.%s for %s" (show_module module_) (show_reference trait) law
+        (show for_type)
+  | Unresolved { names; _ } -> String.concat "::" names
+
+and show_reference { path; arguments; associated } =
+  match
+    List.map show_argument arguments
+    @ List.map (fun (name, argument) -> name ^ " = " ^ show_argument argument) associated
+  with
+  | [] -> show path
+  | shown -> Printf.sprintf "%s[%s]" (show path) (String.concat ", " shown)
+
+and show_argument = function
+  | Named reference -> show_reference reference
+  | Parameter name -> name
+  | Any reference -> "any " ^ show_reference reference
+  | Count value -> Z.to_string value
+  | Constant path -> show path
 
 let compare = Stdlib.compare
 let equal left right = compare left right = 0
