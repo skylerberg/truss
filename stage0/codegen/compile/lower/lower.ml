@@ -138,7 +138,7 @@ let lower_source_code context ~path ~type_arguments : Emit_c.Builder.instance =
   let convention, returns = result_of context code.substitution code.result in
   result_slot st convention;
   let parameter_locals, places =
-    begin_body st ~body ~defaults:(Mir_form.parameter_defaults context path)
+    begin_body st ~body ~defaults:(Mir_form.parameter_defaults context path).form
   in
   let lending_locals =
     List.map

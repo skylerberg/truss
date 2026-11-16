@@ -138,10 +138,9 @@ let literal_value st ty text =
   | _ -> None
 
 let constant_state context path =
-  let key = key_of context path in
-  let mir =
+  let ({ source; form = mir } : Mir.Graph.t Mir.sourced) =
     match Mir.initializer_graph_of_path context.lookups.mir path with
-    | Some mir -> mir
+    | Some graph -> graph
     | None -> bug "%s is not a constant" (Path.show path)
   in
   let ty =
@@ -151,8 +150,8 @@ let constant_state context path =
   in
   let code =
     {
-      (unwritten ~definition:path ~substitution:[] ~result:(Returns Types.unit)) with
-      written = Some (read_written context key);
+      (unwritten ~definition:source.path ~substitution:[] ~result:(Returns Types.unit)) with
+      written = Some (read_written context source);
     }
   in
   let st = enter context ~builder:(create context.env ~key:(Evaluator path)) (frame_of code) in
@@ -250,7 +249,7 @@ and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowere
             Some ()
         | _ -> None)
     | Function { path; type_arguments }, arguments when depth > 0 ->
-        let* callee_mir = Mir.graph_of_path st.context.lookups.mir path in
+        let* { form = callee_mir; _ } = Mir.graph_of_path st.context.lookups.mir path in
         let type_arguments =
           List.map
             (Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution)
@@ -259,7 +258,7 @@ and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowere
         let callee =
           enter st.context ~builder:st.builder (frame_of (code_of st.context path type_arguments))
         in
-        let defaults = Mir_form.parameter_defaults st.context path in
+        let defaults = (Mir_form.parameter_defaults st.context path).form in
         let* values =
           all
             (List.mapi

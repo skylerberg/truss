@@ -129,10 +129,7 @@ let require_written st =
   | Some written -> written
   | None -> bug "%s is generated code, which has no source" (Path.show st.frame.code.definition)
 
-let source st (span : Source.Definition_span.t) =
-  let text = (require_written st).text in
-  let start = min span.start (String.length text) in
-  String.sub text start (min span.stop (String.length text) - start)
+let source st span = Source.Definition_span.quote (require_written st).text span
 
 let rec binding_scope = function
   | ({ kind = Bindings; _ } as scope) :: _ -> scope

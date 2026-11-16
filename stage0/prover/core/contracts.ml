@@ -21,7 +21,7 @@ let source_at (lookups : Lookups.t) (path : Path.t) =
       let source =
         match origin with
         | Written key | Inherited key -> source_of key
-        | Generated -> { key = None; name = Path.show path; spans = lazy [||]; text = lazy "" }
+        | Derived _ -> { key = None; name = Path.show path; spans = lazy [||]; text = lazy "" }
       in
       (source, substitution, origin))
     (lookups.mir.form_origin path)
@@ -58,7 +58,9 @@ let part_of ?(inherited = false) (lookups : Lookups.t) path callee =
         callbacks = contract.callbacks;
         inherited;
       })
-    (Mir.contract_of_path lookups.mir path)
+    (Option.map
+       (fun ({ form; _ } : Mir.contract Mir.sourced) -> form)
+       (Mir.contract_of_path lookups.mir path))
 
 let holds_todo (lookups : Lookups.t) (key : Names.key) =
   match Mir.code (lookups.mir.body_part key) with
@@ -159,7 +161,7 @@ let method_contract lookups (trait : Types.trait_reference) name receiver (evide
   | Impl { impl; _ } -> (
       let path = Path.Method { owner = impl; name; receiver } in
       match source_at lookups path with
-      | Some (callee, _, (Written _ | Generated)) ->
+      | Some (callee, _, (Written _ | Derived _)) ->
           Option.map
             (fun own -> make_contract lookups path ~own ~others:(Option.to_list trait_side))
             (part_of lookups path callee)

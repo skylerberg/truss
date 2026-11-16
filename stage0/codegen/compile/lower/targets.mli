@@ -78,7 +78,9 @@ val call_through_any :
 val any_substitution :
   Definitions.context -> any:Types.trait_reference -> Path.t -> Types.substitution
 
-val in_type_definition : Lowering.state -> Ground.ty -> (unit -> 'a) -> 'a
+val in_type_definition :
+  Lowering.state -> source:Resolve.Names.key -> Ground.ty -> (unit -> 'a) -> 'a
+
 val begin_output : Lowering.state -> Lowered.place
 val echo : Lowering.state -> Lowered.place -> Ground.ty -> site:Lowered.site -> unit
 

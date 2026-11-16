@@ -1,0 +1,25 @@
+capability Scale {
+  fn scaled(value: Int64, factor: Int64 = 2 * 3) -> Int64
+}
+
+type Offset(offset: Int64)
+
+impl Scale for Offset {
+  fn scaled(self, value: Int64, factor: Int64) -> Int64 {
+    value * factor + self.offset
+  }
+}
+
+fn six() -> Int64
+  uses Scale
+{
+  Scale.scaled(1)
+}
+
+test "default" {
+  let plain = Offset(offset: 0)
+  let result = provide plain {
+    six()
+  }
+  assert result == 6
+}

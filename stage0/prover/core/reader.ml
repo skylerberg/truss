@@ -401,7 +401,10 @@ let argument_place context (frame : frame) run (mode : Types.mode) (value : Mir.
               slices))
   | Types.Mut, Some Unknown_slice when Types.is_well_known Slice (Mir.operand_type value) ->
       unsupported
-        (span_of frame.source (Option.value (operand_origin value) ~default:0))
+        (span_of frame.source
+           (match operand_origin value with
+           | Some origin -> origin
+           | None -> bug "a constant is passed `mut`"))
         "a slice passed `mut` whose collection the prover does not know: a loop assigns the slice, \
          a call returns it, or it is a copy of a parameter"
   | Types.Mut, (Some Unknown_slice | None) -> (

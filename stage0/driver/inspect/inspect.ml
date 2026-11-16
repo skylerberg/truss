@@ -149,11 +149,7 @@ let explain_at ~path (spans : Source.Definition_span.t array) (definition : defi
   | None, Some name -> Some (explain_name ~path definition resolved tables name)
   | None, None -> None
   | Some value, _ ->
-      let written =
-        let span = spans.(value.id) in
-        let start = max 0 span.start and stop = min (String.length text) span.stop in
-        if stop > start then String.sub text start (stop - start) else ""
-      in
+      let written = Source.Definition_span.quote text spans.(value.id) in
       let meaning, refers_to =
         match value.kind with
         | Name path -> resolved_meaning resolved path.last

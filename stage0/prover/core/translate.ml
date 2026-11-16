@@ -100,7 +100,7 @@ let empty_frame source =
 
 let definition_span (source : source) =
   let spans = Lazy.force source.spans in
-  match Array.length spans with 0 -> Source.Definition_span.make 0 0 | count -> spans.(count - 1)
+  Source.Definition_span.locate spans (Array.length spans - 1)
 
 type promise = { counter : Costs.counter; clause : Mir.cost; written_in : source; inherited : bool }
 
@@ -165,7 +165,7 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
     (lookups : Lookups.t) (source : source) ~path =
   let contract =
     match Mir.contract_of_path lookups.mir path with
-    | Some contract -> contract
+    | Some { form; _ } -> form
     | None -> bug "`%s` has no MIR of its contract" source.name
   in
   let parameters = contract.parameters in
@@ -298,7 +298,7 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
   in
   let mir =
     match Mir.code_of_path lookups.mir path with
-    | Some mir -> mir
+    | Some { form; _ } -> form
     | None -> bug "`%s` has a body and no MIR" source.name
   in
   let promised =
@@ -578,7 +578,7 @@ let type_ (lookups : Lookups.t) (source : source) ~path =
   let home = home source in
   let context = new_context lookups ~home ~current:path ~terminates:false ~measures:[] in
   (match Mir.type_clauses_of_path lookups.mir path with
-  | Some { invariants; potential } ->
+  | Some { form = { invariants; potential }; _ } ->
       let ty =
         match Interface.Definition.interface lookups.interface path with
         | Some (Interface.Environment.Type_interface interface) ->
@@ -587,14 +587,14 @@ let type_ (lookups : Lookups.t) (source : source) ~path =
       in
       let start = { (empty_frame source) with self_type = Some ty } in
       (match Mir.defaults_of_path lookups.mir path with
-      | Some (Field_defaults defaults) ->
+      | Some { form = Field_defaults defaults; _ } ->
           List.iter
             (fun (default : Mir.t Mir.field_default) ->
               ignore
                 (code_value context start default.value
                    ~type_:(substituted context start default.type_)))
             defaults
-      | Some (Parameter_defaults _) | None -> ());
+      | Some { form = Parameter_defaults _; _ } | None -> ());
       let value_ = arrive context start "value" ty in
       assume context start (validity context start ~assuming:true ~own:false ty value_);
       let at_value = { start with self = Some value_; old_self = Some value_ } in
@@ -631,7 +631,7 @@ let constant (lookups : Lookups.t) (source : source) ~path =
   let home = home source in
   let context = new_context lookups ~home ~current:path ~terminates:false ~measures:[] in
   (match Mir.initializer_of_path lookups.mir path with
-  | Some code ->
+  | Some { form = code; _ } ->
       ignore (code_value context (empty_frame source) code ~type_:(constant_type context path))
   | None -> bug "the constant `%s` has no MIR" (Path.show path));
   outcome context

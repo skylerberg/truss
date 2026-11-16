@@ -864,7 +864,7 @@ let () =
       let parts = app_parts packages in
       let by_path path =
         match Mir.graph_of_path parts path with
-        | Some mir -> mir
+        | Some { form; _ } -> form
         | None -> failwith (Path.show path ^ " has no MIR")
       in
       let default_method = method_of (Top { module_; name = "Shape" }) "doubled" in
@@ -895,7 +895,7 @@ let () =
       let parts = app_parts packages in
       let defaults_of path =
         match Mir.default_graphs_of_path parts path with
-        | Some defaults -> defaults
+        | Some { form; _ } -> form
         | None -> failwith (Path.show path ^ " has no defaults")
       in
       let returned (default : Mir.Graph.t) =
@@ -961,7 +961,9 @@ let () =
           block.statements
       in
       match Mir.contract_of_path (app_parts packages) g with
-      | Some { requires = [ quantified; connected; chosen ]; ensures = [ ensured ]; _ } -> (
+      | Some
+          { form = { requires = [ quantified; connected; chosen ]; ensures = [ ensured ]; _ }; _ }
+        -> (
           List.iter
             (fun clause ->
               if parameters clause <> [ Some "count"; Some "items" ] then
@@ -994,7 +996,7 @@ let () =
               if not (computes_a_comparison body) then
                 fail "the quantifier's body is not computed in its block"
           | values -> fail "the quantified clause holds %d values" (List.length values))
-      | Some contract ->
+      | Some { form = contract; _ } ->
           fail "%d `requires` and %d `ensures`" (List.length contract.requires)
             (List.length contract.ensures)
       | None -> fail "`g` has no contract");

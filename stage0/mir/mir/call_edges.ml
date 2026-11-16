@@ -174,7 +174,7 @@ let edges (lookups : lookups) ~package (code : Tree.t) =
     | _ -> ()
   and field_defaults type_ variant omitted =
     match Parts.defaults_of_path lookups.mir type_ with
-    | Some (Field_defaults defaults) ->
+    | Some { form = Field_defaults defaults; _ } ->
         List.iter
           (fun (default : Tree.t Tree.field_default) ->
             if
@@ -182,7 +182,7 @@ let edges (lookups : lookups) ~package (code : Tree.t) =
               && enters (`Default (type_, variant, default.field))
             then Walk.iter_code_with_locals statement default.value)
           defaults
-    | Some (Parameter_defaults _) | None -> ()
+    | Some { form = Parameter_defaults _; _ } | None -> ()
   and invariant_checked (call : Tree.call) =
     match (call.callee, call.arguments) with
     | ( Intrinsic { operation = Holds_invariant; type_arguments = [ Type checked ] },
@@ -190,7 +190,7 @@ let edges (lookups : lookups) ~package (code : Tree.t) =
         match
           (head_of checked, Option.bind (head_of checked) (Parts.type_clauses_of_path lookups.mir))
         with
-        | Some type_, Some clauses -> (
+        | Some type_, Some { form = clauses; _ } -> (
             match List.nth_opt clauses.invariants (Z.to_int index) with
             | Some { clause; is_executable = true; _ } when enters (`Invariant (type_, index)) ->
                 Walk.iter_formula_with_locals statement clause
@@ -204,13 +204,13 @@ let edges (lookups : lookups) ~package (code : Tree.t) =
 let of_path (lookups : lookups) path =
   let defaults =
     match Parts.defaults_of_path lookups.mir path with
-    | Some (Parameter_defaults defaults) -> List.map snd defaults
-    | Some (Field_defaults _) | None -> []
+    | Some { form = Parameter_defaults defaults; _ } -> List.map snd defaults
+    | Some { form = Field_defaults _; _ } | None -> []
   in
   let code =
     match Parts.body_part_of_path lookups.mir path with
-    | Body code | Initializer code -> [ code.tree ]
-    | No_code -> []
+    | Some { form = Body code | Initializer code; _ } -> [ code.tree ]
+    | Some { form = No_code; _ } | None -> []
   in
   List.sort_uniq Path.compare
     (List.concat_map (edges lookups ~package:(Path.package path)) (code @ defaults))

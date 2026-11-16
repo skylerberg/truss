@@ -39,12 +39,16 @@ let statement_diverges (tables : tables) =
   State.diverges ~is_never:(fun (value : Syntax.expression) ->
       match tables.types.(value.id) with Some Types.Never -> true | _ -> false)
 
-type form_origin = Written of Resolve.Names.key | Generated | Inherited of Resolve.Names.key
+type form_origin =
+  | Written of Resolve.Names.key
+  | Derived of Resolve.Names.key
+  | Inherited of Resolve.Names.key
 
 let form_origin (interface : Interface.Lookups.t) ~is_derived (path : Path.t) =
   match (interface.names.key path, path) with
   | Some key, _ -> Some (Written key, [])
-  | None, Method { owner = Impl _ | Derived _; _ } when is_derived path -> Some (Generated, [])
+  | None, Method { owner = Derived { type_; _ }; _ } when is_derived path ->
+      Option.map (fun type_key -> (Derived type_key, [])) (interface.names.key type_)
   | None, Method { owner = (Impl _ | Derived _) as owner; name; receiver } ->
       Option.bind (Interface.Impls.impl_interface interface owner)
         (fun (impl : Types.impl_interface) ->

@@ -313,9 +313,7 @@ let quote source origin =
   match source.key with Some key -> Quote (key, origin) | None -> Text "this expression"
 
 let quoted text (span : Source.Definition_span.t) =
-  if span.stop > span.start && span.stop <= String.length text then
-    String.sub text span.start (span.stop - span.start)
-  else "this expression"
+  if span.stop = span.start then "this expression" else Source.Definition_span.quote text span
 
 let text_of source origin = quoted (Lazy.force source.text) (span_of source origin)
 let builtin ty = Types.builtin_of ty

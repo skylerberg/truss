@@ -20,6 +20,20 @@ module Definition_span = struct
     span (base + definition_span.start) (base + definition_span.stop)
 
   let of_file ~base (file_span : span) = make (file_span.start - base) (file_span.stop - base)
+
+  let locate spans origin =
+    if origin < 0 || origin >= Array.length spans then
+      invalid_arg
+        (Printf.sprintf "Source.Definition_span.locate: no node %d among %d" origin
+           (Array.length spans));
+    spans.(origin)
+
+  let quote text span =
+    if span.stop > String.length text then
+      invalid_arg
+        (Printf.sprintf "Source.Definition_span.quote: %d..%d is past a text of %d" span.start
+           span.stop (String.length text));
+    String.sub text span.start (span.stop - span.start)
 end
 
 type t = { path : string; text : string; line_starts : int array }

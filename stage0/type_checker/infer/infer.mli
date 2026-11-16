@@ -30,7 +30,10 @@ val contract : Lookups.t -> Resolve.Names.key -> (checked, Diagnostic.in_definit
 val body : Lookups.t -> Resolve.Names.key -> (checked, Diagnostic.in_definition list) result
 val derived : Lookups.t -> Path.t -> Core.t option
 
-type form_origin = Written of Resolve.Names.key | Generated | Inherited of Resolve.Names.key
+type form_origin =
+  | Written of Resolve.Names.key
+  | Derived of Resolve.Names.key
+  | Inherited of Resolve.Names.key
 
 val form_origin :
   Interface.Lookups.t ->
