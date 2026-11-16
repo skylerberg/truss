@@ -200,6 +200,16 @@ let () =
       match list_server_files_added ~before with
       | [] -> ()
       | added -> fail "left %s" (String.concat ", " added));
+  test "a command outside any project runs without a background process" (fun () ->
+      let directory = Harness.make_scratch_directory "outside-a-project" in
+      let before = list_server_files () in
+      Unix.putenv "TRUSS_NO_SERVER" "";
+      let status, out, err = Process.run (Lazy.force other_build) [ "check"; "-C"; directory ] in
+      if status <> 2 || not (String.includes ~affix:"so it is in no project" (out ^ err)) then
+        fail "exited with %d: %s%s" status out err;
+      match list_server_files_added ~before with
+      | [] -> ()
+      | added -> fail "started a background process: %s" (String.concat ", " added));
   test "a background process whose project is deleted ends, and does not make the project again"
     (fun () ->
       let before = list_server_files () in

@@ -212,7 +212,7 @@ let project_of files =
 let snapshot_of_files kind files = { kind; files; project = project_of files }
 let replace_files (snapshot : snapshot) files = { snapshot with files; project = project_of files }
 
-let find_root directory =
+let find_project_root directory =
   let directory = try Unix.realpath directory with Unix.Unix_error _ -> directory in
   let has_project_table manifest =
     try Manifest.has_project_table (In_channel.with_open_bin manifest In_channel.input_all)
@@ -647,7 +647,7 @@ let rec load_worktree_snapshot root =
 let take_snapshot directory =
   if not (Sys.file_exists directory) then Error (directory ^ ": no such directory.")
   else
-    match find_root directory with
+    match find_project_root directory with
     | None ->
         Error
           (Printf.sprintf "No `truss.toml` in %s or any directory above it, so it is in no project."
@@ -802,8 +802,6 @@ let fetch_published name version =
           | [] -> Ok snapshot
           | problem :: _ -> refuse (Project.show_problem problem)))
 
-let make_server_key directory = Option.value (find_root directory) ~default:""
-
 let close_all () =
   List.iter
     (fun worktree ->
@@ -818,7 +816,7 @@ let flush () =
 let serve ~key ~handle =
   is_serving := true;
   Server.serve ~key
-    ~is_alive:(fun () -> key = "" || Sys.file_exists key)
+    ~is_alive:(fun () -> Sys.file_exists key)
     ~collect
     ~list_watcher_descriptors:(fun () ->
       Hashtbl.fold
