@@ -1,6 +1,3 @@
-module Impls = Interface.Impls
-module Environment = Interface.Environment
-
 let bug format = Compiler_bug.bug ~stage:"Infer" format
 
 let gives (trait : Path.t) name =

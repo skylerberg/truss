@@ -1,5 +1,3 @@
-module Names = Resolve.Names
-
 type target = Definition of Path.t | Module of Path.module_
 type occurrence = { span : Source.Definition_span.t; target : target }
 

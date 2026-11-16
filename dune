@@ -3,4 +3,6 @@
 (env
  (dev
   (flags
-   (:standard %{dune-warnings}))))
+   (:standard %{dune-warnings} -w +60+66+74))
+  (c_flags
+   (:standard -Wextra -Werror))))

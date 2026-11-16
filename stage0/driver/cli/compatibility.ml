@@ -1,5 +1,4 @@
 module Names = Resolve.Names
-module Environment = Interface.Environment
 
 type change = Breaks of string | Grows of string
 type public_change = { path : Path.t; change : change }
