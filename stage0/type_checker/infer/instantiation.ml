@@ -13,10 +13,10 @@ let check_evidence_grants (state : State.state) (span : Source.Definition_span.t
         Diagnostic.make ~code:(Capabilities Not_granted) span message :: state.diagnostics)
     (Interface.Grants.describe_missing_in_impls state.lookups.interface ~package:state.package impls)
 
-let error_at state ?fixes code (value : Syntax.expression) message =
+let error_at state code (value : Syntax.expression) message =
   match State.head state value with
   | Some { target = Unknown report; _ } -> Types.Error report
-  | _ -> State.error state ?fixes code (State.read_span state value.id) message
+  | _ -> State.error state code (State.read_span state value.id) message
 
 type static_ =
   | Static_type of Types.ty

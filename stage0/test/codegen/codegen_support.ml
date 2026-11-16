@@ -111,8 +111,8 @@ let constant_int32 number = Lowered.Constant (Integer (Int32, Z.of_int number))
 let constant_int64 number = Lowered.Constant (Integer (Int64, Z.of_int number))
 let block statements terminator = { statements; terminator }
 
-let function_ ?(parameters = []) ?result ?(returns = true) ?(environment = []) locals blocks =
-  { parameters; result; returns; environment; locals; blocks }
+let function_ ?(parameters = []) ?result ?(environment = []) locals blocks =
+  { parameters; result; returns = true; environment; locals; blocks }
 
 let key name = Instance.Code { path = definition name; type_arguments = [] }
 

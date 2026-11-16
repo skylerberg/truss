@@ -202,12 +202,12 @@ let joins_neighbors cursor (span : Source.span) code =
 
 let has_reported cursor = Diagnostic.Collector.to_list cursor.diagnostics <> []
 
-let report cursor ?notes ?fixes code span message =
+let report cursor ?fixes code span message =
   (match code with
   | Diagnostic.Code.Missing_body -> cursor.recoveries := span :: !(cursor.recoveries)
   | _ -> record_recovery cursor ~index:cursor.index span);
   Diagnostic.Collector.add cursor.diagnostics
-    (Diagnostic.make ?notes ?fixes ~code:(Diagnostic.Code.Parser code) span message)
+    (Diagnostic.make ?fixes ~code:(Diagnostic.Code.Parser code) span message)
 
 let describe (token : Token.t) =
   match token.kind with

@@ -1509,25 +1509,14 @@ and loop_clauses builder (clauses : Core.loop_clause list) : Tree.loop_clause li
           Cost { origin; amortized; resource; bound = bound written })
     clauses
 
-let of_expression ?(parameters = []) (written : Core.expression) =
-  let builder =
-    Emitter.create
-      ~entry_locals:(List.map (fun (parameter : Core.parameter) -> parameter.local) parameters)
-      ()
-  in
-  let parameters =
-    List.map
-      (fun (parameter : Core.parameter) ->
-        Emitter.bind_source ~name:parameter.name builder parameter.local parameter.mode
-          parameter.type_ 0)
-      parameters
-  in
+let of_expression (written : Core.expression) =
+  let builder = Emitter.create ~entry_locals:[] () in
   Emitter.in_scope builder written.origin (fun () ->
       Emitter.in_statement builder written.origin (fun () ->
           Option.iter
             (fun value -> Emitter.return_ builder (Some value) written.origin)
             (expression builder written)));
-  let body = Emitter.finish builder ~parameters in
+  let body = Emitter.finish builder ~parameters:[] in
   { Tree.body; lambdas = Emitter.lambdas builder }
 
 let of_clause ?(is_executable = false) ~(parameters : Core.parameter list)

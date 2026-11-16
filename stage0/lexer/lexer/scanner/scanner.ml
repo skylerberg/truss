@@ -121,8 +121,8 @@ and scan_after (cursor : Cursor.t) ~inline ~nesting previous =
 and scan_item cursor ~inline ~nesting =
   let start = cursor.position in
   let again () = scan_item cursor ~inline ~nesting in
-  let reject ?code length message =
-    Source_text.reject ?code cursor ~length message;
+  let reject length message =
+    Source_text.reject cursor ~length message;
     again ()
   in
   let token ?ending kind = Cursor.Token (token cursor ~inline ~start ?ending kind) in

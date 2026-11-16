@@ -466,10 +466,10 @@ let named (body : Mir.Graph.body) name =
     body.locals;
   match !found with Some local -> local | None -> failwith ("no local is named " ^ name)
 
-let reachable (body : Mir.Graph.body) ~from ?(avoid = []) () =
+let reachable (body : Mir.Graph.body) ~from =
   let seen = Array.make (Array.length body.blocks) false in
   let rec visit block =
-    if (not seen.(block)) && not (List.mem block avoid) then begin
+    if not seen.(block) then begin
       seen.(block) <- true;
       List.iter visit (Mir.Graph.For_testing.successors body.blocks.(block).terminator)
     end
@@ -536,8 +536,7 @@ let () =
       with
       | None -> Harness.fail "nothing branches on a"
       | Some (yes, no) ->
-          let from_yes = reachable body ~from:[ yes ] ()
-          and from_no = reachable body ~from:[ no ] () in
+          let from_yes = reachable body ~from:[ yes ] and from_no = reachable body ~from:[ no ] in
           Array.iteri
             (fun index basic ->
               if negates basic && (from_no.(index) || not from_yes.(index)) then
@@ -661,12 +660,10 @@ let () =
       match List.find_opt (fun (_, terminator) -> returns_one terminator) (terminators body) with
       | None -> Harness.fail "the else does not return 1"
       | Some (else_return, _) ->
-          let from_entry = reachable body ~from:[ 0 ] () in
+          let from_entry = reachable body ~from:[ 0 ] in
           Array.iteri
             (fun index basic ->
-              if
-                from_entry.(index) && binds basic
-                && (reachable body ~from:[ index ] ()).(else_return)
+              if from_entry.(index) && binds basic && (reachable body ~from:[ index ]).(else_return)
               then Harness.fail "block %d binds x on the way to the else" index)
             body.blocks;
           if not (Array.exists binds body.blocks) then Harness.fail "x is never bound");

@@ -9,12 +9,17 @@ let expect_bug ~saying work =
 let env = Codegen_support.shape_env ()
 let emit env instance = ignore (Emit_c.fragment env (Code (instance env)))
 
-let caller ?(parameters = [ Codegen_support.value Codegen_support.int32 ]) arguments =
+let caller arguments =
   Codegen_support.entry
     [ Codegen_support.local (Codegen_support.value Codegen_support.int32) ]
     [
       Codegen_support.block
-        [ Codegen_support.call "callee" ~parameters arguments (Some (Codegen_support.at 0)) ]
+        [
+          Codegen_support.call "callee"
+            ~parameters:[ Codegen_support.value Codegen_support.int32 ]
+            arguments
+            (Some (Codegen_support.at 0));
+        ]
         (Return (Some (Codegen_support.copy 0)));
     ]
 
