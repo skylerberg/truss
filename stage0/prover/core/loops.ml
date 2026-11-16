@@ -529,8 +529,8 @@ let elements_so_far context (head : State.frame) ~element ~collection ~count yie
           (Models.model_of context collection_type collected ~element)
   | None -> ()
 
-let receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) ?(most = []) ~(for_loop : for_loop)
-    context frame ~element_type ~changed ~holds ~start ~receive =
+let receiving_loop ~each_iteration ~most ~(for_loop : for_loop) context frame ~element_type ~changed
+    ~holds ~start ~receive =
   let clauses = for_loop.for_clauses in
   let entry =
     { frame with State.yielded = Some (Amounts.empty_parts context frame element_type) }

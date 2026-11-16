@@ -446,7 +446,7 @@ let () =
 
 let edit start stop replacement = Diagnostic.replace (Source.span start stop) replacement
 
-let diagnostic ?(fixes = []) start stop =
+let diagnostic ~fixes start stop =
   Diagnostic.make ~fixes ~code:(Usage Unused_variable) (Source.span start stop) "x."
 
 let () =

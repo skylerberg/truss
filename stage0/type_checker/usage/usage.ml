@@ -8,7 +8,7 @@ type context = {
   mutable diagnostics : Diagnostic.in_definition list;
 }
 
-let report context ?(fixes = []) code (span : Source.Definition_span.t) message =
+let report context ~fixes code (span : Source.Definition_span.t) message =
   context.diagnostics <-
     Diagnostic.make ~fixes ~code:(Usage code) span message :: context.diagnostics
 

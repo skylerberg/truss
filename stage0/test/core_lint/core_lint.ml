@@ -281,7 +281,7 @@ let free_locals (parameters : Core.pattern list) (body : Core.block) =
 let is_executable context (condition : Core.expression) =
   not
     (Core_walk.For_testing.expression_exists
-       ~expression:(fun (node : Core.expression) ->
+       (fun (node : Core.expression) ->
          Types.equal node.type_ Integer
          ||
          match node.kind with

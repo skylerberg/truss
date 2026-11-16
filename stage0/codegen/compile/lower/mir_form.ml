@@ -1869,8 +1869,7 @@ and terminator st region (ending : Mir.Graph.terminator) ~origin =
           exits
       in
       Builder.finish st.builder
-        (Switch
-           { value = Copy (local_place st winner); cases; default = Some (jump st region next) });
+        (Switch { value = Copy (local_place st winner); cases; default = jump st region next });
       Builder.start st.builder (Builder.block st.builder)
   | Yield { mode; part; resume } ->
       Lowering.in_statement st (fun () -> lend_part st ~mode part);

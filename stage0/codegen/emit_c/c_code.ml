@@ -346,14 +346,14 @@ let terminator_c context fc buffer (terminator : Lowered.terminator) =
   in
   match terminator with
   | Goto block -> line "goto b%d;" block
-  | Switch { value; cases; default = otherwise } ->
+  | Switch { value; cases; default } ->
       let text, ty = operand value in
       let c_type = C_types.scalar_c context (C_values.scalar_of context ty) in
       line "switch (%s) {" text;
       List.iter
         (fun (value, block) -> line "case (%s)%sULL: goto b%d;" c_type (Z.to_string value) block)
         cases;
-      line "default: %s" (default otherwise);
+      line "default: goto b%d;" default;
       line "}"
   | Switch_variant { place; cases; default = otherwise } -> (
       match C_values.place_c context fc place with

@@ -13,11 +13,9 @@ val optimization_flag : optimization -> string
 val compile :
   t ->
   optimization:optimization ->
-  ?extra:string list ->
+  extra:string list ->
   source:string ->
   output:string ->
-  unit ->
   (unit, string) result
 
-val link :
-  t -> ?extra:string list -> objects:string list -> output:string -> unit -> (unit, string) result
+val link : t -> extra:string list -> objects:string list -> output:string -> (unit, string) result

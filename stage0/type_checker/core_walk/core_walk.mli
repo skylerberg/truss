@@ -29,10 +29,5 @@ val traverse_indirect : ('a -> 'b option) -> 'a Core.target -> 'b Core.target op
 
 module For_testing : sig
   val local_names : Core.definition -> (Core.local, string) Hashtbl.t
-
-  val expression_exists :
-    ?expression:(Core.expression -> bool) ->
-    ?statement:(Core.statement -> bool) ->
-    Core.expression ->
-    bool
+  val expression_exists : (Core.expression -> bool) -> Core.expression -> bool
 end

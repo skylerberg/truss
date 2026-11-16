@@ -194,7 +194,7 @@ let at = Lowered.local_place
 let constant_uint64 number = Lowered.Constant (Integer (UInt64, Z.of_int number))
 
 let branch builder value ~yes ~no =
-  finish builder (Switch { value; cases = [ (Z.one, yes) ]; default = Some no })
+  finish builder (Switch { value; cases = [ (Z.one, yes) ]; default = no })
 
 let when_ builder condition then_ =
   let inside = block builder in

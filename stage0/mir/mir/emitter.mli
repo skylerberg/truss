@@ -1,7 +1,7 @@
 type t
 
 val create :
-  ?is_specification:bool -> ?entry_locals:Core.local list -> ?takes_free_locals:bool -> unit -> t
+  ?is_specification:bool -> entry_locals:Core.local list -> ?takes_free_locals:bool -> unit -> t
 
 val for_lambda : t -> t
 val is_specification : t -> bool
@@ -16,7 +16,7 @@ val add_source : t -> Core.local -> Tree.local -> unit
 val free_source : t -> Core.local -> type_:Types.ty -> origin:Core.origin -> Tree.local
 
 val bind_source :
-  ?name:string ->
+  name:string ->
   ?is_var:bool ->
   t ->
   Core.local ->

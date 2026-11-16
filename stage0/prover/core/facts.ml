@@ -87,7 +87,7 @@ let scope_facts (context : State.context) names =
     (fun (name, facts) -> if List.mem name names then List.rev !facts else [])
     context.scopes
 
-let with_quantifier_facts ?(binders = []) (context : State.context) term =
+let with_quantifier_facts ~binders (context : State.context) term =
   let stated bound fact =
     List.for_all
       (fun name -> List.mem name bound || not (Logic.mentions [ name ] fact))

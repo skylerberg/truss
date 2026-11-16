@@ -696,8 +696,7 @@ and truth builder (node : Core.expression) : Tree.operand option =
           match_patterns builder [ pattern ] [ scrutinee ] node.origin)
   | _ -> bug "a condition that is no short-circuit operator and no `is`"
 
-and pattern_tests ?(matched = ignore) builder (patterns : Core.pattern list) places :
-    Tree.operand option =
+and pattern_tests ~matched builder (patterns : Core.pattern list) places : Tree.operand option =
   let tested = ref [] in
   let branch_on value origin =
     match value with
@@ -1549,7 +1548,7 @@ let of_clause ?(is_executable = false) ~(parameters : Core.parameter list)
   Emitter.formula builder ~origin:written.origin ~type_:written.type_ (fun () ->
       (locals, expression builder written))
 
-let of_definition ?(is_specification = false) (definition : Core.definition) =
+let of_definition ~is_specification (definition : Core.definition) =
   let code =
     match definition with
     | Function { parameters; body = Some body; _ } -> Some (parameters, body, true)
