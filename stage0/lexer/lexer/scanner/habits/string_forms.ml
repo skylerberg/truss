@@ -69,12 +69,7 @@ let character_literal cursor ~tag ~literal_start ~stop =
   in
   let replacement = tag ^ "\"" ^ as_ordinary ^ "\"" in
   report cursor ~code:Character_literal
-    ~fixes:
-      [
-        Diagnostic.fix
-          ("Write `" ^ replacement ^ "`")
-          [ Diagnostic.replace (span literal_start stop) replacement ];
-      ]
+    ~fixes:(code_fixes cursor (span literal_start stop) [ replacement ])
     (span literal_start stop)
     (Printf.sprintf "Truss has no %s literals. A single %s is a tagged string: `%s`."
        (if tag = "UInt8" then "byte" else "character")
@@ -194,7 +189,7 @@ let prefixed_string cursor ~scan ~prefix ~start ~nesting =
           [] )
   in
   report cursor ~code:String_prefix
-    ~fixes:(if touches_word_before cursor start then [] else fixes)
+    ~fixes:(without_joining_fixes cursor (span start cursor.position) fixes)
     (span start quote_start) message;
   (kind, ending)
 
@@ -238,13 +233,14 @@ let hash_raw_string cursor ~start =
                || String.ends_with ~suffix:"\"" value
              then []
              else
-               [
-                 Diagnostic.fix "Write a raw string"
-                   [
-                     Diagnostic.replace (span start text_start) delimiter;
-                     Diagnostic.replace (span text_stop stop) delimiter;
-                   ];
-               ])
+               without_joining_fixes cursor (span start stop)
+                 [
+                   Diagnostic.fix "Write a raw string"
+                     [
+                       Diagnostic.replace (span start text_start) delimiter;
+                       Diagnostic.replace (span text_stop stop) delimiter;
+                     ];
+                 ])
           (span start text_start)
           "Truss has no `r#` strings. A raw string is written between `\"\"\"`s, or between more \
            quotes when its text has `\"\"\"` in it.";
@@ -291,12 +287,13 @@ let quoted_string cursor ~scan ~nesting ~delimiter =
   let template = delimiter = '`' in
   report cursor ~code:String_delimiter
     ~fixes:
-      (if ending = Closed && not (touches_word_before cursor start) then
-         [
-           Diagnostic.fix "Write the string between `\"`s"
-             ((Diagnostic.replace (span start (start + 1)) "\"" :: quote_edits (start + 1) [])
-             @ [ Diagnostic.replace (span (stop - 1) stop) "\"" ]);
-         ]
+      (if ending = Closed then
+         without_joining_fixes cursor (span start stop)
+           [
+             Diagnostic.fix "Write the string between `\"`s"
+               ((Diagnostic.replace (span start (start + 1)) "\"" :: quote_edits (start + 1) [])
+               @ [ Diagnostic.replace (span (stop - 1) stop) "\"" ]);
+           ]
        else [])
     (span start (start + 1))
     (if template then
@@ -323,19 +320,19 @@ let curly_quoted_string cursor ~opening_length ~closing =
         String.exists
           (fun character -> character = '\\' || character = '$' || character = '"')
           value
-        || touches_word_before cursor start
       in
       report cursor ~code:Confusable_character
         ~fixes:
           (if reads_differently then []
            else
-             [
-               Diagnostic.fix "Write the string between `\"`s"
-                 [
-                   Diagnostic.replace (span start text_start) "\"";
-                   Diagnostic.replace (span text_stop stop) "\"";
-                 ];
-             ])
+             without_joining_fixes cursor (span start stop)
+               [
+                 Diagnostic.fix "Write the string between `\"`s"
+                   [
+                     Diagnostic.replace (span start text_start) "\"";
+                     Diagnostic.replace (span text_stop stop) "\"";
+                   ];
+               ])
         (span start text_start)
         "A string is written between straight quotes, `\"`. This is a curly quote.";
       cursor.position <- stop;

@@ -165,7 +165,6 @@ val punctuation_spelling : punctuation -> string
 val foreign_spelling : foreign -> string
 val definition_keywords : keyword list
 val spelling : ?insertions:(int * string) list -> t array -> string option
-val joins : char -> char -> bool
 val can_end : kind -> bool
 val can_begin : kind -> bool
-val joins_neighbor : before:char option -> after:char option -> string -> bool
+val joins_neighbor : before:string -> after:string -> string -> bool

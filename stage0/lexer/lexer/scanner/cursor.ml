@@ -73,20 +73,46 @@ let is_ascii_name_byte character =
   is_ascii_letter character || is_digit character || character = '_'
 
 let is_ascii character = Char.code character < 0x80
+let decode cursor index = Unicode.decode cursor.text index
 
-let joins_neighbor cursor (span : Source.span) code =
-  let before = if span.start > 0 then Some cursor.text.[span.start - 1] else None
-  and after = if span.stop < cursor.length then Some cursor.text.[span.stop] else None in
-  Token.joins_neighbor ~before ~after code
+let written_before cursor index =
+  let rec character_start position =
+    if position > 0 && Char.code cursor.text.[position] land 0xC0 = 0x80 then
+      character_start (position - 1)
+    else position
+  in
+  if index <= 0 then ""
+  else
+    let start = character_start (index - 1) in
+    match Confusable_characters.find (Unicode.Decoded.code_point (decode cursor start)) with
+    | Some (Spelled spelling) -> spelling
+    | Some Space -> " "
+    | Some (Opening_quote _) | None -> String.sub cursor.text start (index - start)
+
+let without_joining_fixes cursor (span : Source.span) fixes =
+  let text = String.sub cursor.text span.start (span.stop - span.start) in
+  let before = written_before cursor span.start
+  and after = String.sub cursor.text span.stop (min 2 (cursor.length - span.stop)) in
+  List.filter
+    (fun (fix : Source.span Diagnostic.fix) ->
+      let written =
+        Diagnostic.apply_edits text
+          (List.map
+             (fun (edit : Source.span Diagnostic.edit) ->
+               {
+                 edit with
+                 span = Source.span (edit.span.start - span.start) (edit.span.stop - span.start);
+               })
+             fix.edits)
+      in
+      not (Token.joins_neighbor ~before ~after written))
+    fixes
 
 let code_fixes cursor span codes =
-  List.filter_map
-    (fun code ->
-      if joins_neighbor cursor span code then None
-      else Some (Diagnostic.fix ("Write `" ^ code ^ "`") [ Diagnostic.replace span code ]))
-    codes
-
-let decode cursor index = Unicode.decode cursor.text index
+  without_joining_fixes cursor span
+    (List.map
+       (fun code -> Diagnostic.fix ("Write `" ^ code ^ "`") [ Diagnostic.replace span code ])
+       codes)
 
 let run_length cursor index character =
   let rec loop position =

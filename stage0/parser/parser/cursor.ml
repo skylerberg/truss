@@ -190,17 +190,12 @@ let joins_neighbors cursor (span : Source.span) code =
         if token.span.start < token.span.stop && is_adjacent token then Token.spelling [| token |]
         else search (index + 1)
     in
-    Option.bind (search cursor.first) (fun spelling ->
-        if spelling = "" then None else Some spelling)
+    Option.value ~default:"" (search cursor.first)
   in
-  let before =
-    Option.map
-      (fun spelling -> spelling.[String.length spelling - 1])
-      (adjacent (fun token -> token.span.stop = span.start))
-  and after =
-    Option.map (fun spelling -> spelling.[0]) (adjacent (fun token -> token.span.start = span.stop))
-  in
-  Token.joins_neighbor ~before ~after code
+  Token.joins_neighbor
+    ~before:(adjacent (fun token -> token.span.stop = span.start))
+    ~after:(adjacent (fun token -> token.span.start = span.stop))
+    code
 
 let has_reported cursor = Diagnostic.Collector.to_list cursor.diagnostics <> []
 

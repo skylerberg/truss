@@ -209,12 +209,11 @@ and number cursor ~inline ~nesting =
   | Some problem ->
       report cursor ~code:problem.code
         ~fixes:
-          (if is_at cursor stop '.' then []
-           else
-             List.map
-               (fun (title, replacement) ->
-                 Diagnostic.fix title [ Diagnostic.replace (span start stop) replacement ])
-               checked.fixes)
+          (without_joining_fixes cursor (span start stop)
+             (List.map
+                (fun (title, replacement) ->
+                  Diagnostic.fix title [ Diagnostic.replace (span start stop) replacement ])
+                checked.fixes))
         (span (start + problem.start) (start + problem.stop))
         problem.message
   | None -> ());

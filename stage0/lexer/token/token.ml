@@ -424,14 +424,17 @@ let joins left right =
   let is_operator_byte character = String.contains "!%&*+-./:<=>^|" character in
   (is_name_byte left && (is_name_byte right || right = '"' || right = '\''))
   || (is_operator_byte left && is_operator_byte right)
+  || (left = '"' && right = '"')
+
+let text_joins left right =
+  left <> "" && right <> ""
+  &&
+  let last = left.[String.length left - 1] and first = right.[0] in
+  joins last first
+  || (last >= '0' && last <= '9' && first = '.' && not (String.starts_with ~prefix:".." right))
 
 let joins_neighbor ~before ~after code =
-  match (code, before, after) with
-  | "", Some left, Some right -> joins left right
-  | "", _, _ -> false
-  | _ ->
-      Option.fold ~none:false ~some:(fun left -> joins left code.[0]) before
-      || Option.fold ~none:false ~some:(joins code.[String.length code - 1]) after
+  if code = "" then text_joins before after else text_joins before code || text_joins code after
 
 let can_end = function
   | Upper _ | Lower _ | Underscore | Integer _ | Float _ | String _ -> true
