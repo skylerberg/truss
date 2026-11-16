@@ -409,8 +409,8 @@ let check_semantics context (form : Core.t) =
              | Quantified { binder = Over_collection _; _ }
                when not (Hashtbl.mem in_specification node.id) ->
                  context.wrong "a quantifier in executable code is over a mathematical collection"
-             | Slice { call = { kind = Call ({ arguments; _ } as call); _ } } ->
-                 let name = callee_name call.callee in
+             | Slice { callee; bounds; _ } ->
+                 let name = callee_name callee in
                  let ends suffix =
                    String.length name >= String.length suffix
                    && String.sub name
@@ -420,13 +420,11 @@ let check_semantics context (form : Core.t) =
                  in
                  if
                    not
-                     (match List.length arguments with
-                     | 3 -> ends ".slice_range"
-                     | 2 -> ends ".slice_from"
+                     (match List.length bounds with
+                     | 2 -> ends ".slice_range"
+                     | 1 -> ends ".slice_from"
                      | _ -> false)
-                 then
-                   context.wrong "a `Slice` with %d arguments calls `%s`" (List.length arguments)
-                     name
+                 then context.wrong "a `Slice` with %d bounds calls `%s`" (List.length bounds) name
              | _ -> ());
        })
     form.definition
@@ -602,7 +600,6 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
           (List.combine parameters call.arguments)
   in
   let compound_assignments = ref 0 and current_targets = ref 0 in
-  let slice_calls = Hashtbl.create 8 in
   let local_types : (Core.local, T.ty) Hashtbl.t = Hashtbl.create 16 in
   let parameters =
     List.iter (fun (parameter : Core.parameter) ->
@@ -710,12 +707,17 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                          wrong "a construct that no `Yield` lends has a field that is a place"
                      | _ -> ())
                    fields
-             | Slice { call } -> (
-                 Hashtbl.replace slice_calls call.id ();
-                 match call.kind with
-                 | Call { arguments = Passed { value = Place base; _ } :: ([ _ ] | [ _; _ ]); _ } ->
-                     place base
-                 | _ -> wrong "the call of a `Slice` does not take its base and then its bounds")
+             | Slice { base; callee = sliced; bounds } ->
+                 place base;
+                 callee sliced;
+                 arguments_fit
+                   {
+                     callee = sliced;
+                     arguments =
+                       Passed { mode = Read; value = Place base; mode_keyword = None } :: bounds;
+                     lends = None;
+                     uses = T.no_capabilities;
+                   }
              | Matches { value; pattern } -> binds_own "an `is`" value pattern
              | Match { scrutinees; arms; _ } ->
                  List.iter
@@ -753,30 +755,8 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                  | _ -> ());
                  List.iter
                    (function
-                     | Core.Passed
-                         {
-                           mode = Mut;
-                           value =
-                             Value
-                               {
-                                 kind =
-                                   Slice
-                                     {
-                                       call =
-                                         {
-                                           kind =
-                                             Call
-                                               {
-                                                 arguments = Passed { value = Place base; _ } :: _;
-                                                 _;
-                                               };
-                                           _;
-                                         };
-                                     };
-                                 _;
-                               };
-                           _;
-                         } ->
+                     | Core.Passed { mode = Mut; value = Value { kind = Slice { base; _ }; _ }; _ }
+                       ->
                          mutable_place "a slice passed `mut`" base
                      | Core.Passed { mode = Mut; value = Value _; _ } ->
                          wrong "a `mut` parameter receives a value that is not a slice"
@@ -784,8 +764,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                          mutable_place "a `mut` argument" core_place
                      | Passed { mode = Own; value = Place _; _ } ->
                          wrong "an `own` parameter receives a place"
-                     | Passed { mode = Read; value = Value { kind = Use _; _ }; _ }
-                       when not (Hashtbl.mem slice_calls node.id) ->
+                     | Passed { mode = Read; value = Value { kind = Use _; _ }; _ } ->
                          wrong
                            "a read-only parameter of `%s` receives a `Use`, which moves or copies \
                             the place"

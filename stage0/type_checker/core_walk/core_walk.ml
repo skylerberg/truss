@@ -76,7 +76,10 @@ let expression_children visit (node : expression) =
   | Record_update { base; updates } ->
       visit.expression base;
       List.iter (fun (_, value) -> visit.expression value) updates
-  | Slice { call; _ } -> visit.expression call
+  | Slice { base; callee; bounds } ->
+      place visit base;
+      visit.callee callee;
+      List.iter (function Passed { value; _ } -> operand visit value | Default -> ()) bounds
   | Call call ->
       (match call.callee with
       | Indirect function_value -> operand visit function_value

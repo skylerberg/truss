@@ -114,7 +114,10 @@ and kind renaming (before : kind) (after : kind) =
            (fun (fields, value) (after_fields, after_value) ->
              List.equal String.equal fields after_fields && expression renaming value after_value)
            updates after.updates
-  | Slice { call }, Slice after -> expression renaming call after.call
+  | Slice { base; callee = sliced; bounds }, Slice after ->
+      operand renaming (Place base) (Place after.base)
+      && callee renaming sliced after.callee
+      && List.equal (argument renaming) bounds after.bounds
   | Call before, Call after -> call renaming before after
   | Operator { operation; arguments }, Operator after ->
       operation = after.operation && List.equal (expression renaming) arguments after.arguments

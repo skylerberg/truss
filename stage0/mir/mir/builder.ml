@@ -36,13 +36,13 @@ module In_order = struct
   let pure value =
     { slots = 0; origin = None; evaluate = (fun ~count:_ ~index:_ ~loans:_ -> Some value) }
 
-  let operand builder evaluate type_ origin =
+  let operand_with builder evaluate type_ origin =
     {
       slots = 1;
       origin = Some origin;
       evaluate =
         (fun ~count ~index ~loans ->
-          let* value = evaluate () in
+          let* value, extra = evaluate () in
           if count > 1 then begin
             let value = held builder value type_ origin in
             (match value with
@@ -50,9 +50,9 @@ module In_order = struct
             | _ ->
                 if index < count - 1 then
                   loans := start_loan builder value Read Operand_evaluation origin :: !loans);
-            Some value
+            Some (value, extra)
           end
-          else Some value);
+          else Some (value, extra));
     }
 
   let map transform evaluation =
@@ -73,6 +73,12 @@ module In_order = struct
           let* second_value = second.evaluate ~count ~index:(index + first.slots) ~loans in
           Some (combine first_value second_value));
     }
+
+  let operand builder evaluate type_ origin =
+    map fst
+      (operand_with builder
+         (fun () -> Option.map (fun value -> (value, ())) (evaluate ()))
+         type_ origin)
 
   let all evaluations = List.fold_right (map2 List.cons) evaluations (pure [])
 
@@ -107,8 +113,7 @@ let rec extended_temporaries (value : Core.operand) =
 
 and extended_by (value : Core.expression) =
   match value.kind with
-  | Slice { call = { kind = Call { arguments = Passed { value = Place base; _ } :: _; _ }; _ } } ->
-      extended_base base
+  | Slice { base; _ } -> extended_base base
   | Construct { fields; _ } ->
       List.concat_map
         (fun (_, field) -> Option.fold ~none:[] ~some:extended_temporaries field)
@@ -248,17 +253,31 @@ let rec expression builder (node : Core.expression) : operand option =
             assign builder (field_path (at local) fields) (Operand value) written.origin)
           update_values;
         Some (Use { place = at local; type_ = node.type_; origin = node.origin })
-    | Slice { call = { kind = Call called; _ }; _ } -> (
-        let* call = call_of builder called ~node:node.id ~origin:node.origin in
-        match call.arguments with
-        | Passed { value = Borrow { place = base; _ }; _ } :: _ ->
-            let local = temporary builder node.type_ origin in
-            emit builder
-              (Basic (Slice { destination = at local; base = borrowed_place builder base; call }))
-              origin;
-            Some (Use { place = at local; type_ = node.type_; origin = node.origin })
-        | _ -> bug "a slice whose base is not its first argument")
-    | Slice _ -> bug "a slice whose view is not a call"
+    | Slice { base; callee; bounds } ->
+        let* callee = callee_of builder callee in
+        let* (receiver, base_place), bounds =
+          In_order.run builder
+            (In_order.map2
+               (fun receiver bounds -> (receiver, bounds))
+               (plan_borrow builder base)
+               (In_order.all (List.map (plan_argument builder) bounds)))
+        in
+        let call =
+          {
+            callee;
+            arguments =
+              Passed { mode = Read; value = receiver; mode_keyword = None; function_ = None }
+              :: bounds;
+            uses = Types.no_capabilities;
+            node = node.id;
+            origin = node.origin;
+          }
+        in
+        let local = temporary builder node.type_ origin in
+        emit builder
+          (Basic (Slice { destination = at local; base = borrowed_place builder base_place; call }))
+          origin;
+        Some (Use { place = at local; type_ = node.type_; origin = node.origin })
     | Call called -> call_value builder node called
     | Operator { operation; arguments } ->
         let* operands = operands builder arguments in
@@ -485,15 +504,19 @@ and operand builder (mode : Types.mode) (passed : Core.operand) =
   match passed with
   | Place written ->
       let* passed = place builder written in
-      Some
-        (Borrow
-           {
-             place = passed;
-             type_ = Core_walk.place_type written;
-             mode;
-             origin = Core_walk.place_origin written;
-           })
+      Some (borrow written passed mode)
   | Value value -> expression builder value
+
+and borrow (written : Core.place) (place : place) mode =
+  Borrow
+    { place; type_ = Core_walk.place_type written; mode; origin = Core_walk.place_origin written }
+
+and plan_borrow builder (written : Core.place) =
+  In_order.operand_with builder
+    (fun () ->
+      let* place = place builder written in
+      Some (borrow written place Read, place))
+    (Core_walk.place_type written) (Core_walk.place_origin written)
 
 and place builder (written : Core.place) : place option =
   if not (reaches builder) then None
@@ -583,29 +606,26 @@ and callee_of builder (callee : Core.callee) : callee option =
 and call_of builder (called : Core.call) ~node ~origin : call option =
   let* callee = callee_of builder called.callee in
   let* arguments =
-    In_order.run builder
-      (In_order.all
-         (List.map
-            (function
-              | Core.Default -> In_order.pure Default
-              | Passed { mode; value; mode_keyword } ->
-                  let function_ = ref None in
-                  In_order.map
-                    (fun value -> Passed { mode; value; mode_keyword; function_ = !function_ })
-                    (In_order.operand builder
-                       (fun () ->
-                         match value with
-                         | Value written when is_function_expression written ->
-                             Option.map
-                               (fun (passed, made) ->
-                                 function_ := Some made;
-                                 passed)
-                               (function_expression builder written ~is_argument:true)
-                         | Place _ | Value _ -> operand builder mode value)
-                       (core_operand_type value) (operand_origin value)))
-            called.arguments))
+    In_order.run builder (In_order.all (List.map (plan_argument builder) called.arguments))
   in
   Some { callee; arguments; uses = called.uses; node; origin }
+
+and plan_argument builder (argument : Core.argument) =
+  match argument with
+  | Default -> In_order.pure Default
+  | Passed { mode; value; mode_keyword } ->
+      In_order.map
+        (fun (value, function_) -> Passed { mode; value; mode_keyword; function_ })
+        (In_order.operand_with builder
+           (fun () ->
+             match value with
+             | Value written when is_function_expression written ->
+                 Option.map
+                   (fun (passed, function_) -> (passed, Some function_))
+                   (function_expression builder written ~is_argument:true)
+             | Place _ | Value _ ->
+                 Option.map (fun passed -> (passed, None)) (operand builder mode value))
+           (core_operand_type value) (operand_origin value))
 
 and call_value builder (node : Core.expression) (called : Core.call) =
   let origin = node.origin in

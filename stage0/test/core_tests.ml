@@ -40,7 +40,10 @@ and expression form (node : Core.expression) =
   match node.kind with
   | Integer number -> Z.to_string number
   | Use place -> "use " ^ access_path form place
-  | Slice { call } -> "slice " ^ expression form call
+  | Slice { base; callee; bounds } ->
+      Printf.sprintf "slice %s(%s)" (Core_lint.callee_name callee)
+        (list (argument form)
+           (Passed { mode = Read; value = Place base; mode_keyword = None } :: bounds))
   | Operator { operation; arguments } ->
       Printf.sprintf "%s(%s)"
         (Intrinsic.operation_name operation)
