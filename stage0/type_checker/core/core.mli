@@ -110,7 +110,6 @@ and conversion = Widen | To_integer | From_integer
 and binder =
   | Over_type of { local : local; name : string; type_ : Types.ty }
   | Over_range of { pattern : pattern; start : expression; stop : expression; inclusive : bool }
-  | Over_collection of { pattern : pattern; collection : expression }
   | Over_elements of { pattern : pattern; elements : elements }
 
 and implementation = {

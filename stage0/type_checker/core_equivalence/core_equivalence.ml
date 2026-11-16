@@ -204,13 +204,10 @@ and is_equivalent_binder renaming (before : Core.binder) (after : Core.binder) =
       && is_equivalent_expression renaming start after.start
       && is_equivalent_expression renaming stop after.stop
       && Bool.equal inclusive after.inclusive
-  | Over_collection { pattern = bound; collection }, Over_collection after ->
-      is_equivalent_pattern renaming bound after.pattern
-      && is_equivalent_expression renaming collection after.collection
   | Over_elements { pattern = bound; elements = counted }, Over_elements after ->
       is_equivalent_pattern renaming bound after.pattern
       && is_equivalent_elements renaming counted after.elements
-  | (Over_type _ | Over_range _ | Over_collection _ | Over_elements _), _ -> false
+  | (Over_type _ | Over_range _ | Over_elements _), _ -> false
 
 and is_equivalent_elements renaming ({ count; position; element } : Core.elements)
     (after : Core.elements) =

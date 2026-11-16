@@ -133,7 +133,6 @@ and case = { tests : block; guard : block option; value : block }
 and quantifier_range =
   | Over_type of Types.ty
   | Over_range of { start : operand; stop : operand; inclusive : bool }
-  | Over_collection of operand
 
 and block = { statements : statement list; value : operand option }
 

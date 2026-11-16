@@ -2191,6 +2191,12 @@ an invariant, a law, or a proof.
 - A quantifier over a range or a collection is also an expression in code,
   which runs as a loop that stops when the answer is known. Its body may rely
   on the bound name being in its range, and uses no capabilities.
+- A quantifier over a collection ranges over the values that the
+  collection's `element` lends at the positions below its `count()`, in code
+  and in specifications alike. A loop over the collection visits the same
+  values, so what the quantifier says about the collection's `model()`
+  follows from `element`'s `ensures`. A pattern that does not match a value
+  leaves that value out.
 - A quantifier over a type and `==>` appear only in specifications and in
   functions for specifications only.
 - A quantifier's body runs to the end of the expression.
