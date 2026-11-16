@@ -102,7 +102,7 @@ let hold ?node builder type_ origin value =
   else
     let local = temporary builder type_ origin in
     assign ?node builder (at local) value origin;
-    Some (Use { place = at local; type_; node = Option.value node ~default:origin; origin })
+    Some (Use { place = at local; type_; origin })
 
 let block_of builder (build : unit -> operand option) : block =
   let enclosing = builder.statements in
@@ -208,10 +208,10 @@ let in_statement builder origin f =
 
 let held_past_scopes builder origin (value : operand) =
   match value with
-  | Use { type_; node; _ } ->
+  | Use { type_; _ } ->
       let local = new_local builder Temporary type_ origin in
       assign builder (at local) (Operand value) origin;
-      Use { place = at local; type_; node; origin }
+      Use { place = at local; type_; origin }
   | Constant _ | Borrow _ | Take _ -> value
 
 let return_from_scopes builder value origin =
@@ -231,10 +231,10 @@ let held builder (value : operand) type_ origin =
   | Use { place = { root = Local local; projections = [] }; _ }
     when (Hashtbl.find builder.infos local).kind = Temporary ->
       value
-  | Use { node; _ } ->
+  | Use _ ->
       let local = temporary builder type_ origin in
       assign builder (at local) (Operand value) origin;
-      Use { place = at local; type_; node; origin }
+      Use { place = at local; type_; origin }
   | Borrow { place; mode; _ } ->
       let local = new_local builder (Lent Read) type_ origin in
       add_temporary builder local;
@@ -299,8 +299,8 @@ let in_value_scope ?provides builder origin (build : unit -> operand option) =
   in_scope ?provides builder origin (fun () ->
       let value = build () in
       match (value, builder.scopes) with
-      | ( Some (Use { place = { root = Local local; _ }; type_; node; _ } as read),
-          scope :: enclosing :: _ ) ->
+      | Some (Use { place = { root = Local local; _ }; type_; _ } as read), scope :: enclosing :: _
+        ->
           if List.mem local scope.temporaries then begin
             scope.temporaries <- List.filter (fun temporary -> temporary <> local) scope.temporaries;
             enclosing.temporaries <- local :: enclosing.temporaries;
@@ -310,7 +310,7 @@ let in_value_scope ?provides builder origin (build : unit -> operand option) =
             let held = new_local builder Temporary type_ origin in
             enclosing.temporaries <- held :: enclosing.temporaries;
             assign builder (at held) (Operand read) origin;
-            Some (Use { place = at held; type_; node; origin })
+            Some (Use { place = at held; type_; origin })
           end
           else value
       | _ -> value)
@@ -384,7 +384,7 @@ let leave_tasks builder tasks exit origin =
               leave
                 (Option.map
                    (fun (value, slot) ->
-                     Use { place = at slot; type_ = operand_type value; node = origin; origin })
+                     Use { place = at slot; type_ = operand_type value; origin })
                    moved)
                 outer;
               if builder.reaches then Some unit_value else None)

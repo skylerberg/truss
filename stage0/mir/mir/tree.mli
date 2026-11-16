@@ -20,7 +20,7 @@ and projection = Field of string | Variant_field of { variant : string; field : 
 type constant = Unit | Integer of Z.t | Float of float | Boolean of bool | String of string
 
 type operand =
-  | Use of { place : place; type_ : Types.ty; node : Core.id; origin : Core.origin }
+  | Use of { place : place; type_ : Types.ty; origin : Core.origin }
   | Borrow of { place : place; type_ : Types.ty; mode : Types.mode; origin : Core.origin }
   | Take of { place : place; type_ : Types.ty; origin : Core.origin }
   | Constant of { value : constant; type_ : Types.ty }
