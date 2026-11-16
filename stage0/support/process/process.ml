@@ -3,15 +3,6 @@ let exit_code (status : Unix.process_status) =
   | WEXITED code -> code
   | WSIGNALED signal | WSTOPPED signal -> 128 + Sys.signal_to_int signal
 
-let environment_with overrides =
-  let overridden entry =
-    List.exists (fun (name, _) -> String.starts_with ~prefix:(name ^ "=") entry) overrides
-  in
-  Array.append
-    (Array.of_list
-       (List.filter (fun entry -> not (overridden entry)) (Array.to_list (Unix.environment ()))))
-    (Array.of_list (List.map (fun (name, value) -> name ^ "=" ^ value) overrides))
-
 type reader = {
   descriptor : Unix.file_descr;
   contents : Buffer.t;
@@ -115,7 +106,7 @@ let rec await pid deadline =
           await pid deadline)
   | _, status -> (deadline, status)
 
-let execute ?(environment = []) ?input ?on_output ~deadline program arguments =
+let execute ?input ?on_output ~deadline program arguments =
   let stdout_read, stdout_write = Unix.pipe ~cloexec:true () in
   let stderr_read, stderr_write = Unix.pipe ~cloexec:true () in
   let stdin_pipe = Option.map (fun _ -> Unix.pipe ~cloexec:true ()) input in
@@ -127,9 +118,8 @@ let execute ?(environment = []) ?input ?on_output ~deadline program arguments =
         Option.iter (fun (stdin_read, _) -> Unix.close stdin_read) stdin_pipe)
       (fun () ->
         try
-          Unix.create_process_env program
+          Unix.create_process program
             (Array.of_list (program :: arguments))
-            (environment_with environment)
             (Option.fold ~none:Unix.stdin ~some:fst stdin_pipe)
             stdout_write stderr_write
         with error ->
@@ -160,12 +150,12 @@ let execute ?(environment = []) ?input ?on_output ~deadline program arguments =
   let deadline, status = await pid deadline_after_reading in
   (deadline, (exit_code status, Buffer.contents output.contents, Buffer.contents errors.contents))
 
-let run ?environment ?input ?on_output program arguments =
-  snd (execute ?environment ?input ?on_output ~deadline:Unlimited program arguments)
+let run ?input ?on_output program arguments =
+  snd (execute ?input ?on_output ~deadline:Unlimited program arguments)
 
-let run_with_time_limit ?environment ?input ?on_output ~time_limit_ms program arguments =
+let run_with_time_limit ?input ?on_output ~time_limit_ms program arguments =
   let deadline = Until (Unix.gettimeofday () +. (Float.of_int time_limit_ms /. 1000.)) in
-  match execute ?environment ?input ?on_output ~deadline program arguments with
+  match execute ?input ?on_output ~deadline program arguments with
   | Passed, _ -> None
   | (Unlimited | Until _), result -> Some result
 

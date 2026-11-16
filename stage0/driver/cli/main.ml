@@ -159,37 +159,6 @@ let explain =
     Term.(
       const (fun () position -> Outcome.Exit (Explain_command.run ~position)) $ common $ position)
 
-let impact =
-  let base =
-    Arg.(
-      value
-      & opt (some string) None
-      & info [ "base" ] ~docv:"REVISION"
-          ~doc:"Compare with the commit $(docv) instead of the merge base with the default branch.")
-  in
-  command "impact"
-    ~doc:"List the definitions that the worktree changes since a base commit, and their dependents."
-    Term.(const (fun () base -> Outcome.Exit (Impact_command.run ~base)) $ common $ base)
-
-let overlap =
-  let with_ =
-    Arg.(
-      value
-      & opt (some string) None
-      & info [ "with" ] ~docv:"BRANCH"
-          ~doc:"Compare with $(docv) instead of the other open worktrees.")
-  in
-  let merge =
-    Arg.(
-      value & flag
-      & info [ "merge" ] ~doc:"Also check the merge result and list the diagnostics only it has.")
-  in
-  command "overlap"
-    ~doc:"List where this worktree's changes overlap those of other worktrees or of a branch."
-    Term.(
-      const (fun () with_ merge -> Outcome.Exit (Overlap_command.run ~with_ ~merge))
-      $ common $ with_ $ merge)
-
 let name_argument =
   Arg.(
     required
@@ -297,11 +266,9 @@ let truss =
       build;
       holes;
       show;
-      impact;
       dependents;
       dependencies;
       explain;
-      overlap;
       rename;
       add;
       upgrade;

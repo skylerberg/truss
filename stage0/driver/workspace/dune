@@ -12,7 +12,6 @@
   project
   diagnostic
   file_system
-  process
   standard_library
   compiler_version
   database

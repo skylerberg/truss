@@ -15,14 +15,6 @@ val source : snapshot -> Path.file -> Source.t
 val file_path : snapshot -> Path.file -> string
 val list_package_databases : unit -> string list
 val make_trial : snapshot -> (string * string option) list -> snapshot
-val find_base_commit : snapshot -> string option -> string option
-val read_commit : snapshot -> string -> (snapshot, string) result
-
-type side = { base : snapshot; other : snapshot; merged : unit -> (snapshot, string) result }
-
-val read_branch : snapshot -> string -> (side, string) result
-val read_other_worktree : snapshot -> string -> (side, string) result
-val list_other_worktrees : snapshot -> string list
 val fetch_published : Path.package -> Registry.Version.t -> (snapshot, string) result
 val flush : unit -> unit
 

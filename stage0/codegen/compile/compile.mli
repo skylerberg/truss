@@ -52,9 +52,6 @@ type progress =
   | Started of { test : int }
   | Ended of { test : int; record : record }
 
-val result_key : t -> Path.t -> string option
-val is_cached : t -> Path.t -> bool
-
 val run_tests :
   ?rerun:bool ->
   ?progress:(progress -> unit) ->

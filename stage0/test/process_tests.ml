@@ -1,16 +1,6 @@
 open Harness
 
 let mebibyte = String.make 1_048_576 'x'
-let fills_both_outputs = "TRUSS_PROCESS_TESTS_FILLS_BOTH_OUTPUTS"
-
-let () =
-  if Option.is_some (Sys.getenv_opt fills_both_outputs) then begin
-    Out_channel.output_string stderr mebibyte;
-    Out_channel.flush stderr;
-    Out_channel.output_string stdout (In_channel.input_all stdin);
-    Out_channel.flush stdout;
-    Unix._exit 0
-  end
 
 let () =
   test "a program still running at its time limit is stopped, though its child holds its output"
@@ -27,11 +17,10 @@ let () =
       match Process.run_with_time_limit ~time_limit_ms:0 "/bin/sh" [ "-c"; "echo done" ] with
       | None -> ()
       | Some (status, output, _) -> fail "it finished with status %d and output %S" status output);
-  test "a program that fills both outputs before it reads its input does not deadlock" (fun () ->
+  test "a program that fills standard error before it reads its input does not deadlock" (fun () ->
       match
-        Process.run_with_time_limit
-          ~environment:[ (fills_both_outputs, "") ]
-          ~input:mebibyte ~time_limit_ms:10_000 Sys.executable_name []
+        Process.run_with_time_limit ~input:mebibyte ~time_limit_ms:10_000 "/bin/sh"
+          [ "-c"; "head -c 1048576 /dev/zero | tr '\\000' x >&2; cat" ]
       with
       | None -> fail "it ran past its time limit"
       | Some (status, output, errors) ->

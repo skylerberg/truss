@@ -491,85 +491,14 @@ let copy_database root (trial : snapshot) =
       database
   | None -> build_cold_database ~checks:true trial
 
-let over (snapshot : snapshot) files =
-  let root = root snapshot in
-  let trial = with_files snapshot files in
-  { trial with kind = Trial { root; database = lazy (copy_database root trial) } }
-
 let make_trial snapshot changes =
-  over snapshot
-    (List.filter (fun (path, _) -> not (List.mem_assoc path changes)) snapshot.files
-    @ List.filter_map (fun (path, text) -> Option.map (fun text -> (path, text)) text) changes)
-
-let find_base_commit snapshot base =
-  let directory = root snapshot in
-  match base with
-  | Some revision -> Git.resolve ~directory revision
-  | None -> (
-      match (Git.head ~directory, Git.default_branch ~directory) with
-      | Some head, Some branch -> Git.merge_base ~directory head branch
-      | Some head, None -> Some head
-      | None, _ -> None)
-
-let read_commit snapshot commit =
-  match Git.files ~directory:(root snapshot) commit with
-  | Some files -> Ok (over snapshot files)
-  | None -> Error (Printf.sprintf "The files of commit %s cannot be read." commit)
-
-type side = { base : snapshot; other : snapshot; merged : unit -> (snapshot, string) result }
-
-let side snapshot ~head ~other ~mergeable =
-  let directory = root snapshot in
-  match Option.map (fun mine -> Git.merge_base ~directory mine head) (Git.head ~directory) with
-  | None -> Error "This worktree has no commit."
-  | Some None -> Error "The two have no commit in common."
-  | Some (Some merge_base) ->
-      Result.map
-        (fun base ->
-          {
-            base;
-            other;
-            merged =
-              (fun () ->
-                match (Git.snapshot ~directory, mergeable ()) with
-                | Some mine, Some theirs -> (
-                    match Git.merged_files ~directory mine theirs with
-                    | Some files -> Ok (over snapshot files)
-                    | None -> Error "The two do not merge without a textual conflict.")
-                | None, _ | _, None ->
-                    Error "The files of the two cannot be committed to merge them.");
-          })
-        (read_commit snapshot merge_base)
-
-let read_branch snapshot name =
-  match Git.resolve ~directory:(root snapshot) name with
-  | None -> Error (Printf.sprintf "No commit is named %s." name)
-  | Some commit ->
-      Result.bind (read_commit snapshot commit) (fun other ->
-          side snapshot ~head:commit ~other ~mergeable:(fun () -> Some commit))
-
-let read_other_worktree snapshot other =
-  match Git.head ~directory:other with
-  | None -> Error "The other worktree has no commit."
-  | Some head ->
-      side snapshot ~head
-        ~other:(over snapshot (Registry.Content.input_files other))
-        ~mergeable:(fun () -> Git.snapshot ~directory:other)
-
-let list_other_worktrees snapshot =
   let root = root snapshot in
-  match
-    List.filter
-      (fun other -> other <> root && other <> "" && Sys.file_exists other)
-      (List.sort_uniq compare
-         (Server.serving () @ Hashtbl.fold (fun root _ roots -> root :: roots) worktrees []))
-  with
-  | [] -> []
-  | others -> (
-      let place directory = (Git.common_directory directory, Git.prefix directory) in
-      match place root with
-      | (Some _, Some _) as here -> List.filter (fun other -> place other = here) others
-      | _ -> [])
+  let trial =
+    with_files snapshot
+      (List.filter (fun (path, _) -> not (List.mem_assoc path changes)) snapshot.files
+      @ List.filter_map (fun (path, text) -> Option.map (fun text -> (path, text)) text) changes)
+  in
+  { trial with kind = Trial { root; database = lazy (copy_database root trial) } }
 
 let open_database ?(checks = true) snapshot =
   match snapshot.kind with
