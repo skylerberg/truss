@@ -9,7 +9,6 @@ type t =
   | Interfaces
   | Derived_interfaces
   | Type_facts
-  | Grants
   | Signature_checks
   | Contracts
   | Checked_bodies
@@ -36,7 +35,6 @@ let all =
     Interfaces;
     Derived_interfaces;
     Type_facts;
-    Grants;
     Signature_checks;
     Contracts;
     Checked_bodies;
@@ -62,9 +60,9 @@ let precedes earlier later = position earlier <= position later
 let is_lowering = function
   | Lowered_code | Test_keys -> true
   | Parse | Namespaces | Resolution | Import_checks | Trait_headers | Constant_values | Headers
-  | Interfaces | Derived_interfaces | Type_facts | Grants | Signature_checks | Contracts
-  | Checked_bodies | Derived_forms | Mir | Mir_call_edges | Body_checks | Package_checks
-  | Call_edges | Recursion_groups | Proofs ->
+  | Interfaces | Derived_interfaces | Type_facts | Signature_checks | Contracts | Checked_bodies
+  | Derived_forms | Mir | Mir_call_edges | Body_checks | Package_checks | Call_edges
+  | Recursion_groups | Proofs ->
       false
 
 let drains ~through stage =
@@ -75,7 +73,7 @@ let drains ~through stage =
 let of_part : Part.computed -> t = function
   | Parsed _ -> Parse
   | Namespace _ -> Namespaces
-  | Resolved _ -> Resolution
+  | Resolved _ | Grant _ -> Resolution
   | Import_check _ -> Import_checks
   | Trait_header _ -> Trait_headers
   | Constant_value _ -> Constant_values
@@ -83,7 +81,6 @@ let of_part : Part.computed -> t = function
   | Interface _ -> Interfaces
   | Derived_interface _ -> Derived_interfaces
   | Type_facts _ -> Type_facts
-  | Grant _ -> Grants
   | Signature_check _ -> Signature_checks
   | Contract _ -> Contracts
   | Checked_body _ -> Checked_bodies

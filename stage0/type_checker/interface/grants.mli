@@ -1,4 +1,6 @@
-val resolve_grant : Lookups.t -> package:Path.package -> string list -> Environment.grant
+val resolve_grant :
+  Resolve.Names.lookups -> package:Path.package -> string list -> Environment.grant
+
 val describe_not_a_capability : dependency:Path.package -> string -> string
 
 val list_missing :

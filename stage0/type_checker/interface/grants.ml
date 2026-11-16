@@ -1,9 +1,8 @@
-let resolve_capability (lookups : Lookups.t) ~package written : Path.t option =
+let resolve_capability (names : Resolve.Names.lookups) ~package written : Path.t option =
   let find_visible_capability (module_ : Path.module_) name =
-    if not (Resolve.Names.is_visible_module lookups.names ~from:{ package; modules = [] } module_)
-    then None
+    if not (Resolve.Names.is_visible_module names ~from:{ package; modules = [] } module_) then None
     else
-      match lookups.names.find module_ name with
+      match names.find module_ name with
       | Some { kind = Capability; visibility; _ }
         when module_.package = package || Resolve.Names.is_public visibility ->
           Some (Path.Top { module_; name })
@@ -14,7 +13,7 @@ let resolve_capability (lookups : Lookups.t) ~package written : Path.t option =
       Option.bind (Resolve.Prelude.find_type name) (fun module_ ->
           find_visible_capability module_ name)
   | Some (name :: modules) -> (
-      match lookups.names.split_module (List.rev modules) with
+      match names.split_module (List.rev modules) with
       | Some module_ -> find_visible_capability module_ name
       | None -> None)
   | Some [] | None -> None
@@ -24,9 +23,9 @@ let show_as_written (path : Path.t) =
   | Top { module_; name } when Resolve.Prelude.find_type name = Some module_ -> name
   | _ -> Path.show path
 
-let resolve_grant lookups ~package written_capabilities : Environment.grant =
+let resolve_grant names ~package written_capabilities : Environment.grant =
   let resolved =
-    List.map (fun name -> (name, resolve_capability lookups ~package name)) written_capabilities
+    List.map (fun name -> (name, resolve_capability names ~package name)) written_capabilities
   in
   {
     capabilities = List.filter_map snd resolved;

@@ -9,7 +9,6 @@ type t =
   | Interfaces
   | Derived_interfaces
   | Type_facts
-  | Grants
   | Signature_checks
   | Contracts
   | Checked_bodies
