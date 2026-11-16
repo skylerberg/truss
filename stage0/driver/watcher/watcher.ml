@@ -70,8 +70,8 @@ let drain watcher =
       relatives;
   (relatives, is_overflowed)
 
-let is_cookie_path watcher relative =
-  String.starts_with ~prefix:(watcher.cookie_directory ^ "/") relative
+let list_relevant watcher relatives =
+  List.filter (fun relative -> relative = "" || not (is_skipped watcher relative)) relatives
 
 let synchronize watcher ~pending_paths ~is_overflowed =
   watcher.cookies <- watcher.cookies + 1;
@@ -89,9 +89,7 @@ let synchronize watcher ~pending_paths ~is_overflowed =
       | _ ->
           let relatives, overflowed = drain watcher in
           let is_overflowed = is_overflowed || overflowed in
-          let paths =
-            List.filter (fun relative -> not (is_cookie_path watcher relative)) relatives @ paths
-          in
+          let paths = list_relevant watcher relatives @ paths in
           if List.mem cookie relatives then
             if is_overflowed then Overflow else Changed (List.sort_uniq compare paths)
           else wait ~deadline paths is_overflowed
@@ -110,7 +108,7 @@ let read_changes watcher = synchronize watcher ~pending_paths:[] ~is_overflowed:
 
 let read_pending_changes watcher =
   let relatives, is_overflowed = drain watcher in
-  match List.filter (fun relative -> not (is_skipped watcher relative)) relatives with
+  match list_relevant watcher relatives with
   | [] when not is_overflowed -> Changed []
   | pending_paths -> synchronize watcher ~pending_paths ~is_overflowed
 

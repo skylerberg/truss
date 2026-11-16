@@ -1519,7 +1519,8 @@ the start.
 | Rule | Reason |
 |---|---|
 | Each obligation goes to an automated solver, as in Dafny. | A programmer writes a proof only where the solver fails. |
-| A query that the solver answers `unknown` is solved again with each uninterpreted sort bounded to 2, then 3, then 4 elements, until a bound has a model or is `unknown`. | A model of the bounded query is a model of the query, so its counterexample is real. Z3's search for a model runs out of steps on a fact that nests `exists` in `forall`, such as the definition of `contains_equal_key` that `Map.get` reaches, though a model of two elements satisfies the query. |
+| A query that the solver answers `unknown` is solved again with each uninterpreted sort bounded to 2, then 3, then 4 elements, until a bound has a model or is `unknown`. | A model of the bounded query is a model of the query, so its counterexample is real. Z3's search for a model runs out of steps on a fact that nests `exists` in `forall`, such as a `requires` that does, though a model of two elements satisfies the query. |
+| A function whose contract is one clause `result == body`, where the body has a quantifier or calls such a function, reaches the solver as a definition (`define-fun`) that holds where the function's preconditions and its arguments' validity hold. | As an axiom, the definition nests the body's quantifier inside `forall`, and Z3 found no model of a word count whose `Map.get` reaches `contains_equal_key`. As a definition, the quantifier stands at each use. A definition's symbol cannot be a trigger, so every other function keeps its axiom: making all definitional functions definitions left 31 obligations of `list::slice` and `math` unproven. |
 | A proof is written in the language's own syntax: calls, `match`, `if`, and `assert`. | Programmers and LLMs already know that syntax. |
 | A proof is a result of its own. | An edit to a proof re-checks proofs, with no rebuild of the program and no rerun of tests. A reviewer trusts a checked proof without reading it, and reads only signatures. |
 | There is no `assume`. | A missing proof that an addition cannot overflow would allow a failure that the signature does not show. A claim that is not ready is left out of the signature. |
@@ -1808,7 +1809,7 @@ and `opaque`, the homes of methods and `impl`s, grants, and versions.
 | A package is not a unit of building. | Results are cached per definition, so splitting a package makes no build faster. A package is split only where a boundary should be checked. |
 | A project lists no members. | A list is one more file that every agent that adds a package must edit, and so one more place for a merge conflict (*parallel agents*). |
 | A dependency names a package, never a path to it. | Moving a directory breaks no dependency. |
-| A project's package replaces the registry's package of the same name. | This is how a dependency is patched before its owner releases a fix, with the patched copy in the repository for a reviewer to see. |
+| A project's package replaces the registry's package of the same name. A registry package that depends on it, directly or through other registry packages, is built in the project's database. | This is how a dependency is patched before its owner releases a fix, with the patched copy in the repository for a reviewer to see. A package that depends on the patched copy changes with the project's files, so no cached database can hold it. |
 | A registry package is named `owner::name`. | Much malware arrives by typosquatting: a name one letter away from a well-known name. LLMs make it worse by inventing package names, which attackers then publish. With an owner in the name, every path that uses the code says who published it. |
 
 ### Versions
@@ -1853,6 +1854,7 @@ Rules: [The registry](PACKAGES.md#the-registry).
 | The registry keeps an append-only public log of the hash of every version, as Go's checksum database does. | The registry cannot give two users different code under one version. |
 | The registry signs the proofs and test results that it computed for a release. | Proving a whole dependency tree on a machine that starts with nothing, such as an agent's new container, is the cost that GOALS.md sets out to remove. Each signed result is a function of its key, so a registry that signed a false result is caught by anyone who recomputes it. |
 | A new toolchain re-proves the registry, as far as the toolchain changed the proofs. | A toolchain that fails a proof of an approved package that the previous toolchain passed is not released. |
+| A package's database records, when it is built, the diagnostics that can block code that uses the package: its parse errors and the errors of its definitions, except its tests. A registry package with such a diagnostic is a problem on the lock file, which names the package. The standard library's are a compiler bug. | A part that reads a failed part is blocked and reports no error, so code that uses a broken dependency would stop checking with nothing to say why. A user never builds a dependency's tests, so their errors are the author's alone. The diagnostics are a function of the database's key, so they are listed once, when the database is built, and read on every load. |
 | A yanked release, one that is marked as not to use, still builds. | If yanking broke builds, one compromised account could stop every project that depends on the package. |
 
 ## Incremental builds
@@ -1881,7 +1883,7 @@ changes no definition.
 | Add, remove, or rename a definition | The parts that refer to its name, whether or not a definition held the name before | Each reference names one fully qualified name, so no lookup searches (see [References to names](#references-to-names)). |
 | Rename a definition, or move it to another module | The type checks and the code of its users. Their proofs and test results are cache hits. | A user names the definition, and an object file holds the names of the functions it calls. A solver query numbers its symbols, and a test's key numbers the references of the code it reaches, so neither holds a name. |
 | Rename a local variable | One body | Local names are part of identity, because diagnostics and `echo` output show them, and a cached result would show the old name. |
-| Change the spelling of a literal, such as `0xFF` to `255` | Nothing | Identity holds the value of the literal. The file keeps the spelling, so `truss fmt` can print it back. |
+| Change the spelling of a literal, such as `0xFF` to `255` | Nothing | Identity holds the value of the literal. |
 | Reorder clauses | Nothing between kinds of clause. The definition, within one kind. | Each `requires` may rely on the `requires` before it. |
 | Add a line at the top of a file | Nothing | A panic, an `echo`, a failed `assert`, and debug information record a position relative to their definition. A table built at the end of the build converts each position to a file, a line, and a column. |
 | Upgrade a dependency | The dependents of the dependency's diff | A path holds no version, so a new version of a package is an edit to code that the project does not own, and is tracked as any edit is. |
@@ -2095,15 +2097,17 @@ input:
 
 | Result | Key |
 |---|---|
-| A solver answer: proven, unknown, or a model and the cardinality bound it was found at | The query's text, whose symbols are numbered in order of appearance |
-| The values of a counterexample | The query's text and the terms whose values are requested |
+| A solver answer: proven, unknown, or a model and the cardinality bound it was found at | Z3's version, its options and step limit, the cardinality bounds, the version of the entry format, and the query's text, whose symbols are numbered in order of appearance |
+| The values of a counterexample | The key of the solver answer and the terms whose values are requested |
 | An object file | The C text, the C compiler, and its flags |
 | A test result | The test's key: the code generator's version, the target system, the flags, and a hash of the code the test reaches, in which each reference is numbered |
 | The database of the standard library or of a registry package | The package's content hash, the content hashes of the versions selected for its dependencies, and the compiler |
 | A fetched registry package | Its content hash |
 
 A cache never makes a result wrong: deleting it only makes the next build
-slower. Every worktree and CI share the caches. The database itself caches
+slower. An entry is never replaced, so a change to the layout or the
+meaning of an entry must change its key. The solver's key therefore names
+the version of its entry format. Every worktree and CI share the caches. The database itself caches
 nothing, so a revert or a branch switch is a change to the files like any
 other. The database computes the cheap stages again, and the solver, the C
 compiler, and the tests are cache hits.

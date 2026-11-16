@@ -540,7 +540,8 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
               || not (List.mem_assoc Path.Mut overloads)) -> (
         match List.assoc_opt Path.Own overloads with
         | Some method_path ->
-            if State.is_place state base then Modes.note_place_without_own state env base;
+            if State.is_place state base then
+              Modes.note_place_without_keyword state env base ~needs:Own;
             Some (Path.Own, method_path)
         | None -> None)
     | None -> None

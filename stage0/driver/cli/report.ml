@@ -39,6 +39,7 @@ let gather ?(proofs = false) database snapshot packages =
         | None -> []);
     problems =
       Workspace.problems snapshot
+      @ Workspace.list_dependency_problems snapshot database
       @ List.map
           (fun (file, package, (problem : Database.manifest_problem)) ->
             {

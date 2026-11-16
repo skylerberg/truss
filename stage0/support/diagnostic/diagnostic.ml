@@ -199,6 +199,7 @@ module Code = struct
     | Lends_other_parameter
     | Read_only_view
     | Lent_mut_in_variant
+    | Needs_lent_mut
     | Task_outlives_view
 
   type capabilities =
@@ -463,6 +464,7 @@ module Code = struct
     | Lends_other_parameter -> "lends_other_parameter"
     | Read_only_view -> "read_only_view"
     | Lent_mut_in_variant -> "lent_mut_in_variant"
+    | Needs_lent_mut -> "needs_lent_mut"
     | Task_outlives_view -> "task_outlives_view"
 
   let name_capabilities_code code =

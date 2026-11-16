@@ -12,6 +12,7 @@ module Symbol = struct
     | Named_term of 'term
     | Lambda of { sorts : sort list; definition : 'term }
     | Lifted of 'term t
+    | Unspecified of 'term t
     | Constructor of { type_ : Types.ty; variant : string option }
     | Field of { type_ : Types.ty; variant : string option; field : string }
     | Unit
@@ -64,6 +65,7 @@ and symbol = term Symbol.t
 type declaration =
   | Constant of symbol * sort
   | Function of symbol * sort list * sort
+  | Definition of { symbol : symbol; parameters : (symbol * sort) list; result : sort; body : term }
   | Datatype of Types.ty * (symbol * (symbol * sort) list) list
 
 type query = { declarations : declaration list; facts : term list; goal : term }
@@ -111,6 +113,7 @@ let rec show_symbol : symbol -> string = function
   | Named_term term -> "named_term(" ^ show_term term ^ ")"
   | Lambda { definition; _ } -> "lambda(" ^ show_term definition ^ ")"
   | Lifted symbol -> show_symbol symbol ^ ".lifted"
+  | Unspecified symbol -> show_symbol symbol ^ ".unspecified"
   | Constructor { type_; variant } -> "constructor." ^ Types.show type_ ^ "." ^ show_variant variant
   | Field { type_; variant; field } ->
       "field." ^ Types.show type_ ^ "." ^ show_variant variant ^ "." ^ field
@@ -423,7 +426,12 @@ let make_triggering_test declarations =
               Symbol_table.replace functions constructor ();
               List.iter (fun (selector, _) -> Symbol_table.replace functions selector ()) fields)
             constructors
-      | Constant _ -> ())
+      | Constant _ | Definition _ -> ())
+    declarations;
+  List.iter
+    (function
+      | Definition { symbol; _ } -> Symbol_table.remove functions symbol
+      | Constant _ | Function _ | Datatype _ -> ())
     declarations;
   Symbol_table.mem functions
 
@@ -457,13 +465,27 @@ let list_declared_symbols declared term =
 
 let prune query =
   let declared = Symbol_table.create 64 in
+  let bodies = Symbol_table.create 8 in
   List.iter
     (function
       | Constant (name, _) | Function (name, _, _) -> Symbol_table.replace declared name ()
+      | Definition { symbol; body; _ } ->
+          Symbol_table.replace declared symbol ();
+          Symbol_table.replace bodies symbol body
       | Datatype _ -> ())
     query.declarations;
   let reached = Symbol_table.create 64 in
-  let reach symbols = List.iter (fun symbol -> Symbol_table.replace reached symbol ()) symbols in
+  let rec reach symbols =
+    List.iter
+      (fun symbol ->
+        if not (Symbol_table.mem reached symbol) then begin
+          Symbol_table.replace reached symbol ();
+          Option.iter
+            (fun body -> reach (list_declared_symbols declared body))
+            (Symbol_table.find_opt bodies symbol)
+        end)
+      symbols
+  in
   reach (list_declared_symbols declared query.goal);
   let is_triggering = make_triggering_test query.declarations in
   let rec needs fact symbols =
@@ -518,6 +540,7 @@ type numbering = {
   is_triggering : symbol -> bool;
   symbol_names : string Symbol_table.t;
   symbol_order : symbol Dynarray.t;
+  definition_bodies : string Symbol_table.t;
   sort_names : string Sort_table.t;
   sort_order : sort Dynarray.t;
 }
@@ -542,7 +565,7 @@ let rec render_sort_name numbering = function
           | None -> ());
           canonical)
 
-let render_symbol_name numbering name =
+let rec render_symbol_name numbering name =
   match Symbol_table.find_opt numbering.symbol_names name with
   | Some canonical -> Some canonical
   | None -> (
@@ -551,21 +574,31 @@ let render_symbol_name numbering name =
       | Some declaration ->
           let canonical = Printf.sprintf "x%d" (Symbol_table.length numbering.symbol_names) in
           Symbol_table.replace numbering.symbol_names name canonical;
-          Dynarray.add_last numbering.symbol_order name;
           (match declaration with
           | Constant (_, sort) -> ignore (render_sort_name numbering sort)
           | Function (_, inputs, output) ->
               List.iter (fun sort -> ignore (render_sort_name numbering sort)) inputs;
               ignore (render_sort_name numbering output)
+          | Definition { parameters; result; body; _ } ->
+              List.iter (fun (_, sort) -> ignore (render_sort_name numbering sort)) parameters;
+              ignore (render_sort_name numbering result);
+              let buffer = Buffer.create 128 in
+              print numbering
+                (List.mapi
+                   (fun index (parameter, _) -> (parameter, Printf.sprintf "b%d" index))
+                   parameters)
+                buffer body;
+              Symbol_table.replace numbering.definition_bodies name (Buffer.contents buffer)
           | Datatype _ -> ());
+          Dynarray.add_last numbering.symbol_order name;
           Some canonical)
 
-let render_member_name numbering name =
+and render_member_name numbering name =
   Option.map
     (fun (datatype, suffix) -> render_sort_name numbering datatype ^ suffix)
     (Symbol_table.find_opt numbering.member_of name)
 
-let render_function_name numbering name =
+and render_function_name numbering name =
   match render_member_name numbering name with
   | Some canonical -> canonical
   | None -> (
@@ -573,7 +606,7 @@ let render_function_name numbering name =
       | Some canonical -> canonical
       | None -> invalid_arg ("Logic.text: undeclared symbol " ^ show_symbol name))
 
-let rec print numbering bound buffer term =
+and print numbering bound buffer term =
   let add = Buffer.add_string buffer in
   match term with
   | Symbol name -> (
@@ -650,7 +683,8 @@ let number_symbols query =
   List.iter
     (fun declaration ->
       match declaration with
-      | Constant (name, _) | Function (name, _, _) -> Symbol_table.replace declared name declaration
+      | Constant (name, _) | Function (name, _, _) | Definition { symbol = name; _ } ->
+          Symbol_table.replace declared name declaration
       | Datatype (ty, constructors) ->
           let sort = Type_sort ty in
           Sort_table.replace datatypes sort constructors;
@@ -672,6 +706,7 @@ let number_symbols query =
     is_triggering = make_triggering_test query.declarations;
     symbol_names = Symbol_table.create 64;
     symbol_order = Dynarray.create ();
+    definition_bodies = Symbol_table.create 8;
     sort_names = Sort_table.create 8;
     sort_order = Dynarray.create ();
   }
@@ -707,6 +742,15 @@ let render_with ~cardinality_bound query =
             Printf.sprintf "(declare-fun %s (%s) %s)\n" canonical
               (String.concat " " (List.map (render_sort_name numbering) inputs))
               (render_sort_name numbering output)
+        | Definition { parameters; result; _ } ->
+            Printf.sprintf "(define-fun %s (%s) %s %s)\n" canonical
+              (String.concat " "
+                 (List.mapi
+                    (fun index (_, sort) ->
+                      Printf.sprintf "(b%d %s)" index (render_sort_name numbering sort))
+                    parameters))
+              (render_sort_name numbering result)
+              (Symbol_table.find numbering.definition_bodies name)
         | Datatype _ -> "")
       (Dynarray.to_list numbering.symbol_order)
   in

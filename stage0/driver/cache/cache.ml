@@ -449,17 +449,7 @@ let measure_size cache =
   + match cache.writer with Some writer -> writer.size | None -> 0
 
 let is_abandoned segment =
-  segment.index <> None
-  ||
-  match Unix.openfile segment.path [ O_RDWR; O_CLOEXEC ] 0 with
-  | exception Unix.Unix_error _ -> false
-  | descriptor ->
-      Fun.protect
-        ~finally:(fun () -> Unix.close descriptor)
-        (fun () ->
-          match Unix.lockf descriptor F_TEST 0 with
-          | () -> true
-          | exception Unix.Unix_error _ -> false)
+  segment.index <> None || (Sys.file_exists segment.path && not (Lock_file.is_held segment.path))
 
 let list_entries segment =
   match segment.index with

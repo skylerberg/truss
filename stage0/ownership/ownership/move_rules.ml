@@ -2,11 +2,6 @@ module Place_table = Hashtbl.Make (Structural_key.Make (struct
   type t = Moves.path
 end))
 
-let copy_fix context title type_ origin =
-  if Context.is_copyable context type_ then
-    [ Diagnostic.fix title (Context.copy_edits context origin) ]
-  else []
-
 type verdict =
   | Moves
   | Reads
@@ -18,27 +13,42 @@ let decide_move context (place : Place.t) ~origin ~type_ ~is_returned ~is_captur
     Refused
       (fun context at type_ ->
         Context.report context Not_owned at
-          ~fixes:(copy_fix context "Copy it." type_ origin)
+          ~fixes:(Context.copy_fix context "Copy it." type_ origin)
           message)
   in
   let root_mode : Types.mode =
     if is_captured then Read else Context.classify_binding_mode context place.root
   in
-  if is_returned && root_mode <> Own then
+  if Hashtbl.find_opt context.places_without_keyword origin = Some Mut then
+    Refused
+      (fun context at type_ ->
+        Context.report context Needs_lent_mut at
+          ~fixes:
+            (Diagnostic.fix "Lend it `mut`."
+               [ Diagnostic.insert (Source.Definition_span.make_zero_width at.start) "mut " ]
+            :: Context.copy_fix context "Pass a copy." type_ origin)
+          (Printf.sprintf
+             "`%s` is a place in a value that is lent `mut`, so the place is lent `mut` too. Pass \
+              it `mut`, or pass a copy."
+             shown))
+  else if is_returned && root_mode <> Own then
     if Context.is_view context type_ then Reads
     else
       Refused
         (fun context at type_ ->
           Context.report context Needs_owned at
-            ~fixes:(copy_fix context "Return a copy." type_ origin)
+            ~fixes:(Context.copy_fix context "Return a copy." type_ origin)
             (Printf.sprintf
                "A returned value must be owned, and `%s` is not owned here. Return a copy." shown))
   else if List.exists (function Place.Element _ -> true | Field _ -> false) place.steps then
     refuse
       (Printf.sprintf
-         "`%s` is an element, which cannot be moved out of its collection. Copy it, or take it out \
-          with a method such as `remove`."
-         shown)
+         "`%s` is %s, which cannot be moved out of its collection. Copy it, or take it out with a \
+          method such as `remove`."
+         shown
+         (match List.rev place.steps with
+         | Element _ :: _ -> "an element"
+         | Field _ :: _ | [] -> "part of an element"))
   else
     match (root_mode, place.root) with
     | Read, Constant _ ->
@@ -49,14 +59,14 @@ let decide_move context (place : Place.t) ~origin ~type_ ~is_returned ~is_captur
         refuse
           (Printf.sprintf "`%s` is %s, so it cannot be moved. Copy it instead." shown
              (if place.steps = [] then "a view" else "part of a view"))
-    | (Own | Mut), _ when Hashtbl.mem context.places_without_own origin ->
+    | (Own | Mut), _ when Hashtbl.find_opt context.places_without_keyword origin = Some Own ->
         Refused
           (fun context at type_ ->
             Context.report context Needs_owned at
               ~fixes:
                 (Diagnostic.fix "Move it with `own`."
                    [ Diagnostic.insert (Source.Definition_span.make_zero_width at.start) "own " ]
-                :: copy_fix context "Copy it." type_ origin)
+                :: Context.copy_fix context "Copy it." type_ origin)
               (Printf.sprintf
                  "An owned value is needed here, and `%s` is a place. Pass it `own` to move it, or \
                   copy it."
@@ -82,6 +92,26 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
     | origin :: _ -> Some origin
     | [] -> None
   in
+  let moved_types = Hashtbl.create 8 in
+  let record_moved_type (use : Moves.use) =
+    match use.operand with
+    | Some (Use { type_; _ } | Borrow { type_; _ } | Take { type_; _ } | Constant { type_; _ })
+      when use.moves ->
+        Hashtbl.replace moved_types use.origin type_
+    | Some _ | None -> ()
+  in
+  Array.iter
+    (fun (basic : Mir.Graph.basic_block) ->
+      List.iter
+        (fun statement -> List.iter record_moved_type (Moves.list_statement_uses moves statement))
+        basic.statements;
+      List.iter record_moved_type (Moves.list_terminator_uses moves basic))
+    body.blocks;
+  let read_moved_type origin =
+    match Hashtbl.find_opt moved_types origin with
+    | Some type_ -> type_
+    | None -> Compiler_bug.raise_bug ~stage:"Ownership" "a move has no moving use"
+  in
   let reported_use_after_move = Place_table.create 8 in
   let check_use_after_move state (place : Mir.place) origin =
     match Moves.path_of_place place with
@@ -101,10 +131,8 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
                         Printf.sprintf "`%s` is moved here." shown );
                     ]
                   ~fixes:
-                    [
-                      Diagnostic.fix "Pass a copy at the move instead."
-                        (Context.copy_edits context moved_origin);
-                    ]
+                    (Context.copy_fix context "Pass a copy at the move instead."
+                       (read_moved_type moved_origin) moved_origin)
                   (Printf.sprintf "`%s` is used after it was moved." shown)
             | _ -> ())
         | _ -> ())

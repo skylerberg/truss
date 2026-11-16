@@ -523,7 +523,32 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
           in
           match stated with
           | None -> ()
-          | Some (valid, parts) ->
+          | Some (valid, parts) -> (
+              let has_quantifier_through_definitions body =
+                Logic.has_quantifier body
+                || Logic.mentions
+                     (List.of_seq (Tables.Symbol_table.to_seq_keys context.query.definitions))
+                     body
+              in
+              let definition =
+                match (is_triggered, facts, parts) with
+                | ( true,
+                    Logic.Boolean true,
+                    [ (_, required, [ (_, Logic.Operation ("=", [ left; right ])) ]) ] ) -> (
+                    let defined_by body =
+                      if
+                        Logic.mentions [ symbol ] body
+                        || Facts.find_bounds result_type <> None
+                        || not (has_quantifier_through_definitions body)
+                      then None
+                      else Some (required, body)
+                    in
+                    match (left, right) with
+                    | _ when left = applied -> defined_by right
+                    | _ when right = applied -> defined_by left
+                    | _ -> None)
+                | _ -> None
+              in
               if is_triggered then
                 List.iter
                   (fun ((part : State.part), _, ensures) ->
@@ -535,19 +560,37 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                       ensures)
                   parts;
               record_axiom symbol axiom;
-              Facts.add_fact context.query
-                (Logic.forall
-                   ~trigger:(if is_triggered then [ applied ] else [])
-                   ( parameters,
-                     Logic.( ==> )
-                       (Logic.conjunction (valid :: axiom.hypotheses))
-                       (Logic.conjunction
-                          (facts
-                          :: List.map
-                               (fun (_, required, ensures) ->
-                                 Logic.( ==> ) (Logic.conjunction required)
-                                   (Logic.conjunction (List.map snd ensures)))
-                               parts)) )))
+              match definition with
+              | Some (required, body) ->
+                  let unspecified = Logic.Symbol.Unspecified symbol
+                  and result_sort = Facts.declare_sort context result_type in
+                  Facts.declare context.query (Logic.Function (unspecified, sorts, result_sort));
+                  Facts.declare context.query
+                    (Logic.Definition
+                       {
+                         symbol;
+                         parameters;
+                         result = result_sort;
+                         body =
+                           Logic.ite
+                             (Logic.conjunction ((valid :: axiom.hypotheses) @ required))
+                             body
+                             (Logic.Apply (unspecified, inputs));
+                       })
+              | None ->
+                  Facts.add_fact context.query
+                    (Logic.forall
+                       ~trigger:(if is_triggered then [ applied ] else [])
+                       ( parameters,
+                         Logic.( ==> )
+                           (Logic.conjunction (valid :: axiom.hypotheses))
+                           (Logic.conjunction
+                              (facts
+                              :: List.map
+                                   (fun (_, required, ensures) ->
+                                     Logic.( ==> ) (Logic.conjunction required)
+                                       (Logic.conjunction (List.map snd ensures)))
+                                   parts)) ))))
     in
     (match (!is_limited_call, axiom_symbol, !applied_as) with
     | true, _, _ -> ()

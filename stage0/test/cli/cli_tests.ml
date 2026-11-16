@@ -106,8 +106,7 @@ let () =
       let ready, signal = Unix.pipe ~cloexec:true () in
       match Unix.fork () with
       | 0 ->
-          let lock = Unix.openfile (Filename.concat root ".truss/lock") [ O_RDWR ] 0 in
-          Unix.lockf lock F_LOCK 0;
+          ignore (Lock_file.acquire (Filename.concat root ".truss/lock"));
           ignore (Unix.write_substring signal "x" 0 1);
           Unix.sleep 60;
           Unix._exit 0
@@ -127,12 +126,7 @@ let other_build =
     (Unix.realpath
        (Filename.concat (Filename.dirname Sys.executable_name) "../../driver/truss/truss.exe"))
 
-let is_database_open_elsewhere root =
-  let descriptor = Unix.openfile (Filename.concat root ".truss/lock") [ O_RDWR; O_CLOEXEC ] 0 in
-  Fun.protect
-    ~finally:(fun () -> Unix.close descriptor)
-    (fun () ->
-      match Unix.lockf descriptor F_TEST 0 with () -> false | exception Unix.Unix_error _ -> true)
+let is_database_open_elsewhere root = Lock_file.is_held (Filename.concat root ".truss/lock")
 
 let make_package_served_by_other_build () =
   let root = make_package [ ("one.truss", "fn one() -> Int64 { 1 }\n") ] in
@@ -200,6 +194,16 @@ let () =
       match list_server_files_added ~before with
       | [] -> ()
       | added -> fail "left %s" (String.concat ", " added));
+  test "a command outside any project runs without a background process" (fun () ->
+      let directory = Harness.make_scratch_directory "outside-a-project" in
+      let before = list_server_files () in
+      Unix.putenv "TRUSS_NO_SERVER" "";
+      let status, out, err = Process.run (Lazy.force other_build) [ "check"; "-C"; directory ] in
+      if status <> 2 || not (String.includes ~affix:"so it is in no project" (out ^ err)) then
+        fail "exited with %d: %s%s" status out err;
+      match list_server_files_added ~before with
+      | [] -> ()
+      | added -> fail "started a background process: %s" (String.concat ", " added));
   test "a background process whose project is deleted ends, and does not make the project again"
     (fun () ->
       let before = list_server_files () in
@@ -1406,6 +1410,23 @@ let () =
           (List.mem "units/lengths/lengths.truss"
              (List.map (Workspace.locate_file (fst project)) (list_files project)))
       then fail "the project's package is not the one in the build")
+
+let () =
+  test "a registry package that does not check with this toolchain is a problem that names it"
+    (fun () ->
+      let registry = make_registry () in
+      publish registry "acme::broken" (1, 0, 0)
+        [ ("lengths/lengths.truss", "public fn meter() -> Int64 {\n  \"one\"\n}\n") ];
+      let root =
+        make_package
+          [
+            ( "main.truss",
+              "use acme::broken::lengths\n\nfn length() -> Int64 {\n  lengths::meter()\n}\n" );
+          ]
+      in
+      ignore (add root [ "acme::broken" ]);
+      expect_problem_in root
+        "`acme::broken` 1.0.0 does not check with this toolchain. It has 1 error; the first is at")
 
 let upgrade root names = run_truss ([ "upgrade"; "-C"; root ] @ names)
 

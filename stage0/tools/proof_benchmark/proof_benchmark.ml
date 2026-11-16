@@ -6,14 +6,33 @@ let () =
         prerr_endline message;
         exit 1
   in
-  let standard : Project.package =
-    { name = Path.standard_package; dependencies = []; files = Standard_library.files }
+  let modules =
+    List.sort_uniq compare
+      (List.map
+         (fun ((file : Path.file), _) -> Path.show_module file.module_)
+         Standard_library.files)
+  in
+  let wanted = List.tl (Array.to_list Sys.argv) in
+  (match List.filter (fun name -> not (List.mem name modules)) wanted with
+  | [] -> ()
+  | unknown ->
+      prerr_endline ("Not modules of the standard library: " ^ String.concat ", " unknown);
+      exit 2);
+  let is_wanted ((file : Path.file), _) =
+    wanted = [] || List.mem (Path.show_module file.module_) wanted
+  in
+  let database =
+    Database.create
+      [ { name = Path.standard_package; dependencies = []; files = Standard_library.files } ]
+  in
+  Database.check database [ Path.standard_package ];
+  let show channel (name, queries, seconds, failed) =
+    Printf.fprintf channel "%8.2f s %6d queries  %s%s\n%!" seconds queries name
+      (if failed = 0 then "" else Printf.sprintf " (%d not proven)" failed)
   in
   let timed =
     List.filter_map
       (fun ((file : Path.file), _) ->
-        let database = Database.create [ standard ] in
-        Database.check database [ file.module_.package ];
         match Database.list_file_diagnostics database file with
         | _ :: _ -> None
         | [] ->
@@ -28,17 +47,17 @@ let () =
                       (Database.list_proofs (Database.prove database [ file ])))
                    file)
             in
-            Some
+            let row =
               ( Path.show_file file,
                 Solver.count_queries_run solver - runs_before,
                 Unix.gettimeofday () -. start,
-                failed ))
-      Standard_library.files
+                failed )
+            in
+            show stderr row;
+            Some row)
+      (List.filter is_wanted Standard_library.files)
   in
-  List.iter
-    (fun (name, queries, seconds, failed) ->
-      Printf.printf "%8.2f s %6d queries  %s%s\n" seconds queries name
-        (if failed = 0 then "" else Printf.sprintf " (%d not proven)" failed))
+  List.iter (show stdout)
     (List.sort (fun (_, _, first, _) (_, _, second, _) -> compare second first) timed);
   let queries = List.fold_left (fun total (_, queries, _, _) -> total + queries) 0 timed in
   let seconds = List.fold_left (fun total (_, _, seconds, _) -> total +. seconds) 0. timed in

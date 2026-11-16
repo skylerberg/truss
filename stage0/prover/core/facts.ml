@@ -41,6 +41,11 @@ let declare (query : State.query) (declaration : Logic.declaration) =
         Tables.Symbol_table.replace query.declared name ();
         query.declarations <- declaration :: query.declarations
       end
+  | Definition { symbol; _ } ->
+      if not (Tables.Symbol_table.mem query.definitions symbol) then begin
+        Tables.Symbol_table.replace query.definitions symbol ();
+        query.declarations <- declaration :: query.declarations
+      end
   | Datatype _ -> invalid_arg "Translate.declare: a datatype is declared by its sort"
 
 let add_fact (query : State.query) fact = query.facts <- fact :: query.facts
@@ -314,8 +319,9 @@ and make_obligation ?template_clause (context : State.context) (frame : State.fr
        in
        Locals.fold
          (fun local term shown ->
-           match Tables.Local_table.find_opt context.report.local_names local with
-           | Some name when not (is_parameter term || List.mem_assoc term shown) ->
+           match (local, Tables.Local_table.find_opt context.report.local_names local) with
+           | Core_local (Named _), Some name
+             when not (is_parameter term || List.mem_assoc term shown) ->
                (term, name) :: shown
            | _ -> shown)
          frame.locals

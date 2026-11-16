@@ -7,7 +7,7 @@ type context = {
   list_bounds : Types.parameter -> Types.trait_reference list;
   spans : Source.Definition_span.t array Lazy.t;
   mode_keywords : (Core.origin, Core.mode_keyword) Hashtbl.t;
-  places_without_own : (Core.origin, unit) Hashtbl.t;
+  places_without_keyword : (Core.origin, Types.mode) Hashtbl.t;
   names : string Local_table.t;
   binding_modes : Types.mode Local_table.t;
   types : Types.ty Local_table.t;
@@ -135,6 +135,9 @@ let copy_edits context (moved : Core.origin) =
         (Source.Definition_span.make_zero_width (locate_origin context moved).stop)
         ".copy()";
     ]
+
+let copy_fix context title type_ (moved : Core.origin) =
+  if is_copyable context type_ then [ Diagnostic.fix title (copy_edits context moved) ] else []
 
 let locate_with_mode_keyword context (place : Core.origin) : Source.Definition_span.t =
   match Hashtbl.find_opt context.mode_keywords place with

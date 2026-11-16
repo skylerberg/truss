@@ -248,10 +248,12 @@ let () =
             Harness.fail "%s" message;
             -1
       in
+      let wait_for_first_periodic_work () = ignore (measure_served "two") in
       Fun.protect
         ~finally:(fun () -> ignore (Workspace.stop_servers ()))
         (fun () ->
           ignore (measure_served "one");
+          wait_for_first_periodic_work ();
           let servers = Filename.concat cache "servers" in
           let list_files () =
             List.sort compare
@@ -1000,3 +1002,14 @@ let () =
       with
       | [ { kind = "untracked"; computed = 0; writes = 0; reads; _ } ] when reads > 0 -> ()
       | counts -> Harness.fail "counted %s" (String.concat "; " (List.map show_counts counts)))
+
+let () =
+  Harness.test "a package database records the diagnostics of its package, and none when it checks"
+    (fun () ->
+      let clean = load_package [ ("lib::tools", "public fn first() -> Int64 { 1 }\n") ] in
+      let broken = load_package [ ("lib::tools", "public fn first() -> Int64 { \"one\" }\n") ] in
+      if Database.list_package_diagnostics clean <> [] then
+        Harness.fail "the package that checks records diagnostics";
+      match Database.list_package_diagnostics broken with
+      | [ (_, _ :: _) ] -> ()
+      | failed -> Harness.fail "the broken package records %d files" (List.length failed))

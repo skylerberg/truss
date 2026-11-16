@@ -24,6 +24,7 @@ let make_context (definition : State.definition) ~terminates ~proving : State.co
       {
         declarations = [];
         declared = Tables.Symbol_table.create 64;
+        definitions = Tables.Symbol_table.create 8;
         datatypes = Tables.Type_table.create 16;
         stated = Tables.Stated_table.create 64;
         facts = [];

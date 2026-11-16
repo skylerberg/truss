@@ -5,6 +5,7 @@ val retake : snapshot -> (snapshot, string) result
 val locate_root : snapshot -> string
 val open_database : ?checks:bool -> snapshot -> Database.t
 val problems : snapshot -> Project.problem list
+val list_dependency_problems : snapshot -> Database.t -> Project.problem list
 val list_packages : snapshot -> (string * Path.package) list
 val time_limit_ms : snapshot -> int
 val list_registry_packages : snapshot -> (Path.package * Registry.Version.t * string) list
@@ -26,7 +27,7 @@ val plan_lock :
   all:bool ->
   (lock_plan, string) result
 
-val make_server_key : string -> string
+val find_project_root : string -> string option
 val serve : key:string -> handle:(report_progress:(string -> unit) -> 'request -> 'response) -> unit
 
 val call :

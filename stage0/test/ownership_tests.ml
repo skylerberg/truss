@@ -113,11 +113,16 @@ let () =
         (make_lending_source "numbered" "(mut self, index: UInt64) lends mut Numbered"
            "  Numbered(index: index, title: mut self.books[index])\n"
         ^ Fixtures.Ownership.title_cleared_through_numbered));
-  Harness.test "a place in a constructor lent `mut` needs the `mut` keyword" (fun () ->
+  Harness.test
+    "a place in a constructor lent `mut` needs the `mut` keyword, with a fix that adds it"
+    (fun () ->
       expect_one_diagnostic
         (make_lending_source "numbered" "(mut self) lends mut Numbered"
            "  Numbered(index: 0, title: self.books[0])\n")
-        "types.missing_mode");
+        "ownership.needs_lent_mut"
+        ~fixed:
+          (make_lending_source "numbered" "(mut self) lends mut Numbered"
+             "  Numbered(index: 0, title: mut self.books[0])\n"));
   Harness.test "a place in a constructor lent read-only takes no `mut` keyword" (fun () ->
       expect_one_diagnostic
         (make_lending_source "numbered" "(self) lends Numbered"
@@ -530,6 +535,13 @@ let () =
         (keep ^ Fixtures.Ownership.list_moved_then_read)
         "ownership.use_after_move"
         ~fixed:(keep ^ Fixtures.Ownership.list_copied_then_read));
+  Harness.test "a moved place whose type is not `Copyable` gets no fix that copies it" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.token_moved_then_read "ownership.use_after_move";
+      let packages = Support.setup [ ("app::main", Fixtures.Ownership.token_moved_then_read) ] in
+      List.iter
+        (fun (diagnostic : Diagnostic.t) ->
+          if diagnostic.fixes <> [] then Harness.fail "offered a fix that copies the token")
+        (check packages (Support.parse_file "app::main")));
   Harness.test "a `let` that reads a moved place is reported at the place" (fun () ->
       expect_one_diagnostic
         (keep ^ Fixtures.Ownership.list_moved_then_bound)
@@ -697,6 +709,11 @@ let () =
         "ownership.use_after_move",
         Fixtures.Ownership.bag_copied_for_its_receiver_then_read );
     ];
+  Harness.test "a field of an element is part of an element, which cannot be moved, with a fix"
+    (fun () ->
+      expect_one_diagnostic ~says:"`rows[...].label` is part of an element"
+        Fixtures.Ownership.field_of_an_element_moved_into_a_var "ownership.not_owned"
+        ~fixed:Fixtures.Ownership.field_of_an_element_copied_into_a_var);
   Harness.test "an associated type that grows a type reaches the recursion limit" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.associated_type_that_grows_its_type
         "types.recursion_limit" ~says:"needs more than 64 nested types");
