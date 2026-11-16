@@ -279,17 +279,13 @@ let statement_c context fc buffer (statement : Lowered.statement) =
           line "%s(&%s);" symbol text
       | Some _ -> bug "a drop of a place that is not a value")
   | Echo { text; length; site } ->
-      context.failures <-
-        (Echo, { definition = site.definition; line = site.line; column = site.column })
-        :: context.failures;
+      context.failures <- (Echo, site) :: context.failures;
       let operand argument =
         match operand_c context fc argument with
         | Some (text, _) -> text
         | None -> bug "an echo of nothing"
       in
-      line "t_runtime_echo(%s, %s, %s, %d, %d);" (operand text) (operand length)
-        (anchor_c context site.definition)
-        site.line site.column
+      line "t_runtime_echo(%s, %s, %s);" (operand text) (operand length) (site_c context site)
   | Free_block { place; variant } -> (
       match place_c context fc place with
       | Some (text, Value sum) ->
@@ -386,28 +382,16 @@ let terminator_c context fc buffer (terminator : Lowered.terminator) =
       | None -> line "return;"
       | Some (text, _) -> line "return %s;" text)
   | Unreachable -> line "%s" (unreachable_c context)
-  | Fail { failure; message; length; site; reported } -> (
+  | Fail { failure; message; length; site; reported } ->
       if match failure with Lowered.Todo -> true | Panic | Assertion -> false then
-        context.failures <-
-          (Todo, { definition = site.definition; line = site.line; column = site.column })
-          :: context.failures;
+        context.failures <- (Todo, site) :: context.failures;
       let runtime =
         match failure with
         | Panic -> "t_runtime_panic"
         | Assertion -> "t_runtime_assertion_failed"
         | Todo -> "t_runtime_todo"
       in
-      match Option.map operand reported with
-      | Some (reported, _) ->
-          line "{";
-          line "  const struct t_site *site = %s;" reported;
-          line "  %s(%s, %s, site->anchor, site->line, site->column);" runtime
-            (fst (operand message))
-            (fst (operand length));
-          line "}"
-      | None ->
-          line "%s(%s, %s, %s, %d, %d);" runtime
-            (fst (operand message))
-            (fst (operand length))
-            (anchor_c context site.definition)
-            site.line site.column)
+      let site =
+        match reported with Some reported -> fst (operand reported) | None -> site_c context site
+      in
+      line "%s(%s, %s, %s);" runtime (fst (operand message)) (fst (operand length)) site

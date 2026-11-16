@@ -28,7 +28,6 @@ val test_key : Path.t -> Instance.key
 
 type code = {
   definition_key : Names.key;
-  anchor : Path.t;
   enclosing_impl : Path.t option;
   text : string;
   result : Types.result;
@@ -39,11 +38,7 @@ type code = {
 }
 
 val unwritten :
-  definition_key:Names.key ->
-  anchor:Path.t ->
-  substitution:Types.substitution ->
-  result:Types.result ->
-  code
+  definition_key:Names.key -> substitution:Types.substitution -> result:Types.result -> code
 
 val key_of : context -> Path.t -> Resolve.Names.key
 val text_of : context -> Names.key -> string

@@ -1861,7 +1861,7 @@ changes no definition.
 | Rename a local variable | One body | Local names are part of identity, because diagnostics and `echo` output show them, and a cached result would show the old name. |
 | Change the spelling of a literal, such as `0xFF` to `255` | Nothing | Identity holds the value of the literal. The file keeps the spelling, so `truss fmt` can print it back. |
 | Reorder clauses | Nothing between kinds of clause. The definition, within one kind. | Each `requires` may rely on the `requires` before it. |
-| Add a line at the top of a file | Nothing | A panic, an `echo`, a failed `assert`, and debug information record a position relative to their definition. A table built at the end of the build converts each position to a file and a line. |
+| Add a line at the top of a file | Nothing | A panic, an `echo`, a failed `assert`, and debug information record a position relative to their definition. A table built at the end of the build converts each position to a file, a line, and a column. |
 | Upgrade a dependency | The dependents of the dependency's diff | A path holds no version, so a new version of a package is an edit to code that the project does not own, and is tracked as any edit is. |
 | Install a new compiler | The database, from the files. Solver answers, object files, and test results whose inputs are unchanged are cache hits. | The database records the compiler that built it. Each cache is keyed by its whole input, so a release that changes code generation leaves every solver answer valid. |
 

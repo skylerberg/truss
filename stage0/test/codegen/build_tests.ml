@@ -136,7 +136,7 @@ let () =
           "fn suite() {\n}\n"
       in
       let site : Lowered.site =
-        { definition = Top { module_ = example; name = "suite" }; line = 2; column = 3 }
+        { definition = Top { module_ = example; name = "suite" }; offset = 3 }
       in
       let text value = Lowered.Constant (Bytes value) in
       let length value = Lowered.Constant (Integer (UInt64, Z.of_int (String.length value))) in
@@ -198,14 +198,14 @@ let () =
               (String.concat ""
                  [
                    "test 0 passed\n";
-                   "test 1 failed\nmessage 41\nvalues differ\n  at example/main.truss:3:3\n";
-                   "test 2 panicked\nmessage 32\nboom\n  at example/main.truss:3:3\n";
-                   "test 3 passed\necho 27\nexample/main.truss:3:3: 42\n\n";
+                   "test 1 failed\nmessage 41\nvalues differ\n  at example/main.truss:1:4\n";
+                   "test 2 panicked\nmessage 32\nboom\n  at example/main.truss:1:4\n";
+                   "test 3 passed\necho 27\nexample/main.truss:1:4: 42\n\n";
                    "test 4 timed_out\nmessage 23\nran past the time limit\n";
                    "test 5 incomplete\n\
                     message 46\n\
                     hole of type Int64\n\
-                   \  at example/main.truss:3:3\n";
+                   \  at example/main.truss:1:4\n";
                    "test 6 panicked\nmessage 45\ncompiler bug: the test left 1 block allocated\n";
                    "test 7 crashed\nmessage 19\nended with status 3\n";
                  ])

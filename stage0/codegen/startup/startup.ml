@@ -80,17 +80,12 @@ static void t_text_number(uint64_t number) {
   t_text_add(digits + sizeof digits - count, count);
 }
 
-static void t_text_position(const struct t_anchor *anchor, uint32_t line, uint32_t column) {
-  if (anchor) {
-    t_text_add(anchor->path, anchor->path_length);
-    t_text_string(":");
-    t_text_number((uint64_t)anchor->line + line);
-  } else {
-    t_text_string("generated code:");
-    t_text_number(line);
-  }
+static void t_text_position(const struct t_site *site) {
+  t_text_add(site->file, site->file_length);
   t_text_string(":");
-  t_text_number(column);
+  t_text_number(site->line);
+  t_text_string(":");
+  t_text_number(site->column);
 }
 
 static void t_record(uint8_t kind) {
@@ -113,38 +108,33 @@ static _Noreturn void t_end(uint8_t kind, const char *heading, int status) {
   _exit(status);
 }
 
-static void t_describe(const uint8_t *message, uint64_t length, const struct t_anchor *anchor, uint32_t line,
-                       uint32_t column) {
+static void t_describe(const uint8_t *message, uint64_t length, const struct t_site *site) {
   pthread_mutex_lock(&t_text_lock);
   t_text_length = 0;
   t_text_add(message, length);
   t_text_string("\n  at ");
-  t_text_position(anchor, line, column);
+  t_text_position(site);
 }
 
-_Noreturn void t_runtime_panic(const uint8_t *message, uint64_t length, const struct t_anchor *anchor,
-                               uint32_t line, uint32_t column) {
-  t_describe(message, length, anchor, line, column);
+_Noreturn void t_runtime_panic(const uint8_t *message, uint64_t length, const struct t_site *site) {
+  t_describe(message, length, site);
   t_end(t_panicked, "panic: ", 101);
 }
 
-_Noreturn void t_runtime_assertion_failed(const uint8_t *message, uint64_t length,
-                                          const struct t_anchor *anchor, uint32_t line, uint32_t column) {
-  t_describe(message, length, anchor, line, column);
+_Noreturn void t_runtime_assertion_failed(const uint8_t *message, uint64_t length, const struct t_site *site) {
+  t_describe(message, length, site);
   t_end(t_failed, "assertion failed: ", 1);
 }
 
-_Noreturn void t_runtime_todo(const uint8_t *message, uint64_t length, const struct t_anchor *anchor,
-                              uint32_t line, uint32_t column) {
-  t_describe(message, length, anchor, line, column);
+_Noreturn void t_runtime_todo(const uint8_t *message, uint64_t length, const struct t_site *site) {
+  t_describe(message, length, site);
   t_end(t_incomplete, "", 101);
 }
 
-void t_runtime_echo(const uint8_t *text, uint64_t length, const struct t_anchor *anchor, uint32_t line,
-                    uint32_t column) {
+void t_runtime_echo(const uint8_t *text, uint64_t length, const struct t_site *site) {
   pthread_mutex_lock(&t_text_lock);
   t_text_length = 0;
-  t_text_position(anchor, line, column);
+  t_text_position(site);
   t_text_string(": ");
   t_text_add(text, length);
   if (t_report >= 0) {
@@ -2016,7 +2006,7 @@ let runtime ~tests =
     [
       (if tests then "#define T_TESTS 1\n" else "");
       headers;
-      Emit_c.anchor_struct;
+      Emit_c.site_struct;
       failing;
       allocation;
       threads;

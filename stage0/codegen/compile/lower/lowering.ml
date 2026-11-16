@@ -115,18 +115,7 @@ let is_trivial st ty = Drop_and_copy.is_trivial st.context.drop_and_copy ty
 let is_zero_size st = Memory_layout.has_zero_size st.context.env
 
 let site st (span : Source.Definition_span.t) : Lowered.site =
-  let text = st.frame.code.text in
-  let line = ref 0 and column = ref 1 in
-  String.iteri
-    (fun position capability ->
-      if position < span.start then
-        if capability = '\n' then begin
-          incr line;
-          column := 1
-        end
-        else incr column)
-    text;
-  { definition = st.frame.code.anchor; line = !line; column = !column }
+  { definition = st.frame.code.definition_key.path; offset = span.start }
 
 type unsupported = { construct : string; at : Lowered.site option }
 

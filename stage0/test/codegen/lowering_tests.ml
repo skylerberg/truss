@@ -47,7 +47,14 @@ let () =
   test "a check in a called lending method of the standard library reports the program's call site"
     (fun () ->
       expect_output Fixtures.Lowering.check_in_a_map_index_reports_the_programs_call_site
-        "test 0 panicked\nmessage 48\nindex out of bounds\n  at example/main.truss:3:11\n")
+        "test 0 panicked\nmessage 48\nindex out of bounds\n  at example/main.truss:3:11\n");
+  test "a check on the first line of an indented method reports its column in the file" (fun () ->
+      expect_output Fixtures.Lowering.panic_on_the_first_line_of_a_method_in_an_impl
+        "test 0 panicked\nmessage 48\narithmetic overflow\n  at example/main.truss:8:28\n");
+  test "a column after a letter of two bytes counts Unicode scalar values, as a diagnostic's does"
+    (fun () ->
+      expect_output Fixtures.Lowering.column_after_a_letter_of_two_bytes_counts_scalar_values
+        "test 0 panicked\nmessage 48\nindex out of bounds\n  at example/main.truss:3:29\n")
 
 let () =
   passes "an index, and a lending method with a default"

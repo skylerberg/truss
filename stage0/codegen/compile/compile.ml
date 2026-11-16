@@ -224,29 +224,24 @@ let result_key compiler root =
 
 let test_key compiler test = result_key compiler (Lower.test_key test)
 
-let anchor compiler (path : Path.t) : Positions.anchor option =
-  match compiler.requests.interface.names.key path with
-  | None -> None
-  | Some key -> (
-      match compiler.requests.interface.names.place key with
-      | None -> None
-      | Some { file; base } ->
-          let line, _ = Source.position (compiler.requests.source file) base in
-          Some { definition = path; path = compiler.file_name file; first_line = line })
+let position compiler (definition : Path.t) offset : Emit_c.position =
+  let names = compiler.requests.interface.names in
+  match Option.bind (names.key definition) names.place with
+  | Some { file; base } ->
+      let line, column = Source.position (compiler.requests.source file) (base + offset) in
+      { file = compiler.file_name file; line; column }
+  | None -> bug "%s has no place in a file" (Path.show definition)
+
+let site_position compiler (site : Lowered.site) = position compiler site.definition site.offset
+
+let show_position (position : Emit_c.position) =
+  Printf.sprintf "%s:%d:%d" position.file position.line position.column
 
 let todo_type_position compiler (path : Path.t) =
   let names = compiler.requests.interface.names in
-  match
-    Option.map
-      (fun key -> (names.place key, names.definition key, names.spans key))
-      (names.key path)
-  with
-  | Some (Some { file; base }, Some { kind = Type_definition { name; _ }; _ }, Some spans) ->
-      let line, column =
-        Source.position (compiler.requests.source file)
-          (Source.Definition_span.to_file ~base spans.(name.id)).start
-      in
-      (compiler.file_name file, line, column)
+  match Option.map (fun key -> (names.definition key, names.spans key)) (names.key path) with
+  | Some (Some { kind = Type_definition { name; _ }; _ }, Some spans) ->
+      position compiler path spans.(name.id).start
   | Some _ | None ->
       bug "%s is reached as a type defined as todo, and has no definition" (Path.show path)
 
@@ -281,9 +276,9 @@ let rec build ?progress ?tests ?(supplied = []) compiler ~roots ~startup ~output
       (fun units_by_key unit -> Reachable.Keys.add (Emit_c.key unit) unit units_by_key)
       Reachable.Keys.empty units
   in
-  let paths = List.sort_uniq Path.compare (List.concat_map Emit_c.anchors units) in
-  let anchors = List.filter_map (anchor compiler) paths in
-  let sources = [ ("startup", startup); ("anchors", Positions.anchors_file anchors) ] in
+  let sources =
+    [ ("startup", startup); ("sites", Emit_c.sites_file ~position:(site_position compiler) units) ]
+  in
   let find key = Reachable.Keys.find_opt key units_by_key in
   let copied =
     match compiler.settings.build with
@@ -379,11 +374,7 @@ let unsupported_message compiler (unsupported : Lower.unsupported) =
   let where =
     match unsupported.at with
     | None -> ""
-    | Some at -> (
-        match anchor compiler at.definition with
-        | Some anchor ->
-            Printf.sprintf "%s:%d:%d: " anchor.path (anchor.first_line + at.line) at.column
-        | None -> "")
+    | Some at -> show_position (site_position compiler at) ^ ": "
   in
   where ^ "Stage0 cannot build this yet: " ^ unsupported.construct ^ "."
 
@@ -541,9 +532,8 @@ let incomplete_record compiler todo_types =
         (String.concat "\n"
            (List.map
               (fun path ->
-                let file, line, column = todo_type_position compiler path in
-                Printf.sprintf "the type %s is defined as todo\n  at %s:%d:%d" (Path.show path) file
-                  line column)
+                Printf.sprintf "the type %s is defined as todo\n  at %s" (Path.show path)
+                  (show_position (todo_type_position compiler path)))
               todo_types));
     echo = None;
     microseconds = 0;
@@ -674,24 +664,21 @@ let unshippable compiler ~main =
     let reports =
       List.map
         (fun path ->
-          let file, line, column = todo_type_position compiler path in
+          let ({ file; line; column } : Emit_c.position) = todo_type_position compiler path in
           { failure = `Todo; file; line; column; way = [ main; path ] })
         (compiler.requests.reached_todo_types (Program_main main))
       @ List.concat_map
           (fun (compiled, keys) ->
-            List.filter_map
-              (fun (failure, (site : Emit_c.site)) ->
-                match anchor compiler site.definition with
-                | None -> None
-                | Some anchor ->
-                    Some
-                      {
-                        failure = (match failure with Emit_c.Echo -> `Echo | Todo -> `Todo);
-                        file = anchor.path;
-                        line = anchor.first_line + site.line;
-                        column = site.column;
-                        way = definitions keys;
-                      })
+            List.map
+              (fun (failure, site) ->
+                let ({ file; line; column } : Emit_c.position) = site_position compiler site in
+                {
+                  failure = (match failure with Emit_c.Echo -> `Echo | Todo -> `Todo);
+                  file;
+                  line;
+                  column;
+                  way = definitions keys;
+                })
               (Emit_c.failures compiled))
           reached
     in
@@ -721,11 +708,11 @@ let program_root compiler ~main =
         (String.concat "\n"
            (List.map
               (fun path ->
-                let file, line, column = todo_type_position compiler path in
                 Printf.sprintf
-                  "%s:%d:%d: the type %s is defined as todo, and `main` can reach it, so the \
-                   program cannot be built."
-                  file line column (Path.show path))
+                  "%s: the type %s is defined as todo, and `main` can reach it, so the program \
+                   cannot be built."
+                  (show_position (todo_type_position compiler path))
+                  (Path.show path))
               todo_types))
 
 let run_program ?input compiler ~main ~arguments =

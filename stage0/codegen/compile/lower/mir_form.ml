@@ -24,7 +24,7 @@ let parameter_of (body : Mir.Graph.body) local =
 let spans st =
   match st.context.lookups.interface.names.spans st.frame.code.definition_key with
   | Some spans -> spans
-  | None -> bug "no spans for %s" (Path.show st.frame.code.anchor)
+  | None -> bug "no spans for %s" (Path.show st.frame.code.definition_key.path)
 
 let site_of st (origin : Core.origin) =
   let spans = spans st in
@@ -34,7 +34,7 @@ let site_of st (origin : Core.origin) =
 let reported_site st : Lowered.operand option =
   match st.frame.mir with
   | Some { lending = Some { site; _ }; _ }
-    when Path.package st.frame.code.anchor = Path.standard_package ->
+    when Path.package st.frame.code.definition_key.path = Path.standard_package ->
       Some site
   | _ -> None
 
@@ -1486,7 +1486,6 @@ and capability_defaults st ~capability ~name (arguments : Mir.argument list) eva
           {
             caller.code with
             definition_key = key;
-            anchor = capability;
             enclosing_impl = None;
             text = text_of st.context key;
             substitution = [];

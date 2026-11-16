@@ -24,14 +24,14 @@ type context = {
   mutable environments : (string * Lowered.ty) list Keys.t;
   bytes : (string, int) Hashtbl.t;
   mutable prototypes : (string * string) list;
-  mutable anchors : (string * Path.t) list;
+  mutable sites : Lowered.site list;
   mutable references : key list option;
   mutable helpers_used : string list;
   mutable statics : string list;
   mutable instances : Instance.key list;
   mutable called : Instance.key list;
   mutable calls : (Path.t * int) list;
-  mutable failures : (C_runtime.failure * C_runtime.site) list;
+  mutable failures : (C_runtime.failure * Lowered.site) list;
 }
 
 val new_context : Memory_layout.env -> string -> context

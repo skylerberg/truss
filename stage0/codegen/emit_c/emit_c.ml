@@ -5,12 +5,9 @@ open C_data
 type build = C_runtime.build = Development | Release
 type linkage = C_runtime.linkage = External | Internal
 
-let anchor_struct = C_runtime.anchor_struct
-let runtime_declarations = C_runtime.runtime_declarations
-let anchor_symbol = C_runtime.anchor_symbol
-let version = 27
+let site_struct = C_runtime.site_struct
+let version = 28
 
-type site = C_runtime.site = { definition : Path.t; line : int; column : int }
 type failure = C_runtime.failure = Echo | Todo
 
 type kind =
@@ -27,12 +24,12 @@ type fragment = {
   environments : (key * defined) list;
   prototypes : (string * string) list;
   statics : string list;
-  anchors : (string * Path.t) list;
+  sites : Lowered.site list;
   helpers : string list;
   references : Instance.key list;
   calls : (Path.t * int) list;
   called : Instance.key list;
-  failures : (failure * site) list;
+  failures : (failure * Lowered.site) list;
 }
 
 let key fragment = fragment.key
@@ -92,7 +89,7 @@ let text fragment =
        (fragment.types
        @ List.concat_map (fun (_, (defined : defined)) -> defined.references) fragment.environments
        ));
-  number "@anchor_" (List.map fst fragment.anchors);
+  number "@site_" (List.map site_symbol fragment.sites);
   let rename identifier =
     if String.starts_with ~prefix:self identifier then
       "@self"
@@ -188,7 +185,7 @@ let fragment env (compiled : compiled) =
     prototypes = List.rev context.prototypes;
     statics =
       named_bytes context ~texts:(definition :: List.map snd functions) @ List.rev context.statics;
-    anchors = List.rev context.anchors;
+    sites = List.sort_uniq compare context.sites;
     helpers = context.helpers_used;
     references =
       (match compiled with
@@ -199,8 +196,6 @@ let fragment env (compiled : compiled) =
     called = List.rev context.called;
     failures = List.rev context.failures;
   }
-
-let anchors fragment = List.map snd fragment.anchors
 
 let file env build (fragments : (fragment * linkage) list) =
   let context = new_context env "" in
@@ -331,14 +326,12 @@ let file env build (fragments : (fragment * linkage) list) =
                (key_name key) layout.size (key_name key) layout.alignment))
         layout)
     keys;
-  let anchors =
-    List.sort_uniq String.compare
-      (List.concat_map (fun ((fragment : fragment), _) -> List.map fst fragment.anchors) fragments)
-  in
   List.iter
-    (fun symbol ->
-      Buffer.add_string buffer (Printf.sprintf "extern const struct t_anchor %s;\n" symbol))
-    anchors;
+    (fun site ->
+      Buffer.add_string buffer
+        (Printf.sprintf "extern const struct t_site %s;\n" (site_symbol site)))
+    (List.sort_uniq compare
+       (List.concat_map (fun ((fragment : fragment), _) -> fragment.sites) fragments));
   Buffer.add_buffer buffer declarations;
   List.iter
     (fun ((fragment : fragment), _) -> List.iter (Buffer.add_string buffer) fragment.statics)
@@ -348,6 +341,29 @@ let file env build (fragments : (fragment * linkage) list) =
     fragments;
   List.iter (fun (header, body) -> Buffer.add_string buffer (header ^ body)) own;
   Buffer.contents buffer
+
+type position = { file : string; line : int; column : int }
+
+let sites_file ~position:resolve fragments =
+  let positions =
+    List.map
+      (fun site -> (site, resolve site))
+      (List.sort_uniq compare (List.concat_map (fun fragment -> fragment.sites) fragments))
+  in
+  let file_symbols =
+    List.mapi
+      (fun index file -> (file, Printf.sprintf "t_file_%d" index))
+      (List.sort_uniq String.compare
+         (List.map (fun (_, (position : position)) -> position.file) positions))
+  in
+  String.concat ""
+    ((runtime_declarations :: List.map bytes_definition file_symbols)
+    @ List.map
+        (fun (site, (position : position)) ->
+          Printf.sprintf "const struct t_site %s = { %s, %d, %d, %d };\n" (site_symbol site)
+            (List.assoc position.file file_symbols)
+            (String.length position.file) position.line position.column)
+        positions)
 
 module For_testing = struct
   let c fragment =

@@ -354,11 +354,8 @@ let () =
             ];
         ]);
   test "a panic writes its message and position and exits with 101" (fun () ->
-      let anchors =
-        [ { Positions.definition = definition "entry"; path = "test.truss"; first_line = 10 } ]
-      in
       let status, _, errors =
-        run_program ~anchors
+        run_program
           [
             entry []
               [
@@ -368,14 +365,14 @@ let () =
                        failure = Panic;
                        message = Constant (Bytes "boom");
                        length = Constant (Integer (UInt64, Z.of_int 4));
-                       site = { definition = definition "entry"; line = 3; column = 5 };
+                       site = { definition = definition "entry"; offset = 4 };
                        reported = None;
                      });
               ];
           ]
       in
       expect_int ~expected:101 status;
-      expect_string ~expected:"panic: boom\n  at test.truss:13:5\n" errors);
+      expect_string ~expected:"panic: boom\n  at test.truss:1:5\n" errors);
   test "a copy of a callee is a static inline function, declared before its caller" (fun () ->
       let callee =
         instance "callee"
@@ -500,7 +497,7 @@ let operate builder ?destination ?(type_arguments = [ int32 ]) ?value_arguments 
     =
   Intrinsics.lower ?value_arguments (shape_env ()) builder intrinsic_types operation ~type_arguments
     arguments ~destination
-    ~site:{ definition = definition "entry"; line = 0; column = 1 }
+    ~site:{ definition = definition "entry"; offset = 0 }
 
 let () =
   test "storage with room is pushed onto, and inserts, removes, swaps, and pops in place" (fun () ->
@@ -618,7 +615,7 @@ let () =
           ~value_arguments:[ Z.of_int 3 ]
           (shape_env ~extra ()) builder intrinsic_types operation ~type_arguments:[ int32 ]
           arguments ~destination
-          ~site:{ definition = definition "entry"; line = 0; column = 1 }
+          ~site:{ definition = definition "entry"; offset = 0 }
       in
       expect_status ~extra 53
         [
@@ -658,10 +655,7 @@ let () =
           ~value_arguments:[ Z.of_int 3 ]
           (shape_env ()) builder intrinsic_types operation ~type_arguments:[ int32 ] arguments
           ~destination
-          ~site:{ definition = definition "entry"; line = 0; column = 1 }
-      in
-      let anchors =
-        [ { Positions.definition = definition "entry"; path = "test.truss"; first_line = 1 } ]
+          ~site:{ definition = definition "entry"; offset = 0 }
       in
       let program_with pushed =
         [
@@ -688,8 +682,8 @@ let () =
               status);
         ]
       in
-      expect_status ~anchors 46 (program_with [ 40; 5; 6 ]);
-      expect_status ~anchors 101 (program_with [ 40; 5 ]));
+      expect_status 46 (program_with [ 40; 5; 6 ]);
+      expect_status 101 (program_with [ 40; 5 ]));
   test "a float fits an integer type where the whole number it is cut down to does" (fun () ->
       let open Emit_c.Builder in
       let all_right cases =
@@ -740,13 +734,10 @@ let () =
   test "a storage is shortened in place, keeping its room, and a static one stays static" (fun () ->
       let open Emit_c.Builder in
       let storage_ty = named "Storage" ~arguments:[ Type uint8 ] in
-      let anchors =
-        [ { Positions.definition = definition "entry"; path = "test.truss"; first_line = 1 } ]
-      in
       let checked builder ?destination operation arguments =
         Intrinsics.lower ~checks:true (shape_env ()) builder intrinsic_types operation
           ~type_arguments:[ uint8 ] arguments ~destination
-          ~site:{ definition = definition "entry"; line = 0; column = 1 }
+          ~site:{ definition = definition "entry"; offset = 0 }
       in
       let shortened ~capacity ~to_ =
         [
@@ -786,9 +777,9 @@ let () =
               status);
         ]
       in
-      expect_status ~anchors (2 + 8 + Char.code 'b') (shortened ~capacity:8 ~to_:2);
-      expect_status ~anchors (3 + 0 + Char.code 'c') (shortened ~capacity:0 ~to_:3);
-      expect_status ~anchors 101 (shortened ~capacity:8 ~to_:6);
+      expect_status (2 + 8 + Char.code 'b') (shortened ~capacity:8 ~to_:2);
+      expect_status (3 + 0 + Char.code 'c') (shortened ~capacity:0 ~to_:3);
+      expect_status 101 (shortened ~capacity:8 ~to_:6);
       match (Intrinsic_signatures.signature Storage_shorten).generics with
       | [ { kind = Type_generic [ { trait = Top { name = "Plain"; _ }; _ } ]; _ } ] -> ()
       | _ -> fail "storage_shorten takes elements that are not known to be Plain");
@@ -802,19 +793,16 @@ let () =
       let extra =
         [ (Ground.to_string view_ty, Storage.view_shape ~uint64:(named "UInt64") uint8) ]
       in
-      let anchors =
-        [ { Positions.definition = definition "entry"; path = "test.truss"; first_line = 1 } ]
-      in
       let checked builder ?destination operation arguments =
         ignore
           (Intrinsics.lower ~checks:true (shape_env ~extra ()) builder intrinsic_types operation
              ~type_arguments:[ uint8 ] arguments ~destination
-             ~site:{ definition = definition "entry"; line = 0; column = 1 })
+             ~site:{ definition = definition "entry"; offset = 0 })
       in
       let byte : Lowered.operand = Constant (Integer (UInt8, Z.of_int 1)) in
       let stops saying operation =
         let status, _, errors =
-          run_program ~extra ~anchors
+          run_program ~extra
             [
               built_entry (fun builder ->
                   let storage = local builder (value storage_ty) in

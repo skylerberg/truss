@@ -52,7 +52,6 @@
   toolchain
   process
   startup
-  positions
   reachable
   build
   workspace

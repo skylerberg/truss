@@ -3,17 +3,17 @@ open Lowering
 open Targets
 open Emit_c.Builder
 
-let generated_state context ~key ~anchor ~substitution =
+let generated_state context ~key ~definition ~substitution =
   enter context ~builder:(create context.env ~key)
     (frame_of
        (unwritten
           ~definition_key:
             {
               Names.module_ = { package = { owner = None; name = "" }; modules = [] };
-              path = anchor;
+              path = definition;
               ordinal = 0;
             }
-          ~anchor ~substitution ~result:(Returns Types.unit)))
+          ~substitution ~result:(Returns Types.unit)))
 
 let passed_on st result_ty =
   match result_place st with Some place -> place | None -> temporary st result_ty
@@ -38,7 +38,7 @@ let entry context (key : Instance.key) (method_key : Instance.key) : Emit_c.Buil
   let _, result = entry_signature context capability_signature in
   let method_signature = signature_of context path in
   let substitution = bind method_signature.generics type_arguments in
-  let st = generated_state context ~key ~anchor:impl ~substitution in
+  let st = generated_state context ~key ~definition:impl ~substitution in
   let builder = st.builder in
   let evidence = local builder ~name:"evidence" Convention.evidence in
   result_slot st result;
@@ -96,7 +96,7 @@ let entry context (key : Instance.key) (method_key : Instance.key) : Emit_c.Buil
 let locked_entry context (key : Instance.key) ~capability ~name : Emit_c.Builder.instance =
   let slot, capability_signature = capability_method context capability name in
   let c_signature, result = entry_signature context capability_signature in
-  let st = generated_state context ~key ~anchor:capability ~substitution:[] in
+  let st = generated_state context ~key ~definition:capability ~substitution:[] in
   let builder = st.builder in
   let evidence = local builder ~name:"evidence" Convention.evidence in
   result_slot st result;
@@ -276,7 +276,7 @@ let real_implementations st ~user capabilities =
 let text_copied_from = Well_known.path Text_copied_from
 
 let program_main context (key : Instance.key) main_path : Emit_c.Builder.instance =
-  let st = generated_state context ~key ~anchor:main_path ~substitution:[] in
+  let st = generated_state context ~key ~definition:main_path ~substitution:[] in
   let builder = st.builder in
   let count = local builder ~name:"count" (Raw (Integer Int32)) in
   let arguments_pointer = local builder ~name:"arguments" (Raw (Pointer Opaque)) in
@@ -294,7 +294,7 @@ let program_main context (key : Instance.key) main_path : Emit_c.Builder.instanc
     ignore
       (Intrinsics.lower ~checks:context.checks context.env builder context.types operation
          ~type_arguments arguments ~destination
-         ~site:{ definition = main_path; line = 0; column = 1 })
+         ~site:{ definition = main_path; offset = 0 })
   in
   let wanted = local builder (Value context.types.uint64) in
   emit builder (Assign (at wanted, Convert (Copy (at count), Integer UInt64)));
@@ -354,7 +354,7 @@ let adapter context (key : Instance.key) ~(function_ : Instance.key) ~(ty : Grou
   in
   let signature = signature_of context path in
   let substitution = bind signature.generics type_arguments in
-  let st = generated_state context ~key ~anchor:path ~substitution in
+  let st = generated_state context ~key ~definition:path ~substitution in
   let builder = st.builder in
   let environment = local builder ~name:"environment" (Raw (Nullable_pointer Opaque)) in
   let result_ty =
@@ -398,7 +398,7 @@ let any_entry context (key : Instance.key) (method_key : Instance.key) : Emit_c.
   let substitution = bind method_signature.generics type_arguments in
   let any = Types.substitute_trait substitution interface.implements in
   let _, result, capabilities = any_entry_signature context ~any ~trait trait_signature in
-  let st = generated_state context ~key ~anchor:impl ~substitution in
+  let st = generated_state context ~key ~definition:impl ~substitution in
   let builder = st.builder in
   let value = local builder ~name:"value" (Raw (Pointer Opaque)) in
   result_slot st result;
