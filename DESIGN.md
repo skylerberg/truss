@@ -602,18 +602,18 @@ about an argument only if the callee states one. The function type of a
 parameter can therefore carry a `requires`:
 
 ```truss
-fn List[Element].map[Output](
-  self,
-  transform: (fn(element: Element) -> Output requires self.model().contains(element)),
-) -> List[Output]
+fn List[Element].generate(
+  count: UInt64,
+  make: (fn(index: UInt64) -> Element requires index < count cost time finite),
+) -> List[Element]
 
-let picked = indices.map(fn(i) { values[i] })
+let reversed = List.generate(values.length(), make: fn(index) { values[values.length() - 1 - index] })
 ```
 
-The `requires` tells the lambda that `i` is an element of `indices`, and
-from that the lambda proves `values[i]` in bounds. A `requires` is allowed
-only on the type of a parameter, so no type that values are stored in or
-compared by carries one.
+The `requires` gives the lambda the fact `index < count`. From it, the
+lambda proves that `values.length() - 1 - index` does not underflow and
+indexes `values` in bounds. A `requires` is allowed only on the type of a
+parameter, so no type that values are stored in or compared by carries one.
 
 | Rule | Reason |
 |---|---|

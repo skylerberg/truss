@@ -882,6 +882,27 @@ let () =
                  (list_statements mir.body))
           then Harness.fail "the lambda value does not capture g's offset"
       | lambdas -> Harness.fail "%d lambdas" (Array.length lambdas));
+  Harness.test
+    "a parameter ends at its body's return, with no `Dead`, in a function and in a lambda, and the \
+     bindings of a destructured parameter end with the lambda's scope" (fun () ->
+      let is_ended (body : Mir.Graph.body) local =
+        List.exists
+          (fun (statement : Mir.Graph.statement) ->
+            match statement.kind with Dead locals -> List.mem local locals | _ -> false)
+          (list_statements body)
+      in
+      let mir = lower_graph Fixtures.Mir.lambda_with_a_destructured_and_a_plain_parameter in
+      match mir.lambdas with
+      | [| lambda |] ->
+          if is_ended mir.body (locate_named mir.body "offset") then
+            Harness.fail "a `Dead` ends g's parameter offset";
+          List.iter
+            (fun parameter ->
+              if is_ended lambda parameter then Harness.fail "a `Dead` ends a lambda's parameter")
+            lambda.parameters;
+          if not (is_ended lambda (locate_named lambda "left")) then
+            Harness.fail "no `Dead` ends the binding left"
+      | lambdas -> Harness.fail "%d lambdas" (Array.length lambdas));
   Harness.test "a method an impl inherits shares its trait's default method's MIR" (fun () ->
       let packages =
         Support.setup [ ("app::main", Fixtures.Mir.impls_inheriting_a_default_method) ]

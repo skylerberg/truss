@@ -54,11 +54,17 @@ val run_in_arm_scope : t -> (scope -> 'a) -> 'a
 val end_scope : t -> scope -> Core.origin -> unit
 val make_dead_statements : scope -> Core.origin -> Tree.statement list
 
-type condition_lends = For_statement | For_block | For_condition
+type lowered_condition = {
+  value : Tree.operand option;
+  ended_if_true : scope;
+  ended_if_false : scope;
+  held_if_true : held;
+}
 
 val run_in_condition_scope :
-  lends:condition_lends -> t -> (unit -> 'value) -> 'value * scope * scope * held
+  binds_lent_part:bool -> t -> (unit -> Tree.operand option) -> lowered_condition
 
+val run_in_guard_scope : t -> Core.origin -> (unit -> Tree.operand option) -> Tree.operand option
 val run_in_old : t -> (unit -> 'a) -> 'a
 val reads_entry : t -> Core.local -> bool
 val run_binding_to_statement : t -> (unit -> 'a) -> 'a

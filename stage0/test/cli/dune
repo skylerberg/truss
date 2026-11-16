@@ -4,6 +4,7 @@
  (libraries
   file_system
   harness
+  lock_file
   process
   unix
   cli
