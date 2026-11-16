@@ -17,7 +17,6 @@ let expect_reads database part ~includes ~excludes =
   List.iter (fun read -> if List.mem read reads then fail "%s reads %s" part read) excludes
 
 let lowered name = "lowered app::main::" ^ name
-let ground_types name = "ground types app::main::" ^ name
 let test_key name = "test key app::main::" ^ name
 
 let built ?(roots = []) files =
@@ -56,7 +55,7 @@ let propagate ?roots hot ~before ~after =
 
 let propagated ~before ~after = (propagate (built before) ~before ~after).recomputed
 
-let laid_out ~roots ~before ~after =
+let propagated_with_roots ~roots ~before ~after =
   (propagate ~roots (built ~roots before) ~before ~after).recomputed
 
 let expect_recomputed recomputed ~exactly =
@@ -458,42 +457,9 @@ let () =
             "parsed app/main/main.truss";
             "proof app::main::callee";
           ]);
-  test "a field that changes a type's layout recomputes the layouts that hold it in place"
-    (fun () ->
-      let holders inner =
-        [
-          ( "app::main",
-            "type Inner(" ^ inner
-            ^ ")\n\
-               type Outer(inner: Inner)\n\
-               type Holder(items: List[Inner])\n\
-               fn sizes(outer: Outer, holder: Holder) -> Int64 { 1 }\n" );
-        ]
-      in
-      let recomputed =
-        laid_out ~roots:[ "sizes" ] ~before:(holders "value: Int64")
-          ~after:(holders "value: Int64, flag: Bool")
-      in
-      expect_included recomputed ~parts:[ "layout Inner"; "layout Outer" ];
-      expect_untouched recomputed ~names:[ "layout Holder"; "layout List" ]);
-  test "reordering a type's fields recomputes no layout of the types that hold it" (fun () ->
-      let holders inner =
-        [
-          ( "app::main",
-            "type Inner(" ^ inner
-            ^ ")\ntype Outer(inner: Inner)\nfn size(outer: Outer) -> Int64 { 1 }\n" );
-        ]
-      in
-      let recomputed =
-        laid_out ~roots:[ "size" ]
-          ~before:(holders "first: Int64, second: Bool")
-          ~after:(holders "second: Bool, first: Int64")
-      in
-      expect_included recomputed ~parts:[ "layout Inner" ];
-      expect_untouched recomputed ~names:[ "layout Outer" ]);
   test "an edit to a callee's body recomputes its lowered code and not its caller's" (fun () ->
       let recomputed =
-        laid_out ~roots:[ "caller" ]
+        propagated_with_roots ~roots:[ "caller" ]
           ~before:[ ("app::main", callee_and_caller) ]
           ~after:
             [
@@ -505,7 +471,7 @@ let () =
       expect_untouched recomputed ~names:[ lowered "caller" ]);
   test "a call that is removed with its callee collects the callee's lowered code" (fun () ->
       expect_untouched
-        (laid_out ~roots:[ "caller" ]
+        (propagated_with_roots ~roots:[ "caller" ]
            ~before:[ ("app::main", callee_and_caller) ]
            ~after:[ ("app::main", "fn caller() -> Int64 { 1 }\n") ])
         ~names:[ lowered "callee" ]);
@@ -523,11 +489,8 @@ let () =
       let before = program "kept() + only() == 3" in
       let after = program "kept() == 1" in
       let observed = propagate (built before) ~before ~after in
-      let collected =
-        List.filter (fun part -> not (String.starts_with ~prefix:"layout" part)) observed.collected
-      in
-      if collected <> [ ground_types "only"; lowered "only"; test_key "only" ] then
-        fail "collected %s" (String.concat ", " collected);
+      if observed.collected <> [ lowered "only"; test_key "only" ] then
+        fail "collected %s" (String.concat ", " observed.collected);
       expect_untouched observed.recomputed ~names:[ lowered "shared"; lowered "kept" ]);
   test "removing a type collects the instances at that type without computing them" (fun () ->
       let program shape =
@@ -557,7 +520,7 @@ let () =
       in
       expect_included
         (propagated ~before:(program " = todo") ~after:(program "(id: Int64)"))
-        ~parts:[ "layout Session"; lowered "none" ]);
+        ~parts:[ lowered "none" ]);
   test "an edit to a constant recomputes the constants that fold it, in order" (fun () ->
       let constants first =
         [
@@ -567,7 +530,7 @@ let () =
         ]
       in
       expect_included
-        (laid_out ~roots:[ "read" ] ~before:(constants "1") ~after:(constants "2"))
+        (propagated_with_roots ~roots:[ "read" ] ~before:(constants "1") ~after:(constants "2"))
         ~parts:[ lowered "first"; lowered "second" ]);
   test "adding a dependency to a manifest fixes the dependent's use of it" (fun () ->
       expect_included

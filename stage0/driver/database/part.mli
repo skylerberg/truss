@@ -48,8 +48,7 @@ type t =
   | Successors of Path.t * Path.package
   | Recursion_group of Path.t
   | Proof of Resolve.Names.key
-  | Ground_types of Instance.key
-  | Layout of Ground.ty
+  | Folded_constants of Path.t
   | Lowered of Instance.key
   | Test_key of Instance.key
 

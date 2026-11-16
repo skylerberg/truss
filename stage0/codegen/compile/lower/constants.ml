@@ -5,6 +5,8 @@ open Emit_c.Builder
 
 let ( let* ) = Option.bind
 
+module Path_table = Hashtbl.Make (Path)
+
 let all values =
   List.fold_right
     (fun value rest ->
@@ -311,6 +313,46 @@ let constant context path =
   match fold_body ~depth:call_depth ~steps:(ref step_limit) st mir [] with
   | Some value -> Folded { data_key = Constant path; ty; value }
   | None -> Run ty
+
+let list_folded_constants (lookups : Mir.lookups) path =
+  let constants = ref [] in
+  let walked_depths = Path_table.create 16 in
+  let note_constant (place : Mir.place) =
+    match place.root with Constant constant -> constants := constant :: !constants | Local _ -> ()
+  in
+  let rec walk ~depth (graph : Mir.Graph.t) =
+    Mir.iter_graph_places_read note_constant graph.body;
+    if depth > 0 then
+      Array.iter
+        (fun (basic : Mir.Graph.basic_block) ->
+          List.iter
+            (fun (statement : Mir.Graph.statement) ->
+              match statement.kind with
+              | Call { call = { callee = Function { path = callee; _ }; _ }; _ } ->
+                  walk_callee ~depth:(depth - 1) callee
+              | _ -> ())
+            basic.statements)
+        graph.body.blocks
+  and walk_callee ~depth callee =
+    let is_walked =
+      match Path_table.find_opt walked_depths callee with
+      | Some walked_depth -> walked_depth >= depth
+      | None -> false
+    in
+    if not is_walked then begin
+      Path_table.replace walked_depths callee depth;
+      match Mir.graph_of_path lookups callee with
+      | Some graph ->
+          (match Mir.default_graphs_of_path lookups callee with
+          | Some (Parameter_defaults defaults) ->
+              List.iter (fun (_, default) -> walk ~depth default) defaults
+          | Some (Field_defaults _) | None -> ());
+          walk ~depth graph
+      | None -> ()
+    end
+  in
+  Option.iter (walk ~depth:call_depth) (Mir.initializer_graph_of_path lookups path);
+  List.sort_uniq Path.compare !constants
 
 let write_fully = Well_known.path Write_fully
 

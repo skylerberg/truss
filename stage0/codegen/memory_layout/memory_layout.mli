@@ -43,10 +43,7 @@ and step = Field of string | Tag
 
 type env
 
-val create : Libc.system -> shape_of:(Ground.ty -> shape) -> layout_of:(Ground.ty -> t) -> env
-val layout : layout_of:(Ground.ty -> t) -> Ground.ty -> shape -> t
-val stored_in_place : shape -> Ground.ty list
-val reaches : shape -> Ground.ty list
+val create : Libc.system -> shape_of:(Ground.ty -> shape) -> env
 val system : env -> Libc.system
 val shape : env -> Ground.ty -> shape
 val of_type : env -> Ground.ty -> t

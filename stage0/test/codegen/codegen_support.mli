@@ -25,7 +25,6 @@ val variant :
   ?indirect:bool -> string -> (string * Memory_layout.member) list -> Memory_layout.variant_shape
 
 val shapes : (string * Memory_layout.shape) list -> Ground.ty -> Memory_layout.shape
-val computed_env : Libc.system -> (Ground.ty -> Memory_layout.shape) -> Memory_layout.env
 val layout : ?extra:(string * Memory_layout.shape) list -> Ground.ty -> Memory_layout.t
 val describe : ?extra:(string * Memory_layout.shape) list -> Ground.ty -> string
 val int32 : Ground.ty

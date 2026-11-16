@@ -21,16 +21,6 @@ end
 module Instance_table = Hashtbl.Make (Instance_key)
 module References = Graph.Make (Instance_key)
 
-module Ground_key = struct
-  type t = Ground.ty
-
-  let equal left right = Ground.compare left right = 0
-  let hash = Hashtbl.hash_param 64 256
-  let compare = Ground.compare
-end
-
-module Type_table = Hashtbl.Make (Ground_key)
-
 module Entry = struct
   type t =
     | Value of Part.t
@@ -92,9 +82,7 @@ type t = {
   implied : (Path.package, Part.t list) Hashtbl.t;
   graphs : (Path.package, Call_graph.t) Hashtbl.t;
   lowering : Compile.Lookups.settings option;
-  ground_types : Compile.ground_types part Instance_table.t;
-  layouts : Memory_layout.t part Type_table.t;
-  holders : unit Instance_table.t Type_table.t;
+  folded_constants : Path.t list part Path_table.t;
   lowered : (Compile.lowered, Compile.unsupported) result part Instance_table.t;
   test_keys : (string, Compile.unsupported) result part Instance_table.t;
   references : References.t;
@@ -217,9 +205,7 @@ let create ?(loaded = []) ?(checks = true) (packages : Project.package list) =
       implied = Hashtbl.create 8;
       graphs = Hashtbl.create 8;
       lowering = Option.map (fun system -> { Compile.Lookups.checks; system }) Libc.host;
-      ground_types = Instance_table.create 1024;
-      layouts = Type_table.create 1024;
-      holders = Type_table.create 1024;
+      folded_constants = Path_table.create 256;
       lowered = Instance_table.create 1024;
       test_keys = Instance_table.create 1024;
       references = References.create ~tracks_blocked:false;
@@ -290,8 +276,6 @@ let copy database =
   Hashtbl.filter_map_inplace (fun _ parts -> Some (Part_table.copy parts)) stale;
   let graphs = Hashtbl.copy database.graphs in
   Hashtbl.filter_map_inplace (fun _ graph -> Some (Call_graph.copy graph)) graphs;
-  let holders = Type_table.copy database.holders in
-  Type_table.filter_map_inplace (fun _ instances -> Some (Instance_table.copy instances)) holders;
   {
     package_databases;
     project = database.project;
@@ -302,9 +286,7 @@ let copy database =
     implied = Hashtbl.copy database.implied;
     graphs;
     lowering = database.lowering;
-    ground_types = Instance_table.copy database.ground_types;
-    layouts = Type_table.copy database.layouts;
-    holders;
+    folded_constants = Path_table.copy database.folded_constants;
     lowered = Instance_table.copy database.lowered;
     test_keys = Instance_table.copy database.test_keys;
     references = References.copy database.references;
@@ -874,13 +856,6 @@ let proof_lookups database note : Prover.Lookups.t =
     recursion_group = recursion_group database note;
   }
 
-let layout database note ty =
-  read database note (Layout ty);
-  match Type_table.find_opt database.layouts ty with
-  | Some (Value layout) -> layout
-  | Some (Failed _ | Blocked) -> raise Reads_failed_part
-  | None -> unchecked (Part.show (Layout ty))
-
 let stage_lowering_lookups database note : Compile.Lookups.t =
   { interface = interface_lookups database note ~is_checked:true; mir = mir_lookups database note }
 
@@ -891,24 +866,8 @@ let instance_part database note table part instance =
   | Some (Failed _ | Blocked) -> raise Reads_failed_part
   | None -> unchecked (Part.show part)
 
-let ground_types database note key =
-  instance_part database note database.ground_types (Ground_types key) key
-
 let lowered database note key = instance_part database note database.lowered (Lowered key) key
 let test_key database note key = instance_part database note database.test_keys (Test_key key) key
-
-let instance_layout database note key =
-  let types =
-    lazy
-      (let types = Type_table.create 64 in
-       List.iter (fun ty -> Type_table.replace types ty ()) (ground_types database note key).types;
-       types)
-  in
-  fun ty ->
-    if not (Type_table.mem (Lazy.force types) ty) then
-      Compiler_bug.bug ~stage:"Database" "%s reads the layout of %s, which its ground types lack"
-        (Instance.to_string key) (Ground.to_string ty);
-    layout database note ty
 
 let instance_slot table instance =
   {
@@ -1082,19 +1041,19 @@ let stored database (part : Part.t) =
   | Recursion_group path ->
       at_path ~is_failed:failed (fun package_database -> package_database.recursion_groups) path
   | Proof key -> keyed ~is_failed:failed (fun package_database -> package_database.proofs) key
-  | Ground_types key -> of_instance (fun database -> database.ground_types) key
-  | Lowered key -> of_instance (fun database -> database.lowered) key
-  | Test_key key -> of_instance (fun database -> database.test_keys) key
-  | Layout ty ->
-      let find database = Type_table.find_opt database.layouts ty in
+  | Folded_constants path ->
+      let find database = Path_table.find_opt database.folded_constants path in
       {
         is_failed = Option.fold ~none:false ~some:failed (find database);
-        remove = (fun () -> Type_table.remove database.layouts ty);
+        remove = (fun () -> Path_table.remove database.folded_constants path);
         is_equal_in = (fun other -> compare (find other) (find database) = 0);
         saved = (fun () -> Option.map marshalled (find database));
         restore =
-          (fun bytes -> Type_table.replace database.layouts ty (Marshal.from_string bytes 0));
+          (fun bytes ->
+            Path_table.replace database.folded_constants path (Marshal.from_string bytes 0));
       }
+  | Lowered key -> of_instance (fun database -> database.lowered) key
+  | Test_key key -> of_instance (fun database -> database.test_keys) key
   | Source _ | Packages | Modules _ | Dependencies _ | Entry _ | Entries _ | Imports _
   | Declaration _ | Tree _ | Text _ | Place _ | Container _ | Contained _ | Module_declarations _
   | File_declarations _ | Package_declarations _ | Members _ | Traits_declaring _ | Impl_index _
@@ -1107,14 +1066,15 @@ let discard database part =
   Part_table.remove database.reads part;
   mark_unsaved database (Reads part)
 
-let instance_parts key : Part.t list = [ Ground_types key; Lowered key; Test_key key ]
+let instance_parts (key : Instance.key) : Part.t list =
+  (match key with Constant path -> [ Part.Folded_constants path ] | _ -> [])
+  @ [ Lowered key; Test_key key ]
 
 let is_stored database (part : Part.t) =
   match part with
-  | Ground_types key -> Instance_table.mem database.ground_types key
+  | Folded_constants path -> Path_table.mem database.folded_constants path
   | Lowered key -> Instance_table.mem database.lowered key
   | Test_key key -> Instance_table.mem database.test_keys key
-  | Layout ty -> Type_table.mem database.layouts ty
   | part -> Compiler_bug.bug ~stage:"Database" "%s is not a part of lowering" (Part.show part)
 
 let is_created database part = is_stale database part || is_stored database part
@@ -1125,11 +1085,6 @@ let create_instance database key =
     (fun part -> if not (is_created database part) then mark_stale database part)
     (instance_parts key)
 
-let held_types database key =
-  match Instance_table.find_opt database.ground_types key with
-  | Some (Value ground) -> List.sort_uniq Ground.compare ground.types
-  | Some (Failed _ | Blocked) | None -> []
-
 let rec sorted_difference compare left right =
   match (left, right) with
   | [], _ -> []
@@ -1139,27 +1094,6 @@ let rec sorted_difference compare left right =
       if order = 0 then sorted_difference compare rest others
       else if order < 0 then item :: sorted_difference compare rest right
       else sorted_difference compare left others
-
-let release database key ty =
-  match Type_table.find_opt database.holders ty with
-  | Some holders ->
-      Instance_table.remove holders key;
-      let is_unheld = Instance_table.length holders = 0 in
-      if is_unheld then Type_table.remove database.holders ty;
-      is_unheld
-  | None -> false
-
-let hold database key ty =
-  let holders =
-    match Type_table.find_opt database.holders ty with
-    | Some holders -> holders
-    | None ->
-        let holders = Instance_table.create 4 in
-        Type_table.replace database.holders ty holders;
-        holders
-  in
-  Instance_table.replace holders key ();
-  if not (is_created database (Layout ty)) then mark_stale database (Layout ty)
 
 let rec forget database parts =
   let removed = Part_table.create 16 in
@@ -1202,77 +1136,65 @@ and settle_references database =
     collect database (References.update database.references).removed
 
 and collect database keys =
-  let layouts =
-    List.concat_map
-      (fun key ->
-        List.filter_map
-          (fun ty -> if release database key ty then Some (Part.Layout ty) else None)
-          (held_types database key))
-      keys
-  in
-  let parts = List.concat_map instance_parts keys @ layouts in
+  let parts = List.concat_map instance_parts keys in
   List.iter (fun part -> database.observe (Collected part)) parts;
   forget database parts
 
-let update_holders database key ~before =
-  let after = held_types database key in
-  let unheld = List.filter (release database key) (sorted_difference Ground.compare before after) in
-  List.iter (hold database key) (sorted_difference Ground.compare after before);
-  if unheld <> [] then begin
-    let parts = List.map (fun ty -> Part.Layout ty) unheld in
-    List.iter (fun part -> database.observe (Collected part)) parts;
-    forget database parts
-  end
+let find_folded_constants database (key : Instance.key) =
+  match key with
+  | Constant path -> (
+      match Path_table.find_opt database.folded_constants path with
+      | Some (Value paths) -> paths
+      | Some (Failed _ | Blocked) | None -> [])
+  | _ -> []
 
-let instance_edges database key =
+let list_lowered_references database key =
+  match Instance_table.find_opt database.lowered key with
+  | Some (Value (Ok lowered)) -> Compile.references lowered
+  | Some (Value (Error _) | Failed _ | Blocked) | None -> []
+
+let list_instance_edges database key =
   List.sort_uniq Instance.compare
-    ((match Instance_table.find_opt database.ground_types key with
-       | Some (Value ground) ->
-           List.map (fun path -> Instance.Constant path) ground.folded_constants
-       | Some (Failed _ | Blocked) | None -> [])
-    @
-    match Instance_table.find_opt database.lowered key with
-    | Some (Value (Ok lowered)) -> Compile.references lowered
-    | Some (Value (Error _) | Failed _ | Blocked) | None -> [])
+    (List.map (fun path -> Instance.Constant path) (find_folded_constants database key)
+    @ list_lowered_references database key)
 
 let update_references database key =
-  let edges = instance_edges database key in
+  let edges = list_instance_edges database key in
   if References.successors database.references key <> Some (Some edges) then begin
     List.iter (create_instance database)
       (References.set_successors database.references key (Some edges));
     settle_references database
   end
 
-let refers_currently database referrer (key : Instance.key) =
-  (not (is_stale database (Ground_types referrer)))
-  && ((match (key, Instance_table.find_opt database.ground_types referrer) with
-        | Constant path, Some (Value ground) ->
-            List.exists (Path.equal path) ground.folded_constants
-        | _ -> false)
-     || (not (is_stale database (Lowered referrer)))
-        &&
-        match Instance_table.find_opt database.lowered referrer with
-        | Some (Value (Ok lowered)) -> List.exists (Instance.equal key) (Compile.references lowered)
-        | Some (Value (Error _) | Failed _ | Blocked) | None -> false)
+let list_current_edges database (key : Instance.key) =
+  (match key with
+    | Constant path when not (is_stale database (Folded_constants path)) ->
+        List.map (fun path -> Instance.Constant path) (find_folded_constants database key)
+    | _ -> [])
+  @ if is_stale database (Lowered key) then [] else list_lowered_references database key
 
-let is_ready database key =
-  List.exists
-    (fun owner -> not (is_stale database owner))
-    (Option.value (Instance_table.find_opt database.owners key) ~default:[])
-  || List.exists
-       (fun referrer -> refers_currently database referrer key)
-       (References.predecessors database.references key)
+let list_ready_instances database =
+  let ready = Instance_table.create 1024 in
+  let pending = Queue.create () in
+  let reach key =
+    if not (Instance_table.mem ready key) then begin
+      Instance_table.replace ready key ();
+      Queue.add key pending
+    end
+  in
+  Instance_table.iter
+    (fun root owners ->
+      if List.exists (fun owner -> not (is_stale database owner)) owners then reach root)
+    database.owners;
+  while not (Queue.is_empty pending) do
+    List.iter reach (list_current_edges database (Queue.pop pending))
+  done;
+  ready
 
-let is_drained database (part : Part.t) =
+let is_drained ~ready (part : Part.t) =
   match part with
-  | Ground_types key | Lowered key | Test_key key -> is_ready database key
-  | Layout ty -> (
-      match Type_table.find_opt database.holders ty with
-      | Some holders ->
-          Seq.exists
-            (fun holder -> not (is_stale database (Ground_types holder)))
-            (Instance_table.to_seq_keys holders)
-      | None -> false)
+  | Folded_constants path -> Instance_table.mem (Lazy.force ready) (Constant path)
+  | Lowered key | Test_key key -> Instance_table.mem (Lazy.force ready) key
   | _ -> true
 
 let lowering_settings database =
@@ -1641,51 +1563,22 @@ let compute_part database (part : Part.t) =
       into (keyed package_database.proofs key) (fun note ->
           Some (computed (Prover.proof (proof_lookups database note)) key));
       own_template_checks database key
-  | Ground_types key ->
-      let before = held_types database key in
-      into (instance_slot database.ground_types key) (fun note ->
-          Some
-            (computed
-               (Compile.ground_types (lowering_settings database)
-                  (stage_lowering_lookups database note))
-               key));
-      update_holders database key ~before;
-      update_references database key
+  | Folded_constants path ->
+      into (at_path database.folded_constants path) (fun note ->
+          Some (computed (Compile.list_folded_constants (mir_lookups database note)) path));
+      update_references database (Constant path)
   | Lowered key ->
       into (instance_slot database.lowered key) (fun note ->
-          let layout_of = instance_layout database note key in
-          Some
-            (computed
-               (fun key ->
-                 match
-                   Compile.lower (lowering_settings database)
-                     (stage_lowering_lookups database note)
-                     ~layout_of ~lowered:(lowered database note) key
-                 with
-                 | lowered -> lowered
-                 | exception Compile.Todo_type ty ->
-                     ignore (layout_of ty);
-                     Compiler_bug.bug ~stage:"Database" "%s is defined as todo, and has a layout"
-                       (Ground.to_string ty))
-               key));
-      update_references database key
-  | Layout ty ->
-      into
-        {
-          stored = Type_table.find_opt database.layouts ty;
-          replace = Type_table.replace database.layouts ty;
-          remove = (fun () -> Type_table.remove database.layouts ty);
-        }
-        (fun note ->
           Some
             (match
-               Compile.layout
-                 (interface_lookups database note ~is_checked:true)
-                 ~layout_of:(layout database note) ty
+               Compile.lower (lowering_settings database)
+                 (stage_lowering_lookups database note)
+                 ~lowered:(lowered database note) key
              with
-            | layout -> Value layout
+            | lowered -> Value lowered
             | exception Reads_failed_part -> Blocked
-            | exception Compile.Todo_type _ -> Failed []))
+            | exception Compile.Todo_type _ -> Failed []));
+      update_references database key
   | Source _ | Packages | Modules _ | Dependencies _ | Derived_interface _ | Entry _ | Entries _
   | Imports _ | Declaration _ | Tree _ | Text _ | Place _ | Container _ | Contained _
   | Module_declarations _ | File_declarations _ | Package_declarations _ | Members _
@@ -1737,36 +1630,14 @@ let units database (stage : Stage.t) package parts =
            paths)
   | _ -> List.map (fun part -> [ part ]) parts
 
-let layout_units database parts =
-  let types = List.filter_map (function Part.Layout ty -> Some ty | _ -> None) parts in
-  let in_closure = Type_table.create 64 in
-  List.iter (fun ty -> Type_table.replace in_closure ty ()) types;
-  let interface = interface_lookups database ignore ~is_checked:true in
-  let successors ty =
-    match Compile.stored_in_place interface ty with
-    | stored -> List.filter (Type_table.mem in_closure) stored
-    | exception Reads_failed_part -> []
-  in
-  List.map
-    (function
-      | [ ty ] when not (List.exists (Ground_key.equal ty) (successors ty)) -> [ Part.Layout ty ]
-      | cycle ->
-          Compiler_bug.bug ~stage:"Database"
-            "%s contains itself in place, which the type checker rejects"
-            (String.concat ", " (List.map Ground.to_string cycle)))
-    (Strongly_connected.find_components (module Ground_key) ~successors types)
-
 let constant_units database parts =
   let in_closure = Part_table.create 64 in
   List.iter (fun part -> Part_table.replace in_closure part ()) parts;
   let successors (part : Part.t) =
     match part with
-    | Lowered (Constant _ as key) -> (
-        match Instance_table.find_opt database.ground_types key with
-        | Some (Value { folded_constants; _ }) ->
-            List.filter (Part_table.mem in_closure)
-              (List.map (fun path -> Part.Lowered (Constant path)) folded_constants)
-        | Some (Failed _ | Blocked) | None -> [])
+    | Lowered (Constant _ as key) ->
+        List.filter (Part_table.mem in_closure)
+          (List.map (fun path -> Part.Lowered (Constant path)) (find_folded_constants database key))
     | _ -> []
   in
   List.map
@@ -1870,10 +1741,9 @@ let drain_stage database ~is_drained ~on_raise (stage : Stage.t) packages =
       in
       let all_parts () = parts_where (fun _ -> true) in
       match stage with
-      | Layouts -> compute_units (layout_units database (all_parts ()))
+      | Folded_constants -> compute_units (List.map (fun part -> [ part ]) (all_parts ()))
       | Lowered_code -> compute_units (constant_units database (all_parts ()))
       | Test_keys -> compute_units (test_key_units database (all_parts ()))
-      | Ground_types -> compute_units (List.map (fun part -> [ part ]) (all_parts ()))
       | stage ->
           List.iter
             (fun package ->
@@ -1885,7 +1755,6 @@ let drain_stage database ~is_drained ~on_raise (stage : Stage.t) packages =
 let drain_where ?on_bug database ~drains requested =
   let packages = in_dependency_order database requested in
   let broken = Part_table.create 0 in
-  let is_drained part = is_drained database part && not (Part_table.mem broken part) in
   let on_raise unit raised =
     match (on_bug, raised) with
     | Some on_bug, Compiler_bug.Bug bug ->
@@ -1893,15 +1762,17 @@ let drain_where ?on_bug database ~drains requested =
         on_bug bug
     | _ -> raise raised
   in
-  let has_drained_work stage =
-    List.exists
-      (fun package ->
-        has_work database package stage
-        && ((Part_table.length broken = 0 && not (Stage.is_lowering stage))
-           || List.exists is_drained (stale_parts database package stage)))
-      packages
-  in
   let rec next () =
+    let ready = lazy (list_ready_instances database) in
+    let is_drained part = is_drained ~ready part && not (Part_table.mem broken part) in
+    let has_drained_work stage =
+      List.exists
+        (fun package ->
+          has_work database package stage
+          && ((Part_table.length broken = 0 && not (Stage.is_lowering stage))
+             || List.exists is_drained (stale_parts database package stage)))
+        packages
+    in
     match List.find_opt (fun stage -> drains stage && has_drained_work stage) Stage.all with
     | Some stage ->
         drain_stage database ~is_drained ~on_raise stage packages;
@@ -2302,14 +2173,14 @@ let restore_references database =
         roots)
     database.owned;
   let instances = Instance_table.create 1024 in
-  let note key _ = Instance_table.replace instances key () in
-  Instance_table.iter note database.ground_types;
-  Instance_table.iter note database.lowered;
+  let note key = Instance_table.replace instances key () in
+  Path_table.iter (fun path _ -> note (Constant path)) database.folded_constants;
+  Instance_table.iter (fun key _ -> note key) database.lowered;
   Instance_table.iter
     (fun key () ->
-      List.iter (hold database key) (held_types database key);
       ignore
-        (References.set_successors database.references key (Some (instance_edges database key))))
+        (References.set_successors database.references key
+           (Some (list_instance_edges database key))))
     instances;
   settle_references database
 
@@ -2559,38 +2430,12 @@ let request database packages ~through ~needs keys =
           (Instance.to_string key))
     keys
 
-let laid_out database key =
-  let part = Part.Ground_types key in
-  part
-  ::
-  (if is_current database part then
-     match Instance_table.find_opt database.ground_types key with
-     | Some (Value { types; _ }) -> List.map (fun ty -> Part.Layout ty) types
-     | Some (Failed _ | Blocked) | None -> []
-   else [])
-
 let requested table part key =
   match Instance_table.find_opt table key with
   | Some (Value value) -> value
   | Some (Failed _ | Blocked) ->
       Compiler_bug.bug ~stage:"Database" "%s is requested from code with errors" (Part.show part)
   | None -> unchecked (Part.show part)
-
-let layouts database packages keys =
-  request database packages ~through:Lowered_code ~needs:(laid_out database) keys;
-  let ground_types = Type_table.create 256 in
-  List.iter
-    (fun key ->
-      List.iter
-        (fun ty -> Type_table.replace ground_types ty ())
-        (requested database.ground_types (Ground_types key) key).types)
-    keys;
-  fun ty ->
-    if not (Type_table.mem ground_types ty) then
-      Compiler_bug.bug ~stage:"Database" "%s reads the layout of %s, which its ground types lack"
-        (String.concat ", " (List.map Instance.to_string keys))
-        (Ground.to_string ty);
-    layout database ignore ty
 
 let make_interface_lookups database packages =
   drain database ~through:Signature_checks packages;
@@ -2610,13 +2455,21 @@ let check_calls database interface viewers key = function
   | Error _ -> ()
 
 let reached_todo_types database key =
+  let reads part = Option.value (Part_table.find_opt database.reads part) ~default:[] in
   let blocked = function Some Blocked -> true | Some (Value _ | Failed _) | None -> false in
   let is_blocked (part : Part.t) =
     match part with
     | Test_key key -> blocked (Instance_table.find_opt database.test_keys key)
     | Lowered key -> blocked (Instance_table.find_opt database.lowered key)
-    | Layout ty -> blocked (Type_table.find_opt database.layouts ty)
     | _ -> false
+  in
+  let todo_type (part : Part.t) =
+    match part with
+    | Interface key -> (
+        match Hashtbl.find_opt (owner database key.module_.package).interfaces key with
+        | Some (Value { interface = Type_interface { shape = Todo_type; _ }; _ }) -> Some key.path
+        | Some (Value _ | Failed _ | Blocked) | None -> None)
+    | _ -> None
   in
   let visited = Part_table.create 16 in
   let rec visit todo_types (part : Part.t) =
@@ -2624,10 +2477,9 @@ let reached_todo_types database key =
     else begin
       Part_table.replace visited part ();
       match part with
-      | Layout (Named { path; _ }) when (stored database part).is_failed -> path :: todo_types
-      | _ when is_blocked part ->
-          List.fold_left visit todo_types
-            (Option.value (Part_table.find_opt database.reads part) ~default:[])
+      | Lowered _ when (stored database part).is_failed ->
+          List.filter_map todo_type (reads part) @ todo_types
+      | _ when is_blocked part -> List.fold_left visit todo_types (reads part)
       | _ -> todo_types
     end
   in
@@ -2654,7 +2506,6 @@ let make_lowering_requests database packages : Compile.requests =
       (fun key ->
         request database packages ~through:Test_keys ~needs:(fun key -> [ Test_key key ]) [ key ];
         reached_todo_types database key);
-    layouts = layouts database packages;
   }
 
 let find_main database package =

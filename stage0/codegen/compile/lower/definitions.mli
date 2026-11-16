@@ -14,8 +14,6 @@ type context = {
 }
 
 val monomorphic : Interface.Lookups.t -> Monomorphic.context
-val uint64 : Ground.ty
-val string_slice : Ground.ty
 
 val context :
   Lookups.settings ->

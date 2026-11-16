@@ -117,6 +117,26 @@ and statement_places visit (kind : statement_kind) =
       ());
   List.iter (iter_places_read visit) (nested_blocks_of kind)
 
+let terminator_places visit (terminator : Graph.terminator) =
+  match terminator with
+  | Branch { condition; _ } -> operand_place visit condition
+  | For { iteration; _ } -> iteration_places visit iteration
+  | Yield { part; _ } -> yielded_places visit part
+  | Return returned -> Option.iter (operand_place visit) returned
+  | Cancel { returned; _ } -> Option.iter (fun (value, _) -> operand_place visit value) returned
+  | Goto _ | Fork _ | Join _ | Iteration_end _ | Resume _ | Unreachable | Written_unreachable | Todo
+    ->
+      ()
+
+let iter_graph_places_read visit (body : Graph.body) =
+  Array.iter
+    (fun (basic : Graph.basic_block) ->
+      List.iter
+        (fun (statement : Graph.statement) -> statement_places visit (Basic statement.kind))
+        basic.statements;
+      terminator_places visit basic.terminator)
+    body.blocks
+
 let rec visit_block visit locals (block : block) =
   List.iter
     (fun (statement : statement) ->

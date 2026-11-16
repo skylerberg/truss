@@ -1,7 +1,6 @@
 let bug format = Compiler_bug.bug ~stage:"Writing" format
 let output_ty = Storage.of_elements (Ground.builtin UInt8)
 let bytes_ty = Storage.view_of_elements (Ground.builtin UInt8)
-let ground_types = [ output_ty; bytes_ty ]
 
 open Emit_c.Builder
 

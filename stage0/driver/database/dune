@@ -25,7 +25,6 @@
   compile
   instance
   ground
-  memory_layout
   libc
   prover
   zarith))

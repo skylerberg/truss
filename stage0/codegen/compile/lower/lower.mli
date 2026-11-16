@@ -15,9 +15,7 @@ val context :
   Lookups.t ->
   context
 
-type ground_types = Ground_types.t = { types : Ground.ty list; folded_constants : Path.t list }
-
-val ground_types : Lookups.settings -> Lookups.t -> Instance.key -> ground_types
+val list_folded_constants : Mir.lookups -> Path.t -> Path.t list
 
 val lower_source_code :
   context -> path:Path.t -> type_arguments:Ground.argument list -> Emit_c.Builder.instance
