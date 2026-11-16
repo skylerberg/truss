@@ -362,6 +362,14 @@ test "a float is raised to a float" {
   assert power(-8.0, exponent: 0.5).is_nan()
   assert power(2.0, exponent: 2000.0) == Float64.infinity
   assert power(2.0, exponent: -2000.0) == 0.0
+  assert power(2.0, exponent: 64.0) == 18446744073709551616.0
+  assert power(0.5, exponent: 64.0) == 5.421010862427522e-20
+  assert power(1.0e300, exponent: 64.0) == Float64.infinity
+  assert power(1.0e-300, exponent: 64.0) == 0.0
+  assert power(1.0e300, exponent: -64.0) == 0.0
+  assert power(1.0e-300, exponent: -64.0) == Float64.infinity
+  assert power(5.0e-324, exponent: 64.0) == 0.0
+  assert power(Float64.maximum, exponent: 2.0) == Float64.infinity
 }
 
 test "a power at the edges follows IEEE 754" {
@@ -563,6 +571,8 @@ test "a float is written with a fixed number of decimals" {
   assert fixed(Float64.negative_infinity, decimals: 2) == "-infinity"
   let long = fixed(0.5, decimals: 1105)
   assert long.length() == 1107 && long.starts_with("0.500000") && long.ends_with("0000")
+  let smallest = fixed(5e-324, decimals: 1080)
+  assert smallest.length() == 1082 && smallest.ends_with("447265625000000")
   let single: Float32 = 0.1
   assert single.to_fixed(10) == "0.1000000015"
 }
