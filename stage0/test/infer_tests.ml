@@ -349,6 +349,11 @@ let () =
         "types.unknown_member");
   Harness.test "own on a place of a hole's type is not redundant" (fun () ->
       expect_fine Fixtures.Infer.own_before_a_local_bound_to_todo);
+  Harness.test "a redundant own is reported once a later element of the statement solves the type"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.own_before_a_lambda_parameter_solved_later_as_an_integer
+        "types.redundant_mode"
+        ~fixed:Fixtures.Infer.own_before_a_lambda_parameter_solved_later_as_an_integer_fixed);
   Harness.test "a mut receiver chooses the method's mut overload" (fun () ->
       expect_fine Fixtures.Infer.mut_push_onto_a_var_list);
   Harness.test

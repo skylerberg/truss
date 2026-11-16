@@ -354,6 +354,43 @@ let () =
     (fun _ -> Types.make_named (app "Session") [])
     Interface.Impls.is_copyable
 
+let show_decision : Interface.Properties.decision -> string = function
+  | Holds -> "Holds"
+  | Fails -> "Fails"
+  | Depends_on open_type -> "Depends_on " ^ Types.show open_type
+
+let expect_decision name expected type_ property =
+  Harness.test name (fun () ->
+      let actual =
+        Interface.Impls.decide_property property
+          (make_interface (Support.setup [ ("app::main", "") ]))
+          ~list_bounds:(fun _ -> [])
+          type_
+      in
+      if actual <> expected then
+        Harness.fail "expected %s, got %s" (show_decision expected) (show_decision actual))
+
+let () =
+  expect_decision "whether an Option of an open type is Plain depends on that type"
+    (Depends_on Types.Hole) (option Types.Hole) Plain;
+  expect_decision "whether an open type is a view depends on that type" (Depends_on Types.Hole)
+    Types.Hole View;
+  expect_decision "a List of an open type is not Plain" Fails (list Types.Hole) Plain;
+  expect_decision "a Slice of an open type is Plain" Holds (slice Types.Hole) Plain;
+  expect_decision "an Option of a Slice of an open type is a view" Holds
+    (option (slice Types.Hole))
+    View;
+  Harness.test "is_plain of a type whose decision depends on an open type is a compiler bug"
+    (fun () ->
+      match
+        Interface.Impls.is_plain
+          (make_interface (Support.setup [ ("app::main", "") ]))
+          ~list_bounds:(fun _ -> [])
+          (option Types.Hole)
+      with
+      | exception Compiler_bug.Bug _ -> ()
+      | holds -> Harness.fail "answered %b" holds)
+
 let holder = "type Holder[Value](value: Value)\n"
 let held type_ = Types.make_named (app "Holder") [ type_ ]
 let chain = Fixtures.Interface.chain

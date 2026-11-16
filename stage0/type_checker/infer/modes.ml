@@ -194,12 +194,24 @@ let classify_argument state (value : Syntax.expression) =
       | Some mode -> Lent mode
       | None -> if State.is_place state value then Place else Temporary)
 
+let run_once_solved state type_ check =
+  State.defer state (fun () ->
+      let is_solved =
+        not
+          (Types.exists (function Types.Variable _ -> true | _ -> false) (State.zonk state type_))
+      in
+      if is_solved then check ();
+      is_solved)
+
+let is_known_not_plain state type_ =
+  State.decide_property state Interface.Properties.Plain type_ = Interface.Properties.Fails
+
 let find_lent_field_mode (state : State.state) (value : Syntax.expression) type_ : Types.mode option
     =
   match (Hashtbl.find_opt state.yielded value.id, classify_argument state value) with
   | _ when is_slice value -> None
   | Some Read, With_mode (Mut, _) -> Some Read
-  | Some Read, (Place | Lent _) when not (State.is_plain state type_) -> Some Read
+  | Some Read, (Place | Lent _) when is_known_not_plain state type_ -> Some Read
   | Some Mut, With_mode (Mut, _) -> Some Mut
   | _ -> None
 
@@ -244,35 +256,41 @@ let check_mode state env (value : Syntax.expression) (parameter : Types.paramete
         (Printf.sprintf "`%s` mutates its argument in place, so it must be a place passed `mut`."
            name)
   | Own, With_mode (Own, inner) ->
-      if
-        State.is_plain state type_ && not (Types.exists Types.is_open_type (State.zonk state type_))
-      then
-        State.report state Redundant_mode (State.read_span state value.id)
-          ~fixes:
-            [
-              State.fix "Remove the keyword."
-                [ Diagnostic.delete (locate_mode_keyword state value inner) ];
-            ]
-          (Printf.sprintf "%s copies implicitly, so it needs no `own`."
-             (String.capitalize_ascii (State.describe state type_)))
+      run_once_solved state type_ (fun () ->
+          if
+            State.decide_property state Interface.Properties.Plain type_
+            = Interface.Properties.Holds
+          then
+            State.report state Redundant_mode (State.read_span state value.id)
+              ~fixes:
+                [
+                  State.fix "Remove the keyword."
+                    [ Diagnostic.delete (locate_mode_keyword state value inner) ];
+                ]
+              (Printf.sprintf "%s copies implicitly, so it needs no `own`."
+                 (String.capitalize_ascii (State.describe state type_))))
   | Own, (Temporary | Lent _) -> ()
   | Own, Place when Hashtbl.find_opt state.yielded value.id = Some Mut ->
-      if not (State.is_plain state type_) then
-        State.report state Missing_mode (State.read_span state value.id)
-          ~fixes:
-            (State.fix "Lend it `mut`."
-               [ State.insert (State.read_span state value.id).start "mut " ]
-            ::
-            (if State.is_copyable state type_ then
-               [
-                 State.fix "Pass a copy."
-                   [ State.insert (State.read_span state value.id).stop ".copy()" ];
-               ]
-             else []))
-          (Printf.sprintf
-             "`%s` is a field of a value that is lent `mut`. Pass the place `mut` to lend it too, \
-              or pass a copy."
-             name)
+      run_once_solved state type_ (fun () ->
+          if is_known_not_plain state type_ then
+            State.report state Missing_mode (State.read_span state value.id)
+              ~fixes:
+                (State.fix "Lend it `mut`."
+                   [ State.insert (State.read_span state value.id).start "mut " ]
+                ::
+                (if
+                   State.decide_property state Interface.Properties.Copyable type_
+                   = Interface.Properties.Holds
+                 then
+                   [
+                     State.fix "Pass a copy."
+                       [ State.insert (State.read_span state value.id).stop ".copy()" ];
+                   ]
+                 else []))
+              (Printf.sprintf
+                 "`%s` is a field of a value that is lent `mut`. Pass the place `mut` to lend it \
+                  too, or pass a copy."
+                 name))
   | Own, Place -> note_place_without_own state env value
   | Own, With_mode (Mut, _) ->
       State.report state Wrong_mode (State.read_span state value.id)
