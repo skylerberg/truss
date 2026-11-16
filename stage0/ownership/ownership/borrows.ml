@@ -487,7 +487,10 @@ let check_body context (actions : Actions.t) moves =
             match Move_rules.decide_move context place ~type_ ~is_returned ~is_captured with
             | Moves -> mutations := (place, here.origin) :: !mutations
             | Reads | Refused _ -> ())
-        | _ -> ());
+        | Move_out_of_lent _ | Bind _ | Yield_point _ | Bind_views _ | Store _ | Return_view _
+        | Drop _ | Bind_lent_part _ | Pass_owned_function _ | Start_loan _ | End_loans _
+        | Arguments _ ->
+            ());
     (!mutations, !uses)
   in
   List.iter

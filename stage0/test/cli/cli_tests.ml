@@ -2,7 +2,6 @@ let test = Harness.test
 let fail = Harness.fail
 let expect_string = Harness.expect_string
 let expect_strings = Harness.expect_strings
-let contains = Substring.contains
 
 let directory files =
   let root = Harness.scratch "package" in
@@ -105,8 +104,8 @@ let () =
             (fun () ->
               ignore (Unix.read ready (Bytes.create 1) 0 1);
               let status, output = truss [ "check"; "-C"; root ] in
-              if status <> 2 || not (contains output "is open in another process") then
-                fail "exited with %d: %s" status output))
+              if status <> 2 || not (String.includes ~affix:"is open in another process" output)
+              then fail "exited with %d: %s" status output))
 
 let () =
   test "a command refuses a cache that other users can write, and exits with 2" (fun () ->
@@ -114,15 +113,16 @@ let () =
       let cache = Harness.scratch "writable-cache" in
       Unix.chmod cache 0o777;
       Workspace.reset ();
+      Unix.putenv "TRUSS_CACHE" cache;
       Fun.protect ~finally:Workspace.reset (fun () ->
-          Harness.with_environment
-            [ ("TRUSS_CACHE", cache) ]
-            (fun () ->
-              let status, output = truss [ "build"; "-C"; root ] in
-              if
-                status <> 2
-                || not (contains output ("Users other than its owner can write the cache " ^ cache))
-              then fail "exited with %d: %s" status output)))
+          let status, output = truss [ "build"; "-C"; root ] in
+          if
+            status <> 2
+            || not
+                 (String.includes
+                    ~affix:("Users other than its owner can write the cache " ^ cache)
+                    output)
+          then fail "exited with %d: %s" status output))
 
 let names (_, packages) = List.sort compare (List.map Path.show_package packages)
 let modules (snapshot, packages) = Cli.Command_packages.modules snapshot packages
@@ -185,7 +185,7 @@ let () =
           ]
       in
       let status, output = truss [ "check"; "-C"; Filename.concat root "app" ] in
-      if status <> 1 || not (contains output "lib/arith/arith.truss") then
+      if status <> 1 || not (String.includes ~affix:"lib/arith/arith.truss" output) then
         fail "the dependency's overflow is not reported: %s" output);
   test "a dependency's type error is reported without proofs" (fun () ->
       let root =
@@ -199,7 +199,8 @@ let () =
           ]
       in
       let status, output = truss [ "run"; "-C"; Filename.concat root "app" ] in
-      if status <> 1 || not (contains output "lib/arith/arith.truss") then fail "%s" output);
+      if status <> 1 || not (String.includes ~affix:"lib/arith/arith.truss" output) then
+        fail "%s" output);
   test "a package with no [project] above it is a project by itself" (fun () ->
       let root =
         directory
@@ -215,7 +216,7 @@ let () =
         not
           (List.exists
              (fun (problem : Project.problem) ->
-               contains problem.message "`two` is not a package of this project")
+               String.includes ~affix:"`two` is not a package of this project" problem.message)
              problems)
       then fail "problems: %s" (String.concat "; " (List.map Project.show_problem problems));
       match Cli.Command_packages.load root with
@@ -299,7 +300,7 @@ let report_problems report =
 let expect_problem ?file files message =
   let problems_reported = problems files in
   let is_expected (problem : Project.problem) =
-    contains problem.message message
+    String.includes ~affix:message problem.message
     && match file with Some file -> problem.file = file | None -> true
   in
   if not (List.exists is_expected problems_reported) then
@@ -307,7 +308,7 @@ let expect_problem ?file files message =
 
 let expect_problem_in root part =
   let problems_reported = report_problems (gather (Cli.Command_packages.load root)) in
-  if not (List.exists (fun problem -> contains problem part) problems_reported) then
+  if not (List.exists (fun problem -> String.includes ~affix:part problem) problems_reported) then
     fail "problems: [%s]" (String.concat "; " problems_reported)
 
 let () =
@@ -372,14 +373,16 @@ let () =
       if
         not
           (List.exists
-             (fun problem -> contains problem "app/truss.toml: Nothing in `app` uses `other`")
+             (fun problem ->
+               String.includes ~affix:"app/truss.toml: Nothing in `app` uses `other`" problem)
              problems)
       then fail "problems: [%s]" (String.concat "; " problems);
       if quietly [ "check"; "-C"; app; "--fix" ] <> 0 then fail "still has errors";
       let manifest = read root "app/truss.toml" in
       if
-        contains manifest "other" || contains manifest "Clock"
-        || not (contains manifest "library = []")
+        String.includes ~affix:"other" manifest
+        || String.includes ~affix:"Clock" manifest
+        || not (String.includes ~affix:"library = []" manifest)
       then fail "wrote %s" manifest)
 
 let owned =
@@ -400,7 +403,7 @@ let () =
   test "show finds a definition of a package with an owner by its full path" (fun () ->
       match shown (directory owned) "acme::geometry::vector::double" with
       | [ text ] ->
-          if not (contains text "public fn double(value: Int64) -> Int64") then
+          if not (String.includes ~affix:"public fn double(value: Int64) -> Int64" text) then
             fail "showed %s" text
       | texts -> fail "found %d" (List.length texts));
   test "show lists the public definitions of a package with an owner" (fun () ->
@@ -436,7 +439,7 @@ let () =
           (List.exists
              (fun (problem : Project.problem) ->
                problem.file = "one/truss.toml"
-               && contains problem.message "A test's time limit is its project's")
+               && String.includes ~affix:"A test's time limit is its project's" problem.message)
              problems)
       then fail "problems: %s" (String.concat "; " (List.map Project.show_problem problems)));
   test "a time limit of 0 is malformed, at its line" (fun () ->
@@ -468,7 +471,7 @@ let () =
       let root = package [ ("main.truss", Fixtures.twice_with_one_fix) ] in
       let status = quietly [ "check"; "-C"; root; "--fix" ] in
       if status <> 0 then fail "status %d" status;
-      if not (contains (read root "main.truss") "let _ = value") then
+      if not (String.includes ~affix:"let _ = value" (read root "main.truss")) then
         fail "wrote %s" (read root "main.truss"))
 
 let () =
@@ -476,7 +479,7 @@ let () =
       let root = package [ ("main.truss", Fixtures.next_count) ] in
       let status, output = truss [ "check"; "-C"; root ] in
       if status <> 1 then fail "status %d" status;
-      if not (contains output "prover.overflow") then fail "%s" output);
+      if not (String.includes ~affix:"prover.overflow" output) then fail "%s" output);
   test "check --no-proofs reports no obligation" (fun () ->
       let root = package [ ("main.truss", Fixtures.next_count) ] in
       let status, output = truss [ "check"; "-C"; root; "--no-proofs" ] in
@@ -488,8 +491,7 @@ let () =
       let status, output = truss [ "check"; "-C"; root ] in
       if status <> 1 then fail "status %d" status;
       match
-        ( Substring.For_testing.find output "b.truss",
-          Substring.For_testing.find output "prover.overflow" )
+        (String.find_first ~sub:"b.truss" output, String.find_first ~sub:"prover.overflow" output)
       with
       | Some type_error, Some overflow when type_error < overflow -> ()
       | _ -> fail "%s" output);
@@ -497,7 +499,7 @@ let () =
       let root = package [ ("main.truss", Fixtures.main_with_a_todo_proof) ] in
       let status, output = truss [ "build"; "-C"; root ] in
       if status <> 1 then fail "did not refuse";
-      if not (contains output "main.truss:3:5: `todo` in a proof can be reached") then
+      if not (String.includes ~affix:"main.truss:3:5: `todo` in a proof can be reached" output) then
         fail "%s" output)
 
 let () =
@@ -670,8 +672,9 @@ let () =
       if rename root "demo::weather::total" "sum" <> 0 then fail "refused";
       if
         not
-          (contains (read root "main.truss") "weather::sum([1]) + demo::weather::sum([2])"
-          && contains (read root "weather/weather.truss") "public fn sum(")
+          (String.includes ~affix:"weather::sum([1]) + demo::weather::sum([2])"
+             (read root "main.truss")
+          && String.includes ~affix:"public fn sum(" (read root "weather/weather.truss"))
       then fail "wrote %s" (read root "main.truss"));
   test "a rename that would cause a diagnostic changes nothing" (fun () ->
       let root = package [ ("main.truss", Fixtures.first_and_second) ] in
@@ -686,8 +689,8 @@ let () =
       let main = read root "main.truss" in
       if
         not
-          (contains main "use demo::outlook"
-          && contains main "outlook::total([1]) + demo::outlook::total([2])")
+          (String.includes ~affix:"use demo::outlook" main
+          && String.includes ~affix:"outlook::total([1]) + demo::outlook::total([2])" main)
       then fail "wrote %s" main);
   test "renaming in a package with an owner rewrites a full path into it" (fun () ->
       let root = directory owned in
@@ -695,8 +698,8 @@ let () =
       let main = read root "app/main.truss" in
       if
         not
-          (contains main "let _ = vector::twice(1)"
-          && contains main "  acme::geometry::vector::twice(2)")
+          (String.includes ~affix:"let _ = vector::twice(1)" main
+          && String.includes ~affix:"  acme::geometry::vector::twice(2)" main)
       then fail "wrote %s" main);
   test "renaming a module of a package with an owner rewrites its uses and full paths" (fun () ->
       let root = directory owned in
@@ -706,16 +709,19 @@ let () =
       let main = read root "app/main.truss" in
       if
         not
-          (contains main "use acme::geometry::arrow"
-          && contains main "let _ = arrow::double(1)"
-          && contains main "  acme::geometry::arrow::double(2)")
+          (String.includes ~affix:"use acme::geometry::arrow" main
+          && String.includes ~affix:"let _ = arrow::double(1)" main
+          && String.includes ~affix:"  acme::geometry::arrow::double(2)" main)
       then fail "wrote %s" main);
   test "renaming a method rewrites its calls" (fun () ->
       let root = package [ ("main.truss", Fixtures.point_get_and_its_calls) ] in
       if rename root "demo::Point.get" "value" <> 0 then fail "refused";
       let text = read root "main.truss" in
-      if not (contains text "fn Point.value(self)" && contains text "Point(x: 1).value()") then
-        fail "wrote %s" text)
+      if
+        not
+          (String.includes ~affix:"fn Point.value(self)" text
+          && String.includes ~affix:"Point(x: 1).value()" text)
+      then fail "wrote %s" text)
 
 let rewrite root path text =
   Out_channel.with_open_bin (Filename.concat root path) (fun out -> output_string out text);
@@ -734,8 +740,8 @@ let () =
       if status <> 0 then fail "status %d" status;
       if
         not
-          (contains output "means the definition demo::double"
-          && contains output "internal fn double(value: Int64) -> Int64")
+          (String.includes ~affix:"means the definition demo::double" output
+          && String.includes ~affix:"internal fn double(value: Int64) -> Int64" output)
       then fail "wrote %s" output);
   let explain root position =
     let status, output =
@@ -749,19 +755,22 @@ let () =
       let output = explain root "3:13" in
       if
         not
-          (contains output "means the definition demo::Counter.bump(mut self)"
-          && contains output "fn Counter.bump(mut self)")
+          (String.includes ~affix:"means the definition demo::Counter.bump(mut self)" output
+          && String.includes ~affix:"fn Counter.bump(mut self)" output)
       then fail "wrote %s" output);
   test "explaining a method call's callee gives the method" (fun () ->
       let root = package [ ("main.truss", Fixtures.counter) ] in
       let output = explain root "9:16" in
-      if not (contains output "means the definition demo::Counter.bump(mut self)") then
-        fail "wrote %s" output);
+      if not (String.includes ~affix:"means the definition demo::Counter.bump(mut self)" output)
+      then fail "wrote %s" output);
   test "explaining a variable where it is bound gives its type" (fun () ->
       let root = package [ ("main.truss", Fixtures.counter) ] in
       let output = explain root "8:8" in
-      if not (contains output "means a name bound here" && contains output "has type Counter") then
-        fail "wrote %s" output)
+      if
+        not
+          (String.includes ~affix:"means a name bound here" output
+          && String.includes ~affix:"has type Counter" output)
+      then fail "wrote %s" output)
 
 let strings = function
   | Cli.Json.List items ->
@@ -815,12 +824,12 @@ let () =
   test "a suffix that ends inside a name finds nothing" (fun () ->
       let root = package [ ("main.truss", Fixtures.doubling) ] in
       let status, output = truss [ "dependents"; "-C"; root; "ouble" ] in
-      if status <> 2 || not (contains output "No definition named ouble") then
+      if status <> 2 || not (String.includes ~affix:"No definition named ouble" output) then
         fail "status %d: %s" status output);
   test "a name that is not a path is refused" (fun () ->
       let root = package [ ("main.truss", Fixtures.doubling) ] in
       let status, output = truss [ "dependents"; "-C"; root; "demo:double" ] in
-      if status <> 2 || not (contains output "`demo:double` is not a path") then
+      if status <> 2 || not (String.includes ~affix:"`demo:double` is not a path" output) then
         fail "status %d: %s" status output);
   test "a method of an impl is found through the implementing type" (fun () ->
       let root = package [ ("main.truss", Fixtures.square_area) ] in
@@ -920,9 +929,11 @@ let () =
       if status <> 1 then fail "status %d: %s" status output;
       if
         not
-          (contains output
-             "main.truss:1:6: `todo` can be reached from `main`, so the program cannot be built.\n\
-             \    demo::main -> demo::Session")
+          (String.includes
+             ~affix:
+               "main.truss:1:6: `todo` can be reached from `main`, so the program cannot be built.\n\
+               \    demo::main -> demo::Session"
+             output)
       then fail "%s" output);
   test "build refuses a todo that main reaches beside a type defined as todo" (fun () ->
       let status, output =
@@ -932,9 +943,11 @@ let () =
       if status <> 1 then fail "status %d: %s" status output;
       if
         not
-          (contains output
-             "main.truss:12:3: `todo` can be reached from `main`, so the program cannot be built.\n\
-             \    demo::main -> demo::greet")
+          (String.includes
+             ~affix:
+               "main.truss:12:3: `todo` can be reached from `main`, so the program cannot be built.\n\
+               \    demo::main -> demo::greet"
+             output)
       then fail "%s" output)
 
 let registry_root = ref ""
@@ -1015,7 +1028,7 @@ let () =
       let _ = stocked () in
       let root = package [ uses_geometry ] in
       if add root [ "acme::geometry" ] <> 0 then fail "not added";
-      if not (contains (read root "truss.toml") "\"acme::geometry\" = []") then
+      if not (String.includes ~affix:"\"acme::geometry\" = []" (read root "truss.toml")) then
         fail "the manifest is %s" (read root "truss.toml");
       expect_versions root [ ("acme::geometry", "1.0.0"); ("acme::units", "1.0.0") ];
       if not (clean root) then fail "has diagnostics");
@@ -1054,11 +1067,11 @@ let () =
       match
         List.filter
           (fun (problem : Project.problem) ->
-            contains problem.message "not a package of this project")
+            String.includes ~affix:"not a package of this project" problem.message)
           problems
       with
-      | [ { file = "truss.lock"; message; _ } ] when contains message "Run `truss add acme::units`"
-        ->
+      | [ { file = "truss.lock"; message; _ } ]
+        when String.includes ~affix:"Run `truss add acme::units`" message ->
           ()
       | _ -> fail "problems: [%s]" (String.concat "; " (List.map Project.show_problem problems)));
   test "registry packages that depend on each other in a cycle are a problem, and none is built"
@@ -1082,7 +1095,9 @@ let () =
          `acme::rings` -> `acme::chains`";
       if
         List.exists
-          (fun state -> contains state "acme::rings" || contains state "acme::chains")
+          (fun state ->
+            String.includes ~affix:"acme::rings" state
+            || String.includes ~affix:"acme::chains" state)
           (Workspace.list_package_databases ())
       then fail "a package of the cycle has a state");
   test "a project's package and a registry package that depend on each other form a cycle"
@@ -1114,7 +1129,9 @@ let () =
       if
         not
           (List.exists
-             (fun line -> contains line "acme::geometry 1.0.0" && contains line " holds Clock")
+             (fun line ->
+               String.includes ~affix:"acme::geometry 1.0.0" line
+               && String.includes ~affix:" holds Clock" line)
              (lock_lines root))
       then fail "the lock file is %s" (read root "truss.lock"));
   test "a line that no package uses is a problem, which check --fix fixes by deleting it" (fun () ->
@@ -1186,7 +1203,8 @@ let () =
       ignore (add root [ "acme::geometry" ]);
       let status, output = upgrade root [] in
       if status <> 0 then fail "status %d: %s" status output;
-      if not (contains output "`acme::units` goes from 1.0.0 to 1.1.0") then fail "said %s" output;
+      if not (String.includes ~affix:"`acme::units` goes from 1.0.0 to 1.1.0" output) then
+        fail "said %s" output;
       expect_versions root [ ("acme::geometry", "1.0.0"); ("acme::units", "1.1.0") ]);
   test "upgrading a package that is at its newest version changes nothing" (fun () ->
       let _ = stocked () in
@@ -1194,8 +1212,10 @@ let () =
       ignore (add root [ "acme::geometry" ]);
       let before = read root "truss.lock" in
       let status, output = upgrade root [ "acme::geometry" ] in
-      if status <> 0 || not (contains output "Every package is at the version asked for") then
-        fail "status %d: %s" status output;
+      if
+        status <> 0
+        || not (String.includes ~affix:"Every package is at the version asked for" output)
+      then fail "status %d: %s" status output;
       expect_string ~expected:before (read root "truss.lock"));
   test "an upgrade says which signatures the project reads change, and which code breaks" (fun () ->
       let registry = stocked () in
@@ -1206,7 +1226,8 @@ let () =
       let status, output = upgrade root [ "acme::units" ] in
       if status <> 1 then fail "status %d: %s" status output;
       List.iter
-        (fun part -> if not (contains output part) then fail "%s is not in: %s" part output)
+        (fun part ->
+          if not (String.includes ~affix:part output) then fail "%s is not in: %s" part output)
         [
           "`acme::units` goes from 1.1.0 to 1.2.0";
           "acme::units::lengths::meter";
@@ -1227,7 +1248,7 @@ let () =
         ~record:[ ({ Path.owner = Some "acme"; name = "units" }, (1, 0, 0)) ]
         geometry;
       let _, output = upgrade root [ "acme::geometry" ] in
-      if not (contains output "`acme::units` would hold Clock, which it did not") then
+      if not (String.includes ~affix:"`acme::units` would hold Clock, which it did not" output) then
         fail "said %s" output)
 
 let publish_from root = truss [ "publish"; "-C"; root ]
@@ -1247,7 +1268,7 @@ let expect_published registry name expected = expect_strings ~expected (publishe
 let expect_refused root part =
   let status, output = publish_from root in
   if status <> 1 then fail "status %d: %s" status output;
-  if not (contains output part) then fail "said %s" output
+  if not (String.includes ~affix:part output) then fail "said %s" output
 
 let () =
   test "a package's first version is 1.0.0, and holds its files" (fun () ->
@@ -1255,7 +1276,8 @@ let () =
       let root = angles turn in
       let status, output = publish_from root in
       if status <> 0 then fail "status %d: %s" status output;
-      if not (contains output "Published `acme::angles` 1.0.0") then fail "said %s" output;
+      if not (String.includes ~affix:"Published `acme::angles` 1.0.0" output) then
+        fail "said %s" output;
       expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0" ];
       let files =
         Registry.Content.all_files
@@ -1285,15 +1307,18 @@ let () =
       rewrite root "degrees/degrees.truss" (turn ^ Fixtures.public_half);
       let status, output = publish_from root in
       if status <> 0 then fail "status %d: %s" status output;
-      if not (contains output "acme::angles::degrees::half is new") then fail "said %s" output;
+      if not (String.includes ~affix:"acme::angles::degrees::half is new" output) then
+        fail "said %s" output;
       expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0"; "1.1.0" ]);
   test "files that are a version already are not published again" (fun () ->
       let registry = registry () in
       let root = angles turn in
       ignore (publish_from root);
       let status, output = publish_from root in
-      if status <> 0 || not (contains output "`acme::angles` 1.0.0 already has these files") then
-        fail "status %d: %s" status output;
+      if
+        status <> 0
+        || not (String.includes ~affix:"`acme::angles` 1.0.0 already has these files" output)
+      then fail "status %d: %s" status output;
       expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0" ]);
   test "a release that changes a public signature is refused, with the signature as it was and is"
     (fun () ->
@@ -1304,7 +1329,8 @@ let () =
       expect_refused root "acme::angles::degrees::turn changed its parameters or its result";
       let _, output = publish_from root in
       List.iter
-        (fun part -> if not (contains output part) then fail "%s is not in: %s" part output)
+        (fun part ->
+          if not (String.includes ~affix:part output) then fail "%s is not in: %s" part output)
         [
           "was: public fn turn() -> Int64";
           "now: public fn turn(times: Int64) -> Int64";
@@ -1328,7 +1354,7 @@ let () =
   test "a package with no owner in its name is not published" (fun () ->
       let _ = registry () in
       let status, output = publish_from (package [ ("degrees/degrees.truss", turn) ]) in
-      if status <> 2 || not (contains output "has no owner in its name") then
+      if status <> 2 || not (String.includes ~affix:"has no owner in its name" output) then
         fail "status %d: %s" status output);
   test "a package with an error is not published" (fun () ->
       let _ = registry () in
@@ -1488,7 +1514,7 @@ let () =
           let status, output =
             captured (fun () -> Cli.Main.client [ "truss"; "--no-server"; "check"; "-C"; root ])
           in
-          if status = 0 || not (contains output "is_valid_template") then
+          if status = 0 || not (String.includes ~affix:"is_valid_template" output) then
             fail "accepted %s: %s" template output)
         [
           "<a onclick=\\\"${own code}\\\">x</a>";
@@ -1580,7 +1606,8 @@ let () =
       let written = In_channel.with_open_bin output_file In_channel.input_all in
       if status <> 0 then fail "status %d" status;
       List.iter
-        (fun part -> if not (contains written part) then fail "no %s in %s" part written)
+        (fun part ->
+          if not (String.includes ~affix:part written) then fail "no %s in %s" part written)
         [
           {|"positionEncoding":"utf-8"|};
           {|"id":2,"error":{"code":-32601|};
@@ -1611,7 +1638,7 @@ let () =
       Cli.Lsp_command.For_testing.refresh server;
       let all = String.concat "\n" (List.rev !written) in
       List.iter
-        (fun part -> if not (contains all part) then fail "no %s in %s" part all)
+        (fun part -> if not (String.includes ~affix:part all) then fail "no %s in %s" part all)
         [
           {|"method":"textDocument/publishDiagnostics"|};
           {|"method":"truss/proofStates"|};

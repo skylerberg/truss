@@ -31,7 +31,6 @@
  (libraries
   process
   harness
-  substring
   compiler_bug
   source
   diagnostic

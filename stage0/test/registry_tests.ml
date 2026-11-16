@@ -1,5 +1,3 @@
-let contains text part = Substring.contains text part
-
 let () =
   Harness.test "a version is three numbers" (fun () ->
       if Registry.Version.parse "1.4.2" <> Some (1, 4, 2) then Harness.fail "1.4.2 is not read";
@@ -158,7 +156,8 @@ let () =
            (1, 0, 0) ~hash
        with
       | Error reason ->
-          if not (contains reason "do not have the hash") then Harness.fail "said %s" reason
+          if not (String.includes ~affix:"do not have the hash" reason) then
+            Harness.fail "said %s" reason
       | Ok _ -> Harness.fail "kept");
       if Sys.readdir into <> [||] then Harness.fail "left files behind");
   Harness.test "a version the registry does not hold is not fetched" (fun () ->
@@ -382,7 +381,9 @@ let () =
       and current = [ entry "acme::geometry" (1, 0, 0); entry "truss::http" (1, 0, 0) ] in
       let actual = String.concat " " (Registry.Selection.differences ~written ~current) in
       List.iter
-        (fun part -> if not (contains actual part) then Harness.fail "%s is not in: %s" part actual)
+        (fun part ->
+          if not (String.includes ~affix:part actual) then
+            Harness.fail "%s is not in: %s" part actual)
         [
           "`acme::geometry` 1.0.0 is in the build and has no line";
           "Nothing in the build uses `acme::units`";

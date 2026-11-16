@@ -1,4 +1,4 @@
-let node_spelling cursor id = Cursor.spelling cursor (Cursor.read_file_span cursor id)
+let spell_node cursor id = Cursor.spell cursor (Cursor.read_file_span cursor id)
 
 let report cursor code (span : Source.span) message fix_title edits =
   let joins (edit : Source.span Diagnostic.edit) =
@@ -7,7 +7,7 @@ let report cursor code (span : Source.span) message fix_title edits =
   Cursor.report cursor code span message
     ~fixes:(if List.exists joins edits then [] else [ Diagnostic.fix fix_title edits ])
 
-let token_with_trailing_space (token : Token.t) ~(next : Token.t) =
+let extend_with_trailing_space (token : Token.t) ~(next : Token.t) =
   Source.span token.span.start next.span.start
 
 let increment cursor ~(target : Syntax.expression) ~(operator : Token.t) =
@@ -15,7 +15,7 @@ let increment cursor ~(target : Syntax.expression) ~(operator : Token.t) =
     match operator.kind with Foreign Plus_plus -> (" += 1", "+") | _ -> (" -= 1", "-")
   in
   let written =
-    match node_spelling cursor target.id with
+    match spell_node cursor target.id with
     | Some target -> Printf.sprintf "%s %s= 1" target sign
     | None -> Printf.sprintf "%s= 1" sign
   in
@@ -24,7 +24,7 @@ let increment cursor ~(target : Syntax.expression) ~(operator : Token.t) =
     (Printf.sprintf "Write `%s`" written)
     [ Diagnostic.replace operator.span replacement ]
 
-let double_negation cursor ~(operator : Token.t) ~(operand : Syntax.expression) =
+let report_double_negation cursor ~(operator : Token.t) ~(operand : Syntax.expression) =
   let operand_span = Cursor.read_file_span cursor operand.id in
   report cursor Double_negation operator.span "Truss has no `--`; to negate twice, write `-(-x)`."
     "Write `-(-x)`"
@@ -38,7 +38,7 @@ let match_arm_comma cursor ~(comma : Token.t) =
     "Remove the comma"
     [ Diagnostic.delete comma.span ]
 
-let conditional cursor ~(condition : Syntax.expression) ~(then_ : Syntax.expression)
+let report_conditional cursor ~(condition : Syntax.expression) ~(then_ : Syntax.expression)
     ~(else_ : Syntax.expression) ~(question : Token.t) =
   let condition = Cursor.read_file_span cursor condition.id
   and then_ = Cursor.read_file_span cursor then_.id
@@ -52,12 +52,12 @@ let conditional cursor ~(condition : Syntax.expression) ~(then_ : Syntax.express
       Diagnostic.insert (Source.zero_width else_.stop) " }";
     ]
 
-let let_mut cursor ~(let_token : Token.t) ~(mut_token : Token.t) =
+let report_let_mut cursor ~(let_token : Token.t) ~(mut_token : Token.t) =
   report cursor Let_mut mut_token.span "A mutable variable is declared with `var`, not `let mut`."
     "Write `var`"
     [ Diagnostic.replace (Source.span let_token.span.start mut_token.span.stop) "var" ]
 
-let address_of cursor ~(before : Token.t option) ~(ampersand : Token.t) ~(next : Token.t) =
+let report_address_of cursor ~(before : Token.t option) ~(ampersand : Token.t) ~(next : Token.t) =
   let written = match next.kind with Keyword Mut -> "`mut x`" | _ -> "`x`" in
   let separator =
     match before with
@@ -72,9 +72,9 @@ let address_of cursor ~(before : Token.t option) ~(ampersand : Token.t) ~(next :
         moved."
        written)
     "Remove the `&`"
-    [ Diagnostic.replace (token_with_trailing_space ampersand ~next) separator ]
+    [ Diagnostic.replace (extend_with_trailing_space ampersand ~next) separator ]
 
-let closure_bars cursor ~(opening : Token.t) ~(closing : Token.t) ~(body : Syntax.expression)
+let report_closure_bars cursor ~(opening : Token.t) ~(closing : Token.t) ~(body : Syntax.expression)
     ~is_before_else =
   let body_span = Cursor.read_file_span cursor body.id in
   let edits =
@@ -105,7 +105,7 @@ let closure_bars cursor ~(opening : Token.t) ~(closing : Token.t) ~(body : Synta
   report cursor Closure_bars opening.span "A lambda is written `fn(x) { x + 1 }`."
     "Write `fn(...) { ... }`" edits
 
-let brace_record cursor ~(name_stop : int) ~(opening : Token.t) ~(first : Token.t)
+let report_brace_record cursor ~(name_stop : int) ~(opening : Token.t) ~(first : Token.t)
     ~(last_stop : int) ~(closing : Token.t) =
   report cursor Brace_record opening.span
     "Records are built with parentheses: `Point(x: 1.0, y: 2.0)`." "Use parentheses"
@@ -114,7 +114,7 @@ let brace_record cursor ~(name_stop : int) ~(opening : Token.t) ~(first : Token.
       Diagnostic.replace (Source.span last_stop closing.span.stop) ")";
     ]
 
-let turbofish cursor ~(colons : Token.t) ~(less : Token.t) ~(greater : Token.t) =
+let report_turbofish cursor ~(colons : Token.t) ~(less : Token.t) ~(greater : Token.t) =
   report cursor Turbofish less.span "Type arguments go in square brackets: `parse[Int64](text)`."
     "Use square brackets"
     [
@@ -122,7 +122,7 @@ let turbofish cursor ~(colons : Token.t) ~(less : Token.t) ~(greater : Token.t) 
       Diagnostic.replace greater.span "]";
     ]
 
-let angle_brackets cursor ~(angles : Token.t list) =
+let report_angle_brackets cursor ~(angles : Token.t list) =
   report cursor Angle_brackets (List.hd angles).span
     "Type arguments and generic parameters go in square brackets: `List[String]`, `fn \
      first[Element](...)`."
@@ -136,14 +136,14 @@ let angle_brackets cursor ~(angles : Token.t list) =
            | _ -> "]"))
        angles)
 
-let path_separator cursor ~(separator : Token.t) =
+let report_path_separator cursor ~(separator : Token.t) =
   report cursor Path_separator separator.span
     "`::` follows only the name of a module. A variant, a constant, or a function of a type is \
      named with `.`, as in `Shape.Circle`."
     "Write `.`"
     [ Diagnostic.replace separator.span "." ]
 
-let qualified_variant cursor ~qualifier_start ~(variant : Syntax.name) =
+let report_qualified_variant cursor ~qualifier_start ~(variant : Syntax.name) =
   let variant_start = (Cursor.read_file_span cursor variant.id).start in
   report cursor Qualified_variant
     (Source.span qualifier_start variant_start)
@@ -154,7 +154,7 @@ let qualified_variant cursor ~qualifier_start ~(variant : Syntax.name) =
     "Remove the qualifier"
     [ Diagnostic.delete (Source.span qualifier_start variant_start) ]
 
-let macro_advice = function
+let show_macro_advice = function
   | "println" | "print" | "eprintln" | "eprint" ->
       " Print with `Console.print_line(text)`, and build the text with `${...}` in a string."
   | "format" -> " Build text with `${...}` in a string."
@@ -165,10 +165,10 @@ let macro_advice = function
   | "panic" -> " Code that cannot be reached is `unreachable`, and a failure is a `Result`."
   | _ -> ""
 
-let macro_call cursor ~(name : Syntax.name) ~(bang : Token.t) ~(opening : Token.t) =
+let report_macro_call cursor ~(name : Syntax.name) ~(bang : Token.t) ~(opening : Token.t) =
   let message =
     Printf.sprintf "Truss has no macros, so `%s!` is not a call.%s" name.text
-      (macro_advice name.text)
+      (show_macro_advice name.text)
   in
   match (name.text, opening.kind) with
   | "vec", Punctuation (Open Square) ->
@@ -179,7 +179,7 @@ let macro_call cursor ~(name : Syntax.name) ~(bang : Token.t) ~(opening : Token.
         ]
   | _ -> Cursor.report cursor Macro_call bang.span message
 
-let keyword_macro cursor ~(bang : Token.t) ~(closing : Token.t) ~has_arguments =
+let report_keyword_macro cursor ~(bang : Token.t) ~(closing : Token.t) ~has_arguments =
   let message = "Truss has no macros. `todo` and `unreachable` are written without `!()`." in
   if has_arguments then Cursor.report cursor Macro_call bang.span message
   else
@@ -190,22 +190,22 @@ let no_tuples =
   "Truss has no tuples. Values that belong together go in a record, whose fields have names, such \
    as `Pair(first: a, second: b)`."
 
-let tuple cursor ~(opening : Token.t) =
+let report_tuple cursor ~(opening : Token.t) =
   Cursor.report cursor Tuple opening.span no_tuples;
   raise Cursor.Failed
 
-let tuple_field cursor ~(field : Token.t) =
+let report_tuple_field cursor ~(field : Token.t) =
   Cursor.report cursor Tuple field.span
     "Truss has no tuples, so a value has no numbered fields. A record's fields have names, as in \
      `pair.first`.";
   raise Cursor.Failed
 
-let power_operator cursor ~(operator : Token.t) =
+let report_power_operator cursor ~(operator : Token.t) =
   Cursor.report cursor Power_operator operator.span
     "Truss has no power operator. Multiply, as in `x * x`, or call the type's own method for a \
      power."
 
-let short_declaration cursor ~(target : Syntax.expression) ~(operator : Token.t) =
+let report_short_declaration cursor ~(target : Syntax.expression) ~(operator : Token.t) =
   let message = "Truss has no `:=`. A new name is declared with `let name = value`." in
   match target.kind with
   | Name { modules = []; _ } ->
@@ -227,7 +227,7 @@ let pipe_operator cursor ~(value : Syntax.expression) ~(operator : Token.t)
     | Member (receiver, _) -> is_path receiver
     | _ -> false
   in
-  match if is_path callee then node_spelling cursor callee.id else None with
+  match if is_path callee then spell_node cursor callee.id else None with
   | Some callee_spelling ->
       let value = Cursor.read_file_span cursor value.id
       and callee = Cursor.read_file_span cursor callee.id in
@@ -238,14 +238,14 @@ let pipe_operator cursor ~(value : Syntax.expression) ~(operator : Token.t)
         ]
   | None -> Cursor.report cursor Pipe_operator operator.span message
 
-let lambda_annotation cursor ~from ~stop =
+let report_lambda_annotation cursor ~from ~stop =
   report cursor Lambda_annotation (Source.span from stop)
     "A lambda's parameters and result have no annotations. Their types are inferred from where the \
      lambda is passed."
     "Remove the annotation"
     [ Diagnostic.delete (Source.span from stop) ]
 
-let impl_parameters cursor ~(opening : Token.t) ~(closing : Token.t) ~has_bounds =
+let report_impl_parameters cursor ~(opening : Token.t) ~(closing : Token.t) ~has_bounds =
   let message =
     "An `impl` has no parameters of its own. The type after `for` declares them, with their \
      bounds: `impl Trait for Box[Item: Ordered]`."
@@ -256,8 +256,8 @@ let impl_parameters cursor ~(opening : Token.t) ~(closing : Token.t) ~has_bounds
     report cursor Impl_parameters opening.span message "Remove the parameters"
       [ Diagnostic.delete span ]
 
-let null_coalescing cursor ~(value : Syntax.expression) ~(first : Token.t) ~(second : Token.t)
-    ~(default : Syntax.expression) =
+let report_null_coalescing cursor ~(value : Syntax.expression) ~(first : Token.t)
+    ~(second : Token.t) ~(default : Syntax.expression) =
   let value_span = Cursor.read_file_span cursor value.id
   and default_span = Cursor.read_file_span cursor default.id in
   let needs_parentheses =
@@ -281,7 +281,7 @@ let null_coalescing cursor ~(value : Syntax.expression) ~(first : Token.t) ~(sec
         Diagnostic.insert (Source.zero_width default_span.stop) ")";
       ])
 
-let singular word =
+let singularize word =
   let length = String.length word in
   let ends suffix = String.ends_with ~suffix word in
   if length > 3 && ends "ies" then Some (String.sub word 0 (length - 3) ^ "y")
@@ -291,18 +291,18 @@ let singular word =
   then Some (String.sub word 0 (length - 1))
   else None
 
-let parameter_name (callee : Syntax.expression) =
+let derive_parameter_name (callee : Syntax.expression) =
   let receiver = match callee.kind with Member (receiver, _) -> Some receiver | _ -> None in
   let candidate =
     match receiver with
-    | Some { kind = Name { modules = []; last }; _ } -> singular last.text
+    | Some { kind = Name { modules = []; last }; _ } -> singularize last.text
     | _ -> None
   in
   match candidate with
-  | Some name when name <> "it" && Token.word name = None -> name
+  | Some name when name <> "it" && Token.find_word name = None -> name
   | _ -> "element"
 
-let trailing_lambda cursor ~(callee : Syntax.expression) ~parameter ~(opening : Token.t)
+let report_trailing_lambda cursor ~(callee : Syntax.expression) ~parameter ~(opening : Token.t)
     ~(closing : Token.t) ~(uses : Token.t list) =
   let callee_stop = (Cursor.read_file_span cursor callee.id).stop in
   report cursor Trailing_lambda opening.span
@@ -316,9 +316,9 @@ let trailing_lambda cursor ~(callee : Syntax.expression) ~parameter ~(opening : 
     :: Diagnostic.insert (Source.zero_width closing.span.stop) ")"
     :: List.map (fun (token : Token.t) -> Diagnostic.replace token.span parameter) uses)
 
-let as_conversion cursor ~(value : Syntax.expression) ~(as_token : Token.t)
+let report_as_conversion cursor ~(value : Syntax.expression) ~(as_token : Token.t)
     ~(target : Syntax.type_expression) =
-  match node_spelling cursor target.id with
+  match spell_node cursor target.id with
   | Some target_spelling ->
       let value = Cursor.read_file_span cursor value.id
       and target = Cursor.read_file_span cursor target.id in
@@ -342,17 +342,17 @@ let as_conversion cursor ~(value : Syntax.expression) ~(as_token : Token.t)
         "Truss has no `as`; call the target type's `from`, or its `try_from` when the conversion \
          can lose information."
 
-let elif cursor ~(previous_stop : int) ~(elif_token : Token.t) =
+let report_elif cursor ~(previous_stop : int) ~(elif_token : Token.t) =
   report cursor Elif elif_token.span "Truss writes `else if`, not `elif`." "Write `else if`"
     [ Diagnostic.replace (Source.span previous_stop elif_token.span.stop) " else if" ]
 
-let loop cursor ~(loop_token : Token.t) =
+let report_loop cursor ~(loop_token : Token.t) =
   report cursor Reserved_word loop_token.span "Truss has no `loop`; write `while true`."
     "Write `while true`"
     [ Diagnostic.replace loop_token.span "while true" ]
 
-let constant_keyword cursor ~(token : Token.t) ~reserved =
-  let word = Token.reserved_spelling reserved in
+let report_constant_keyword cursor ~(token : Token.t) ~reserved =
+  let word = Token.spell_reserved reserved in
   report cursor Reserved_word token.span
     (Printf.sprintf "Truss has no `%s`; a constant is a `let` at the top level." word)
     "Write `let`"

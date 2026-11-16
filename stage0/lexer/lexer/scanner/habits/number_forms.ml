@@ -39,7 +39,7 @@ let is_radix text = String.length text >= 2 && text.[0] = '0' && String.contains
 let is_hexadecimal text = is_radix text && Char.lowercase_ascii text.[1] = 'x'
 let is_hexadecimal_digit character = is_digit character || String.contains "abcdefABCDEF" character
 
-let span_of text position accepts =
+let measure_span text position accepts =
   let rec loop position =
     if position < String.length text && accepts text.[position] then loop (position + 1)
     else position
@@ -61,12 +61,12 @@ let scan_end text start =
   in
   let rec quoted stop =
     if stop + 1 < length && text.[stop] = '\'' && is_digit text.[stop + 1] then
-      quoted (Numbers.name_end text (stop + 1))
+      quoted (Numbers.compute_name_end text (stop + 1))
     else stop
   in
   let stop = if digits_only then quoted stop else stop in
   if is_hexadecimal literal then
-    let marker = span_of text (stop + 1) is_hexadecimal_digit in
+    let marker = measure_span text (stop + 1) is_hexadecimal_digit in
     let stop =
       if
         stop + 1 < length
@@ -74,20 +74,21 @@ let scan_end text start =
         && marker > stop + 1
         && marker < length
         && (text.[marker] = 'p' || text.[marker] = 'P')
-      then Numbers.name_end text (stop + 1)
+      then Numbers.compute_name_end text (stop + 1)
       else stop
     in
-    if sign_follows stop 'p' || sign_follows stop 'P' then Numbers.name_end text (stop + 1)
+    if sign_follows stop 'p' || sign_follows stop 'P' then Numbers.compute_name_end text (stop + 1)
     else stop
-  else if (not (is_radix literal)) && sign_follows stop 'E' then Numbers.name_end text (stop + 1)
+  else if (not (is_radix literal)) && sign_follows stop 'E' then
+    Numbers.compute_name_end text (stop + 1)
   else stop
 
-let number_end text =
+let compute_number_end text =
   if is_radix text then
-    span_of text 2 (fun character -> is_hexadecimal_digit character || character = '_')
+    measure_span text 2 (fun character -> is_hexadecimal_digit character || character = '_')
   else
     let digits position =
-      span_of text position (fun character -> is_digit character || character = '_')
+      measure_span text position (fun character -> is_digit character || character = '_')
     in
     let whole = digits 0 in
     let position =
@@ -103,7 +104,7 @@ let number_end text =
       if stop > digits_start then stop else position
     else position
 
-let rec foreign text : Numbers.checked option =
+let rec lex_foreign_number text : Numbers.checked option =
   let length = String.length text in
   let problem code message start stop = Some { Numbers.code; message; start; stop } in
   let translated code message start stop translation =
@@ -116,7 +117,7 @@ let rec foreign text : Numbers.checked option =
           (if checked.problem = None then [ ("Write `" ^ translation ^ "`", translation) ] else []);
       }
   in
-  let stop = number_end text in
+  let stop = compute_number_end text in
   let suffix = String.sub text stop (length - stop) in
   match String.index_opt text '\'' with
   | Some quote ->
@@ -179,13 +180,15 @@ let rec foreign text : Numbers.checked option =
               marker (marker + 1)
               (String.mapi (fun index character -> if index = marker then 'e' else character) text)
         | _ ->
-            let whole = span_of text 0 (fun character -> is_digit character || character = '_') in
+            let whole =
+              measure_span text 0 (fun character -> is_digit character || character = '_')
+            in
             let digits = String.concat "" (String.split_on_char '_' (String.sub text 0 whole)) in
             if is_radix text || String.length digits < 2 || digits.[0] <> '0' then None
             else
               let without_zeros =
                 let stripped =
-                  span_of text 0 (fun character -> character = '0' || character = '_')
+                  measure_span text 0 (fun character -> character = '0' || character = '_')
                 in
                 if stripped >= whole then "0" else String.sub text stripped (whole - stripped)
               in
@@ -222,9 +225,10 @@ let rec foreign text : Numbers.checked option =
                   fixes = alternatives;
                 })
 
-and check text = match foreign text with Some checked -> checked | None -> Numbers.check text
+and check text =
+  match lex_foreign_number text with Some checked -> checked | None -> Numbers.check text
 
-let trailing_point cursor ~start ~stop (checked : Numbers.checked) =
+let lex_trailing_point cursor ~start ~stop (checked : Numbers.checked) =
   match checked with
   | { value = Integer _; problem = None; _ }
     when Cursor.is_at cursor stop '.'
@@ -237,11 +241,11 @@ let trailing_point cursor ~start ~stop (checked : Numbers.checked) =
 let report_trailing_point (cursor : Cursor.t) ~start ~point =
   let written = String.sub cursor.text start (point + 1 - start) in
   Cursor.report cursor ~code:Number_missing_digits
-    ~fixes:(Cursor.code_fixes cursor (Cursor.span start (point + 1)) [ written ^ "0" ])
-    (Cursor.span point (point + 1))
+    ~fixes:(Cursor.list_code_fixes cursor (Source.span start (point + 1)) [ written ^ "0" ])
+    (Source.span point (point + 1))
     (Printf.sprintf "A float has a digit after its `.`: `%s0`." written)
 
-let leading_dot (cursor : Cursor.t) =
+let lex_leading_dot (cursor : Cursor.t) =
   let start = cursor.position in
   let stop = scan_end cursor.text (start + 1) in
   let written = String.sub cursor.text start (stop - start) in
@@ -253,12 +257,12 @@ let leading_dot (cursor : Cursor.t) =
       let fixes, message =
         match checked.problem with
         | None ->
-            ( Cursor.code_fixes cursor (Cursor.span start stop) [ fixed ],
+            ( Cursor.list_code_fixes cursor (Source.span start stop) [ fixed ],
               Printf.sprintf "A float has a digit before its `.`: `%s`." fixed )
         | Some _ -> ([], "A float has a digit before its `.`.")
       in
       Cursor.report cursor ~code:Number_missing_digits ~fixes
-        (Cursor.span start (start + 1))
+        (Source.span start (start + 1))
         message;
       Some checked.value
   | _ -> None

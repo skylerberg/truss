@@ -1,0 +1,6 @@
+fn shifted(flag: Bool, value: UInt64, by: UInt64) -> UInt64 {
+  if flag {
+    return value << by
+  }
+  0
+}

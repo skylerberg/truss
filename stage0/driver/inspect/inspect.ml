@@ -28,9 +28,9 @@ let unfinished (spans : Source.Definition_span.t array) (definition : Syntax.def
     | Todo -> add `Todo (Some value.id) spans.(value.id)
     | Echo _ -> add `Echo (Some value.id) spans.(value.id)
     | _ -> ());
-    Syntax_walk.children visit value
+    Syntax_walk.visit_children visit value
   in
-  Syntax_walk.definition visit definition;
+  Syntax_walk.visit_definition visit definition;
   (match definition.kind with
   | Type_definition { name; body = Type_todo; _ } -> add `Todo None spans.(name.id)
   | _ -> ());
@@ -130,10 +130,10 @@ let explain_at ~path (spans : Source.Definition_span.t array) (definition : Synt
       (match value.kind with
       | Name _ | Member _ | Call _ | Bracket _ -> innermost := Some value
       | _ -> if !innermost = None then innermost := Some value);
-      Syntax_walk.children visit value
+      Syntax_walk.visit_children visit value
     end
   in
-  Syntax_walk.definition visit definition;
+  Syntax_walk.visit_definition visit definition;
   let name_at =
     List.find_opt
       (fun (name : Syntax.name) -> contains spans.(name.id) offset)

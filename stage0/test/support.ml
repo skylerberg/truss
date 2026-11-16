@@ -16,6 +16,14 @@ let file_of text : Path.file =
       let module_ = module_of text in
       { module_; name = (match List.rev module_.modules with last :: _ -> last | [] -> "main") }
 
+let find_occurrence ~sub ~occurrence text =
+  let rec search start remaining =
+    match String.find_first ~sub ~start text with
+    | None -> failwith (Printf.sprintf "no occurrence %d of %S" occurrence sub)
+    | Some offset -> if remaining = 1 then offset else search (offset + 1) (remaining - 1)
+  in
+  search 0 occurrence
+
 let standard_package_database = lazy (Workspace.For_testing.load_standard_package_database ())
 let database packages = Database.create ~loaded:[ Lazy.force standard_package_database ] packages
 
@@ -141,7 +149,7 @@ let one_diagnostic ~check ?(setup = fun files -> setup files) ?(file = "app::mai
       if actual <> code then Harness.fail "expected %s, got %s: %s" code actual diagnostic.message;
       Option.iter
         (fun says ->
-          if not (Substring.contains diagnostic.message says) then
+          if not (String.includes ~affix:says diagnostic.message) then
             Harness.fail "expected a message that says %S, got: %s" says diagnostic.message)
         says;
       match (fixed, diagnostic.fixes) with

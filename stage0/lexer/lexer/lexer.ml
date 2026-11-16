@@ -2,7 +2,7 @@ let attempt source ~recovery =
   let diagnostics = Diagnostic.Collector.create () in
   let scanner = Scanner.create source diagnostics in
   let tokens, open_at_end =
-    Layout.file ~source ~diagnostics ~recovery (fun () -> Scanner.next scanner)
+    Layout.lex_file ~source ~diagnostics ~recovery (fun () -> Scanner.lex_next scanner)
   in
   (tokens, Diagnostic.Collector.to_list diagnostics, open_at_end)
 
@@ -21,11 +21,11 @@ let rec iter_names visit (tokens : Token.t array) =
       | String literal ->
           Array.iter
             (fun (interpolation : Token.interpolation) -> iter_names visit interpolation.tokens)
-            (Token.interpolations literal)
+            (Token.list_interpolations literal)
       | _ -> ())
     tokens
 
-let without_colliding_renames text (tokens : Token.t array) (diagnostics : Diagnostic.t list) =
+let remove_colliding_renames text (tokens : Token.t array) (diagnostics : Diagnostic.t list) =
   let written = Hashtbl.create 64 in
   iter_names (fun name -> Hashtbl.replace written name ()) tokens;
   let rename (diagnostic : Diagnostic.t) =
@@ -49,7 +49,7 @@ let without_colliding_renames text (tokens : Token.t array) (diagnostics : Diagn
 
 type placed = { original : Source.span; fixed_start : int; fixed_stop : int }
 
-let placed_edits (edits : Source.span Diagnostic.edit list) =
+let place_edits (edits : Source.span Diagnostic.edit list) =
   let sorted =
     List.stable_sort
       (fun (left : Source.span Diagnostic.edit) right -> compare left.span.start right.span.start)
@@ -66,7 +66,7 @@ let placed_edits (edits : Source.span Diagnostic.edit list) =
   in
   Array.of_list (List.rev placed)
 
-let original_offset (placed : placed array) ~is_stop offset =
+let map_original_offset (placed : placed array) ~is_stop offset =
   let starts_before (edit : placed) =
     if is_stop then edit.fixed_start < offset else edit.fixed_start <= offset
   in
@@ -84,11 +84,11 @@ let original_offset (placed : placed array) ~is_stop offset =
       else if is_stop then edit.original.stop
       else edit.original.start
 
-let rec original_token placed (token : Token.t) =
+let rec map_original_token placed (token : Token.t) =
   let span (span : Source.span) =
-    let stop = original_offset placed ~is_stop:true span.stop in
+    let stop = map_original_offset placed ~is_stop:true span.stop in
     if span.start = span.stop then Source.zero_width stop
-    else Source.span (original_offset placed ~is_stop:false span.start) stop
+    else Source.span (map_original_offset placed ~is_stop:false span.start) stop
   in
   let kind : Token.kind =
     match token.kind with
@@ -104,7 +104,7 @@ let rec original_token placed (token : Token.t) =
                 (fun ((interpolation : Token.interpolation), piece) ->
                   ( {
                       interpolation with
-                      tokens = Array.map (original_token placed) interpolation.tokens;
+                      tokens = Array.map (map_original_token placed) interpolation.tokens;
                       span = span interpolation.span;
                     },
                     text piece ))
@@ -114,9 +114,9 @@ let rec original_token placed (token : Token.t) =
   in
   { token with kind; span = span token.span }
 
-let to_original edits tokens = Array.map (original_token (placed_edits edits)) tokens
+let map_to_original edits tokens = Array.map (map_original_token (place_edits edits)) tokens
 
-let rec with_inserted_closers_marked (tokens : Token.t array) =
+let rec mark_inserted_closers (tokens : Token.t array) =
   Array.map
     (fun (token : Token.t) ->
       match token.kind with
@@ -132,10 +132,7 @@ let rec with_inserted_closers_marked (tokens : Token.t array) =
                   rest =
                     Array.map
                       (fun ((interpolation : Token.interpolation), text) ->
-                        ( {
-                            interpolation with
-                            tokens = with_inserted_closers_marked interpolation.tokens;
-                          },
+                        ( { interpolation with tokens = mark_inserted_closers interpolation.tokens },
                           text ))
                       literal.rest;
                 };
@@ -145,7 +142,7 @@ let rec with_inserted_closers_marked (tokens : Token.t array) =
 
 let lex source =
   let tokens, diagnostics = scan source in
-  let diagnostics = without_colliding_renames (Source.text source) tokens diagnostics in
+  let diagnostics = remove_colliding_renames (Source.text source) tokens diagnostics in
   let edits =
     List.concat_map
       (fun (diagnostic : Diagnostic.t) ->
@@ -153,16 +150,16 @@ let lex source =
       (Diagnostic.machine_applicable diagnostics)
   in
   match edits with
-  | [] -> (with_inserted_closers_marked tokens, diagnostics)
+  | [] -> (mark_inserted_closers tokens, diagnostics)
   | _ ->
       let fixed_tokens, _ =
         scan
           (Source.create ~path:(Source.path source)
              (Diagnostic.apply_edits (Source.text source) edits))
       in
-      (with_inserted_closers_marked (to_original edits fixed_tokens), diagnostics)
+      (mark_inserted_closers (map_to_original edits fixed_tokens), diagnostics)
 
 module For_testing = struct
   let scan = scan
-  let to_original = to_original
+  let to_original = map_to_original
 end

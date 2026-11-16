@@ -124,7 +124,9 @@ let collect context (mir : Mir.Graph.t) =
             match statement.kind with
             | Call { call; _ } | Lend { call; _ } | Slice { call; _ } | Template { call; _ } ->
                 record_mode_keywords call
-            | _ -> ())
+            | Assign _ | Live _ | Dead _ | Assert _ | Echo _ | Provide _ | Provide_end
+            | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ ->
+                ())
           block.statements)
       body.blocks
   in

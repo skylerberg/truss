@@ -178,8 +178,8 @@ let equal_punctuation (first : punctuation) (second : punctuation) =
   | (Open _ | Close _), _ | _, (Open _ | Close _) -> false
   | _ -> first == second
 
-let texts literal = Array.append [| literal.first |] (Array.map snd literal.rest)
-let interpolations literal = Array.map fst literal.rest
+let list_texts literal = Array.append [| literal.first |] (Array.map snd literal.rest)
+let list_interpolations literal = Array.map fst literal.rest
 
 let keywords =
   [
@@ -322,14 +322,14 @@ let words : (string, kind) Hashtbl.t =
     reserved_words;
   table
 
-let word spelling = Hashtbl.find_opt words spelling
-let spelling_of list value = fst (List.find (fun (_, candidate) -> candidate = value) list)
-let keyword_spelling = spelling_of keywords
-let reserved_spelling = spelling_of reserved_words
-let punctuation_spelling = spelling_of punctuation
-let foreign_spelling = spelling_of foreign_sequences
+let find_word spelling = Hashtbl.find_opt words spelling
+let lookup_spelling list value = fst (List.find (fun (_, candidate) -> candidate = value) list)
+let spell_keyword = lookup_spelling keywords
+let spell_reserved = lookup_spelling reserved_words
+let spell_punctuation = lookup_spelling punctuation
+let spell_foreign = lookup_spelling foreign_sequences
 
-let escaped text =
+let escape text =
   let buffer = Buffer.create (String.length text) in
   String.iteri
     (fun index character ->
@@ -348,7 +348,7 @@ let escaped text =
     text;
   Buffer.contents buffer
 
-let rec spelling ?(insertions = []) (tokens : t array) =
+let rec spell_tokens ?(insertions = []) (tokens : t array) =
   let inserted offset =
     String.concat ""
       (List.filter_map (fun (at, text) -> if at = offset then Some text else None) insertions)
@@ -364,7 +364,7 @@ let rec spelling ?(insertions = []) (tokens : t array) =
       match token.kind with
       | End_of_file -> spell (index + 1) previous_stop
       | kind -> (
-          match if token.is_inserted_closer then None else kind_spelling kind with
+          match if token.is_inserted_closer then None else spell_kind kind with
           | None -> false
           | Some text ->
               (match previous_stop with
@@ -380,28 +380,28 @@ let rec spelling ?(insertions = []) (tokens : t array) =
   in
   if spell 0 None then Some (Buffer.contents buffer) else None
 
-and kind_spelling = function
+and spell_kind = function
   | Upper name | Lower name -> Some name
   | Underscore -> Some "_"
-  | Keyword keyword -> Some (keyword_spelling keyword)
-  | Reserved reserved -> Some (reserved_spelling reserved)
+  | Keyword keyword -> Some (spell_keyword keyword)
+  | Reserved reserved -> Some (spell_reserved reserved)
   | Integer value -> Some (Z.to_string value)
   | Float { Decimal.significand; exponent } ->
       Some (Z.to_string significand ^ "e" ^ Z.to_string exponent)
-  | String literal -> string_spelling literal
-  | Punctuation punctuation -> Some (punctuation_spelling punctuation)
-  | Foreign foreign -> Some (foreign_spelling foreign)
+  | String literal -> spell_string literal
+  | Punctuation punctuation -> Some (spell_punctuation punctuation)
+  | Foreign foreign -> Some (spell_foreign foreign)
   | Newline | End_of_file -> None
 
-and string_spelling literal =
+and spell_string literal =
   let pieces =
     Array.to_list
       (Array.map
          (fun ((interpolation : interpolation), (text : text)) ->
            if interpolation.is_closed then
              Option.map
-               (fun inner -> "${" ^ inner ^ "}" ^ escaped text.value)
-               (spelling interpolation.tokens)
+               (fun inner -> "${" ^ inner ^ "}" ^ escape text.value)
+               (spell_tokens interpolation.tokens)
            else None)
          literal.rest)
   in
@@ -409,7 +409,7 @@ and string_spelling literal =
   else
     let tag = match literal.tag with Some (tag, _) -> tag | None -> "" in
     Some
-      (tag ^ "\"" ^ escaped literal.first.value
+      (tag ^ "\"" ^ escape literal.first.value
       ^ String.concat "" (List.filter_map Fun.id pieces)
       ^ "\"")
 

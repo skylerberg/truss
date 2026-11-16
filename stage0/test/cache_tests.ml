@@ -192,15 +192,13 @@ let () =
   Harness.test
     "with HOME unset, the default cache is in the home directory of the user's account, not in the \
      shared temporary directory" (fun () ->
-      Harness.with_environment
-        [ ("TRUSS_CACHE", ""); ("XDG_CACHE_HOME", ""); ("HOME", "") ]
-        (fun () ->
-          match Cache.default_directory () with
-          | Ok directory ->
-              Harness.expect_string
-                ~expected:
-                  (Filename.concat
-                     (Filename.concat (Unix.getpwuid (Unix.getuid ())).pw_dir ".cache")
-                     "truss")
-                directory
-          | Error message -> Harness.fail "%s" message))
+      List.iter Unix.unsetenv [ "TRUSS_CACHE"; "XDG_CACHE_HOME"; "HOME" ];
+      match Cache.default_directory () with
+      | Ok directory ->
+          Harness.expect_string
+            ~expected:
+              (Filename.concat
+                 (Filename.concat (Unix.getpwuid (Unix.getuid ())).pw_dir ".cache")
+                 "truss")
+            directory
+      | Error message -> Harness.fail "%s" message)

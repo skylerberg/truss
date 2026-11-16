@@ -133,14 +133,11 @@ let () =
     (fun () -> expect_threaded ~expected:"total 1400\n" Fixtures.Concurrent.lengths_of_owned_items)
 
 let expect_with_each_thread_count ~expected text =
-  Fun.protect
-    ~finally:(fun () -> Unix.putenv "TRUSS_WORKERS" "")
-    (fun () ->
-      List.iter
-        (fun workers ->
-          Unix.putenv "TRUSS_WORKERS" (string_of_int workers);
-          expect_threaded ~expected text)
-        Codegen_support.worker_counts)
+  List.iter
+    (fun workers ->
+      Unix.putenv "TRUSS_WORKERS" (string_of_int workers);
+      expect_threaded ~expected text)
+    Codegen_support.worker_counts
 
 let tally = Fixtures.Concurrent.tally
 
@@ -191,12 +188,9 @@ let () =
         ~expected:"captured 110890 and 110890\ncaptured from many\nechoed 262144\n"
         (child_lines ^ Fixtures.Concurrent.child_pipe_echo_tasks));
   Codegen_support.test "on one worker, both of a child's outputs are captured whole" (fun () ->
-      Fun.protect
-        ~finally:(fun () -> Unix.putenv "TRUSS_WORKERS" "")
-        (fun () ->
-          Unix.putenv "TRUSS_WORKERS" "1";
-          expect_threaded ~expected:"captured 110890 and 110890\n"
-            (child_lines ^ Fixtures.Concurrent.child_outputs_captured)))
+      Unix.putenv "TRUSS_WORKERS" "1";
+      expect_threaded ~expected:"captured 110890 and 110890\n"
+        (child_lines ^ Fixtures.Concurrent.child_outputs_captured))
 
 let () =
   Codegen_support.test

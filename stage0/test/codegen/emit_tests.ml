@@ -286,7 +286,7 @@ let () =
   Codegen_support.test "a mut parameter is a restrict pointer in C" (fun () ->
       let c_file = c_file (Codegen_support.shape_env ()) [ (bump, External) ] in
       let expected = "void t_test__bump(int32_t *restrict l0_count)" in
-      if not (Codegen_support.contains c_file expected) then
+      if not (String.includes ~affix:expected c_file) then
         Codegen_support.fail "no %S in:\n%s" expected c_file);
   let callback =
     ({ parameters = [ (Read, Codegen_support.int32) ]; result = Codegen_support.int32; uses = [] }
@@ -497,9 +497,9 @@ let () =
         c_file (Codegen_support.shape_env ()) [ (caller, External); (callee, Internal) ]
       in
       let copy = "static inline int32_t t_test__callee(int32_t l0) {" in
-      if not (Codegen_support.contains c_file copy) then
+      if not (String.includes ~affix:copy c_file) then
         Codegen_support.fail "no %S in:\n%s" copy c_file;
-      if Codegen_support.contains c_file "\nint32_t t_test__callee(int32_t);" then
+      if String.includes ~affix:"\nint32_t t_test__callee(int32_t);" c_file then
         Codegen_support.fail "the callee is also declared as another file's:\n%s" c_file);
   Codegen_support.test "the C checks each type's size and alignment against its layout" (fun () ->
       let pair_shape =
@@ -539,7 +539,7 @@ let () =
       let expected =
         "_Static_assert(sizeof(t_test__Pair) == 16 && _Alignof(t_test__Pair) == 8, \"layout\");"
       in
-      if not (Codegen_support.contains c_file expected) then
+      if not (String.includes ~affix:expected c_file) then
         Codegen_support.fail "no %S in:\n%s" expected c_file);
   Codegen_support.test "emitting the same instances twice gives the same C" (fun () ->
       let instances = [ (bump, Emit_c.External) ] in
@@ -574,12 +574,12 @@ let () =
       let c_file = c_file (Codegen_support.shape_env ()) [ (entry, External) ] in
       List.iter
         (fun name ->
-          if not (Codegen_support.contains c_file name) then
+          if not (String.includes ~affix:name c_file) then
             Codegen_support.fail "no %s in:\n%s" name c_file)
         [ "l1_late"; "l2_early" ];
       List.iter
         (fun name ->
-          if Codegen_support.contains c_file name then Codegen_support.fail "%s in:\n%s" name c_file)
+          if String.includes ~affix:name c_file then Codegen_support.fail "%s in:\n%s" name c_file)
         [ "l0_unused"; "l3_dead"; "b3:" ]);
   ()
 
@@ -1212,7 +1212,7 @@ let () =
                   status);
             ]
         in
-        if status <> 101 || not (Codegen_support.contains errors saying) then
+        if status <> 101 || not (String.includes ~affix:saying errors) then
           Codegen_support.fail "expected a panic saying %S, got status %d (%s)" saying status errors
       in
       let index = "index out of bounds" and slice = "slice out of bounds" in

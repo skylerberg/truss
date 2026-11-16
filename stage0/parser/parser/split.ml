@@ -16,7 +16,7 @@ let stop (tokens : Token.t array) ~first =
   in
   scan first 0
 
-let pieces (tokens : Token.t array) =
+let split_pieces (tokens : Token.t array) =
   let rec collect index pieces =
     if index >= Array.length tokens then List.rev pieces
     else

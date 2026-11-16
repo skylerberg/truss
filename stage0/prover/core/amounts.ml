@@ -273,17 +273,13 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
           | Unknown_allocations, _, _ -> Operations.declare_unknown_amount context frame counter)
       | Calls _ -> Costs.zero)
   | Capability_method { capability; name } -> (
-      let direct =
-        match counter.resource with
-        | Calls (Capability path) when Path.equal path capability -> Logic.int 1
-        | Calls (Capability_method (path, method_))
-          when Path.equal path capability && method_ = name ->
-            Logic.int 1
-        | _ -> Costs.zero
-      in
       match counter.resource with
-      | Calls _ -> direct
-      | _ -> (
+      | Calls (Capability path) when Path.equal path capability -> Logic.int 1
+      | Calls (Capability_method (path, method_)) when Path.equal path capability && method_ = name
+        ->
+          Logic.int 1
+      | Calls (Capability _ | Capability_method _ | Through _) -> Costs.zero
+      | Time | Allocations | Allocated_bytes -> (
           match Contracts.find_capability_part context.lookups capability name with
           | Some part ->
               let inside =
@@ -309,7 +305,8 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
                (invocation.uses :> Types.capability list)
                values target)
             (Operations.declare_unknown_amount context frame counter)
-      | _ -> Operations.declare_unknown_amount context frame counter)
+      | Time | Allocations | Allocated_bytes ->
+          Operations.declare_unknown_amount context frame counter)
 
 let declare_held_symbol context ty term =
   let symbol = Logic.Symbol.Potential ty in

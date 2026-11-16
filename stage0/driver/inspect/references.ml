@@ -28,9 +28,9 @@ let member_targets (tables : Infer.tables) (definition : Syntax.definition) =
         | Some (Global { path = (Method _ | Member_constant _) as path; _ }) -> add name path
         | _ -> ())
     | _ -> ());
-    Syntax_walk.children visit expression
+    Syntax_walk.visit_children visit expression
   in
-  Syntax_walk.definition visit definition;
+  Syntax_walk.visit_definition visit definition;
   !members
 
 let occurrences ~(path : Path.t) (spans : Source.Definition_span.t array)

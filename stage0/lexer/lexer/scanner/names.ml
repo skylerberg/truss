@@ -10,7 +10,7 @@ type checked = {
 let is_upper character = character >= 'A' && character <= 'Z'
 let is_lower character = character >= 'a' && character <= 'z'
 
-let kind_of name =
+let classify_name name =
   match
     String.fold_left
       (fun first character ->
@@ -20,7 +20,7 @@ let kind_of name =
   | Some first when is_upper first -> Upper
   | _ -> Lower
 
-let parts name = List.filter (fun part -> part <> "") (String.split_on_char '_' name)
+let split_name name = List.filter (fun part -> part <> "") (String.split_on_char '_' name)
 
 let to_snake name =
   let length = String.length name in
@@ -40,25 +40,25 @@ let to_snake name =
       end
       else Buffer.add_char buffer character)
     name;
-  String.concat "_" (parts (Buffer.contents buffer))
+  String.concat "_" (split_name (Buffer.contents buffer))
 
 let to_camel name =
   String.concat ""
     (List.mapi
        (fun index part -> if index = 0 then part else String.capitalize_ascii part)
-       (parts name))
+       (split_name name))
 
 let correct_case name =
-  match parts name with
+  match split_name name with
   | [] -> name
   | first :: _ when is_upper first.[0] ->
       if not (String.contains name '_') then name
       else if not (String.exists is_lower name) then
-        String.lowercase_ascii (String.concat "_" (parts name))
+        String.lowercase_ascii (String.concat "_" (split_name name))
       else to_camel name
   | _ -> to_snake name
 
-let case_problem name =
+let find_case_problem name =
   let length = String.length name in
   let rec has_double_underscore index =
     index + 1 < length
@@ -66,7 +66,7 @@ let case_problem name =
   in
   let message =
     if length > 0 && name.[0] = '_' then Some "Names cannot start with `_`."
-    else if kind_of name = Upper then
+    else if classify_name name = Upper then
       if not (String.contains name '_') then None
       else if not (String.exists is_lower name) then
         Some
@@ -85,7 +85,7 @@ let case_problem name =
   in
   Option.map (fun message -> (Diagnostic.Code.Name_case, message)) message
 
-let first_non_ascii name =
+let find_first_non_ascii name =
   let rec find index =
     if index >= String.length name then None
     else if Char.code name.[index] >= 0x80 then
@@ -99,10 +99,10 @@ let first_non_ascii name =
   find 0
 
 let check name =
-  match first_non_ascii name with
+  match find_first_non_ascii name with
   | Some character ->
       {
-        kind = kind_of name;
+        kind = classify_name name;
         name;
         problem =
           Some
@@ -114,17 +114,17 @@ let check name =
         fix = None;
       }
   | None -> (
-      match case_problem name with
-      | None -> { kind = kind_of name; name; problem = None; fix = None }
+      match find_case_problem name with
+      | None -> { kind = classify_name name; name; problem = None; fix = None }
       | Some problem ->
           let corrected = correct_case name in
           let fix =
             if
               corrected <> name && corrected <> ""
               && (is_upper corrected.[0] || is_lower corrected.[0])
-              && case_problem corrected = None
-              && Token.word corrected = None
+              && find_case_problem corrected = None
+              && Token.find_word corrected = None
             then Some corrected
             else None
           in
-          { kind = kind_of name; name; problem = Some problem; fix })
+          { kind = classify_name name; name; problem = Some problem; fix })
