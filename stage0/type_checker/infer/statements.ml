@@ -175,8 +175,8 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
                   (State.add_mismatch_diagnostic state Mismatch
                      (State.read_span state written_annotation.id)
                      ~sides:[ (element, annotated) ]
-                     (Printf.sprintf "The elements of this loop are `%s`, not `%s`."
-                        (State.show state element) (State.show state annotated)))
+                     (Printf.sprintf "Each element of this loop is %s, not %s."
+                        (State.describe state element) (State.describe state annotated)))
           | None -> (
               match written_pattern.kind with
               | Binding name -> Hashtbl.replace state.annotatable name.id ()
@@ -395,9 +395,9 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
                   (match mode with
                   | Types.Read ->
                       Printf.sprintf
-                        "A `for` loop cannot go over `%s`: it is not a `Cursor`, and it has no \
+                        "A `for` loop cannot go over %s: it is not a `Cursor`, and it has no \
                          `count` and `element` to visit it by position."
-                        (Types.show type_)
+                        (Types.describe type_)
                   | Mut ->
                       Printf.sprintf
                         "A `for` loop cannot mutate the elements of `%s`: it has no `element` that \

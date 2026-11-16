@@ -174,6 +174,7 @@ val find_head : state -> Syntax.expression -> Resolve.head option
 val is_variant_name : Syntax.name -> bool
 val is_member_constant : state -> Syntax.expression -> bool
 val show : state -> Types.ty -> string
+val describe : state -> Types.ty -> string
 
 val add_mismatch_diagnostic :
   state ->

@@ -180,7 +180,7 @@ and check_prefix state env ?expected (value : Syntax.expression) operator
       then type_
       else
         State.make_error_type state No_impl (State.read_span state value.id)
-          (Printf.sprintf "`~` works on built-in integers, not `%s`." (State.show state type_))
+          (Printf.sprintf "`~` works on built-in integers, not %s." (State.describe state type_))
   | Negate -> (
       match inner.kind with
       | Integer number ->

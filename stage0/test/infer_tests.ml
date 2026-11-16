@@ -186,7 +186,7 @@ let () =
       expect_fine Fixtures.Infer.loop_annotating_a_destructured_element);
   Harness.test "a loop's annotation must be its element type" (fun () ->
       expect_one_diagnostic Fixtures.Infer.loop_over_uint16s_annotated_uint8 "types.mismatch"
-        ~says:"The elements of this loop are `UInt16`, not `UInt8`.");
+        ~says:"Each element of this loop is `UInt16`, not `UInt8`.");
   Harness.test
     "a loop variable given its default type by a method call has a fix that annotates the loop"
     (fun () ->
@@ -934,7 +934,8 @@ let () =
   Harness.test "a pattern that does not fit its type still gives its bindings a type" (fun () ->
       expect_one_diagnostic Fixtures.Infer.some_pattern_on_an_integer "types.unknown_variant");
   Harness.test "a `todo` that nothing decides keeps the hole type in the tables" (fun () ->
-      expect_type Fixtures.Infer.let_of_todo "todo" "an undecided type")
+      let value, (result : Infer.checked) = locate_expression Fixtures.Infer.let_of_todo "todo" 1 in
+      if result.tables.types.(value.id) <> Some Types.Hole then Harness.fail "not the hole type")
 
 let shape = Fixtures.Infer.shape
 let source = Fixtures.Infer.source

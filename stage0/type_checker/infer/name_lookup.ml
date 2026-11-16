@@ -178,7 +178,9 @@ and check_field state (value : Syntax.expression) base_type (member : Syntax.nam
                 [ State.replace (State.read_span state member.id) candidate ];
             ]
         | None -> [])
-      (Printf.sprintf "`%s` has no field `%s`." (State.show state base_type) member.text)
+      (Printf.sprintf "%s has no field `%s`."
+         (String.capitalize_ascii (State.describe state base_type))
+         member.text)
   in
   match base_type with
   | Types.Named { path; arguments } -> (
