@@ -45,7 +45,7 @@ type t =
   | Used_packages of Resolve.Names.key
   | Import_check of Path.file
   | Package_check of Path.package * Package_checks.check
-  | Successors of Path.t * Path.package
+  | Callees of Path.t * Path.package
   | Recursion_group of Path.t
   | Proof of Resolve.Names.key
   | Folded_constants of Path.t
@@ -66,7 +66,7 @@ let package_of_definition = function
   | Impls_of_trait (package, _)
   | Grant (package, _)
   | Package_check (package, _)
-  | Successors (_, package) ->
+  | Callees (_, package) ->
       package
   | Entry (module_, _) | Entries module_ | Module_declarations module_ -> module_.package
   | Imports key
@@ -199,8 +199,8 @@ let show part =
         | Instantiations -> "instantiations"
         | Tests -> "tests"
         | Dependencies -> "dependencies")
-  | Successors (path, package) ->
-      Printf.sprintf "successors %s %s" (Path.show_package package) (Path.show path)
+  | Callees (path, package) ->
+      Printf.sprintf "callees %s %s" (Path.show_package package) (Path.show path)
   | Recursion_group path -> "recursion group " ^ Path.show path
   | Proof declared -> "proof " ^ key declared
   | Folded_constants path -> "folded constants " ^ Path.show path
@@ -266,7 +266,7 @@ let definition = function
   | Derived_form path
   | Generated_mir path
   | Call_edges path
-  | Successors (path, _)
+  | Callees (path, _)
   | Recursion_group path ->
       Some path
   | Folded_constants path -> Some path
@@ -319,7 +319,7 @@ let kind_name = function
   | Used_packages _ -> "used packages"
   | Import_check _ -> "import check"
   | Package_check _ -> "package check"
-  | Successors _ -> "successors"
+  | Callees _ -> "callees"
   | Recursion_group _ -> "recursion group"
   | Proof _ -> "proof"
   | Folded_constants _ -> "folded constants"

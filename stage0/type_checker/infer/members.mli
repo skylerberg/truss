@@ -1,4 +1,3 @@
-val visible_packages : Lookups.t -> Path.package -> Path.package list
 val own_methods : Lookups.t -> Path.t -> string -> (Path.receiver * Path.t) list
 val own_constant : Lookups.t -> Path.t -> string -> Path.t option
 val trait_methods : Lookups.t -> Path.t -> string -> Types.trait_method list

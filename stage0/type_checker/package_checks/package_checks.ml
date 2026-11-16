@@ -517,16 +517,6 @@ let check_tests (lookups : Lookups.t) (package : Path.package) =
          else (name :: seen, diagnostics))
        ([], []) tests)
 
-let visible_packages (lookups : Lookups.t) package =
-  let dependency_names = lookups.interface.names.dependency_names in
-  let rec packages seen = function
-    | [] -> seen
-    | name :: rest when List.mem name seen -> packages seen rest
-    | name :: rest -> packages (name :: seen) (dependency_names name @ rest)
-  in
-  let standard = if package = Path.standard_package then [] else [ Path.standard_package ] in
-  List.filter (fun name -> name <> package) (packages [] (standard @ dependency_names package))
-
 let check_overlaps (lookups : Lookups.t) (declaration : Names.declaration) spans definition
     (impl : Types.impl_interface) =
   let package = declaration.module_.package in
@@ -554,7 +544,7 @@ let check_overlaps (lookups : Lookups.t) (declaration : Names.declaration) spans
             List.filter_map
               (Interface.Impls.impl_interface lookups.interface)
               (Interface.Impls.impls_in lookups.interface ~trait ~type_ name))
-          (visible_packages lookups package)
+          (Names.list_transitive_dependencies lookups.interface.names package)
       in
       List.filter_map
         (fun (other : Types.impl_interface) ->

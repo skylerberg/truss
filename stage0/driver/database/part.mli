@@ -45,7 +45,7 @@ type t =
   | Used_packages of Resolve.Names.key
   | Import_check of Path.file
   | Package_check of Path.package * Package_checks.check
-  | Successors of Path.t * Path.package
+  | Callees of Path.t * Path.package
   | Recursion_group of Path.t
   | Proof of Resolve.Names.key
   | Folded_constants of Path.t

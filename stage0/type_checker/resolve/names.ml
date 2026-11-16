@@ -118,12 +118,20 @@ type lookups = {
   law_proofs : Path.package -> law_proof_name -> key list;
 }
 
-let packages lookups (module_ : Path.module_) =
-  List.sort_uniq compare
-    (module_.package :: Path.standard_package :: lookups.dependency_names module_.package)
+let list_visible_packages lookups package =
+  List.sort_uniq compare (package :: Path.standard_package :: lookups.dependency_names package)
+
+let list_transitive_dependencies lookups package =
+  let rec close seen = function
+    | [] -> seen
+    | name :: rest when List.mem name seen -> close seen rest
+    | name :: rest -> close (name :: seen) (lookups.dependency_names name @ rest)
+  in
+  let standard = if package = Path.standard_package then [] else [ Path.standard_package ] in
+  List.filter (fun name -> name <> package) (close [] (standard @ lookups.dependency_names package))
 
 let full_module lookups ~(from : Path.module_) (names : string list) : Path.module_ =
-  let known = packages lookups from in
+  let known = list_visible_packages lookups from.package in
   match Path.split_module ~is_package:(fun package -> List.mem package known) names with
   | Some module_ -> module_
   | None -> (
@@ -135,9 +143,10 @@ let used_module lookups ~from (path : path) =
   full_module lookups ~from
     (List.map (fun (name : name) -> name.text) path.modules @ [ path.last.text ])
 
-let is_visible_module lookups ~from (module_ : Path.module_) =
+let is_visible_module lookups ~(from : Path.module_) (module_ : Path.module_) =
   module_ = Intrinsic.module_
-  || (List.mem module_.package (packages lookups from) && lookups.module_exists module_)
+  || List.mem module_.package (list_visible_packages lookups from.package)
+     && lookups.module_exists module_
 
 type module_lookup =
   | Found_module of Path.module_ * [ `Import of string | `Package ]

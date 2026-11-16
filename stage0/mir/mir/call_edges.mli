@@ -7,4 +7,4 @@ val impls_for : Interface.Lookups.t -> Path.package -> Path.t list -> Types.ty -
 val impls_used : Interface.Lookups.t -> Path.package -> 'a Core.target -> Path.t list
 val dispatched : 'a Core.target -> bool
 val of_path : lookups -> Path.t -> Path.t list
-val implementations : lookups -> visible:Path.package list -> Path.t -> Path.t list
+val list_implementations : lookups -> viewer:Path.package -> Path.t -> Path.t list
