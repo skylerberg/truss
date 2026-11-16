@@ -121,7 +121,7 @@ let name_package : name -> Path.package = function
       key.module_.package
   | Members (path, _) -> Path.package path
 
-let key = Resolve.Names.show_key
+let show_key = Resolve.Names.show_key
 
 let show_input = function
   | Source file -> "source " ^ Path.show_file file
@@ -132,13 +132,13 @@ let show_input = function
 let show_name = function
   | Entry (module_, name) -> Printf.sprintf "entry %s %s" (Path.show_module module_) name
   | Entries module_ -> "entries " ^ Path.show_module module_
-  | Imports declared -> "imports " ^ key declared
-  | Declaration declared -> "declaration " ^ key declared
-  | Tree declared -> "tree " ^ key declared
-  | Text declared -> "text " ^ key declared
-  | Place declared -> "place " ^ key declared
-  | Container declared -> "container " ^ key declared
-  | Contained declared -> "contained " ^ key declared
+  | Imports declared -> "imports " ^ show_key declared
+  | Declaration declared -> "declaration " ^ show_key declared
+  | Tree declared -> "tree " ^ show_key declared
+  | Text declared -> "text " ^ show_key declared
+  | Place declared -> "place " ^ show_key declared
+  | Container declared -> "container " ^ show_key declared
+  | Contained declared -> "contained " ^ show_key declared
   | Module_declarations module_ -> "module declarations " ^ Path.show_module module_
   | File_declarations file -> "file declarations " ^ Path.show_file file
   | Package_declarations package -> "package declarations " ^ Path.show_package package
@@ -163,41 +163,41 @@ let show_computed part =
   match part with
   | Parsed file -> "parsed " ^ Path.show_file file
   | Namespace package -> "namespace " ^ Path.show_package package
-  | Resolved (declared, part) -> Printf.sprintf "resolved %s %s" (section part) (key declared)
-  | Trait_header declared -> "trait header " ^ key declared
+  | Resolved (declared, part) -> Printf.sprintf "resolved %s %s" (section part) (show_key declared)
+  | Trait_header declared -> "trait header " ^ show_key declared
   | Constant_value path -> "constant value " ^ Path.show path
-  | Header declared -> "header " ^ key declared
-  | Interface declared -> "interface " ^ key declared
+  | Header declared -> "header " ^ show_key declared
+  | Interface declared -> "interface " ^ show_key declared
   | Derived_interface { type_; trait } ->
       "derived interface " ^ Path.show (Derived { type_; trait })
   | Type_facts path -> "type facts " ^ Path.show path
   | Grant (package, dependency) ->
       Printf.sprintf "grant %s %s" (Path.show_package package) (Path.show_package dependency)
-  | Signature_check declared -> "signature check " ^ key declared
-  | Contract declared -> "contract " ^ key declared
-  | Checked_body declared -> "checked body " ^ key declared
+  | Signature_check declared -> "signature check " ^ show_key declared
+  | Contract declared -> "contract " ^ show_key declared
+  | Checked_body declared -> "checked body " ^ show_key declared
   | Derived_form path -> "derived form " ^ Path.show path
-  | Body_mir declared -> "body mir " ^ key declared
-  | Contract_mir declared -> "contract mir " ^ key declared
+  | Body_mir declared -> "body mir " ^ show_key declared
+  | Contract_mir declared -> "contract mir " ^ show_key declared
   | Generated_mir path -> "generated mir " ^ Path.show path
   | Call_edges path -> "call edges " ^ Path.show path
-  | Patterns declared -> "patterns " ^ key declared
-  | Usage declared -> "usage " ^ key declared
-  | Ownership declared -> "ownership " ^ key declared
-  | Used_packages declared -> "used packages " ^ key declared
+  | Patterns declared -> "patterns " ^ show_key declared
+  | Usage declared -> "usage " ^ show_key declared
+  | Ownership declared -> "ownership " ^ show_key declared
+  | Used_packages declared -> "used packages " ^ show_key declared
   | Import_check file -> "import check " ^ Path.show_file file
   | Package_check (package, check) ->
       Printf.sprintf "package check %s %s" (Path.show_package package)
         (match check with
-        | Sealed declared -> "sealed " ^ key declared
-        | Impl declared -> "impl " ^ key declared
-        | Type declared -> "type " ^ key declared
+        | Sealed declared -> "sealed " ^ show_key declared
+        | Impl declared -> "impl " ^ show_key declared
+        | Type declared -> "type " ^ show_key declared
         | Instantiations -> "instantiations"
         | Tests -> "tests"
         | Dependencies -> "dependencies")
   | Callees (path, package) ->
       Printf.sprintf "callees %s %s" (Path.show_package package) (Path.show path)
-  | Proof declared -> "proof " ^ key declared
+  | Proof declared -> "proof " ^ show_key declared
   | Lowering (Folded_constants path) -> "folded constants " ^ Path.show path
   | Lowering (Lowered instance) -> "lowered " ^ Instance.to_string instance
   | Lowering (Test_key instance) -> "test key " ^ Instance.to_string instance

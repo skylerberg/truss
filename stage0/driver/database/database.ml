@@ -970,10 +970,6 @@ let stored database (part : Part.stored) =
           Instance_table.replace (select database) instance (Marshal.from_string bytes 0));
     }
   in
-  let unsaved () =
-    Compiler_bug.bug ~stage:"Database" "%s is computed when a database opens, not saved"
-      (Part.show (Stored part))
-  in
   match part with
   | Recursion_group path ->
       at_path ~is_failed:failed (fun package_database -> package_database.recursion_groups) path
@@ -986,8 +982,8 @@ let stored database (part : Part.stored) =
             remove = (fun () -> package_database.namespace <- None);
             is_equal_in =
               (fun other -> compare (owner other package).namespace package_database.namespace = 0);
-            saved = unsaved;
-            restore = (fun _ -> unsaved ());
+            saved = (fun () -> None);
+            restore = ignore;
           }
       | Resolved (key, section) ->
           keyed ~is_failed:failed
