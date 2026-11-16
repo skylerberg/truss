@@ -1,11 +1,11 @@
-let bug format = Compiler_bug.bug ~stage:"Writing" format
+let raise_bug format = Compiler_bug.raise_bug ~stage:"Writing" format
 let output_ty = Storage.make_storage_type (Ground.make_builtin UInt8)
 let bytes_ty = Storage.make_view_type (Ground.make_builtin UInt8)
 
 let make_output_parameter env =
   match Convention.classify_parameter env Mut output_ty with
   | Some parameter -> parameter
-  | None -> bug "storage of no size"
+  | None -> raise_bug "storage of no size"
 
 let make_value_parameter ty = Lowered.Pointer { target = Value ty; writable = false }
 
@@ -17,7 +17,7 @@ let emit_write_call env builder ~output (writer : Well_known.t) ty (place : Lowe
     match Convention.classify_parameter env Read ty with
     | Some (Pointer _ as parameter) -> (parameter, Lowered.Address { place; writable = false })
     | Some parameter -> (parameter, Copy place)
-    | None -> bug "%s is written, and has no size" (Ground.to_string ty)
+    | None -> raise_bug "%s is written, and has no size" (Ground.to_string ty)
   in
   Emit_c.Builder.emit builder
     (Call

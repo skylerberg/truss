@@ -617,7 +617,7 @@ let own_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
     match next with
     | Trait_method { trait; evidence = Impl _ as evidence; _ } -> (trait, evidence)
     | _ ->
-        Facts.unsupported location "a loop over `%s`, whose `Cursor` the prover cannot find"
+        Facts.raise_unsupported location "a loop over `%s`, whose `Cursor` the prover cannot find"
           (Types.show cursor_type)
   in
   let impl, impl_arguments =
@@ -628,13 +628,13 @@ let own_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
             (fun (parameter, argument) ->
               (parameter, Types.substitute_argument frame.substitution argument))
             arguments )
-    | _ -> Facts.bug "a cursor's evidence is not an impl"
+    | _ -> Facts.raise_bug "a cursor's evidence is not an impl"
   in
   let contract =
     match Contracts.method_contract context.lookups trait "next" Mut evidence with
     | Some contract -> contract
     | None ->
-        Facts.unsupported location "a loop over `%s`, whose `next` the prover cannot read"
+        Facts.raise_unsupported location "a loop over `%s`, whose `next` the prover cannot read"
           (Types.show cursor_type)
   in
   let path = Path.Method { owner = impl; name = "next"; receiver = Mut } in

@@ -252,7 +252,8 @@ let quantified_over (context : State.context) (frame : State.frame) (quantifier 
             match model with
             | Some model -> model
             | None ->
-                Facts.unsupported location "a quantifier over `%s`" (Types.show collection_type)
+                Facts.raise_unsupported location "a quantifier over `%s`"
+                  (Types.show collection_type)
           in
           let matched, inner = bind inner each element in
           make symbol
@@ -282,8 +283,10 @@ let quantified_over (context : State.context) (frame : State.frame) (quantifier 
                       &&& matched)
                     inner element_value
               | None ->
-                  Facts.unsupported location "a quantifier over `%s`" (Types.show collection_type))
-          | None -> Facts.unsupported location "a quantifier over `%s`" (Types.show collection_type)
+                  Facts.raise_unsupported location "a quantifier over `%s`"
+                    (Types.show collection_type))
+          | None ->
+              Facts.raise_unsupported location "a quantifier over `%s`" (Types.show collection_type)
           ))
 
 let rec make_value_term context (frame : State.frame) (value : Types.value) =

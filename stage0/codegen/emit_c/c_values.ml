@@ -72,7 +72,7 @@ let render_block_pointer context text sum variant =
   match (C_types.compute_layout context sum).form with
   | Tagged _ -> text ^ ".payload.v_" ^ variant
   | Niche_encoded _ -> text
-  | _ -> C_runtime.bug "a block of %s, which is not a sum type" (Ground.to_string sum)
+  | _ -> C_runtime.raise_bug "a block of %s, which is not a sum type" (Ground.to_string sum)
 
 let rec render_place context fc (place : Lowered.place) : (string * Lowered.ty) option =
   let root =
@@ -99,7 +99,7 @@ let rec render_place context fc (place : Lowered.place) : (string * Lowered.ty) 
           ^ ".f_" ^ field
     | Index index, Value _ -> text ^ ".items[" ^ render_operand_exn context fc index ^ "]"
     | Index index, _ -> text ^ "[" ^ render_operand_exn context fc index ^ "]"
-    | Variant_field _, _ -> C_runtime.bug "a variant of a place that is not a value"
+    | Variant_field _, _ -> C_runtime.raise_bug "a variant of a place that is not a value"
   in
   let projected (ty : Lowered.ty) (projection : Lowered.projection) =
     Lowered.find_projection_type context.env ~environment:(list_environment context fc) ty
@@ -125,11 +125,11 @@ and render_address context fc (place : Lowered.place) ~writable =
         | _ -> "(&" ^ text ^ ")"
       in
       Some (text, pointer)
-  | None -> C_runtime.bug "the address of a place of zero size"
+  | None -> C_runtime.raise_bug "the address of a place of zero size"
 
 and render_operand context fc : Lowered.operand -> (string * Lowered.ty) option = function
   | Move { root = Static { key; _ }; _ } | Moved_address { root = Static { key; _ }; _ } ->
-      C_runtime.bug "a move out of %s, which is static data" (Instance.to_string key)
+      C_runtime.raise_bug "a move out of %s, which is static data" (Instance.to_string key)
   | Copy place | Move place -> render_place context fc place
   | Address { place; writable } -> render_address context fc place ~writable
   | Moved_address place -> render_address context fc place ~writable:true
@@ -138,7 +138,7 @@ and render_operand context fc : Lowered.operand -> (string * Lowered.ty) option 
 and render_operand_exn context fc operand =
   match render_operand context fc operand with
   | Some (text, _) -> text
-  | None -> C_runtime.bug "an operand of zero size"
+  | None -> C_runtime.raise_bug "an operand of zero size"
 
 and render_constant context : Lowered.constant -> string * Lowered.ty = function
   | Integer (integer, value) -> (render_integer_literal integer value, Raw (Integer integer))
@@ -170,10 +170,10 @@ let classify_scalar context : Lowered.ty -> Memory_layout.scalar = function
       match (C_types.compute_layout context ty).form with
       | Scalar scalar -> scalar
       | Tag_only { tag; _ } -> Integer tag
-      | _ -> C_runtime.bug "an operator on %s, which is not a scalar" (Ground.to_string ty))
+      | _ -> C_runtime.raise_bug "an operator on %s, which is not a scalar" (Ground.to_string ty))
   | Raw scalar -> scalar
   | Pointer _ | Environment _ | Evidence _ -> Pointer Opaque
-  | Lend | Lend_mark -> C_runtime.bug "an operator on a lend's record"
+  | Lend | Lend_mark -> C_runtime.raise_bug "an operator on a lend's record"
 
 let is_float : Memory_layout.scalar -> bool = function Float32 | Float64 -> true | _ -> false
 let compute_bit_width (scalar : Memory_layout.scalar) = 8 * Memory_layout.compute_scalar_size scalar
@@ -317,12 +317,12 @@ let build_laid_out_c context fc ty variant (values : (string * Lowered.operand) 
        | _ -> None
      in
      match names with
-     | None -> C_runtime.bug "a value of %s built as another type" (Ground.to_string ty)
+     | None -> C_runtime.raise_bug "a value of %s built as another type" (Ground.to_string ty)
      | Some names ->
          List.iter
            (fun (name, _) ->
              if not (List.mem name names) then
-               C_runtime.bug "a value of %s built with a field %s, which it does not have"
+               C_runtime.raise_bug "a value of %s built with a field %s, which it does not have"
                  (Ground.to_string ty) name)
            values);
   let block_of variant =
@@ -342,12 +342,12 @@ let build_laid_out_c context fc ty variant (values : (string * Lowered.operand) 
   | Some variant, Tag_only { variants; _ } -> (
       match List.find_index (String.equal variant) variants with
       | Some index -> Some (Expression (Printf.sprintf "((%s)%d)" c_type index))
-      | None -> C_runtime.bug "no variant %s" variant)
+      | None -> C_runtime.raise_bug "no variant %s" variant)
   | Some name, Tagged { variants; _ } -> (
       match
         List.find_opt (fun (candidate : Memory_layout.variant) -> candidate.name = name) variants
       with
-      | None -> C_runtime.bug "no variant %s" name
+      | None -> C_runtime.raise_bug "no variant %s" name
       | Some candidate -> (
           match candidate.payload.form with
           | Zero_size ->
@@ -369,7 +369,7 @@ let build_laid_out_c context fc ty variant (values : (string * Lowered.operand) 
                          Printf.sprintf "((%s){ .tag = %d, .payload.v_%s = %s })" c_type
                            candidate.index name pointer);
                    })
-          | _ -> C_runtime.bug "a payload"))
+          | _ -> C_runtime.raise_bug "a payload"))
   | Some name, Niche_encoded { dataful; dataless } ->
       if dataful.name = name then
         match dataful.payload.form with
@@ -381,12 +381,12 @@ let build_laid_out_c context fc ty variant (values : (string * Lowered.operand) 
         | Scalar (Pointer (Block _)) ->
             let block, fill = block_of name in
             Some (Allocating { block; fill; value = (fun pointer -> pointer) })
-        | _ -> C_runtime.bug "a payload"
+        | _ -> C_runtime.raise_bug "a payload"
       else
         begin match dataless with
         | Some { niche; niche_values } -> (
             match List.assoc_opt name niche_values with
-            | None -> C_runtime.bug "no variant %s" name
+            | None -> C_runtime.raise_bug "no variant %s" name
             | Some value -> (
                 let stored = render_niche_value context niche value in
                 match niche.path with
@@ -395,9 +395,9 @@ let build_laid_out_c context fc ty variant (values : (string * Lowered.operand) 
                     Some
                       (Expression
                          (Printf.sprintf "((%s){ %s = %s })" c_type (render_path "" path) stored))))
-        | None -> C_runtime.bug "no variant %s" name
+        | None -> C_runtime.raise_bug "no variant %s" name
         end
-  | _ -> C_runtime.bug "building %s" (Ground.to_string ty)
+  | _ -> C_runtime.raise_bug "building %s" (Ground.to_string ty)
 
 let render_prototype context current symbol ?names ~linkage (signature : Lowered.signature) =
   let result =
@@ -416,7 +416,7 @@ let render_rvalue context fc (target : Lowered.ty) (rvalue : Lowered.rvalue) : b
   let operand argument =
     match render_operand context fc argument with
     | Some expression -> expression
-    | None -> C_runtime.bug "an operand of zero size"
+    | None -> C_runtime.raise_bug "an operand of zero size"
   in
   match rvalue with
   | Use argument ->
@@ -434,13 +434,13 @@ let render_rvalue context fc (target : Lowered.ty) (rvalue : Lowered.rvalue) : b
   | Is_variant (place, variant) -> (
       match render_place context fc place with
       | Some (text, Value sum) -> Some (Expression (is_variant_c context text sum variant))
-      | Some _ -> C_runtime.bug "a variant test on a place that is not a value"
+      | Some _ -> C_runtime.raise_bug "a variant test on a place that is not a value"
       | None -> Some (Expression "((uint8_t)1)"))
   | Function_value { code; environment } ->
       let function_ =
         match target with
         | Value (Function function_) -> function_
-        | _ -> C_runtime.bug "a function value stored where no function goes"
+        | _ -> C_runtime.raise_bug "a function value stored where no function goes"
       in
       let symbol = render_function_ref_symbol fc code in
       (match code with

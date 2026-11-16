@@ -136,12 +136,12 @@ let make_constant_state (context : Definitions.context) path =
   let ({ source; form = mir } : Mir.Graph.t Mir.sourced) =
     match Mir.read_initializer_graph context.lookups.mir path with
     | Some graph -> graph
-    | None -> Definitions.bug "%s is not a constant" (Path.show path)
+    | None -> Definitions.raise_bug "%s is not a constant" (Path.show path)
   in
   let ty =
     match Interface.Definition.read_constant_type context.lookups.interface path with
     | Some ty -> Monomorphic.ground context.monomorphic [] ty
-    | None -> Definitions.bug "%s has no type" (Path.show path)
+    | None -> Definitions.raise_bug "%s has no type" (Path.show path)
   in
   let code =
     {
@@ -336,7 +336,7 @@ let write_output (st : Lowering.state) output =
   let result =
     match signature.output with
     | Returns ty -> Monomorphic.ground st.context.monomorphic [] ty
-    | Lends _ -> Definitions.bug "write_fully does not return"
+    | Lends _ -> Definitions.raise_bug "write_fully does not return"
   in
   Targets.lower_instance_call st
     (Code { path = write_fully; type_arguments = [] })
@@ -348,7 +348,7 @@ let write_output (st : Lowering.state) output =
 let build_evaluator context path : Emit_c.Builder.instance =
   let st, mir, ty = make_constant_state context path in
   Emit_c.Builder.start st.builder (Emit_c.Builder.allocate_block st.builder);
-  Lowering.in_scope st (fun () ->
+  Lowering.run_in_scope st (fun () ->
       let place = Lowering.allocate_temporary st ty in
       Mir_form.lower_mir_into st mir place;
       let output = Targets.begin_output st in

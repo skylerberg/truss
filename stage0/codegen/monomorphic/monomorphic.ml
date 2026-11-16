@@ -1,4 +1,4 @@
-let bug format = Compiler_bug.bug ~stage:"Monomorphic" format
+let raise_bug format = Compiler_bug.raise_bug ~stage:"Monomorphic" format
 
 exception Todo_type of Ground.ty
 
@@ -17,12 +17,12 @@ let list_capabilities context substitution (set : Types.capability_set) : Path.t
        (function
          | Types.Capability path -> path
          | Capability_parameter parameter ->
-             bug "the capability parameter %s of %s is not substituted" parameter.name
+             raise_bug "the capability parameter %s of %s is not substituted" parameter.name
                (Path.show parameter.owner)
          | Capability_projection { name; _ } ->
-             bug "the associated capability set %s is not normalized" name
-         | Capability_variable _ -> bug "a set of capabilities the checker left unsolved"
-         | Capability_error _ -> bug "a capability with an error reached code generation")
+             raise_bug "the associated capability set %s is not normalized" name
+         | Capability_variable _ -> raise_bug "a set of capabilities the checker left unsolved"
+         | Capability_error _ -> raise_bug "a capability with an error reached code generation")
        (context.normalize_capabilities (Types.substitute_capabilities substitution set)
          :> Types.capability list))
 
@@ -45,21 +45,21 @@ let rec ground context substitution (ty : Types.ty) : Ground.ty =
         }
   | Never -> Never
   | Parameter parameter ->
-      bug "the generic parameter %s of %s is not substituted" parameter.name
+      raise_bug "the generic parameter %s of %s is not substituted" parameter.name
         (Path.show parameter.owner)
-  | Projection { name; _ } -> bug "the associated type %s is not normalized" name
-  | Integer -> bug "Integer exists only in specifications"
+  | Projection { name; _ } -> raise_bug "the associated type %s is not normalized" name
+  | Integer -> raise_bug "Integer exists only in specifications"
   | (Variable _ | Literal _ | Hole) as ty ->
-      bug "a type the checker left undecided: %s" (Types.show ty)
-  | Error _ -> bug "a type with an error, which no build reaches"
+      raise_bug "a type the checker left undecided: %s" (Types.show ty)
+  | Error _ -> raise_bug "a type with an error, which no build reaches"
 
 and ground_argument context substitution (argument : Types.argument) : Ground.argument =
   match Types.substitute_argument substitution argument with
   | Type ty -> Type (ground context [] ty)
   | Value (Known value) -> Value value
   | Value (Value_parameter parameter) ->
-      bug "the value parameter %s is not substituted" parameter.name
-  | Value (Value_variable _) -> bug "a value the checker left undecided"
+      raise_bug "the value parameter %s is not substituted" parameter.name
+  | Value (Value_variable _) -> raise_bug "a value the checker left undecided"
   | Capabilities set -> Capabilities (list_capabilities context [] set)
 
 and ground_function context substitution (function_type : Types.function_type) :
@@ -109,7 +109,8 @@ and argument_of_ground : Ground.argument -> Types.argument = function
 
 let make_substitution (generics : Types.generic list) arguments =
   if List.length generics <> List.length arguments then
-    bug "%d generic parameters for %d arguments" (List.length generics) (List.length arguments);
+    raise_bug "%d generic parameters for %d arguments" (List.length generics)
+      (List.length arguments);
   List.map2
     (fun (generic : Types.generic) argument -> (generic.generic, argument_of_ground argument))
     generics arguments
@@ -146,11 +147,11 @@ let compute_shape context (ty : Ground.ty) : Memory_layout.shape =
       | Some View, [ Type element ] -> Storage.make_view_shape ~uint64 element
       | Some Handle, [] -> Record [ ("descriptor", Raw (Integer Int32)) ]
       | Some Shared, [ Type _ ] -> Record [ ("value", Raw (Pointer Opaque)) ]
-      | Some Integer, _ -> bug "Integer exists only in specifications"
-      | Some _, _ -> bug "a built-in type with the wrong arguments: %s" (Ground.to_string ty)
+      | Some Integer, _ -> raise_bug "Integer exists only in specifications"
+      | Some _, _ -> raise_bug "a built-in type with the wrong arguments: %s" (Ground.to_string ty)
       | None, _ -> (
           match context.type_interface path with
-          | None -> bug "%s is not a type" (Path.show path)
+          | None -> raise_bug "%s is not a type" (Path.show path)
           | Some interface -> (
               let substitution = make_substitution interface.type_generics arguments in
               match interface.shape with
@@ -167,5 +168,5 @@ let compute_shape context (ty : Ground.ty) : Memory_layout.shape =
                                (Option.value value.fields ~default:[]);
                          })
                        variants)
-              | Builtin_type _ -> bug "a built-in type under a path that is not built in"
+              | Builtin_type _ -> raise_bug "a built-in type under a path that is not built in"
               | Types.Todo_type -> raise (Todo_type ty))))

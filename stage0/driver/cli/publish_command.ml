@@ -195,14 +195,14 @@ let run () =
   let snapshot, packages = Command_packages.load_current () in
   let name = Command_packages.require_one packages in
   if name.owner = None then
-    Outcome.cannot_run
+    Outcome.raise_cannot_run
       "`%s` has no owner in its name, which a published package's has, such as `acme::%s`."
       name.name name.name;
   let registry =
     match Registry.Index.find_current_registry () with
     | Some registry -> registry
     | None ->
-        Outcome.cannot_run "No registry is set. Set `%s` to the registry's directory."
+        Outcome.raise_cannot_run "No registry is set. Set `%s` to the registry's directory."
           Registry.Index.variable
   in
   let database = Workspace.open_database snapshot in

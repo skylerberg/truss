@@ -20,7 +20,7 @@ type requests = {
 exception Todo_type = Monomorphic.Todo_type
 exception Infinite_size = Memory_layout.Infinite_size
 
-let bug format = Compiler_bug.bug ~stage:"Compile" format
+let raise_bug format = Compiler_bug.raise_bug ~stage:"Compile" format
 
 let make (context : Lower.context) (key : Instance.key) : lowered =
   let env = Lower.env context in
@@ -53,7 +53,7 @@ let lower (settings : Lookups.settings) (lookups : Lookups.t) key =
       ~shape_of:(Monomorphic.compute_shape (Lower.make_monomorphic_context lookups.interface))
   in
   match
-    Compiler_bug.while_doing ~stage:"Compile"
+    Compiler_bug.run_while_doing ~stage:"Compile"
       ("lowering " ^ Instance.to_string key)
       (fun () -> make (Lower.make_context settings ~env lookups) key)
   with
@@ -138,8 +138,8 @@ let check_calls (interface : Interface.Lookups.t) ~list_call_edges (key : Instan
                            || List.exists (Path.equal callee) allowed
                            || List.exists (Path.equal (resolve_call_node interface callee)) allowed
                            ) ->
-                      bug "%s calls %s, which is not among its call edges" (Instance.to_string key)
-                        (Instance.to_string called)
+                      raise_bug "%s calls %s, which is not among its call edges"
+                        (Instance.to_string key) (Instance.to_string called)
                   | _ -> ())
                 (Emit_c.called fragment)))
   | _ -> ()
@@ -241,7 +241,7 @@ let read_lowered compiler key =
   match compiler.requests.lowered key with
   | Some (Ok lowered) -> lowered
   | Some (Error unsupported) -> raise (Lower.Unsupported unsupported)
-  | None -> bug "%s is requested from code with errors" (Instance.to_string key)
+  | None -> raise_bug "%s is requested from code with errors" (Instance.to_string key)
 
 let read_test_key compiler root =
   match compiler.requests.test_key root with
@@ -256,7 +256,7 @@ let make_program_path compiler =
 
 exception Cannot_build of string
 
-let cannot_build format = Printf.ksprintf (fun message -> raise (Cannot_build message)) format
+let raise_cannot_build format = Printf.ksprintf (fun message -> raise (Cannot_build message)) format
 let derive_result_key = Blake3.derive_key ~context:"truss 2026-11-13 result key"
 
 let make_result_key compiler root =
@@ -276,7 +276,7 @@ let locate_offset compiler (definition : Path.t) offset : Emit_c.position =
   | Some { file; base } ->
       let line, column = Source.compute_position (compiler.requests.source file) (base + offset) in
       { file = compiler.file_name file; line; column }
-  | None -> bug "%s has no place in a file" (Path.show definition)
+  | None -> raise_bug "%s has no place in a file" (Path.show definition)
 
 let locate_site compiler (site : Lowered.site) = locate_offset compiler site.definition site.offset
 
@@ -289,7 +289,7 @@ let locate_todo_type compiler (path : Path.t) =
   | Some ({ kind = Type_definition { name; _ }; _ }, spans) ->
       locate_offset compiler path spans.(name.id).start
   | Some _ | None ->
-      bug "%s is reached as a type defined as todo, and has no definition" (Path.show path)
+      raise_bug "%s is reached as a type defined as todo, and has no definition" (Path.show path)
 
 let list_small_callees ~find ~worked_on fragment =
   match Emit_c.key fragment with
@@ -406,12 +406,13 @@ and compile_fragment compiler key =
         with
         | Ran value -> data { data_key = Constant path; ty; value }
         | Ran_too_long ->
-            cannot_build "Evaluating %s ran past the time limit of %d ms." (Path.show path)
+            raise_cannot_build "Evaluating %s ran past the time limit of %d ms." (Path.show path)
               compiler.evaluation_time_limit_ms
-        | Stopped report -> cannot_build "Evaluating %s stopped: %s" (Path.show path) report)
+        | Stopped report -> raise_cannot_build "Evaluating %s stopped: %s" (Path.show path) report)
   in
   if not (Instance.equal (Emit_c.key compiled) key) then
-    bug "%s compiled to %s" (Instance.to_string key) (Instance.to_string (Emit_c.key compiled));
+    raise_bug "%s compiled to %s" (Instance.to_string key)
+      (Instance.to_string (Emit_c.key compiled));
   compiled
 
 let show_unsupported compiler (unsupported : Lower.unsupported) =
@@ -461,7 +462,7 @@ type reader = {
 let make_reader ?(on_start = ignore) on_record =
   { pending = Buffer.create 1024; message = None; echo = None; on_start; on_record }
 
-let malformed text = cannot_build "A test report cannot be read: %s" text
+let raise_malformed_report text = raise_cannot_build "A test report cannot be read: %s" text
 
 let rec drain reader =
   let text = Buffer.contents reader.pending in
@@ -478,7 +479,7 @@ let rec drain reader =
           let count =
             match int_of_string_opt count with
             | Some parsed_count -> parsed_count
-            | None -> malformed line
+            | None -> raise_malformed_report line
           in
           if String.length text >= stop + 1 + count + 1 then begin
             let content = String.sub text (stop + 1) count in
@@ -493,7 +494,7 @@ let rec drain reader =
               consume (stop + 1);
               reader.on_start number;
               drain reader
-          | None -> malformed line)
+          | None -> raise_malformed_report line)
       | [ "test"; number; outcome; microseconds ] -> (
           match
             ( int_of_string_opt number,
@@ -515,8 +516,8 @@ let rec drain reader =
               consume (stop + 1);
               reader.on_record number record;
               drain reader
-          | _ -> malformed line)
-      | _ -> malformed line)
+          | _ -> raise_malformed_report line)
+      | _ -> raise_malformed_report line)
 
 let feed reader text =
   Buffer.add_string reader.pending text;
@@ -528,7 +529,7 @@ let parse_report text =
   match
     feed reader text;
     if Buffer.length reader.pending > 0 || reader.message <> None || reader.echo <> None then
-      malformed "it ends partway through a record"
+      raise_malformed_report "it ends partway through a record"
   with
   | () -> Ok (List.map snd (List.sort (fun (left, _) (right, _) -> compare left right) !records))
   | exception Cannot_build message -> Error message
@@ -609,7 +610,7 @@ let run_tests ?(rerun = false) ?(progress = ignore) compiler ~time_limit_ms test
     progress (Running { tests = Array.length missing });
     let index_of number =
       if number < 0 || number >= Array.length missing then
-        malformed (Printf.sprintf "a test numbered %d" number);
+        raise_malformed_report (Printf.sprintf "a test numbered %d" number);
       let index, _, _, _ = missing.(number) in
       index
     in
@@ -631,7 +632,7 @@ let run_tests ?(rerun = false) ?(progress = ignore) compiler ~time_limit_ms test
         (fun () -> Process.run ~on_output:(feed reader) output [])
     in
     if Array.exists Option.is_none fresh then
-      cannot_build "The test program ended before reporting every test:\n%s%s" report errors
+      raise_cannot_build "The test program ended before reporting every test:\n%s%s" report errors
   end;
   let fresh = ref (List.filter_map Fun.id (Array.to_list fresh)) in
   List.map
@@ -643,7 +644,7 @@ let run_tests ?(rerun = false) ?(progress = ignore) compiler ~time_limit_ms test
           | record :: rest ->
               fresh := rest;
               record
-          | [] -> bug "fewer results than tests"))
+          | [] -> raise_bug "fewer results than tests"))
     known
 
 let build_supplied_tests compiler ~time_limit_ms supplied ~output =
@@ -743,7 +744,7 @@ let make_program_root compiler ~main =
   match compiler.requests.reached_todo_types root with
   | [] -> root
   | todo_types ->
-      cannot_build "%s"
+      raise_cannot_build "%s"
         (String.concat "\n"
            (List.map
               (fun path ->
@@ -779,8 +780,8 @@ let run_template_check compiler ~from_template ~literals ~clauses =
       ~read:(fun output ->
         let holds = Encoding.decode_booleans output in
         if List.length holds <> List.length clauses then
-          bug "checking a template of %s wrote %d results for %d clauses" (Path.show from_template)
-            (List.length holds) (List.length clauses);
+          raise_bug "checking a template of %s wrote %d results for %d clauses"
+            (Path.show from_template) (List.length holds) (List.length clauses);
         holds)
   in
   match ran with
@@ -797,7 +798,7 @@ let evaluate_call compiler ~function_ ~arguments =
       let key = Instance.Call_evaluation { function_; arguments } in
       run_while_compiling compiler key ~read:(fun encoded ->
           Encoding.decode (make_env compiler) ty encoded)
-  | _ -> bug "%s has no result to evaluate" (Path.show function_)
+  | _ -> raise_bug "%s has no result to evaluate" (Path.show function_)
 
 let create ?(file_name = Path.show_file) ?results ?(evaluation_time_limit_ms = 10_000)
     ?(programs = Filename.get_temp_dir_name ())
@@ -822,7 +823,7 @@ module For_testing = struct
     match read_lowered compiler (Instance.Constant path) with
     | Folded _ -> true
     | Evaluate _ -> false
-    | Compiled _ -> bug "%s is not a constant" (Path.show path)
+    | Compiled _ -> raise_bug "%s is not a constant" (Path.show path)
 
   let make_lowered fragment = Compiled fragment
 

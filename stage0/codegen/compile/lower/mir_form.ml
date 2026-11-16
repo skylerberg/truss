@@ -1,24 +1,24 @@
 let require_mir_frame (st : Lowering.state) =
   match st.frame.mir with
   | Some mir -> mir
-  | None -> Definitions.bug "MIR lowering outside a MIR frame"
+  | None -> Definitions.raise_bug "MIR lowering outside a MIR frame"
 
 let read_mir_graph (context : Definitions.context) path : Mir.Graph.t =
   match Mir.read_graph context.lookups.mir path with
   | Some { form; _ } -> form
-  | None -> Definitions.bug "%s has no MIR" (Path.show path)
+  | None -> Definitions.raise_bug "%s has no MIR" (Path.show path)
 
 let read_parameter_defaults (context : Definitions.context) path :
     (int * Mir.Graph.t) list Mir.sourced =
   match Mir.read_default_graphs context.lookups.mir path with
   | Some { source; form = Parameter_defaults defaults } -> { source; form = defaults }
   | Some { form = Field_defaults _; _ } | None ->
-      Definitions.bug "%s is not a function" (Path.show path)
+      Definitions.raise_bug "%s is not a function" (Path.show path)
 
 let extract_parameter (body : Mir.Graph.body) local =
   match body.locals.(local) with
   | { kind = Source { mode; name; _ }; type_; _ } -> (mode, name, type_)
-  | _ -> Definitions.bug "a parameter that is no source local"
+  | _ -> Definitions.raise_bug "a parameter that is no source local"
 
 let read_spans st = (Lowering.require_written st).spans
 
@@ -105,7 +105,8 @@ let list_variants (st : Lowering.state) (ty : Ground.ty) :
         match member with
         | Typed field_ty -> (name, field_ty)
         | Raw _ ->
-            Definitions.bug "a field %s of %s that no Truss type names" name (Ground.to_string ty))
+            Definitions.raise_bug "a field %s of %s that no Truss type names" name
+              (Ground.to_string ty))
       fields
   in
   match Memory_layout.shape st.context.env ty with
@@ -115,7 +116,8 @@ let list_variants (st : Lowering.state) (ty : Ground.ty) :
         (fun (variant_shape : Memory_layout.variant_shape) ->
           (Some variant_shape.name, typed variant_shape.fields))
         variants
-  | Scalar _ | Array _ -> Definitions.bug "the fields of %s, which has none" (Ground.to_string ty)
+  | Scalar _ | Array _ ->
+      Definitions.raise_bug "the fields of %s, which has none" (Ground.to_string ty)
 
 let make_body_frame (st : Lowering.state) ?owner ?returns_into ?lending
     ?(passed : Ground.mode list option) ~lambdas (body : Mir.Graph.body) : Lowering.mir_frame =
@@ -317,7 +319,7 @@ let make_field_projection variant field : Lowered.projection =
 
 let lower_owned_place st (written : Mir.place) =
   match written.root with
-  | Literal { text; _ } -> Definitions.bug "the string literal %S used as an owned value" text
+  | Literal { text; _ } -> Definitions.raise_bug "the string literal %S used as an owned value" text
   | Local _ | Constant _ -> lower_place st written
 
 let take_place st (written : Mir.place) =
@@ -329,7 +331,7 @@ let compute_operand_type st operand = Lowering.ground st (Mir.extract_operand_ty
 
 let lower_constant st ty (value : Mir.constant) : Lowered.operand =
   match value with
-  | Unit -> Definitions.bug "a unit constant as a value"
+  | Unit -> Definitions.raise_bug "a unit constant as a value"
   | Integer number -> Targets.lower_literal st ty (Integer_value number)
   | Float number -> Targets.lower_literal st ty (Float_value number)
   | Boolean truth -> Constant (Bool truth)
@@ -421,7 +423,7 @@ let resolve_jump ?entry (st : Lowering.state) region target : Lowered.block =
   | Some owner ->
       let pad = Emit_c.Builder.allocate_block st.builder in
       let lowered = Hashtbl.find owner.lowered target in
-      Emit_c.Builder.in_block st.builder pad (fun () ->
+      Emit_c.Builder.run_in_block st.builder pad (fun () ->
           Lowering.leave_to st owner.depth;
           Emit_c.Builder.finish st.builder (Goto lowered));
       pad
@@ -443,7 +445,7 @@ let continue_loop (st : Lowering.state) =
       Lowering.leave_to st loop.continue_depth;
       Emit_c.Builder.finish st.builder (Goto loop.continue_);
       Emit_c.Builder.start st.builder (Emit_c.Builder.allocate_block st.builder)
-  | [] -> Definitions.bug "the end of an iteration outside a loop"
+  | [] -> Definitions.raise_bug "the end of an iteration outside a loop"
 
 let break_loop (st : Lowering.state) =
   match st.loops with
@@ -451,7 +453,7 @@ let break_loop (st : Lowering.state) =
       Lowering.leave_to st loop.break_depth;
       Emit_c.Builder.finish st.builder (Goto loop.break_);
       Emit_c.Builder.start st.builder (Emit_c.Builder.allocate_block st.builder)
-  | [] -> Definitions.bug "a break outside a loop"
+  | [] -> Definitions.raise_bug "a break outside a loop"
 
 let lower_path_place st (path : Moves.path) =
   lower_place st { root = Local path.local; projections = path.projections }
@@ -472,7 +474,7 @@ let rec drop_path st (path : Moves.path) =
         match List.assoc_opt path frame.flags with
         | Some flag -> flag
         | None ->
-            Definitions.bug "local %d%s, which may hold nothing, has no flag" path.local
+            Definitions.raise_bug "local %d%s, which may hold nothing, has no flag" path.local
               (String.concat ""
                  (List.map
                     (function
@@ -497,7 +499,7 @@ and drop_parts st (path : Moves.path) =
   let ty =
     match Lowering.find_place_type st place with
     | Some (Value ty) -> ty
-    | _ -> Definitions.bug "a path to drop that holds no value"
+    | _ -> Definitions.raise_bug "a path to drop that holds no value"
   in
   let child projection =
     let inner = { path with projections = path.projections @ [ projection ] } in
@@ -549,14 +551,14 @@ and drop_parts st (path : Moves.path) =
             List.map
               (fun variant ->
                 let case = Emit_c.Builder.allocate_block st.builder in
-                Emit_c.Builder.in_block st.builder case (fun () ->
+                Emit_c.Builder.run_in_block st.builder case (fun () ->
                     open_variant variant;
                     Emit_c.Builder.finish st.builder (Goto after));
                 (variant, case))
               variants
           in
           let other = Emit_c.Builder.allocate_block st.builder in
-          Emit_c.Builder.in_block st.builder other (fun () ->
+          Emit_c.Builder.run_in_block st.builder other (fun () ->
               Emit_c.Builder.emit st.builder (Drop place);
               Emit_c.Builder.finish st.builder (Goto after));
           Emit_c.Builder.finish st.builder (Switch_variant { place; cases; default = Some other });
@@ -610,7 +612,7 @@ let resolve_callee st (callee : Mir.callee) : (Path.t * Ground.argument list) op
           ~self_type ~type_arguments ~evidence
       with
       | Code { path; type_arguments } -> Some (path, type_arguments)
-      | _ -> Definitions.bug "a trait method's key")
+      | _ -> Definitions.raise_bug "a trait method's key")
   | Capability_method _ | Intrinsic _ | Indirect _ -> None
 
 let resolve_call_signature st (callee : Mir.callee) =
@@ -618,13 +620,13 @@ let resolve_call_signature st (callee : Mir.callee) =
   | Some (path, type_arguments) ->
       let signature = Definitions.read_signature st.context path in
       (path, type_arguments, signature, Definitions.bind signature.generics type_arguments)
-  | None -> Definitions.bug "a callee that is not a function or a method"
+  | None -> Definitions.raise_bug "a callee that is not a function or a method"
 
 let compute_result_type st (callee : Mir.callee) =
   let path, _, signature, substitution = resolve_call_signature st callee in
   match signature.output with
   | Returns ty -> Monomorphic.ground st.context.monomorphic substitution ty
-  | Lends _ -> Definitions.bug "%s does not return a value" (Path.show path)
+  | Lends _ -> Definitions.raise_bug "%s does not return a value" (Path.show path)
 
 let lower_call_with_places st (callee : Mir.callee) (places : Lowered.place list) ~destination =
   let path, type_arguments, signature, substitution = resolve_call_signature st callee in
@@ -643,7 +645,7 @@ let evaluate_arguments (st : Lowering.state) (signature : Types.signature) subst
     (arguments : Mir.argument list) =
   let parameters = Definitions.list_interface_parameters signature in
   if List.length parameters <> List.length arguments then
-    Definitions.bug "a call with %d arguments for %d parameters" (List.length arguments)
+    Definitions.raise_bug "a call with %d arguments for %d parameters" (List.length arguments)
       (List.length parameters);
   let receivers = List.length parameters - List.length signature.parameters in
   let mask = ref 0 and defaulted = ref 0 in
@@ -671,13 +673,13 @@ let evaluate_arguments (st : Lowering.state) (signature : Types.signature) subst
       (List.combine parameters arguments)
   in
   if !defaulted > 62 then
-    Lowering.unsupported "a function with more than 62 parameters that have defaults";
+    Lowering.raise_unsupported "a function with more than 62 parameters that have defaults";
   (evaluated, !mask)
 
 let lower_argument_place st (argument : Mir.argument) =
   match argument with
   | Passed { mode; value; _ } -> (mode, compute_operand_type st value, lower_operand_place st value)
-  | Default -> Definitions.bug "an omitted argument in a call that has no defaults"
+  | Default -> Definitions.raise_bug "an omitted argument in a call that has no defaults"
 
 let lower_shared_update st ~shared ~input ~change ~destination =
   let _, _, shared = lower_argument_place st shared in
@@ -686,12 +688,14 @@ let lower_shared_update st ~shared ~input ~change ~destination =
   let function_type =
     match change_ty with
     | Function function_type -> function_type
-    | ty -> Definitions.bug "shared_update with a %s, which is not a function" (Ground.to_string ty)
+    | ty ->
+        Definitions.raise_bug "shared_update with a %s, which is not a function"
+          (Ground.to_string ty)
   in
   let value_ty, result_ty =
     match function_type.parameters with
     | (_, value_ty) :: _ -> (value_ty, function_type.result)
-    | [] -> Definitions.bug "shared_update with a function that takes no value"
+    | [] -> Definitions.raise_bug "shared_update with a function that takes no value"
   in
   let pointer = Lowered.Copy (Lowered.project shared (Field "value")) in
   Emit_c.Builder.emit st.builder
@@ -730,7 +734,7 @@ let lower_intrinsic st ?reported (operation : Intrinsic.operation) ~type_argumen
                 if Storage.match_storage_element ty <> None || Storage.match_view_element ty <> None
                 then Intrinsics.Place (lower_operand_place st passed)
                 else Intrinsics.Value (lower_operand st passed)
-            | Default -> Definitions.bug "an intrinsic called with an omitted argument")
+            | Default -> Definitions.raise_bug "an intrinsic called with an omitted argument")
           arguments
       in
       List.iter
@@ -748,7 +752,7 @@ let read_field_default (st : Lowering.state) (ty : Ground.ty) ~variant ~field :
   let path =
     match ty with
     | Named { path; _ } -> path
-    | _ -> Definitions.bug "defaults of %s" (Ground.to_string ty)
+    | _ -> Definitions.raise_bug "defaults of %s" (Ground.to_string ty)
   in
   match Mir.read_default_graphs st.context.lookups.mir path with
   | Some { source; form = Field_defaults defaults } -> (
@@ -759,9 +763,9 @@ let read_field_default (st : Lowering.state) (ty : Ground.ty) ~variant ~field :
           defaults
       with
       | Some default -> { source; form = default }
-      | None -> Definitions.bug "%s has no default for %s" (Path.show path) field)
+      | None -> Definitions.raise_bug "%s has no default for %s" (Path.show path) field)
   | Some { form = Parameter_defaults _; _ } | None ->
-      Definitions.bug "%s is not a type" (Path.show path)
+      Definitions.raise_bug "%s is not a type" (Path.show path)
 
 let make_tasks_call (st : Lowering.state) name ?result (places : Lowered.place list) :
     Lowered.statement =
@@ -819,7 +823,7 @@ let compute_task_function_type (st : Lowering.state) : Lowered.ty =
   in
   match signature.parameters with
   | [ _; work; _ ] -> Value (Monomorphic.ground st.context.monomorphic [] work.type_)
-  | _ -> Definitions.bug "Tasks.spawn does not take a group, a function, and an item"
+  | _ -> Definitions.raise_bug "Tasks.spawn does not take a group, a function, and an item"
 
 let lower_task_body st ~(id : Mir.task) ~group ~parts (f : Lowering.task -> unit) : Lowered.rvalue =
   let nested, environment =
@@ -897,7 +901,8 @@ let cancel (st : Lowering.state) ~(task : Mir.task) ~winner ~number ~value =
       Lowering.leave_to st current.scope_depth;
       Emit_c.Builder.finish st.builder (Goto current.end_block);
       Emit_c.Builder.start st.builder (Emit_c.Builder.allocate_block st.builder)
-  | _ -> Definitions.bug "an early exit leaves a task that is not the innermost enclosing task"
+  | _ ->
+      Definitions.raise_bug "an early exit leaves a task that is not the innermost enclosing task"
 
 let spawn_iteration (st : Lowering.state) (loop : Lowering.spawn_loop) ~(not_spawned : unit -> unit)
     (f : unit -> unit) =
@@ -911,7 +916,7 @@ let spawn_iteration (st : Lowering.state) (loop : Lowering.spawn_loop) ~(not_spa
            ~id:(Iteration { loop = loop.origin })
            ~group:loop.group ~parts:[ loop.item ]
            (fun task ->
-             Lowering.looping st ~continue_:task.end_block ~break_:task.end_block
+             Lowering.run_in_loop st ~continue_:task.end_block ~break_:task.end_block
                ~depth:task.scope_depth f) ));
   let spawned =
     call_tasks_bool st "spawn"
@@ -979,8 +984,8 @@ let spawn_with_item st (loop : Lowering.spawn_loop) (value : Lowered.place) ~own
   else
     Emit_c.Builder.emit st.builder (Assign (item, Use (Lowering.make_int_constant UInt64 Z.zero)));
   spawn_iteration st loop
-    ~not_spawned:(fun () -> Lowering.in_scope st (fun () -> ignore (unbox ~dropped_here:true)))
-    (fun () -> Lowering.in_scope st (fun () -> each (unbox ~dropped_here:false)))
+    ~not_spawned:(fun () -> Lowering.run_in_scope st (fun () -> ignore (unbox ~dropped_here:true)))
+    (fun () -> Lowering.run_in_scope st (fun () -> each (unbox ~dropped_here:false)))
 
 let lend_record (st : Lowering.state) : Lowered.operand =
   match st.lend_record with
@@ -1102,7 +1107,7 @@ and run_region st region ~entry:(block, index) =
     | Some (next, lowered, entry) ->
         region.pending <- List.filter (fun (block, _, _) -> block <> next) region.pending;
         restore st entry;
-        Emit_c.Builder.in_block st.builder lowered (fun () ->
+        Emit_c.Builder.run_in_block st.builder lowered (fun () ->
             lower_from st region next 0;
             Emit_c.Builder.finish st.builder Unreachable);
         drain ()
@@ -1127,7 +1132,7 @@ and lower_from st region block index =
       if position >= index then begin
         let before = Moves.copy frame.state in
         Moves.apply_moves frame.moves frame.state statement;
-        Lowering.in_statement st (fun () -> lower_statement st statement);
+        Lowering.run_in_statement st (fun () -> lower_statement st statement);
         Moves.apply frame.moves frame.state statement;
         update_flags st ~before
       end
@@ -1224,7 +1229,7 @@ and lower_statement st (statement : Mir.Graph.statement) =
       | enclosing :: rest ->
           st.evidence <- enclosing;
           frame.provides <- rest
-      | [] -> Definitions.bug "the end of a provide that did not start")
+      | [] -> Definitions.raise_bug "the end of a provide that did not start")
 
 and end_local st local =
   let frame = require_mir_frame st in
@@ -1288,7 +1293,7 @@ and compute_mir_place_type st (written : Mir.place) =
   | _ -> (
       match Lowering.find_place_type st (lower_place st written) with
       | Some (Value ty) -> ty
-      | _ -> Definitions.bug "a place of no known type")
+      | _ -> Definitions.raise_bug "a place of no known type")
 
 and assign st (target : Mir.place) (value : Mir.rvalue) ~origin =
   match (target, value) with
@@ -1415,7 +1420,7 @@ and lower_rvalue_into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.
   | Is_variant { place = tested; variant } -> assign (Is_variant (lower_place st tested, variant))
   | Convert { conversion = Widen; value = inner; _ } -> write_operand st inner destination
   | Convert { conversion = To_integer | From_integer; _ } ->
-      Definitions.bug "a conversion that exists only in specifications"
+      Definitions.raise_bug "a conversion that exists only in specifications"
   | To_any { value = inner; trait; evidence } ->
       let impl, type_arguments =
         Targets.resolve_impl st.context st.frame.code.substitution ~trait
@@ -1438,16 +1443,16 @@ and lower_rvalue_into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.
               }
           in
           assign (Function_value { code = Instance (Generated adapter); environment = None })
-      | _ -> Definitions.bug "a function value of type %s" (Ground.to_string ty))
+      | _ -> Definitions.raise_bug "a function value of type %s" (Ground.to_string ty))
   | Value_parameter parameter -> (
       match ground_argument st (Value (Value_parameter parameter)) with
       | Value number -> assign (Use (Targets.lower_literal st ty (Integer_value number)))
-      | _ -> Definitions.bug "the value parameter %s is not a number" parameter.name)
+      | _ -> Definitions.raise_bug "the value parameter %s is not a number" parameter.name)
   | Lambda { body = index; captures; _ } ->
       let function_type =
         match ty with
         | Function function_type -> function_type
-        | _ -> Definitions.bug "a lambda of %s" (Ground.to_string ty)
+        | _ -> Definitions.raise_bug "a lambda of %s" (Ground.to_string ty)
       in
       let lambdas = (require_mir_frame st).lambdas in
       let lambda = lambdas.(index) in
@@ -1479,11 +1484,11 @@ and lower_rvalue_into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.
             lambda.parameters parameter_places;
           lower_body inner (Option.get inner.frame.mir))
         destination
-  | Specification _ -> Definitions.bug "a specification's expression in code that runs"
+  | Specification _ -> Definitions.raise_bug "a specification's expression in code that runs"
 
 and lower_field_default_place st ty ~variant ~field =
   let { Mir.source; form = default } = read_field_default st ty ~variant ~field in
-  Targets.in_type_definition st ~source ty (fun () ->
+  Targets.run_in_type_definition st ~source ty (fun () ->
       let default_ty = Lowering.ground st default.type_ in
       let place = Lowering.allocate_temporary st default_ty in
       lower_mir_into st default.value place;
@@ -1518,17 +1523,17 @@ and lower_call_into ?failure st (call : Mir.call) destination ~origin =
           Targets.lower_instance_call st
             (Code { path; type_arguments })
             ~signature ~substitution ~arguments ~mask ~destination ()
-      | Lends _ -> Definitions.bug "a lending call that lends no part")
+      | Lends _ -> Definitions.raise_bug "a lending call that lends no part")
   | None, Intrinsic { operation = Holds_invariant; _ } -> (
       match call.arguments with
       | [ value; clause ] -> holds_invariant st ~value ~clause ~destination
-      | _ -> Definitions.bug "holds_invariant takes a value and a clause")
+      | _ -> Definitions.raise_bug "holds_invariant takes a value and a clause")
   | None, Intrinsic { operation; type_arguments } -> (
       match
         lower_intrinsic st operation ~type_arguments call.arguments ~destination:(Some destination)
           ~site:(locate_site st origin)
       with
-      | Some _ -> Definitions.bug "a lending intrinsic that lends no part"
+      | Some _ -> Definitions.raise_bug "a lending intrinsic that lends no part"
       | None -> ())
   | None, Capability_method { capability; name } ->
       let slot, signature = Targets.lookup_capability_method st.context capability name in
@@ -1543,7 +1548,7 @@ and lower_call_into ?failure st (call : Mir.call) destination ~origin =
               (Intrinsics.lower ~checks:(Lowering.checks_operations st) st.context.env st.builder
                  st.context.types Crash ~type_arguments:[] [ Intrinsics.Place message ]
                  ~destination:None ~site:(locate_site st origin))
-        | _ -> Definitions.bug "Panic.crash takes one message"
+        | _ -> Definitions.raise_bug "Panic.crash takes one message"
       else begin
         let c_signature, result = Targets.make_entry_signature st.context signature in
         let target =
@@ -1569,18 +1574,18 @@ and lower_call_into ?failure st (call : Mir.call) destination ~origin =
       let any_type =
         match Types.substitute st.frame.code.substitution self_type with
         | Types.Any reference -> reference
-        | receiver -> Definitions.bug "a call through any on %s" (Types.show receiver)
+        | receiver -> Definitions.raise_bug "a call through any on %s" (Types.show receiver)
       in
       match List.map (lower_argument_place st) call.arguments with
       | (_, _, any) :: arguments ->
           Targets.lower_call_through_any st ~any_type ~trait:trait.trait ~name ~any ~arguments
             destination
-      | [] -> Definitions.bug "a call through any with no receiver")
+      | [] -> Definitions.raise_bug "a call through any with no receiver")
   | None, Indirect function_value ->
       let function_type =
         match compute_operand_type st function_value with
         | Function function_type -> function_type
-        | callee_ty -> Definitions.bug "a call of %s" (Ground.to_string callee_ty)
+        | callee_ty -> Definitions.raise_bug "a call of %s" (Ground.to_string callee_ty)
       in
       let value = lower_operand_place st function_value in
       Targets.lower_indirect_call st ~function_type ~value
@@ -1590,7 +1595,7 @@ and lower_call_into ?failure st (call : Mir.call) destination ~origin =
              place)
            call.arguments)
         destination
-  | None, Function _ -> Definitions.bug "a function that does not resolve"
+  | None, Function _ -> Definitions.raise_bug "a function that does not resolve"
 
 and lower_capability_defaults st ~capability ~name (arguments : Mir.argument list) evaluated =
   if List.mem Mir.Default arguments then begin
@@ -1603,8 +1608,8 @@ and lower_capability_defaults st ~capability ~name (arguments : Mir.argument lis
               interface.methods
           with
           | Some declared -> declared.method_receiver
-          | None -> Definitions.bug "%s has no method %s" (Path.show capability) name)
-      | None -> Definitions.bug "no interface for %s" (Path.show capability)
+          | None -> Definitions.raise_bug "%s has no method %s" (Path.show capability) name)
+      | None -> Definitions.raise_bug "no interface for %s" (Path.show capability)
     in
     let defaults =
       read_parameter_defaults st.context (Method { owner = capability; name; receiver })
@@ -1632,8 +1637,9 @@ and lower_capability_defaults st ~capability ~name (arguments : Mir.argument lis
               (Lowering.lookup_innermost_scope st).owned <-
                 Drop_value place :: (Lowering.lookup_innermost_scope st).owned
         | Default, None ->
-            Definitions.bug "the argument at position %d of `%s.%s` is omitted and has no default"
-              position (Path.show capability) name
+            Definitions.raise_bug
+              "the argument at position %d of `%s.%s` is omitted and has no default" position
+              (Path.show capability) name
         | Passed _, _ -> ())
       (List.combine arguments evaluated);
     st.frame <- caller
@@ -1644,25 +1650,26 @@ and holds_invariant st ~value ~clause ~destination =
   let index =
     match clause with
     | Passed { value = Constant { value = Integer index; _ }; _ } -> Z.to_int index
-    | _ -> Definitions.bug "holds_invariant with a clause that is not a literal"
+    | _ -> Definitions.raise_bug "holds_invariant with a clause that is not a literal"
   in
   let path =
     match value_ty with
     | Named { path; _ } -> path
-    | ty -> Definitions.bug "holds_invariant of %s, which has no invariant" (Ground.to_string ty)
+    | ty ->
+        Definitions.raise_bug "holds_invariant of %s, which has no invariant" (Ground.to_string ty)
   in
   let ({ source; form = clauses } : Mir.type_clauses Mir.sourced) =
     match Mir.read_type_clauses st.context.lookups.mir path with
     | Some clauses -> clauses
-    | None -> Definitions.bug "%s has no clauses" (Path.show path)
+    | None -> Definitions.raise_bug "%s has no clauses" (Path.show path)
   in
   let invariant =
     match List.nth_opt clauses.invariants index with
     | Some { clause; is_executable = true; _ } -> Mir.expand_formula clause
     | Some { is_executable = false; _ } | None ->
-        Definitions.bug "%s has no clause %d that runs" (Path.show path) index
+        Definitions.raise_bug "%s has no clause %d that runs" (Path.show path) index
   in
-  Targets.in_type_definition st ~source value_ty (fun () ->
+  Targets.run_in_type_definition st ~source value_ty (fun () ->
       lower_mir_into ~arguments:[ value_place ] st invariant destination)
 
 and check_requires st ~path ~type_arguments arguments ~origin ~failure =
@@ -1711,13 +1718,13 @@ and lend ?(forwards = 0) st part (call : Mir.call) ~origin =
   with
   | Intrinsic { operation; type_arguments }, _ ->
       Hashtbl.replace (require_mir_frame st).placed_parts part ();
-      Lowering.in_statement st (fun () ->
+      Lowering.run_in_statement st (fun () ->
           match
             lower_intrinsic st operation ~type_arguments call.arguments ~destination:None
               ?reported:(find_reported_site st) ~site:(locate_site st origin)
           with
           | Some place -> bind_local st part place
-          | None -> Definitions.bug "a lent place from an intrinsic that does not lend")
+          | None -> Definitions.raise_bug "a lent place from an intrinsic that does not lend")
   | _, Some { setup; call = inner } ->
       List.iter
         (fun (local, type_, (computing : Mir.call)) ->
@@ -1754,7 +1761,7 @@ and lend ?(forwards = 0) st part (call : Mir.call) ~origin =
         let mode, part_ty =
           match output with
           | Lends (mode, ty) -> (mode, Monomorphic.ground st.context.monomorphic substitution ty)
-          | Returns _ -> Definitions.bug "a lending call of a method that does not lend"
+          | Returns _ -> Definitions.raise_bug "a lending call of a method that does not lend"
         in
         emit_mark st Lend_begin lent;
         if Lowering.is_zero_size st part_ty then begin
@@ -1787,7 +1794,7 @@ and lend ?(forwards = 0) st part (call : Mir.call) ~origin =
             let any_type =
               match Types.substitute st.frame.code.substitution self_type with
               | Types.Any reference -> reference
-              | receiver -> Definitions.bug "a call through any on %s" (Types.show receiver)
+              | receiver -> Definitions.raise_bug "a call through any on %s" (Types.show receiver)
             in
             let _, signature = Targets.lookup_dynamic_method st.context trait.trait name in
             match List.map (lower_argument_place st) call.arguments with
@@ -1797,13 +1804,14 @@ and lend ?(forwards = 0) st part (call : Mir.call) ~origin =
                   (fun ~lending destination ->
                     Targets.lower_call_through_any st ~any_type ~trait:trait.trait ~name ~any
                       ~arguments ~lending destination)
-            | [] -> Definitions.bug "a call through any with no receiver")
+            | [] -> Definitions.raise_bug "a call through any with no receiver")
         | None, Capability_method _ ->
-            Lowering.unsupported ~at:(locate_site st origin)
+            Lowering.raise_unsupported ~at:(locate_site st origin)
               "a lending call of a capability's method"
         | None, Indirect _ ->
-            Definitions.bug "a lending call of a function value, whose type cannot lend"
-        | None, (Function _ | Intrinsic _) -> Definitions.bug "a lending call that does not resolve"
+            Definitions.raise_bug "a lending call of a function value, whose type cannot lend"
+        | None, (Function _ | Intrinsic _) ->
+            Definitions.raise_bug "a lending call that does not resolve"
       in
       emit_mark st Lend_called lent;
       bind_local st part place
@@ -1813,7 +1821,7 @@ and lend_part st ~(mode : Types.mode) (part : Mir.yielded) =
   let lending =
     match frame.lending with
     | Some lending -> lending
-    | None -> Definitions.bug "a part lent outside a lending method"
+    | None -> Definitions.raise_bug "a part lent outside a lending method"
   in
   let owns = Moves.owns frame.moves in
   let outlives =
@@ -1850,10 +1858,11 @@ and lend_part st ~(mode : Types.mode) (part : Mir.yielded) =
             | Some source, Mut -> [ ([], Deferred_write_back { source; ty }) ]
             | Some _, (Read | Own) -> []
             | None, Mut when outlives written ->
-                Definitions.bug "a place lent `mut` that is not reached through a pointer"
+                Definitions.raise_bug "a place lent `mut` that is not reached through a pointer"
             | None, _ ->
                 if not (outlives written || Lowering.is_trivial st ty) then
-                  Definitions.bug "a lent part of %s that the method owns" (Ground.to_string ty);
+                  Definitions.raise_bug "a lent part of %s that the method owns"
+                    (Ground.to_string ty);
                 [])
         | Use _ | Take _ | Constant _ ->
             write_operand st operand destination;
@@ -1947,13 +1956,13 @@ and lend_part st ~(mode : Types.mode) (part : Mir.yielded) =
       in
       match Lowering.find_result_place st with
       | Some result -> Emit_c.Builder.emit st.builder (Assign (result, Use pointer))
-      | None -> Definitions.bug "a lending method with no result")
+      | None -> Definitions.raise_bug "a lending method with no result")
 
 and lower_terminator st region (ending : Mir.Graph.terminator) ~origin =
   match ending with
   | Goto target -> goto st region target
   | Branch { condition; yes; no; _ } ->
-      let condition = Lowering.in_statement st (fun () -> lower_operand st condition) in
+      let condition = Lowering.run_in_statement st (fun () -> lower_operand st condition) in
       let yes = resolve_jump st region yes and no = resolve_jump st region no in
       Emit_c.Builder.branch st.builder condition ~yes ~no;
       Emit_c.Builder.start st.builder (Emit_c.Builder.allocate_block st.builder)
@@ -1976,7 +1985,7 @@ and lower_terminator st region (ending : Mir.Graph.terminator) ~origin =
         when List.mem local (require_mir_frame st).returned ->
           ()
       | Some slot, Some returned ->
-          Lowering.in_statement st (fun () -> write_operand st returned slot)
+          Lowering.run_in_statement st (fun () -> write_operand st returned slot)
       | _ -> ());
       return_from_frame st
   | Iteration_end _ -> continue_loop st
@@ -1987,7 +1996,7 @@ and lower_terminator st region (ending : Mir.Graph.terminator) ~origin =
             match (around.ending, task, around.enclosing) with
             | Some (fork, _), Branch { block; _ }, _ when fork = block -> around
             | _, _, Some enclosing -> branch_region enclosing
-            | _, _, None -> Definitions.bug "an early exit from a branch outside its block"
+            | _, _, None -> Definitions.raise_bug "an early exit from a branch outside its block"
           in
           let branch = branch_region region in
           ignore (resolve_jump ~entry:branch.start st branch target))
@@ -2021,7 +2030,7 @@ and lower_terminator st region (ending : Mir.Graph.terminator) ~origin =
            });
       Emit_c.Builder.start st.builder (Emit_c.Builder.allocate_block st.builder)
   | Yield { mode; part; resume } ->
-      Lowering.in_statement st (fun () -> lend_part st ~mode part);
+      Lowering.run_in_statement st (fun () -> lend_part st ~mode part);
       goto st region resume
   | For { iteration; part; body; after; loop; _ } ->
       claim st region after;
@@ -2114,7 +2123,7 @@ and lower_range_loop st ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~in
     match scalar with
     | Integer integer -> Lowering.make_int_constant integer (Z.of_int value)
     | Character -> Constant (Character value)
-    | _ -> Definitions.bug "a range of %s" (Ground.to_string element)
+    | _ -> Definitions.raise_bug "a range of %s" (Ground.to_string element)
   in
   let characters = scalar = Character in
   let both first second =
@@ -2192,7 +2201,7 @@ and lower_range_loop st ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~in
             and done_ = Emit_c.Builder.allocate_block st.builder in
             Emit_c.Builder.finish st.builder (Goto again);
             Emit_c.Builder.start st.builder again;
-            Lowering.in_scope st (fun () ->
+            Lowering.run_in_scope st (fun () ->
                 let offset = Lowering.allocate_binding st element in
                 let bound = Lowering.allocate_binding st element in
                 Emit_c.Builder.emit st.builder
@@ -2207,7 +2216,7 @@ and lower_range_loop st ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~in
                     (fun () ->
                       Emit_c.Builder.emit st.builder
                         (Assign (bound, Binary (Add, Copy bound, constant 0x800))));
-                Lowering.looping st ~continue_:step ~break_:done_ ~depth (fun () -> each bound));
+                Lowering.run_in_loop st ~continue_:step ~break_:done_ ~depth (fun () -> each bound));
             Emit_c.Builder.finish st.builder (Goto step);
             Emit_c.Builder.start st.builder step;
             let ended = Emit_c.Builder.allocate_local st.builder (Raw Bool) in
@@ -2261,9 +2270,9 @@ and lower_range_loop st ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~in
              Binary ((if inclusive then Less_equal else Less), Copy index, Copy stop) ));
       Emit_c.Builder.branch st.builder (Copy (Lowered.make_local_place going)) ~yes:inside ~no:after;
       Emit_c.Builder.start st.builder inside;
-      Lowering.looping st ~continue_:step ~break_:after ~depth (fun () ->
+      Lowering.run_in_loop st ~continue_:step ~break_:after ~depth (fun () ->
           let run value =
-            Lowering.in_scope st (fun () ->
+            Lowering.run_in_scope st (fun () ->
                 let bound = loop_value () in
                 Emit_c.Builder.emit st.builder (Assign (bound, value));
                 each bound)
@@ -2339,7 +2348,7 @@ let fill_defaults (st : Lowering.state) (mask : Lowered.place) (body : Mir.Graph
               Emit_c.Builder.emit builder (Assign (owned_here, Use (Move arrived)));
               Emit_c.Builder.finish builder (Goto after);
               Emit_c.Builder.start builder fill;
-              Lowering.in_statement st (fun () -> lower_mir_into st default owned_here);
+              Lowering.run_in_statement st (fun () -> lower_mir_into st default owned_here);
               owned_here
             end
             else begin
@@ -2348,7 +2357,7 @@ let fill_defaults (st : Lowering.state) (mask : Lowered.place) (body : Mir.Graph
               in
               unless_passed after;
               Emit_c.Builder.start builder fill;
-              Lowering.in_statement st (fun () ->
+              Lowering.run_in_statement st (fun () ->
                   match arrived with
                   | { projections = [ Deref ]; root = Local pointer } ->
                       let value = default_value () in

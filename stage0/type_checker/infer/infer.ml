@@ -19,7 +19,7 @@ type tables = Tables.published = {
 type checked = Body.checked = { form : Core.t; tables : tables; used_packages : Path.package list }
 
 let check lookups (key : Resolve.Names.key) ~checks_body =
-  Compiler_bug.while_doing ~stage:"Infer" (Resolve.Names.show_key key) (fun () ->
+  Compiler_bug.run_while_doing ~stage:"Infer" (Resolve.Names.show_key key) (fun () ->
       try Body.check lookups key ~checks_body
       with Interface.Properties.Recursion_limit message ->
         let names = lookups.interface.names in

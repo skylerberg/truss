@@ -26,7 +26,7 @@ let check_body state (env : State.env) (written : Syntax.block) =
                    (State.show state output))
         | _ -> ())
     | [ (last : Syntax.statement) ] ->
-        State.in_statement state env (State.read_span state last.id) (fun () ->
+        State.run_in_statement state env (State.read_span state last.id) (fun () ->
             match (last.kind, env.output) with
             | Expression _, Some (Returns output) when State.resolve state output = Types.unit ->
                 Statements.check_statement state env last ~last:false
@@ -43,11 +43,11 @@ let check_body state (env : State.env) (written : Syntax.block) =
                        (State.show state output))
             | _ -> Statements.check_statement state env last ~last:false)
     | (first : Syntax.statement) :: rest ->
-        State.in_statement state env (State.read_span state first.id) (fun () ->
+        State.run_in_statement state env (State.read_span state first.id) (fun () ->
             Statements.check_statement state env first ~last:false);
         check_statements rest
   in
-  State.in_statement state env (State.read_span state written.id) (fun () ->
+  State.run_in_statement state env (State.read_span state written.id) (fun () ->
       check_statements written.statements)
 
 let declare_parameters state (written : Syntax.parameter list) (signature : Types.signature) =
@@ -90,7 +90,7 @@ let check_clauses state env (clauses : Syntax.clause list) =
     clauses;
   List.iter
     (fun ((value : Syntax.expression), kind) ->
-      State.in_statement state env (State.read_span state value.id) (fun () ->
+      State.run_in_statement state env (State.read_span state value.id) (fun () ->
           match kind with
           | `Bool -> Expressions.check state env value Types.bool
           | `Cost_function -> ignore (Expressions.check_expression state env value)))
@@ -121,7 +121,7 @@ let check_function_type_requires state env (written : Syntax.parameter list)
                 (fun (clause : Syntax.clause) ->
                   match clause.kind with
                   | Requires value ->
-                      State.in_statement state env (State.read_span state value.id) (fun () ->
+                      State.run_in_statement state env (State.read_span state value.id) (fun () ->
                           Expressions.check state env value Types.bool)
                   | _ -> ())
                 clauses
@@ -140,7 +140,7 @@ let check_defaults state env (written : Syntax.parameter list) (signature : Type
               signature.parameters
           with
           | Some info ->
-              State.in_statement state env (State.read_span state value.id) (fun () ->
+              State.run_in_statement state env (State.read_span state value.id) (fun () ->
                   let actual = Expressions.check_expression state env ~expected:info.type_ value in
                   Name_lookup.coerce state env ~argument:info.mode value ~actual
                     ~expected:info.type_);
@@ -313,10 +313,10 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
           (fun (clause : Syntax.type_clause) ->
             match clause.kind with
             | Type_invariant value ->
-                State.in_statement state env (State.read_span state value.id) (fun () ->
+                State.run_in_statement state env (State.read_span state value.id) (fun () ->
                     Expressions.check state env value Types.bool)
             | Potential value ->
-                State.in_statement state env (State.read_span state value.id) (fun () ->
+                State.run_in_statement state env (State.read_span state value.id) (fun () ->
                     ignore (Expressions.check_expression state env value))
             | Derives _ -> ())
           clauses;
@@ -378,8 +378,8 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                       lowered_fields
                   with
                   | Some elaborated ->
-                      State.in_statement state constant_expression (State.read_span state value.id)
-                        (fun () ->
+                      State.run_in_statement state constant_expression
+                        (State.read_span state value.id) (fun () ->
                           Expressions.check state constant_expression value elaborated.field_type);
                       Constant.check state ~default:true value
                   | None -> ())
@@ -460,8 +460,8 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                     law.parameters;
                   List.iter
                     (fun (requirement : Syntax.expression) ->
-                      State.in_statement state env (State.read_span state requirement.id) (fun () ->
-                          Expressions.check state env requirement Types.bool))
+                      State.run_in_statement state env (State.read_span state requirement.id)
+                        (fun () -> Expressions.check state env requirement Types.bool))
                     law.requires;
                   if not (broken (Member_body index)) then
                     check_body state { env with output = Some (Returns Types.bool) } law.body
@@ -480,7 +480,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                 Option.is_some (Types.find_specification_only_type constant.constant_type);
             }
           in
-          State.in_statement state env (State.read_span state value.id) (fun () ->
+          State.run_in_statement state env (State.read_span state value.id) (fun () ->
               Expressions.check state env value constant.constant_type);
           Constant.check state ~default:false value
         end

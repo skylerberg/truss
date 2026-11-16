@@ -93,7 +93,7 @@ type unsupported = { construct : string; at : Lowered.site option }
 
 exception Unsupported of unsupported
 
-val unsupported : ?at:Lowered.site -> ('a, unit, string, 'b) format4 -> 'a
+val raise_unsupported : ?at:Lowered.site -> ('a, unit, string, 'b) format4 -> 'a
 val require_written : state -> Definitions.written
 val quote_span : state -> Source.Definition_span.t -> string
 val lookup_innermost_scope : state -> scope
@@ -116,8 +116,8 @@ val return_result : state -> Lowered.terminator
 val leave_to : state -> int -> unit
 val open_scope : state -> scope_kind -> scope
 val close_scope : state -> scope -> unit
-val in_scope : state -> (unit -> 'a) -> 'a
-val in_statement : state -> (unit -> 'a) -> 'a
+val run_in_scope : state -> (unit -> 'a) -> 'a
+val run_in_statement : state -> (unit -> 'a) -> 'a
 
 val finish_function :
   state ->
@@ -136,7 +136,7 @@ val make_owned_operand : state -> Lowered.place -> Ground.ty -> Lowered.operand
 val take : state -> Lowered.place -> Ground.ty -> destination:Lowered.place -> unit
 val snapshot : state -> Lowered.place -> Lowered.place
 
-val looping :
+val run_in_loop :
   state -> continue_:Lowered.block -> break_:Lowered.block -> depth:int -> (unit -> unit) -> unit
 
 val find_place_type : state -> Lowered.place -> Lowered.ty option

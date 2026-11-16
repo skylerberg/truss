@@ -108,7 +108,7 @@ let lookup_section_names state = function
 let lookup_current_names state = lookup_section_names state state.section
 let read_span state id = state.spans.(id)
 
-let in_section state section walk =
+let run_in_section state section walk =
   if section = state.walked then begin
     let enclosing = state.section in
     state.section <- section;
@@ -841,7 +841,7 @@ let resolve_parameters state scope (parameters_ : Syntax.parameter list) =
           resolve_type_expression state scope type_;
           Option.iter
             (fun default ->
-              in_section state Contract (fun () -> resolve_expression state scope default))
+              run_in_section state Contract (fun () -> resolve_expression state scope default))
             default;
           declare_parameter state scope name
       | Self_parameter _ | Parameter_error -> scope)
@@ -870,7 +870,7 @@ let resolve_clauses state scope (clauses_ : Syntax.clause list) =
     (fun (clause_ : Syntax.clause) ->
       match clause_.kind with
       | Requires _ | Ensures _ | Decreases _ ->
-          in_section state Contract (fun () -> resolve_clause state scope clause_)
+          run_in_section state Contract (fun () -> resolve_clause state scope clause_)
       | Uses _ | Cost _ | Clause_error -> resolve_clause state scope clause_)
     clauses_
 
@@ -897,7 +897,7 @@ let resolve_fields state scope (fields_ : Syntax.field list) =
           resolve_type_expression state scope type_;
           Option.iter
             (fun default ->
-              in_section state Contract (fun () -> resolve_expression state scope default))
+              run_in_section state Contract (fun () -> resolve_expression state scope default))
             default
       | Field_error -> ())
     fields_
@@ -947,7 +947,8 @@ let resolve_definition state ~(path : Path.t) ?(container : (Path.t * Syntax.def
         let scope = resolve_head state scope ~owner:path signature_.name in
         match resolve_signature state scope ~owner:path ~broken:false signature_ with
         | Some scope ->
-            if not body_broken then in_section state Body (fun () -> resolve_block state scope body)
+            if not body_broken then
+              run_in_section state Body (fun () -> resolve_block state scope body)
         | None -> ()
       end
   | Method_declaration signature_ ->
@@ -981,7 +982,8 @@ let resolve_definition state ~(path : Path.t) ?(container : (Path.t * Syntax.def
           (fun (clause : Syntax.type_clause) ->
             match clause.kind with
             | Type_invariant value | Potential value ->
-                in_section state Contract (fun () -> resolve_expression state clause_scope value)
+                run_in_section state Contract (fun () ->
+                    resolve_expression state clause_scope value)
             | Derives traits -> List.iter (resolve_path_type state scope) traits)
           clauses
       end
@@ -1000,7 +1002,7 @@ let resolve_definition state ~(path : Path.t) ?(container : (Path.t * Syntax.def
                       { scope with specification = in_specification }
                       parameters_
                   in
-                  in_section state Contract (fun () ->
+                  run_in_section state Contract (fun () ->
                       List.iter (resolve_expression state inner) requires;
                       if not (broken (Member_body index)) then resolve_block state inner body)
               | Associated_capability _ | Trait_member_error -> ())
@@ -1028,12 +1030,12 @@ let resolve_definition state ~(path : Path.t) ?(container : (Path.t * Syntax.def
         let scope = resolve_head state scope ~owner:path name in
         resolve_type_expression state scope type_;
         if not body_broken then
-          in_section state Body (fun () -> resolve_expression state scope value)
+          run_in_section state Body (fun () -> resolve_expression state scope value)
       end
   | Test { uses; body; _ } ->
       if not header_broken then begin
         List.iter (resolve_capability_reference state scope) uses;
-        if not body_broken then in_section state Body (fun () -> resolve_block state scope body)
+        if not body_broken then run_in_section state Body (fun () -> resolve_block state scope body)
       end
   | Theorem { generics = generics_; parameters = parameters_; clauses = clauses_; body; _ } ->
       if not header_broken then begin
@@ -1044,7 +1046,7 @@ let resolve_definition state ~(path : Path.t) ?(container : (Path.t * Syntax.def
         in
         let scope = resolve_parameters state scope parameters_ in
         resolve_clauses state scope clauses_;
-        if not body_broken then in_section state Body (fun () -> resolve_block state scope body)
+        if not body_broken then run_in_section state Body (fun () -> resolve_block state scope body)
       end
   | Law_proof { trait_; law; type_; body } ->
       if not header_broken then begin
@@ -1065,7 +1067,7 @@ let resolve_definition state ~(path : Path.t) ?(container : (Path.t * Syntax.def
             (List.mapi (fun index name -> (index, name)) law_parameters)
         in
         if not body_broken then
-          in_section state Body (fun () ->
+          run_in_section state Body (fun () ->
               resolve_block state { scope with values; specification = in_specification } body)
       end
   | Definition_error _ -> ()

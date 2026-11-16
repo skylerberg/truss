@@ -55,7 +55,7 @@ let rec try_ state env (value : Syntax.expression) (inner : Syntax.expression) =
   State.register_expression state value (fun () ->
       match output with
       | Some output -> Form.build_try state value inner ~output:(State.finalize_type state output)
-      | None -> State.bug "`?` where nothing is returned");
+      | None -> State.raise_bug "`?` where nothing is returned");
   match (inner_type, output) with
   | ( Types.Named { path; arguments = [ Types.Type ok; Types.Type error ] },
       Some (Types.Named { path = output_path; arguments = [ _; Types.Type output_error ] }) )
@@ -152,7 +152,7 @@ and check_record_update state env (value : Syntax.expression) (base : Syntax.exp
                             State.make_synthetic_expression state ~origin:update.id
                               (Form.read_local_type state id)
                               (Form.build_local_use state ~origin:update.id id)
-                        | None, _ -> State.bug "`with (%s)` names no local" first.text )
+                        | None, _ -> State.raise_bug "`with (%s)` names no local" first.text )
                 | Update_error -> None)
               updates;
         });
@@ -619,7 +619,7 @@ and check_any state env ?expected (value : Syntax.expression) (inner : Syntax.ex
                   trait;
                   evidence = Form.convert_evidence (State.convert_evidence implementation);
                 }
-          | _ -> State.bug "`any` of a value whose type does not implement the trait");
+          | _ -> State.raise_bug "`any` of a value whose type does not implement the trait");
       Instantiation.require state ~at:(State.read_span state value.id) inner_type trait
         ~unmet:(fun inner_type other ->
           State.report state No_impl (State.read_span state value.id)

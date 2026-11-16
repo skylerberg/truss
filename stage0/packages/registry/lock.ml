@@ -3,7 +3,7 @@ type t = entry list
 
 exception Malformed of { line : int; message : string }
 
-let malformed line format =
+let raise_malformed line format =
   Printf.ksprintf (fun message -> raise (Malformed { line; message })) format
 
 let header = "format 1"
@@ -21,7 +21,7 @@ let parse_entry line text =
         match Manifest.parse_name written with
         | Some ({ owner = Some _; _ } as name) -> name
         | _ ->
-            malformed line
+            raise_malformed line
               "`%s` is not a registry package's name, which is an owner and a name joined by `::`."
               written
       in
@@ -29,15 +29,16 @@ let parse_entry line text =
         match Version.parse version with
         | Some ((major, _, _) as version) when major = Version.parse_major name -> version
         | Some _ ->
-            malformed line
+            raise_malformed line
               "A version of `%s` starts with %d, the number at the end of its name, or 1 for a \
                name without one."
               written (Version.parse_major name)
         | None ->
-            malformed line "`%s` is not a version, which is three numbers, such as 1.4.2." version
+            raise_malformed line "`%s` is not a version, which is three numbers, such as 1.4.2."
+              version
       in
       if not (Content.is_hash hash) then
-        malformed line "`%s` is not a hash, which is 64 hexadecimal digits." hash;
+        raise_malformed line "`%s` is not a hash, which is 64 hexadecimal digits." hash;
       let holds =
         match rest with
         | [] -> []
@@ -50,11 +51,11 @@ let parse_entry line text =
                 else capability)
               capabilities
         | _ ->
-            malformed line
+            raise_malformed line
               "After a package's hash comes nothing, or `holds` and the capabilities it holds."
       in
       { name; version; hash; holds }
-  | _ -> malformed line "A line is a package's name, its version, and its hash."
+  | _ -> raise_malformed line "A line is a package's name, its version, and its hash."
 
 let parse text =
   let lines =
@@ -72,11 +73,11 @@ let parse text =
         (List.fold_left
            (fun seen (line, entry) ->
              if List.mem entry.name seen then
-               malformed line "`%s` already has a line above." (Path.show_package entry.name);
+               raise_malformed line "`%s` already has a line above." (Path.show_package entry.name);
              entry.name :: seen)
            [] entries);
       sort_entries (List.map snd entries)
-  | (line, _) :: _ -> malformed line "A lock file starts with the line `%s`." header
+  | (line, _) :: _ -> raise_malformed line "A lock file starts with the line `%s`." header
 
 let print entries =
   String.concat ""

@@ -1,4 +1,4 @@
-let bug format = Compiler_bug.bug ~stage:"MIR" format
+let raise_bug format = Compiler_bug.raise_bug ~stage:"MIR" format
 
 type undecided =
   | Undecided_connective of {
@@ -223,11 +223,11 @@ let expand_body (body : Tree.body) : Graph.body =
               | Break -> (
                   match targets.break_ with
                   | Some after -> Goto after
-                  | None -> bug "a `break` outside a loop")
+                  | None -> raise_bug "a `break` outside a loop")
               | Continue -> (
                   match targets.continue_ with
                   | Some continue_ -> continue_
-                  | None -> bug "a `continue` outside a loop")
+                  | None -> raise_bug "a `continue` outside a loop")
               | Cancel { task; winner; number; returned } ->
                   Cancel
                     {
@@ -249,14 +249,14 @@ let expand_body (body : Tree.body) : Graph.body =
   and block targets current (statements : Tree.statement list) =
     match emit targets current [] statements with
     | Some (current, undecided) -> with_values targets current undecided
-    | None -> bug "statements that control leaves, where it goes on after them"
+    | None -> raise_bug "statements that control leaves, where it goes on after them"
   and branch targets current (statements : Tree.statement list) (value : Tree.operand option) ~yes
       ~no origin =
     match value with
     | None -> (
         match emit targets current [] statements with
         | None -> ()
-        | Some _ -> bug "statements with no value, whose end control reaches")
+        | Some _ -> raise_bug "statements with no value, whose end control reaches")
     | Some value -> (
         match List.rev statements with
         | { kind = Choose { target; choice = Connective { connective; left; right } }; _ } :: before
@@ -313,14 +313,14 @@ let expand_body (body : Tree.body) : Graph.body =
         close (index, assigned target value origin :: emitted) (Goto joined) origin;
         true
     | None, None -> false
-    | Some _, None | None, Some _ -> bug "a block whose value and whose end disagree"
+    | Some _, None | None, Some _ -> raise_bug "a block whose value and whose end disagree"
   in
   let entry = fresh () in
   (match
      emit { break_ = None; continue_ = None; task_ends = [] } (entry, []) [] body.code.statements
    with
   | None -> ()
-  | Some _ -> bug "a body whose end control reaches");
+  | Some _ -> raise_bug "a body whose end control reaches");
   {
     parameters = body.parameters;
     captures = body.captures;
