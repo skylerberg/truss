@@ -551,31 +551,30 @@ let list_changed_files root files paths =
 
 let refresh worktree =
   let root = worktree.root in
-  let files =
-    match Option.map Watcher.read_changes worktree.watcher with
-    | Some Overflow | None -> Some (Registry.Content.list_input_files root)
-    | Some (Changed []) -> None
-    | Some (Changed paths) -> Some (list_changed_files root worktree.snapshot.files paths)
+  let update files =
+    let before = worktree.snapshot in
+    let after = replace_files before files in
+    worktree.snapshot <- after;
+    match find_file_changes before after with
+    | Some [] -> `Unchanged
+    | changes ->
+        Option.iter
+          (fun loaded -> worktree.loaded <- loaded)
+          (apply_changes worktree.database after changes);
+        `Changed
   in
-  match files with
-  | None -> false
-  | Some files -> (
-      let before = worktree.snapshot in
-      let after = replace_files before files in
-      worktree.snapshot <- after;
-      match find_file_changes before after with
-      | Some [] -> false
-      | changes ->
-          Option.iter
-            (fun loaded -> worktree.loaded <- loaded)
-            (apply_changes worktree.database after changes);
-          true)
+  match Option.map Watcher.read_changes worktree.watcher with
+  | Some Removed -> `Removed
+  | Some Overflow | None -> update (Registry.Content.list_input_files root)
+  | Some (Changed []) -> `Unchanged
+  | Some (Changed paths) -> update (list_changed_files root worktree.snapshot.files paths)
 
 let open_worktree root =
   let directory = Filename.concat root database_directory in
   match
     Segments.open_ directory ~stop_holder:(fun () -> Server.stop_servers ~key:root ~wait:false ())
   with
+  | exception Unix.Unix_error (ENOENT, _, _) -> Error (root ^ ": no such directory.")
   | Error `Open_elsewhere ->
       Error
         (Printf.sprintf
@@ -603,12 +602,15 @@ let open_worktree root =
           Segments.close segments;
           raise failure)
 
-let load_worktree_snapshot root =
+let rec load_worktree_snapshot root =
   match Hashtbl.find_opt worktrees root with
-  | Some worktree ->
-      ignore (refresh worktree);
-      Ok worktree.snapshot
   | None -> Result.map (fun worktree -> worktree.snapshot) (open_worktree root)
+  | Some worktree -> (
+      match refresh worktree with
+      | `Removed ->
+          close worktree;
+          load_worktree_snapshot root
+      | `Changed | `Unchanged -> Ok worktree.snapshot)
 
 let take_snapshot directory =
   if not (Sys.file_exists directory) then Error (directory ^ ": no such directory.")
@@ -633,11 +635,15 @@ let propagate_changes descriptor =
   Hashtbl.iter
     (fun _ worktree ->
       if Option.map Watcher.extract_descriptor worktree.watcher = Some descriptor then
-        match if refresh worktree then Database.propagate ~on_bug:log_bug worktree.database with
-        | () -> commit worktree
-        | exception Compiler_bug.Bug bug ->
-            log_bug bug;
-            close worktree)
+        match refresh worktree with
+        | `Removed -> close worktree
+        | `Unchanged -> ()
+        | `Changed -> (
+            match Database.propagate ~on_bug:log_bug worktree.database with
+            | () -> commit worktree
+            | exception Compiler_bug.Bug bug ->
+                log_bug bug;
+                close worktree))
     (Hashtbl.copy worktrees)
 
 let problems snapshot = snapshot.project.problems

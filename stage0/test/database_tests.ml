@@ -1,3 +1,12 @@
+let () =
+  match Sys.argv with
+  | [| _; "__serve"; key |] ->
+      Workspace.serve ~key ~handle:(fun ~report_progress (request : string) ->
+          report_progress "working";
+          String.length request);
+      Unix._exit 0
+  | _ -> ()
+
 let check_text text =
   let database = Support.make_database (Support.setup [ ("app::main", text) ]) in
   (match
@@ -201,6 +210,7 @@ let with_helper =
 let () =
   Harness.test "a client whose background process exits without serving gets an error at once"
     (fun () ->
+      Unix.putenv "TRUSS_CACHE" (Harness.make_scratch_directory "unserved-cache");
       let started = Unix.gettimeofday () in
       (match
          (Workspace.For_testing.call_starting ~program:"/usr/bin/false"
@@ -225,45 +235,28 @@ let () =
       | Error message ->
           if not (String.includes ~affix:cache message) then Harness.fail "refused with: %s" message);
   Harness.test "the background process answers each request and sends its progress" (fun () ->
+      Unix.putenv "TRUSS_CACHE" (Harness.make_scratch_directory "served-cache");
       let key = Harness.make_scratch_directory "served" in
-      let socket =
-        match Workspace.For_testing.listen ~key with
-        | Ok socket -> socket
-        | Error message -> failwith message
+      let program = Unix.realpath Sys.executable_name in
+      let progressed = ref false in
+      let measure_served request =
+        match
+          Workspace.For_testing.call_starting ~program ~key
+            ~report_progress:(fun text -> if text = "working" then progressed := true)
+            request
+        with
+        | Ok (length : int) -> length
+        | Error message ->
+            Harness.fail "%s" message;
+            -1
       in
-      match Unix.fork () with
-      | 0 -> (
-          Unix.dup2 socket Unix.stdin;
-          match
-            Workspace.serve ~key ~handle:(fun ~report_progress request ->
-                report_progress "working";
-                String.length request)
-          with
-          | () -> Unix._exit 0
-          | exception _ -> Unix._exit 1)
-      | process ->
-          Unix.close socket;
-          Fun.protect
-            ~finally:(fun () ->
-              (try Unix.kill process Sys.sigkill with Unix.Unix_error _ -> ());
-              ignore (Unix.waitpid [] process))
-            (fun () ->
-              let progressed = ref false in
-              let measure_served request =
-                match
-                  Workspace.call ~start_server:false ~key
-                    ~report_progress:(fun text -> if text = "working" then progressed := true)
-                    request
-                with
-                | Ok (length : int) -> length
-                | Error message ->
-                    Harness.fail "%s" message;
-                    -1
-              in
-              let lengths = List.map measure_served [ "one"; "three"; "four" ] in
-              if lengths <> [ 3; 5; 4 ] then
-                Harness.fail "answered %s" (String.concat ", " (List.map string_of_int lengths));
-              if not !progressed then Harness.fail "sent no progress"))
+      Fun.protect
+        ~finally:(fun () -> ignore (Workspace.stop_servers ()))
+        (fun () ->
+          let lengths = List.map measure_served [ "one"; "three"; "four" ] in
+          if lengths <> [ 3; 5; 4 ] then
+            Harness.fail "answered %s" (String.concat ", " (List.map string_of_int lengths));
+          if not !progressed then Harness.fail "sent no progress"))
 
 let () =
   Harness.test "a caller's checked body reads the callee's interface and not its body" (fun () ->
