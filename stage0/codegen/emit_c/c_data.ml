@@ -38,7 +38,7 @@ let rec initializer_c context ty (value : Lowered.static_value) : string option 
   in
   match (layout.form, value) with
   | Zero_size, _ -> None
-  | _, Static_storage { element; elements; owned } ->
+  | _, Static_storage { element; elements } ->
       let element_c = value_c context element in
       let count = List.length elements in
       let buffer =
@@ -56,8 +56,7 @@ let rec initializer_c context ty (value : Lowered.static_value) : string option 
       in
       Some
         (Printf.sprintf "{ .f_%s = %s, .f_%s = %d, .f_%s = %d }" Storage.buffer_field buffer
-           Storage.length_field count Storage.capacity_field
-           (if owned then count else 0))
+           Storage.length_field count Storage.capacity_field count)
   | Scalar _, Static_scalar constant -> Some (fst (constant_c context constant))
   | Struct fields, Static_record values -> Some ("{ " ^ fields_c fields values "" ^ " }")
   | Array { element; _ }, Static_array values ->

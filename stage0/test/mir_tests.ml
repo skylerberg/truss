@@ -7,7 +7,7 @@ let graph_of (parts : Mir.lookups) key = Mir.graph (parts.body_part key)
 let code_of (parts : Mir.lookups) key = Mir.code (parts.body_part key)
 
 let place_locals (place : Mir.place) =
-  match place.root with Local local -> [ local ] | Constant _ -> []
+  match place.root with Local local -> [ local ] | Constant _ | Literal _ -> []
 
 let operand_locals : Mir.operand -> Mir.local list = function
   | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> place_locals place

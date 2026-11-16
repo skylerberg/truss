@@ -13,10 +13,10 @@ type local_info = {
 }
 
 type place = { root : root; projections : projection list }
-and root = Local of local | Constant of Path.t
+and root = Local of local | Constant of Path.t | Literal of { text : string; type_ : Types.ty }
 and projection = Field of string | Variant_field of { variant : string; field : string }
 
-type constant = Unit | Integer of Z.t | Float of float | Boolean of bool | String of string
+type constant = Unit | Integer of Z.t | Float of float | Boolean of bool
 
 type operand =
   | Use of { place : place; type_ : Types.ty; origin : Core.origin }

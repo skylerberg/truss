@@ -81,8 +81,8 @@ let () =
 let () =
   passes "a list grows as it is pushed and keeps its elements"
     Fixtures.Feature.list_grows_as_it_is_pushed_and_keeps_its_elements;
-  passes "text that started as a literal is copied before it is added to"
-    Fixtures.Feature.text_that_started_as_a_literal_is_copied_before_it
+  passes "a var bound to a string literal holds a copy"
+    Fixtures.Feature.var_bound_to_a_string_literal_holds_a_copy
 
 let () =
   test "values echo as Truss writes them" (fun () ->

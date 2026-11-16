@@ -62,7 +62,7 @@ public fn Algorithm.name(self) -> StringSlice {
     Es256 => "ES256"
     Es384 => "ES384"
     EdDsa => "EdDSA"
-  }.slice()
+  }
 }
 
 public fn Algorithm.from_name(name: StringSlice) -> Option[Algorithm] {

@@ -258,7 +258,7 @@ let rec borrowed_place builder (place : place) =
           let held = borrowed_place builder held in
           { held with projections = held.projections @ place.projections }
       | None -> place)
-  | Constant _ -> place
+  | Constant _ | Literal _ -> place
 
 let in_condition_scope :
     'value.

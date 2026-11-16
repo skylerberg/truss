@@ -149,7 +149,7 @@ public fn Status.reason(self) -> StringSlice {
     504 => "Gateway Timeout"
     505 => "HTTP Version Not Supported"
     _ => ""
-  }.slice()
+  }
 }
 
 public fn Status.is_success(self) -> Bool {

@@ -148,7 +148,9 @@ let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
             Passed
               {
                 mode = Read;
-                value = Value (node (Types.named (Well_known.path String_slice) []) (String text));
+                value =
+                  Place
+                    (Temporary (node (Types.named (Well_known.path String_slice) []) (String text)));
                 mode_keyword = None;
               }
           in

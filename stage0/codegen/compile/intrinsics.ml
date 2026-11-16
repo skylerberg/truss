@@ -44,13 +44,10 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
   let into intrinsic = call ?result:destination intrinsic (List.map operand arguments) in
   let uint64_local name = local builder ~name (Value types.uint64) in
   let element () = type_argument 0 in
-  let element_layout ?element:element_type () =
-    Memory_layout.of_type env
-      (match element_type with Some element -> element | None -> element ())
-  in
-  let length storage = Lowered.Copy (Storage.length storage) in
-  let view_length view = Lowered.Copy (Storage.view_length view) in
-  let element_at = Storage.at in
+  let element_layout () = Memory_layout.of_type env (element ()) in
+  let length storage = Lowered.Copy (Storage.project_length storage) in
+  let view_length view = Lowered.Copy (Storage.project_view_length view) in
+  let element_at = Storage.index_element in
   let panic_when failed message =
     let fail = block builder and go_on = block builder in
     branch builder failed ~yes:fail ~no:go_on;
@@ -66,52 +63,41 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
          });
     start builder go_on
   in
-  let set_capacity ?element storage capacity =
-    let layout = element_layout ?element () in
+  let set_capacity storage capacity =
+    let layout = element_layout () in
     let bytes = uint64_local "bytes" and too_many = local builder (Raw Bool) in
     call ~result:(at too_many) Multiply_overflow
       [ capacity; constant_uint64 layout.size; Address { place = at bytes; writable = true } ];
     panic_when (Copy (at too_many)) "out of memory";
     let buffer = local builder (Raw (Pointer Opaque)) in
-    let owns = local builder (Raw Bool) and borrows = local builder (Raw Bool) in
-    emit builder
-      (Assign (at owns, Binary (Not_equal, Copy (Storage.capacity storage), constant_uint64 0)));
-    emit builder (Assign (at borrows, Unary (Not, Copy (at owns))));
+    let is_allocated = local builder (Raw Bool) and is_unallocated = local builder (Raw Bool) in
+    emit builder (Assign (at is_allocated, Storage.build_is_allocated storage));
+    emit builder (Assign (at is_unallocated, Unary (Not, Copy (at is_allocated))));
     when_ builder
-      (Copy (at owns))
+      (Copy (at is_allocated))
       (fun () ->
         let held = uint64_local "held" in
         emit builder
           (Assign
              ( at held,
-               Binary (Multiply, Copy (Storage.capacity storage), constant_uint64 layout.size) ));
+               Binary
+                 (Multiply, Copy (Storage.project_capacity storage), constant_uint64 layout.size) ));
         call ~result:(at buffer) Reallocate
           [
-            Copy (Storage.buffer storage);
+            Copy (Storage.project_buffer storage);
             Copy (at held);
             Copy (at bytes);
             constant_uint64 layout.alignment;
           ]);
     when_ builder
-      (Copy (at borrows))
+      (Copy (at is_unallocated))
       (fun () ->
-        call ~result:(at buffer) Allocate [ Copy (at bytes); constant_uint64 layout.alignment ];
-        let used = uint64_local "used" in
-        emit builder
-          (Assign (at used, Binary (Multiply, length storage, constant_uint64 layout.size)));
-        call Copy_bytes [ Copy (at buffer); Copy (Storage.buffer storage); Copy (at used) ]);
-    emit builder (Assign (Storage.buffer storage, Use (Copy (at buffer))));
-    emit builder (Assign (Storage.capacity storage, Use capacity))
-  in
-  let own ?element storage =
-    let storage = place storage in
-    let borrowed = local builder (Raw Bool) in
-    emit builder
-      (Assign (at borrowed, Binary (Greater, length storage, Copy (Storage.capacity storage))));
-    when_ builder (Copy (at borrowed)) (fun () -> set_capacity ?element storage (length storage))
+        call ~result:(at buffer) Allocate [ Copy (at bytes); constant_uint64 layout.alignment ]);
+    emit builder (Assign (Storage.project_buffer storage, Use (Copy (at buffer))));
+    emit builder (Assign (Storage.project_capacity storage, Use capacity))
   in
   let add_to_length storage amount =
-    emit builder (Assign (Storage.length storage, Binary (Add, length storage, amount)))
+    emit builder (Assign (Storage.project_length storage, Binary (Add, length storage, amount)))
   in
   let lent place = Some place in
   let panic_if (failed : Lowered.rvalue) message =
@@ -160,15 +146,8 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
   in
   let room storage : Lowered.operand =
     let room = local builder ~name:"room" (Value types.uint64) in
-    let any = local builder (Raw Bool) in
-    emit builder (Assign (at room, Use (constant_uint64 0)));
     emit builder
-      (Assign (at any, Binary (Greater, Copy (Storage.capacity storage), length storage)));
-    when_ builder
-      (Copy (at any))
-      (fun () ->
-        emit builder
-          (Assign (at room, Binary (Subtract, Copy (Storage.capacity storage), length storage))));
+      (Assign (at room, Binary (Subtract, Copy (Storage.project_capacity storage), length storage)));
     Copy (at room)
   in
   match (operation : Intrinsic.operation) with
@@ -178,12 +157,11 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
       lent (element_at storage (value 1))
   | Storage_at_mut ->
       check_index (value 1) (length (place (argument 0)));
-      own (argument 0);
       lent (element_at (place (argument 0)) (value 1))
   | View_at | View_at_mut ->
       let view = place (argument 0) in
       check_index (value 1) (view_length view);
-      lent (Storage.view_at view (value 1))
+      lent (Storage.index_view_element view (value 1))
   | Array_at_mut ->
       (match value_arguments with
       | [ count ] -> check_index (value 1) (Constant (Integer (UInt64, count)))
@@ -252,7 +230,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
             emit builder (Assign (at elements, Use (Copy (at address))));
             call ~result:(at count) Terminated_length [ Copy (at address) ]);
         set
-          (Storage.view (Storage.view_of_elements byte)
+          (Storage.build_view (Storage.make_view_type byte)
              ~elements:(Copy (at elements))
              ~length:(Copy (at count)))
       in
@@ -308,7 +286,9 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
           let order = local builder (Raw (Integer Int32)) in
           call ~result:(at order) Compare_bytes
             [
-              Copy (Storage.view_elements left); Copy (Storage.view_elements right); Copy (at count);
+              Copy (Storage.project_view_elements left);
+              Copy (Storage.project_view_elements right);
+              Copy (at count);
             ];
           let same = local builder (Raw Bool) in
           emit builder
@@ -417,17 +397,17 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
           let same = local builder (Raw Bool) in
           emit builder (Assign (at same, Binary (Ieee_equal, value 0, value 0)));
           set (Unary (Not, Copy (at same)))
-      | Storage_empty -> set (Storage.empty (Storage.of_elements (element ())))
+      | Storage_empty -> set (Storage.build_empty (Storage.make_storage_type (element ())))
       | Storage_with_capacity ->
-          let ty = Storage.of_elements (element ()) in
+          let ty = Storage.make_storage_type (element ()) in
           let result = local builder (Value ty) in
-          emit builder (Assign (at result, Storage.empty ty));
+          emit builder (Assign (at result, Storage.build_empty ty));
           let any = local builder (Raw Bool) in
           emit builder (Assign (at any, Binary (Greater, value 0, constant_uint64 0)));
           when_ builder (Copy (at any)) (fun () -> set_capacity (at result) (value 0));
           set (Use (Move (at result)))
       | Storage_length -> set (Use (length (place (argument 0))))
-      | Storage_capacity -> set (Use (Copy (Storage.capacity (place (argument 0)))))
+      | Storage_capacity -> set (Use (Copy (Storage.project_capacity (place (argument 0)))))
       | Storage_set_capacity ->
           let storage = place (argument 0) in
           panic_if
@@ -446,11 +426,11 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
           panic_if
             (Binary (Greater, value 1, length storage))
             "a storage shortened to more than its length";
-          emit builder (Assign (Storage.length storage, Use (value 1)))
+          emit builder (Assign (Storage.project_length storage, Use (value 1)))
       | Storage_push ->
           let storage = place (argument 0) in
           panic_if
-            (Binary (Greater_equal, length storage, Copy (Storage.capacity storage)))
+            (Binary (Greater_equal, length storage, Copy (Storage.project_capacity storage)))
             "an element pushed to a storage that has no room";
           emit builder (Assign (element_at storage (length storage), Use (value 1)));
           add_to_length storage (constant_uint64 1)
@@ -460,14 +440,15 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
             (Binary (Equal, length storage, constant_uint64 0))
             "an element popped from an empty storage";
           emit builder
-            (Assign (Storage.length storage, Binary (Subtract, length storage, constant_uint64 1)));
+            (Assign
+               (Storage.project_length storage, Binary (Subtract, length storage, constant_uint64 1)));
           set (Use (Move (element_at storage (length storage))))
       | Storage_insert ->
           let storage = place (argument 0) in
           let index = value 1 in
           panic_if (Binary (Greater, index, length storage)) "index out of bounds";
           panic_if
-            (Binary (Greater_equal, length storage, Copy (Storage.capacity storage)))
+            (Binary (Greater_equal, length storage, Copy (Storage.project_capacity storage)))
             "an element inserted into a storage that has no room";
           let after = uint64_local "after" in
           let bytes = uint64_local "bytes" in
@@ -487,7 +468,6 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
           add_to_length storage (constant_uint64 1)
       | Storage_remove ->
           check_index (value 1) (length (place (argument 0)));
-          own (argument 0);
           let storage = place (argument 0) in
           let index = value 1 in
           set (Use (Move (element_at storage index)));
@@ -506,11 +486,11 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
               Copy (at bytes);
             ];
           emit builder
-            (Assign (Storage.length storage, Binary (Subtract, length storage, constant_uint64 1)))
+            (Assign
+               (Storage.project_length storage, Binary (Subtract, length storage, constant_uint64 1)))
       | Storage_swap ->
           check_index (value 1) (length (place (argument 0)));
           check_index (value 2) (length (place (argument 0)));
-          own (argument 0);
           let storage = place (argument 0) in
           let held = local builder (Value (element ())) in
           emit builder (Assign (at held, Use (Move (element_at storage (value 1)))));
@@ -530,13 +510,13 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
                 arguments = [ Type (element ()); Value count ];
               }
           in
-          let ty = Storage.of_elements (element ()) in
+          let ty = Storage.make_storage_type (element ()) in
           let result = local builder (Value ty) in
-          emit builder (Assign (at result, Storage.empty ty));
+          emit builder (Assign (at result, Storage.build_empty ty));
+          if Z.sign count > 0 then set_capacity (at result) (Constant (Integer (UInt64, count)));
           if Z.sign count > 0 && (Memory_layout.of_type env array_ty).size > 0 then begin
-            set_capacity (at result) (Constant (Integer (UInt64, count)));
             let untyped = local builder (Raw (Pointer Opaque)) in
-            emit builder (Assign (at untyped, Use (Copy (Storage.buffer (at result)))));
+            emit builder (Assign (at untyped, Use (Copy (Storage.project_buffer (at result)))));
             let typed = local builder (Pointer { target = Value array_ty; writable = true }) in
             emit builder (Assign (at typed, Use (Copy (at untyped))));
             emit builder (Assign ({ root = Local typed; projections = [ Deref ] }, Use (value 0)))
@@ -556,7 +536,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
                 arguments = [ Type (element ()); Value count ];
               }
           in
-          let moved_storage = at (local builder (Value (Storage.of_elements (element ())))) in
+          let moved_storage = at (local builder (Value (Storage.make_storage_type (element ())))) in
           emit builder (Assign (moved_storage, Use (Move (place (argument 0)))));
           if checks then begin
             let other = local builder (Raw Bool) in
@@ -568,18 +548,16 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
           end;
           if Z.sign count > 0 && (Memory_layout.of_type env array_ty).size > 0 then begin
             let untyped = local builder (Raw (Pointer Opaque)) in
-            emit builder (Assign (at untyped, Use (Copy (Storage.buffer moved_storage))));
+            emit builder (Assign (at untyped, Use (Copy (Storage.project_buffer moved_storage))));
             let typed = local builder (Pointer { target = Value array_ty; writable = true }) in
             emit builder (Assign (at typed, Use (Copy (at untyped))));
             set (Use (Move { root = Local typed; projections = [ Deref ] }))
           end;
-          let owns = local builder (Raw Bool) in
-          emit builder
-            (Assign
-               (at owns, Binary (Greater, Copy (Storage.capacity moved_storage), constant_uint64 0)));
+          let is_allocated = local builder (Raw Bool) in
+          emit builder (Assign (at is_allocated, Storage.build_is_allocated moved_storage));
           when_ builder
-            (Copy (at owns))
-            (fun () -> call Free [ Copy (Storage.buffer moved_storage) ])
+            (Copy (at is_allocated))
+            (fun () -> call Free [ Copy (Storage.project_buffer moved_storage) ])
       | Array_view ->
           let count =
             match value_arguments with
@@ -598,14 +576,14 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
             else Address { place = read (argument 0) / Index (constant_uint64 0); writable = false }
           in
           set
-            (Storage.view
-               (Storage.view_of_elements (element ()))
+            (Storage.build_view
+               (Storage.make_view_type (element ()))
                ~elements
                ~length:(Constant (Integer (UInt64, count))))
       | View_swap ->
           check_index (value 1) (view_length (place (argument 0)));
           check_index (value 2) (view_length (place (argument 0)));
-          let element_at index = Storage.view_at (place (argument 0)) index in
+          let element_at index = Storage.index_view_element (place (argument 0)) index in
           let held = local builder (Value (element ())) in
           emit builder (Assign (at held, Use (Move (element_at (value 1)))));
           emit builder (Assign (element_at (value 1), Use (Move (element_at (value 2)))));
@@ -613,13 +591,13 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
       | Storage_view ->
           let storage = place (argument 0) in
           set
-            (Storage.view
-               (Storage.view_of_elements (element ()))
-               ~elements:(Copy (Storage.buffer storage))
+            (Storage.build_view
+               (Storage.make_view_type (element ()))
+               ~elements:(Copy (Storage.project_buffer storage))
                ~length:(length storage))
       | View_length -> set (Use (view_length (place (argument 0))))
       | View_address ->
-          set (Convert (Copy (Storage.view_elements (place (argument 0))), Integer UInt64))
+          set (Convert (Copy (Storage.project_view_elements (place (argument 0))), Integer UInt64))
       | View_slice ->
           let view = place (argument 0) in
           panic_if (Binary (Greater, value 1, value 2)) "slice out of bounds";
@@ -627,9 +605,10 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
           let count = uint64_local "count" in
           emit builder (Assign (at count, Binary (Subtract, value 2, value 1)));
           set
-            (Storage.view
-               (Storage.view_of_elements (element ()))
-               ~elements:(Address { place = Storage.view_at view (value 1); writable = false })
+            (Storage.build_view
+               (Storage.make_view_type (element ()))
+               ~elements:
+                 (Address { place = Storage.index_view_element view (value 1); writable = false })
                ~length:(Copy (at count)))
       | Storage_model | View_model | Array_model ->
           bug "a model, which exists only in specifications"
@@ -644,8 +623,8 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
             (Fail
                {
                  failure = Panic;
-                 message = Copy (Storage.view_elements bytes);
-                 length = Copy (Storage.view_length bytes);
+                 message = Copy (Storage.project_view_elements bytes);
+                 length = Copy (Storage.project_view_length bytes);
                  site;
                  reported;
                });
@@ -746,14 +725,13 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
               (fun (_, (passes : Libc.passes)) : Lowered.operand ->
                 match passes with
                 | Value _ -> value (next_argument ())
-                | Elements _ -> Copy (Storage.view_elements (place (argument (next_argument ()))))
+                | Elements _ ->
+                    Copy (Storage.project_view_elements (place (argument (next_argument ()))))
                 | Room _ ->
                     let storage = place (argument (next_argument ())) in
                     Address { place = element_at storage (length storage); writable = true }
-                | Elements_to_change (scalar, _) ->
-                    let storage = argument (next_argument ()) in
-                    own ~element:(ground scalar) storage;
-                    Copy (Storage.buffer (place storage))
+                | Elements_to_change _ ->
+                    Copy (Storage.project_buffer (place (argument (next_argument ()))))
                 | Written (scalar, names) ->
                     let structure =
                       local builder
@@ -863,7 +841,10 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
                         emit builder
                           (Assign (at last, Binary (Subtract, view_length view, constant_uint64 1)));
                         panic_if
-                          (Binary (Not_equal, Copy (Storage.view_at view (Copy (at last))), zero))
+                          (Binary
+                             ( Not_equal,
+                               Copy (Storage.index_view_element view (Copy (at last))),
+                               zero ))
                           message)
                 | Some (Value _ | Written _ | Always _ | Fixed _) | None -> ())
               passed

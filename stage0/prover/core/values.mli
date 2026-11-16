@@ -69,4 +69,5 @@ val apply_specification_function :
   types:Types.ty list ->
   State.frame * Logic.term
 
-val copied : State.context -> State.frame -> Types.ty -> Logic.term -> State.frame
+val copied :
+  ?literal:string -> State.context -> State.frame -> Types.ty -> Logic.term -> State.frame

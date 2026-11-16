@@ -1,7 +1,7 @@
 use standard::html
 
 test "text interpolated into a template is escaped, and markup is kept" {
-  let name = "<script>alert('x')</script> & co"
+  var name = "<script>alert('x')</script> & co"
   let page = html::Html"<p class=\"greeting\">Hello, ${own name}!</p>"
   assert page.text() == "<p class=\"greeting\">Hello, &lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt; &amp; co!</p>".slice()
   let three: Int64 = 3
@@ -13,13 +13,13 @@ test "text interpolated into a template is escaped, and markup is kept" {
 }
 
 test "a value in a quoted attribute is escaped, and a URL with an unsafe scheme is replaced" {
-  let title = "say \"hi\""
+  var title = "say \"hi\""
   let attribute = html::Html"<abbr title='${own title}'>x</abbr>"
   assert attribute.text() == "<abbr title='say &quot;hi&quot;'>x</abbr>".slice()
-  let dangerous = "javascript:alert(1)"
+  var dangerous = "javascript:alert(1)"
   let link = html::Html"<a href=\"${own dangerous}\">x</a>"
   assert link.text() == "<a href=\"about:invalid\">x</a>".slice()
-  let relative = "/users/7?tab=a&b"
+  var relative = "/users/7?tab=a&b"
   let kept = html::Html"<a href=\"${own relative}\">x</a>"
   assert kept.text() == "<a href=\"/users/7?tab=a&amp;b\">x</a>".slice()
   let markup = html::Html"<b>bold</b>"
@@ -28,7 +28,7 @@ test "a value in a quoted attribute is escaped, and a URL with an unsafe scheme 
 }
 
 test "text after a comment or a closed script is text again" {
-  let value = "<x>"
+  var value = "<x>"
   let after = html::Html"<!-- a > b --><script>let a = 1 < 2</script><p>${own value}</p>"
   assert after.text() == "<!-- a > b --><script>let a = 1 < 2</script><p>&lt;x&gt;</p>".slice()
   assert html::Html.joined([html::Html"<i>a</i>", html::Html"<i>b</i>"], separator: ", ").text() == "<i>a</i>, <i>b</i>".slice()

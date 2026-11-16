@@ -1,0 +1,4 @@
+fn f() -> StringSlice {
+  let part = "abc".slice()
+  part
+}

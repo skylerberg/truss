@@ -433,15 +433,16 @@ change to its API.
 |---|---|
 | A handle is not `Copyable`. | Copying one would duplicate an operating-system handle, which can fail, and `copy()` cannot fail. |
 | Generic code copies only under a `Copyable` bound. | An unbounded type parameter then accepts every type, handles included. |
-| A string literal is copy-on-write: it is an owned `String` with no `copy()`, copied to the heap at its first mutation. | Only the methods that write bytes mutate a `String`, and each of those may allocate anyway, so copy-on-write changes no `cost` clause. |
+| A string literal is a `String` constant, copied where an owned `String` is needed. | Every `String` then owns its buffer. Copy-on-write needs a run-time test of whether the buffer is static before each write, drop, and copy, and gives a literal a capacity below its length, which the prover assumes cannot happen. |
+| A string literal where a `StringSlice` is expected is a `StringSlice`. | A `match` whose arms are literals then has the expected type. Converting its `String` value instead would make a view of a copy that is dropped at the end of the statement. |
 
 ### Views
 
 Rules: [Views](SPECIFICATION.md#views).
 
 A view is a read-only reference to a value that another variable owns. A
-read-only parameter, a `let` bound to a place, the variable of a `for` loop,
-and a slice are views:
+read-only parameter, a `let` bound to a place or to a string literal, the
+variable of a `for` loop, and a slice are views:
 
 ```truss
 let middle = items[1..4]

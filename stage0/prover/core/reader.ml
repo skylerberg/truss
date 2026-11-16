@@ -67,7 +67,8 @@ let rec place_type context frame run (place : Mir.place) =
   | [] -> (
       match place.Mir.root with
       | Local local -> substituted context frame run.infos.(local).type_
-      | Constant path -> constant_type context path)
+      | Constant path -> constant_type context path
+      | Literal { type_; _ } -> substituted context frame type_)
   | _ -> (
       let base =
         { place with Mir.projections = List.rev (List.tl (List.rev place.Mir.projections)) }
@@ -99,7 +100,7 @@ let rec aliased (frame : frame) run (place : Mir.place) : (Logic.term * Mir.plac
                 (aliased frame run bound_place))
             bound
       | None -> [ (Logic.Boolean true, place) ])
-  | Constant _ -> [ (Logic.Boolean true, place) ]
+  | Constant _ | Literal _ -> [ (Logic.Boolean true, place) ]
 
 let expanded frame run (place : Mir.place) =
   match aliased frame run place with
@@ -109,6 +110,7 @@ let expanded frame run (place : Mir.place) =
 let read_root context frame run (root : Mir.root) =
   match root with
   | Constant path -> constant_value context frame path
+  | Literal { text; type_ } -> text_value context frame (substituted context frame type_) text
   | Local local -> (
       match local_key run local with
       | Self -> (
@@ -198,7 +200,7 @@ let write_resolved context frame run (place : Mir.place) new_value =
           (rebuilt (prefix @ [ projection ]) part rest)
   in
   match place.Mir.root with
-  | Constant _ -> raise (Foreign_unsupported "assigning to a constant")
+  | Constant _ | Literal _ -> raise (Foreign_unsupported "assigning to a constant")
   | Local local -> (
       let whole =
         if place.Mir.projections = [] then new_value
@@ -216,7 +218,7 @@ let write_place context frame run (place : Mir.place) new_value =
         (fun frame (condition, (place : Mir.place)) ->
           let written = write_resolved context frame run place new_value in
           match place.Mir.root with
-          | Constant _ -> written
+          | Constant _ | Literal _ -> written
           | Local local -> (
               match local_key run local with
               | Self -> (
@@ -243,7 +245,7 @@ let changes ?(also = []) run frame (blocks : Mir.block list) : changed =
             match local_key run local with
             | Self -> self := true
             | key -> if Locals.mem key frame.locals then locals := key :: !locals)
-        | Constant _ -> ())
+        | Constant _ | Literal _ -> ())
       (aliased frame run place)
   in
   let assigned (place : Mir.place) =
@@ -328,8 +330,7 @@ let read_operand context frame run (operand : Mir.operand) =
           match float_format ty with
           | Some format -> float_literal format number
           | None -> raise (Foreign_unsupported "a float literal without a float type"))
-      | Boolean truth -> Logic.Boolean truth
-      | String text -> text_value context frame ty text)
+      | Boolean truth -> Logic.Boolean truth)
 
 let operand_type context frame operand = substituted context frame (Mir.operand_type operand)
 
@@ -447,7 +448,10 @@ let read_call context frame run (call : Mir.call) ~result_type =
   let invocation = invocation_of call ~lends:None in
   match (invocation.callee, call.arguments) with
   | ( Trait_method { trait; name = "equal"; _ },
-      [ Passed { value = tested; _ }; Passed { value = Constant { value = String text; _ }; _ } ] )
+      [
+        Passed { value = tested; _ };
+        Passed { value = Borrow { place = { root = Literal { text; _ }; projections = [] }; _ }; _ };
+      ] )
     when Path.equal trait.trait equal_trait ->
       let ty = operand_type context frame tested in
       Some
@@ -675,7 +679,12 @@ let rec read_rvalue context frame run (value : Mir.rvalue) ~(site : Invocation.s
   | Copy copied_operand ->
       let ty = operand_type context frame copied_operand in
       let term = operand copied_operand in
-      (copied context frame ty term, term)
+      let literal =
+        match copied_operand with
+        | Borrow { place = { root = Literal { text; _ }; projections = [] }; _ } -> Some text
+        | _ -> None
+      in
+      (copied ?literal context frame ty term, term)
   | Convert { conversion = Widen; value; converts_function_expression } ->
       check_widened span ~is_written:converts_function_expression
         (operand_type context frame value)
@@ -1376,7 +1385,7 @@ and write_assignment context run (target : Mir.place) ~(copied : Mir.operand lis
         when frame.source.key = Some context.home ->
           Hashtbl.replace context.local_names core name
       | Source _ | Temporary | Lent _ -> ())
-  | Constant _ -> ());
+  | Constant _ | Literal _ -> ());
   let copied_slice =
     Option.bind copied (fun source -> Locals.find_opt (local_key run source) frame.slices)
   in

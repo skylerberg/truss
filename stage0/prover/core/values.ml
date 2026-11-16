@@ -654,7 +654,7 @@ let apply_specification_function context frame ~span (measure : specification_fu
       (frame, time_of context frame function_type function_term)
   | _ -> unsupported span "this specification function"
 
-let copied context frame ty term =
+let copied ?literal context frame ty term =
   if
     context.counters = []
     || Interface.Impls.plain context.lookups.interface ~bounds:(current_bounds context) ty
@@ -662,17 +662,24 @@ let copied context frame ty term =
   then frame
   else
     spend context frame (fun (counter : Costs.counter) ->
-        match (counter.resource, counter.counting) with
-        | Time, Units ->
+        match (literal, counter.resource, counter.counting) with
+        | _, Time, Units ->
             let time =
-              trait_method_time context frame
-                (Path.Method
-                   { owner = Interface.Impls.copyable_path; name = "copy"; receiver = Read })
-                ty
+              match literal with
+              | Some _ -> Costs.zero
+              | None ->
+                  trait_method_time context frame
+                    (Path.Method
+                       { owner = Interface.Impls.copyable_path; name = "copy"; receiver = Read })
+                    ty
             in
             let copy_potential =
               try potential context frame ty term
               with Unsupported _ | Foreign_unsupported _ -> Costs.zero
             in
             Costs.minus (Costs.plus time (Logic.int 1)) copy_potential
+        | Some text, (Allocations | Allocated_bytes), Units | Some text, Allocations, _ ->
+            Logic.int (if text = "" then 0 else 1)
+        | Some text, Allocated_bytes, (At_most | Exactly) -> Logic.int (String.length text)
+        | Some _, Calls _, _ -> Costs.zero
         | _ -> unknown_amount context frame counter)

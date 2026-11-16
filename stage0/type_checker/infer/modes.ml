@@ -21,8 +21,15 @@ let rec is_slice (value : expression) =
   | Parenthesized inner | Mode (_, inner) -> is_slice inner
   | _ -> false
 
+let rec is_plain_string_literal (value : expression) =
+  match value.kind with
+  | String { tag = None; rest = []; _ } -> true
+  | Parenthesized inner -> is_plain_string_literal inner
+  | _ -> false
+
 let borrowed state (value : expression) =
-  (is_place state value || Option.is_some (lent state value)) && not (is_slice value)
+  (is_place state value || is_plain_string_literal value || Option.is_some (lent state value))
+  && not (is_slice value)
 
 let scrutinee_mode state (scrutinee : expression) : Types.mode =
   match scrutinee.kind with

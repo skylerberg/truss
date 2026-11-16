@@ -288,10 +288,11 @@ let program_main context (key : Instance.key) main_path : Emit_c.Builder.instanc
       in
       call Program_argument [ Copy (at arguments_pointer); Copy (at index) ] bytes;
       call Terminated_length [ Copy (at bytes) ] length;
-      let view_ty = Storage.view_of_elements (Ground.builtin UInt8) in
+      let view_ty = Storage.make_view_type (Ground.builtin UInt8) in
       let view = temporary st view_ty in
       emit builder
-        (Assign (view, Storage.view view_ty ~elements:(Copy (at bytes)) ~length:(Copy (at length))));
+        (Assign
+           (view, Storage.build_view view_ty ~elements:(Copy (at bytes)) ~length:(Copy (at length))));
       let text = temporary st string_ty in
       call_instance st
         (Code { path = text_copied_from; type_arguments = [] })
