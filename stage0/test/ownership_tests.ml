@@ -530,6 +530,10 @@ let () =
         (keep ^ Fixtures.Ownership.list_moved_then_read)
         "ownership.use_after_move"
         ~fixed:(keep ^ Fixtures.Ownership.list_copied_then_read));
+  Harness.test "a `let` that reads a moved place is reported at the place" (fun () ->
+      expect_one_diagnostic
+        (keep ^ Fixtures.Ownership.list_moved_then_bound)
+        "ownership.use_after_move" ~at:("items\n  look", 1));
   Harness.test "a tagged string moves its parts, and a plain string reads them" (fun () ->
       let shout = Fixtures.Ownership.shout in
       expect_one_diagnostic (shout ^ Fixtures.Ownership.shout_of_a_name) "ownership.not_owned";
@@ -896,17 +900,23 @@ let () =
         ~fixed:(grid ^ Fixtures.Ownership.lent_receiver_copied));
   Harness.test "a lent part cannot be returned" (fun () ->
       expect_one_diagnostic (grid ^ Fixtures.Ownership.grid_cell_returned) "ownership.not_owned");
-  Harness.test "a `let` cannot bind a lent part, with a fix that copies it at the lending call"
-    (fun () ->
+  Harness.test "a `let` cannot bind a lent part, with a fix that copies the scrutinee" (fun () ->
       expect_one_diagnostic
         (grid ^ Fixtures.Ownership.let_of_a_grid_cell)
-        "ownership.lent_part_escapes"
+        "ownership.lent_part_escapes" ~at:("held", 1)
         ~fixed:(grid ^ Fixtures.Ownership.let_of_a_grid_cell_fixed));
+  Harness.test "a `let` cannot bind a field of a lent part, with a fix that copies the scrutinee"
+    (fun () ->
+      expect_one_diagnostic
+        (grid ^ Fixtures.Ownership.let_of_a_grid_cell_name)
+        "ownership.lent_part_escapes" ~at:("name = grid", 1)
+        ~fixed:(grid ^ Fixtures.Ownership.let_of_a_grid_cell_name_fixed));
   Harness.test
-    "a `let` pattern cannot bind a part of a lent part, with a fix that copies the lent part"
+    "a `let` pattern cannot bind a part of a lent part, with a fix that copies the scrutinee"
     (fun () ->
       expect_one_diagnostic Fixtures.Ownership.let_else_of_a_lent_option
-        "ownership.lent_part_escapes" ~fixed:Fixtures.Ownership.let_else_of_a_lent_option_fixed);
+        "ownership.lent_part_escapes" ~at:("title) =", 1)
+        ~fixed:Fixtures.Ownership.let_else_of_a_lent_option_fixed);
   Harness.test "a `let` copies a `Plain` lent part" (fun () ->
       expect_fine (counter ^ Fixtures.Ownership.let_of_a_lent_count));
   Harness.test "a `match` on a lent part binds views of it, which cannot be moved" (fun () ->

@@ -139,7 +139,7 @@ let expect_no_diagnostics ~check files =
     files
 
 let expect_one_diagnostic ~check ?(setup = fun files -> setup files) ?(file = "app::main")
-    ?(others = []) ?fixed ?says text code =
+    ?(others = []) ?fixed ?says ?at text code =
   let packages = setup ((file, text) :: others) in
   match run_check ~check packages file with
   | [ (diagnostic : Diagnostic.t) ] -> (
@@ -150,6 +150,13 @@ let expect_one_diagnostic ~check ?(setup = fun files -> setup files) ?(file = "a
           if not (String.includes ~affix:says diagnostic.message) then
             Harness.fail "expected a message that says %S, got: %s" says diagnostic.message)
         says;
+      Option.iter
+        (fun (written, occurrence) ->
+          let expected = locate_occurrence ~sub:written ~occurrence text in
+          if diagnostic.span.start <> expected then
+            Harness.fail "expected the diagnostic at occurrence %d of %S, offset %d, got offset %d"
+              occurrence written expected diagnostic.span.start)
+        at;
       match (fixed, diagnostic.fixes) with
       | None, _ -> ()
       | Some _, [] -> Harness.fail "no fix"
