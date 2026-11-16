@@ -6,11 +6,7 @@ val trait_substitution :
   Types.trait_interface -> self:Types.ty -> Types.trait_reference -> Types.substitution
 
 val bound_closure :
-  Lookups.t ->
-  ?seen:Types.trait_reference list ->
-  self:Types.ty ->
-  Types.trait_reference ->
-  Types.trait_reference list
+  Lookups.t -> self:Types.ty -> Types.trait_reference -> Types.trait_reference list
 
 val known_bounds :
   Lookups.t ->

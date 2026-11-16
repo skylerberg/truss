@@ -163,17 +163,38 @@ let () =
       | reported -> fail "found [%s]" (String.concat "; " reported));
   test "a trait hierarchy of many diamonds is checked quickly" (fun () ->
       let levels = 24 in
+      let level index =
+        let body = if index = 0 then "{\n  fn size(self) -> UInt64\n}" else "{}" in
+        Printf.sprintf "trait T%d: A%d + B%d %s\n\ntrait A%d: T%d {}\n\ntrait B%d: T%d {}\n\n" index
+          index index body index (index + 1) index (index + 1)
+      in
       let text =
         String.concat ""
-          (List.init levels (fun index ->
-               Printf.sprintf
-                 "trait T%d: A%d + B%d {}\n\ntrait A%d: T%d {}\n\ntrait B%d: T%d {}\n\n" index index
-                 index index (index + 1) index (index + 1))
-          @ [ Printf.sprintf "trait T%d {}\n" levels ])
+          (List.init levels level
+          @ [
+              Printf.sprintf "trait T%d {}\n\n" levels;
+              "fn measure[Value: T0](value: Value) -> UInt64 {\n  value.size()\n}\n\n";
+              "fn measure_any(value: any T0) -> UInt64 {\n  value.size()\n}\n";
+            ])
       in
       let started = Sys.time () in
       no_diagnostics [ ("app::main", text) ];
       if Sys.time () -. started > 5.0 then fail "took %.1f seconds" (Sys.time () -. started));
+  test "a bound keeps a trait that it requires twice with different arguments" (fun () ->
+      no_diagnostics
+        [
+          ( "app::main",
+            "trait Convert[Target] {\n\
+            \  fn convert(self) -> Target\n\
+             }\n\n\
+             trait ToCount: Convert[Int64] {}\n\n\
+             trait ToText: Convert[String] {}\n\n\
+             trait Both: ToCount + ToText {}\n\n\
+             fn needs_text[Value: Convert[String]](value: Value) {}\n\n\
+             fn passes[Value: Both](value: Value) {\n\
+            \  needs_text(value)\n\
+             }\n" );
+        ]);
   test "a trait cannot redeclare a method of a trait it requires" (fun () ->
       one_diagnostic Fixtures.Interface.trait_cannot_redeclare_a_method_of_a_trait_it
         "types.redeclared_method");
