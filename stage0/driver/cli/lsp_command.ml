@@ -16,7 +16,7 @@ let encode_range encoding source (span : Source.span) =
   in
   Json.Object [ ("start", encode_point span.start); ("end", encode_point span.stop) ]
 
-let path_of_uri uri =
+let decode_file_uri uri =
   let prefix = "file://" in
   if not (String.starts_with ~prefix uri) then None
   else
@@ -75,7 +75,7 @@ let encode_state encoding source (state : Source.span Prover.state) =
 let check ~root encoding (buffers : (string * string) list) =
   let buffers =
     List.filter_map
-      (fun (uri, text) -> Option.map (fun path -> (uri, path, text)) (path_of_uri uri))
+      (fun (uri, text) -> Option.map (fun path -> (uri, path, text)) (decode_file_uri uri))
       buffers
   in
   let snapshot, _ = Command_packages.load root in
@@ -224,7 +224,7 @@ let choose_client_encoding params =
 
 let extract_root params =
   match (Json.lookup_field "rootUri" params, Json.lookup_field "rootPath" params) with
-  | Json.String uri, _ when path_of_uri uri <> None -> Option.get (path_of_uri uri)
+  | Json.String uri, _ when decode_file_uri uri <> None -> Option.get (decode_file_uri uri)
   | _, Json.String path -> path
   | _ -> Sys.getcwd ()
 
@@ -285,7 +285,7 @@ let handle server message =
   | Json.String "exit" -> Stop (if server.shut_down then 0 else 1)
   | Json.String "textDocument/didOpen" -> (
       match (uri, Json.lookup_field "text" document) with
-      | Some uri, Json.String text when path_of_uri uri <> None ->
+      | Some uri, Json.String text when decode_file_uri uri <> None ->
           server.buffers <- (uri, text) :: List.remove_assoc uri server.buffers;
           Recheck
       | _ -> Continue)

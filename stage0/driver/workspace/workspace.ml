@@ -162,11 +162,11 @@ let index_files (files : (string * string) list) =
   List.iter (fun (path, text) -> Hashtbl.replace table path text) files;
   (List.sort compare (List.map fst files), table)
 
-let project_of files =
-  let own = index_files files in
+let load_project files =
+  let project_files = index_files files in
   let registry = Hashtbl.create 4 and unavailable = Hashtbl.create 4 in
   let find_indexed_files = function
-    | Project.Project -> Some own
+    | Project.Project -> Some project_files
     | Registry hash -> Hashtbl.find_opt registry hash
   in
   let rec settle () =
@@ -195,8 +195,10 @@ let project_of files =
   in
   settle ()
 
-let snapshot_of_files kind files = { kind; files; project = project_of files }
-let replace_files (snapshot : snapshot) files = { snapshot with files; project = project_of files }
+let make_snapshot kind files = { kind; files; project = load_project files }
+
+let replace_files (snapshot : snapshot) files =
+  { snapshot with files; project = load_project files }
 
 let find_project_root directory =
   let directory = try Unix.realpath directory with Unix.Unix_error _ -> directory in
@@ -374,7 +376,7 @@ let compiler_line = "compiler " ^ Compiler_version.digest
 let make_header loaded =
   compiler_line :: List.map (fun (loaded : loaded) -> "loaded " ^ Blake3.to_hex loaded.key) loaded
 
-let of_hex hex =
+let decode_hex hex =
   if String.length hex mod 2 <> 0 || not (String.for_all Char.Ascii.is_hex_digit hex) then None
   else
     let read_byte_at index =
@@ -405,12 +407,12 @@ let find_saved_package_databases segments ~current =
               | [ "loaded"; hex ] ->
                   Option.map
                     (fun package_database -> package_database :: package_databases)
-                    (Option.bind (of_hex hex) (find_saved_package_database ~current))
+                    (Option.bind (decode_hex hex) (find_saved_package_database ~current))
               | _ -> None))
         loaded_lines (Some [])
   | Some _ | None -> None
 
-let project_texts snapshot =
+let make_text_lookup snapshot =
   let texts = File_table.create 256 in
   List.iter
     (fun (package : Project.package) ->
@@ -431,7 +433,7 @@ let restore_database segments snapshot =
         match Segments.read_entries segments with
         | None -> start_cold ()
         | Some entries -> (
-            match Database.restore ~loaded:saved ~find_text:(project_texts snapshot) entries with
+            match Database.restore ~loaded:saved ~find_text:(make_text_lookup snapshot) entries with
             | database ->
                 Database.relayout database ~loaded:(extract_package_databases loaded) packages;
                 database
@@ -602,7 +604,7 @@ let open_worktree root =
         else None
       in
       match
-        let snapshot = snapshot_of_files (Worktree root) (Registry.Content.list_input_files root) in
+        let snapshot = make_snapshot (Worktree root) (Registry.Content.list_input_files root) in
         (snapshot, restore_database segments snapshot)
       with
       | snapshot, (database, loaded) ->
@@ -774,7 +776,7 @@ let fetch_published name version =
       | Error reason -> refuse reason
       | Ok _ -> (
           let snapshot =
-            snapshot_of_files Published
+            make_snapshot Published
               (Registry.Content.list_input_files
                  (Filename.concat (Cache.make_packages_directory (open_cache ())) hash))
           in

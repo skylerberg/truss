@@ -473,7 +473,7 @@ let finish (outcome : Outcome.t) =
         ~finally:(fun () -> try Sys.remove program with Sys_error _ -> ())
         (fun () -> Process.run_attached program arguments)
 
-let request arguments =
+let make_request arguments =
   {
     arguments;
     directory = Sys.getcwd ();
@@ -513,7 +513,7 @@ let locate_directory arguments =
 let run_language_server ~no_server =
   let check ~root encoding buffers =
     let request =
-      { (request (Lsp_command.check_arguments ~root encoding buffers)) with directory = root }
+      { (make_request (Lsp_command.check_arguments ~root encoding buffers)) with directory = root }
     in
     let response =
       match Workspace.find_project_root root with
@@ -552,7 +552,7 @@ let run_client argv =
             (fun status key ->
               match
                 (Workspace.call ~start_server:false ~key ~report_progress:Output.eprint
-                   (request arguments)
+                   (make_request arguments)
                   : (response, string) result)
               with
               | Ok response ->
@@ -567,7 +567,8 @@ let run_client argv =
       | None -> run_locally ()
       | Some project_root -> (
           match
-            (Workspace.call ~key:project_root ~report_progress:Output.eprint (request arguments)
+            (Workspace.call ~key:project_root ~report_progress:Output.eprint
+               (make_request arguments)
               : (response, string) result)
           with
           | Ok response ->

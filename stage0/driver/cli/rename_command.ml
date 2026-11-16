@@ -5,7 +5,7 @@ type plan = {
   moved : (Path.module_ * Path.module_) option;
 }
 
-let module_exists snapshot packages (module_ : Path.module_) =
+let has_module snapshot packages (module_ : Path.module_) =
   List.mem module_ (Command_packages.list_modules snapshot packages)
 
 let compute_moved_file plan (file : Path.file) =
@@ -36,11 +36,11 @@ let locate_in_package packages from_ =
 let resolve_target snapshot database packages from_ =
   let { Path.package; modules = names }, member = locate_in_package packages from_ in
   let package_name = Path.show_package package in
-  if member = None && module_exists snapshot packages { package; modules = names } then
+  if member = None && has_module snapshot packages { package; modules = names } then
     Module { package; modules = names }
   else
     match List.rev names with
-    | last :: rest when module_exists snapshot packages { package; modules = List.rev rest } ->
+    | last :: rest when has_module snapshot packages { package; modules = List.rev rest } ->
         let module_ : Path.module_ = { package; modules = List.rev rest } in
         let is_declared path =
           List.exists
@@ -105,8 +105,7 @@ let plan_definition database snapshot packages path name =
   let edits =
     List.filter_map
       (fun (file, span, target) ->
-        if Inspect.References.names_definition path target then
-          Some (file, Diagnostic.replace span name)
+        if Inspect.References.is_named_by path target then Some (file, Diagnostic.replace span name)
         else None)
       (list_occurrences database snapshot packages)
   in
@@ -129,7 +128,7 @@ let plan_module database snapshot packages (old_module : Path.module_) to_ =
           name)
     modules;
   let new_module : Path.module_ = { package; modules } in
-  if module_exists snapshot packages new_module then
+  if has_module snapshot packages new_module then
     Outcome.raise_cannot_run "`%s` already exists." to_;
   let full = Path.show_module new_module in
   let last = List.nth modules (List.length modules - 1) in
