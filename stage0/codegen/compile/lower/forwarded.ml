@@ -161,13 +161,7 @@ let call ~(substitution : Types.substitution) ~(fresh : unit -> Mir.local) (mir 
               })
     | Use use ->
         projected use.place use.type_ ~of_place:(fun place ->
-            Use
-              {
-                use with
-                place;
-                type_ = Types.substitute substitution use.type_;
-                origin = outer.origin;
-              })
+            Use { place; type_ = Types.substitute substitution use.type_; origin = outer.origin })
     | Take _ -> None
   in
   let forwarded_call (inner : Mir.call) : Mir.call option =

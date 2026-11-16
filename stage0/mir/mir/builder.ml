@@ -126,13 +126,7 @@ let lower_pattern_constant (pattern : Core.pattern) (value : Core.pattern_consta
   | Integer_constant value -> Constant { value = Integer value; type_ }
   | String_constant value -> Constant { value = String value; type_ }
   | Named_constant path ->
-      Use
-        {
-          place = { root = Constant path; projections = [] };
-          type_;
-          node = pattern.id;
-          origin = pattern.origin;
-        }
+      Use { place = { root = Constant path; projections = [] }; type_; origin = pattern.origin }
 
 let lower_range_bound (pattern : Core.pattern) (bound : Core.range_bound) : operand =
   lower_pattern_constant pattern
@@ -154,11 +148,11 @@ let rec expression builder (node : Core.expression) : operand option =
         let* call = call_of builder called ~node:node.id ~origin:node.origin in
         let local = temporary builder node.type_ origin in
         emit builder (Basic (Template { destination = at local; literals; call })) origin;
-        Some (Use { place = at local; type_ = node.type_; node = node.id; origin = node.origin })
+        Some (Use { place = at local; type_ = node.type_; origin = node.origin })
     | Template _ -> bug "a tagged template whose value is not a call"
     | Use place_ ->
         let* place_ = place builder place_ in
-        Some (Use { place = place_; type_ = node.type_; node = node.id; origin = node.origin })
+        Some (Use { place = place_; type_ = node.type_; origin = node.origin })
     | Copy copied ->
         let* copied = operand builder Read copied in
         hold (Copy copied)
@@ -181,8 +175,7 @@ let rec expression builder (node : Core.expression) : operand option =
               (fun (fields, (written : Core.expression)) value ->
                 assign builder (field_path (at local) fields) (Operand value) written.origin)
               updates update_values;
-            Some
-              (Use { place = at local; type_ = node.type_; node = node.id; origin = node.origin })
+            Some (Use { place = at local; type_ = node.type_; origin = node.origin })
         | [] -> bug "a record update without a base")
     | Slice { call = { kind = Call called; _ }; _ } -> (
         let* call = call_of builder called ~node:node.id ~origin:node.origin in
@@ -192,8 +185,7 @@ let rec expression builder (node : Core.expression) : operand option =
             emit builder
               (Basic (Slice { destination = at local; base = borrowed_place builder base; call }))
               origin;
-            Some
-              (Use { place = at local; type_ = node.type_; node = node.id; origin = node.origin })
+            Some (Use { place = at local; type_ = node.type_; origin = node.origin })
         | _ -> bug "a slice whose base is not its first argument")
     | Slice _ -> bug "a slice whose view is not a call"
     | Call called -> call_value builder node called
@@ -235,7 +227,7 @@ let rec expression builder (node : Core.expression) : operand option =
                   match (Option.map (block builder) body, result) with
                   | Some (Some value), Some local ->
                       assign builder (at local) (Operand value) origin;
-                      Some (Use { place = at local; type_ = node.type_; node = node.id; origin })
+                      Some (Use { place = at local; type_ = node.type_; origin })
                   | Some None, _ -> None
                   | (Some (Some _) | None), _ -> Some unit_value))
         in
@@ -309,7 +301,7 @@ let rec expression builder (node : Core.expression) : operand option =
         emit builder
           (Basic (Echo (Borrow { place = at local; type_ = inner.type_; mode = Read; origin })))
           origin;
-        Some (Use { place = at local; type_ = node.type_; node = node.id; origin = node.origin })
+        Some (Use { place = at local; type_ = node.type_; origin = node.origin })
     | Current_target -> (
         match compound_target builder with
         | Some target -> Some (Take { place = target; type_ = node.type_; origin = node.origin })
@@ -636,7 +628,7 @@ and call_value builder (node : Core.expression) (called : Core.call) =
       else
         let local = temporary builder node.type_ origin in
         emit builder (Basic (Call { destination = Some (at local); call })) origin;
-        Some (Use { place = at local; type_ = node.type_; node = node.id; origin = node.origin })
+        Some (Use { place = at local; type_ = node.type_; origin = node.origin })
 
 and chosen builder (node : Core.expression) (blocks : block list) choice =
   let type_ = if diverges node.type_ then Types.unit else node.type_ in
@@ -750,13 +742,7 @@ and match_ builder (node : Core.expression) scrutinees (arms : Core.arm list) : 
                   (fun value ->
                     let local = temporary builder Types.bool guard.origin in
                     assign builder (at local) (Operand value) guard.origin;
-                    Use
-                      {
-                        place = at local;
-                        type_ = Types.bool;
-                        node = guard.id;
-                        origin = guard.origin;
-                      })
+                    Use { place = at local; type_ = Types.bool; origin = guard.origin })
                   holds
               in
               end_scope builder ended guard.origin;
@@ -779,7 +765,7 @@ and match_ builder (node : Core.expression) scrutinees (arms : Core.arm list) : 
             match (block builder arm.body, result) with
             | Some value, Some local ->
                 assign builder (at local) (Operand value) arm.origin;
-                Some (Use { place = at local; type_ = node.type_; node = node.id; origin })
+                Some (Use { place = at local; type_ = node.type_; origin })
             | Some _, None -> Some unit_value
             | None, _ -> None
           in
@@ -825,9 +811,7 @@ and scrutinee_place builder (value : operand) type_ origin : place =
 and test builder (pattern : Core.pattern) (scrutinee : place) ~branch_on =
   let origin = pattern.origin in
   let branch value = branch_on value origin in
-  let read =
-    Use { place = scrutinee; type_ = pattern.type_; node = pattern.id; origin = pattern.origin }
-  in
+  let read = Use { place = scrutinee; type_ = pattern.type_; origin = pattern.origin } in
   match pattern.kind with
   | Wildcard | Bind _ -> ()
   | Variant { variant; fields } ->
@@ -900,15 +884,7 @@ and test builder (pattern : Core.pattern) (scrutinee : place) ~branch_on =
                       };
                   }))
             origin;
-          branch
-            (Some
-               (Use
-                  {
-                    place = at local;
-                    type_ = Types.bool;
-                    node = pattern.id;
-                    origin = pattern.origin;
-                  }))
+          branch (Some (Use { place = at local; type_ = Types.bool; origin = pattern.origin }))
       | _ -> ())
   | Alternatives _ -> bug "alternatives are expanded before they are tested"
 
@@ -929,22 +905,9 @@ and bind ?(owned = false) builder (pattern : Core.pattern) (scrutinee : place) =
       assign builder (at bound)
         (Operand
            (match mode with
-           | Own ->
-               Use
-                 {
-                   place = scrutinee;
-                   type_ = pattern.type_;
-                   node = pattern.id;
-                   origin = pattern.origin;
-                 }
+           | Own -> Use { place = scrutinee; type_ = pattern.type_; origin = pattern.origin }
            | (Read | Mut) when owned ->
-               Use
-                 {
-                   place = scrutinee;
-                   type_ = pattern.type_;
-                   node = pattern.id;
-                   origin = pattern.origin;
-                 }
+               Use { place = scrutinee; type_ = pattern.type_; origin = pattern.origin }
            | Read | Mut ->
                Borrow { place = scrutinee; type_ = pattern.type_; mode; origin = pattern.origin }))
         pattern.origin
@@ -1049,8 +1012,7 @@ and statement builder (node : Core.statement) =
                 | Borrow _ ->
                     Borrow
                       { place = at local; type_ = core_operand_type right; mode = Read; origin }
-                | _ ->
-                    Use { place = at local; type_ = core_operand_type right; node = origin; origin }
+                | _ -> Use { place = at local; type_ = core_operand_type right; origin }
               in
               let loans = [ start_loan builder bound_value Read Operand_evaluation origin ] in
               let target = place builder target in
@@ -1344,7 +1306,7 @@ and quantifier_loop builder (node : Core.expression) (quantifier : Core.quantifi
                         if_condition = None;
                       })))
             (expression builder body)));
-  Some (Use { place = at result; type_ = Types.bool; node = node.id; origin })
+  Some (Use { place = at result; type_ = Types.bool; origin })
 
 and quantified builder (node : Core.expression) (quantifier : Core.quantifier)
     (binder : Core.binder) (body : Core.expression) =

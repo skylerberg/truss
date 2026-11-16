@@ -48,12 +48,12 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
   match value.kind with
   | Integer number ->
       state.tables.literals.(value.id) <- Some (Integer_value number);
-      register_expression state value (fun () -> Form.numeric_literal state value.id);
+      register_expression state value (fun () -> Form.build_numeric_literal state value.id);
       let type_ = literal_type state ~expected Integer_literal in
       check_literal_fits state value number type_;
       type_
   | Float number ->
-      register_expression state value (fun () -> Form.numeric_literal state value.id);
+      register_expression state value (fun () -> Form.build_numeric_literal state value.id);
       let type_ = literal_type state ~expected Float_literal in
       let significand = number.significand and exponent = number.exponent in
       defer state (fun () ->
@@ -77,7 +77,7 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
   | String literal -> (
       match character_tag state literal with
       | Some builtin ->
-          register_expression state value (fun () -> Form.numeric_literal state value.id);
+          register_expression state value (fun () -> Form.build_numeric_literal state value.id);
           character_literal state value.id literal builtin
       | None -> string_literal state env ?expected value literal)
   | True | False ->
@@ -98,7 +98,8 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
       Types.Never
   | Self_value -> (
       state.locals_read <- state.definition.id :: state.locals_read;
-      register_expression state value (fun () -> Use (Form.self_local state env ~origin:value.id));
+      register_expression state value (fun () ->
+          Use (Form.build_self_local state env ~origin:value.id));
       match env.self with
       | Some self -> self
       | None ->
@@ -139,7 +140,7 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
       register_expression state value (fun () ->
           Matches
             {
-              value = Form.operand mode (build_expression state tested);
+              value = Form.build_operand mode (build_expression state tested);
               pattern = build_pattern state written;
             });
       Types.bool
@@ -157,7 +158,7 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
         | None, None -> fresh state
       in
       register_expression state value (fun () ->
-          Form.range_record state value start stop ~inclusive);
+          Form.build_range_record state value start stop ~inclusive);
       Types.Named { path = Well_known.path Range; arguments = [ Types.Type element ] }
   | Quantified { quantifier; binder; body } ->
       (match binder with
@@ -181,7 +182,7 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
           match (binder, state.tables.loops.(value.id)) with
           | Binder_in (written, collection), Some (Elements { count; element; lends }) ->
               let pattern = build_pattern state written in
-              Form.over_elements state collection ~count ~element ~lends ~origin:value.id
+              Form.quantify_over_elements state collection ~count ~element ~lends ~origin:value.id
                 (fun elements -> quantified (Over_elements { pattern; elements }))
           | _ ->
               let binder : Core.binder =
@@ -191,7 +192,7 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
                       {
                         local = Named bound.id;
                         name = bound.text;
-                        type_ = Form.local_type state bound.id;
+                        type_ = Form.read_local_type state bound.id;
                       }
                 | Binder_in
                     ( written,
@@ -248,7 +249,7 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
   | Match { scrutinees; arms } -> match_ state env ?expected value scrutinees arms
   | Provide { implementations; body } ->
       List.iter (fun implementation -> ignore (expression state env implementation)) implementations;
-      register_expression state value (fun () -> Form.provide state implementations body);
+      register_expression state value (fun () -> Form.build_provide state implementations body);
       block_value state env ?expected body
   | Block body ->
       register_expression state value (fun () -> Block (build_block state body));
@@ -272,7 +273,7 @@ and member_value state env (value : expression) (base : expression) (member : na
                    {
                      base = place_of (build_expression state base);
                      field = member.text;
-                     type_ = Form.type_of state value;
+                     type_ = Form.read_type state value;
                      origin = value.id;
                    }));
           field state value base_type member)
@@ -325,7 +326,7 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
           let base = place_of (build_expression state base) in
           let start = Option.map (build_expression state) start in
           let stop = Option.map (build_expression state) stop in
-          slice state ~origin:value.id ~viewed:(Form.type_of state value) base ~start ~stop
+          slice state ~origin:value.id ~viewed:(Form.read_type state value) base ~start ~stop
             ~inclusive:(match range.kind with Range { inclusive; _ } -> inclusive | _ -> false));
       match base_type with
       | Types.Named { path; arguments = Types.Type element :: _ }

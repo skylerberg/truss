@@ -964,7 +964,6 @@ and read_statement context frame run (statement : Mir.statement) =
              {
                place = { root = Local winner; projections = [] };
                type_ = Types.builtin UInt32;
-               node = statement.origin;
                origin = statement.origin;
              })
       in

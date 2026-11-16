@@ -97,7 +97,7 @@ and statement state env (written : statement) ~last : unit =
         if is_var then Types.Own else if borrowed state value then Types.Read else Types.Own
       in
       register_statement state written (fun () ->
-          let value = Form.operand mode (build_expression state value) in
+          let value = Form.build_operand mode (build_expression state value) in
           let pattern = build_pattern state written_pattern in
           Let { pattern; value; else_ = Option.map (build_block state) else_ });
       (match (annotation, written_pattern.kind) with
@@ -135,7 +135,7 @@ and statement state env (written : statement) ~last : unit =
             | Assign -> Add
           in
           register_statement state written (fun () ->
-              Form.compound_assign state written written_target value binary_operator);
+              Form.build_compound_assign state written written_target value binary_operator);
           match binary_operator with
           | Add | Subtract | Multiply | Divide | Remainder ->
               let trait, method_ =
@@ -245,8 +245,8 @@ and statement state env (written : statement) ~last : unit =
         clauses;
       register_statement state written (fun () ->
           let pattern = build_pattern state written_pattern in
-          let clauses = List.map (Form.loop_clause state) clauses in
-          Form.for_loop state written inner ~pattern ~clauses ~body:(build_block state body)
+          let clauses = List.map (Form.build_loop_clause state) clauses in
+          Form.build_for_loop state written inner ~pattern ~clauses ~body:(build_block state body)
             ~mode:
               (match running with
               | Sequential -> Sequential
@@ -259,7 +259,7 @@ and statement state env (written : statement) ~last : unit =
       List.iter (loop_clause state env) clauses;
       register_statement state written (fun () ->
           let condition = build_expression state test in
-          let clauses = List.map (Form.loop_clause state) clauses in
+          let clauses = List.map (Form.build_loop_clause state) clauses in
           While
             {
               condition;

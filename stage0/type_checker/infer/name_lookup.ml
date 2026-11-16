@@ -29,7 +29,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
   | Local id -> (
       state.locals_read <- id :: state.locals_read;
       state.tables.resolutions.(value.id) <- Some (Local_value id);
-      register_expression state value (fun () -> Form.local_use state ~origin:value.id id);
+      register_expression state value (fun () -> Form.build_local_use state ~origin:value.id id);
       match Hashtbl.find_opt state.locals id with
       | Some local -> local.type_
       | None -> bug "the local `%s` has no type" text)
@@ -65,7 +65,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
   | Definition (Constant, path) -> (
       state.tables.resolutions.(value.id) <- Some (Global { path; type_arguments = [] });
       register_expression state value (fun () ->
-          Use (Form.constant_place state ~origin:value.id path));
+          Use (Form.build_constant_place state ~origin:value.id path));
       match Interface.Definition.constant_type state.lookups.interface path with
       | Some type_ -> type_
       | None -> bug "the constant `%s` has no type" (Path.show path))
@@ -98,9 +98,9 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
                       Use
                         (Field
                            {
-                             base = Form.self_local state env ~origin:value.id;
+                             base = Form.build_self_local state env ~origin:value.id;
                              field;
-                             type_ = Form.type_of state value;
+                             type_ = Form.read_type state value;
                              origin = value.id;
                            }));
                   written.field_type
@@ -130,7 +130,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
 and variant_value state (value : expression) type_path variant ~arguments =
   let type_ = Types.Named { path = type_path; arguments } in
   state.tables.resolutions.(value.id) <- Some (Variant_value { type_; variant });
-  register_expression state value (fun () -> Form.variant_value state value type_path variant);
+  register_expression state value (fun () -> Form.build_variant_value state value type_path variant);
   match Members.variants state.lookups type_path arguments with
   | Some variants -> (
       match
@@ -210,7 +210,7 @@ and field state (value : expression) base_type (member : name) =
 and function_value state (value : expression) (signature : Types.signature) =
   match Types.function_type_of signature with
   | Some function_type ->
-      register_expression state value (fun () -> Form.function_value state value);
+      register_expression state value (fun () -> Form.build_function_value state value);
       Types.Function function_type
   | None ->
       error state Not_a_value (read_span state value.id)
@@ -229,7 +229,7 @@ and static_member state (value : expression) type_ (member : name) =
             state.tables.resolutions.(value.id) <-
               Some (Global { path = constant; type_arguments = [] });
             register_expression state value (fun () ->
-                Use (Form.constant_place state ~origin:value.id constant));
+                Use (Form.build_constant_place state ~origin:value.id constant));
             match Interface.Definition.constant_type state.lookups.interface constant with
             | Some type_ -> type_
             | None -> bug "the constant `%s` has no type" (Path.show constant))

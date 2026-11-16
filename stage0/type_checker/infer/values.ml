@@ -59,7 +59,7 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
   match literal.tag with
   | None ->
       register_expression state value (fun () ->
-          Form.untagged_string state ~origin:value.id literal);
+          Form.build_untagged_string state ~origin:value.id literal);
       List.iteri
         (fun index ((part : expression), part_type) ->
           defer state (fun () ->
@@ -98,7 +98,8 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
           let part_type = ref None in
           register_expression state value (fun () ->
               match !part_type with
-              | Some part -> Form.tagged_string state value literal ~part:(final_type state part)
+              | Some part ->
+                  Form.build_tagged_string state value literal ~part:(final_type state part)
               | None -> bug "a tagged string's part type was not inferred");
           defer state (fun () ->
               let tag_type = normalize state tag_type in
@@ -181,7 +182,7 @@ and list_literal state env ?expected (value : expression) items =
   List.iter (fun item -> check state env item element) items;
   List.iter (fun item -> check_owned state env item element) items;
   register_expression state value (fun () ->
-      Form.collection_literal state value (List.map (build_expression state) items));
+      Form.build_collection_literal state value (List.map (build_expression state) items));
   make element
 
 and map_literal state env ?expected (value : expression) entries =
@@ -206,7 +207,7 @@ and map_literal state env ?expected (value : expression) entries =
       check_owned state env entry_value value_type)
     entries;
   register_expression state value (fun () ->
-      Form.map_literal state value
+      Form.build_map_literal state value
         (List.map
            (fun (entry_key, entry_value) ->
              let entry_key = build_expression state entry_key in
@@ -275,13 +276,13 @@ and lambda state env ?expected (value : expression) parameters body =
             List.filter_map
               (fun id : Core.capture option ->
                 if id = state.definition.id then
-                  Some { local = Self; type_ = Form.self_type state env }
+                  Some { local = Self; type_ = Form.read_self_type state env }
                 else if was_hole state (fun tables -> tables.local_types) id then None
-                else Some { local = Named id; type_ = Form.local_type state id })
+                else Some { local = Named id; type_ = Form.read_local_type state id })
               captures;
           body = build_block state body;
           result =
-            (match Form.type_of state value with
+            (match Form.read_type state value with
             | Types.Function function_type -> function_type.output
             | type_ -> bug "a lambda of type `%s`" (Types.show type_));
         });
@@ -369,7 +370,7 @@ and match_ state env ?expected (value : expression) scrutinees arms =
       let scrutinees =
         List.map
           (fun scrutinee ->
-            Form.operand (scrutinee_mode state scrutinee) (build_expression state scrutinee))
+            Form.build_operand (scrutinee_mode state scrutinee) (build_expression state scrutinee))
           scrutinees
       in
       Match
