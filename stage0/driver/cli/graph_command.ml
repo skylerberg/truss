@@ -3,22 +3,29 @@ module Part = Database.Part
 
 type direction = Dependents | Dependencies
 
-let ends_path name shown =
-  shown = name
-  ||
-  let name_length = String.length name and shown_length = String.length shown in
-  shown_length > name_length
-  && String.sub shown (shown_length - name_length) name_length = name
-  && (shown.[shown_length - name_length - 1] = ':' || shown.[shown_length - name_length - 1] = '.')
+let has_suffix names ~suffix =
+  let skipped = List.length names - List.length suffix in
+  skipped >= 0 && List.filteri (fun index _ -> index >= skipped) names = suffix
 
-let matches name (path : Path.t) =
-  ends_path name (Path.show path)
-  ||
-  match path with
-  | Method method_ -> ends_path name (Path.show (Method { method_ with receiver = Read }))
+let matches (argument : Path_argument.t) (path : Path.t) =
+  let suffix = argument.prefix @ [ argument.last ] in
+  let is_named (module_ : Path.module_) name =
+    has_suffix (Path.module_parts module_ @ [ name ]) ~suffix
+  in
+  match (path, argument.member) with
+  | Top { module_; name }, None -> is_named module_ name
+  | (Method { owner; name; _ } | Member_constant { owner; name }), Some member -> (
+      name = member
+      &&
+      match owner with
+      | Top { module_; name } | Impl { for_type = Top { module_; name }; _ } ->
+          is_named module_ name
+      | _ -> false)
+  | (Method { name; _ } | Member_constant { name; _ }), None ->
+      argument.prefix = [] && name = argument.last
   | _ -> false
 
-let definitions snapshot database name =
+let find_definitions snapshot database argument =
   let packages = List.map snd (Workspace.packages snapshot) in
   let names = Database.make_name_lookups database packages in
   List.sort_uniq Path.compare
@@ -26,7 +33,8 @@ let definitions snapshot database name =
        (fun package ->
          List.filter_map
            (fun (declaration : Names.declaration) ->
-             if declaration.ordinal = 0 && matches name declaration.path then Some declaration.path
+             if declaration.ordinal = 0 && matches argument declaration.path then
+               Some declaration.path
              else None)
            (names.package_declarations package))
        packages)
@@ -82,9 +90,10 @@ let to_json line =
     ]
 
 let run ~direction ~name =
+  let argument = Path_argument.parse name in
   let snapshot, _ = Command_packages.current () in
   let database = Workspace.open_database snapshot in
-  match definitions snapshot database name with
+  match find_definitions snapshot database argument with
   | [] -> Outcome.cannot_run "No definition named %s in this worktree." name
   | targets ->
       let lines =

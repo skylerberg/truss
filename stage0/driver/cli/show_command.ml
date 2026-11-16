@@ -26,8 +26,9 @@ let is_visible packages (declaration : Names.declaration) =
 let resolve database packages text =
   let names = Database.make_name_lookups database packages in
   let argument = Path_argument.parse text in
-  let module_ = if argument.member = None then find_module names argument.names else None in
-  match (names.split_module argument.names, module_, argument.member) with
+  let written = argument.prefix @ [ argument.last ] in
+  let module_ = if argument.member = None then find_module names written else None in
+  match (names.split_module written, module_, argument.member) with
   | Some { package; modules = [] }, _, None ->
       List.filter
         (fun (declaration : Names.declaration) -> Names.is_public declaration.visibility)
@@ -35,12 +36,12 @@ let resolve database packages text =
   | _, Some module_, _ ->
       List.filter (is_visible packages) (list_module_declarations database module_)
   | _, None, member -> (
-      match (find_module names (Path_argument.prefix argument), List.rev argument.names) with
-      | None, _ | _, [] -> []
-      | Some module_, last :: _ -> (
+      match find_module names argument.prefix with
+      | None -> []
+      | Some module_ -> (
           match member with
           | None -> (
-              let path : Path.t = Top { module_; name = last } in
+              let path : Path.t = Top { module_; name = argument.last } in
               match
                 List.filter
                   (fun (declaration : Names.declaration) -> Path.equal declaration.path path)
@@ -68,7 +69,7 @@ let resolve database packages text =
                   |> List.filter (is_visible packages)
               | declarations -> List.filter (is_visible packages) declarations)
           | Some member ->
-              let owner : Path.t = Top { module_; name = last } in
+              let owner : Path.t = Top { module_; name = argument.last } in
               list_package_declarations database module_.package
               |> List.filter (fun (declaration : Names.declaration) ->
                   match declaration.path with
