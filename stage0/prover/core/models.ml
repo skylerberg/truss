@@ -118,14 +118,18 @@ let substitute_value_term context (value : Types.value) =
       Logic.Symbol symbol
   | Value_variable _ -> Facts.raise_unsupported Whole_definition "an unsolved size"
 
-let is_standard_model_impl : Path.t -> bool = function
-  | Impl { module_; trait; _ } ->
+let is_model_built_from_contents : Path.t -> bool = function
+  | Impl { module_; trait; for_type } ->
       Path.compare_package module_.package Path.standard_package = 0
       && Path.equal trait.path (Well_known.make_path Model)
+      && (Intrinsic.builtin_of_path for_type = Some Array
+         || List.exists
+              (fun name -> Path.equal for_type (Well_known.make_path name))
+              [ List; Slice; String; String_slice; Literal; Set; Map ])
   | Top _ | Method _ | Member_constant _ | Derived _ | Test _ | Law_proof _ | Unresolved _ -> false
 
 let rank_model (context : State.context) (ty : Types.ty) ~(model : Types.ty) ~impl symbol =
-  if context.ranking && is_standard_model_impl impl then
+  if context.ranking && is_model_built_from_contents impl then
     Facts.run_once context (Ranked_model symbol) (fun () ->
         let each = Logic.Symbol.Variable { label = "ranked.value"; numbers = [] } in
         let fact =
