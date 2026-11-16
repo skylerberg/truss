@@ -1,0 +1,3 @@
+fn scaled(value: Integer, by: Integer = 2) -> Integer {
+  value * by
+}

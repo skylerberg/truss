@@ -368,6 +368,9 @@ let () =
   test "a variant with several fields is not a function, because fields have no order" (fun () ->
       one_diagnostic Fixtures.Infer.variant_with_several_fields_is_not_a_function
         "types.not_a_value");
+  test "a lending method is not a function value, because a function type cannot lend" (fun () ->
+      one_diagnostic Fixtures.Infer.lending_method_is_not_a_function_value "types.not_a_value"
+        ~says:"a function value cannot lend");
   test "a variant is looked up under its type" (fun () ->
       fine Fixtures.Infer.variant_is_looked_up_under_its_type);
   test "a constant under a type is read by name" (fun () ->
@@ -732,6 +735,28 @@ let () =
   test "a quantifier over a type in a compiled body" (fun () ->
       one_diagnostic Fixtures.Infer.quantifier_over_a_type_in_a_compiled_body
         "types.specification_only");
+  test "a local of type Integer in a compiled body" (fun () ->
+      one_diagnostic Fixtures.Infer.local_of_type_integer_in_a_compiled_body
+        "types.specification_only" ~says:"`big` has the type `Integer`");
+  test "a local whose type holds Integer in a compiled body" (fun () ->
+      one_diagnostic Fixtures.Infer.local_holding_integer_in_a_compiled_body
+        "types.specification_only" ~says:"which holds `Integer`");
+  test "a model in a compiled body" (fun () ->
+      one_diagnostic Fixtures.Infer.model_in_a_compiled_body "types.specification_only"
+        ~says:"`Sequence[Int64]`");
+  test "a field of type Integer" (fun () ->
+      one_diagnostic Fixtures.Infer.field_of_type_integer "types.specification_only");
+  test "a variant's field of type Sequence" (fun () ->
+      one_diagnostic Fixtures.Infer.variant_field_of_type_sequence "types.specification_only");
+  test "a constant of type Integer is read in specifications" (fun () ->
+      fine Fixtures.Infer.constant_of_type_integer_is_read_in_specifications);
+  test "a constant of type Integer in a compiled body" (fun () ->
+      one_diagnostic Fixtures.Infer.constant_of_type_integer_in_a_compiled_body
+        "types.specification_only");
+  test "a default of a function for specifications only is a specification" (fun () ->
+      fine Fixtures.Infer.default_of_a_function_for_specifications_only);
+  test "a loop clause of a compiled body reads a Sequence" (fun () ->
+      fine Fixtures.Infer.loop_clause_of_a_compiled_body_reads_a_sequence);
   test "a function for specifications only has a specification for a body" (fun () ->
       fine Fixtures.Infer.function_for_specifications_only_has_a);
   test "a function for specifications only cannot hold a var" (fun () ->

@@ -98,10 +98,7 @@ and zonk_function unifier (function_type : Types.function_type) =
   {
     function_type with
     inputs = List.map (fun (mode, type_) -> (mode, zonk unifier type_)) function_type.inputs;
-    output =
-      (match function_type.output with
-      | Returns type_ -> Returns (zonk unifier type_)
-      | Lends (mode, type_) -> Lends (mode, zonk unifier type_));
+    output = zonk unifier function_type.output;
     uses = zonk_capabilities unifier function_type.uses;
   }
 
@@ -140,7 +137,7 @@ let unknowns unifier (type_ : Types.ty) =
         trait reference
     | Function { inputs; output; _ } ->
         List.iter (fun (_, type_) -> collect type_) inputs;
-        collect (Types.result_type output)
+        collect output
     | Any reference -> trait reference
     | Parameter _ | Never | Integer | Hole | Error _ -> ()
   and argument = function
@@ -204,7 +201,7 @@ let rec unify unifier (left : Types.ty) (right : Types.ty) =
            (fun (left_mode, left) (right_mode, right) ->
              left_mode = right_mode && unify unifier left right)
            left.inputs right.inputs
-      && unify_result unifier left.output right.output
+      && unify unifier left.output right.output
       && unify_capabilities unifier left.uses right.uses
   | Any left, Any right -> unify_trait unifier left right
   | Projection left, Projection right ->
@@ -213,13 +210,6 @@ let rec unify unifier (left : Types.ty) (right : Types.ty) =
       && unify_arguments unifier left.trait.trait_arguments right.trait.trait_arguments
       && unify unifier left.base right.base
   | Never, Never | Integer, Integer -> true
-  | _ -> false
-
-and unify_result unifier (left : Types.result) (right : Types.result) =
-  match (left, right) with
-  | Returns left, Returns right -> unify unifier left right
-  | Lends (left_mode, left), Lends (right_mode, right) ->
-      left_mode = right_mode && unify unifier left right
   | _ -> false
 
 and unify_arguments unifier left right =

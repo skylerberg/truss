@@ -34,7 +34,7 @@ let rec agrees (left : Types.ty) (right : Types.ty) =
            (fun (left_mode, left) (right_mode, right) ->
              left_mode = right_mode && agrees left right)
            left.inputs right.inputs
-      && agrees_result left.output right.output
+      && agrees left.output right.output
   | _ -> Types.equal left right
 
 and agrees_result (left : Types.result) (right : Types.result) =

@@ -218,7 +218,7 @@ let () =
       let expected = "void t_test__bump(int32_t *restrict l0_count)" in
       if not (contains c_file expected) then fail "no %S in:\n%s" expected c_file);
   let callback =
-    ({ parameters = [ (Read, int32) ]; result = Returns int32; uses = [] } : Ground.function_type)
+    ({ parameters = [ (Read, int32) ]; result = int32; uses = [] } : Ground.function_type)
   in
   test "a lambda reads a local of its caller through its environment" (fun () ->
       let environment =

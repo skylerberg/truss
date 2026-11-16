@@ -30,6 +30,9 @@ type frame = {
   mutable declared : int list;
   mutable deferred_checks : (unit -> bool) list;
   mutable reported_unmet_bounds : (Types.ty * Types.trait_reference) list;
+  mutable compiled_expressions : int list;
+  mutable compiled_bindings : int list;
+  mutable specification_type_report : Diagnostic.reported option;
   frame_specification : bool;
   span : Source.Definition_span.t;
 }
@@ -131,6 +134,7 @@ val replace : Source.Definition_span.t -> string -> Source.Definition_span.t Dia
 val insert : int -> string -> Source.Definition_span.t Diagnostic.edit
 val current_frame : state -> frame option
 val record : state -> Syntax.expression -> Types.ty -> unit
+val note_compiled_expression : state -> env -> Syntax.expression -> unit
 val defer : state -> (unit -> bool) -> unit
 val resolve : state -> Types.ty -> Types.ty
 val zonk : state -> Types.ty -> Types.ty
@@ -160,6 +164,10 @@ val diverges : is_never:(Syntax.expression -> bool) -> Syntax.statement -> bool
 val statement_diverges : state -> Syntax.statement -> bool
 val build_block : state -> Syntax.block -> Core.block
 val declare : state -> Syntax.name -> Types.ty -> is_var:bool -> mode:Types.mode -> unit
+
+val declare_compiled :
+  state -> env -> Syntax.name -> Types.ty -> is_var:bool -> mode:Types.mode -> unit
+
 val target : state -> Syntax.name -> Resolve.target option
 val default_literal : state -> at:Source.Definition_span.t -> Types.ty -> Types.ty
 val head : state -> Syntax.expression -> Resolve.head option

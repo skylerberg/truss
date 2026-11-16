@@ -7,8 +7,7 @@ type ty =
   | Never
 
 and argument = Type of ty | Value of Z.t | Capabilities of Path.t list
-and function_type = { parameters : (mode * ty) list; result : result; uses : Path.t list }
-and result = Returns of ty | Lends of mode * ty
+and function_type = { parameters : (mode * ty) list; result : ty; uses : Path.t list }
 
 val compare : ty -> ty -> int
 val builtin : Intrinsic.builtin -> ty

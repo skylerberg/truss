@@ -44,8 +44,7 @@ let check_bounds state =
 let rec mentioned = function
   | Types.Named { path; arguments } -> path :: List.concat_map mentioned_argument arguments
   | Types.Function { inputs; output; _ } ->
-      List.concat_map (fun (_, type_) -> mentioned type_) inputs
-      @ mentioned (Types.result_type output)
+      List.concat_map (fun (_, type_) -> mentioned type_) inputs @ mentioned output
   | Types.Any trait -> trait.trait :: List.concat_map mentioned_argument trait.trait_arguments
   | Types.Projection { base; _ } -> mentioned base
   | _ -> []

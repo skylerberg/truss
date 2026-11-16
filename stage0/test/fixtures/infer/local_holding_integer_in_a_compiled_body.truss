@@ -1,0 +1,3 @@
+fn f() {
+  let numbers: List[Integer] = [1, 2]
+}

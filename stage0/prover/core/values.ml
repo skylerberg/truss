@@ -425,10 +425,10 @@ let named_function context frame (site : Invocation.site) path type_arguments co
   | Types.Function function_type when in_the_logic function_type && contract.is_logic_function ->
       let parameters = parameters_of context frame function_type in
       let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
-      let output = match function_type.output with Returns output -> output | _ -> Types.unit in
       let function_symbol = Symbol.Function { callee = path; instance } in
       declare context
-        (Logic.Function (function_symbol, List.map snd parameters, sort_of context output));
+        (Logic.Function
+           (function_symbol, List.map snd parameters, sort_of context function_type.output));
       let value = Logic.Apply (function_symbol, inputs) in
       if instance = [] then contract_for_every_argument context frame contract parameters value;
       fact context frame

@@ -19,6 +19,7 @@ let rec expression state env ?expected (value : expression) : Types.ty =
     else expression_kind state env ?expected value
   in
   record state value type_;
+  note_compiled_expression state env value;
   type_
 
 and lent_part state env (value : expression) : Types.ty =

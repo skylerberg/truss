@@ -1,0 +1,5 @@
+let limit: Integer = 5
+
+fn f() {
+  let _ = limit
+}

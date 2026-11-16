@@ -511,8 +511,7 @@ and walk_any_methods walk impl type_arguments ~only =
 
 let rec reached context (ty : Ground.ty) =
   (match ty with
-    | Function { parameters; result = Returns result | Lends (_, result); _ } ->
-        result :: List.map snd parameters
+    | Function { parameters; result; _ } -> result :: List.map snd parameters
     | Any { arguments; associated; _ } ->
         List.filter_map (function Ground.Type ty -> Some ty | _ -> None) arguments
         @ List.map snd associated

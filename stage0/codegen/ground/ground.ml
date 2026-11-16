@@ -7,8 +7,7 @@ type ty =
   | Never
 
 and argument = Type of ty | Value of Z.t | Capabilities of Path.t list
-and function_type = { parameters : (mode * ty) list; result : result; uses : Path.t list }
-and result = Returns of ty | Lends of mode * ty
+and function_type = { parameters : (mode * ty) list; result : ty; uses : Path.t list }
 
 let compare = Stdlib.compare
 let builtin builtin = Named { path = Intrinsic.builtin_path builtin; arguments = [] }
@@ -33,9 +32,8 @@ let rec to_string = function
       in
       let result =
         match function_type.result with
-        | Returns (Named { path; arguments = [] }) when path_name path = "Unit" -> ""
-        | Returns ty -> " -> " ^ to_string ty
-        | Lends (mode, ty) -> " lends " ^ mode_prefix mode ^ to_string ty
+        | Named { path; arguments = [] } when path_name path = "Unit" -> ""
+        | ty -> " -> " ^ to_string ty
       in
       let text = "fn(" ^ String.concat ", " parameters ^ ")" ^ result in
       if function_type.uses = [] then text

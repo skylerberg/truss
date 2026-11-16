@@ -417,7 +417,7 @@ let rec can_call_capability_code (state : state) ~bounds ?(seen = []) (type_ : T
   | Types.Function { uses; inputs; output; _ } ->
       uses <> Types.no_capabilities
       || List.exists (fun (_, input) -> inside input) inputs
-      || inside (Types.result_type output)
+      || inside output
   | Types.Any trait -> trait_uses trait
   | Types.Parameter parameter -> List.exists trait_uses (bounds parameter)
   | Types.Named { path; arguments = type_arguments } -> (

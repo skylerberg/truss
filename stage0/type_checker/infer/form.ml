@@ -188,7 +188,7 @@ let function_value state (value : expression) : Core.kind =
 
 let variant_value state (value : expression) type_path variant : Core.kind =
   match type_of state value with
-  | Types.Function { output = Returns (Types.Named { arguments; _ } as variant_type); _ } ->
+  | Types.Function { output = Types.Named { arguments; _ } as variant_type; _ } ->
       let fields =
         List.map
           (fun (field : Types.field) -> (field, fresh_synthetic_local state))

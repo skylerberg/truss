@@ -253,7 +253,9 @@ let check_function state ~broken_body (written : signature) (body_block : block 
     }
   in
   declare_parameters state written.parameters signature;
-  check_defaults state constant_expression written.parameters signature;
+  check_defaults state
+    { constant_expression with specification = signature.specification_only }
+    written.parameters signature;
   check_function_type_requires state env written.parameters signature;
   check_clauses state env written.clauses;
   state.form.definition_builder <-
@@ -462,8 +464,15 @@ let check_definition state (lowered : Environment.lowered_interface) ~checks_bod
             (fun ~holds_body ->
               Constant (if holds_body then Some (build_expression state value) else None));
         if not (broken Body) then begin
-          in_statement state constant_expression (read_span state value.id) (fun () ->
-              check state constant_expression value constant.constant_type);
+          let env =
+            {
+              constant_expression with
+              specification =
+                Option.is_some (Types.find_specification_only_type constant.constant_type);
+            }
+          in
+          in_statement state env (read_span state value.id) (fun () ->
+              check state env value constant.constant_type);
           Constant.check state ~default:false value
         end
     | Test { body = written; _ }, _ ->

@@ -671,9 +671,9 @@ let shared_update st ~shared ~input ~change ~destination =
     | ty -> bug "shared_update with a %s, which is not a function" (Ground.to_string ty)
   in
   let value_ty, result_ty =
-    match (function_type.parameters, function_type.result) with
-    | (_, value_ty) :: _, Returns result_ty -> (value_ty, result_ty)
-    | _ -> bug "shared_update with a function that takes no value or returns none"
+    match function_type.parameters with
+    | (_, value_ty) :: _ -> (value_ty, function_type.result)
+    | [] -> bug "shared_update with a function that takes no value"
   in
   let pointer = Lowered.Copy (shared / Field "value") in
   emit st.builder
@@ -1334,7 +1334,7 @@ and into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.place) ty ~or
       nested_function st ~function_type
         ~output:
           (match types_ty with
-          | Some (Types.Function function_type) -> Some function_type.output
+          | Some (Types.Function function_type) -> Some (Types.Returns function_type.output)
           | _ -> None)
         ~captures:
           (List.map
@@ -1612,9 +1612,9 @@ and lend ?(forwards = 0) st part (call : Mir.call) ~origin =
                     call_through_any st ~any_type ~trait:trait.trait ~name ~any ~arguments ~lending
                       destination)
             | [] -> bug "a call through any with no receiver")
-        | None, (Capability_method _ | Indirect _) ->
-            unsupported ~at:(site_of st origin)
-              "a lending call of a capability's method or of a function value"
+        | None, Capability_method _ ->
+            unsupported ~at:(site_of st origin) "a lending call of a capability's method"
+        | None, Indirect _ -> bug "a lending call of a function value, whose type cannot lend"
         | None, (Function _ | Intrinsic _) -> bug "a lending call that does not resolve"
       in
       emit_mark st Lend_called lent;

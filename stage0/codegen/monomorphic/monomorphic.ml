@@ -64,16 +64,12 @@ and ground_argument context substitution (argument : Types.argument) : Ground.ar
 and ground_function context substitution (function_type : Types.function_type) :
     Ground.function_type =
   let function_type = Types.substitute_function substitution function_type in
-  let ground_result : Types.result -> Ground.result = function
-    | Returns ty -> Returns (ground context [] ty)
-    | Lends (yield_mode, ty) -> Lends (mode yield_mode, ground context [] ty)
-  in
   {
     parameters =
       List.map
         (fun (yield_mode, ty) -> (mode yield_mode, ground context [] ty))
         function_type.inputs;
-    result = ground_result function_type.output;
+    result = ground context [] function_type.output;
     uses = evidence_for context [] function_type.uses;
   }
 
@@ -90,10 +86,7 @@ let rec back : Ground.ty -> Types.ty = function
             List.map
               (fun (yield_mode, ty) -> (types_mode yield_mode, back ty))
               function_type.parameters;
-          output =
-            (match function_type.result with
-            | Returns ty -> Returns (back ty)
-            | Lends (yield_mode, ty) -> Lends (types_mode yield_mode, back ty));
+          output = back function_type.result;
           uses =
             Types.capability_set (List.map (fun path -> Types.Capability path) function_type.uses);
           costs = [];
