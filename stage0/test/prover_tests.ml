@@ -1516,6 +1516,16 @@ let () =
           if List.hd (Solver.solve_all solver [ (request, query) ]) <> Solver.Proven then
             Harness.fail "expected the cached answer";
           if Solver.count_queries_run solver <> 0 then Harness.fail "ran the solver");
+  Harness.test "each solver keeps its own answers" (fun () ->
+      let query = make_self_comparison "<" in
+      let request = Solver.request query in
+      match (Solver.find (), Solver.find ()) with
+      | Ok first, Ok second ->
+          ignore (Solver.solve_all first [ (request, query) ]);
+          ignore (Solver.solve_all second [ (request, query) ]);
+          if Solver.count_queries_run second <> 1 then
+            Harness.fail "the second solver ran %d queries" (Solver.count_queries_run second)
+      | Error message, _ | _, Error message -> Harness.fail "%s" message);
   Harness.test "a solved answer is added to the cache under its query's key" (fun () ->
       let query = make_self_comparison "<=" in
       let request = Solver.request query in
@@ -1546,29 +1556,10 @@ let () =
     | Unsupported _ | Not_proven_here -> None
   in
   Harness.test "an unknown answer without an uninterpreted sort is not searched further" (fun () ->
-      let make_variable label = Logic.Symbol.Variable { label; numbers = [] } in
-      let first = make_variable "first"
-      and second = make_variable "second"
-      and sum = make_variable "sum" in
-      let cube variable =
-        Logic.Operation
-          ("*", [ Logic.Symbol variable; Logic.Symbol variable; Logic.Symbol variable ])
-      in
-      let query =
-        {
-          Logic.declarations =
-            List.map (fun variable -> Logic.Constant (variable, Logic.Int)) [ first; second; sum ];
-          facts =
-            List.map
-              (fun variable -> Logic.Operation (">", [ Logic.Symbol variable; Logic.int 0 ]))
-              [ first; second; sum ];
-          goal =
-            Logic.not_ (Logic.equal (Logic.Operation ("+", [ cube first; cube second ])) (cube sum));
-        }
-      in
-      match Solver.find () with
-      | Error message -> Harness.fail "%s" message
-      | Ok solver ->
+      match (find_obligation_query Fixtures.Prover.sum_of_two_cubes Ensures, Solver.find ()) with
+      | None, _ -> Harness.fail "no obligation of the `ensures`"
+      | _, Error message -> Harness.fail "%s" message
+      | Some query, Ok solver ->
           let request = Solver.request query in
           if List.hd (Solver.solve_all solver [ (request, query) ]) <> Unknown then
             Harness.fail "expected an unknown answer";
