@@ -580,6 +580,8 @@ let () =
       proven Fixtures.Prover.empty_string_literal_allocates_nothing);
   test "reading a string literal allocates nothing" (fun () ->
       proven Fixtures.Prover.reading_a_string_literal_allocates_nothing);
+  test "a copy has its original's capacity" (fun () ->
+      proven Fixtures.Prover.copy_has_its_originals_capacity);
   test "sequences with the same elements are identical" (fun () ->
       proven Fixtures.Prover.sequences_with_the_same_elements_are_identical);
   test "sequences that differ in one element are not identical" (fun () ->

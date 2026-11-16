@@ -73,9 +73,6 @@ let condition builder rvalue =
   emit builder (Assign (at flag, rvalue));
   Lowered.Copy (at flag)
 
-let is_empty builder storage =
-  condition builder (Binary (Equal, Copy (Storage.project_length storage), constant_uint64 0))
-
 let drop context ty =
   let builder = create context.env ~key:(Drop ty) in
   let pointer = local builder ~name:"value" (Pointer { target = Value ty; writable = true }) in
@@ -317,9 +314,11 @@ let copy context ty =
       emit builder (Assign (result, Use (Copy self)))
   | Storage element ->
       let layout = Memory_layout.of_type context.env element in
-      let hollow = block builder and allocate = block builder and after = block builder in
-      branch builder (is_empty builder self) ~yes:hollow ~no:allocate;
-      start builder hollow;
+      let unallocated = block builder and allocate = block builder and after = block builder in
+      branch builder
+        (condition builder (Storage.build_is_allocated self))
+        ~yes:allocate ~no:unallocated;
+      start builder unallocated;
       emit builder (Assign (result, Storage.build_empty ty));
       finish builder (Goto after);
       start builder allocate;
@@ -328,7 +327,7 @@ let copy context ty =
       emit builder
         (Assign
            ( at bytes,
-             Binary (Multiply, Copy (Storage.project_length self), constant_uint64 layout.size) ));
+             Binary (Multiply, Copy (Storage.project_capacity self), constant_uint64 layout.size) ));
       emit builder
         (Call
            {
@@ -336,14 +335,20 @@ let copy context ty =
              arguments = [ Copy (at bytes); constant_uint64 layout.alignment ];
              result = Returned (at buffer);
            });
-      if is_trivial context element then
+      if is_trivial context element then begin
+        let used = local builder (Raw (Integer UInt64)) in
+        emit builder
+          (Assign
+             ( at used,
+               Binary (Multiply, Copy (Storage.project_length self), constant_uint64 layout.size) ));
         emit builder
           (Call
              {
                target = Intrinsic Copy_bytes;
-               arguments = [ Copy (at buffer); Copy (Storage.project_buffer self); Copy (at bytes) ];
+               arguments = [ Copy (at buffer); Copy (Storage.project_buffer self); Copy (at used) ];
                result = Discarded;
              })
+      end
       else
         loop builder
           ~count:(Copy (Storage.project_length self))
@@ -358,7 +363,7 @@ let copy context ty =
              Storage.build_storage ty
                ~buffer:(Copy (at buffer))
                ~length:(Copy (Storage.project_length self))
-               ~capacity:(Copy (Storage.project_length self)) ));
+               ~capacity:(Copy (Storage.project_capacity self)) ));
       finish builder (Goto after);
       start builder after
   | Shape (Record fields) ->
