@@ -2094,15 +2094,17 @@ input:
 
 | Result | Key |
 |---|---|
-| A solver answer: proven, unknown, or a model and the cardinality bound it was found at | The query's text, whose symbols are numbered in order of appearance |
-| The values of a counterexample | The query's text and the terms whose values are requested |
+| A solver answer: proven, unknown, or a model and the cardinality bound it was found at | Z3's version, its options and step limit, the cardinality bounds, the version of the entry format, and the query's text, whose symbols are numbered in order of appearance |
+| The values of a counterexample | The key of the solver answer and the terms whose values are requested |
 | An object file | The C text, the C compiler, and its flags |
 | A test result | The test's key: the code generator's version, the target system, the flags, and a hash of the code the test reaches, in which each reference is numbered |
 | The database of the standard library or of a registry package | The package's content hash, the content hashes of the versions selected for its dependencies, and the compiler |
 | A fetched registry package | Its content hash |
 
 A cache never makes a result wrong: deleting it only makes the next build
-slower. Every worktree and CI share the caches. The database itself caches
+slower. An entry is never replaced, so a change to the layout or the
+meaning of an entry must change its key. The solver's key therefore names
+the version of its entry format. Every worktree and CI share the caches. The database itself caches
 nothing, so a revert or a branch switch is a change to the files like any
 other. The database computes the cheap stages again, and the solver, the C
 compiler, and the tests are cache hits.
