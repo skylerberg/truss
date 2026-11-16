@@ -1,0 +1,24 @@
+capability Store {
+  fn current(key: Int64) lends Int64
+}
+
+type Fixed(value: Int64)
+
+impl Store for Fixed {
+  fn current(self, key: Int64) lends Int64 {
+    self.value
+  }
+}
+
+fn read_current() -> Int64
+  uses Store
+{
+  Store.current(1)
+}
+
+fn main(arguments: List[String]) -> ExitCode {
+  let value = provide Fixed(value: 3) {
+    read_current()
+  }
+  if value == 3 { ExitCode.success } else { ExitCode.failure }
+}

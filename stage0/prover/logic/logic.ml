@@ -32,12 +32,12 @@ module Symbol = struct
         self_type : Types.ty;
       }
     | Opaque_operation of {
-        operation : Intrinsic.operation;
+        operation : Intrinsic.scalar;
         type_ : Types.ty;
         integer : (int * bool) option;
       }
-    | Bit_count of { count : Intrinsic.operation; width : int }
-    | System of Intrinsic.operation
+    | Bit_count of { count : Intrinsic.scalar; width : int }
+    | System of Intrinsic.runtime
     | Libc_number of Libc.number
     | Handle_descriptor
     | Compare_bytes_order
@@ -130,9 +130,12 @@ let rec show_symbol : symbol -> string = function
       Printf.sprintf "time.method.%s%s[%s]" (Path.show method_) (show_instance trait_arguments)
         (Types.show self_type)
   | Opaque_operation { operation; type_; _ } ->
-      Printf.sprintf "operation.%s.%s" (Intrinsic.show_operation operation) (Types.show type_)
-  | Bit_count { count; width } -> Printf.sprintf "bits.%s.%d" (Intrinsic.show_operation count) width
-  | System operation -> "system." ^ Intrinsic.show_operation operation
+      Printf.sprintf "operation.%s.%s"
+        (Intrinsic.show_operation (Scalar operation))
+        (Types.show type_)
+  | Bit_count { count; width } ->
+      Printf.sprintf "bits.%s.%d" (Intrinsic.show_operation (Scalar count)) width
+  | System operation -> "system." ^ Intrinsic.show_operation (Runtime operation)
   | Libc_number number -> "libc.number." ^ Libc.show_number number
   | Handle_descriptor -> "handle.descriptor"
   | Compare_bytes_order -> "compare_bytes.order"
@@ -675,7 +678,14 @@ let number_symbols query =
 
 type rendering = { text : string; numbering : numbering }
 
-let render query =
+let render_cardinality_bound sort_name element_count =
+  let elements = List.init element_count (Printf.sprintf "%s_e%d" sort_name) in
+  String.concat ""
+    (List.map (fun element -> Printf.sprintf "(declare-fun %s () %s)\n" element sort_name) elements)
+  ^ Printf.sprintf "(assert (forall ((b0 %s)) (or%s)))\n" sort_name
+      (String.concat "" (List.map (Printf.sprintf " (= b0 %s)") elements))
+
+let render_with ~cardinality_bound query =
   let numbering = number_symbols query in
   let render_assertion term =
     let buffer = Buffer.create 128 in
@@ -701,13 +711,21 @@ let render query =
       (Dynarray.to_list numbering.symbol_order)
   in
   let sort_order = Dynarray.to_list numbering.sort_order in
-  let sorts =
+  let uninterpreted_sorts =
     List.filter_map
       (fun name ->
         if Sort_table.mem numbering.datatypes name then None
-        else
-          Some (Printf.sprintf "(declare-sort %s 0)\n" (Sort_table.find numbering.sort_names name)))
+        else Some (Sort_table.find numbering.sort_names name))
       sort_order
+  in
+  let sorts = List.map (Printf.sprintf "(declare-sort %s 0)\n") uninterpreted_sorts in
+  let cardinality_bounds =
+    match cardinality_bound with
+    | None -> []
+    | Some element_count ->
+        List.map
+          (fun sort_name -> render_cardinality_bound sort_name element_count)
+          uninterpreted_sorts
   in
   let datatypes = List.filter (Sort_table.mem numbering.datatypes) sort_order in
   let datatype_block =
@@ -743,12 +761,19 @@ let render query =
         ]
   in
   {
-    text = String.concat "" (sorts @ datatype_block @ declarations @ assertions) ^ "(check-sat)\n";
+    text =
+      String.concat "" (sorts @ datatype_block @ cardinality_bounds @ declarations @ assertions)
+      ^ "(check-sat)\n";
     numbering;
   }
 
+let render query = render_with ~cardinality_bound:None query
 let rendered_text rendering = rendering.text
-let show_query query = (render query).text
+let show_query ?cardinality_bound query = (render_with ~cardinality_bound query).text
+
+let has_uninterpreted_sort query =
+  let { numbering; _ } = render query in
+  Dynarray.exists (fun sort -> not (Sort_table.mem numbering.datatypes sort)) numbering.sort_order
 
 let render_term { numbering; _ } term =
   let rec is_named = function

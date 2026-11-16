@@ -108,7 +108,7 @@ let convert_to_any context frame (site : Invocation.site) =
 
 let compute_current_bounds (context : State.context) : Interface.Impls.bounds =
   let list_impl_generics path =
-    match Interface.Definition.read_impl_interface context.lookups.interface path with
+    match Interface.Definition.find_impl_interface context.lookups.interface path with
     | Some interface -> interface.impl_generics
     | None -> []
   in
@@ -142,31 +142,29 @@ let find_concrete_impl (context : State.context) (trait : Types.trait_reference)
         (fun package ->
           List.find_map
             (fun impl ->
-              match Interface.Definition.read_impl_interface context.lookups.interface impl with
-              | Some interface -> (
-                  let variables =
-                    List.map
-                      (fun (generic : Types.generic) -> generic.generic)
-                      interface.impl_generics
-                  in
-                  match
-                    Option.bind (Interface.Impls.match_type ~variables [] interface.for_type ty)
-                      (fun arguments ->
-                        Interface.Impls.match_arguments ~variables arguments
-                          interface.implements.trait_arguments trait.trait_arguments)
-                  with
-                  | Some arguments
-                    when is_own impl
-                         || List.for_all
-                              (fun (argument, bound) ->
-                                Option.is_some
-                                  (Interface.Impls.find_evidence context.lookups.interface
-                                     ~list_bounds argument bound))
-                              (Interface.Impls.list_required_bounds interface.impl_generics
-                                 arguments) ->
-                      Some (impl, arguments)
-                  | _ -> None)
-              | None -> None)
+              let interface =
+                Interface.Definition.read_impl_interface context.lookups.interface impl
+              in
+              let variables =
+                List.map (fun (generic : Types.generic) -> generic.generic) interface.impl_generics
+              in
+              match
+                Option.bind (Interface.Impls.match_type ~variables [] interface.for_type ty)
+                  (fun arguments ->
+                    Interface.Impls.match_arguments ~variables arguments
+                      interface.implements.trait_arguments trait.trait_arguments)
+              with
+              | Some arguments
+                when is_own impl
+                     || List.for_all
+                          (fun (argument, bound) ->
+                            Option.is_some
+                              (Interface.Impls.find_evidence context.lookups.interface ~list_bounds
+                                 argument bound))
+                          (Interface.Impls.list_required_bounds interface.impl_generics arguments)
+                ->
+                  Some (impl, arguments)
+              | _ -> None)
             (Interface.Impls.list_impls_of_trait_for_type context.lookups.interface
                ~trait:trait.trait ~type_:path package))
         packages
@@ -276,7 +274,7 @@ let declare_opaque_operation context frame ty operation arguments =
   Facts.assume context frame (Facts.make_in_range ty term);
   term
 
-let make_overflow_fix context frame ty (operation : Intrinsic.operation) left right exact =
+let make_overflow_fix context frame ty (operation : Intrinsic.scalar) left right exact =
   match find_integer_limits ty with
   | None -> []
   | Some (name, low, high) -> (
@@ -338,7 +336,7 @@ let make_negation_fix context frame ty inner =
   | _ -> []
 
 let translate_arithmetic context (frame : State.frame) (site : Invocation.site) ty
-    (operation : Intrinsic.operation) left right =
+    (operation : Intrinsic.scalar) left right =
   let source = frame.source in
   let location = Facts.locate context frame.source site.origin in
   let exact, is_division =
@@ -348,7 +346,7 @@ let translate_arithmetic context (frame : State.frame) (site : Invocation.site) 
     | Multiply -> (Logic.Operation ("*", [ left; right ]), false)
     | Divide -> (Logic.truncated_divide left right, true)
     | Remainder -> (Logic.truncated_remainder left right, true)
-    | _ -> Facts.raise_bug "`%s` is not arithmetic" (Intrinsic.show_operation operation)
+    | _ -> Facts.raise_bug "`%s` is not arithmetic" (Intrinsic.show_operation (Scalar operation))
   in
   if is_division then
     Facts.oblige_safe_operation context frame Division location
@@ -474,18 +472,19 @@ let declare_power context frame base exponent =
   Logic.Apply (Logic.Symbol.Cost_power, [ base; exponent ])
 
 let translate_primitive_operation context (frame : State.frame) ~(site : Invocation.site)
-    (operation : Intrinsic.operation) types operands ~(arguments : Core.origin option list)
-    ~fallback =
+    (operation : Intrinsic.scalar) types operands ~(arguments : Core.origin option list) ~fallback =
   let source = frame.source in
   let location = Facts.locate context frame.source site.origin in
   let find_argument index = Option.join (List.nth_opt arguments index) in
   let is_float = match types with ty :: _ -> Facts.find_float_format ty <> None | [] -> false in
   let exact operation left right =
-    match (operation : Intrinsic.operation) with
+    match (operation : Intrinsic.scalar) with
     | Wrapping_add | Add_overflows -> Logic.Operation ("+", [ left; right ])
     | Wrapping_subtract | Subtract_overflows -> Logic.Operation ("-", [ left; right ])
     | Wrapping_multiply | Multiply_overflows -> Logic.Operation ("*", [ left; right ])
-    | _ -> Facts.raise_bug "`%s` has no exact integer result" (Intrinsic.show_operation operation)
+    | _ ->
+        Facts.raise_bug "`%s` has no exact integer result"
+          (Intrinsic.show_operation (Scalar operation))
   in
   match (operation, types, operands) with
   | Add, _ :: _, [ left; right ] when is_float -> make_float_operation "fp.add" left right

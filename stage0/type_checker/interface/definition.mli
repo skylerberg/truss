@@ -1,13 +1,31 @@
 val is_specification : Environment.interface -> bool
-val read_interface : Lookups.t -> Path.t -> Environment.interface option
+val find_interface : Lookups.t -> Path.t -> Environment.interface option
 
 val sort_in_declared_order :
   Lookups.t -> Path.t -> variant:string option -> name_of:('a -> string) -> 'a list -> 'a list
 
-val read_type_interface : Lookups.t -> Path.t -> Types.type_interface option
-val read_declared_signature : Lookups.t -> Path.t -> Types.signature option
+val find_type_interface : Lookups.t -> Path.t -> Types.type_interface option
+val read_type_interface : Lookups.t -> Path.t -> Types.type_interface
+val find_declared_signature : Lookups.t -> Path.t -> Types.signature option
 val read_method_signature : Lookups.t -> owner:Path.t -> Types.trait_method -> Types.signature
-val read_trait_interface : Lookups.t -> Path.t -> Types.trait_interface option
-val read_impl_interface : Lookups.t -> Path.t -> Types.impl_interface option
-val read_constant_type : Lookups.t -> Path.t -> Types.ty option
-val read_test_uses : Lookups.t -> Path.t -> Types.capability_set option
+val find_trait_interface : Lookups.t -> Path.t -> Types.trait_interface option
+val read_trait_interface : Lookups.t -> Path.t -> Types.trait_interface
+val find_impl_interface : Lookups.t -> Path.t -> Types.impl_interface option
+val read_impl_interface : Lookups.t -> Path.t -> Types.impl_interface
+val find_constant_type : Lookups.t -> Path.t -> Types.ty option
+val read_constant_type : Lookups.t -> Path.t -> Types.ty
+val read_test_uses : Lookups.t -> Path.t -> Types.capability_set
+val is_external_test : Lookups.t -> Path.t -> bool
+val find_real_implementation : Lookups.t -> Path.t -> Path.t option
+
+type declaring_clause =
+  | Own_uses
+  | Impl_uses of { capability : Path.t }
+  | Associated_capability_set of { name : string; is_defined : bool }
+
+type capability_declaration =
+  | Declared_by of declaring_clause
+  | Fixed_by_trait of { trait : Types.trait_reference; method_name : string }
+
+val find_capability_declaration : Lookups.t -> Path.t -> capability_declaration option
+val show_declaring_clause : declaring_clause -> string -> string

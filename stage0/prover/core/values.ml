@@ -386,10 +386,10 @@ let assume_contract_for_every_argument context (frame : State.frame) (contract :
                 match Facts.close_over_binders over (Logic.( ==> ) required ensured) with
                 | Some closed -> Facts.add_fact context closed
                 | None -> ())
-            | exception Facts.Foreign_unsupported _ -> ())
+            | exception Facts.Unsupported _ -> ())
           part.ensures)
       contract.parts
-  with Facts.Unsupported _ | Facts.Foreign_unsupported _ -> ()
+  with Facts.Unsupported _ -> ()
 
 let translate_named_function (context : State.context) (frame : State.frame)
     (site : Invocation.site) path type_arguments (contract : State.contract) ~is_argument =
@@ -482,11 +482,6 @@ let translate_global_value (context : State.context) frame (site : Invocation.si
         (Facts.locate context frame.source site.origin)
         "a function the prover cannot read, used as a value"
 
-let compute_constant_type (context : State.context) path =
-  match Interface.Definition.read_constant_type context.lookups.interface path with
-  | Some ty -> ty
-  | None -> raise (Facts.Foreign_unsupported "a constant with errors")
-
 let evaluate_constant (context : State.context) frame path =
   match
     (Contracts.find_source context.lookups path, Mir.read_initializer context.lookups.mir path)
@@ -507,7 +502,7 @@ let evaluate_constant (context : State.context) frame path =
         }
       in
       Facts.run_once context (Value_of symbol) (fun () ->
-          let ty = compute_constant_type context path in
+          let ty = Interface.Definition.read_constant_type context.lookups.interface path in
           Facts.declare context (Logic.Constant (symbol, Facts.declare_sort context ty));
           let _, defined_value =
             Validity.run_without_costs context (fun () ->
@@ -515,9 +510,9 @@ let evaluate_constant (context : State.context) frame path =
           in
           Facts.add_fact context (Logic.equal (Logic.Symbol symbol) defined_value));
       Logic.Symbol symbol
-  | _ -> raise (Facts.Foreign_unsupported "a constant with errors")
+  | _ -> Facts.raise_bug "the constant %s has no initializer" (Path.show path)
 
-let evaluate_field_default context frame (site : Invocation.site) ty variant field =
+let evaluate_field_default context frame ty variant field =
   match (ty, Validity.find_type_source context ty) with
   | Types.Named { path; _ }, Some source -> (
       match Mir.read_defaults context.lookups.mir path with
@@ -533,16 +528,10 @@ let evaluate_field_default context frame (site : Invocation.site) ty variant fie
               snd
                 (Amounts.run_code context inside default.value
                    ~type_:(Facts.substitute_type context inside default.type_))
-          | None ->
-              Facts.raise_unsupported
-                (Facts.locate context frame.source site.origin)
-                "a field left out without a default")
+          | None -> Facts.raise_bug "the field %s of %s has no default" field (Types.show ty))
       | Some { form = Parameter_defaults _; _ } | None ->
           Facts.raise_bug "a type with no MIR of its defaults")
-  | _ ->
-      Facts.raise_unsupported
-        (Facts.locate context frame.source site.origin)
-        "a default of a type with errors"
+  | _ -> Facts.raise_bug "a default of %s, which has no source" (Types.show ty)
 
 let check_built context frame (site : Invocation.site) ty term =
   Lambdas.check_valid context frame
@@ -552,7 +541,7 @@ let check_built context frame (site : Invocation.site) ty term =
 let is_indirect (context : State.context) (ty : Types.ty) variant =
   match (ty, variant) with
   | Types.Named { path; _ }, Some variant -> (
-      match Interface.Definition.read_interface context.lookups.interface path with
+      match Interface.Definition.find_interface context.lookups.interface path with
       | Some (Interface.Environment.Type_interface { shape = Sum variants; _ }) ->
           List.exists
             (fun (written : Types.variant) -> written.variant_name = variant && written.indirect)
@@ -588,8 +577,7 @@ let apply_construct context frame (site : Invocation.site) variant
           | Some term -> (frame, field_terms @ [ (field, term) ])
           | None ->
               ( frame,
-                field_terms
-                @ [ (field, evaluate_field_default context frame site ty variant field) ] ))
+                field_terms @ [ (field, evaluate_field_default context frame ty variant field) ] ))
         (frame, []) fields
     in
     let frame = Operations.spend context frame (construct_amount context frame ty variant) in
@@ -600,10 +588,7 @@ let apply_construct context frame (site : Invocation.site) variant
         let read_field_value (name, _) =
           match List.assoc_opt name field_terms with
           | Some term -> term
-          | None ->
-              Facts.raise_unsupported
-                (Facts.locate context frame.source site.origin)
-                "a field left out"
+          | None -> Facts.raise_bug "a construction of %s without its field %s" (Types.show ty) name
         in
         let built =
           Logic.Apply (Facts.make_constructor_symbol ty variant, List.map read_field_value shaped)
@@ -703,7 +688,7 @@ let copy_value ?literal (context : State.context) frame ty term =
     || Interface.Impls.is_plain context.lookups.interface
          ~list_bounds:(Operations.compute_current_bounds context)
          ty
-       && not (try Amounts.has_potential context ty with Facts.Foreign_unsupported _ -> true)
+       && not (try Amounts.has_potential context ty with Facts.Unsupported _ -> true)
   then frame
   else
     Operations.spend context frame (fun (counter : Costs.counter) ->
@@ -720,7 +705,7 @@ let copy_value ?literal (context : State.context) frame ty term =
             in
             let copy_potential =
               try Amounts.compute_potential context frame ty term
-              with Facts.Unsupported _ | Facts.Foreign_unsupported _ -> Costs.zero
+              with Facts.Unsupported _ -> Costs.zero
             in
             Costs.minus (Costs.plus time (Logic.int 1)) copy_potential
         | Some text, (Allocations | Allocated_bytes), Units | Some text, Allocations, _ ->

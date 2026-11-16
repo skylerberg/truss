@@ -67,13 +67,11 @@ and check_name (state : State.state) (env : State.env) (value : Syntax.expressio
                 Some (Global { path; type_arguments = instance.type_arguments });
               check_function_value state value instance.signature)
       | None -> State.raise_bug "`%s` has no signature" (Path.show path))
-  | Definition (Constant, path) -> (
+  | Definition (Constant, path) ->
       state.tables.resolutions.(value.id) <- Some (Global { path; type_arguments = [] });
       State.register_expression state value (fun () ->
           Use (Form.build_constant_place state ~origin:value.id path));
-      match Interface.Definition.read_constant_type state.lookups.interface path with
-      | Some type_ -> type_
-      | None -> State.raise_bug "the constant `%s` has no type" (Path.show path))
+      Interface.Definition.read_constant_type state.lookups.interface path
   | Definition (Type, path) ->
       if Intrinsic.builtin_of_path path = Some Unit then begin
         state.tables.resolutions.(value.id) <-
@@ -234,14 +232,12 @@ and check_static_member state (value : Syntax.expression) type_ (member : Syntax
         check_variant_value state value path member.text ~arguments
       else
         begin match Members.find_own_constant state.lookups path member.text with
-        | Some constant -> (
+        | Some constant ->
             state.tables.resolutions.(value.id) <-
               Some (Global { path = constant; type_arguments = [] });
             State.register_expression state value (fun () ->
                 Use (Form.build_constant_place state ~origin:value.id constant));
-            match Interface.Definition.read_constant_type state.lookups.interface constant with
-            | Some type_ -> type_
-            | None -> State.raise_bug "the constant `%s` has no type" (Path.show constant))
+            Interface.Definition.read_constant_type state.lookups.interface constant
         | None -> (
             match Members.list_own_methods state.lookups path member.text with
             | (_, method_path) :: _ -> (
@@ -342,7 +338,7 @@ and reject_specification_call state (env : State.env) (value : Syntax.expression
       (Types.Error
          (State.report_specification_only state (State.read_span state value.id)
             (match
-               (Interface.Definition.read_interface state.lookups.interface path, specification_type)
+               (Interface.Definition.find_interface state.lookups.interface path, specification_type)
              with
             | Some (Theorem_interface _), _ ->
                 Printf.sprintf

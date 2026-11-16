@@ -625,7 +625,7 @@ let make_interface_part (elaborated : Interface.Environment.elaborated_interface
   | diagnostics, _ -> Failed diagnostics
 
 let find_type_interface lookups path =
-  match make_part (Interface.Definition.read_type_interface lookups) path with
+  match make_part (Interface.Definition.find_type_interface lookups) path with
   | Value interface -> interface
   | Failed _ | Blocked -> None
 
@@ -748,6 +748,7 @@ let make_recording_usage_lookups database note : Usage.Lookups.t =
 let make_recording_ownership_lookups database note : Ownership.Lookups.t =
   {
     find_graph = (fun key -> Mir.find_graph (read_body_mir database note key));
+    list_places_without_own = (fun key -> (read_checked database note key).places_without_own);
     interface = make_recording_interface_lookups database note ~is_checked:true;
   }
 
@@ -1273,7 +1274,7 @@ let compute_part database (Part.Any typed as part) =
               Value
                 (Mir.make_contract_part
                    ~find_type_interface:
-                     (Interface.Definition.read_type_interface
+                     (Interface.Definition.find_type_interface
                         (make_recording_interface_lookups database note ~is_checked:true))
                    key.path form)
           | Failed _ | Blocked -> Blocked)
@@ -1288,7 +1289,7 @@ let compute_part database (Part.Any typed as part) =
                      ( Mir.make_body_part form,
                        Mir.make_contract_part
                          ~find_type_interface:
-                           (Interface.Definition.read_type_interface
+                           (Interface.Definition.find_type_interface
                               (make_recording_interface_lookups database note ~is_checked:true))
                          path form ))
                    form)

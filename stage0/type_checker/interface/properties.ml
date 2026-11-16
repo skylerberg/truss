@@ -8,7 +8,7 @@ let list_bound_closure lookups ~self (bound : Types.trait_reference) =
   let rec visit ancestors (bound : Types.trait_reference) =
     if not (List.exists (Path.equal bound.trait) ancestors || List.mem bound !closure) then begin
       closure := bound :: !closure;
-      match Definition.read_trait_interface lookups bound.trait with
+      match Definition.find_trait_interface lookups bound.trait with
       | Some trait ->
           List.iter
             (fun required ->
@@ -24,7 +24,7 @@ let list_bound_closure lookups ~self (bound : Types.trait_reference) =
 let find_declaring_trait lookups ~base (trait : Types.trait_reference) ~is_declared =
   List.find_opt
     (fun (reference : Types.trait_reference) ->
-      match Definition.read_interface lookups reference.trait with
+      match Definition.find_interface lookups reference.trait with
       | Some (Environment.Trait_interface interface) -> is_declared interface
       | Some (Environment.Error_interface _) -> true
       | _ -> false)
@@ -46,7 +46,7 @@ let list_associated_bounds lookups ~base trait name =
       (fun (declaring : Types.trait_reference) ->
         Option.map
           (fun interface -> (declaring, interface))
-          (Definition.read_trait_interface lookups declaring.trait))
+          (Definition.find_trait_interface lookups declaring.trait))
   with
   | Some (declaring, interface) ->
       List.concat_map
@@ -177,7 +177,7 @@ let rec compute_conditions lookups ~facts_of ~resolve ~compute_leaf ?(in_progres
       | Some (Storage | Array), _ -> combine_each (list_type_arguments arguments)
       | Some _, _ -> Some []
       | None, _ -> (
-          match Definition.read_type_interface lookups path with
+          match Definition.find_type_interface lookups path with
           | None -> (
               match property with View | Holds_function -> Some [] | Copyable | Plain -> None)
           | Some _ when List.exists (Types.equal type_) in_progress -> Some []
@@ -230,7 +230,7 @@ let walk_contents lookups ~(facts_of : Path.t -> Environment.type_facts) ~resolv
             contained := (type_, occurrence) :: !contained;
             match
               ( List.find_opt (fun (named, _, _) -> Types.equal named type_) enclosing,
-                Definition.read_type_interface lookups path )
+                Definition.find_type_interface lookups path )
             with
             | Some (_, occurrence, defining), _ ->
                 recursions := { recursive = type_; occurrence; defining } :: !recursions

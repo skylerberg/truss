@@ -95,6 +95,7 @@ val may_panic : capability_set -> bool
 val has_unsolved_capabilities : capability_set -> bool
 val equal : ty -> ty -> bool
 val is_error : ty -> bool
+val is_open_type : ty -> bool
 val contains_unsolved : ty -> bool
 val is_unsolved_argument : argument -> bool
 val terminates : function_type -> bool

@@ -1,0 +1,18 @@
+capability Greeter {
+  fn greet() -> Int64
+}
+
+type Loud()
+
+impl Greeter for Loud uses Clock {
+  fn greet(self) -> Int64 {
+    let _ = Clock.now()
+    1
+  }
+}
+
+fn f() -> Int64 {
+  provide Loud() {
+    Greeter.greet()
+  }
+}

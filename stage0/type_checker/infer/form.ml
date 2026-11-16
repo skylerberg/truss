@@ -54,7 +54,7 @@ let build_call state ~lends ?function_value (call : Tables.call) : Core.call =
     uses = call.uses;
   }
 
-let arithmetic_traits : (Well_known.t * string * Intrinsic.operation) list =
+let arithmetic_traits : (Well_known.t * string * Intrinsic.scalar) list =
   [
     (Add, "add", Add);
     (Subtract, "subtract", Subtract);
@@ -257,9 +257,8 @@ let build_self_local state (env : State.env) ~origin : Core.place =
   Local { local = Self; type_ = read_self_type state env; origin }
 
 let build_constant_place (state : State.state) ~origin (path : Path.t) : Core.place =
-  match Interface.Definition.read_constant_type state.lookups.interface path with
-  | Some type_ -> Constant { path; type_; origin }
-  | None -> State.raise_bug "the constant `%s` has no type" (Path.show path)
+  Constant
+    { path; type_ = Interface.Definition.read_constant_type state.lookups.interface path; origin }
 
 let build_record fields : Core.kind =
   Construct
@@ -292,7 +291,7 @@ let list_capability_impls (state : State.state) (type_ : Types.ty) =
                 Option.map
                   (fun interface ->
                     ({ Core.capability = trait; impl; arguments = substitution }, interface))
-                  (Interface.Definition.read_impl_interface state.lookups.interface impl)
+                  (Interface.Definition.find_impl_interface state.lookups.interface impl)
             | _ -> None
           else None)
         (List.concat_map
@@ -453,7 +452,7 @@ let build_list_literal state ~origin (element : Types.ty) (elements : Core.expre
              };
            value =
              Operands.build Own
-               (make_intrinsic_call Storage_with_capacity storage_type
+               (make_intrinsic_call (Buffer Storage_with_capacity) storage_type
                   [ Operands.build_argument Read capacity ]);
            else_ = None;
          })
@@ -463,7 +462,7 @@ let build_list_literal state ~origin (element : Types.ty) (elements : Core.expre
       (fun element ->
         make_statement
           (Evaluate
-             (make_intrinsic_call Storage_push Types.unit
+             (make_intrinsic_call (Buffer Storage_push) Types.unit
                 [
                   Passed
                     {
@@ -645,7 +644,7 @@ let convert_to_integer state (node : Core.expression) : Core.expression =
     State.make_synthetic_expression state ~origin:node.origin Types.Integer
       (Convert { conversion = To_integer; value = node })
 
-let convert_to_operation : Syntax.operation -> Intrinsic.operation = function
+let convert_to_operation : Syntax.operation -> Intrinsic.scalar = function
   | Arithmetic Add -> Add
   | Arithmetic Subtract -> Subtract
   | Arithmetic Multiply -> Multiply

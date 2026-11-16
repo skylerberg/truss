@@ -1,5 +1,6 @@
 let version = "5.3.3"
 let steps = 1_000_000
+let cardinality_bounds = [ 2; 3; 4 ]
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Solver" format
 
 type cache = { find : string -> string option; add : string -> string -> unit }
@@ -27,8 +28,6 @@ let find ?cache () =
              version program (String.trim output))
   | _, _, errors -> Error (Printf.sprintf "`%s --version` failed: %s" program (String.trim errors))
 
-type answer = Proven | Counterexample of (Logic.symbol * string) list | Out_of_steps
-
 let header =
   Printf.sprintf
     "(set-option :produce-models true)\n\
@@ -37,10 +36,17 @@ let header =
      (set-option :rlimit %d)\n"
     steps
 
-let key_of_text text = Logic.hash (Printf.sprintf "z3 %s\n%s%s" version header text)
+let key_of_text text =
+  Logic.hash
+    (Printf.sprintf
+       "z3 %s\nstatus of the query, with unknown retried at cardinality bounds %s\n%s%s" version
+       (String.concat ", " (List.map string_of_int cardinality_bounds))
+       header text)
+
 let hash_query query = key_of_text (Logic.show_query query)
 
 type sexp = Atom of string | List of sexp list
+type answer = Proven | Counterexample of (Logic.symbol * sexp) list | Unknown
 
 let parse_sexps text =
   let length = String.length text in
@@ -87,17 +93,17 @@ let rec show_sexp = function
   | List items -> "(" ^ String.concat " " (List.map show_sexp items) ^ ")"
 
 type request = {
-  key : string;
+  text_key : string;
+  values_key : string;
   requested : (Logic.symbol * string) list;
   value_arguments : string list;
 }
 
-type canonical = Proven_canonical | Values of (string * string) list | Out_of_steps_canonical
+type status = Unsatisfiable | Satisfiable of { cardinality_bound : int option } | Undecided
 
-let answers : (string, canonical) Hashtbl.t = Hashtbl.create 256
+let entries : (string, string) Hashtbl.t = Hashtbl.create 256
 let lock = Mutex.create ()
 let run_locked work = Mutex.protect lock work
-let request_key_of_text text value_arguments = key_of_text text ^ String.concat "," value_arguments
 
 let request ?(symbols = []) ?(terms = []) query =
   let rendering = Logic.render query in
@@ -118,112 +124,180 @@ let request ?(symbols = []) ?(terms = []) query =
   in
   let requested = List.map fst (requested_symbols @ requested_terms)
   and value_arguments = List.map snd (requested_symbols @ requested_terms) in
+  let text_key = key_of_text (Logic.rendered_text rendering) in
   {
-    key = request_key_of_text (Logic.rendered_text rendering) value_arguments;
+    text_key;
+    values_key = text_key ^ "/" ^ String.concat "," value_arguments;
     requested;
     value_arguments;
   }
 
-let request_key request = request.key
+let print_status = function
+  | Unsatisfiable -> "proven\n"
+  | Undecided -> "unknown\n"
+  | Satisfiable { cardinality_bound = None } -> "model\n"
+  | Satisfiable { cardinality_bound = Some bound } -> Printf.sprintf "model %d\n" bound
 
-let read request = function
-  | Proven_canonical -> Proven
-  | Out_of_steps_canonical -> Out_of_steps
-  | Values pairs ->
+let parse_status text =
+  match String.split_on_char ' ' (String.trim text) with
+  | [ "proven" ] -> Some Unsatisfiable
+  | [ "unknown" ] -> Some Undecided
+  | [ "model" ] -> Some (Satisfiable { cardinality_bound = None })
+  | [ "model"; bound ] ->
+      Option.map
+        (fun bound -> Satisfiable { cardinality_bound = Some bound })
+        (int_of_string_opt bound)
+  | _ -> None
+
+let print_values values =
+  String.concat ""
+    (List.map
+       (fun (canonical, value) -> Printf.sprintf "%s %s\n" canonical (show_sexp value))
+       values)
+
+let parse_values text =
+  List.filter_map
+    (fun line ->
+      match String.split_first ~sep:" " line with
+      | Some (canonical, value) -> (
+          match parse_sexps value with [ value ] -> Some (canonical, value) | _ -> None)
+      | None -> None)
+    (String.split_on_char '\n' text)
+
+let find_entry solver key =
+  run_locked (fun () ->
+      match Hashtbl.find_opt entries key with
+      | Some entry -> Some entry
+      | None -> (
+          match Option.bind solver.cache (fun cache -> cache.find key) with
+          | Some entry ->
+              Hashtbl.replace entries key entry;
+              Some entry
+          | None -> None))
+
+let add_entry solver key entry =
+  run_locked (fun () ->
+      Hashtbl.replace entries key entry;
+      Option.iter (fun cache -> cache.add key entry) solver.cache)
+
+let run_check solver request ?cardinality_bound text =
+  let input =
+    header ^ text
+    ^
+    if request.requested = [] then ""
+    else Printf.sprintf "(get-value (%s))\n" (String.concat " " request.value_arguments)
+  in
+  run_locked (fun () -> solver.queries_run <- solver.queries_run + 1);
+  let status, output, errors = Process.run ~input solver.program [ "-in"; "-smt2" ] in
+  match parse_sexps output with
+  | Atom "unsat" :: _ -> (Unsatisfiable, [])
+  | Atom "sat" :: rest ->
+      ( Satisfiable { cardinality_bound },
+        match rest with
+        | List pairs :: _ ->
+            List.take (List.length request.requested)
+              (List.mapi
+                 (fun index pair ->
+                   match (pair, List.nth_opt request.requested index) with
+                   | List [ _; value ], Some (_, canonical) -> Some (canonical, value)
+                   | _ -> None)
+                 pairs)
+            |> List.filter_map Fun.id
+        | _ -> [] )
+  | Atom "unknown" :: _ -> (Undecided, [])
+  | _ ->
+      raise_bug
+        "Z3 exited with status %d without answering a query, writing `%s` to stdout and `%s` to \
+         stderr"
+        status (String.trim output) (String.trim errors)
+
+let run_bounded_check solver request query cardinality_bound =
+  run_check solver request ~cardinality_bound (Logic.show_query ~cardinality_bound query)
+
+let search_model solver request query text =
+  let rec search_from = function
+    | [] -> (Undecided, [])
+    | cardinality_bound :: larger_bounds -> (
+        match run_bounded_check solver request query cardinality_bound with
+        | Unsatisfiable, _ -> search_from larger_bounds
+        | ((Satisfiable _ | Undecided), _) as outcome -> outcome)
+  in
+  match run_check solver request text with
+  | Undecided, _ when Logic.has_uninterpreted_sort query -> search_from cardinality_bounds
+  | outcome -> outcome
+
+let solve solver (request, query) =
+  let render_checked () =
+    let text = Logic.show_query query in
+    if key_of_text text <> request.text_key then
+      raise_bug "the query is not the one its request was made from";
+    text
+  in
+  let status, values =
+    match Option.bind (find_entry solver request.text_key) parse_status with
+    | Some (Satisfiable { cardinality_bound } as status) when request.requested <> [] -> (
+        match find_entry solver request.values_key with
+        | Some entry -> (status, parse_values entry)
+        | None -> (
+            let text = render_checked () in
+            match
+              match cardinality_bound with
+              | Some cardinality_bound -> run_bounded_check solver request query cardinality_bound
+              | None -> run_check solver request text
+            with
+            | Satisfiable _, values ->
+                add_entry solver request.values_key (print_values values);
+                (status, values)
+            | (Unsatisfiable | Undecided), _ ->
+                raise_bug "a query that had a model has none when it is solved again"))
+    | Some status -> (status, [])
+    | None ->
+        let ((status, values) as outcome) = search_model solver request query (render_checked ()) in
+        add_entry solver request.text_key (print_status status);
+        (match status with
+        | Satisfiable _ when request.requested <> [] ->
+            add_entry solver request.values_key (print_values values)
+        | Satisfiable _ | Unsatisfiable | Undecided -> ());
+        outcome
+  in
+  match status with
+  | Unsatisfiable -> Proven
+  | Undecided -> Unknown
+  | Satisfiable _ ->
       Counterexample
         (List.filter_map
            (fun (symbol, canonical) ->
-             Option.map (fun value -> (symbol, value)) (List.assoc_opt canonical pairs))
+             Option.map (fun value -> (symbol, value)) (List.assoc_opt canonical values))
            request.requested)
 
-let print_canonical = function
-  | Proven_canonical -> "proven\n"
-  | Out_of_steps_canonical -> "out_of_steps\n"
-  | Values pairs ->
-      "counterexample\n"
-      ^ String.concat ""
-          (List.map (fun (canonical, value) -> Printf.sprintf "%s %s\n" canonical value) pairs)
-
-let parse_canonical text =
-  match String.split_on_char '\n' text with
-  | "proven" :: _ -> Some Proven_canonical
-  | "out_of_steps" :: _ -> Some Out_of_steps_canonical
-  | "counterexample" :: lines -> Some (Values (List.filter_map (String.split_first ~sep:" ") lines))
-  | _ -> None
-
-let find_known_answer solver key =
-  run_locked (fun () ->
-      match Hashtbl.find_opt answers key with
-      | Some answer -> Some answer
-      | None -> (
-          match
-            Option.bind solver.cache (fun cache -> Option.bind (cache.find key) parse_canonical)
-          with
-          | Some answer ->
-              Hashtbl.replace answers key answer;
-              Some answer
-          | None -> None))
-
-let solve solver (request, query) =
-  match find_known_answer solver request.key with
-  | Some answer -> answer
-  | None ->
-      let text = Logic.show_query query in
-      if request_key_of_text text request.value_arguments <> request.key then
-        raise_bug "the query is not the one its request was made from";
-      let input =
-        header ^ text
-        ^
-        if request.requested = [] then ""
-        else Printf.sprintf "(get-value (%s))\n" (String.concat " " request.value_arguments)
-      in
-      run_locked (fun () -> solver.queries_run <- solver.queries_run + 1);
-      let status, output, errors = Process.run ~input solver.program [ "-in"; "-smt2" ] in
-      let answer =
-        match parse_sexps output with
-        | Atom "unsat" :: _ -> Proven_canonical
-        | Atom "sat" :: rest ->
-            Values
-              (match rest with
-              | List pairs :: _ ->
-                  List.take (List.length request.requested)
-                    (List.mapi
-                       (fun index pair ->
-                         match (pair, List.nth_opt request.requested index) with
-                         | List [ _; value ], Some (_, canonical) ->
-                             Some (canonical, show_sexp value)
-                         | _ -> None)
-                       pairs)
-                  |> List.filter_map Fun.id
-              | _ -> [])
-        | Atom "unknown" :: _ -> Out_of_steps_canonical
-        | _ ->
-            raise_bug
-              "Z3 exited with status %d without answering a query, writing `%s` to stdout and `%s` \
-               to stderr"
-              status (String.trim output) (String.trim errors)
-      in
-      run_locked (fun () ->
-          Hashtbl.replace answers request.key answer;
-          Option.iter (fun cache -> cache.add request.key (print_canonical answer)) solver.cache);
-      answer
-
-let solve_all solver requests =
-  let requests = Array.of_list requests in
-  let answers = Array.make (Array.length requests) Out_of_steps_canonical in
+let run_workers count work =
   let next = Atomic.make 0 in
   let rec run_worker () =
     let index = Atomic.fetch_and_add next 1 in
-    if index < Array.length requests then begin
-      answers.(index) <- solve solver requests.(index);
+    if index < count then begin
+      work index;
       run_worker ()
     end
   in
-  let helper_domains = min (Array.length requests) (Domain.recommended_domain_count ()) - 1 in
+  let helper_domains = min count (Domain.recommended_domain_count ()) - 1 in
   let domains = List.init (max 0 helper_domains) (fun _ -> Domain.spawn run_worker) in
   run_worker ();
-  List.iter Domain.join domains;
-  Array.to_list answers
+  List.iter Domain.join domains
+
+let solve_all solver requests =
+  let solve_distinct key_of =
+    let distinct = Hashtbl.create 64 in
+    List.iter
+      (fun ((request, _) as asked) ->
+        if not (Hashtbl.mem distinct (key_of request)) then
+          Hashtbl.replace distinct (key_of request) asked)
+      requests;
+    let distinct = Array.of_seq (Hashtbl.to_seq_values distinct) in
+    run_workers (Array.length distinct) (fun index -> ignore (solve solver distinct.(index)))
+  in
+  solve_distinct (fun request -> request.text_key);
+  solve_distinct (fun request -> request.values_key);
+  List.map (solve solver) requests
 
 let count_queries_run solver = run_locked (fun () -> solver.queries_run)
 

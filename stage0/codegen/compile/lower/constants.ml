@@ -20,7 +20,7 @@ let find_integer_kind (st : Lowering.state) ty =
 
 let make_static_bool value = Some (Lowered.Static_scalar (Bool value))
 
-let fold_arithmetic st ty (operation : Intrinsic.operation) (left : Lowered.static_value)
+let fold_arithmetic st ty (operation : Intrinsic.scalar) (left : Lowered.static_value)
     (right : Lowered.static_value) =
   match (left, right) with
   | Static_scalar (Integer (kind, x)), Static_scalar (Integer (_, y)) -> (
@@ -140,9 +140,8 @@ let make_constant_state (context : Definitions.context) path =
     | None -> Definitions.raise_bug "%s is not a constant" (Path.show path)
   in
   let ty =
-    match Interface.Definition.read_constant_type context.lookups.interface path with
-    | Some ty -> Monomorphic.ground context.monomorphic [] ty
-    | None -> Definitions.raise_bug "%s has no type" (Path.show path)
+    Monomorphic.ground context.monomorphic []
+      (Interface.Definition.read_constant_type context.lookups.interface path)
   in
   let code =
     {
@@ -236,10 +235,11 @@ and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowere
   in
   let fold_call (destination : Mir.place option) (called : Mir.call) =
     match (called.callee, called.arguments) with
-    | Intrinsic { operation = Storage_with_capacity; type_arguments = [ Type element ] }, _ ->
+    | Intrinsic { operation = Buffer Storage_with_capacity; type_arguments = [ Type element ] }, _
+      ->
         assign destination
           (Lowered.Static_storage { element = Lowering.ground st element; elements = [] })
-    | ( Intrinsic { operation = Storage_push; _ },
+    | ( Intrinsic { operation = Buffer Storage_push; _ },
         [
           Passed { value = Borrow { place = { root = Local storage; projections = [] }; _ }; _ };
           Passed { value = element; _ };

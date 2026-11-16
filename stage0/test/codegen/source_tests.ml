@@ -4,9 +4,14 @@ let () =
       Codegen_support.expect_output Fixtures.Source.square_test
         "test 0 passed\n\
          test 1 failed\n\
-         message 51\n\
+         message 52\n\
          assert square(3) == 10\n\
-        \  at example/main.truss:10:3\n")
+        \  at example/main.truss:10:10\n")
+
+let () =
+  Codegen_support.test "a failed assert of a pattern test quotes the whole condition" (fun () ->
+      Codegen_support.expect_output Fixtures.Source.failed_assert_of_a_pattern
+        "test 0 failed\nmessage 51\nassert find(1) is None\n  at example/main.truss:6:10\n")
 
 let () =
   Codegen_support.expect_pass "loops, variables, and comparisons run" Fixtures.Source.sum_to;

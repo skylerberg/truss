@@ -506,7 +506,8 @@ either can mutate. There are no stored references and no lifetimes.
 - **A temporary** is any other value. It is passed as owned.
 - **An owned value is needed** by a `var`, an `own` parameter, a record field,
   a collection element, and a return value. A place there is written with
-  `own`, which moves it, or is copied with `copy()`.
+  `own`, which moves it, or is copied with `copy()`. A view, a constant, an
+  element, or a part of one cannot be moved, so it is copied.
 - **There is no mutable global state.** A top-level `let` is a constant, and
   `var` is allowed only inside functions.
 
@@ -1710,6 +1711,10 @@ These capabilities are in the prelude:
 | `Log` | Writing to the program's log |
 | `Panic` | Ending the program |
 
+The runtime holds a *real implementation* of every standard capability
+except `Panic`, which is built in. A capability that a package declares has
+no real implementation.
+
 ### Handles
 
 A handle is a value that stands for something the operating system holds,
@@ -1736,9 +1741,10 @@ fn main(arguments: List[String]) -> ExitCode
 }
 ```
 
-`main` has this signature and any `uses` clause. The runtime provides the
-real implementation of each capability in it, and nothing else. The program
-ends when `main` returns or panics.
+`main` has this signature. Its `uses` clause names only `Panic` and
+capabilities with a real implementation, and the runtime provides those real
+implementations and nothing else. The program ends when `main` returns or
+panics.
 
 ## Parallelism
 
@@ -2082,13 +2088,17 @@ test "config loads with defaults" {
 ```
 
 - `plain_string` is a `STRING` with no interpolation.
-- A test provides every capability its code uses, except `Panic`, unless it
-  declares them with `uses`. A test with `uses` is *external*: it gets the
-  real implementations of exactly those capabilities, and runs every time the
-  suite runs. Any other test is deterministic, and its result is cached until
-  its code changes.
+- A test has `Panic`. It provides every other capability its code uses,
+  unless it declares them with `uses`. A test with `uses` is *external*: it
+  gets the real implementations of exactly those capabilities, and runs every
+  time the suite runs. Any other test is deterministic, and its result is
+  cached until its code changes.
+- A test's `uses` names only capabilities with a [real
+  implementation](#standard-capabilities), so it cannot name `Panic`. A panic
+  does not depend on the world, so declaring `Panic` would only stop a
+  deterministic test's result from being cached.
 - A test's standard output and standard error are attached to its report
-  as one text, in the order written.
+  as one text, in the order written. Its standard input is empty.
 - A failed test is never retried.
 - A failed `assert` ends the test as failed, and the rest of the test can
   rely on the asserted fact.

@@ -174,15 +174,10 @@ let mutate state env ~(by : mutation) (value : Syntax.expression) =
       | None when not (State.is_formula env) -> Some code
       | _ -> None)
 
-let rec is_part_of_constant state (value : Syntax.expression) =
-  match value.kind with
-  | Name path -> (
-      match State.find_target state path.last with
-      | Some (Definition (Constant, _)) -> true
-      | _ -> false)
-  | Member (base, _) -> State.is_member_constant state value || is_part_of_constant state base
-  | Bracket (base, _) | Parenthesized base -> is_part_of_constant state base
-  | _ -> false
+let rec note_place_without_own (state : State.state) env (place : Syntax.expression) =
+  match place.kind with
+  | Parenthesized inner -> note_place_without_own state env inner
+  | _ -> if State.runs env then state.places_without_own <- place.id :: state.places_without_own
 
 type argument_form =
   | With_mode of Types.mode * Syntax.expression
@@ -244,26 +239,14 @@ let check_mode state env (value : Syntax.expression) (parameter : Types.paramete
            "`%s` may mutate its argument, and this part is lent read-only. Pass the place it is \
             lent from `mut`, so that it is lent `mut`."
            name)
-  | Own, Lent _ ->
-      if not (State.is_plain state type_) then
-        State.report state Missing_mode (State.read_span state value.id)
-          ~fixes:
-            (if State.is_copyable state type_ then
-               [
-                 State.fix "Pass a copy."
-                   [ State.insert (State.read_span state value.id).stop ".copy()" ];
-               ]
-             else [])
-          (Printf.sprintf
-             "`%s` takes ownership of its argument, and a part that is lent cannot be moved. Pass \
-              a copy."
-             name)
   | Mut, (Temporary | With_mode (Own, _)) ->
       State.report state Wrong_mode (State.read_span state value.id)
         (Printf.sprintf "`%s` mutates its argument in place, so it must be a place passed `mut`."
            name)
   | Own, With_mode (Own, inner) ->
-      if State.is_plain state type_ then
+      if
+        State.is_plain state type_ && not (Types.exists Types.is_open_type (State.zonk state type_))
+      then
         State.report state Redundant_mode (State.read_span state value.id)
           ~fixes:
             [
@@ -271,7 +254,7 @@ let check_mode state env (value : Syntax.expression) (parameter : Types.paramete
                 [ Diagnostic.delete (locate_mode_keyword state value inner) ];
             ]
           (Printf.sprintf "`%s` copies implicitly, so it needs no `own`." (State.show state type_))
-  | Own, Temporary -> ()
+  | Own, (Temporary | Lent _) -> ()
   | Own, Place when Hashtbl.find_opt state.yielded value.id = Some Mut ->
       if not (State.is_plain state type_) then
         State.report state Missing_mode (State.read_span state value.id)
@@ -289,34 +272,7 @@ let check_mode state env (value : Syntax.expression) (parameter : Types.paramete
              "`%s` is a field of a value that is lent `mut`. Pass the place `mut` to lend it too, \
               or pass a copy."
              name)
-  | Own, Place when is_part_of_constant state value ->
-      if not (State.is_plain state type_) then
-        State.report state Missing_mode (State.read_span state value.id)
-          ~fixes:
-            (if State.is_copyable state type_ then
-               [
-                 State.fix "Pass a copy."
-                   [ State.insert (State.read_span state value.id).stop ".copy()" ];
-               ]
-             else [])
-          (Printf.sprintf
-             "`%s` takes ownership of its argument, and a constant cannot be moved. Pass a copy."
-             name)
-  | Own, Place ->
-      if not (State.is_plain state type_) then
-        State.report state Missing_mode (State.read_span state value.id)
-          ~fixes:
-            (State.fix "Move it with `own`."
-               [ State.insert (State.read_span state value.id).start "own " ]
-            ::
-            (if State.is_copyable state type_ then
-               [
-                 State.fix "Pass a copy."
-                   [ State.insert (State.read_span state value.id).stop ".copy()" ];
-               ]
-             else []))
-          (Printf.sprintf
-             "`%s` takes ownership of its argument. Move the place with `own`, or pass a copy." name)
+  | Own, Place -> note_place_without_own state env value
   | Own, With_mode (Mut, _) ->
       State.report state Wrong_mode (State.read_span state value.id)
         (Printf.sprintf "`%s` takes ownership of its argument, so it is passed `own`, not `mut`."
@@ -358,44 +314,7 @@ let check_lent_value (state : State.state) env (operand : Syntax.expression) =
   in
   check_fields ~variant:None operand
 
-let check_owned state env (value : Syntax.expression) type_ =
-  if State.runs env then
-    State.defer state (fun () ->
-        let type_ = State.normalize state type_ in
-        if Types.contains_unsolved type_ then false
-        else begin
-          (match classify_argument state value with
-          | Place when not (State.is_plain state type_) ->
-              let place = State.quote_span state (State.read_span state value.id) in
-              let copy =
-                if State.is_copyable state type_ then
-                  [
-                    State.fix "Copy it."
-                      [ State.insert (State.read_span state value.id).stop ".copy()" ];
-                  ]
-                else []
-              in
-              let fixes, message =
-                if is_part_of_constant state value then
-                  ( copy,
-                    Printf.sprintf "An owned value is needed here, and `%s` is %s. Copy it." place
-                      (match value.kind with
-                      | Name _ -> "a constant"
-                      | _ when State.is_member_constant state value -> "a constant"
-                      | _ -> "part of a constant") )
-                else
-                  ( State.fix "Move it with `own`."
-                      [ State.insert (State.read_span state value.id).start "own " ]
-                    :: copy,
-                    Printf.sprintf
-                      "An owned value is needed here, and `%s` is a place. Pass it `own` to move \
-                       it, or copy it."
-                      place )
-              in
-              state.diagnostics <-
-                Diagnostic.make ~fixes ~code:(Ownership Needs_owned)
-                  (State.read_span state value.id) message
-                :: state.diagnostics
-          | _ -> ());
-          true
-        end)
+let note_owned_value state env (value : Syntax.expression) =
+  match classify_argument state value with
+  | Place -> note_place_without_own state env value
+  | With_mode _ | Lent _ | Temporary -> ()

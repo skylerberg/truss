@@ -1470,6 +1470,8 @@ in a test build takes constant time.
 |---|---|
 | A test with `uses` is external: it gets the real implementations, and its result is never cached. | Its result depends on the world. It gets no hidden isolation: a test that wants a scratch directory narrows file access where a reader can see it. |
 | A test's standard output and standard error are attached to its report as one text. | Tests run at once in several worker processes, so output sent to the terminal would interleave, with nothing to say which test wrote it. One text keeps the order that a terminal would show. |
+| A test's standard input is empty. | Workers run tests at once, so input from the terminal would go to whichever test read first, and a test waiting for a person would run into its time limit. A test that needs input gets it from a `Console` it provides, or gives it to a program it runs through `Processes`. |
+| A test has `Panic` and cannot declare it. | A panic does not depend on the world. Declaring `Panic` would make the test external, so the suite would run it every time instead of caching its result. |
 | A failed test is never retried. | A retry hides exactly the failures that an external test exists to catch. |
 | A test cannot expect a panic. | That would treat a panic as intended behavior, which is the job of `Result`. The misuse that other languages test this way, such as a violated precondition, does not compile. To check that a program crashes on bad input, an external test runs the program through `Processes`. |
 | A panic ends one worker process, and the test runner starts another. | Tests share a process safely, because Truss has no mutable global state and a test reaches only its inputs. |
@@ -1517,6 +1519,7 @@ the start.
 | Rule | Reason |
 |---|---|
 | Each obligation goes to an automated solver, as in Dafny. | A programmer writes a proof only where the solver fails. |
+| A query that the solver answers `unknown` is solved again with each uninterpreted sort bounded to 2, then 3, then 4 elements, until a bound has a model or is `unknown`. | A model of the bounded query is a model of the query, so its counterexample is real. Z3's search for a model runs out of steps on a fact that nests `exists` in `forall`, such as the definition of `contains_equal_key` that `Map.get` reaches, though a model of two elements satisfies the query. |
 | A proof is written in the language's own syntax: calls, `match`, `if`, and `assert`. | Programmers and LLMs already know that syntax. |
 | A proof is a result of its own. | An edit to a proof re-checks proofs, with no rebuild of the program and no rerun of tests. A reviewer trusts a checked proof without reading it, and reads only signatures. |
 | There is no `assume`. | A missing proof that an addition cannot overflow would allow a failure that the signature does not show. A claim that is not ready is left out of the signature. |
@@ -2092,7 +2095,8 @@ input:
 
 | Result | Key |
 |---|---|
-| A solver answer | The query's text, whose symbols are numbered in order of appearance |
+| A solver answer: proven, unknown, or a model and the cardinality bound it was found at | The query's text, whose symbols are numbered in order of appearance |
+| The values of a counterexample | The query's text and the terms whose values are requested |
 | An object file | The C text, the C compiler, and its flags |
 | A test result | The test's key: the code generator's version, the target system, the flags, and a hash of the code the test reaches, in which each reference is numbered |
 | The database of the standard library or of a registry package | The package's content hash, the content hashes of the versions selected for its dependencies, and the compiler |
@@ -2140,6 +2144,7 @@ reachable by the other:
 | A trial, such as a rename's check, an editor's open buffers, or an upgrade's new lock file, is a copy of the worktree's database in memory, propagated with the files that differ, and then discarded. The changes between two databases are the parts whose values differ. | The database is a function of the files, so the copy is a correct start, and a trial costs its change, not a cold build. The worktree's database is never in a trial's state. |
 | One process owns a project's database, and handles one request or one change set at a time. | No request reads a change set that is half propagated. A request that arrives during a long propagation waits for it. |
 | A process that finds a project's database open in another process stops the project's background processes of every build of `truss`, then waits for the database. A background process ends when its socket is removed. | A background process holds the database only to keep it in memory, and it commits before it ends, so it loses nothing. Otherwise a background process of an earlier build would keep the database, and the new build's commands would fail until it noticed that its executable was replaced. A removed socket stops a process of any build, while a request cannot: two builds may encode requests differently. The process waits for the database and not for the processes it stopped, because two background processes that each waited for the other to end would deadlock. |
+| A background process closes a project's database when the database's directory is removed, and a save never makes the database's directory or the project's. | Deleting `.truss` gives the next command a new database. Deleting a worktree ends its background process. A save that made the directory again would leave a `.truss` in place of the worktree, and the process would keep running on it. |
 
 ## Omitted features
 

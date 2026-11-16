@@ -78,6 +78,21 @@ struct watcher {
   int signal[2];
 };
 
+static pthread_once_t is_fork_handler_registered = PTHREAD_ONCE_INIT;
+static int has_started_watcher;
+static int is_forked_after_watcher;
+
+static void mark_forked_child(void) { is_forked_after_watcher = has_started_watcher; }
+
+static void register_fork_handler(void) { pthread_atfork(NULL, NULL, mark_forked_child); }
+
+static const char *describe_open_failure(void) {
+  return is_forked_after_watcher
+             ? "the watcher cannot start in a process forked after a watcher started, since "
+               "FSEvents does not work across fork; exec a new process instead"
+             : "the watcher cannot start";
+}
+
 static void on_events(ConstFSEventStreamRef stream, void *context, size_t count, void *event_paths,
                       const FSEventStreamEventFlags flags[], const FSEventStreamEventId ids[]) {
   (void)stream;
@@ -100,6 +115,8 @@ static void on_events(ConstFSEventStreamRef stream, void *context, size_t count,
 }
 
 static struct watcher *watcher_open(const char *root) {
+  pthread_once(&is_fork_handler_registered, register_fork_handler);
+  if (is_forked_after_watcher) return NULL;
   struct watcher *watcher = calloc(1, sizeof(struct watcher));
   if (watcher == NULL) return NULL;
   if (pipe(watcher->signal) != 0) {
@@ -130,6 +147,7 @@ static struct watcher *watcher_open(const char *root) {
     free(watcher);
     return NULL;
   }
+  has_started_watcher = 1;
   return watcher;
 }
 
@@ -194,6 +212,8 @@ static struct watcher *watcher_open(const char *root) {
   }
   return watcher;
 }
+
+static const char *describe_open_failure(void) { return "the watcher cannot start"; }
 
 static int watcher_is_recursive(void) { return 0; }
 
@@ -290,7 +310,7 @@ value truss_watcher_open(value root) {
   CAMLparam1(root);
   CAMLlocal1(handle);
   struct watcher *watcher = watcher_open(String_val(root));
-  if (watcher == NULL) caml_failwith("the watcher cannot start");
+  if (watcher == NULL) caml_failwith(describe_open_failure());
   handle = caml_alloc_custom(&watcher_operations, sizeof(struct watcher *), 0, 1);
   Watcher_val(handle) = watcher;
   CAMLreturn(handle);

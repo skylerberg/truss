@@ -659,15 +659,17 @@ let () =
                 Emit_c.Builder.allocate_local builder (Codegen_support.value Codegen_support.int32)
               in
               ignore
-                (operate builder ~destination:(Lowered.make_local_place storage) Storage_empty []);
+                (operate builder
+                   ~destination:(Lowered.make_local_place storage)
+                   (Buffer Storage_empty) []);
               ignore
-                (operate builder Storage_set_capacity
+                (operate builder (Buffer Storage_set_capacity)
                    [
                      Place (Lowered.make_local_place storage);
                      Value (Lowered.make_uint64_constant 2);
                    ]);
               ignore
-                (operate builder Storage_set_capacity
+                (operate builder (Buffer Storage_set_capacity)
                    [
                      Place (Lowered.make_local_place storage);
                      Value (Lowered.make_uint64_constant 8);
@@ -675,38 +677,39 @@ let () =
               List.iter
                 (fun count ->
                   ignore
-                    (operate builder Storage_push
+                    (operate builder (Buffer Storage_push)
                        [
                          Place (Lowered.make_local_place storage);
                          Value (Codegen_support.constant_int32 count);
                        ]))
                 [ 1; 2; 3; 4; 5 ];
               ignore
-                (operate builder Storage_insert
+                (operate builder (Buffer Storage_insert)
                    [
                      Place (Lowered.make_local_place storage);
                      Value (Lowered.make_uint64_constant 0);
                      Value (Codegen_support.constant_int32 0);
                    ]);
               ignore
-                (operate builder ~destination:(Lowered.make_local_place popped) Storage_remove
+                (operate builder ~destination:(Lowered.make_local_place popped)
+                   (Buffer Storage_remove)
                    [
                      Place (Lowered.make_local_place storage);
                      Value (Lowered.make_uint64_constant 2);
                    ]);
               ignore
-                (operate builder Storage_swap
+                (operate builder (Buffer Storage_swap)
                    [
                      Place (Lowered.make_local_place storage);
                      Value (Lowered.make_uint64_constant 0);
                      Value (Lowered.make_uint64_constant 4);
                    ]);
               ignore
-                (operate builder ~destination:(Lowered.make_local_place popped) Storage_pop
+                (operate builder ~destination:(Lowered.make_local_place popped) (Buffer Storage_pop)
                    [ Place (Lowered.make_local_place storage) ]);
               let make_element index weight =
                 match
-                  operate builder Storage_at
+                  operate builder (Lend Storage_at)
                     [
                       Place (Lowered.make_local_place storage);
                       Value (Lowered.make_uint64_constant index);
@@ -739,7 +742,8 @@ let () =
                   (Codegen_support.value (Codegen_support.named "UInt64"))
               in
               ignore
-                (operate builder ~destination:(Lowered.make_local_place length) Storage_length
+                (operate builder ~destination:(Lowered.make_local_place length)
+                   (Buffer Storage_length)
                    [ Place (Lowered.make_local_place storage) ]);
               let length32 =
                 Emit_c.Builder.allocate_local builder (Codegen_support.value Codegen_support.int32)
@@ -805,7 +809,7 @@ let () =
                 (operate builder
                    ~destination:(Lowered.make_local_place storage)
                    ~value_arguments:[ Z.of_int 3 ]
-                   Storage_from_array
+                   (Buffer Storage_from_array)
                    [ Value (Copy (Lowered.make_local_place array)) ]);
               let last =
                 Emit_c.Builder.allocate_local builder (Codegen_support.value Codegen_support.int32)
@@ -813,17 +817,18 @@ let () =
                 Emit_c.Builder.allocate_local builder (Codegen_support.value Codegen_support.int32)
               in
               ignore
-                (operate builder ~destination:(Lowered.make_local_place last) Storage_pop
+                (operate builder ~destination:(Lowered.make_local_place last) (Buffer Storage_pop)
                    [ Place (Lowered.make_local_place storage) ]);
               ignore
-                (operate builder ~destination:(Lowered.make_local_place middle) Storage_pop
+                (operate builder ~destination:(Lowered.make_local_place middle) (Buffer Storage_pop)
                    [ Place (Lowered.make_local_place storage) ]);
               let length =
                 Emit_c.Builder.allocate_local builder
                   (Codegen_support.value (Codegen_support.named "UInt64"))
               in
               ignore
-                (operate builder ~destination:(Lowered.make_local_place length) Storage_length
+                (operate builder ~destination:(Lowered.make_local_place length)
+                   (Buffer Storage_length)
                    [ Place (Lowered.make_local_place storage) ]);
               let status =
                 Emit_c.Builder.allocate_local builder (Codegen_support.value Codegen_support.int32)
@@ -907,11 +912,11 @@ let () =
                 Emit_c.Builder.allocate_local builder ~name:"view" (Codegen_support.value view_ty)
               in
               ignore
-                (operate builder ~destination:(Lowered.make_local_place view) Array_view
+                (operate builder ~destination:(Lowered.make_local_place view) (Buffer Array_view)
                    [ Place (Lowered.make_local_place array) ]);
               let middle =
                 match
-                  operate builder View_at
+                  operate builder (Lend View_at)
                     [
                       Place (Lowered.make_local_place view); Value (Lowered.make_uint64_constant 1);
                     ]
@@ -924,7 +929,7 @@ let () =
                   (Codegen_support.value (Codegen_support.named "UInt64"))
               in
               ignore
-                (operate builder ~destination:(Lowered.make_local_place length) View_length
+                (operate builder ~destination:(Lowered.make_local_place length) (Buffer View_length)
                    [ Place (Lowered.make_local_place view) ]);
               let status =
                 Emit_c.Builder.allocate_local builder (Codegen_support.value Codegen_support.int32)
@@ -983,12 +988,12 @@ let () =
               ignore
                 (operate builder
                    ~destination:(Lowered.make_local_place storage)
-                   Storage_with_capacity
+                   (Buffer Storage_with_capacity)
                    [ Value (Lowered.make_uint64_constant 3) ]);
               List.iter
                 (fun count ->
                   ignore
-                    (operate builder Storage_push
+                    (operate builder (Buffer Storage_push)
                        [
                          Place (Lowered.make_local_place storage);
                          Value (Codegen_support.constant_int32 count);
@@ -998,7 +1003,8 @@ let () =
                 Emit_c.Builder.allocate_local builder ~name:"array" (Codegen_support.value array_ty)
               in
               ignore
-                (operate builder ~destination:(Lowered.make_local_place array) Array_from_storage
+                (operate builder ~destination:(Lowered.make_local_place array)
+                   (Buffer Array_from_storage)
                    [ Place (Lowered.make_local_place storage) ]);
               let status =
                 Emit_c.Builder.allocate_local builder (Codegen_support.value Codegen_support.int32)
@@ -1043,7 +1049,7 @@ let () =
                     ignore
                       (operate builder ~destination:(Lowered.make_local_place fits)
                          ~type_arguments:[ Codegen_support.float64; target ]
-                         Fits
+                         (Scalar Fits)
                          [ Value (Constant (Float64 (Int64.bits_of_float float))) ]);
                     let right = Emit_c.Builder.allocate_local builder (Raw Bool) in
                     Emit_c.Builder.emit builder
@@ -1114,19 +1120,19 @@ let () =
               ignore
                 (operate_checked builder
                    ~destination:(Lowered.make_local_place storage)
-                   Storage_with_capacity
+                   (Buffer Storage_with_capacity)
                    [ Value (Lowered.make_uint64_constant 8) ]);
               String.iter
                 (fun byte ->
                   ignore
-                    (operate_checked builder Storage_push
+                    (operate_checked builder (Buffer Storage_push)
                        [
                          Place (Lowered.make_local_place storage);
                          Value (Constant (Integer (UInt8, Z.of_int (Char.code byte))));
                        ]))
                 "abcde";
               ignore
-                (operate_checked builder Storage_shorten
+                (operate_checked builder (Buffer Storage_shorten)
                    [
                      Place (Lowered.make_local_place storage);
                      Value (Lowered.make_uint64_constant to_);
@@ -1162,7 +1168,7 @@ let () =
       in
       Codegen_support.expect_status (2 + 8 + Char.code 'b') (make_shortened ~to_:2);
       Codegen_support.expect_status 101 (make_shortened ~to_:6);
-      match (Intrinsic_signatures.make_signature Storage_shorten).generics with
+      match (Intrinsic_signatures.make_signature (Buffer Storage_shorten)).generics with
       | [ { kind = Type_generic [ { trait = Top { name = "Plain"; _ }; _ } ]; _ } ] -> ()
       | _ -> Codegen_support.fail "storage_shorten takes elements that are not known to be Plain");
   Codegen_support.test
@@ -1198,18 +1204,19 @@ let () =
                   in
                   operate_checked builder
                     ~destination:(Lowered.make_local_place storage)
-                    Storage_with_capacity
+                    (Buffer Storage_with_capacity)
                     [ Value (Lowered.make_uint64_constant 3) ];
                   List.iter
                     (fun _ ->
-                      operate_checked builder Storage_push
+                      operate_checked builder (Buffer Storage_push)
                         [ Place (Lowered.make_local_place storage); Value byte ])
                     [ 'a'; 'b'; 'c' ];
                   let view =
                     Emit_c.Builder.allocate_local builder ~name:"view"
                       (Codegen_support.value view_ty)
                   in
-                  operate_checked builder ~destination:(Lowered.make_local_place view) Storage_view
+                  operate_checked builder ~destination:(Lowered.make_local_place view)
+                    (Buffer Storage_view)
                     [ Place (Lowered.make_local_place storage) ];
                   run_operation builder ~storage ~view;
                   let status =
@@ -1226,29 +1233,29 @@ let () =
       in
       let index = "index out of bounds" and slice = "slice out of bounds" in
       expect_stop "an element pushed to a storage that has no room" (fun builder ~storage ~view:_ ->
-          operate_checked builder Storage_push
+          operate_checked builder (Buffer Storage_push)
             [ Place (Lowered.make_local_place storage); Value byte ]);
       expect_stop "an element inserted into a storage that has no room"
         (fun builder ~storage ~view:_ ->
-          operate_checked builder Storage_insert
+          operate_checked builder (Buffer Storage_insert)
             [
               Place (Lowered.make_local_place storage);
               Value (Lowered.make_uint64_constant 1);
               Value byte;
             ]);
       expect_stop index (fun builder ~storage ~view:_ ->
-          operate_checked builder Storage_insert
+          operate_checked builder (Buffer Storage_insert)
             [
               Place (Lowered.make_local_place storage);
               Value (Lowered.make_uint64_constant 9);
               Value byte;
             ]);
       expect_stop "a storage lengthened to more than its capacity" (fun builder ~storage ~view:_ ->
-          operate_checked builder Storage_lengthen
+          operate_checked builder (Buffer Storage_lengthen)
             [ Place (Lowered.make_local_place storage); Value (Lowered.make_uint64_constant 1) ]);
       expect_stop "a storage's capacity set to less than its length"
         (fun builder ~storage ~view:_ ->
-          operate_checked builder Storage_set_capacity
+          operate_checked builder (Buffer Storage_set_capacity)
             [ Place (Lowered.make_local_place storage); Value (Lowered.make_uint64_constant 2) ]);
       expect_stop index (fun builder ~storage ~view:_ ->
           let removed =
@@ -1256,23 +1263,23 @@ let () =
           in
           operate_checked builder
             ~destination:(Lowered.make_local_place removed)
-            Storage_remove
+            (Buffer Storage_remove)
             [ Place (Lowered.make_local_place storage); Value (Lowered.make_uint64_constant 3) ]);
       expect_stop index (fun builder ~storage ~view:_ ->
-          operate_checked builder Storage_swap
+          operate_checked builder (Buffer Storage_swap)
             [
               Place (Lowered.make_local_place storage);
               Value (Lowered.make_uint64_constant 0);
               Value (Lowered.make_uint64_constant 3);
             ]);
       expect_stop index (fun builder ~storage ~view:_ ->
-          operate_checked builder Storage_at
+          operate_checked builder (Lend Storage_at)
             [ Place (Lowered.make_local_place storage); Value (Lowered.make_uint64_constant 3) ]);
       expect_stop index (fun builder ~storage:_ ~view ->
-          operate_checked builder View_at
+          operate_checked builder (Lend View_at)
             [ Place (Lowered.make_local_place view); Value (Lowered.make_uint64_constant 3) ]);
       expect_stop index (fun builder ~storage:_ ~view ->
-          operate_checked builder View_swap
+          operate_checked builder (Buffer View_swap)
             [
               Place (Lowered.make_local_place view);
               Value (Lowered.make_uint64_constant 3);
@@ -1280,7 +1287,7 @@ let () =
             ]);
       expect_stop slice (fun builder ~storage:_ ~view ->
           let part = Emit_c.Builder.allocate_local builder (Codegen_support.value view_ty) in
-          operate_checked builder ~destination:(Lowered.make_local_place part) View_slice
+          operate_checked builder ~destination:(Lowered.make_local_place part) (Buffer View_slice)
             [
               Place (Lowered.make_local_place view);
               Value (Lowered.make_uint64_constant 1);
@@ -1288,19 +1295,20 @@ let () =
             ]);
       expect_stop slice (fun builder ~storage:_ ~view ->
           let part = Emit_c.Builder.allocate_local builder (Codegen_support.value view_ty) in
-          operate_checked builder ~destination:(Lowered.make_local_place part) View_slice
+          operate_checked builder ~destination:(Lowered.make_local_place part) (Buffer View_slice)
             [
               Place (Lowered.make_local_place view);
               Value (Lowered.make_uint64_constant 2);
               Value (Lowered.make_uint64_constant 1);
             ]);
       expect_stop "an element popped from an empty storage" (fun builder ~storage ~view:_ ->
-          operate_checked builder Storage_shorten
+          operate_checked builder (Buffer Storage_shorten)
             [ Place (Lowered.make_local_place storage); Value (Lowered.make_uint64_constant 0) ];
           let popped =
             Emit_c.Builder.allocate_local builder (Codegen_support.value Codegen_support.uint8)
           in
-          operate_checked builder ~destination:(Lowered.make_local_place popped) Storage_pop
+          operate_checked builder ~destination:(Lowered.make_local_place popped)
+            (Buffer Storage_pop)
             [ Place (Lowered.make_local_place storage) ]))
 
 let () =

@@ -71,7 +71,7 @@ let resolve_call_node (interface : Interface.Lookups.t) (path : Path.t) =
     when not
            (List.exists (Path.equal path)
               (Mir.Call_edges.list_written_methods interface.names owner)) -> (
-      match Interface.Definition.read_impl_interface interface owner with
+      match Interface.Definition.find_impl_interface interface owner with
       | Some impl -> Path.Method { owner = impl.implements.trait; name; receiver }
       | None -> path)
   | _ -> path
@@ -463,6 +463,7 @@ type record = {
 
 type reader = {
   pending : Buffer.t;
+  mutable unread_from : int;
   mutable message : string option;
   mutable echo : string option;
   mutable output : string option;
@@ -471,20 +472,32 @@ type reader = {
 }
 
 let make_reader ?(on_start = ignore) on_record =
-  { pending = Buffer.create 1024; message = None; echo = None; output = None; on_start; on_record }
+  {
+    pending = Buffer.create 1024;
+    unread_from = 0;
+    message = None;
+    echo = None;
+    output = None;
+    on_start;
+    on_record;
+  }
 
 let raise_malformed_report text = raise_cannot_build "A test report cannot be read: %s" text
 
+let find_line_end reader =
+  let rec scan index =
+    if index >= Buffer.length reader.pending then None
+    else if Buffer.nth reader.pending index = '\n' then Some index
+    else scan (index + 1)
+  in
+  scan reader.unread_from
+
 let rec drain reader =
-  let text = Buffer.contents reader.pending in
-  match String.index_opt text '\n' with
+  match find_line_end reader with
   | None -> ()
   | Some stop -> (
-      let line = String.sub text 0 stop in
-      let consume count =
-        Buffer.clear reader.pending;
-        Buffer.add_string reader.pending (String.drop_first count text)
-      in
+      let line = Buffer.sub reader.pending reader.unread_from (stop - reader.unread_from) in
+      let consume_through last = reader.unread_from <- last + 1 in
       match String.split_on_char ' ' line with
       | [ (("message" | "echo" | "output") as label); count ] ->
           let count =
@@ -492,19 +505,19 @@ let rec drain reader =
             | Some parsed_count -> parsed_count
             | None -> raise_malformed_report line
           in
-          if String.length text >= stop + 1 + count + 1 then begin
-            let content = String.sub text (stop + 1) count in
+          if Buffer.length reader.pending >= stop + 1 + count + 1 then begin
+            let content = Buffer.sub reader.pending (stop + 1) count in
             (match label with
             | "message" -> reader.message <- Some content
             | "echo" -> reader.echo <- Some content
             | _ -> reader.output <- Some content);
-            consume (stop + 1 + count + 1);
+            consume_through (stop + 1 + count);
             drain reader
           end
       | [ "start"; number ] -> (
           match int_of_string_opt number with
           | Some number ->
-              consume (stop + 1);
+              consume_through stop;
               reader.on_start number;
               drain reader
           | None -> raise_malformed_report line)
@@ -528,7 +541,7 @@ let rec drain reader =
               reader.message <- None;
               reader.echo <- None;
               reader.output <- None;
-              consume (stop + 1);
+              consume_through stop;
               reader.on_record number record;
               drain reader
           | _ -> raise_malformed_report line)
@@ -536,7 +549,16 @@ let rec drain reader =
 
 let feed reader text =
   Buffer.add_string reader.pending text;
-  drain reader
+  drain reader;
+  if reader.unread_from > 0 then begin
+    let unread =
+      Buffer.sub reader.pending reader.unread_from
+        (Buffer.length reader.pending - reader.unread_from)
+    in
+    Buffer.clear reader.pending;
+    Buffer.add_string reader.pending unread;
+    reader.unread_from <- 0
+  end
 
 let parse_report text =
   let records = ref [] in
@@ -569,11 +591,6 @@ type progress =
   | Started of { test : int }
   | Ended of { test : int; record : record }
 
-let is_external_test compiler test =
-  match Interface.Definition.read_test_uses compiler.requests.interface test with
-  | Some uses -> uses <> Types.no_capabilities
-  | None -> false
-
 let make_incomplete_record compiler todo_types =
   {
     outcome = Incomplete;
@@ -596,7 +613,9 @@ let run_tests ?(rerun = false) ?(report_progress = ignore) compiler ~time_limit_
   let results = compiler.results in
   let roots = List.map make_test_root tests in
   report_progress Lowering;
-  let is_keyed test = results <> None && not (is_external_test compiler test) in
+  let is_keyed test =
+    results <> None && not (Interface.Definition.is_external_test compiler.requests.interface test)
+  in
   let known =
     List.mapi
       (fun index (test, root) ->
@@ -648,7 +667,7 @@ let run_tests ?(rerun = false) ?(report_progress = ignore) compiler ~time_limit_
     let _, report, errors =
       Fun.protect
         ~finally:(fun () -> try Sys.remove output with Sys_error _ -> ())
-        (fun () -> Process.run ~on_output:(feed reader) output [])
+        (fun () -> Process.run ~input:"" ~on_output:(feed reader) output [])
     in
     if Array.exists Option.is_none fresh then
       raise_cannot_build "The test program ended before reporting every test:\n%s%s" report errors

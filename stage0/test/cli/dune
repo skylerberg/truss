@@ -2,6 +2,7 @@
  (name cli_tests)
  (deps ../../driver/truss/truss.exe)
  (libraries
+  file_system
   harness
   process
   unix

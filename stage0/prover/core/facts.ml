@@ -1,10 +1,25 @@
 let make_variable ?(numbers = []) label = Logic.Symbol.Variable { label; numbers }
 
-exception Unsupported of State.location * string
-exception Foreign_unsupported of string
+type unsupported = {
+  location : State.location;
+  construct : string;
+  foreign_definition : string option;
+}
+
+exception Unsupported of unsupported
 
 let raise_unsupported location format =
-  Printf.ksprintf (fun message -> raise (Unsupported (location, message))) format
+  Printf.ksprintf
+    (fun construct -> raise (Unsupported { location; construct; foreign_definition = None }))
+    format
+
+let run_in_source (context : State.context) (source : State.source) read =
+  try read ()
+  with
+  | Unsupported ({ foreign_definition = None; _ } as unsupported)
+  when source.key <> Some context.home
+  ->
+    raise (Unsupported { unsupported with foreign_definition = Some source.name })
 
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Prover" format
 
@@ -164,11 +179,11 @@ let make_requires_fix (context : State.context) required =
     | _ -> None
   in
   match edit with
-  | Some edit ->
+  | Some edit when not context.inherits_precondition ->
       [
         { State.title = (State.Text "Add `requires " :: required) @ [ Text "`" ]; edits = [ edit ] };
       ]
-  | None -> []
+  | Some _ | None -> []
 
 let find_parameter_name (context : State.context) symbol =
   if List.mem symbol context.entry then
@@ -285,24 +300,26 @@ and make_obligation ?template_clause (context : State.context) (frame : State.fr
     values = context.values;
     decisions = List.rev context.decisions;
     locals =
-      Locals.fold
-        (fun local term shown ->
-          match (term, Tables.Local_table.find_opt context.local_names local) with
-          | Logic.Symbol symbol, Some name
-            when not (List.mem_assoc symbol context.values || List.mem_assoc symbol shown) ->
-              (symbol, name) :: shown
-          | _ -> shown)
-        frame.locals
-        (match frame.result with
-        | Some (Logic.Symbol symbol) when not (List.mem_assoc symbol context.values) ->
-            [ (symbol, "result") ]
-        | _ -> []);
+      (let is_parameter = function
+         | Logic.Symbol symbol -> List.mem_assoc symbol context.values
+         | _ -> false
+       in
+       Locals.fold
+         (fun local term shown ->
+           match Tables.Local_table.find_opt context.local_names local with
+           | Some name when not (is_parameter term || List.mem_assoc term shown) ->
+               (term, name) :: shown
+           | _ -> shown)
+         frame.locals
+         (match frame.result with
+         | Some term when not (is_parameter term) -> [ (term, "result") ]
+         | _ -> []));
     template_clause;
-    may_stop_with_panic = false;
+    panic_clause = None;
   }
 
-let record_obligation ?template_clause ?cited ~fixes ~may_stop_with_panic context
-    (frame : State.frame) code location message goal =
+let record_obligation ?template_clause ?cited ~fixes ~panic_clause context (frame : State.frame)
+    code location message goal =
   match
     make_closed_obligation ?template_clause context frame code location message
       (add_quantifier_facts
@@ -318,23 +335,24 @@ let record_obligation ?template_clause ?cited ~fixes ~may_stop_with_panic contex
             | None -> [])
         | fixes -> fixes
       in
-      context.obligations <-
-        { obligation with cited; fixes; may_stop_with_panic } :: context.obligations;
+      context.obligations <- { obligation with cited; fixes; panic_clause } :: context.obligations;
       assume context frame goal
   | None -> ()
 
 let oblige ?template_clause ?cited ?(fixes = []) context frame code location message goal =
-  record_obligation ?template_clause ?cited ~fixes ~may_stop_with_panic:false context frame code
-    location message goal
+  record_obligation ?template_clause ?cited ~fixes ~panic_clause:None context frame code location
+    message goal
 
 let oblige_safe_operation ?cited ?(fixes = []) (context : State.context) (frame : State.frame) code
     location message goal =
+  let record panic_clause =
+    record_obligation ?cited ~fixes ~panic_clause context frame code location message goal
+  in
   match frame.panic with
   | Declared when frame.source.key = Some context.home ->
       if frame.makes_obligations then assume context frame goal
-  | Declared | Undeclared | Undeclarable ->
-      record_obligation ?cited ~fixes ~may_stop_with_panic:(frame.panic = Undeclared) context frame
-        code location message goal
+  | Undeclared clause -> record (Some clause)
+  | Declared | Undeclarable -> record None
 
 let quote (source : State.source) origin =
   match source.key with Some key -> State.Quote (key, origin) | None -> Text "this expression"
@@ -373,7 +391,7 @@ let equal_trait = Well_known.make_path Equal
 let find_visible_type (context : State.context) (ty : Types.ty) =
   match ty with
   | Named { path; arguments } when Types.find_builtin ty = None -> (
-      match Interface.Definition.read_interface context.lookups.interface path with
+      match Interface.Definition.find_interface context.lookups.interface path with
       | Some (Interface.Environment.Type_interface interface)
         when (not interface.opaque)
              || Path.locate_package path = Path.locate_package context.current ->
@@ -481,6 +499,9 @@ let arrive context frame prefix ty =
   let value = declare_fresh context frame prefix (declare_sort context ty) in
   assume context frame (make_in_range ty value);
   value
+
+let read_or_arrive context frame prefix ty read =
+  try read frame with Unsupported _ -> arrive context frame prefix ty
 
 let bind (frame : State.frame) local ty term =
   {

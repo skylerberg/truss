@@ -91,6 +91,33 @@ let () =
                   (String.length expected_long_output)
           | _ -> Codegen_support.fail "%s" (Codegen_support.render_records records)))
 
+let with_standard_input text work =
+  let read_end, write_end = Unix.pipe ~cloexec:true () in
+  ignore (Unix.write_substring write_end text 0 (String.length text));
+  Unix.close write_end;
+  let saved = Unix.dup ~cloexec:true Unix.stdin in
+  Unix.dup2 ~cloexec:false read_end Unix.stdin;
+  Unix.close read_end;
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.dup2 ~cloexec:false saved Unix.stdin;
+      Unix.close saved)
+    work
+
+let () =
+  Codegen_support.test
+    "a test's standard input is empty, whatever the runner's standard input holds" (fun () ->
+      let database, compile =
+        Codegen_support.load Fixtures.Program.test_reading_its_standard_input
+      in
+      match
+        with_standard_input "typed at the terminal\n" (fun () ->
+            Compile.run_tests compile ~time_limit_ms:2000 (Codegen_support.list_tests database))
+      with
+      | Ok [ { outcome = Passed; _ } ] -> ()
+      | Ok records -> Codegen_support.fail "%s" (Codegen_support.render_records records)
+      | Error message -> Codegen_support.fail "%s" message)
+
 let () =
   Codegen_support.test
     "a build checks each primitive operation that could fail, and evaluates no requires clause"
@@ -664,7 +691,7 @@ let () =
                     (fun (declaration : Resolve.Names.declaration) ->
                       match
                         ( declaration.path,
-                          Interface.Definition.read_declared_signature interface declaration.path )
+                          Interface.Definition.find_declared_signature interface declaration.path )
                       with
                       | Top _, Some { generics = []; specification_only = false; _ } ->
                           Some (Instance.Code { path = declaration.path; type_arguments = [] })
@@ -705,9 +732,8 @@ let () =
       | status, _, errors -> Codegen_support.fail "ended with status %d: %s" status errors)
 
 let () =
-  Codegen_support.test "a main that uses a capability with no real implementation is not built"
-    (fun () ->
-      let _, compile = Codegen_support.load Fixtures.Program.main_using_a_greeter in
+  Codegen_support.test "a program whose capability method lends is not built yet" (fun () ->
+      let _, compile = Codegen_support.load Fixtures.Program.store_lending_its_value in
       match
         Compile.For_testing.run_program compile
           ~main:(Top { module_ = Codegen_support.example; name = "main" })
@@ -717,5 +743,6 @@ let () =
       | Error message ->
           if
             not
-              (String.includes ~affix:"main uses Greeter, which has no real implementation" message)
+              (String.includes ~affix:"Stage0 cannot build this yet" message
+              && String.includes ~affix:"a capability method that lends" message)
           then Codegen_support.fail "failed with: %s" message)

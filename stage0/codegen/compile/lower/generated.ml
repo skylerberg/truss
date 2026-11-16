@@ -71,9 +71,8 @@ let build_entry context (key : Instance.key) (impl_method : Instance.impl_method
     match receiver with Mut -> Mut | Own -> Own | Read | Static -> Read
   in
   let result_ty =
-    match capability_signature.output with
-    | Returns ty -> Monomorphic.ground context.monomorphic [] ty
-    | _ -> Definitions.raise_bug "a capability method that lends"
+    Monomorphic.ground context.monomorphic []
+      (Types.extract_result_type capability_signature.output)
   in
   Targets.lower_instance_call st
     (Code { path; type_arguments })
@@ -158,9 +157,8 @@ let build_locked_entry context (key : Instance.key) ~capability ~name : Emit_c.B
          })
   in
   let result_ty =
-    match capability_signature.output with
-    | Returns ty -> Monomorphic.ground context.monomorphic [] ty
-    | _ -> Definitions.raise_bug "a capability method that lends"
+    Monomorphic.ground context.monomorphic []
+      (Types.extract_result_type capability_signature.output)
   in
   call_tasks "lock";
   Emit_c.Builder.emit builder
@@ -221,33 +219,21 @@ let build_impl_table context (key : Instance.key) ~impl ~type_arguments : Lowere
   in
   { table_key = key; capability = Some capability; entries }
 
-let find_real_implementation (interface : Interface.Lookups.t) (capability : Path.t) =
-  match
-    List.filter
-      (function Path.Impl { module_; _ } -> Well_known.is_system_module module_ | _ -> false)
-      (interface.names.list_impls_of_trait Path.standard_package capability)
-  with
-  | [] -> None
-  | [ impl ] -> (
-      match Interface.Definition.read_impl_interface interface impl with
-      | Some impl_interface -> Some (impl, impl_interface)
-      | None -> Definitions.raise_bug "the real implementation %s has no interface" (Path.show impl)
-      )
-  | impls ->
-      Definitions.raise_bug "%s has %d real implementations: %s" (Path.show capability)
-        (List.length impls)
-        (String.concat ", " (List.map Path.show impls))
-
 let list_real_implementations (st : Lowering.state) ~user capabilities =
   List.map
     (fun capability ->
-      let impl, ty =
-        match find_real_implementation st.context.lookups.interface capability with
-        | Some (impl, impl_interface) ->
-            (impl, Monomorphic.ground st.context.monomorphic [] impl_interface.for_type)
+      let impl =
+        match
+          Interface.Definition.find_real_implementation st.context.lookups.interface capability
+        with
+        | Some impl -> impl
         | None ->
-            Lowering.raise_unsupported "%s uses %s, which has no real implementation" user
-              (Ground.show_path_name capability)
+            Definitions.raise_bug "%s uses %s, which has no real implementation" user
+              (Path.show capability)
+      in
+      let ty =
+        Monomorphic.ground st.context.monomorphic []
+          (Definitions.read_impl_interface st.context impl).for_type
       in
       let implementation =
         if Lowering.is_zero_size st ty then Lowered.Constant Null
@@ -300,7 +286,7 @@ let build_program_main context (key : Instance.key) main_path : Emit_c.Builder.i
     (Assign
        ( Lowered.make_local_place wanted,
          Convert (Copy (Lowered.make_local_place count), Integer UInt64) ));
-  lower Storage_with_capacity [ string_ty ]
+  lower (Buffer Storage_with_capacity) [ string_ty ]
     [ Value (Copy (Lowered.make_local_place wanted)) ]
     (Some (Lowered.project list (Field storage_field)));
   Emit_c.Builder.emit_loop builder ~integer:Int32
@@ -336,7 +322,7 @@ let build_program_main context (key : Instance.key) main_path : Emit_c.Builder.i
         ~substitution:[]
         ~arguments:[ (Read, view_ty, view) ]
         ~destination:text ();
-      lower Storage_push [ string_ty ]
+      lower (Buffer Storage_push) [ string_ty ]
         [ Place (Lowered.project list (Field storage_field)); Value (Lowering.move_place st text) ]
         None);
   st.evidence <-

@@ -52,7 +52,7 @@ let rec compute_place_type context frame run (place : Mir.place) =
   | [] -> (
       match place.Mir.root with
       | Local local -> Facts.substitute_type context frame run.infos.(local).type_
-      | Constant path -> Values.compute_constant_type context path
+      | Constant path -> Interface.Definition.read_constant_type context.lookups.interface path
       | Literal { type_; _ } -> Facts.substitute_type context frame type_)
   | _ -> (
       let base =
@@ -66,7 +66,7 @@ let rec compute_place_type context frame run (place : Mir.place) =
       in
       match Option.bind (find_declared_fields context base_type variant) (List.assoc_opt field) with
       | Some field_type -> Facts.substitute_type context frame field_type
-      | None -> raise (Facts.Foreign_unsupported (Printf.sprintf "the field `%s`" field)))
+      | None -> Facts.raise_unsupported Whole_definition "the field `%s`" field)
 
 let rec resolve_aliases (frame : State.frame) run (place : Mir.place) :
     (Logic.term * Mir.place) list =
@@ -92,7 +92,14 @@ let expand_place frame run (place : Mir.place) =
   match resolve_aliases frame run place with
   | [ (_, place) ] -> place
   | _ ->
-      raise (Facts.Foreign_unsupported "a name that the alternatives of a pattern bind `mut`, here")
+      Facts.raise_unsupported Whole_definition
+        "a name that the alternatives of a pattern bind `mut`, here"
+
+let describe_local : Mir.local_kind -> string = function
+  | Source { name = Some name; _ } -> Printf.sprintf "`%s`" name
+  | Source { name = None; _ } -> "an unnamed local"
+  | Temporary -> "a temporary"
+  | Lent _ -> "a lent part"
 
 let read_root context frame run (root : Mir.root) =
   match root with
@@ -104,23 +111,19 @@ let read_root context frame run (root : Mir.root) =
       | Core_local Self -> (
           match frame.self with
           | Some self -> self
-          | None -> raise (Facts.Foreign_unsupported "`self` outside a method"))
+          | None -> Facts.raise_unsupported Whole_definition "`self` outside a method")
       | key -> (
           (match key with
           | Core_local core when frame.makes_obligations && not context.reading_callback ->
               Validity.check_escaping_callback context frame core
           | Core_local _ | Mir_local _ -> ());
-          match Locals.find_opt key frame.locals with
-          | Some term -> term
-          | None
-            when run.in_formula
-                 &&
-                 match run.infos.(local).kind with
-                 | Source _ -> false
-                 | Temporary | Lent _ -> true ->
-              Facts.raise_bug "a temporary of a formula of `%s` is read before it is assigned"
-                frame.source.name
-          | None -> raise (Facts.Foreign_unsupported "a local the prover did not bind")))
+          match (Locals.find_opt key frame.locals, run.infos.(local).kind) with
+          | Some term, _ -> term
+          | None, Source _ when run.in_formula ->
+              Facts.raise_unsupported Whole_definition "a local the prover did not bind"
+          | None, kind ->
+              Facts.raise_bug "`%s` reads %s before the prover binds it" frame.source.name
+                (describe_local kind)))
 
 let read_resolved context frame run (place : Mir.place) =
   let _, term =
@@ -135,10 +138,8 @@ let read_resolved context frame run (place : Mir.place) =
         in
         let projected = { place with Mir.projections = prefix @ [ projection ] } in
         if Facts.find_constructors context base_type = None then
-          raise
-            (Facts.Foreign_unsupported
-               (Printf.sprintf "a field of `%s`, whose fields the prover does not see"
-                  (Types.show base_type)));
+          Facts.raise_unsupported Whole_definition
+            "a field of `%s`, whose fields the prover does not see" (Types.show base_type);
         ignore (Facts.declare_sort context base_type);
         ( prefix @ [ projection ],
           Values.project_field context frame base_type variant field
@@ -172,7 +173,7 @@ let replace_field context ty variant field whole new_value =
               if name = field then new_value
               else Validity.select_field context ty variant name whole)
             fields )
-  | None -> raise (Facts.Foreign_unsupported (Printf.sprintf "the fields of `%s`" (Types.show ty)))
+  | None -> Facts.raise_unsupported Whole_definition "the fields of `%s`" (Types.show ty)
 
 let write_resolved context frame run (place : Mir.place) new_value =
   let rec rebuild prefix whole = function
@@ -195,7 +196,7 @@ let write_resolved context frame run (place : Mir.place) new_value =
           (rebuild (prefix @ [ projection ]) part rest)
   in
   match place.Mir.root with
-  | Constant _ | Literal _ -> raise (Facts.Foreign_unsupported "assigning to a constant")
+  | Constant _ | Literal _ -> Facts.raise_unsupported Whole_definition "assigning to a constant"
   | Local local -> (
       let whole =
         if place.Mir.projections = [] then new_value
@@ -342,7 +343,7 @@ let read_operand context frame run (operand : Mir.operand) =
       | Float number -> (
           match Facts.find_float_format ty with
           | Some format -> make_float_literal format number
-          | None -> raise (Facts.Foreign_unsupported "a float literal without a float type"))
+          | None -> Facts.raise_unsupported Whole_definition "a float literal without a float type")
       | Boolean truth -> Logic.Boolean truth)
 
 let compute_operand_type context frame operand =
@@ -519,15 +520,12 @@ let read_lend context (frame : State.frame) run part (call : Mir.call) =
   in
   let lent, write_back =
     match (invocation.lends, invocation.callee, receiver) with
-    | ( Some Types.Mut,
-        Intrinsic
-          { operation = (Storage_at_mut | Array_at_mut | View_at_mut) as operation; type_arguments },
-        Some receiver ) ->
+    | Some Types.Mut, Intrinsic { operation = Lend element_lend; type_arguments }, Some receiver ->
         let index = make_index_term () in
         ( lend frame,
           Some
             (fun frame final ->
-              Intrinsics.write_element_back context frame ~operation ~type_arguments
+              Intrinsics.write_element_back context frame ~lend:element_lend ~type_arguments
                 ~receiver:(make_passed_place context run receiver)
                 ~receiver_type:(compute_place_type context frame run receiver)
                 index final) )
@@ -607,8 +605,7 @@ let rec write_back_part context run ty (part : Mir.yielded) frame after =
                   write_back_part context run field_type field frame value
               | _ -> frame)
             frame fields
-      | None ->
-          raise (Facts.Foreign_unsupported (Printf.sprintf "the fields of `%s`" (Types.show ty))))
+      | None -> Facts.raise_unsupported Whole_definition "the fields of `%s`" (Types.show ty))
   | Part (Use _ | Take _ | Constant _) -> frame
 
 let bind_parts context (frame : State.frame) run =
@@ -623,7 +620,7 @@ let bind_parts context (frame : State.frame) run =
               (List.fold_left
                  (fun otherwise (condition, part) -> Logic.ite condition (read part) otherwise)
                  (read first) later)
-          with Facts.Unsupported _ | Facts.Foreign_unsupported _ -> frame)
+          with Facts.Unsupported _ -> frame)
       | _ -> frame)
     frame.aliases frame
 
@@ -744,9 +741,9 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
       let types = match types with [] -> [ ty ] | types -> types in
       let terms = List.map translate_operand operands in
       ( frame,
-        Intrinsics.translate_intrinsic context frame ~site operation types terms
-          ~arguments:(List.map find_operand_origin operands)
-          ~changed:terms ty )
+        Operations.translate_primitive_operation context frame ~site operation types terms
+          ~arguments:(List.map find_operand_origin operands) ~fallback:(fun () ->
+            Facts.arrive context frame "result" ty) )
   | Construct { variant; fields; type_ } ->
       Values.apply_construct context frame { site with type_ } variant
         (List.map (fun (name, field) -> (name, Option.map translate_operand field)) fields)
@@ -765,11 +762,11 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
       | Core_local Self -> (
           match frame.old_self with
           | Some self -> (frame, self)
-          | None -> raise (Facts.Foreign_unsupported "`self` outside a method"))
+          | None -> Facts.raise_unsupported Whole_definition "`self` outside a method")
       | key -> (
           match Locals.find_opt key frame.old_locals with
           | Some term -> (frame, term)
-          | None -> raise (Facts.Foreign_unsupported "a local the prover did not bind")))
+          | None -> Facts.raise_unsupported Whole_definition "a local the prover did not bind"))
   | Specification Yielded -> (
       match (frame.yielded, frame.yielded_so_far) with
       | Some yielded, _ -> (frame, yielded)
@@ -859,7 +856,7 @@ and read_block context frame run (block : Mir.block) =
 and read_value context frame run (block : Mir.block) =
   match read_block context frame run block with
   | Some read -> read
-  | None -> raise (Facts.Foreign_unsupported "a call in a specification that never returns")
+  | None -> Facts.raise_unsupported Whole_definition "a call in a specification that never returns"
 
 and join_after_either context ~(outer : State.frame) ~condition
     ((entered : State.frame), (after : State.frame))
@@ -954,7 +951,7 @@ and read_statement context frame run (statement : Mir.statement) =
   let location = Facts.locate context frame.source statement.origin in
   match statement.kind with
   | Basic basic -> read_basic context frame run statement ~location basic
-  | Assert_by_bit_vector { condition; names; code } ->
+  | Assert_by_bit_vector { names; code; _ } ->
       let named =
         List.map
           (fun local ->
@@ -965,8 +962,7 @@ and read_statement context frame run (statement : Mir.statement) =
           names
       in
       let frame, term = read_value context frame run code in
-      Assertions.check_assertion context frame
-        ~origin:(Option.value (find_operand_origin condition) ~default:statement.origin)
+      Assertions.check_assertion context frame ~origin:statement.origin
         ~bit_vector:(Some (named, fun isolated -> snd (read_value context isolated run code)))
         term;
       Some frame
@@ -1093,66 +1089,39 @@ and read_statement context frame run (statement : Mir.statement) =
                     (read_operand context after run left, read_operand context after run right) ))
               compared;
         }
-  | For
-      {
-        loop = { quantified = Some { quantifier; binding_count; decision; holds; decides }; _ };
-        iteration;
-        part;
-        lent;
-        body;
-        _;
-      } ->
-      let bindings = List.take binding_count body.statements in
-      let range, parameter, bindings =
-        match (lent, iteration) with
-        | Some { element; collection; _ }, _ ->
-            let pattern_bindings =
-              match
-                List.find_index
-                  (fun (statement : Mir.statement) ->
-                    match statement.kind with
-                    | Basic (Lend { part; _ }) -> part = element
-                    | _ -> false)
-                  bindings
-              with
-              | Some lend_index -> List.drop (lend_index + 1) bindings
-              | None -> Facts.raise_bug "a quantifier over elements that no statement lends"
-            in
-            ( Models.Range_of_collection
-                {
-                  collection_type = compute_place_type context frame run collection;
-                  collected = read_place context frame run collection;
-                  element = Facts.substitute_type context frame run.infos.(element).type_;
-                  location;
-                },
-              element,
-              pattern_bindings )
-        | None, Range { start; stop; inclusive } ->
-            ( Range_of_integers
-                {
-                  low = read_operand context frame run start;
-                  high = read_operand context frame run stop;
-                  inclusive;
-                  type_ = compute_operand_type context frame start;
-                },
-              part,
-              bindings )
-        | None, Pull _ ->
-            Facts.raise_unsupported location "a quantifier over the values of a cursor"
+  | For { loop = { quantified = Some { quantifier; decides }; _ }; iteration; part; lent; body; _ }
+    ->
+      let frame =
+        match lent with Some lent -> fst (read_value context frame run lent.count) | None -> frame
+      in
+      let range : Models.quantified_range =
+        match iteration with
+        | Range { start; stop; inclusive } ->
+            Range_of_integers
+              {
+                low = read_operand context frame run start;
+                high = read_operand context frame run stop;
+                inclusive;
+                type_ = compute_operand_type context frame start;
+              }
+        | Pull _ -> Facts.raise_bug "a quantifier loop that pulls from a cursor"
+      in
+      let decision : Mir.operand =
+        Use
+          {
+            place = { root = Local decides; projections = [] };
+            type_ = Types.bool;
+            origin = statement.origin;
+          }
       in
       let after, term =
-        translate_quantifier_value context frame run ~location quantifier range ~parameter
+        translate_quantifier_value context frame run ~location quantifier range ~parameter:part
           ~matches:
             {
-              statements = bindings;
+              statements = [];
               value = Some (Constant { value = Boolean true; type_ = Types.bool });
             }
-          ~body:
-            {
-              statements =
-                List.take (decision - binding_count) (List.drop binding_count body.statements);
-              value = Some holds;
-            }
+          ~body:{ body with value = Some decision }
       in
       Some (write_place context after run { root = Local decides; projections = [] } term)
   | For { loop; iteration; part; lent; binding_count; body } ->
@@ -1346,9 +1315,7 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
         }
   | Lend { part; call } -> read_lend context frame run part call
   | Assert condition ->
-      Assertions.check_assertion context frame
-        ~origin:(Option.value (find_operand_origin condition) ~default:statement.origin)
-        ~bit_vector:None
+      Assertions.check_assertion context frame ~origin:statement.origin ~bit_vector:None
         (read_operand context frame run condition);
       Some frame
   | Ghost_assert { condition; by_bit_vector } ->
@@ -1529,11 +1496,9 @@ let read_formula context (frame : State.frame) (formula : Mir.formula) ~argument
             argument)
         inside formula.parameters arguments
   in
-  try
-    let after, term = read_value context inside run formula.value in
-    ({ frame with spent = after.spent }, term)
-  with Facts.Unsupported (_, message) when frame.source.key <> Some context.home ->
-    raise (Facts.Foreign_unsupported (Printf.sprintf "%s, in `%s`" message frame.source.name))
+  Facts.run_in_source context frame.source (fun () ->
+      let after, term = read_value context inside run formula.value in
+      ({ frame with spent = after.spent }, term))
 
 let read_body context start ~(lambdas : Mir.body array) (body : Mir.body) =
   let run = make_run ~in_formula:false ~locals:body.locals ~lambdas in

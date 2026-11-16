@@ -1,6 +1,6 @@
 fn f(items: List[Int64]) -> UInt64 {
   var labeled = Labeled(view: items[..], name: "a".copy())
-  let borrowed = labeled
+  let labeled_view = labeled
   labeled = Labeled(view: items[..], name: "b".copy())
-  borrowed.name.length()
+  labeled_view.name.length()
 }

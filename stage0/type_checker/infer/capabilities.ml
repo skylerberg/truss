@@ -11,27 +11,23 @@ let report checking ?(fixes = []) code (origin : Core.origin) message =
   checking.state.diagnostics <-
     Diagnostic.make ~fixes ~code:(Capabilities code) span message :: checking.state.diagnostics
 
-type scope_kind = Function_body | Lambda_body of Core.origin | Restricted of string
+type scope_kind =
+  | Function_body of Interface.Definition.capability_declaration option
+  | Lambda_body of Core.origin
+  | Restricted of string
 
-type scope = {
-  available : Types.capability_set;
-  kind : scope_kind;
-  implemented_capability : Types.capability option;
-}
+type scope = { available : Types.capability_set; kind : scope_kind }
+
+let find_implemented_capability scope : Types.capability option =
+  match scope.kind with
+  | Function_body (Some (Declared_by (Impl_uses { capability }))) -> Some (Capability capability)
+  | Function_body _ | Lambda_body _ | Restricted _ -> None
 
 let make_panic_only_scope description =
-  {
-    available = Types.make_capability_set [ panic ];
-    kind = Restricted description;
-    implemented_capability = None;
-  }
+  { available = Types.make_capability_set [ panic ]; kind = Restricted description }
 
 let make_no_capabilities_scope description =
-  {
-    available = Types.no_capabilities;
-    kind = Restricted description;
-    implemented_capability = None;
-  }
+  { available = Types.no_capabilities; kind = Restricted description }
 
 let check_grant checking (origin : Core.origin) ~subject package (uses : Types.capability_set) =
   List.iter
@@ -63,7 +59,7 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.callee) =
       | None -> ());
       match evidence with
       | Impl { impl; _ } -> (
-          match Interface.Definition.read_impl_interface state.lookups.interface impl with
+          match Interface.Definition.find_impl_interface state.lookups.interface impl with
           | Some interface when List.mem (name, receiver) interface.impl_methods ->
               Option.iter
                 (fun (signature : Types.signature) ->
@@ -85,7 +81,7 @@ let require_available checking scope (origin : Core.origin) ?(for_implementation
   let superset =
     if indirect_call then
       Types.union_capabilities scope.available
-        (Types.make_capability_set (Option.to_list scope.implemented_capability))
+        (Types.make_capability_set (Option.to_list (find_implemented_capability scope)))
     else scope.available
   in
   let report_missing (missing : Types.capability_set) =
@@ -110,23 +106,27 @@ let require_available checking scope (origin : Core.origin) ?(for_implementation
               (Printf.sprintf
                  "This call uses `%s`, but %s may use only `Panic`, whatever the function declares."
                  shown description)
-        | Function_body when for_implementation ->
+        | Function_body declaration ->
+            let subject = if for_implementation then "This implementation" else "This call" in
+            let can_provide =
+              match capability with
+              | Types.Capability path -> not (Well_known.is Panic path)
+              | Capability_parameter _ | Capability_projection _ | Capability_variable _ -> false
+              | Capability_error _ -> State.raise_bug "a capability with an error is missing"
+            in
             report checking Not_available origin
-              (Printf.sprintf "This implementation uses `%s`, which is not available here." shown)
-        | Function_body -> (
-            match capability with
-            | Types.Capability _ ->
-                report checking Not_available origin
-                  (Printf.sprintf
-                     "This call uses `%s`, which is not available here. Declare it with `uses %s`, \
-                      or `provide` an implementation."
-                     shown shown)
-            | Capability_parameter _ | Capability_projection _ | Capability_variable _ ->
-                report checking Not_available origin
-                  (Printf.sprintf
-                     "This call uses `%s`, which is not available here. Declare it with `uses %s`."
-                     shown shown)
-            | Capability_error _ -> State.raise_bug "a capability with an error is missing"))
+              (match declaration with
+              | Some (Declared_by clause) ->
+                  Printf.sprintf "%s uses `%s`, which is not available here. Declare it with %s%s."
+                    subject shown
+                    (Interface.Definition.show_declaring_clause clause shown)
+                    (if can_provide then ", or `provide` an implementation" else "")
+              | Some (Fixed_by_trait { trait; method_name }) ->
+                  Printf.sprintf
+                    "%s uses `%s`, but `%s` can use only the capabilities `%s` declares for it.%s"
+                    subject shown method_name (Types.show_trait trait)
+                    (if can_provide then " Provide an implementation with `provide`." else "")
+              | None -> Printf.sprintf "%s uses `%s`, which is not available here." subject shown))
       (missing :> Types.capability list)
   in
   if required <> Types.no_capabilities then
@@ -134,7 +134,7 @@ let require_available checking scope (origin : Core.origin) ?(for_implementation
       { subset = required; superset; report_missing } :: state.capability_constraints
 
 let require_intrinsic_uses checking scope (origin : Core.origin) operation =
-  if Option.is_none scope.implemented_capability then
+  if Option.is_none (find_implemented_capability scope) then
     require_available checking scope origin
       (Types.make_capability_set
          (List.map (fun capability -> Types.Capability capability) (Intrinsic.list_uses operation)))
@@ -152,7 +152,7 @@ let require_callee_uses checking scope (origin : Core.origin) (callee : Core.cal
       require_available checking scope origin
         (match
            ( Members.find_trait_method state.lookups trait.trait name receiver,
-             Interface.Definition.read_trait_interface state.lookups.interface trait.trait )
+             Interface.Definition.find_trait_interface state.lookups.interface trait.trait )
          with
         | Some method_, Some interface ->
             let signature =
@@ -178,9 +178,7 @@ let rec check_expression checking scope (node : Core.expression) =
       let uses =
         match node.type_ with Types.Function { uses; _ } -> uses | _ -> Types.no_capabilities
       in
-      check_block checking
-        { available = uses; kind = Lambda_body node.origin; implemented_capability = None }
-        body
+      check_block checking { available = uses; kind = Lambda_body node.origin } body
   | Provide { implementations; body } -> check_provide checking scope implementations body
   | Quantified _ ->
       check_children checking (make_no_capabilities_scope "a quantifier's body") (`Expression node)
@@ -397,7 +395,7 @@ let rec can_call_capability_code (state : State.state) ~list_bounds ?(seen = [])
     in
     List.exists
       (fun (bound : Types.trait_reference) ->
-        match Interface.Definition.read_trait_interface state.lookups.interface bound.trait with
+        match Interface.Definition.find_trait_interface state.lookups.interface bound.trait with
         | Some interface ->
             List.exists
               (fun (method_ : Types.trait_method) ->
@@ -488,7 +486,7 @@ let check_monitor_callbacks checking implementations =
         List.iter
           (fun ((provided : Core.provided), (_ : Types.impl_interface)) ->
             match
-              Interface.Definition.read_trait_interface state.lookups.interface provided.capability
+              Interface.Definition.find_trait_interface state.lookups.interface provided.capability
             with
             | Some capability ->
                 List.iter
@@ -525,8 +523,13 @@ let check_monitor_callbacks checking implementations =
 let check (state : State.state) (elaborated : Interface.Environment.elaborated_interface)
     (form : Core.t) =
   let checking = { state; provides = [] } in
-  let make_function_body_scope ?implemented_capability available =
-    { available; kind = Function_body; implemented_capability }
+  let make_function_body_scope available =
+    {
+      available;
+      kind =
+        Function_body
+          (Interface.Definition.find_capability_declaration state.lookups.interface state.key.path);
+    }
   in
   let check_specification =
     check_expression checking (make_no_capabilities_scope "a specification")
@@ -563,18 +566,9 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
   | Constant _ | Test _ | Law_proof _ | Empty -> ());
   (match (form.definition, state.definition.kind, elaborated.interface) with
   | Function { body; _ }, (Function _ | Method_declaration _), Function_interface signature ->
-      let implemented_capability =
-        Option.bind (state.lookups.interface.names.find_container state.key) (fun container ->
-            match (state.lookups.interface.read_elaborated_interface container).interface with
-            | Impl_interface impl
-              when Resolve.Names.find_kind state.lookups.interface.names impl.implements.trait
-                   = Some Capability ->
-                Some (Types.Capability impl.implements.trait)
-            | _ -> None)
-      in
       Option.iter
         (check_block checking
-           (make_function_body_scope ?implemented_capability
+           (make_function_body_scope
               (Interface.Impls.normalize_capabilities state.lookups.interface
                  ~list_bounds:(State.lookup_bounds state) signature.uses)))
         body
