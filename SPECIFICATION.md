@@ -506,7 +506,8 @@ either can mutate. There are no stored references and no lifetimes.
 - **A temporary** is any other value. It is passed as owned.
 - **An owned value is needed** by a `var`, an `own` parameter, a record field,
   a collection element, and a return value. A place there is written with
-  `own`, which moves it, or is copied with `copy()`.
+  `own`, which moves it, or is copied with `copy()`. A view, a constant, an
+  element, or a part of one cannot be moved, so it is copied.
 - **There is no mutable global state.** A top-level `let` is a constant, and
   `var` is allowed only inside functions.
 

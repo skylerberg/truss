@@ -40,20 +40,20 @@ let classify_scrutinee_mode state (scrutinee : Syntax.expression) : Types.mode =
 
 type immutable = Read_only of string | Captured of string | Lent_read_only | Not_a_place
 
+let is_captured (state : State.state) local =
+  match state.lambdas with
+  | (lambda : Source.Definition_span.t) :: _ ->
+      let binding = State.read_span state local in
+      binding.start < lambda.start || binding.start >= lambda.stop
+  | [] -> false
+
 let rec find_immutable state (env : State.env) (value : Syntax.expression) : immutable option =
   match value.kind with
   | Name path -> (
       match State.find_target state path.last with
       | Some (Local id) -> (
-          let captured =
-            match state.lambdas with
-            | (lambda : Source.Definition_span.t) :: _ ->
-                let binding = State.read_span state id in
-                binding.start < lambda.start || binding.start >= lambda.stop
-            | [] -> false
-          in
           match Hashtbl.find_opt state.locals id with
-          | _ when captured -> Some (Captured path.last.text)
+          | _ when is_captured state id -> Some (Captured path.last.text)
           | Some local ->
               if local.is_var || local.mode = Mut then None else Some (Read_only path.last.text)
           | None -> None)
@@ -174,15 +174,44 @@ let mutate state env ~(by : mutation) (value : Syntax.expression) =
       | None when not (State.is_formula env) -> Some code
       | _ -> None)
 
-let rec is_part_of_constant state (value : Syntax.expression) =
-  match value.kind with
+type immovable = Constant | Part_of_constant | Borrowed | Element
+
+let rec find_immovable state (env : State.env) (place : Syntax.expression) : immovable option =
+  let find_part_immovable base ~is_element =
+    match find_immovable state env base with
+    | Some (Constant | Part_of_constant) -> Some Part_of_constant
+    | None when is_element -> Some Element
+    | immovable -> immovable
+  in
+  match place.kind with
   | Name path -> (
       match State.find_target state path.last with
-      | Some (Definition (Constant, _)) -> true
-      | _ -> false)
-  | Member (base, _) -> State.is_member_constant state value || is_part_of_constant state base
-  | Bracket (base, _) | Parenthesized base -> is_part_of_constant state base
-  | _ -> false
+      | Some (Definition (Constant, _)) -> Some Constant
+      | Some (Local id) when not (is_captured state id) -> (
+          match Hashtbl.find_opt state.locals id with
+          | Some { mode = Read; _ } -> Some Borrowed
+          | Some { mode = Own | Mut; _ } | None -> None)
+      | _ -> Some Borrowed)
+  | Self_value -> if state.lambdas = [] && env.self_mode <> Read then None else Some Borrowed
+  | Member _ when State.is_member_constant state place -> Some Constant
+  | Member (base, _) -> find_part_immovable base ~is_element:false
+  | Bracket (base, _) -> find_part_immovable base ~is_element:true
+  | Parenthesized inner -> find_immovable state env inner
+  | _ -> State.raise_bug "a place is not a name, `self`, a field, an element, or parenthesized"
+
+let explain_immovable state (place : Syntax.expression) immovable ~copy =
+  let reason, remedy =
+    match immovable with
+    | Constant -> ("is a constant, so it cannot be moved", copy)
+    | Part_of_constant -> ("is part of a constant, so it cannot be moved", copy)
+    | Borrowed -> ("is borrowed, not owned, so it cannot be moved", copy)
+    | Element ->
+        ( "is an element, so it cannot be moved out of its collection",
+          copy ^ ", or take it out with a method such as `remove`" )
+  in
+  Printf.sprintf "`%s` %s. %s."
+    (State.quote_span state (State.read_span state place.id))
+    reason remedy
 
 type argument_form =
   | With_mode of Types.mode * Syntax.expression
@@ -289,34 +318,31 @@ let check_mode state env (value : Syntax.expression) (parameter : Types.paramete
              "`%s` is a field of a value that is lent `mut`. Pass the place `mut` to lend it too, \
               or pass a copy."
              name)
-  | Own, Place when is_part_of_constant state value ->
-      if not (State.is_plain state type_) then
-        State.report state Missing_mode (State.read_span state value.id)
-          ~fixes:
-            (if State.is_copyable state type_ then
-               [
-                 State.fix "Pass a copy."
-                   [ State.insert (State.read_span state value.id).stop ".copy()" ];
-               ]
-             else [])
-          (Printf.sprintf
-             "`%s` takes ownership of its argument, and a constant cannot be moved. Pass a copy."
-             name)
   | Own, Place ->
       if not (State.is_plain state type_) then
-        State.report state Missing_mode (State.read_span state value.id)
-          ~fixes:
-            (State.fix "Move it with `own`."
-               [ State.insert (State.read_span state value.id).start "own " ]
-            ::
-            (if State.is_copyable state type_ then
-               [
-                 State.fix "Pass a copy."
-                   [ State.insert (State.read_span state value.id).stop ".copy()" ];
-               ]
-             else []))
-          (Printf.sprintf
-             "`%s` takes ownership of its argument. Move the place with `own`, or pass a copy." name)
+        let copy =
+          if State.is_copyable state type_ then
+            [
+              State.fix "Pass a copy."
+                [ State.insert (State.read_span state value.id).stop ".copy()" ];
+            ]
+          else []
+        in
+        let fixes, message =
+          match find_immovable state env value with
+          | None ->
+              ( State.fix "Move it with `own`."
+                  [ State.insert (State.read_span state value.id).start "own " ]
+                :: copy,
+                Printf.sprintf
+                  "`%s` takes ownership of its argument. Move the place with `own`, or pass a copy."
+                  name )
+          | Some immovable ->
+              ( copy,
+                Printf.sprintf "`%s` takes ownership of its argument, and %s" name
+                  (explain_immovable state value immovable ~copy:"Pass a copy") )
+        in
+        State.report state Missing_mode (State.read_span state value.id) ~fixes message
   | Own, With_mode (Mut, _) ->
       State.report state Wrong_mode (State.read_span state value.id)
         (Printf.sprintf "`%s` takes ownership of its argument, so it is passed `own`, not `mut`."
@@ -359,14 +385,14 @@ let check_lent_value (state : State.state) env (operand : Syntax.expression) =
   check_fields ~variant:None operand
 
 let check_owned state env (value : Syntax.expression) type_ =
-  if State.runs env then
-    State.defer state (fun () ->
-        let type_ = State.normalize state type_ in
-        if Types.contains_unsolved type_ then false
-        else begin
-          (match classify_argument state value with
-          | Place when not (State.is_plain state type_) ->
-              let place = State.quote_span state (State.read_span state value.id) in
+  match classify_argument state value with
+  | Place when State.runs env ->
+      let immovable = find_immovable state env value in
+      State.defer state (fun () ->
+          let type_ = State.normalize state type_ in
+          if Types.contains_unsolved type_ then false
+          else begin
+            if not (State.is_plain state type_) then begin
               let copy =
                 if State.is_copyable state type_ then
                   [
@@ -376,26 +402,25 @@ let check_owned state env (value : Syntax.expression) type_ =
                 else []
               in
               let fixes, message =
-                if is_part_of_constant state value then
-                  ( copy,
-                    Printf.sprintf "An owned value is needed here, and `%s` is %s. Copy it." place
-                      (match value.kind with
-                      | Name _ -> "a constant"
-                      | _ when State.is_member_constant state value -> "a constant"
-                      | _ -> "part of a constant") )
-                else
-                  ( State.fix "Move it with `own`."
-                      [ State.insert (State.read_span state value.id).start "own " ]
-                    :: copy,
-                    Printf.sprintf
-                      "An owned value is needed here, and `%s` is a place. Pass it `own` to move \
-                       it, or copy it."
-                      place )
+                match immovable with
+                | None ->
+                    ( State.fix "Move it with `own`."
+                        [ State.insert (State.read_span state value.id).start "own " ]
+                      :: copy,
+                      Printf.sprintf
+                        "An owned value is needed here, and `%s` is a place. Pass it `own` to move \
+                         it, or copy it."
+                        (State.quote_span state (State.read_span state value.id)) )
+                | Some immovable ->
+                    ( copy,
+                      Printf.sprintf "An owned value is needed here, and %s"
+                        (explain_immovable state value immovable ~copy:"Copy it") )
               in
               state.diagnostics <-
                 Diagnostic.make ~fixes ~code:(Ownership Needs_owned)
                   (State.read_span state value.id) message
                 :: state.diagnostics
-          | _ -> ());
-          true
-        end)
+            end;
+            true
+          end)
+  | _ -> ()

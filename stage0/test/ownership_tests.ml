@@ -622,8 +622,33 @@ let () =
       expect_one_diagnostic Fixtures.Ownership.map_literal_of_an_own_name "ownership.needs_owned");
   Harness.test "a constant's value and a default may hold a constant without a copy" (fun () ->
       expect_fine Fixtures.Ownership.constants_and_defaults_holding_a_constant);
-  Harness.test "a list element needs an owned value" (fun () ->
-      expect_one_diagnostic Fixtures.Ownership.list_of_a_string_parameter "ownership.needs_owned");
+  List.iter
+    (fun (place, text, code, fixed) ->
+      Harness.test
+        ("an owned value from " ^ place ^ " is a copy, with a fix")
+        (fun () -> expect_one_diagnostic text code ~fixed))
+    [
+      ( "a read-only parameter in a list literal",
+        Fixtures.Ownership.list_of_a_string_parameter,
+        "ownership.needs_owned",
+        Fixtures.Ownership.list_of_a_copied_string_parameter );
+      ( "a read-only parameter passed to an `own` parameter",
+        keep ^ Fixtures.Ownership.read_only_list_passed_without_own,
+        "types.missing_mode",
+        keep ^ Fixtures.Ownership.read_only_list_passed_without_own_fixed );
+      ( "a `let` bound to a string literal",
+        Fixtures.Ownership.var_initialized_from_a_string_literal_let,
+        "ownership.needs_owned",
+        Fixtures.Ownership.var_initialized_from_a_string_literal_let_fixed );
+      ( "an element of an `own` list",
+        Fixtures.Ownership.var_initialized_from_an_element,
+        "ownership.needs_owned",
+        Fixtures.Ownership.var_initialized_from_an_element_fixed );
+      ( "a lambda's capture",
+        Fixtures.Ownership.list_of_a_capture,
+        "ownership.needs_owned",
+        Fixtures.Ownership.list_of_a_copied_capture );
+    ];
   Harness.test "a lending method can lend from a `return` inside a loop" (fun () ->
       expect_fine Fixtures.Ownership.bag_lending_from_a_loop);
   Harness.test "a `parallel` branch cannot mutate a place that another branch uses" (fun () ->
