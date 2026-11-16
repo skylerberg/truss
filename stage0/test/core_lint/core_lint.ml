@@ -859,9 +859,8 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
       !compound_assignments;
   let bounds parameter =
     let of_key key =
-      match interface.lowered_interface key with
-      | Some lowered -> Option.value ~default:[] (List.assoc_opt parameter lowered.scope.bounds)
-      | None -> []
+      Option.value ~default:[]
+        (List.assoc_opt parameter (interface.lowered_interface key).scope.bounds)
     in
     match key with
     | Some key -> of_key key @ Option.fold ~none:[] ~some:of_key (interface.names.container key)

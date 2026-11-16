@@ -662,135 +662,131 @@ let integer_literal_range (bounds : Types.trait_reference list) =
         None builtins)
 
 let check (lookups : Lookups.t) (key : Names.key) ~checks_body =
-  match
-    ( Resolve.whole
-        ~sections:(if checks_body then Resolve.sections else [ Interface; Contract ])
-        lookups.interface.resolved key,
-      lookups.interface.lowered_interface key )
-  with
-  | Some resolved, Some lowered ->
-      let module_ = key.module_ in
-      let definition = lookups.interface.names.definition key in
-      let spans = lookups.interface.names.spans key in
-      let context = Interface.Lower.create lookups.interface resolved ~spans lowered.scope in
-      let text = lazy (lookups.interface.names.text key) in
-      let state : state =
+  let resolved =
+    Resolve.merge
+      (List.map
+         (fun section -> lookups.interface.resolved section key)
+         (if checks_body then Resolve.sections else [ Interface; Contract ]))
+  in
+  let lowered = lookups.interface.lowered_interface key in
+  let module_ = key.module_ in
+  let definition = lookups.interface.names.definition key in
+  let spans = lookups.interface.names.spans key in
+  let context = Interface.Lower.create lookups.interface resolved ~spans lowered.scope in
+  let text = lazy (lookups.interface.names.text key) in
+  let state : state =
+    {
+      lookups;
+      key;
+      package = module_.package;
+      definition;
+      resolved;
+      context;
+      text;
+      tables = Tables.create (definition.id + 1);
+      form =
         {
-          lookups;
-          key;
-          package = module_.package;
-          definition;
-          resolved;
-          context;
-          text;
-          tables = Tables.create (definition.id + 1);
-          form =
-            {
-              expression_builders = Array.make (definition.id + 1) None;
-              statement_builders = Array.make (definition.id + 1) None;
-              pattern_builders = Array.make (definition.id + 1) None;
-              definition_builder = None;
-              next_node_id = 0;
-              next_synthetic_local = 0;
-              tables_with_holes = None;
-            };
-          diagnostics = [];
-          unifier = Unify.create ();
-          locals = Hashtbl.create 32;
-          law_parameters = [];
-          frames = [];
-          locals_read = [];
-          receiver_modes = [];
-          yielded = Hashtbl.create 4;
-          lent_tails = Hashtbl.create 4;
-          lambdas = [];
-          unsolved = None;
-          capability_constraints = [];
-          capability_solution = None;
-          evidence_packages = [];
-          undecided = [];
-          decisions = Hashtbl.create 4;
-          annotatable = Hashtbl.create 8;
+          expression_builders = Array.make (definition.id + 1) None;
+          statement_builders = Array.make (definition.id + 1) None;
+          pattern_builders = Array.make (definition.id + 1) None;
+          definition_builder = None;
+          next_node_id = 0;
+          next_synthetic_local = 0;
+          tables_with_holes = None;
+        };
+      diagnostics = [];
+      unifier = Unify.create ();
+      locals = Hashtbl.create 32;
+      law_parameters = [];
+      frames = [];
+      locals_read = [];
+      receiver_modes = [];
+      yielded = Hashtbl.create 4;
+      lent_tails = Hashtbl.create 4;
+      lambdas = [];
+      unsolved = None;
+      capability_constraints = [];
+      capability_solution = None;
+      evidence_packages = [];
+      undecided = [];
+      decisions = Hashtbl.create 4;
+      annotatable = Hashtbl.create 8;
+    }
+  in
+  state.unifier.integer_range <-
+    (fun type_ ->
+      integer_literal_range
+        (Interface.Properties.known_bounds lookups.interface ~bounds:(bounds state) type_));
+  check_definition state lowered ~checks_body;
+  state.diagnostics <- !(context.diagnostics) @ state.diagnostics;
+  state.diagnostics <-
+    Interface.Check.bound_diagnostics lookups.interface ~package:state.package
+      ~bounds:(bounds state) ~spans !(context.named)
+    @ state.diagnostics;
+  finalize state;
+  Exported_parts.check state;
+  let any_type unwanted =
+    let contains table =
+      Seq.exists
+        (function
+          | Some type_ ->
+              let has_unwanted = ref false in
+              ignore
+                (Types.map
+                   (fun part ->
+                     if unwanted part then has_unwanted := true;
+                     None)
+                   type_);
+              !has_unwanted
+          | None -> false)
+        (Array.to_seq table)
+    in
+    contains state.tables.types || contains state.tables.local_types
+    || contains state.tables.scrutinee_types
+  in
+  let is_clean () =
+    state.diagnostics = []
+    && (not (Names.is_broken lookups.interface.names key Header))
+    && (not (checks_body && Names.is_broken lookups.interface.names key Body))
+    && not (any_type Types.is_error)
+  in
+  let build () : Core.t =
+    state.form.next_node_id <- 0;
+    state.form.next_synthetic_local <- 0;
+    let checked = state.tables in
+    if any_type (fun part -> part = Types.Hole) then begin
+      state.form.tables_with_holes <- Some checked;
+      state.tables <- Tables.copy checked;
+      finalize state
+    end;
+    let definition =
+      match state.form.definition_builder with
+      | Some build -> build ~holds_body:checks_body
+      | None -> Core.Empty
+    in
+    state.tables <- checked;
+    state.form.tables_with_holes <- None;
+    { definition }
+  in
+  let checked = if is_clean () then Some (build ()) else None in
+  (match checked with
+  | Some form ->
+      Capabilities.check state lowered form;
+      check_deserialized_invariants state lowered form
+  | None -> state.capability_solution <- Some (Hashtbl.create 1));
+  let has_capability_variables = state.unifier.capability_variable_count > 0 in
+  if has_capability_variables then finalize state;
+  match checked with
+  | Some form when is_clean () ->
+      Ok
+        {
+          form = (if has_capability_variables then build () else form);
+          tables = Tables.publish state.tables;
+          evidence_packages = List.sort_uniq compare state.evidence_packages;
         }
-      in
-      state.unifier.integer_range <-
-        (fun type_ ->
-          integer_literal_range
-            (Interface.Properties.known_bounds lookups.interface ~bounds:(bounds state) type_));
-      check_definition state lowered ~checks_body;
-      state.diagnostics <- !(context.diagnostics) @ state.diagnostics;
-      state.diagnostics <-
-        Interface.Check.bound_diagnostics lookups.interface ~package:state.package
-          ~bounds:(bounds state) ~spans !(context.named)
-        @ state.diagnostics;
-      finalize state;
-      Exported_parts.check state;
-      let any_type unwanted =
-        let contains table =
-          Seq.exists
-            (function
-              | Some type_ ->
-                  let has_unwanted = ref false in
-                  ignore
-                    (Types.map
-                       (fun part ->
-                         if unwanted part then has_unwanted := true;
-                         None)
-                       type_);
-                  !has_unwanted
-              | None -> false)
-            (Array.to_seq table)
-        in
-        contains state.tables.types || contains state.tables.local_types
-        || contains state.tables.scrutinee_types
-      in
-      let is_clean () =
-        state.diagnostics = []
-        && (not (Names.is_broken lookups.interface.names key Header))
-        && (not (checks_body && Names.is_broken lookups.interface.names key Body))
-        && not (any_type Types.is_error)
-      in
-      let build () : Core.t =
-        state.form.next_node_id <- 0;
-        state.form.next_synthetic_local <- 0;
-        let checked = state.tables in
-        if any_type (fun part -> part = Types.Hole) then begin
-          state.form.tables_with_holes <- Some checked;
-          state.tables <- Tables.copy checked;
-          finalize state
-        end;
-        let definition =
-          match state.form.definition_builder with
-          | Some build -> build ~holds_body:checks_body
-          | None -> Core.Empty
-        in
-        state.tables <- checked;
-        state.form.tables_with_holes <- None;
-        { definition }
-      in
-      let checked = if is_clean () then Some (build ()) else None in
-      (match checked with
-      | Some form ->
-          Capabilities.check state lowered form;
-          check_deserialized_invariants state lowered form
-      | None -> state.capability_solution <- Some (Hashtbl.create 1));
-      let has_capability_variables = state.unifier.capability_variable_count > 0 in
-      if has_capability_variables then finalize state;
-      Some
-        (match checked with
-        | Some form when is_clean () ->
-            Ok
-              {
-                form = (if has_capability_variables then build () else form);
-                tables = Tables.publish state.tables;
-                evidence_packages = List.sort_uniq compare state.evidence_packages;
-              }
-        | _ ->
-            Error
-              (List.sort_uniq
-                 (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
-                   compare
-                     (left.span, left.code, left.message)
-                     (right.span, right.code, right.message))
-                 state.diagnostics))
-  | _ -> None
+  | _ ->
+      Error
+        (List.sort_uniq
+           (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
+             compare (left.span, left.code, left.message) (right.span, right.code, right.message))
+           state.diagnostics)

@@ -554,14 +554,10 @@ let resolved_part database note section (key : Names.key) =
   | Some part -> part
   | None -> unchecked (Part.show (Resolved (key, section)))
 
-let resolved database note section (key : Names.key) =
-  read database note (Resolved (key, section));
-  Option.map value
-    (Hashtbl.find_opt (owner database key.module_.package).resolved_names (key, section))
+let resolved database note section key = value (resolved_part database note section key)
 
 let read_whole_resolution database note key =
-  Resolve.merge
-    (List.map (fun section -> value (resolved_part database note section key)) Resolve.sections)
+  Resolve.merge (List.map (fun section -> resolved database note section key) Resolve.sections)
 
 let lowered_interface database note ~is_checked (key : Names.key) =
   let owner = owner database key.module_.package in
@@ -570,9 +566,12 @@ let lowered_interface database note ~is_checked (key : Names.key) =
     read database note (Signature_check key);
     match Hashtbl.find_opt owner.signature_checks key with
     | Some (Failed _ | Blocked) -> raise Reads_failed_part
-    | Some (Value ()) | None -> ()
+    | Some (Value ()) -> ()
+    | None -> unchecked (Part.show (Signature_check key))
   end;
-  Option.map value (Hashtbl.find_opt owner.interfaces key)
+  match Hashtbl.find_opt owner.interfaces key with
+  | Some part -> value part
+  | None -> unchecked (Part.show (Interface key))
 
 let interface_lookups database note ~is_checked : Interface.Lookups.t =
   let names = recording_names database note in
@@ -616,13 +615,11 @@ let interface_lookups database note ~is_checked : Interface.Lookups.t =
         Hashtbl.find_opt (owner database package).grants dependency);
   }
 
-let interface_part = function
-  | Some (lowered : Environment.lowered_interface) -> (
-      match (lowered.diagnostics, lowered.interface) with
-      | [], Error_interface _ -> Blocked
-      | [], _ -> Value lowered
-      | diagnostics, _ -> Failed diagnostics)
-  | None -> Blocked
+let interface_part (lowered : Environment.lowered_interface) =
+  match (lowered.diagnostics, lowered.interface) with
+  | [], Error_interface _ -> Blocked
+  | [], _ -> Value lowered
+  | diagnostics, _ -> Failed diagnostics
 
 let type_interface lookups path =
   match computed (Interface.Definition.type_interface lookups) path with
@@ -704,11 +701,10 @@ let infer_lookups database note : Infer.Lookups.t =
 
 let type_check run lookups key =
   match run lookups key with
-  | Some (Ok checked) -> Some (Value checked)
-  | Some (Error []) -> Some Blocked
-  | Some (Error diagnostics) -> Some (Failed diagnostics)
-  | None -> None
-  | exception Reads_failed_part -> Some Blocked
+  | Ok checked -> Value checked
+  | Error [] -> Blocked
+  | Error diagnostics -> Failed diagnostics
+  | exception Reads_failed_part -> Blocked
 
 let form_origin database note =
   Infer.form_origin (interface_lookups database note ~is_checked:true) ~is_derived:(fun path ->
@@ -770,7 +766,7 @@ let used_packages database note (key : Names.key) =
 let package_checks_lookups database note : Package_checks.Lookups.t =
   {
     interface = interface_lookups database note ~is_checked:true;
-    core = (fun key -> Some (checked_core database note key));
+    core = checked_core database note;
     used_packages =
       read_part database note (fun key -> Part.Used_packages key) (fun owner -> owner.used_packages);
   }
@@ -1396,9 +1392,9 @@ let compute_part database (part : Part.t) =
                  (Interface.Definition.header (interface_lookups database note ~is_checked:false))
                  key
              with
-            | Value (Some (Ok header)) -> Value header
-            | Value (Some (Error (_ :: _ as diagnostics))) -> Failed diagnostics
-            | Value (Some (Error [])) | Value None | Failed _ | Blocked -> Blocked))
+            | Value (Ok header) -> Value header
+            | Value (Error (_ :: _ as diagnostics)) -> Failed diagnostics
+            | Value (Error []) | Failed _ | Blocked -> Blocked))
   | Interface key ->
       into (keyed package_database.interfaces key) (fun note ->
           Some
@@ -1448,18 +1444,18 @@ let compute_part database (part : Part.t) =
                         key,
                       () ))
                   key
-            | Some (Failed _ | Blocked) | None -> Blocked))
+            | Some (Failed _ | Blocked) -> Blocked
+            | None -> unchecked (Part.show (Interface key))))
   | Contract key ->
       into (keyed package_database.contracts key) (fun note ->
-          Option.map
-            (function
-              | Value (checked : Infer.checked) -> Value checked.form
-              | Failed diagnostics -> Failed diagnostics
-              | Blocked -> Blocked)
-            (type_check Infer.contract (infer_lookups database note) key))
+          Some
+            (match type_check Infer.contract (infer_lookups database note) key with
+            | Value (checked : Infer.checked) -> Value checked.form
+            | Failed diagnostics -> Failed diagnostics
+            | Blocked -> Blocked))
   | Checked_body key ->
       into (keyed package_database.checked_bodies key) (fun note ->
-          type_check Infer.body (infer_lookups database note) key)
+          Some (type_check Infer.body (infer_lookups database note) key))
   | Derived_form path ->
       into (at_path package_database.derived_forms path) (fun note ->
           match Infer.derived (infer_lookups database note) path with
@@ -1473,15 +1469,10 @@ let compute_part database (part : Part.t) =
             (match Hashtbl.find_opt package_database.checked_bodies key with
             | Some (Value checked) -> (
                 match lowered_interface database note ~is_checked:true key with
-                | lowered ->
-                    let interface =
-                      Option.map
-                        (fun (lowered : Environment.lowered_interface) -> lowered.interface)
-                        lowered
-                    in
-                    Value (Mir.body_part ?interface checked.form)
+                | lowered -> Value (Mir.body_part ~interface:lowered.interface checked.form)
                 | exception Reads_failed_part -> Blocked)
-            | Some (Failed _ | Blocked) | None -> Blocked))
+            | Some (Failed _ | Blocked) -> Blocked
+            | None -> unchecked (Part.show (Checked_body key))))
   | Contract_mir key ->
       into (keyed package_database.contract_parts key) (fun note ->
           read database note (Contract key);
@@ -1494,7 +1485,8 @@ let compute_part database (part : Part.t) =
                        (Interface.Definition.type_interface
                           (interface_lookups database note ~is_checked:true))
                      key.path form)
-            | Some (Failed _ | Blocked) | None -> Blocked))
+            | Some (Failed _ | Blocked) -> Blocked
+            | None -> unchecked (Part.show (Contract key))))
   | Generated_mir path ->
       into (at_path package_database.generated_parts path) (fun note ->
           read database note (Derived_form path);
@@ -1527,9 +1519,8 @@ let compute_part database (part : Part.t) =
           Some
             (checked_part
                (fun key ->
-                 match Ownership.check (ownership_lookups database note) key with
-                 | Some result -> (result.diagnostics, result.must_be_disjoint)
-                 | None -> ([], []))
+                 let result = Ownership.check (ownership_lookups database note) key in
+                 (result.diagnostics, result.must_be_disjoint))
                key))
   | Used_packages key ->
       into (keyed package_database.used_packages key) (fun note ->

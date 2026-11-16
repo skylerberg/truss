@@ -1,9 +1,7 @@
 val header :
-  Lookups.t ->
-  Resolve.Names.key ->
-  (Environment.header, Diagnostic.in_definition list) result option
+  Lookups.t -> Resolve.Names.key -> (Environment.header, Diagnostic.in_definition list) result
 
-val lower : Lookups.t -> Resolve.Names.key -> Environment.lowered_interface option
+val lower : Lookups.t -> Resolve.Names.key -> Environment.lowered_interface
 val interface : Lookups.t -> Path.t -> Environment.interface option
 
 val in_declared_order :
