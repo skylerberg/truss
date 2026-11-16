@@ -510,6 +510,14 @@ test "truncate and clear shorten a string and keep its room" {
   assert literal == "cone"
 }
 
+test "a copy of a string keeps its capacity" {
+  var text = String.with_capacity(16)
+  mut text.push("ab")
+  let copied = text.copy()
+  assert copied.capacity() == 16
+  assert copied == "ab"
+}
+
 test "a string literal has room for its length, and a copy of one can be changed in place" {
   assert "h\u{e9}llo".capacity() >= 6
   let text = "abc"

@@ -559,6 +559,7 @@ fn Option[Value].take(mut self) -> Option[Value] {
   nothing on the heap, such as the integers, floats, `Bool`, `Character`,
   and records, sum types, and `Array`s built only from those, is `Plain`.
 - **`Copyable` types have `copy()`.** An implicit copy never allocates.
+- A copy has the original's capacity.
 - **Handles are not `Copyable`,** nor is a type that holds one.
 - `Copyable` and `Plain` are prelude traits that the compiler implements and
   no `impl` can, and `Plain` requires `Copyable`. The compiler derives them

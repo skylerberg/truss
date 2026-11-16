@@ -377,6 +377,18 @@ test "clear and truncate drop elements from the end and keep the room" {
   assert words[0] == "a1"
 }
 
+test "a copy of a list keeps its capacity" {
+  var items: List[Int64] = List.with_capacity(10)
+  mut items.push(1)
+  let copied = items.copy()
+  assert copied.capacity() == items.capacity()
+  assert same_items(copied, expected: [1])
+  let reserved: List[String] = List.with_capacity(4)
+  assert reserved.copy().capacity() == 4
+  let none: List[Int64] = []
+  assert none.copy().capacity() == 0
+}
+
 test "swap_remove, remove_range, and split_off take elements out" {
   var items: List[Int64] = [1, 2, 3, 4, 5, 6, 7]
   assert mut items.swap_remove(1) == 2
