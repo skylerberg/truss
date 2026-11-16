@@ -67,9 +67,6 @@ let key_of context path =
   | Some key -> key
   | None -> bug "no definition for %s" (Path.show path)
 
-let text_of context key =
-  match context.lookups.interface.names.text key with Some text -> text | None -> ""
-
 let bind = Monomorphic.substitution
 
 let impl_interface context impl =
@@ -97,7 +94,7 @@ let code_of context (path : Path.t) type_arguments : code =
     {
       definition_key = key;
       enclosing_impl;
-      text = text_of context key;
+      text = context.lookups.interface.names.text key;
       result = interface.output;
       substitution;
       uses = interface.uses;
@@ -114,7 +111,7 @@ let code_of context (path : Path.t) type_arguments : code =
       | Some (key, { kind = Test _; _ }) ->
           {
             (unwritten ~definition_key:key ~substitution:[] ~result:(Returns Types.unit)) with
-            text = text_of context key;
+            text = context.lookups.interface.names.text key;
             real =
               (match Interface.Definition.test_uses context.lookups.interface path with
               | Some uses ->

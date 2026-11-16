@@ -8,4 +8,5 @@
   source
   diagnostic
   syntax
-  syntax_walk))
+  syntax_walk
+  compiler_bug))

@@ -91,82 +91,77 @@ let declared_name (definition : Syntax.definition) : Syntax.name option =
   | Impl _ | Test _ | Definition_error _ -> None
 
 let resolve (lookups : Names.lookups) (key : Names.key) section =
-  match (lookups.definition key, lookups.spans key) with
-  | Some definition, Some spans ->
-      let module_ = key.module_ in
-      let state = Walk.create lookups key ~spans ~walked:section in
-      let container =
-        Option.bind (lookups.container key) (fun (container : Names.key) ->
-            Option.map
-              (fun definition -> (container.path, definition))
-              (lookups.definition container))
+  let definition = lookups.definition key and spans = lookups.spans key in
+  let module_ = key.module_ in
+  let state = Walk.create lookups key ~spans ~walked:section in
+  let container =
+    Option.map
+      (fun (container : Names.key) -> (container.path, lookups.definition container))
+      (lookups.container key)
+  in
+  let is_walked =
+    (not (Names.is_broken lookups key Header))
+    &&
+    match lookups.container key with
+    | Some container -> not (Names.is_broken lookups container Header)
+    | None -> true
+  in
+  if is_walked then Walk.definition state ~path:key.path ?container definition;
+  (match key.path with
+  | Top { name; _ } when List.mem name Prelude.names -> (
+      let defines_it =
+        match Prelude.find_type name with
+        | Some prelude_module -> prelude_module = module_
+        | None -> false
       in
-      let is_walked =
-        (not (Names.is_broken lookups key Header))
-        &&
-        match lookups.container key with
-        | Some container -> not (Names.is_broken lookups container Header)
-        | None -> true
-      in
-      if is_walked then Walk.definition state ~path:key.path ?container definition;
-      (match key.path with
-      | Top { name; _ } when List.mem name Prelude.names -> (
-          let defines_it =
-            match Prelude.find_type name with
-            | Some prelude_module -> prelude_module = module_
-            | None -> false
-          in
-          match declared_name definition with
-          | Some declared when not defines_it ->
-              Walk.report state Shadowed_name spans.(declared.id)
-                (Printf.sprintf
-                   "`%s` is a name in the prelude, and a name cannot shadow another. Choose \
-                    another name."
-                   name)
-          | _ -> ())
-      | _ -> ());
-      if key.ordinal > 0 then begin
-        let span =
-          match declared_name definition with
-          | Some name -> spans.(name.id)
-          | None -> Source.Definition_span.zero_width spans.(definition.id).start
-        in
-        let first =
-          match (lookups.place { key with ordinal = 0 }, lookups.place key) with
-          | Some first, Some place when first.file <> place.file -> Path.show_file first.file
-          | _ -> "this file"
-        in
-        Walk.report state Duplicate_definition span
-          (Printf.sprintf "%s is already defined in %s, so this definition is never used."
-             (Path.show key.path) first)
-      end;
-      let outcome () =
-        let walked = Walk.names_of state section in
-        let resolved =
-          {
-            names = walked.names;
-            brackets = walked.brackets;
-            holes = List.rev walked.holes;
-            used_imports = List.sort compare walked.used_imports;
-          }
-        in
-        match walked.diagnostics with
-        | [] -> Ok resolved
-        | diagnostics ->
-            Error
-              (List.sort
-                 (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
-                   compare left.span right.span)
-                 diagnostics)
-      in
-      let is_parsed =
-        match section with
-        | Interface | Contract -> is_walked
-        | Body -> is_walked && not (Names.is_broken lookups key Body)
-      in
-      if is_parsed || (Walk.names_of state section).diagnostics <> [] then Some (outcome ())
-      else None
-  | _ -> None
+      match declared_name definition with
+      | Some declared when not defines_it ->
+          Walk.report state Shadowed_name spans.(declared.id)
+            (Printf.sprintf
+               "`%s` is a name in the prelude, and a name cannot shadow another. Choose another \
+                name."
+               name)
+      | _ -> ())
+  | _ -> ());
+  if key.ordinal > 0 then begin
+    let span =
+      match declared_name definition with
+      | Some name -> spans.(name.id)
+      | None -> Source.Definition_span.zero_width spans.(definition.id).start
+    in
+    let first = lookups.place { key with ordinal = 0 } in
+    let first =
+      if first.file <> (lookups.place key).file then Path.show_file first.file else "this file"
+    in
+    Walk.report state Duplicate_definition span
+      (Printf.sprintf "%s is already defined in %s, so this definition is never used."
+         (Path.show key.path) first)
+  end;
+  let outcome () =
+    let walked = Walk.names_of state section in
+    let resolved =
+      {
+        names = walked.names;
+        brackets = walked.brackets;
+        holes = List.rev walked.holes;
+        used_imports = List.sort compare walked.used_imports;
+      }
+    in
+    match walked.diagnostics with
+    | [] -> Ok resolved
+    | diagnostics ->
+        Error
+          (List.sort
+             (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
+               compare left.span right.span)
+             diagnostics)
+  in
+  let is_parsed =
+    match section with
+    | Interface | Contract -> is_walked
+    | Body -> is_walked && not (Names.is_broken lookups key Body)
+  in
+  if is_parsed || (Walk.names_of state section).diagnostics <> [] then Some (outcome ()) else None
 
 let file_diagnostics (lookups : Names.lookups) (path : Path.file) (file : Syntax.file) ~text
     ~(used : string list option) =

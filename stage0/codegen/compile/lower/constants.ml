@@ -157,7 +157,7 @@ let constant_state context path =
   let code =
     {
       (unwritten ~definition_key:key ~substitution:[] ~result:(Returns Types.unit)) with
-      text = text_of context key;
+      text = context.lookups.interface.names.text key;
     }
   in
   let st = enter context ~builder:(create context.env ~key:(Evaluator path)) (frame_of code) in

@@ -25,7 +25,7 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) : result option =
           bounds =
             (fun parameter ->
               Option.value ~default:[] (List.assoc_opt parameter lowered.scope.bounds));
-          spans = lazy (Option.value ~default:[||] (lookups.interface.names.spans key));
+          spans = lazy (lookups.interface.names.spans key);
           mode_keywords = Hashtbl.create 8;
           names = Hashtbl.create 32;
           binding_modes = Hashtbl.create 32;

@@ -79,7 +79,7 @@ let resolve database packages text =
               |> List.filter (is_visible packages)))
 
 let find snapshot database packages ~body text =
-  List.filter_map
+  List.map
     (fun (declaration : Names.declaration) ->
       let key = Names.key_of declaration in
       let opaque =
@@ -87,17 +87,14 @@ let find snapshot database packages ~body text =
         && not (List.mem declaration.module_.package packages)
       in
       let names = Database.make_name_lookups database [ key.module_.package ] in
-      match Signatures.text names ~body ~opaque key with
-      | None -> None
-      | Some signature ->
-          let file, line =
-            match names.place key with
-            | Some { file = written; base } ->
-                let source = Command_packages.source snapshot packages written in
-                (Source.path source, fst (Source.position source base))
-            | None -> ("", 0)
-          in
-          Some { declaration; file; line; text = signature })
+      let ({ file = written; base } : Names.place) = names.place key in
+      let source = Command_packages.source snapshot packages written in
+      {
+        declaration;
+        file = Source.path source;
+        line = fst (Source.position source base);
+        text = Signatures.text names ~body ~opaque key;
+      })
     (resolve database packages text)
 
 let run ~paths ~body =

@@ -762,24 +762,15 @@ let call_edge_part database note path =
   | Some part -> part
   | None -> Value []
 
-let read_declared read part_of key =
-  match read key with Some value -> value | None -> unchecked (Part.show (part_of key))
-
 let patterns_lookups database note : Patterns.Lookups.t =
-  let interface = interface_lookups database note ~is_checked:true in
   {
     core = checked_core database note;
-    spans = read_declared interface.names.spans (fun key -> Part.Tree key);
-    text = read_declared interface.names.text (fun key -> Part.Text key);
-    interface;
+    interface = interface_lookups database note ~is_checked:true;
   }
 
 let usage_lookups database note : Usage.Lookups.t =
-  let names = recording_names database note in
   {
-    definition = read_declared names.definition (fun key -> Part.Tree key);
-    spans = read_declared names.spans (fun key -> Part.Tree key);
-    text = read_declared names.text (fun key -> Part.Text key);
+    names = recording_names database note;
     resolved = read_whole_resolution database note;
     tables = (fun key -> (checked_body database note key).tables);
   }
@@ -1410,11 +1401,11 @@ let compute_part database (part : Part.t) =
                ( (recording_names database note).definition key,
                  resolved_part database note Interface key )
              with
-            | Some definition, Value resolved -> (
+            | definition, Value resolved -> (
                 match Resolve.trait_header definition resolved with
                 | Some header -> Value header
                 | None -> Blocked)
-            | _ -> Blocked))
+            | _, (Failed _ | Blocked) -> Blocked))
   | Constant_value path ->
       into (at_path package_database.constant_values path) (fun note ->
           Some
@@ -2268,10 +2259,10 @@ let list_checker_diagnostics database (file : Path.file) checker =
   let names = names_lookups database in
   let package_database = owner database file.module_.package in
   let placed key diagnostics =
-    match names.place key with
-    | Some { file = home; base } when home = file ->
-        List.map (Diagnostic.map_spans (Source.Definition_span.to_file ~base)) diagnostics
-    | Some _ | None -> []
+    let ({ file = home; base } : Names.place) = names.place key in
+    if home = file then
+      List.map (Diagnostic.map_spans (Source.Definition_span.to_file ~base)) diagnostics
+    else []
   in
   let of_definitions () =
     List.concat_map
@@ -2364,13 +2355,7 @@ let prove database files =
       (List.map (fun (file : Path.file) -> file.module_.package) files)
   in
   drain database ~through:Recursion_groups packages;
-  let names = names_lookups database in
-  let keys =
-    List.concat_map
-      (fun file ->
-        List.filter (fun key -> Option.is_some (names.place key)) (file_keys database file))
-      files
-  in
+  let keys = List.concat_map (file_keys database) files in
   List.iter
     (fun (key : Names.key) ->
       let part = Part.Proof key in
@@ -2390,12 +2375,10 @@ let list_holes proofs path =
   let names = names_lookups proofs.database in
   match Option.bind (names.key path) (read_proof proofs) with
   | Some (Value (Obligations { holes; _ })) ->
-      List.filter_map
+      List.map
         (fun ((home : Names.key), (span : Source.Definition_span.t)) ->
-          Option.map
-            (fun ({ file; base } : Names.place) ->
-              (file, (Source.Definition_span.to_file ~base span).start))
-            (names.place home))
+          let ({ file; base } : Names.place) = names.place home in
+          (file, (Source.Definition_span.to_file ~base span).start))
         holes
   | Some (Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked) | None -> []
 

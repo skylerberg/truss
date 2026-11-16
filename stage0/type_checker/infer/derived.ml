@@ -640,10 +640,8 @@ let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   | Some key -> (
                       match lookups.contract key with
                       | { definition = Type { invariants; _ } } ->
-                          let spans =
-                            Option.value (lookups.interface.names.spans key) ~default:[||]
-                          in
-                          let text = Option.value (lookups.interface.names.text key) ~default:"" in
+                          let spans = lookups.interface.names.spans key in
+                          let text = lookups.interface.names.text key in
                           let quoted (origin : Core.origin) =
                             if origin >= 0 && origin < Array.length spans then
                               let span = spans.(origin) in

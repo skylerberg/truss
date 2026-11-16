@@ -418,21 +418,22 @@ let check state =
             let name = Names.signature_name signature in
             match
               ( lookups.names.definition container,
-                lookups.names.spans container,
                 Option.map
                   (fun (lowered : Environment.lowered_interface) -> lowered.interface)
                   (lookups.lowered_interface container) )
             with
-            | Some { kind = Trait _; visibility; _ }, _, Some (Trait_interface trait) ->
+            | { kind = Trait _; visibility; _ }, Some (Trait_interface trait) ->
                 check_redeclared state name
                   (Names.receiver signature.parameters)
                   ~trait_path:container.path trait;
                 check_private_in_public state ~visibility (signature_types written)
                   state.spans.(name.id)
-            | Some { kind = Impl { trait_; _ }; _ }, Some impl_spans, Some (Impl_interface impl) ->
+            | { kind = Impl { trait_; _ }; _ }, Some (Impl_interface impl) ->
                 check_impl_method state name
                   (Names.receiver signature.parameters)
-                  written impl ~trait_span:impl_spans.(trait_.id) trait_
+                  written impl
+                  ~trait_span:(lookups.names.spans container).(trait_.id)
+                  trait_
             | _ -> ())
         | Some _, _, _ -> ()
         | None, Function { signature; _ }, Function_interface lowered ->
@@ -516,12 +517,21 @@ let check state =
         | None, _, _ -> ())
 
 let diagnostics (lookups : Lookups.t) key =
-  match (lookups.names.definition key, lookups.names.spans key, lookups.lowered_interface key) with
-  | Some definition, Some spans, Some lowered ->
-      let state = { lookups; key; definition; lowered; spans; diagnostics = [] } in
+  match lookups.lowered_interface key with
+  | Some lowered ->
+      let state =
+        {
+          lookups;
+          key;
+          definition = lookups.names.definition key;
+          lowered;
+          spans = lookups.names.spans key;
+          diagnostics = [];
+        }
+      in
       check state;
       List.sort
         (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
           compare (left.span, left.code) (right.span, right.code))
         state.diagnostics
-  | _ -> []
+  | None -> []

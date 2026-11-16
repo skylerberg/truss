@@ -431,14 +431,13 @@ let check_semantics context (form : Core.t) =
        })
     form.definition
 
-let check (interface : Interface.Lookups.t) (key : Resolve.Names.key) (form : Core.t) =
+let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolve.Names.key option)
+    (form : Core.t) =
   let module T = Types in
   let at = ref None in
+  let name = match key with Some key -> Resolve.Names.show_key key | None -> Path.show path in
   let source =
-    lazy
-      (match (interface.names.spans key, interface.names.text key) with
-      | Some spans, Some text -> Some (spans, text)
-      | _ -> None)
+    lazy (Option.map (fun key -> (interface.names.spans key, interface.names.text key)) key)
   in
   let quoted () =
     match (!at, Lazy.force source) with
@@ -448,9 +447,7 @@ let check (interface : Interface.Lookups.t) (key : Resolve.Names.key) (form : Co
     | _ -> ""
   in
   let wrong format =
-    Printf.ksprintf
-      (fun message -> fail "%s: %s%s" (Resolve.Names.show_key key) message (quoted ()))
-      format
+    Printf.ksprintf (fun message -> fail "%s: %s%s" name message (quoted ())) format
   in
   let own =
     let of_generics = List.map (fun (generic : T.generic) -> generic.generic) in
@@ -465,12 +462,12 @@ let check (interface : Interface.Lookups.t) (key : Resolve.Names.key) (form : Co
       | Some (Law_proof_interface interface) -> of_generics interface.generics
       | _ -> []
     in
-    declared key.path
-    @ (match Interface.Impls.signature interface key.path with
+    declared path
+    @ (match Interface.Impls.signature interface path with
       | Some signature -> of_generics signature.generics
       | None -> [])
     @
-    match interface.names.container key with
+    match Option.bind key interface.names.container with
     | Some container -> declared container.path
     | None -> []
   in
@@ -866,10 +863,17 @@ let check (interface : Interface.Lookups.t) (key : Resolve.Names.key) (form : Co
       | Some lowered -> Option.value ~default:[] (List.assoc_opt parameter lowered.scope.bounds)
       | None -> []
     in
-    of_key key @ Option.fold ~none:[] ~some:of_key (interface.names.container key)
+    match key with
+    | Some key -> of_key key @ Option.fold ~none:[] ~some:of_key (interface.names.container key)
+    | None -> []
   in
   at := None;
   check_semantics { interface; wrong; at; bounds } form
+
+let check interface (key : Resolve.Names.key) form =
+  check_form interface ~path:key.path ~key:(Some key) form
+
+let check_derived interface path form = check_form interface ~path ~key:None form
 
 let check_file (interface : Interface.Lookups.t) ~core (file : Path.file) =
   List.fold_left

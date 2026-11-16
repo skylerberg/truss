@@ -1,9 +1,5 @@
 open Syntax
 
-let definition (lookups : Lookups.t) path =
-  Option.bind (lookups.names.key path) (fun key ->
-      Option.map (fun tree -> (key, tree)) (lookups.names.definition key))
-
 let rec expression lookups ~visiting resolved (value : expression) : Z.t option =
   let recurse = expression lookups ~visiting resolved in
   match value.kind with
@@ -37,7 +33,7 @@ let rec expression lookups ~visiting resolved (value : expression) : Z.t option 
 and evaluate (lookups : Lookups.t) ~visiting path =
   if List.exists (Path.equal path) visiting then None
   else
-    match definition lookups path with
+    match Resolve.Names.definition_of_path lookups.names path with
     | Some (key, { kind = Constant { value; _ }; _ }) -> (
         match lookups.resolved Body key with
         | Some resolved -> expression lookups ~visiting:(path :: visiting) resolved value
@@ -47,7 +43,7 @@ and evaluate (lookups : Lookups.t) ~visiting path =
 let value_of lookups path = evaluate lookups ~visiting:[] path
 
 let is_uint64 (lookups : Lookups.t) path =
-  match definition lookups path with
+  match Resolve.Names.definition_of_path lookups.names path with
   | Some (key, { kind = Constant { type_ = { kind = Path_type written; _ }; _ }; _ }) -> (
       match lookups.resolved Interface key with
       | Some resolved ->

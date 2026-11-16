@@ -22,7 +22,7 @@ let expression_at text written occurrence =
             (Support.names packages key.module_.package).place key,
             Database.read_checked_body (database packages) key )
         with
-        | Some definition, Some spans, Some { base; _ }, Some result ->
+        | definition, spans, { base; _ }, Some result ->
             let best = ref None in
             let length (value : Syntax.expression) =
               let span : Source.Definition_span.t = spans.(value.id) in

@@ -10,9 +10,7 @@ let diagnostic_at (key : Names.key) ?(fixes = []) code (span : Source.Definition
 
 let read_definition (lookups : Lookups.t) (declaration : Names.declaration) =
   let key = Names.key_of declaration in
-  match (lookups.interface.names.definition key, lookups.interface.names.spans key) with
-  | Some definition, Some spans -> Some (definition, spans)
-  | _ -> None
+  (lookups.interface.names.definition key, lookups.interface.names.spans key)
 
 let header_span (spans : Source.Definition_span.t array) (definition : definition) =
   match definition.kind with
@@ -49,7 +47,7 @@ let check_sealed (lookups : Lookups.t) (declaration : Names.declaration) =
         (lookups.interface.names.impls package),
       read_definition lookups declaration )
   with
-  | Some ((trait, type_), _), Some (definition, spans) -> (
+  | Some ((trait, type_), _), (definition, spans) -> (
       let implementors =
         if Well_known.is Signed_integer trait then Some Intrinsic.[ Int8; Int16; Int32; Int64 ]
         else if Well_known.is Unsigned_integer trait then
@@ -483,14 +481,12 @@ let check_instantiation (lookups : Lookups.t) (package : Path.package) =
   List.filter_map
     (fun (declaration : Names.declaration) ->
       if List.exists (grows_on_cycle declaration.path) (outgoing declaration.path) then
-        match read_definition lookups declaration with
-        | Some (definition, spans) ->
-            Some
-              (diagnostic_at (Names.key_of declaration) Instantiation_cycle
-                 (header_span spans definition)
-                 "This generic code instantiates itself with type arguments that grow each time \
-                  around, so it would be compiled without end.")
-        | None -> None
+        let definition, spans = read_definition lookups declaration in
+        Some
+          (diagnostic_at (Names.key_of declaration) Instantiation_cycle
+             (header_span spans definition)
+             "This generic code instantiates itself with type arguments that grow each time \
+              around, so it would be compiled without end.")
       else None)
     generic
 
@@ -505,15 +501,13 @@ let check_tests (lookups : Lookups.t) (package : Path.package) =
        (fun (seen, diagnostics) (declaration : Names.declaration) ->
          let name = match declaration.path with Test { name; _ } -> name | _ -> "" in
          if List.mem name seen then
-           match read_definition lookups declaration with
-           | Some (definition, spans) ->
-               ( seen,
-                 diagnostics
-                 @ [
-                     diagnostic_at (Names.key_of declaration) Duplicate_test spans.(definition.id)
-                       (Printf.sprintf "Another test of this package is named %S." name);
-                   ] )
-           | None -> (seen, diagnostics)
+           let definition, spans = read_definition lookups declaration in
+           ( seen,
+             diagnostics
+             @ [
+                 diagnostic_at (Names.key_of declaration) Duplicate_test spans.(definition.id)
+                   (Printf.sprintf "Another test of this package is named %S." name);
+               ] )
          else (name :: seen, diagnostics))
        ([], []) tests)
 
@@ -576,7 +570,7 @@ let check_impl lookups ~contained (declaration : Names.declaration) =
     ( Interface.Impls.impl_interface lookups.Lookups.interface declaration.path,
       read_definition lookups declaration )
   with
-  | Some impl, Some (definition, spans) ->
+  | Some impl, (definition, spans) ->
       Option.to_list (check_location declaration spans definition impl)
       @ check_method_names lookups declaration spans definition impl
       @ check_overlaps lookups declaration spans definition impl
@@ -584,9 +578,8 @@ let check_impl lookups ~contained (declaration : Names.declaration) =
   | _ -> []
 
 let check_type lookups ~contained (declaration : Names.declaration) =
-  match read_definition lookups declaration with
-  | Some (definition, spans) -> check_recursion lookups ~contained declaration spans definition
-  | None -> []
+  let definition, spans = read_definition lookups declaration in
+  check_recursion lookups ~contained declaration spans definition
 
 type check =
   | Sealed of Names.key
@@ -646,16 +639,11 @@ let list_unused_dependencies (lookups : Lookups.t) package =
 type outcome = Placed of placed list | Unused_dependencies of Path.package list
 
 let run (lookups : Lookups.t) package check =
-  let declared key =
-    match lookups.interface.names.declaration key with
-    | Some declaration -> declaration
-    | None -> Compiler_bug.bug ~stage:"Package_checks" "%s is not declared" (Names.show_key key)
-  in
   let contained = memoized (contained_types lookups) in
   match check with
-  | Sealed key -> Placed (check_sealed lookups (declared key))
-  | Impl key -> Placed (check_impl lookups ~contained (declared key))
-  | Type key -> Placed (check_type lookups ~contained (declared key))
+  | Sealed key -> Placed (check_sealed lookups (lookups.interface.names.declaration key))
+  | Impl key -> Placed (check_impl lookups ~contained (lookups.interface.names.declaration key))
+  | Type key -> Placed (check_type lookups ~contained (lookups.interface.names.declaration key))
   | Instantiations -> Placed (check_instantiation lookups package)
   | Tests -> Placed (check_tests lookups package)
   | Dependencies -> Unused_dependencies (list_unused_dependencies lookups package)

@@ -10,19 +10,17 @@ let unfinished snapshot database packages =
       List.concat_map
         (fun declaration ->
           let key = Names.key_of declaration in
-          match (names.place key, names.definition key, names.spans key) with
-          | Some { base; _ }, Some definition, Some spans ->
-              List.map
-                (fun ({ keyword; span; _ } : Inspect.unfinished) ->
-                  let line, column =
-                    Source.position source (Source.Definition_span.to_file ~base span).start
-                  in
-                  ( (match keyword with `Todo -> "todo" | `Echo -> "echo"),
-                    Source.path source,
-                    line,
-                    column ))
-                (Inspect.unfinished spans definition)
-          | _ -> [])
+          let ({ base; _ } : Names.place) = names.place key in
+          List.map
+            (fun ({ keyword; span; _ } : Inspect.unfinished) ->
+              let line, column =
+                Source.position source (Source.Definition_span.to_file ~base span).start
+              in
+              ( (match keyword with `Todo -> "todo" | `Echo -> "echo"),
+                Source.path source,
+                line,
+                column ))
+            (Inspect.unfinished (names.spans key) (names.definition key)))
         (names.declarations_in file))
     (Command_packages.files snapshot packages)
 
