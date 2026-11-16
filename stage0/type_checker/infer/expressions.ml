@@ -360,7 +360,7 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
             ignore (check_expression state env key);
             base_type
         | _ -> (
-            let index_trait = State.make_trait_reference (Well_known.path Index) in
+            let index_trait = State.make_trait_reference ~arguments:[] (Well_known.path Index) in
             match State.implements state base_type index_trait with
             | Some evidence ->
                 let associated name =

@@ -156,7 +156,7 @@ val resolve_associated_type :
   state -> Types.ty -> Types.trait_reference -> string -> at:Source.Definition_span.t -> Types.ty
 
 val convert_evidence : Interface.Impls.evidence -> Tables.evidence
-val make_trait_reference : ?arguments:Types.argument list -> Path.t -> Types.trait_reference
+val make_trait_reference : arguments:Types.argument list -> Path.t -> Types.trait_reference
 val string_type : Types.ty
 val in_statement : state -> env -> Source.Definition_span.t -> (unit -> 'a) -> 'a
 val diverges : is_never:(Syntax.expression -> bool) -> Syntax.statement -> bool

@@ -429,7 +429,7 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
               callee =
                 Trait_method
                   {
-                    trait = State.make_trait_reference trait;
+                    trait = State.make_trait_reference ~arguments:[] trait;
                     name = method_;
                     receiver = Read;
                     self_type = left_type;
@@ -455,7 +455,8 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
               uses = Types.no_capabilities;
               callee_result = result;
             };
-        Name_lookup.resolve_evidence state value left_type (State.make_trait_reference trait);
+        Name_lookup.resolve_evidence state value left_type
+          (State.make_trait_reference ~arguments:[] trait);
         Types.bool
       end
   | Operation (Arithmetic _ as operation) when has_operand_hole state env left right ->

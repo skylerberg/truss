@@ -73,18 +73,27 @@ let require_bounds state (span : Source.Definition_span.t) ?of_type generics sub
                     (State.show state associated_type))))
     (Interface.Impls.list_required_bounds generics substitution)
 
+let make_fresh_generic_arguments (state : State.state) (generics : Types.generic list) =
+  List.map
+    (fun (generic : Types.generic) ->
+      match generic.kind with
+      | Value_generic -> Types.Value (Unify.make_fresh_value state.unifier)
+      | Type_generic _ -> Types.Type (State.make_fresh_type state)
+      | Capability_generic ->
+          Types.Capabilities (Unify.make_fresh_capability_variable state.unifier))
+    generics
+
 let make_fresh_arguments (state : State.state) (path : Path.t) =
   match Interface.Definition.read_type_interface state.lookups.interface path with
-  | Some interface ->
-      List.map
-        (fun (generic : Types.generic) ->
-          match generic.kind with
-          | Value_generic -> Types.Value (Unify.make_fresh_value state.unifier)
-          | Type_generic _ -> Types.Type (State.make_fresh_type state)
-          | Capability_generic ->
-              Types.Capabilities (Unify.make_fresh_capability_variable state.unifier))
-        interface.type_generics
+  | Some interface -> make_fresh_generic_arguments state interface.type_generics
   | None -> []
+
+let make_fresh_trait_reference (state : State.state) (trait : Path.t) =
+  State.make_trait_reference trait
+    ~arguments:
+      (match Interface.Definition.read_trait_interface state.lookups.interface trait with
+      | Some interface -> make_fresh_generic_arguments state interface.trait_generics
+      | None -> [])
 
 let require_type_bounds (state : State.state) span path arguments =
   match Interface.Definition.read_type_interface state.lookups.interface path with

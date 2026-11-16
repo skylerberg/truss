@@ -355,17 +355,6 @@ and reject_specification_call state (env : State.env) (value : Syntax.expression
                 Printf.sprintf
                   "`%s` is for specifications only, so it is called only in specifications." name)))
 
-and could_implement (state : State.state) type_ trait =
-  let arguments =
-    match Interface.Definition.read_trait_interface state.lookups.interface trait with
-    | Some interface ->
-        List.map
-          (fun (_ : Types.generic) -> Types.Type (State.make_fresh_type state))
-          interface.trait_generics
-    | None -> []
-  in
-  Option.is_some (State.implements state type_ (State.make_trait_reference ~arguments trait))
-
 and list_trait_static_methods (state : State.state) path name receiver =
   List.concat_map
     (fun package ->
@@ -373,11 +362,13 @@ and list_trait_static_methods (state : State.state) path name receiver =
         (fun trait ->
           match Members.find_trait_method state.lookups trait name receiver with
           | Some method_ ->
-              let reference = State.make_trait_reference trait in
+              let reference = Instantiation.make_fresh_trait_reference state trait in
               if
-                could_implement state
-                  (Types.Named { path; arguments = Instantiation.make_fresh_arguments state path })
-                  trait
+                Option.is_some
+                  (State.implements state
+                     (Types.Named
+                        { path; arguments = Instantiation.make_fresh_arguments state path })
+                     reference)
               then Some (reference, method_)
               else None
           | None -> None)
@@ -459,16 +450,10 @@ and list_trait_candidates (state : State.state) receiver_type name =
            (fun package ->
              List.filter_map
                (fun trait ->
-                 let reference = State.make_trait_reference trait in
-                 let has_generics =
-                   match
-                     Interface.Definition.read_trait_interface state.lookups.interface trait
-                   with
-                   | Some interface -> interface.trait_generics <> []
-                   | None -> false
-                 in
-                 ignore has_generics;
-                 if could_implement state receiver_type trait then with_method reference else None)
+                 let reference = Instantiation.make_fresh_trait_reference state trait in
+                 if Option.is_some (State.implements state receiver_type reference) then
+                   with_method reference
+                 else None)
                (state.lookups.interface.names.traits_declaring package name))
            (Resolve.Names.list_visible_packages state.lookups.interface.names state.package))
 
@@ -592,7 +577,7 @@ and find_consuming_cursor state (span : Source.Definition_span.t) type_ =
   match find_method_version state span type_ "cursor" Own with
   | Some (callee, ({ parameters = []; output = Returns cursor; _ } as signature)) -> (
       let cursor = State.normalize state cursor in
-      let trait = State.make_trait_reference (Well_known.path Cursor) in
+      let trait = State.make_trait_reference ~arguments:[] (Well_known.path Cursor) in
       match State.implements state cursor trait with
       | Some _ ->
           Some
