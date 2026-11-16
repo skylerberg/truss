@@ -30,13 +30,56 @@ type fragment = {
 
 let key fragment = fragment.key
 let references fragment = fragment.references
-let calls fragment = fragment.calls
 let called fragment = fragment.called
 let failures fragment = fragment.failures
 
-let table fragment =
-  match fragment.kind with Table_entries capability -> Some capability | _ -> None
+module Instance_table = Hashtbl.Make (Instance)
 
+let walk ~lookup ~follows_only_called_entries roots =
+  let visited = Instance_table.create 256 in
+  let queue = Queue.create () in
+  List.iter (fun root -> Queue.add (root, []) queue) roots;
+  let reachable = ref [] in
+  let tables = Hashtbl.create 16 and called_slots = Hashtbl.create 16 in
+  let enqueue_entry table (slot, chain) =
+    match List.nth_opt table.references slot with
+    | Some entry -> Queue.add (entry, chain) queue
+    | None ->
+        Compiler_bug.bug ~stage:"Emit_c" "a call of method %d of %s" slot
+          (Instance.to_string table.key)
+  in
+  while not (Queue.is_empty queue) do
+    let key, chain = Queue.pop queue in
+    if not (Instance_table.mem visited key) then begin
+      Instance_table.replace visited key ();
+      let fragment = lookup key in
+      let chain = key :: chain in
+      reachable := (fragment, List.rev chain) :: !reachable;
+      let enqueue_references () =
+        List.iter (fun reference -> Queue.add (reference, chain) queue) fragment.references
+      in
+      match fragment.kind with
+      | Table_entries (Some capability) when follows_only_called_entries ->
+          Hashtbl.add tables capability fragment;
+          List.iter (enqueue_entry fragment) (List.rev (Hashtbl.find_all called_slots capability))
+      | _ when follows_only_called_entries ->
+          List.iter
+            (fun (capability, slot) ->
+              if not (List.mem_assoc slot (Hashtbl.find_all called_slots capability)) then begin
+                Hashtbl.add called_slots capability (slot, chain);
+                List.iter
+                  (fun table -> enqueue_entry table (slot, chain))
+                  (List.rev (Hashtbl.find_all tables capability))
+              end)
+            fragment.calls;
+          enqueue_references ()
+      | _ -> enqueue_references ()
+    end
+  done;
+  List.rev !reachable
+
+let list_linked ~lookup roots = List.map fst (walk ~lookup ~follows_only_called_entries:false roots)
+let trace_reachable ~lookup roots = walk ~lookup ~follows_only_called_entries:true roots
 let small = 24
 
 let is_small fragment =

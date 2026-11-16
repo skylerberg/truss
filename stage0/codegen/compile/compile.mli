@@ -91,7 +91,7 @@ val check_calls :
   lowered ->
   unit
 
-val test_keys :
+val derive_test_keys :
   lowered:(Instance.key -> lowered) ->
   known:(Instance.key -> string) ->
   Instance.key list ->
@@ -99,6 +99,7 @@ val test_keys :
 
 module For_testing : sig
   val is_folded : t -> Path.t -> bool
+  val make_lowered : Emit_c.fragment -> lowered
 
   module Intrinsics = Intrinsics
 

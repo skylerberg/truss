@@ -12,7 +12,6 @@ type context = {
 
 val monomorphic : Interface.Lookups.t -> Monomorphic.context
 val context : Lookups.settings -> env:Memory_layout.env -> Lookups.t -> context
-val test_key : Path.t -> Instance.key
 
 type written = { spans : Source.Definition_span.t array; text : string }
 

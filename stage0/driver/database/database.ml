@@ -14,7 +14,6 @@ struct
 
   let equal : t -> t -> bool = ( = )
   let hash : t -> int = Hashtbl.hash_param 64 256
-  let compare : t -> t -> int = Stdlib.compare
 end
 
 module Part_table = Hashtbl.Make (Structural_key (Part))
@@ -27,12 +26,8 @@ module Stored_table = Hashtbl.Make (Structural_key (struct
   type t = Part.stored
 end))
 
-module Instance_key = Structural_key (struct
-  type t = Instance.key
-end)
-
-module Instance_table = Hashtbl.Make (Instance_key)
-module References = Graph.Make (Instance_key)
+module Instance_table = Hashtbl.Make (Instance)
+module References = Graph.Make (Instance)
 
 module Entry = struct
   type t =
@@ -886,7 +881,7 @@ let compute_test_keys database keys =
           | Error unsupported -> raise (Reaches_unsupported unsupported)
         in
         match
-          Compile.test_keys
+          Compile.derive_test_keys
             ~lowered:(fun key -> supported (read_lowered database note key))
             ~known:(fun key -> supported (read_test_key database note key))
             keys
@@ -1617,7 +1612,7 @@ let list_test_key_components database parts =
   List.map
     (fun keys -> Test_key_component keys)
     (Strongly_connected.find_components
-       (module Instance_key)
+       (module Instance)
        ~successors:(fun key ->
          match Instance_table.find_opt database.lowered key with
          | Some (Value (Ok lowered)) ->
