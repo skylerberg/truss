@@ -205,6 +205,25 @@ let () =
       ignore (make_package_served_by_other_build ());
       let is_removed () = not (List.exists Sys.file_exists paths) in
       wait_until_deadline ~is_done:is_removed;
+      if not (is_removed ()) then fail "the ended process's files are still there");
+  test "a background process does its periodic work while its project keeps changing" (fun () ->
+      let servers = Filename.concat (Sys.getenv "TRUSS_CACHE") "servers" in
+      (try Unix.mkdir servers 0o700 with Unix.Unix_error (EEXIST, _, _) -> ());
+      let ended = Filename.concat servers "fedcba9876543210-fedcba9876543210" in
+      let paths = List.map (fun suffix -> ended ^ suffix) [ ".key"; ".lock"; ".start" ] in
+      List.iter (fun path -> Out_channel.with_open_bin path ignore) paths;
+      let root = make_package_served_by_other_build () in
+      let notes = Filename.concat root "notes.txt" in
+      let deadline = Unix.gettimeofday () +. 10. in
+      let is_removed () = not (List.exists Sys.file_exists paths) in
+      let rec change_until_removed count =
+        if (not (is_removed ())) && Unix.gettimeofday () < deadline then begin
+          Out_channel.with_open_bin notes (fun out -> output_string out (string_of_int count));
+          Unix.sleepf 0.1;
+          change_until_removed (count + 1)
+        end
+      in
+      change_until_removed 0;
       if not (is_removed ()) then fail "the ended process's files are still there")
 
 let () =

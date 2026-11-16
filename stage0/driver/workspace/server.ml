@@ -163,6 +163,7 @@ let stop_servers ?key ~wait () =
       running <> []
 
 let idle_limit = 3. *. 3600.
+let collection_interval = 60.
 let backlog = 128
 
 let bind server_path path =
@@ -260,21 +261,14 @@ let serve_on ~key ~identity ~is_alive ~collect ~list_watcher_descriptors ~propag
   served := Some server_path;
   Out_channel.with_open_bin (server_path ^ ".key") (fun out -> output_string out key);
   let last = ref (Unix.time ()) in
-  let last_collection = ref 0. in
+  let next_collection = ref (Unix.time ()) in
   let is_replaced = ref false in
   while
     (not !is_replaced) && Unix.time () -. !last < idle_limit && is_alive () && Sys.file_exists path
   do
-    match Unix.select (socket :: list_watcher_descriptors ()) [] [] 1.0 with
+    (match Unix.select (socket :: list_watcher_descriptors ()) [] [] 1.0 with
     | exception Unix.Unix_error (EINTR, _, _) -> ()
-    | [], _, _ ->
-        let now = Unix.time () in
-        if now -. !last_collection > 60. then begin
-          last_collection := now;
-          is_replaced := compute_executable_identity () <> identity;
-          collect ();
-          remove_ended_servers (Filename.dirname server_path)
-        end
+    | [], _, _ -> ()
     | ready, _, _ when not (List.mem socket ready) -> List.iter propagate ready
     | _ -> (
         match Unix.accept ~cloexec:true socket with
@@ -289,7 +283,14 @@ let serve_on ~key ~identity ~is_alive ~collect ~list_watcher_descriptors ~propag
                send output (Final (handle ~report_progress request))
              with _ -> ());
             (try Unix.close client with Unix.Unix_error _ -> ());
-            try save () with failure -> prerr_endline (Printexc.to_string failure)))
+            try save () with failure -> prerr_endline (Printexc.to_string failure))));
+    let now = Unix.time () in
+    if now >= !next_collection then begin
+      next_collection := now +. collection_interval;
+      is_replaced := compute_executable_identity () <> identity;
+      collect ();
+      remove_ended_servers (Filename.dirname server_path)
+    end
   done;
   (try Unix.unlink path with Unix.Unix_error _ -> ());
   Unix.close socket;
