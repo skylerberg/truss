@@ -40,7 +40,7 @@ let one_diagnostic = Support.one_diagnostic ~setup:(fun files -> setup files) ~c
 let name_at database name text occurrence =
   let file = file_of name in
   let source = Source.text (Support.source database file) in
-  let offset = Option.get (Substring.find ~occurrence source text) in
+  let offset = Option.get (Substring.For_testing.find ~occurrence source text) in
   if offset < 0 then failwith (Printf.sprintf "no occurrence %d of %S" occurrence text);
   let located =
     List.find_map
@@ -95,7 +95,9 @@ let refers ?(others = []) text ~name:(written, occurrence) expected =
 let refers_to_binding text ~use ~binding =
   let database = setup [ ("app::main", text) ] in
   let source = text in
-  let binding_offset = Option.get (Substring.find ~occurrence:(snd binding) source (fst binding)) in
+  let binding_offset =
+    Option.get (Substring.For_testing.find ~occurrence:(snd binding) source (fst binding))
+  in
   let name, spans, base, resolved = name_at database "app::main" (fst use) (snd use) in
   let actual = describe spans base resolved.names.(name.id) in
   let expected = Printf.sprintf "local at %d" binding_offset in
@@ -231,7 +233,7 @@ let () =
 
 let bracket_of text written occurrence =
   let database = setup [ ("app::main", text) ] in
-  let offset = Option.get (Substring.find ~occurrence text written) in
+  let offset = Option.get (Substring.For_testing.find ~occurrence text written) in
   let declarations = Support.declarations database (Support.module_of "app::main") in
   List.find_map
     (fun (declaration : Resolve.Names.declaration) ->

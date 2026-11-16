@@ -50,7 +50,7 @@ let body_of text =
 let statements text expected =
   let statements, diagnostics = body_of text in
   no_diagnostics text diagnostics;
-  let actual = List.map Syntax_print.statement statements in
+  let actual = List.map Syntax_print.For_testing.statement statements in
   expect_strings ~expected actual
 
 let statement text expected = statements text [ expected ]
@@ -68,7 +68,7 @@ let error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
         fail "expected %s, got %s"
           (Diagnostic.Code.name (Parser code))
           (Diagnostic.Code.name diagnostic.code);
-      let expected = Option.get (Substring.find ~occurrence text at) in
+      let expected = Option.get (Substring.For_testing.find ~occurrence text at) in
       if diagnostic.span.start <> expected then
         fail "expected the error at %d (%S), got %d" expected at diagnostic.span.start;
       let results = List.map (Diagnostic.apply_fix text) diagnostic.fixes in

@@ -63,7 +63,7 @@ let interpolation_tokens text index =
   | Some literal -> shown (interpolations literal).(index).tokens
   | None -> []
 
-let find text part ~occurrence = Option.get (Substring.find ~occurrence text part)
+let find text part ~occurrence = Option.get (Substring.For_testing.find ~occurrence text part)
 
 let error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
   match snd (lex text) with
@@ -748,9 +748,9 @@ let block_after = Documents.block_after
 let words = Documents.words
 
 let between text first second =
-  let start = Option.get (Substring.find text first) + String.length first in
+  let start = Option.get (Substring.For_testing.find text first) + String.length first in
   let rest = String.sub text start (String.length text - start) in
-  String.sub rest 0 (Option.get (Substring.find rest second))
+  String.sub rest 0 (Option.get (Substring.For_testing.find rest second))
   |> String.split_on_char '\n' |> List.map String.trim |> String.concat " "
 
 let backticked text =

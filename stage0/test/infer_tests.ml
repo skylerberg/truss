@@ -11,7 +11,7 @@ let fine text = no_diagnostics [ ("app::main", text) ]
 let expression_at text written occurrence =
   let database = setup [ ("app::main", text) ] in
   let file = file_of "app::main" in
-  let offset = Option.get (Substring.find ~occurrence text written) in
+  let offset = Option.get (Substring.For_testing.find ~occurrence text written) in
   let actual =
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->

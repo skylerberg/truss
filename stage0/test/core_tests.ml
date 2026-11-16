@@ -8,7 +8,7 @@ let core_of database key =
 
 type form = { core : Core.t; names : (Core.local, string) Hashtbl.t }
 
-let form_of (core : Core.t) = { core; names = Core_walk.local_names core.definition }
+let form_of (core : Core.t) = { core; names = Core_walk.For_testing.local_names core.definition }
 
 let expressions form =
   let found = ref [] in
