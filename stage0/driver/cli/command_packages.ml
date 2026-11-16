@@ -52,24 +52,24 @@ let list_modules snapshot packages =
   List.sort_uniq compare
     (List.map (fun (file : Path.file) -> file.module_) (list_files snapshot packages))
 
-let project_dependencies snapshot packages =
+let list_project_dependencies snapshot packages =
   let project_packages = List.map snd (Workspace.list_packages snapshot) in
-  let seen = Package_table.create 8 in
+  let visited = Package_table.create 8 in
   let rec visit name =
     List.iter
       (fun dependency ->
-        if List.mem dependency project_packages && not (Package_table.mem seen dependency) then begin
-          Package_table.replace seen dependency ();
+        if List.mem dependency project_packages && not (Package_table.mem visited dependency) then begin
+          Package_table.replace visited dependency ();
           visit dependency
         end)
       (Workspace.list_dependency_names snapshot name)
   in
   List.iter visit packages;
   List.filter
-    (fun name -> Package_table.mem seen name && not (List.mem name packages))
+    (fun name -> Package_table.mem visited name && not (List.mem name packages))
     project_packages
 
-let list_program_packages snapshot packages = packages @ project_dependencies snapshot packages
+let list_program_packages snapshot packages = packages @ list_project_dependencies snapshot packages
 
 let list_manifest_problems snapshot database packages =
   List.concat_map

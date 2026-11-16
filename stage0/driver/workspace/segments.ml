@@ -16,7 +16,7 @@ let make_segments_directory t = Filename.concat t.directory "segments"
 let make_segment_path t number =
   Filename.concat (make_segments_directory t) (Printf.sprintf "%08d.segment" number)
 
-let digest text = Digest.BLAKE128.to_hex (Digest.BLAKE128.string text)
+let compute_digest text = Digest.BLAKE128.to_hex (Digest.BLAKE128.string text)
 
 let write_durably path text =
   let descriptor = Unix.openfile path [ O_WRONLY; O_CREAT; O_TRUNC; O_CLOEXEC ] 0o644 in
@@ -105,7 +105,7 @@ let parse_records text =
 
 let read_segment t segment =
   match File_system.read (make_segment_path t segment.number) with
-  | text when String.length text = segment.size && digest text = segment.digest ->
+  | text when String.length text = segment.size && compute_digest text = segment.digest ->
       parse_records text
   | _ -> raise Damaged
   | exception Sys_error _ -> raise Damaged
@@ -160,7 +160,7 @@ let write_segment t entries =
   in
   (try Unix.mkdir (make_segments_directory t) 0o755 with Unix.Unix_error (EEXIST, _, _) -> ());
   write_durably (make_segment_path t number) text;
-  { number; size = String.length text; digest = digest text }
+  { number; size = String.length text; digest = compute_digest text }
 
 let make_list_text ~header segments =
   String.concat "\n"
