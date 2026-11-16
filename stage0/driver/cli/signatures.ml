@@ -96,9 +96,9 @@ let is_signature : Database.Part.t -> bool = function
       true
   | Stored
       (Computed
-         ( Parsed _ | Namespace _ | Resolved _ | Grant _ | Checked_body _ | Derived_form _
-         | Body_mir _ | Generated_mir _ | Mir_call_edges _ | Patterns _ | Usage _ | Ownership _
-         | Import_check _ | Package_check _ | Call_edges _ | Proof _ | Lowering _ ))
+         ( Parsed _ | Namespace _ | Resolved _ | Grant _ | Checked_body _ | Body_mir _
+         | Generated_mir _ | Mir_call_edges _ | Patterns _ | Usage _ | Ownership _ | Import_check _
+         | Package_check _ | Call_edges _ | Proof _ | Lowering _ ))
   | Stored (Recursion_group _)
   | Input _ | Name _ ->
       false

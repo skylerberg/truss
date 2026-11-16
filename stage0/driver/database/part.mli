@@ -40,7 +40,6 @@ type computed =
   | Signature_check of Resolve.Names.key
   | Contract of Resolve.Names.key
   | Checked_body of Resolve.Names.key
-  | Derived_form of Path.t
   | Body_mir of Resolve.Names.key
   | Contract_mir of Resolve.Names.key
   | Generated_mir of Path.t

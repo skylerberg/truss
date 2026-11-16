@@ -105,7 +105,6 @@ type package_database = {
   signature_checks : unit part Key_table.t;
   contracts : Core.t part Key_table.t;
   checked_bodies : Infer.checked part Key_table.t;
-  derived_forms : Core.t part Path_table.t;
   body_parts : Mir.body_part part Key_table.t;
   contract_parts : Mir.contract_part part Key_table.t;
   generated_parts : (Mir.body_part * Mir.contract_part) part Path_table.t;
@@ -164,7 +163,6 @@ let make_empty_package_database name ~dependencies =
     signature_checks = Key_table.create 256;
     contracts = Key_table.create 256;
     checked_bodies = Key_table.create 256;
-    derived_forms = Path_table.create 16;
     body_parts = Key_table.create 256;
     contract_parts = Key_table.create 256;
     generated_parts = Path_table.create 16;
@@ -293,7 +291,6 @@ let copy_package_database (package_database : package_database) =
     signature_checks = Key_table.copy package_database.signature_checks;
     contracts = Key_table.copy package_database.contracts;
     checked_bodies = Key_table.copy package_database.checked_bodies;
-    derived_forms = Path_table.copy package_database.derived_forms;
     body_parts = Key_table.copy package_database.body_parts;
     contract_parts = Key_table.copy package_database.contract_parts;
     generated_parts = Path_table.copy package_database.generated_parts;
@@ -742,9 +739,7 @@ let list_package_parts database (names : Resolve.Names.lookups) package : Part.c
         | _, Path.Derived { type_; trait } -> Some (Part.Derived_interface { type_; trait })
         | _ -> None)
       (names.list_impls package)
-  @ List.concat_map
-      (fun path -> [ Part.Derived_form path; Generated_mir path ])
-      (list_derived_methods names package)
+  @ List.map (fun path -> Part.Generated_mir path) (list_derived_methods names package)
   @ List.concat_map
       (fun path -> [ Part.Mir_call_edges path; Call_edges (path, package) ])
       (List.sort_uniq Path.compare paths)
@@ -778,8 +773,8 @@ let type_check run lookups key =
 let make_form_origin database note =
   Infer.find_form_origin (make_recording_interface_lookups database note ~is_checked:true)
     ~is_derived:(fun path ->
-      read database note (Derived_form path);
-      Path_table.mem (obtain_owner database (Path.locate_package path)).derived_forms path)
+      read database note (Generated_mir path);
+      Path_table.mem (obtain_owner database (Path.locate_package path)).generated_parts path)
 
 let read_body_mir database note =
   read_part database note (fun key -> Part.Body_mir key) (fun owner -> owner.body_parts)
@@ -1049,9 +1044,6 @@ let make_stored database (part : Part.stored) =
       | Checked_body key ->
           make_keyed_stored ~is_failed
             (Key_table.make_access (fun package_database -> package_database.checked_bodies) key)
-      | Derived_form path ->
-          make_keyed_stored ~is_failed
-            (Path_table.make_access (fun package_database -> package_database.derived_forms) path)
       | Body_mir key ->
           make_keyed_stored ~is_failed
             (Key_table.make_access (fun package_database -> package_database.body_parts) key)
@@ -1519,12 +1511,6 @@ let compute_part database (part : Part.computed) =
   | Checked_body key ->
       compute_into_slot (Key_table.make_slot package_database.checked_bodies key) (fun note ->
           Some (type_check Infer.check_body (make_recording_infer_lookups database note) key))
-  | Derived_form path ->
-      compute_into_slot (Path_table.make_slot package_database.derived_forms path) (fun note ->
-          match Infer.derive_form (make_recording_infer_lookups database note) path with
-          | Some form -> Some (Value form)
-          | None -> None
-          | exception Reads_failed_part -> Some Blocked)
   | Body_mir key ->
       compute_into_slot (Key_table.make_slot package_database.body_parts key) (fun note ->
           read database note (Checked_body key);
@@ -1553,19 +1539,20 @@ let compute_part database (part : Part.computed) =
             | None -> report_uncomputed (Contract key)))
   | Generated_mir path ->
       compute_into_slot (Path_table.make_slot package_database.generated_parts path) (fun note ->
-          read database note (Derived_form path);
-          Option.map
-            (function
-              | Value form ->
-                  Value
-                    ( Mir.make_body_part form,
-                      Mir.make_contract_part
-                        ~find_type_interface:
-                          (Interface.Definition.read_type_interface
-                             (make_recording_interface_lookups database note ~is_checked:true))
-                        path form )
-              | Failed _ | Blocked -> Blocked)
-            (Path_table.find_opt package_database.derived_forms path))
+          match Infer.derive_form (make_recording_infer_lookups database note) path with
+          | None -> None
+          | Some form ->
+              Some
+                (make_part
+                   (fun form ->
+                     ( Mir.make_body_part form,
+                       Mir.make_contract_part
+                         ~find_type_interface:
+                           (Interface.Definition.read_type_interface
+                              (make_recording_interface_lookups database note ~is_checked:true))
+                         path form ))
+                   form)
+          | exception Reads_failed_part -> Some Blocked)
   | Mir_call_edges path ->
       compute_into_slot (Path_table.make_slot package_database.mir_call_edges path) (fun note ->
           Some
@@ -1961,7 +1948,6 @@ let list_stored_parts (package_database : package_database) : Part.stored list =
                Part.Signature_check key);
            Key_table.list_keys package_database.contracts (fun key -> Part.Contract key);
            Key_table.list_keys package_database.checked_bodies (fun key -> Part.Checked_body key);
-           Path_table.list_keys package_database.derived_forms (fun path -> Part.Derived_form path);
            Key_table.list_keys package_database.body_parts (fun key -> Part.Body_mir key);
            Key_table.list_keys package_database.contract_parts (fun key -> Part.Contract_mir key);
            Path_table.list_keys package_database.generated_parts (fun path ->
@@ -2620,14 +2606,12 @@ module For_testing = struct
 
   let read_derived_form database path =
     drain database ~through:Checked_bodies [ Path.locate_package path ];
-    match
-      Path_table.find_opt (obtain_owner database (Path.locate_package path)).derived_forms path
-    with
-    | Some (Value form) -> Some form
-    | Some (Failed _ | Blocked) | None -> None
+    match Infer.derive_form (make_recording_infer_lookups database ignore) path with
+    | form -> form
+    | exception Reads_failed_part -> None
 
   let read_core database path =
-    drain database ~through:Checked_bodies [ Path.locate_package path ];
+    drain database ~through:Mir [ Path.locate_package path ];
     Option.bind (make_form_origin database ignore path) (fun (origin, substitution) ->
         Option.map
           (fun form -> (form, substitution))
@@ -2734,15 +2718,13 @@ let locate_stage : Part.stored -> Stage.t = function
 let count run =
   let counts_by_kind = Hashtbl.create 32 in
   let add (part : Part.stored) increment =
-    let kind = Part.show_kind (Stored part) and stage = locate_stage part in
-    let earliest, counts =
-      match Hashtbl.find_opt counts_by_kind kind with
-      | Some (earliest, counts) ->
-          ((if Stage.compare stage earliest < 0 then stage else earliest), counts)
-      | None ->
-          (stage, { kind; computed = 0; unchanged = 0; writes = 0; reads = 0; distinct_reads = 0 })
+    let stage = locate_stage part and kind = Part.show_kind (Stored part) in
+    let counts =
+      Option.value
+        (Hashtbl.find_opt counts_by_kind (stage, kind))
+        ~default:{ kind; computed = 0; unchanged = 0; writes = 0; reads = 0; distinct_reads = 0 }
     in
-    Hashtbl.replace counts_by_kind kind (earliest, increment counts)
+    Hashtbl.replace counts_by_kind (stage, kind) (increment counts)
   in
   let result =
     with_observer
@@ -2768,8 +2750,8 @@ let count run =
   ( result,
     List.map snd
       (List.sort
-         (fun (stage, (counts : counts)) (other_stage, (other : counts)) ->
+         (fun ((stage, kind), _) ((other_stage, other_kind), _) ->
            match Stage.compare stage other_stage with
-           | 0 -> String.compare counts.kind other.kind
+           | 0 -> String.compare kind other_kind
            | order -> order)
-         (Hashtbl.fold (fun _ entry entries -> entry :: entries) counts_by_kind [])) )
+         (List.of_seq (Hashtbl.to_seq counts_by_kind))) )

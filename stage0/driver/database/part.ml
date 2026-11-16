@@ -40,7 +40,6 @@ type computed =
   | Signature_check of Resolve.Names.key
   | Contract of Resolve.Names.key
   | Checked_body of Resolve.Names.key
-  | Derived_form of Path.t
   | Body_mir of Resolve.Names.key
   | Contract_mir of Resolve.Names.key
   | Generated_mir of Path.t
@@ -96,7 +95,6 @@ let locate_package : computed -> Path.package = function
       key.module_.package
   | Constant_value path
   | Type_facts path
-  | Derived_form path
   | Generated_mir path
   | Mir_call_edges path
   | Derived_interface { type_ = path; _ } ->
@@ -174,7 +172,6 @@ let show_computed part =
   | Signature_check declared -> "signature check " ^ show_key declared
   | Contract declared -> "contract " ^ show_key declared
   | Checked_body declared -> "checked body " ^ show_key declared
-  | Derived_form path -> "derived form " ^ Path.show path
   | Body_mir declared -> "body mir " ^ show_key declared
   | Contract_mir declared -> "contract mir " ^ show_key declared
   | Generated_mir path -> "generated mir " ^ Path.show path
@@ -259,7 +256,6 @@ let find_computed_definition = function
       Some key.path
   | Constant_value path
   | Type_facts path
-  | Derived_form path
   | Generated_mir path
   | Mir_call_edges path
   | Call_edges (path, _) ->
@@ -303,13 +299,15 @@ let show_computed_kind = function
   | Trait_header _ -> "trait header"
   | Constant_value _ -> "value"
   | Header _ -> "header"
-  | Interface _ | Derived_interface _ -> "interface"
+  | Interface _ -> "interface"
+  | Derived_interface _ -> "derived interface"
   | Type_facts _ -> "type facts"
   | Grant _ -> "grant"
   | Signature_check _ -> "signature check"
   | Contract _ -> "contract"
-  | Checked_body _ | Derived_form _ -> "checked body"
-  | Body_mir _ | Generated_mir _ -> "MIR of the body"
+  | Checked_body _ -> "checked body"
+  | Body_mir _ -> "MIR of the body"
+  | Generated_mir _ -> "generated MIR"
   | Contract_mir _ -> "MIR of the contract"
   | Mir_call_edges _ -> "MIR call edges"
   | Patterns _ -> "pattern check"

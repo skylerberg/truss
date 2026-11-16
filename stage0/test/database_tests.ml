@@ -639,7 +639,7 @@ let () =
         (list_propagated ~before:(make_signup "age >= 13") ~after:(make_signup "age  >=\t13"))
         ~exactly:
           [
-            "derived form derived standard::serialization::Deserialize for \
+            "generated mir derived standard::serialization::Deserialize for \
              app::main::Signup.deserialize";
             "import check app/main/main.truss";
             "namespace app";
