@@ -34,20 +34,15 @@ and evaluate (lookups : Lookups.t) ~visiting path =
   if List.exists (Path.equal path) visiting then None
   else
     match Resolve.Names.definition_of_path lookups.names path with
-    | Some (key, { kind = Constant { value; _ }; _ }) -> (
-        match lookups.resolved Body key with
-        | Some resolved -> expression lookups ~visiting:(path :: visiting) resolved value
-        | None -> None)
+    | Some (key, { kind = Constant { value; _ }; _ }) ->
+        expression lookups ~visiting:(path :: visiting) (lookups.resolved Body key) value
     | _ -> None
 
 let value_of lookups path = evaluate lookups ~visiting:[] path
 
 let is_uint64 (lookups : Lookups.t) path =
   match Resolve.Names.definition_of_path lookups.names path with
-  | Some (key, { kind = Constant { type_ = { kind = Path_type written; _ }; _ }; _ }) -> (
-      match lookups.resolved Interface key with
-      | Some resolved ->
-          resolved.names.(written.path.last.id)
-          = Some (Definition (Type, Intrinsic.builtin_path UInt64))
-      | None -> false)
+  | Some (key, { kind = Constant { type_ = { kind = Path_type written; _ }; _ }; _ }) ->
+      (lookups.resolved Interface key).names.(written.path.last.id)
+      = Some (Definition (Type, Intrinsic.builtin_path UInt64))
   | _ -> false

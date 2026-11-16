@@ -5,4 +5,4 @@ type result = {
   must_be_disjoint : (Core.origin * Core.origin) list;
 }
 
-val check : Lookups.t -> Resolve.Names.key -> result option
+val check : Lookups.t -> Resolve.Names.key -> result

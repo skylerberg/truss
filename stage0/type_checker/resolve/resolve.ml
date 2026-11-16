@@ -53,11 +53,6 @@ let merge = function
           List.sort_uniq compare (List.concat_map (fun part -> part.used_imports) parts);
       }
 
-let whole ?(sections = sections) read key =
-  match List.map (fun section -> read section key) sections with
-  | parts when List.for_all Option.is_some parts -> Some (merge (List.filter_map Fun.id parts))
-  | _ -> None
-
 type head = {
   name : Syntax.name;
   target : target;

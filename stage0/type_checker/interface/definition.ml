@@ -216,26 +216,23 @@ let lower_container (context : Lower.context) (path : Path.t) (definition : defi
   | _ -> (Capability_parts, context)
 
 let header (lookups : Lookups.t) (key : Names.key) =
-  match lookups.resolved Interface key with
-  | Some resolved -> (
-      if Names.is_broken lookups.names key Header then Some (Error [])
-      else
-        match
-          lower_container
-            (Lower.create lookups resolved ~spans:(lookups.names.spans key) empty_scope)
-            key.path (lookups.names.definition key)
-        with
-        | _, context when !(context.diagnostics) <> [] ->
-            Some (Error (List.rev !(context.diagnostics)))
-        | Broken _, _ -> Some (Error [])
-        | parts, context ->
-            let header_generics, header_uses =
-              match parts with
-              | Impl_parts { impl_generics; impl_uses; _ } -> (impl_generics, impl_uses)
-              | _ -> ([], Types.no_capabilities)
-            in
-            Some (Ok { container_scope = Lower.scope context; header_generics; header_uses }))
-  | None -> None
+  let resolved = lookups.resolved Interface key in
+  if Names.is_broken lookups.names key Header then Error []
+  else
+    match
+      lower_container
+        (Lower.create lookups resolved ~spans:(lookups.names.spans key) empty_scope)
+        key.path (lookups.names.definition key)
+    with
+    | _, context when !(context.diagnostics) <> [] -> Error (List.rev !(context.diagnostics))
+    | Broken _, _ -> Error []
+    | parts, context ->
+        let header_generics, header_uses =
+          match parts with
+          | Impl_parts { impl_generics; impl_uses; _ } -> (impl_generics, impl_uses)
+          | _ -> ([], Types.no_capabilities)
+        in
+        Ok { container_scope = Lower.scope context; header_generics; header_uses }
 
 let lower_definition (lookups : Lookups.t) (key : Names.key) (definition : definition) ~spans
     (resolved : Resolve.resolved) =
@@ -425,19 +422,13 @@ let lower_definition (lookups : Lookups.t) (key : Names.key) (definition : defin
   }
 
 let lower (lookups : Lookups.t) key =
-  match lookups.resolved Interface key with
-  | Some resolved ->
-      Compiler_bug.while_doing ~stage:"Interface" (Names.show_key key) (fun () ->
-          Some
-            (lower_definition lookups key (lookups.names.definition key)
-               ~spans:(lookups.names.spans key) resolved))
-  | None -> None
+  let resolved = lookups.resolved Interface key in
+  Compiler_bug.while_doing ~stage:"Interface" (Names.show_key key) (fun () ->
+      lower_definition lookups key (lookups.names.definition key) ~spans:(lookups.names.spans key)
+        resolved)
 
 let interface (lookups : Lookups.t) path =
-  Option.bind (lookups.names.key path) (fun key ->
-      Option.map
-        (fun (lowered : lowered_interface) -> lowered.interface)
-        (lookups.lowered_interface key))
+  Option.map (fun key -> (lookups.lowered_interface key).interface) (lookups.names.key path)
 
 let declared_fields (lookups : Lookups.t) path =
   let names (written : field list) =

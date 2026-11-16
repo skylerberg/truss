@@ -42,12 +42,6 @@ type resolved = {
 val sections : section list
 val merge : resolved list -> resolved
 
-val whole :
-  ?sections:section list ->
-  (section -> Names.key -> resolved option) ->
-  Names.key ->
-  resolved option
-
 type head = {
   name : Syntax.name;
   target : target;
