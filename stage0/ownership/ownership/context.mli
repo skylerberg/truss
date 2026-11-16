@@ -5,7 +5,7 @@ type context = {
   list_bounds : Types.parameter -> Types.trait_reference list;
   spans : Source.Definition_span.t array Lazy.t;
   mode_keywords : (Core.origin, Core.mode_keyword) Hashtbl.t;
-  places_without_own : (Core.origin, unit) Hashtbl.t;
+  places_without_keyword : (Core.origin, Types.mode) Hashtbl.t;
   names : string Local_table.t;
   binding_modes : Types.mode Local_table.t;
   types : Types.ty Local_table.t;

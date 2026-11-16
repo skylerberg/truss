@@ -199,6 +199,7 @@ module Code : sig
     | Lends_other_parameter
     | Read_only_view
     | Lent_mut_in_variant
+    | Needs_lent_mut
     | Task_outlives_view
 
   type capabilities =

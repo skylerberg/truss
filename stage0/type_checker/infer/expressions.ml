@@ -22,7 +22,6 @@ and check_lent_part state env (value : Syntax.expression) : Types.ty =
       Hashtbl.replace state.yielded inner.id (match mode with Mut -> Mut | Read | Own -> Read);
       let actual = check_expression state env ~expected:part inner in
       if inner != value then State.alias_expression state value inner;
-      Modes.check_lent_value state env inner;
       if mode = Mut then Modes.mutate state env ~by:Passed_mut inner;
       Name_lookup.coerce state env inner ~actual ~expected:part;
       actual

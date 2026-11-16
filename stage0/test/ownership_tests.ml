@@ -113,11 +113,16 @@ let () =
         (make_lending_source "numbered" "(mut self, index: UInt64) lends mut Numbered"
            "  Numbered(index: index, title: mut self.books[index])\n"
         ^ Fixtures.Ownership.title_cleared_through_numbered));
-  Harness.test "a place in a constructor lent `mut` needs the `mut` keyword" (fun () ->
+  Harness.test
+    "a place in a constructor lent `mut` needs the `mut` keyword, with a fix that adds it"
+    (fun () ->
       expect_one_diagnostic
         (make_lending_source "numbered" "(mut self) lends mut Numbered"
            "  Numbered(index: 0, title: self.books[0])\n")
-        "types.missing_mode");
+        "ownership.needs_lent_mut"
+        ~fixed:
+          (make_lending_source "numbered" "(mut self) lends mut Numbered"
+             "  Numbered(index: 0, title: mut self.books[0])\n"));
   Harness.test "a place in a constructor lent read-only takes no `mut` keyword" (fun () ->
       expect_one_diagnostic
         (make_lending_source "numbered" "(self) lends Numbered"

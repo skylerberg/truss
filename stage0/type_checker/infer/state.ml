@@ -75,7 +75,7 @@ type state = {
   mutable frames : frame list;
   mutable locals_read : Syntax.id list;
   mutable receiver_modes : (Syntax.id * Types.mode) list;
-  mutable places_without_own : Syntax.id list;
+  mutable places_without_keyword : (Syntax.id * Types.mode) list;
   mutable mode_keywords : Core.mode_keyword list;
   yielded : (Syntax.id, Types.mode) Hashtbl.t;
   lent_tails : (Syntax.id, unit) Hashtbl.t;
