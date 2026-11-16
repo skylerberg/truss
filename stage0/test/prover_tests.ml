@@ -1655,7 +1655,13 @@ let () =
 
 let in_standard text =
   checked
-    (Database.create (Support.setup [ ("standard::probe", text) ]))
+    (Database.create
+       (Support.setup
+          [
+            ("standard::core", Fixtures.Prover.index_trait);
+            ("standard::specification", Fixtures.Prover.sequence_with_index);
+            ("standard::probe", text);
+          ]))
     (Support.file_of "standard::probe")
 
 let proven_in_standard text =
@@ -1694,3 +1700,18 @@ let () =
       match Support.codes (in_standard Fixtures.Prover.character_converted_from_a_code) with
       | [ "prover.requires" ] -> ()
       | codes -> Harness.fail "expected prover.requires, found %s" (String.concat ", " codes))
+
+let () =
+  let only_requires text =
+    match Support.codes (in_standard text) with
+    | [ "prover.requires" ] -> ()
+    | codes -> Harness.fail "expected prover.requires, found %s" (String.concat ", " codes)
+  in
+  Harness.test "an element of a storage is read only at an index within it" (fun () ->
+      only_requires Fixtures.Prover.storage_read_at_an_unchecked_index);
+  Harness.test "an element of a storage at an index below its length proves" (fun () ->
+      proven_in_standard Fixtures.Prover.storage_read_at_a_checked_index);
+  Harness.test "a storage is popped only when it holds an element" (fun () ->
+      only_requires Fixtures.Prover.storage_popped_without_a_length);
+  Harness.test "a view is sliced only within its length" (fun () ->
+      only_requires Fixtures.Prover.view_sliced_past_its_end)
