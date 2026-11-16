@@ -1,9 +1,9 @@
 open Harness
 open Support
 
-let check database =
+let check packages =
   Pipeline.For_testing.(diagnostics [ Resolve; Interface; Infer; Patterns; Usage; Ownership ])
-    (Support.pipeline database)
+    (Support.pipeline packages)
 
 let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]
@@ -761,9 +761,9 @@ let () =
         "ownership.mutated_while_viewed")
 
 let disjoint_obligations text =
-  let database = setup [ ("app::main", text) ] in
+  let packages = setup [ ("app::main", text) ] in
   let file = file_of "app::main" in
-  let pipeline = pipeline database in
+  let pipeline = pipeline packages in
   Pipeline.check pipeline [ file.module_.package ];
   List.fold_left
     (fun total declaration ->
@@ -771,7 +771,7 @@ let disjoint_obligations text =
       | Value must_be_disjoint -> total + List.length must_be_disjoint
       | Failed _ | Blocked -> total)
     0
-    ((Support.names database file.module_.package).declarations_in file)
+    ((Support.names packages file.module_.package).declarations_in file)
 
 let () =
   test "two slices of one list borrowed by one call produce one `Disjoint` obligation" (fun () ->

@@ -219,7 +219,7 @@ let expect_status ?extra ?anchors expected instances =
 let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [] }
 let example_file : Path.file = { module_ = example; name = "main" }
 let standard_state = lazy (Database.For_testing.standard_state ())
-let pipeline database = Pipeline.create ~loaded:[ Lazy.force standard_state ] database
+let pipeline packages = Pipeline.create ~loaded:[ Lazy.force standard_state ] packages
 
 let example_package files : Project.package list =
   [ { name = { owner = None; name = "example" }; dependencies = []; files } ]
@@ -230,8 +230,8 @@ let compile ?results ?evaluation_time_limit_ms pipeline =
     (Lazy.force compiler) (Lazy.force cache) (Lazy.force settings)
 
 let load_files ?results ?(roots = []) files =
-  let database = example_package files in
-  let pipeline = pipeline database in
+  let packages = example_package files in
+  let pipeline = pipeline packages in
   List.iter (Pipeline.For_testing.root pipeline) roots;
   List.iter
     (fun ((file : Path.file), text) ->

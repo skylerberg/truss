@@ -574,12 +574,12 @@ let () =
   |> List.iter (fun name ->
       List.iteri
         (fun index text ->
-          let database = example_package [ (example_file, text) ] in
-          if diagnostics (pipeline database) example_file = [] then
+          let packages = example_package [ (example_file, text) ] in
+          if diagnostics (pipeline packages) example_file = [] then
             test
               (Printf.sprintf "%s block %d lowers, and its tests pass" name (index + 1))
               (fun () ->
-                let checked = pipeline database in
+                let checked = pipeline packages in
                 let interface =
                   Pipeline.interface_lookups checked [ example_file.module_.package ]
                 in

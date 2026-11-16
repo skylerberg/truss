@@ -1,7 +1,7 @@
 open Harness
 
-let check database file =
-  let pipeline = Support.pipeline database in
+let check packages file =
+  let pipeline = Support.pipeline packages in
   match Support.diagnostics pipeline file with
   | [] -> Support.proof_diagnostics pipeline file
   | errors -> errors

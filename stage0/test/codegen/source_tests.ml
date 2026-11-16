@@ -55,13 +55,13 @@ let () =
   passes "a constant made of one that is computed by running is computed by running too"
     Fixtures.Source.constant_made_of_one_that_is_computed_by_running;
   test "a constant whose sum does not fit its type is an error before any code is run" (fun () ->
-      let database =
+      let packages =
         example_package [ (example_file, "let big: Int8 = 100\nlet bigger: Int8 = big + big\n") ]
       in
       match
         List.map
           (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code)
-          (diagnostics (pipeline database) example_file)
+          (diagnostics (pipeline packages) example_file)
       with
       | [ "types.constant_overflow" ] -> ()
       | actual -> fail "got [%s]" (String.concat "; " actual))

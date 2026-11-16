@@ -17,14 +17,14 @@ let () =
     (fun name ->
       List.iteri
         (fun index text ->
-          let database = Support.setup [ ("example", text) ] in
+          let packages = Support.setup [ ("example", text) ] in
           let file = Support.file_of "example" in
-          if Support.parse_errors database file = [] then
+          if Support.parse_errors packages file = [] then
             test
               (Printf.sprintf "%s block %d checks and proves unless it is an excerpt" name
                  (index + 1))
               (fun () ->
-                let pipeline = Support.pipeline database in
+                let pipeline = Support.pipeline packages in
                 let diagnostics = Support.diagnostics pipeline file in
                 if
                   not
@@ -39,10 +39,10 @@ let () =
                       | unproven ->
                           fail "%s"
                             (String.concat ""
-                               (List.map (Diagnostic.render (source_of database file)) unproven)))
+                               (List.map (Diagnostic.render (source_of packages file)) unproven)))
                   | diagnostics ->
                       fail "%s"
                         (String.concat ""
-                           (List.map (Diagnostic.render (source_of database file)) diagnostics))))
+                           (List.map (Diagnostic.render (source_of packages file)) diagnostics))))
         (Documents.truss_blocks (File_system.read (Harness.workspace_path name))))
     markdown_files

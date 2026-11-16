@@ -1,9 +1,9 @@
 open Harness
 open Support
 
-let check database =
+let check packages =
   Pipeline.For_testing.(diagnostics [ Resolve; Interface; Infer; Patterns; Usage ])
-    (Support.pipeline database)
+    (Support.pipeline packages)
 
 let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]

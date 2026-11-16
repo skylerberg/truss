@@ -1,8 +1,8 @@
 open Harness
 open Support
 
-let mir_parts database package = Pipeline.For_testing.mir (pipeline database) package
-let app_parts database = mir_parts database (module_of "app::main").package
+let mir_parts packages package = Pipeline.For_testing.mir (pipeline packages) package
+let app_parts packages = mir_parts packages (module_of "app::main").package
 let graph_of (parts : Mir.lookups) key = Mir.graph (parts.body_part key)
 let code_of (parts : Mir.lookups) key = Mir.code (parts.body_part key)
 
@@ -402,8 +402,8 @@ let validate definition (body : Mir.Graph.body) =
   Array.iteri (fun node is_reached -> if is_reached then run ~report:true node) reached
 
 let () =
-  let database = setup [] in
-  let parts = lazy (mir_parts database Path.standard_package) in
+  let packages = setup [] in
+  let parts = lazy (mir_parts packages Path.standard_package) in
   let built = ref 0 in
   List.iter
     (fun ((file : Path.file), _) ->
@@ -425,23 +425,23 @@ let () =
                   validate definition mir.body;
                   Array.iter (validate definition) mir.lambdas
               | None -> ())
-            ((Support.names database file.module_.package).declarations_in file)))
+            ((Support.names packages file.module_.package).declarations_in file)))
     Standard_library.files;
   test "the standard library has MIR" (fun () ->
       if !built < 500 then fail "only %d of its definitions have MIR" !built)
 
 let both_of_g text =
-  let database = setup [ ("app::main", text) ] in
+  let packages = setup [ ("app::main", text) ] in
   match
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
         let key = Resolve.Names.key_of declaration in
         if key.path = Path.Top { module_ = module_of "app::main"; name = "g" } then Some key
         else None)
-      (Support.declarations database (Support.module_of "app::main"))
+      (Support.declarations packages (Support.module_of "app::main"))
   with
   | Some key -> (
-      let parts = app_parts database in
+      let parts = app_parts packages in
       match (code_of parts key, graph_of parts key) with
       | Some built, Some graph ->
           validate "g" graph.body;
@@ -843,7 +843,7 @@ let () =
           then fail "the lambda value does not capture g's offset"
       | lambdas -> fail "%d lambdas" (Array.length lambdas));
   test "a method an impl inherits shares its trait's default method's MIR" (fun () ->
-      let database =
+      let packages =
         setup [ ("app::main", Fixtures.Mir.method_an_impl_inherits_shares_its_traits_default) ]
       in
       let module_ = module_of "app::main" in
@@ -851,7 +851,7 @@ let () =
       let impl_for type_name : Path.t =
         Impl { module_; trait = "Shape"; for_type = { type_name; generics = [] } }
       in
-      let parts = app_parts database in
+      let parts = app_parts packages in
       let by_path path =
         match Mir.graph_of_path parts path with
         | Some mir -> mir
@@ -861,7 +861,7 @@ let () =
       let default_mir =
         match
           Option.bind
-            ((Support.names database (Path.package default_method)).key default_method)
+            ((Support.names packages (Path.package default_method)).key default_method)
             (graph_of parts)
         with
         | Some mir -> mir
@@ -879,10 +879,10 @@ let () =
         == by_path (method_of (impl_for "Cube") "side")
       then fail "two written methods share one MIR");
   test "defaults have bodies of their own, apart from the MIR of any function's body" (fun () ->
-      let database = setup [ ("app::main", Fixtures.Mir.defaults_have_bodies_of_their_own) ] in
+      let packages = setup [ ("app::main", Fixtures.Mir.defaults_have_bodies_of_their_own) ] in
       let module_ = module_of "app::main" in
       let top name : Path.t = Top { module_; name } in
-      let parts = app_parts database in
+      let parts = app_parts packages in
       let defaults_of path =
         match Mir.default_graphs_of_path parts path with
         | Some defaults -> defaults
@@ -915,7 +915,7 @@ let () =
       | Field_defaults defaults -> fail "`Counter` has %d field defaults" (List.length defaults)
       | Parameter_defaults _ -> fail "a type with parameter defaults");
   test "a contract's clauses are formulas that take the function's parameters" (fun () ->
-      let database = setup [ ("app::main", Fixtures.Mir.contracts_clauses_are_formulas) ] in
+      let packages = setup [ ("app::main", Fixtures.Mir.contracts_clauses_are_formulas) ] in
       let g : Path.t = Top { module_ = module_of "app::main"; name = "g" } in
       let parameters (clause : Mir.formula) =
         List.map
@@ -952,7 +952,7 @@ let () =
             match statement.kind with Assign { value = Compare _; _ } -> true | _ -> false)
           block.statements
       in
-      match Mir.contract_of_path (app_parts database) g with
+      match Mir.contract_of_path (app_parts packages) g with
       | Some { requires = [ quantified; connected; chosen ]; ensures = [ ensured ]; _ } -> (
           List.iter
             (fun clause ->
@@ -991,16 +991,16 @@ let () =
             (List.length contract.ensures)
       | None -> fail "`g` has no contract");
   test "a loop holds its clauses as formulas, and a `proof` block's statement its body" (fun () ->
-      let database = setup [ ("app::main", Fixtures.Mir.loop_holds_its_clauses_as_formulas) ] in
+      let packages = setup [ ("app::main", Fixtures.Mir.loop_holds_its_clauses_as_formulas) ] in
       let module_ = module_of "app::main" in
       let g : Path.t = Top { module_; name = "g" } in
       let key =
-        match (Support.names database (Path.package g)).key g with
+        match (Support.names packages (Path.package g)).key g with
         | Some key -> key
         | None -> failwith "the program has no g"
       in
       let mir =
-        match code_of (app_parts database) key with
+        match code_of (app_parts packages) key with
         | Some mir -> mir
         | None -> failwith "g has no MIR"
       in

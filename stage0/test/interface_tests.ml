@@ -1,21 +1,21 @@
 open Harness
 open Support
 
-let check database =
-  Pipeline.For_testing.(diagnostics [ Resolve; Interface ]) (Support.pipeline database)
+let check packages =
+  Pipeline.For_testing.(diagnostics [ Resolve; Interface ]) (Support.pipeline packages)
 
 let one_diagnostic = one_diagnostic ~check
 let no_diagnostics = no_diagnostics ~check
 let app name : Path.t = Top { module_ = module_of "app::main"; name }
 
-let interface database =
-  Pipeline.interface_lookups (Support.pipeline database) [ (module_of "app::main").package ]
+let interface packages =
+  Pipeline.interface_lookups (Support.pipeline packages) [ (module_of "app::main").package ]
 
 let standard = Path.standard
 let int64 = Types.builtin Int64
 
 let () =
-  let database = setup [] in
+  let packages = setup [] in
   List.iter
     (fun ((file : Path.file), text) ->
       test
@@ -24,30 +24,30 @@ let () =
           let source = Source.create ~path:(Path.show_file file) text in
           List.iter
             (fun diagnostic -> fail "%s" (Diagnostic.render source diagnostic))
-            (Pipeline.For_testing.(diagnostics [ Interface ]) (Support.pipeline database) file)))
+            (Pipeline.For_testing.(diagnostics [ Interface ]) (Support.pipeline packages) file)))
     Standard_library.files
 
 let () =
   test "a function's signature is lowered" (fun () ->
-      let database =
+      let packages =
         setup
           [
             ("app::main", "fn count(items: List[Int64], limit: own Int64 = 3) -> UInt64 { todo }\n");
           ]
       in
-      match Interface.Definition.signature (interface database) (app "count") with
+      match Interface.Definition.signature (interface packages) (app "count") with
       | Some { parameters = [ items; limit ]; output = Returns output; _ } ->
           if Types.show items.type_ <> "List[Int64]" then fail "items: %s" (Types.show items.type_);
           if limit.mode <> Own || not limit.has_default then fail "limit";
           if not (Types.is_builtin UInt64 output) then fail "output %s" (Types.show output)
       | _ -> fail "no signature");
   test "a method's receiver has its type's generic parameters" (fun () ->
-      let database =
+      let packages =
         setup
           [ ("app::main", Fixtures.Interface.methods_receiver_has_its_types_generic_parameters) ]
       in
       let path : Path.t = Method { owner = app "Box"; name = "get"; receiver = Read } in
-      match Interface.Definition.signature (interface database) path with
+      match Interface.Definition.signature (interface packages) path with
       | Some { receiver = Some (Read, self); _ } ->
           if Types.show self <> "Box[Value]" then fail "self: %s" (Types.show self)
       | _ -> fail "no receiver");
@@ -78,14 +78,14 @@ let () =
       one_diagnostic "fn f[Items: Iterable](items: Items) -> Items.Key { todo }\n"
         "types.unknown_associated_type");
   test "an associated type of a bound is a projection" (fun () ->
-      let database =
+      let packages =
         setup
           [
             ( "app::main",
               "fn first[Items: Iterable](items: Items) -> Option[Items.Element] { todo }\n" );
           ]
       in
-      match Interface.Definition.signature (interface database) (app "first") with
+      match Interface.Definition.signature (interface packages) (app "first") with
       | Some { output = Returns output; _ } ->
           if Types.show output <> "Option[Items.Element]" then fail "output %s" (Types.show output)
       | _ -> fail "no signature")
@@ -155,10 +155,10 @@ let () =
       no_diagnostics
         [ ("app::main", Fixtures.Interface.impls_method_can_rename_its_generic_parameters) ]);
   test "traits cannot require each other in a cycle" (fun () ->
-      let database =
+      let packages =
         setup [ ("app::main", Fixtures.Interface.traits_cannot_require_each_other_in_a_cycle) ]
       in
-      match codes (check database (file_of "app::main")) with
+      match codes (check packages (file_of "app::main")) with
       | [ "types.trait_cycle"; "types.trait_cycle" ] -> ()
       | reported -> fail "found [%s]" (String.concat "; " reported));
   test "a trait cannot redeclare a method of a trait it requires" (fun () ->
@@ -170,8 +170,8 @@ let () =
 
 let property name expected text type_ check =
   test name (fun () ->
-      let database = setup [ ("app::main", text) ] in
-      let actual = check (interface database) ~bounds:(fun _ -> []) (type_ database) in
+      let packages = setup [ ("app::main", text) ] in
+      let actual = check (interface packages) ~bounds:(fun _ -> []) (type_ packages) in
       if actual <> expected then fail "expected %b" expected)
 
 let option type_ = Types.named (standard [ "option" ] "Option") [ type_ ]
@@ -307,9 +307,9 @@ let trait name arguments : Types.trait_reference =
 
 let () =
   test "Int64 implements Add[Int64] with Output Int64" (fun () ->
-      let database = setup [] in
+      let packages = setup [] in
       match
-        Interface.Impls.associated_type (interface database)
+        Interface.Impls.associated_type (interface packages)
           ~bounds:(fun _ -> [])
           int64 (trait "Add" [ int64 ]) "Output"
       with
@@ -317,36 +317,36 @@ let () =
       | Some output -> fail "output %s" (Types.show output)
       | None -> fail "no impl");
   test "Int64 does not implement Add[Int32]" (fun () ->
-      let database = setup [] in
+      let packages = setup [] in
       if
         Option.is_some
-          (Interface.Impls.implements (interface database)
+          (Interface.Impls.implements (interface packages)
              ~bounds:(fun _ -> [])
              int64
              (trait "Add" [ Types.builtin Int32 ]))
       then fail "found an impl");
   test "a derived impl holds when its conditions do" (fun () ->
-      let database = setup [] in
+      let packages = setup [] in
       if
         Option.is_none
-          (Interface.Impls.implements (interface database)
+          (Interface.Impls.implements (interface packages)
              ~bounds:(fun _ -> [])
              (option int64) (trait "Equal" []))
       then fail "no impl");
   test "a derived impl does not hold when its conditions do not" (fun () ->
-      let database = setup [ ("app::main", "type Opaque(x: Int64)\n") ] in
+      let packages = setup [ ("app::main", "type Opaque(x: Int64)\n") ] in
       let opaque = Types.named (app "Opaque") [] in
       if
         Option.is_some
-          (Interface.Impls.implements (interface database)
+          (Interface.Impls.implements (interface packages)
              ~bounds:(fun _ -> [])
              (option opaque) (trait "Equal" []))
       then fail "found an impl");
   test "an impl of a conversion is found by the argument's type" (fun () ->
-      let database = setup [] in
+      let packages = setup [] in
       if
         Option.is_none
-          (Interface.Impls.implements (interface database)
+          (Interface.Impls.implements (interface packages)
              ~bounds:(fun _ -> [])
              int64
              (trait "From" [ Types.builtin Int32 ]))
@@ -354,15 +354,15 @@ let () =
 
 let () =
   let text = Fixtures.Interface.described in
-  let impl_of database type_ wanted : Path.t =
-    match Interface.Impls.implements (interface database) ~bounds:(fun _ -> []) type_ wanted with
+  let impl_of packages type_ wanted : Path.t =
+    match Interface.Impls.implements (interface packages) ~bounds:(fun _ -> []) type_ wanted with
     | Some (From_impl { impl; _ }) -> impl
     | _ -> failwith "no impl"
   in
-  let at database type_ wanted name : Types.signature =
-    let owner = impl_of database type_ wanted in
+  let at packages type_ wanted name : Types.signature =
+    let owner = impl_of packages type_ wanted in
     match
-      Interface.Impls.signature (interface database) (Method { owner; name; receiver = Read })
+      Interface.Impls.signature (interface packages) (Method { owner; name; receiver = Read })
     with
     | Some signature -> signature
     | None -> failwith "no signature"
@@ -376,29 +376,29 @@ let () =
     { trait = app "Described"; trait_arguments = []; associated = [] }
   in
   test "a method written inside an impl is generic over the impl's parameters" (fun () ->
-      let database = setup [ ("app::main", text) ] in
-      let signature = at database both described "describe" in
+      let packages = setup [ ("app::main", text) ] in
+      let signature = at packages both described "describe" in
       if generics signature <> "Value" then fail "generics: %s" (generics signature));
   test "a method an impl leaves to its trait has the trait's signature there" (fun () ->
-      let database = setup [ ("app::main", text) ] in
-      let signature = at database both described "beside" in
+      let packages = setup [ ("app::main", text) ] in
+      let signature = at packages both described "beside" in
       if generics signature <> "Value, Other" then fail "generics: %s" (generics signature);
       match signature.output with
       | Returns output when Types.show output = "Both[Value]" -> ()
       | Returns output -> fail "output %s" (Types.show output)
       | _ -> fail "no result");
   test "a derived impl's method has a signature" (fun () ->
-      let database = setup [] in
-      let signature = at database (option int64) (trait "Equal" []) "equal" in
+      let packages = setup [] in
+      let signature = at packages (option int64) (trait "Equal" []) "equal" in
       match (signature.generics, signature.receiver, signature.parameters) with
       | [ _ ], Some (Read, self), [ other ] when Types.equal self other.type_ -> ()
       | _ -> fail "generics: %s" (generics signature));
   test "a method of a capability's impl uses the impl's capabilities" (fun () ->
-      let database = setup [ ("app::main", text) ] in
+      let packages = setup [ ("app::main", text) ] in
       let clock : Types.trait_reference =
         { trait = standard [ "capabilities" ] "Clock"; trait_arguments = []; associated = [] }
       in
-      let signature = at database (Types.named (app "FixedClock") []) clock "now" in
+      let signature = at packages (Types.named (app "FixedClock") []) clock "now" in
       match (signature.uses :> Types.capability list) with
       | [ Capability _ ] -> ()
       | uses -> fail "%d uses" (List.length uses))
@@ -425,11 +425,11 @@ let () =
 
 let () =
   test "a type that contains itself with growing arguments does not hang" (fun () ->
-      let database =
+      let packages =
         setup [ ("app::main", Fixtures.Interface.type_that_contains_itself_with_growing_arguments) ]
       in
       ignore
-        (Interface.Impls.copyable (interface database)
+        (Interface.Impls.copyable (interface packages)
            ~bounds:(fun _ -> [])
            (Types.named (app "Nested") [ int64 ])));
   test "an impl's method may have the trait method's own generic parameters" (fun () ->
@@ -451,22 +451,22 @@ let () =
       no_diagnostics
         [ ("app::main", Fixtures.Interface.self_in_a_required_trait_is_substituted_by_the) ]);
   test "a trait whose header did not parse satisfies every bound that names it" (fun () ->
-      let database =
+      let packages =
         setup [ ("app::main", Fixtures.Interface.trait_whose_header_did_not_parse_satisfies_every) ]
       in
       match
         Pipeline.For_testing.(diagnostics [ Interface ])
-          (Support.pipeline database) (file_of "app::main")
+          (Support.pipeline packages) (file_of "app::main")
       with
       | [] -> ()
       | reported -> fail "found [%s]" (String.concat "; " (codes reported)));
   test "an opaque generic type is Copyable by its declaration and its arguments" (fun () ->
-      let database =
+      let packages =
         setup [ ("app::main", "public opaque type Box[Value](inner: Value)\n  derives Copyable\n") ]
       in
       if
         not
-          (Interface.Impls.copyable (interface database)
+          (Interface.Impls.copyable (interface packages)
              ~bounds:(fun _ -> [])
              (Types.named (app "Box") [ int64 ]))
       then fail "not Copyable");
@@ -484,7 +484,7 @@ let () =
   test "a type argument must be of its parameter's kind" (fun () ->
       one_diagnostic "fn f(items: List[3]) {}\n" "types.argument_kind");
   test "a constant in a type argument must have a value" (fun () ->
-      let database =
+      let packages =
         setup [ ("app::main", Fixtures.Interface.constant_in_a_type_argument_must_have_a_value) ]
       in
       if
@@ -492,7 +492,7 @@ let () =
           (List.mem "types.arity"
              (codes
                 (Pipeline.For_testing.(diagnostics [ Interface ])
-                   (Support.pipeline database) (file_of "app::main"))))
+                   (Support.pipeline packages) (file_of "app::main"))))
       then fail "accepted");
   test "any must fix every associated type" (fun () ->
       one_diagnostic "fn f(items: any Iterable) {}\n" "types.associated_type_not_fixed");
@@ -505,19 +505,19 @@ let () =
       one_diagnostic Fixtures.Interface.uses_names_a_capability_parameter_not_a_type
         "types.not_a_capability");
   test "Never implements no trait" (fun () ->
-      let database = setup [] in
+      let packages = setup [] in
       if
         Option.is_some
-          (Interface.Impls.implements (interface database)
+          (Interface.Impls.implements (interface packages)
              ~bounds:(fun _ -> [])
              Types.Never (trait "Hash" []))
       then fail "it does");
   test "an any value implements its trait only with the same arguments" (fun () ->
-      let database = setup [] in
+      let packages = setup [] in
       let any = Types.Any (trait "From" [ int64 ]) in
       if
         Option.is_some
-          (Interface.Impls.implements (interface database)
+          (Interface.Impls.implements (interface packages)
              ~bounds:(fun _ -> [])
              any
              (trait "From" [ Types.builtin Int32 ]))
@@ -543,11 +543,11 @@ let () =
 
 let () =
   test "every definition the compiler names is in the standard library" (fun () ->
-      let database = setup [] in
+      let packages = setup [] in
       let declared =
         List.map
           (fun (declaration : Resolve.Names.declaration) -> declaration.path)
-          ((Support.names database Path.standard_package).package_declarations Path.standard_package)
+          ((Support.names packages Path.standard_package).package_declarations Path.standard_package)
       in
       List.iter
         (fun known ->

@@ -418,7 +418,7 @@ let opened segments snapshot =
   in
   (pipeline, loaded)
 
-type database = {
+type worktree = {
   root : string;
   watcher : Watcher.t option;
   segments : Segments.t;
@@ -427,28 +427,28 @@ type database = {
   mutable loaded : loaded list;
 }
 
-let databases : (string, database) Hashtbl.t = Hashtbl.create 4
+let worktrees : (string, worktree) Hashtbl.t = Hashtbl.create 4
 let is_serving = ref false
 let log_bug bug = prerr_endline (Compiler_bug.to_string bug)
 
-let commit database =
-  match Pipeline.unsaved database.pipeline with
+let commit worktree =
+  match Pipeline.unsaved worktree.pipeline with
   | entries -> (
-      match Segments.commit database.segments ~header:(header database.loaded) entries with
-      | () -> Pipeline.mark_saved database.pipeline
+      match Segments.commit worktree.segments ~header:(header worktree.loaded) entries with
+      | () -> Pipeline.mark_saved worktree.pipeline
       | exception ((Unix.Unix_error _ | Sys_error _) as failure) ->
           prerr_endline
             (Printf.sprintf "Cannot save the database in %s: %s."
-               (Filename.concat database.root database_directory)
+               (Filename.concat worktree.root database_directory)
                (match failure with
                | Unix.Unix_error (error, _, _) -> Unix.error_message error
                | failure -> Printexc.to_string failure)))
   | exception Compiler_bug.Bug bug -> log_bug bug
 
-let close database =
-  Option.iter Watcher.stop database.watcher;
-  Segments.close database.segments;
-  Hashtbl.remove databases database.root
+let close worktree =
+  Option.iter Watcher.stop worktree.watcher;
+  Segments.close worktree.segments;
+  Hashtbl.remove worktrees worktree.root
 
 let is_layout path =
   path = Project.lock_file || Filename.basename path = Filename.basename (Project.manifest_file "")
@@ -487,18 +487,18 @@ let apply_changes pipeline (after : snapshot) = function
       Pipeline.relayout pipeline ~loaded:(pipeline_states loaded) packages;
       Some loaded
 
-let copied_database root (trial : snapshot) =
-  match Hashtbl.find_opt databases root with
-  | Some database ->
-      let pipeline = Pipeline.copy database.pipeline in
-      ignore (apply_changes pipeline trial (file_changes database.snapshot trial));
+let copy_database root (trial : snapshot) =
+  match Hashtbl.find_opt worktrees root with
+  | Some worktree ->
+      let pipeline = Pipeline.copy worktree.pipeline in
+      ignore (apply_changes pipeline trial (file_changes worktree.snapshot trial));
       pipeline
   | None -> cold_pipeline ~checks:true trial
 
 let over (snapshot : snapshot) files =
   let root = root snapshot in
   let trial = with_files snapshot files in
-  { trial with kind = Trial { root; pipeline = lazy (copied_database root trial) } }
+  { trial with kind = Trial { root; pipeline = lazy (copy_database root trial) } }
 
 let trial snapshot changes =
   over snapshot
@@ -566,7 +566,7 @@ let other_worktrees snapshot =
     List.filter
       (fun other -> other <> root && other <> "" && Sys.file_exists other)
       (List.sort_uniq compare
-         (Server.serving () @ Hashtbl.fold (fun root _ roots -> root :: roots) databases []))
+         (Server.serving () @ Hashtbl.fold (fun root _ roots -> root :: roots) worktrees []))
   with
   | [] -> []
   | others -> (
@@ -578,9 +578,9 @@ let other_worktrees snapshot =
 let pipeline ?(checks = true) snapshot =
   match snapshot.kind with
   | Worktree root when checks -> (
-      match Hashtbl.find_opt databases root with
-      | Some database when database.snapshot == snapshot -> database.pipeline
-      | Some _ | None -> copied_database root snapshot)
+      match Hashtbl.find_opt worktrees root with
+      | Some worktree when worktree.snapshot == snapshot -> worktree.pipeline
+      | Some _ | None -> copy_database root snapshot)
   | Trial { pipeline; _ } when checks -> Lazy.force pipeline
   | Worktree _ | Trial _ | Published -> cold_pipeline ~checks snapshot
 
@@ -614,29 +614,29 @@ let changed_files root files paths =
     files
   @ List.concat_map found prefixes
 
-let refresh database =
-  let root = database.root in
+let refresh worktree =
+  let root = worktree.root in
   let files =
-    match Option.map Watcher.changes database.watcher with
+    match Option.map Watcher.changes worktree.watcher with
     | Some Overflow | None -> Some (Registry.Content.input_files root)
     | Some (Changed []) -> None
-    | Some (Changed paths) -> Some (changed_files root database.snapshot.files paths)
+    | Some (Changed paths) -> Some (changed_files root worktree.snapshot.files paths)
   in
   match files with
   | None -> false
   | Some files -> (
-      let before = database.snapshot in
+      let before = worktree.snapshot in
       let after = with_files before files in
-      database.snapshot <- after;
+      worktree.snapshot <- after;
       match file_changes before after with
       | Some [] -> false
       | changes ->
           Option.iter
-            (fun loaded -> database.loaded <- loaded)
-            (apply_changes database.pipeline after changes);
+            (fun loaded -> worktree.loaded <- loaded)
+            (apply_changes worktree.pipeline after changes);
           true)
 
-let open_database root =
+let open_worktree root =
   match Segments.open_ (Filename.concat root database_directory) with
   | Error `Open_elsewhere ->
       Error
@@ -657,20 +657,20 @@ let open_database root =
         (snapshot, opened segments snapshot)
       with
       | snapshot, (pipeline, loaded) ->
-          let database = { root; watcher; segments; snapshot; pipeline; loaded } in
-          Hashtbl.replace databases root database;
-          Ok database
+          let worktree = { root; watcher; segments; snapshot; pipeline; loaded } in
+          Hashtbl.replace worktrees root worktree;
+          Ok worktree
       | exception failure ->
           Option.iter Watcher.stop watcher;
           Segments.close segments;
           raise failure)
 
 let worktree_snapshot root =
-  match Hashtbl.find_opt databases root with
-  | Some database ->
-      ignore (refresh database);
-      Ok database.snapshot
-  | None -> Result.map (fun database -> database.snapshot) (open_database root)
+  match Hashtbl.find_opt worktrees root with
+  | Some worktree ->
+      ignore (refresh worktree);
+      Ok worktree.snapshot
+  | None -> Result.map (fun worktree -> worktree.snapshot) (open_worktree root)
 
 let take_snapshot directory =
   if not (Sys.file_exists directory) then Error (directory ^ ": no such directory.")
@@ -692,14 +692,14 @@ let retake snapshot =
 
 let propagate_changes descriptor =
   Hashtbl.iter
-    (fun _ database ->
-      if Option.map Watcher.descriptor database.watcher = Some descriptor then
-        match if refresh database then Pipeline.propagate ~on_bug:log_bug database.pipeline with
-        | () -> commit database
+    (fun _ worktree ->
+      if Option.map Watcher.descriptor worktree.watcher = Some descriptor then
+        match if refresh worktree then Pipeline.propagate ~on_bug:log_bug worktree.pipeline with
+        | () -> commit worktree
         | exception Compiler_bug.Bug bug ->
             log_bug bug;
-            close database)
-    (Hashtbl.copy databases)
+            close worktree)
+    (Hashtbl.copy worktrees)
 
 let problems snapshot = snapshot.project.problems
 
@@ -828,13 +828,13 @@ let server_key directory = Option.value (root_of directory) ~default:""
 
 let close_all () =
   List.iter
-    (fun database ->
-      commit database;
-      close database)
-    (Hashtbl.fold (fun _ database databases -> database :: databases) databases [])
+    (fun worktree ->
+      commit worktree;
+      close worktree)
+    (Hashtbl.fold (fun _ worktree worktrees -> worktree :: worktrees) worktrees [])
 
 let flush () =
-  if !is_serving then Hashtbl.iter (fun _ database -> commit database) databases else close_all ();
+  if !is_serving then Hashtbl.iter (fun _ worktree -> commit worktree) worktrees else close_all ();
   flush_store ()
 
 let serve ~key ~handle =
@@ -844,11 +844,11 @@ let serve ~key ~handle =
     ~collect
     ~watcher_descriptors:(fun () ->
       Hashtbl.fold
-        (fun _ database descriptors ->
+        (fun _ worktree descriptors ->
           Option.fold ~none:descriptors
             ~some:(fun watcher -> Watcher.descriptor watcher :: descriptors)
-            database.watcher)
-        databases [])
+            worktree.watcher)
+        worktrees [])
     ~propagate:propagate_changes ~handle ~save:flush
     ~close:(fun () ->
       close_all ();
@@ -870,10 +870,10 @@ module For_testing = struct
   let listen = Server.listen
 
   let interrupt_commit root =
-    match Hashtbl.find_opt databases root with
-    | Some database ->
-        Segments.For_testing.interrupted_commit database.segments ~header:(header database.loaded)
-          (Pipeline.unsaved database.pipeline);
-        close database
+    match Hashtbl.find_opt worktrees root with
+    | Some worktree ->
+        Segments.For_testing.interrupted_commit worktree.segments ~header:(header worktree.loaded)
+          (Pipeline.unsaved worktree.pipeline);
+        close worktree
     | None -> Compiler_bug.bug ~stage:"Database" "%s has no open database" root
 end

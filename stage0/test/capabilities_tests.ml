@@ -1,8 +1,8 @@
 open Harness
 open Support
 
-let check database =
-  Pipeline.For_testing.(diagnostics [ Resolve; Interface; Infer ]) (Support.pipeline database)
+let check packages =
+  Pipeline.For_testing.(diagnostics [ Resolve; Interface; Infer ]) (Support.pipeline packages)
 
 let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]
@@ -20,7 +20,7 @@ let () =
       fine Fixtures.Capabilities.provide_makes_a_capability_available_in_its_block);
   test "provide records each capability's impl with its generic arguments" (fun () ->
       let text = Fixtures.Capabilities.provide_records_each_capabilitys_impl_with_its in
-      let database = setup [ ("app::main", text) ] in
+      let packages = setup [ ("app::main", text) ] in
       let key : Resolve.Names.key =
         {
           module_ = module_of "app::main";
@@ -38,7 +38,7 @@ let () =
                      (fun (implementation : Core.implementation) -> implementation.provides)
                      implementations)
             | _ -> None)
-          (core_nodes database key).expressions
+          (core_nodes packages key).expressions
       with
       | [ [ [ { capability; impl = Impl _; arguments = [ (_, Type tag) ] } ] ] ]
         when Path.show capability = "standard::capabilities::Clock" && Types.show tag = "Bool" ->
@@ -88,7 +88,7 @@ let () =
 
 let () =
   test "a dependency can use only the capabilities that it is granted" (fun () ->
-      let database =
+      let packages =
         setup
           [
             ("app::main", Fixtures.Capabilities.dependency_can_use_only_the_capabilities_that_it);
@@ -96,21 +96,21 @@ let () =
               Fixtures.Capabilities.dependency_can_use_only_the_capabilities_that_it_time );
           ]
       in
-      let database =
-        with_dependencies database { owner = None; name = "app" }
+      let packages =
+        with_dependencies packages { owner = None; name = "app" }
           [ { package = { owner = None; name = "clock_library" }; capabilities = [] } ]
       in
-      match codes (check database (file_of "app::main")) with
+      match codes (check packages (file_of "app::main")) with
       | [ "capabilities.not_granted" ] -> ()
       | actual -> fail "found [%s]" (String.concat "; " actual))
 
 let () =
   let with_grant files granted =
-    let database =
+    let packages =
       with_dependencies (setup files) { owner = None; name = "app" }
         [ { package = { owner = None; name = "clock_library" }; capabilities = granted } ]
     in
-    codes (check database (file_of "app::main"))
+    codes (check packages (file_of "app::main"))
   in
   let library = ("clock_library::time", Fixtures.Capabilities.library_time) in
   test "a dependency's trait method can use only the granted capabilities" (fun () ->
@@ -155,13 +155,13 @@ let () =
       fine Fixtures.Capabilities.implementation_of_a_capability_may_hand_the)
 
 let codes_with_grants files grants =
-  let database =
+  let packages =
     with_dependencies
       (setup ~dependencies:[ ("plugins", "framework") ] files)
       { owner = None; name = "app" }
       (List.map (fun (package, capabilities) -> { Manifest.package; capabilities }) grants)
   in
-  (database, codes (check database (file_of "app::main")))
+  (packages, codes (check packages (file_of "app::main")))
 
 let expect_codes ~expected (_, actual) =
   if actual <> expected then
@@ -214,9 +214,9 @@ let () =
 let ledger = ("store::ledger", Fixtures.Capabilities.ledger_ledger)
 let pays = ("app::main", Fixtures.Capabilities.pays)
 
-let problems database =
+let problems packages =
   let app : Path.package = { owner = None; name = "app" } in
-  let pipeline = pipeline database in
+  let pipeline = pipeline packages in
   Pipeline.check pipeline [ app ];
   Pipeline.manifest_problems pipeline app
 
@@ -226,11 +226,11 @@ let () =
         (codes_with_grants [ pays; ledger ]
            [ ({ owner = None; name = "store" }, [ "store::ledger::Ledger" ]) ]));
   test "a capability's name alone grants only one of the prelude" (fun () ->
-      let database, actual =
+      let packages, actual =
         codes_with_grants [ pays; ledger ] [ ({ owner = None; name = "store" }, [ "Ledger" ]) ]
       in
-      expect_codes ~expected:[ "capabilities.not_granted" ] (database, actual);
-      match problems database with
+      expect_codes ~expected:[ "capabilities.not_granted" ] (packages, actual);
+      match problems packages with
       | [ Not_a_capability { dependency = { Path.owner = None; name = "store" }; name = "Ledger" } ]
         ->
           ()
@@ -242,7 +242,7 @@ let () =
 
 let () =
   test "a dependency that nothing in the package names is reported" (fun () ->
-      let database, _ =
+      let packages, _ =
         codes_with_grants
           [
             ("app::main", Fixtures.Capabilities.dependency_that_nothing_in_the_package_names_is);
@@ -250,17 +250,17 @@ let () =
           ]
           [ ({ Path.owner = None; name = "clock_library" }, []) ]
       in
-      match problems database with
+      match problems packages with
       | [ Unused { Path.owner = None; name = "clock_library" } ] -> ()
       | _ -> fail "not reported");
   test "a dependency named in a path is used" (fun () ->
-      let database, _ =
+      let packages, _ =
         codes_with_grants [ pays; ledger ]
           [ ({ Path.owner = None; name = "store" }, [ "store::ledger::Ledger" ]) ]
       in
-      if problems database <> [] then fail "reported");
+      if problems packages <> [] then fail "reported");
   test "a dependency whose trait's method is called with a dot is used" (fun () ->
-      let database, actual =
+      let packages, actual =
         codes_with_grants
           [
             ("app::main", Fixtures.Capabilities.dependency_whose_traits_method_is_called_with_a);
@@ -269,10 +269,10 @@ let () =
           ]
           [ ({ Path.owner = None; name = "shapes" }, []) ]
       in
-      expect_codes ~expected:[] (database, actual);
-      if problems database <> [] then fail "reported");
+      expect_codes ~expected:[] (packages, actual);
+      if problems packages <> [] then fail "reported");
   test "an unused dependency is reported for every kind of definition in the package" (fun () ->
-      let database, actual =
+      let packages, actual =
         codes_with_grants
           [
             ("app::main", Fixtures.Capabilities.unused_dependency_is_reported_for_every_kind_of);
@@ -280,12 +280,12 @@ let () =
           ]
           [ ({ Path.owner = None; name = "clock_library" }, []) ]
       in
-      expect_codes ~expected:[] (database, actual);
-      match problems database with
+      expect_codes ~expected:[] (packages, actual);
+      match problems packages with
       | [ Unused { Path.owner = None; name = "clock_library" } ] -> ()
       | _ -> fail "not reported");
   test "an unused dependency is not reported for a package with an error" (fun () ->
-      let database, _ =
+      let packages, _ =
         codes_with_grants
           [
             ("app::main", Fixtures.Capabilities.unused_dependency_is_not_reported_for_a_package);
@@ -293,7 +293,7 @@ let () =
           ]
           [ ({ Path.owner = None; name = "clock_library" }, []) ]
       in
-      if problems database <> [] then fail "reported")
+      if problems packages <> [] then fail "reported")
 
 let ticks = Fixtures.Capabilities.ticks
 

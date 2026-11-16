@@ -5,13 +5,13 @@ let checked pipeline file =
   | [] -> Support.proof_diagnostics pipeline file
   | errors -> errors
 
-let check database = checked (Support.pipeline database)
+let check packages = checked (Support.pipeline packages)
 let proven text = Support.no_diagnostics ~check [ ("app::main", text) ]
 let not_proven text code = Support.one_diagnostic ~check text code
 
 let codes text =
-  let database = Support.setup [ ("app::main", text) ] in
-  Support.codes (check database (Support.file_of "app::main"))
+  let packages = Support.setup [ ("app::main", text) ] in
+  Support.codes (check packages (Support.file_of "app::main"))
 
 let only_code text code =
   match codes text with
@@ -20,8 +20,8 @@ let only_code text code =
       if List.exists (fun other -> other <> code) actual then fail "%s" (String.concat ", " actual)
 
 let message text =
-  let database = Support.setup [ ("app::main", text) ] in
-  match check database (Support.file_of "app::main") with
+  let packages = Support.setup [ ("app::main", text) ] in
+  match check packages (Support.file_of "app::main") with
   | [ diagnostic ] -> diagnostic.message
   | actual ->
       Printf.sprintf "%d diagnostics: %s" (List.length actual)
@@ -96,14 +96,14 @@ let () =
   test "recursion that does not decrease" (fun () ->
       not_proven Fixtures.Prover.recursion_that_does_not_decrease "prover.termination");
   test "a contract that calls its own function applies the function's limited copy" (fun () ->
-      let database =
+      let packages =
         Support.setup
           [
             ( "app::main",
               Fixtures.Prover.contract_that_calls_its_own_function_applies_its_limited_copy );
           ]
       in
-      let caller = List.hd (Support.declarations database (Support.module_of "app::main")) in
+      let caller = List.hd (Support.declarations packages (Support.module_of "app::main")) in
       let rec applies_limited (term : Logic.term) =
         match term with
         | Apply (Limited _, _) -> true
@@ -113,7 +113,7 @@ let () =
         | Symbol _ | Integer _ | Boolean _ | Bits _ -> false
       in
       match
-        Support.proofs (Support.pipeline database) (Support.file_of "app::main")
+        Support.proofs (Support.pipeline packages) (Support.file_of "app::main")
           (Resolve.Names.key_of caller)
       with
       | Obligations { obligations = [ obligation ]; _ } ->
@@ -123,11 +123,11 @@ let () =
 
 let () =
   test "mutual recursion without measures cannot be shown to end" (fun () ->
-      let database =
+      let packages =
         Support.setup
           [ ("app::main", Fixtures.Prover.mutual_recursion_without_measures_cannot_be_shown) ]
       in
-      match Support.codes (check database (Support.file_of "app::main")) with
+      match Support.codes (check packages (Support.file_of "app::main")) with
       | [ "prover.termination"; "prover.termination" ] -> ()
       | codes -> fail "codes %s" (String.concat ", " codes));
   test "mutual recursion that decreases" (fun () ->
@@ -139,7 +139,7 @@ let () =
 
 let () =
   test "a proof that reads a contract that fails to check is blocked and reports nothing" (fun () ->
-      let database =
+      let packages =
         Support.setup
           [
             ("app::main", Fixtures.Prover.proof_that_reads_a_contract_that_fails_to_check);
@@ -147,21 +147,21 @@ let () =
           ]
       in
       let main = Support.file_of "app::main" in
-      (match Support.codes (Support.diagnostics (Support.pipeline database) main) with
+      (match Support.codes (Support.diagnostics (Support.pipeline packages) main) with
       | [] -> ()
       | codes -> fail "the caller does not check: %s" (String.concat ", " codes));
-      (match Support.codes (Support.proof_diagnostics (Support.pipeline database) main) with
+      (match Support.codes (Support.proof_diagnostics (Support.pipeline packages) main) with
       | [] -> ()
       | codes -> fail "the blocked proof reports %s" (String.concat ", " codes));
       let caller =
         List.find
           (fun (declaration : Resolve.Names.declaration) ->
             Path.show declaration.path = "app::main::caller")
-          (Support.declarations database (Support.module_of "app::main"))
+          (Support.declarations packages (Support.module_of "app::main"))
       in
       match
         Pipeline.proof
-          (Support.proven (Support.pipeline database) main)
+          (Support.proven (Support.pipeline packages) main)
           (Resolve.Names.key_of caller)
       with
       | Some Blocked -> ()
@@ -170,7 +170,7 @@ let () =
 
 let () =
   test "a type error in a callee's body blocks no caller's proof" (fun () ->
-      let database =
+      let packages =
         Support.setup
           [
             ("app::main", Fixtures.Prover.type_error_in_a_callees_body_blocks_no_callers_proof);
@@ -179,18 +179,18 @@ let () =
           ]
       in
       let main = Support.file_of "app::main" in
-      (match Support.codes (Support.proof_diagnostics (Support.pipeline database) main) with
+      (match Support.codes (Support.proof_diagnostics (Support.pipeline packages) main) with
       | [] -> ()
       | codes -> fail "the caller's proof reports %s" (String.concat ", " codes));
       let caller =
         List.find
           (fun (declaration : Resolve.Names.declaration) ->
             Path.show declaration.path = "app::main::caller")
-          (Support.declarations database (Support.module_of "app::main"))
+          (Support.declarations packages (Support.module_of "app::main"))
       in
       match
         Pipeline.proof
-          (Support.proven (Support.pipeline database) main)
+          (Support.proven (Support.pipeline packages) main)
           (Resolve.Names.key_of caller)
       with
       | Some (Value (Obligations _)) -> ()
@@ -198,7 +198,7 @@ let () =
       | Some (Failed _ | Blocked) -> fail "the proof is blocked"
       | None -> fail "the caller has no proof");
   test "a body that calls a broken signature blocks no caller's proof" (fun () ->
-      let database =
+      let packages =
         Support.setup
           [
             ("app::main", Fixtures.Prover.body_that_calls_a_broken_signature_blocks_no_callers_proof);
@@ -207,18 +207,18 @@ let () =
           ]
       in
       let main = Support.file_of "app::main" in
-      (match Support.codes (Support.proof_diagnostics (Support.pipeline database) main) with
+      (match Support.codes (Support.proof_diagnostics (Support.pipeline packages) main) with
       | [] -> ()
       | codes -> fail "the caller's proof reports %s" (String.concat ", " codes));
       let caller =
         List.find
           (fun (declaration : Resolve.Names.declaration) ->
             Path.show declaration.path = "app::main::caller")
-          (Support.declarations database (Support.module_of "app::main"))
+          (Support.declarations packages (Support.module_of "app::main"))
       in
       match
         Pipeline.proof
-          (Support.proven (Support.pipeline database) main)
+          (Support.proven (Support.pipeline packages) main)
           (Resolve.Names.key_of caller)
       with
       | Some (Value (Obligations _)) -> ()
@@ -228,14 +228,14 @@ let () =
 
 let () =
   test "a broken method of a trait blocks no call of its other methods" (fun () ->
-      let database =
+      let packages =
         Support.setup
           [
             ("app::main", Fixtures.Prover.broken_method_of_a_trait_blocks_no_call_of_its);
             ("app::main/measured", Fixtures.Prover.broken_method_of_a_trait_blocks_no_call_of_its_2);
           ]
       in
-      let pipeline = Support.pipeline database in
+      let pipeline = Support.pipeline packages in
       let main = Support.file_of "app::main" in
       (match
          Support.codes (Support.diagnostics pipeline (Support.file_of "app::main/measured"))
@@ -258,7 +258,7 @@ let () =
           | Some (Failed _ | Blocked) ->
               fail "the proof of %s is blocked" (Path.show declaration.path)
           | None -> fail "%s has no proof" (Path.show declaration.path))
-        ((Support.names database main.module_.package).declarations_in main))
+        ((Support.names packages main.module_.package).declarations_in main))
 
 let tree = Fixtures.Prover.tree
 
@@ -850,15 +850,15 @@ let () =
       proven Fixtures.Prover.potential_its_invariant_keeps_at_or_above_zero)
 
 let holes text =
-  let database = Support.setup [ ("app::main", text) ] in
-  let proof = Support.proofs (Support.pipeline database) (Support.file_of "app::main") in
+  let packages = Support.setup [ ("app::main", text) ] in
+  let proof = Support.proofs (Support.pipeline packages) (Support.file_of "app::main") in
   List.fold_left
     (fun total declaration ->
       match proof (Resolve.Names.key_of declaration) with
       | Obligations outcome -> total + List.length outcome.holes
       | Unsupported _ | Not_proven_here -> total)
     0
-    (Support.declarations database (Support.module_of "app::main"))
+    (Support.declarations packages (Support.module_of "app::main"))
 
 let () =
   test "a todo in a theorem is a hole, not a failure" (fun () ->
@@ -1011,12 +1011,12 @@ let () =
       proven Fixtures.Prover.loop_of_pushed_copies_is_amortized_over_the_copies)
 
 let across library program =
-  let database =
+  let packages =
     Support.setup
       ~dependencies:[ ("app", "lib") ]
       [ ("lib::numbers", library); ("app::main", "use lib::numbers\n\n" ^ program) ]
   in
-  check database (Support.file_of "app::main")
+  check packages (Support.file_of "app::main")
 
 let public_doubling =
   "public fn double(limit_count: Int64) -> Int64\n\
@@ -1056,11 +1056,11 @@ let () =
 
 let () =
   test "a callee's requires about the caller's parameters is offered as the caller's" (fun () ->
-      let database =
+      let packages =
         Support.setup
           [ ("app::main", Fixtures.Prover.callees_requires_about_the_callers_parameters_is) ]
       in
-      match check database (Support.file_of "app::main") with
+      match check packages (Support.file_of "app::main") with
       | [ { fixes = [ { title; _ } ]; _ } ] when title = "Add `requires count < 100`" -> ()
       | actual ->
           fail "%s"
@@ -1091,11 +1091,11 @@ let () =
 
 let () =
   let fix_titles text =
-    let database = Support.setup [ ("app::main", text) ] in
+    let packages = Support.setup [ ("app::main", text) ] in
     List.concat_map
       (fun (diagnostic : Diagnostic.t) ->
         List.map (fun (fix : _ Diagnostic.fix) -> fix.title) diagnostic.fixes)
-      (check database (Support.file_of "app::main"))
+      (check packages (Support.file_of "app::main"))
   in
   test "a divisor that may be zero offers a requires that it is not" (fun () ->
       match fix_titles Fixtures.Prover.divisor_that_may_be_zero_offers_a_requires_that_it with
@@ -1106,11 +1106,11 @@ let () =
       | [ "Add `requires by < 64`" ] -> ()
       | actual -> fail "%s" (String.concat "; " actual));
   test "an overflow with a literal offers the bound as a requires" (fun () ->
-      let database =
+      let packages =
         Support.setup
           [ ("app::main", Fixtures.Prover.overflow_with_a_literal_offers_the_bound_as_a) ]
       in
-      match check database (Support.file_of "app::main") with
+      match check packages (Support.file_of "app::main") with
       | [ { fixes = [ { title; _ } ]; _ } ] when title = "Add `requires count <= 254`" -> ()
       | actual ->
           fail "%s"
@@ -1141,11 +1141,11 @@ let () =
       | [ "Add `requires 0 <= high - low`" ] -> ()
       | actual -> fail "%s" (String.concat "; " actual));
   test "a failed assert about a call's result offers no requires" (fun () ->
-      let database =
+      let packages =
         Support.setup
           [ ("app::main", Fixtures.Prover.failed_assert_about_a_calls_result_offers_no) ]
       in
-      match check database (Support.file_of "app::main") with
+      match check packages (Support.file_of "app::main") with
       | [ { code; fixes = []; _ } ] when Diagnostic.Code.name code = "prover.assertion" -> ()
       | actual -> fail "%d diagnostics" (List.length actual));
   test "an overflow names the fixes that change the code's semantics" (fun () ->
@@ -1221,10 +1221,10 @@ let () =
       let text = message Fixtures.Prover.counterexample_gives_the_values_of_the_locals in
       if not (contains text "`at` is") then fail "%s" text);
   test "a file's proof states list proven and unproven obligations" (fun () ->
-      let database =
+      let packages =
         Support.setup [ ("app::main", Fixtures.Prover.files_proof_states_list_proven_and_unproven) ]
       in
-      let states = Support.proof_states (Support.pipeline database) (Support.file_of "app::main") in
+      let states = Support.proof_states (Support.pipeline packages) (Support.file_of "app::main") in
       let failed =
         List.filter (fun (state : Source.span Prover.state) -> state.failure <> None) states
       in
@@ -1232,8 +1232,8 @@ let () =
         fail "%d states, %d failed" (List.length states) (List.length failed));
   test "a call's requires that may not hold has a note at the clause" (fun () ->
       let text = Fixtures.Prover.calls_requires_that_may_not_hold_has_a_note_at_the in
-      let database = Support.setup [ ("app::main", text) ] in
-      match check database (Support.file_of "app::main") with
+      let packages = Support.setup [ ("app::main", text) ] in
+      match check packages (Support.file_of "app::main") with
       | [ { notes = [ (span, _) ]; _ } ] ->
           let noted = String.sub text span.start (span.stop - span.start) in
           if noted <> "count > 0" then fail "the note is at `%s`" noted
@@ -1378,12 +1378,12 @@ let () =
           if Hashtbl.find_opt cached_answers (Solver.request_key request) <> Some "proven\n" then
             fail "the cache does not have the answer");
   test "a query's text names nothing by its Truss name" (fun () ->
-      let database =
+      let packages =
         Support.setup [ ("app::main", Fixtures.Prover.querys_text_names_nothing_by_its_truss_name) ]
       in
-      let key = List.hd (Support.declarations database (Support.module_of "app::main")) in
+      let key = List.hd (Support.declarations packages (Support.module_of "app::main")) in
       match
-        Support.proofs (Support.pipeline database) (Support.file_of "app::main")
+        Support.proofs (Support.pipeline packages) (Support.file_of "app::main")
           (Resolve.Names.key_of key)
       with
       | Obligations { obligations = [ obligation ]; _ } ->
@@ -1392,10 +1392,10 @@ let () =
       | _ -> fail "expected one obligation");
   test "renaming a function and its parameter gives the same query" (fun () ->
       let key_of text =
-        let database = Support.setup [ ("app::main", text) ] in
-        let key = List.hd (Support.declarations database (Support.module_of "app::main")) in
+        let packages = Support.setup [ ("app::main", text) ] in
+        let key = List.hd (Support.declarations packages (Support.module_of "app::main")) in
         match
-          Support.proofs (Support.pipeline database) (Support.file_of "app::main")
+          Support.proofs (Support.pipeline packages) (Support.file_of "app::main")
             (Resolve.Names.key_of key)
         with
         | Obligations { obligations = [ obligation ]; _ } -> Solver.For_testing.key obligation.query
@@ -1421,7 +1421,7 @@ let () =
             (fun inner _ -> "spread(" ^ inner ^ ")")
             "value + 12345 - 12345" (List.init depth Fun.id)
         in
-        let database =
+        let packages =
           Support.setup
             [
               ( "app::main",
@@ -1444,10 +1444,10 @@ let () =
           List.find
             (fun (declaration : Resolve.Names.declaration) ->
               Path.show declaration.path = "app::main::f")
-            (Support.declarations database (Support.module_of "app::main"))
+            (Support.declarations packages (Support.module_of "app::main"))
         in
         match
-          Support.proofs (Support.pipeline database) (Support.file_of "app::main")
+          Support.proofs (Support.pipeline packages) (Support.file_of "app::main")
             (Resolve.Names.key_of key)
         with
         | Obligations { obligations; _ } ->

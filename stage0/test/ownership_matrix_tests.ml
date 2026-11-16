@@ -1,9 +1,9 @@
 open Harness
 open Support
 
-let check database =
+let check packages =
   Pipeline.For_testing.(diagnostics [ Resolve; Interface; Infer; Patterns; Usage; Ownership ])
-    (Support.pipeline database)
+    (Support.pipeline packages)
 
 let helpers = Fixtures.Ownership_matrix.helpers
 
@@ -250,12 +250,12 @@ let () =
       test (Printf.sprintf "%s cannot be used after its source is mutated or moved" maker.maker)
         (fun () ->
           let text, functions = generate maker in
-          let database = setup [ ("app::main", text) ] in
+          let packages = setup [ ("app::main", text) ] in
           let file = file_of "app::main" in
-          (match parse_errors database file with
+          (match parse_errors packages file with
           | [] -> ()
           | errors -> fail "the generated module does not parse: %s" (String.concat " " errors));
-          let diagnostics = check database file in
+          let diagnostics = check packages file in
           let verdict_of (generated : generated) =
             List.filter
               (fun (diagnostic : Diagnostic.t) ->

@@ -1,15 +1,15 @@
 open Harness
 open Support
 
-let check database =
-  Pipeline.For_testing.(diagnostics [ Resolve; Interface; Infer ]) (Support.pipeline database)
+let check packages =
+  Pipeline.For_testing.(diagnostics [ Resolve; Interface; Infer ]) (Support.pipeline packages)
 
 let one_diagnostic = one_diagnostic ~check
 let no_diagnostics = no_diagnostics ~check
 let fine text = no_diagnostics [ ("app::main", text) ]
 
 let expression_at text written occurrence =
-  let database = setup [ ("app::main", text) ] in
+  let packages = setup [ ("app::main", text) ] in
   let file = file_of "app::main" in
   let offset = Option.get (Substring.find ~occurrence text written) in
   let actual =
@@ -17,10 +17,10 @@ let expression_at text written occurrence =
       (fun (declaration : Resolve.Names.declaration) ->
         let key = Resolve.Names.key_of declaration in
         match
-          ( (Support.names database key.module_.package).definition key,
-            (Support.names database key.module_.package).spans key,
-            (Support.names database key.module_.package).place key,
-            Pipeline.For_testing.checked_body (pipeline database) key )
+          ( (Support.names packages key.module_.package).definition key,
+            (Support.names packages key.module_.package).spans key,
+            (Support.names packages key.module_.package).place key,
+            Pipeline.For_testing.checked_body (pipeline packages) key )
         with
         | Some definition, Some spans, Some { base; _ }, Some result ->
             let best = ref None in
@@ -41,7 +41,7 @@ let expression_at text written occurrence =
             Syntax_walk.definition visit definition;
             Option.map (fun value -> (value, result)) !best
         | _ -> None)
-      ((Support.names database file.module_.package).declarations_in file)
+      ((Support.names packages file.module_.package).declarations_in file)
   in
   match actual with
   | Some actual -> actual
@@ -522,24 +522,24 @@ let () =
   test "checking twice gives the same result" (fun () ->
       let text = Fixtures.Infer.checking_twice_gives_the_same_result in
       let type_check_result () =
-        let database = setup [ ("app::main", text) ] in
+        let packages = setup [ ("app::main", text) ] in
         let key =
           Resolve.Names.key_of
-            (List.hd (Support.declarations database (Support.module_of "app::main")))
+            (List.hd (Support.declarations packages (Support.module_of "app::main")))
         in
-        Pipeline.For_testing.checked_body (pipeline database) key
+        Pipeline.For_testing.checked_body (pipeline packages) key
       in
       if type_check_result () <> type_check_result () then fail "different")
 
 let () =
   test "no table of the standard library holds a type inference left unsolved" (fun () ->
-      let database = setup [] in
+      let packages = setup [] in
       List.iter
         (fun ((file : Path.file), _) ->
           List.iter
             (fun (declaration : Resolve.Names.declaration) ->
               match
-                Pipeline.For_testing.checked_body (pipeline database)
+                Pipeline.For_testing.checked_body (pipeline packages)
                   (Resolve.Names.key_of declaration)
               with
               | Some { tables; _ } ->
@@ -553,7 +553,7 @@ let () =
                       | _ -> ()))
                     [ tables.types; tables.local_types ]
               | None -> ())
-            ((Support.names database file.module_.package).declarations_in file))
+            ((Support.names packages file.module_.package).declarations_in file))
         Standard_library.files)
 
 let point = "type Point(x: Int64)\n\n"
@@ -564,10 +564,10 @@ let () =
         (point ^ Fixtures.Infer.calls_type_arguments_must_meet_their_bounds)
         "types.unsatisfied_bound");
   test "a type written in a body must meet its bounds" (fun () ->
-      let database =
+      let packages =
         setup [ ("app::main", point ^ Fixtures.Infer.type_written_in_a_body_must_meet_its_bounds) ]
       in
-      match codes (check database (file_of "app::main")) with
+      match codes (check packages (file_of "app::main")) with
       | [ "types.unsatisfied_bound"; "types.unsatisfied_bound" ] -> ()
       | actual -> fail "found [%s]" (String.concat "; " actual));
   test
@@ -584,9 +584,9 @@ let () =
         ]
       in
       Support.one_diagnostic ~setup:in_standard ~file:"standard::probe"
-        ~check:(fun database ->
+        ~check:(fun packages ->
           Pipeline.For_testing.(diagnostics [ Resolve; Interface; Infer ])
-            (Pipeline.create database))
+            (Pipeline.create packages))
         Fixtures.Infer.storage_lengthen_rejects_an_element_type_with_a_drop
         "types.unsatisfied_bound");
   test "a type written in a body that is not a type is an error" (fun () ->
@@ -644,10 +644,10 @@ let () =
   test "an operation on a hole is a hole" (fun () ->
       fine Fixtures.Infer.operation_on_a_hole_is_a_hole);
   test "a mistake is not reported again as a type that cannot be inferred" (fun () ->
-      let database =
+      let packages =
         setup [ ("app::main", Fixtures.Infer.mistake_is_not_reported_again_as_a_type_that) ]
       in
-      if List.mem "types.cannot_infer" (codes (check database (file_of "app::main"))) then
+      if List.mem "types.cannot_infer" (codes (check packages (file_of "app::main"))) then
         fail "cascaded");
   test "a Float32 literal too large is an error" (fun () ->
       one_diagnostic Fixtures.Infer.float32_literal_too_large_is_an_error
@@ -703,12 +703,12 @@ let () =
   test "explicit type arguments give exactly the function's own" (fun () ->
       one_diagnostic Fixtures.Infer.explicit_type_arguments_give_exactly_the_functions "types.arity");
   test "a missing label has no fix when which one is meant is not known" (fun () ->
-      let database =
+      let packages =
         setup [ ("app::main", Fixtures.Infer.missing_label_has_no_fix_when_which_one_is_meant) ]
       in
       List.iter
         (fun (diagnostic : Diagnostic.t) -> if diagnostic.fixes <> [] then fail "offered a fix")
-        (check database (file_of "app::main")));
+        (check packages (file_of "app::main")));
   test "the string + fix keeps escapes" (fun () ->
       one_diagnostic Fixtures.Infer.string_fix_keeps_escapes "types.string_addition"
         ~fixed:Fixtures.Infer.string_fix_keeps_escapes_fixed);
@@ -770,10 +770,10 @@ let () =
   test "a parenthesized name with type arguments is a value of that function" (fun () ->
       fine (identity ^ Fixtures.Infer.parenthesized_name_with_type_arguments_is_a_value));
   test "a trait's written arguments are the ones its call uses" (fun () ->
-      let database =
+      let packages =
         setup [ ("app::main", Fixtures.Infer.traits_written_arguments_are_the_ones_its_call) ]
       in
-      if not (List.mem "types.no_impl" (codes (check database (file_of "app::main")))) then
+      if not (List.mem "types.no_impl" (codes (check packages (file_of "app::main")))) then
         fail "the written argument was ignored");
   test "a literal is the receiver of a trait method written in full" (fun () ->
       fine Fixtures.Infer.literal_is_the_receiver_of_a_trait_method_written);

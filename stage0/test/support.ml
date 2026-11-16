@@ -17,7 +17,7 @@ let file_of text : Path.file =
       { module_; name = (match List.rev module_.modules with last :: _ -> last | [] -> "main") }
 
 let standard_state = lazy (Database.For_testing.standard_state ())
-let pipeline database = Pipeline.create ~loaded:[ Lazy.force standard_state ] database
+let pipeline packages = Pipeline.create ~loaded:[ Lazy.force standard_state ] packages
 
 let setup ?(dependencies = []) files : Project.package list =
   let files = List.map (fun (name, text) -> (file_of name, text)) files in
@@ -37,25 +37,25 @@ let setup ?(dependencies = []) files : Project.package list =
       })
     (List.sort_uniq compare (List.map package_of files))
 
-let with_dependencies database name dependencies =
+let with_dependencies packages name dependencies =
   List.map
     (fun (package : Project.package) ->
       if package.name = name then { package with dependencies } else package)
-    database
+    packages
 
-let source database (file : Path.file) =
+let source packages (file : Path.file) =
   match
     List.find_map
       (fun (package : Project.package) -> List.assoc_opt file package.files)
-      (database : Project.package list)
+      (packages : Project.package list)
   with
   | Some text -> Source.create ~path:(Path.show_file file) text
   | None -> failwith ("no file " ^ Path.show_file file)
 
-let parse_errors database file =
+let parse_errors packages file =
   List.map
     (fun (diagnostic : Diagnostic.t) -> diagnostic.message)
-    (Parsed.parse (source database file)).diagnostics
+    (Parsed.parse (source packages file)).diagnostics
 
 let diagnostics pipeline (file : Path.file) =
   Pipeline.check pipeline [ file.module_.package ];
@@ -64,12 +64,12 @@ let diagnostics pipeline (file : Path.file) =
 let codes diagnostics =
   List.map (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code) diagnostics
 
-let checked ~check database name =
+let checked ~check packages name =
   let file = file_of name in
-  (match parse_errors database file with
+  (match parse_errors packages file with
   | [] -> ()
   | errors -> fail "the test input does not parse: %s" (String.concat " " errors));
-  check database file
+  check packages file
 
 type core_nodes = {
   expressions : Core.expression list;
@@ -77,8 +77,8 @@ type core_nodes = {
   patterns : Core.pattern list;
 }
 
-let core_nodes database (key : Resolve.Names.key) : core_nodes =
-  match Pipeline.For_testing.checked_body (pipeline database) key with
+let core_nodes packages (key : Resolve.Names.key) : core_nodes =
+  match Pipeline.For_testing.checked_body (pipeline packages) key with
   | None -> failwith (Printf.sprintf "%s has no core form" (Resolve.Names.show_key key))
   | Some { form; _ } ->
       let expressions = ref [] and statements = ref [] and patterns = ref [] in
@@ -96,22 +96,22 @@ let core_nodes database (key : Resolve.Names.key) : core_nodes =
         patterns = List.rev !patterns;
       }
 
-let names database (package : Path.package) = Pipeline.names (pipeline database) [ package ]
+let names packages (package : Path.package) = Pipeline.names (pipeline packages) [ package ]
 
-let declarations database (module_ : Path.module_) =
-  (names database module_.package).declarations module_
+let declarations packages (module_ : Path.module_) =
+  (names packages module_.package).declarations module_
 
 let first_core_nodes text =
-  let database = setup [ ("app::main", text) ] in
-  core_nodes database
-    (Resolve.Names.key_of (List.hd (declarations database (module_of "app::main"))))
+  let packages = setup [ ("app::main", text) ] in
+  core_nodes packages
+    (Resolve.Names.key_of (List.hd (declarations packages (module_of "app::main"))))
 
 let no_diagnostics ~check files =
-  let database = setup files in
-  let pipeline = pipeline database in
+  let packages = setup files in
+  let pipeline = pipeline packages in
   List.iter
     (fun (name, _) ->
-      (match checked ~check database name with
+      (match checked ~check packages name with
       | [] -> ()
       | reported ->
           fail "%s: %s" name
@@ -132,8 +132,8 @@ let no_diagnostics ~check files =
 
 let one_diagnostic ~check ?(setup = fun files -> setup files) ?(file = "app::main") ?(others = [])
     ?fixed ?says text code =
-  let database = setup ((file, text) :: others) in
-  match checked ~check database file with
+  let packages = setup ((file, text) :: others) in
+  match checked ~check packages file with
   | [ (diagnostic : Diagnostic.t) ] -> (
       let actual = Diagnostic.Code.name diagnostic.code in
       if actual <> code then fail "expected %s, got %s: %s" code actual diagnostic.message;
@@ -149,8 +149,8 @@ let one_diagnostic ~check ?(setup = fun files -> setup files) ?(file = "app::mai
           let after = Diagnostic.apply_fix text fix in
           if after <> expected then fail "fixed to %S" after
           else
-            let database = setup ((file, after) :: others) in
-            match checked ~check database file with
+            let packages = setup ((file, after) :: others) in
+            match checked ~check packages file with
             | [] -> ()
             | left -> fail "after the fix: %s" (String.concat "; " (codes left))))
   | reported ->
