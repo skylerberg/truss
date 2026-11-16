@@ -206,10 +206,7 @@ let build_impl_table context (key : Instance.key) ~impl ~type_arguments : Lowere
     List.map
       (fun (trait_method : Types.trait_method) ->
         let receiver =
-          match
-            Types.find_implementing_receiver ~is_capability:capability_interface.is_capability
-              interface trait_method
-          with
+          match Types.find_implementing_receiver capability_interface interface trait_method with
           | Some receiver -> receiver
           | None ->
               Definitions.raise_bug "%s does not write %s" (Path.show impl) trait_method.method_name
@@ -475,10 +472,7 @@ let build_any_table context (key : Instance.key) ~impl ~type_arguments : Lowered
     List.map
       (fun (trait_method : Types.trait_method) ->
         let receiver =
-          match
-            Types.find_implementing_receiver ~is_capability:trait_interface.is_capability interface
-              trait_method
-          with
+          match Types.find_implementing_receiver trait_interface interface trait_method with
           | Some receiver -> receiver
           | None -> trait_method.method_receiver
         in

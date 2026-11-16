@@ -944,29 +944,17 @@ let elaborate_member (lookups : Lookups.t) ~path ~spans resolved (definition : S
         match (path, header.container_scope.self_trait) with
         | Method { name; receiver; _ }, Some (implements : Types.trait_reference) -> (
             let implemented =
-              Option.bind (lookups.names.key implements.trait) (fun trait_key ->
-                  let is_capability =
-                    match lookups.header trait_key with
-                    | Some { container = Capability_parts; _ } -> true
-                    | Some { container = Trait_parts _ | Impl_parts _; _ } | None -> false
-                  in
-                  Types.find_implemented_method ~is_capability (list_methods lookups trait_key)
-                    ~name ~receiver)
+              match Option.bind (lookups.names.key implements.trait) lookups.header with
+              | Some { container = Capability_parts; _ } ->
+                  Path.make_capability_method implements.trait name
+              | Some { container = Trait_parts _ | Impl_parts _; _ } | None ->
+                  Method { owner = implements.trait; name; receiver }
             in
-            match implemented with
-            | Some implemented -> (
-                match
-                  Option.map lookups.names.definition
-                    (lookups.names.key
-                       (Method
-                          { owner = implements.trait; name; receiver = implemented.method_receiver }))
-                with
-                | Some
-                    { kind = Function { signature = declared; _ } | Method_declaration declared; _ }
-                  ->
-                    terminates declared.clauses
-                | _ -> false)
-            | None -> false)
+            match Option.map lookups.names.definition (lookups.names.key implemented) with
+            | Some { kind = Function { signature = declared; _ } | Method_declaration declared; _ }
+              ->
+                terminates declared.clauses
+            | _ -> false)
         | _ -> false
       in
       make_elaborated_interface context

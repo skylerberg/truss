@@ -36,10 +36,7 @@ let list_impl_methods (interface : Interface.Lookups.t) impl =
           List.map
             (fun (declared : Types.trait_method) ->
               let name = declared.method_name in
-              match
-                Types.find_implementing_receiver ~is_capability:trait_interface.is_capability
-                  implementation declared
-              with
+              match Types.find_implementing_receiver trait_interface implementation declared with
               | Some receiver -> Path.Method { owner = impl; name; receiver }
               | None -> Path.Method { owner = trait; name; receiver = declared.method_receiver })
             trait_interface.methods
