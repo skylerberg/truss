@@ -41,11 +41,7 @@ val list_dependencies : t -> Path.t list -> read list
 val list_dependents : t -> Path.t list -> read list
 val list_changes : t -> t -> Part.t list
 
-type 'a part = 'a Typed_part.part =
-  | Value of 'a
-  | Failed of Diagnostic.in_definition list
-  | Blocked
-
+type 'a part = Value of 'a | Failed of Diagnostic.in_definition list | Blocked
 type proofs
 
 val prove : t -> Path.file list -> proofs
@@ -75,7 +71,7 @@ module For_testing : sig
   val read_ownership : t -> Resolve.Names.key -> (Core.origin * Core.origin) list part
   val find_proof : proofs -> Resolve.Names.key -> Prover.proof part option
   val list_reads : t -> string -> string list
-  val list_unread_parts : t -> Path.package list -> Part.computed list
+  val list_unread_parts : t -> Path.package list -> Part.any list
   val list_differences : t -> t -> string list
 
   type observed = { recomputed : string list; collected : string list }

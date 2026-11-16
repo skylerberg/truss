@@ -88,17 +88,15 @@ let label_signature label signature =
          Printf.sprintf "    %s %s" (if line_index = 0 then label else indent) line)
        (String.split_on_char '\n' signature))
 
-let is_signature : Database.Part.t -> bool = function
-  | Stored
-      (Computed
-         ( Header _ | Trait_header _ | Constant_value _ | Interface _ | Derived_interface _
-         | Type_facts _ | Signature_check _ | Contract _ | Contract_mir _ )) ->
+let is_signature_part : type a. a Database.Part.stored -> bool = function
+  | Header _ | Trait_header _ | Constant_value _ | Interface _ | Derived_interface _ | Type_facts _
+  | Signature_check _ | Contract _ | Contract_mir _ ->
       true
-  | Stored
-      (Computed
-         ( Parsed _ | Namespace _ | Resolved _ | Grant _ | Checked_body _ | Body_mir _
-         | Generated_mir _ | Mir_call_edges _ | Patterns _ | Usage _ | Ownership _ | Import_check _
-         | Package_check _ | Call_edges _ | Proof _ | Lowering _ ))
-  | Stored (Recursion_group _)
-  | Input _ | Name _ ->
+  | Parsed _ | Namespace _ | Resolved _ | Grant _ | Checked_body _ | Body_mir _ | Generated_mir _
+  | Mir_call_edges _ | Patterns _ | Usage _ | Ownership _ | Import_check _ | Package_check _
+  | Call_edges _ | Recursion_group _ | Proof _ | Lowered _ | Test_key _ ->
       false
+
+let is_signature : Database.Part.t -> bool = function
+  | Stored (Any part) -> is_signature_part part
+  | Input _ | Name _ -> false
