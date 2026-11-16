@@ -1,0 +1,22 @@
+type Knot(value: Int64)
+
+impl Model for Knot {
+  type Value = Sequence[Knot]
+
+  fn model(self) -> Sequence[Knot]
+    ensures result.length() == 1
+    ensures identical(result[0], self)
+    cost time finite
+  {
+    Sequence.empty().append(self)
+  }
+}
+
+fn spin(knot: Knot) -> Int64
+  cost time finite
+{
+  proof {
+    assert identical(knot.model()[0], knot)
+  }
+  spin(knot)
+}

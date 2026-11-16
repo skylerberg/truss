@@ -33,7 +33,7 @@ val make_finite_function :
   Logic.term
 
 val finite_set_path : Path.t
-val rank_model : State.context -> Types.ty -> model:Types.ty -> Logic.symbol -> unit
+val rank_model : State.context -> Types.ty -> model:Types.ty -> impl:Path.t -> Logic.symbol -> unit
 
 val find_model_function :
   State.context -> Types.ty -> model:Types.ty -> (Logic.term -> Logic.term) option
