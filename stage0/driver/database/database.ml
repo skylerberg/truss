@@ -2560,13 +2560,13 @@ module For_testing = struct
     List.concat_map (list_checker_diagnostics database file) checkers
 
   let read_derived_form database path =
-    drain database ~through:Derived_forms [ Path.package path ];
+    drain database ~through:Checked_bodies [ Path.package path ];
     match Path_table.find_opt (find_owner database (Path.package path)).derived_forms path with
     | Some (Value form) -> Some form
     | Some (Failed _ | Blocked) | None -> None
 
   let read_core database path =
-    drain database ~through:Derived_forms [ Path.package path ];
+    drain database ~through:Checked_bodies [ Path.package path ];
     Option.bind (make_form_origin database ignore path) (fun (origin, substitution) ->
         Option.map
           (fun form -> (form, substitution))
