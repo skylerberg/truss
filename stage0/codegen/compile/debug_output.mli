@@ -1,4 +1,4 @@
-val debug_call :
+val emit_debug_call :
   Memory_layout.env ->
   Emit_c.Builder.t ->
   output:Lowered.operand ->
@@ -6,4 +6,4 @@ val debug_call :
   Lowered.place ->
   unit
 
-val debug : Memory_layout.env -> Ground.ty -> Emit_c.Builder.instance
+val build_debug : Memory_layout.env -> Ground.ty -> Emit_c.Builder.instance

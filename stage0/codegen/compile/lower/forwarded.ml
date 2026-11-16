@@ -24,7 +24,7 @@ type forwarding = {
   lending : Mir.call;
 }
 
-let forwarding (body : Mir.Graph.body) : forwarding option =
+let find_forwarding (body : Mir.Graph.body) : forwarding option =
   let entry = body.blocks.(0) in
   let is_unnamed local =
     match body.locals.(local).kind with Temporary | Lent _ -> true | Source _ -> false
@@ -61,7 +61,7 @@ let forwarding (body : Mir.Graph.body) : forwarding option =
       Some forwarding
   | _ -> None
 
-let substituted_trait substitution (trait : Types.trait_reference) : Types.trait_reference =
+let substitute_trait substitution (trait : Types.trait_reference) : Types.trait_reference =
   {
     trait with
     trait_arguments = List.map (Types.substitute_argument substitution) trait.trait_arguments;
@@ -69,7 +69,7 @@ let substituted_trait substitution (trait : Types.trait_reference) : Types.trait
       List.map (fun (name, ty) -> (name, Types.substitute substitution ty)) trait.associated;
   }
 
-let substituted_callee substitution (callee : Mir.callee) : Mir.callee option =
+let substitute_callee substitution (callee : Mir.callee) : Mir.callee option =
   let arguments = List.map (Types.substitute_argument substitution) in
   match callee with
   | Function { path; type_arguments } ->
@@ -79,7 +79,7 @@ let substituted_callee substitution (callee : Mir.callee) : Mir.callee option =
         (Trait_method
            {
              method_ with
-             trait = substituted_trait substitution method_.trait;
+             trait = substitute_trait substitution method_.trait;
              self_type = Types.substitute substitution method_.self_type;
              type_arguments = arguments method_.type_arguments;
              evidence =
@@ -100,11 +100,11 @@ let substituted_callee substitution (callee : Mir.callee) : Mir.callee option =
       Some (Intrinsic { operation; type_arguments = arguments type_arguments })
   | Capability_method _ | Indirect _ -> None
 
-let call ~(substitution : Types.substitution) ~(fresh : unit -> Mir.local) (mir : Mir.Graph.t)
-    (outer : Mir.call) : t option =
+let forward_call ~(substitution : Types.substitution) ~(fresh : unit -> Mir.local)
+    (mir : Mir.Graph.t) (outer : Mir.call) : t option =
   let body = mir.body in
   let ( let* ) = Option.bind in
-  let* { held; computed; lending } = forwarding body in
+  let* { held; computed; lending } = find_forwarding body in
   let outer_arguments =
     List.map
       (function
@@ -165,7 +165,7 @@ let call ~(substitution : Types.substitution) ~(fresh : unit -> Mir.local) (mir 
     | Take _ -> None
   in
   let forwarded_call (inner : Mir.call) : Mir.call option =
-    let* callee = substituted_callee substitution inner.callee in
+    let* callee = substitute_callee substitution inner.callee in
     let* arguments =
       List.fold_right
         (fun (argument : Mir.argument) arguments ->

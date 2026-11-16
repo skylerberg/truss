@@ -10,7 +10,7 @@ val version : int
 
 type fragment
 
-val fragment : Memory_layout.env -> compiled -> fragment
+val make_fragment : Memory_layout.env -> compiled -> fragment
 val key : fragment -> Instance.key
 val references : fragment -> Instance.key list
 val called : fragment -> Instance.key list
@@ -23,13 +23,13 @@ val trace_reachable :
 
 val is_small : fragment -> bool
 val failures : fragment -> (failure * Lowered.site) list
-val text : fragment -> string
-val file : Memory_layout.env -> build -> (fragment * linkage) list -> string
+val render_fragment : fragment -> string
+val render_file : Memory_layout.env -> build -> (fragment * linkage) list -> string
 val site_struct : string
 
 type position = { file : string; line : int; column : int }
 
-val sites_file : position:(Lowered.site -> position) -> fragment list -> string
+val render_sites_file : position:(Lowered.site -> position) -> fragment list -> string
 
 module For_testing : sig
   val c : fragment -> string

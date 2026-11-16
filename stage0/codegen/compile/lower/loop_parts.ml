@@ -1,7 +1,7 @@
-let block_at (blocks : Mir.Graph.basic_block Dynarray.t) block = Dynarray.get blocks block
+let lookup_block (blocks : Mir.Graph.basic_block Dynarray.t) block = Dynarray.get blocks block
 let set_block blocks block basic = Dynarray.set blocks block basic
 
-let retargeted (target : Mir.Graph.block -> Mir.Graph.block) (terminator : Mir.Graph.terminator) :
+let retarget (target : Mir.Graph.block -> Mir.Graph.block) (terminator : Mir.Graph.terminator) :
     Mir.Graph.terminator =
   match terminator with
   | Goto block -> Goto (target block)
@@ -41,23 +41,25 @@ let retargeted (target : Mir.Graph.block -> Mir.Graph.block) (terminator : Mir.G
   | Iteration_end { loop } -> Iteration_end { loop = target loop }
   | (Return _ | Unreachable | Written_unreachable | Todo) as terminator -> terminator
 
-let own_iteration_ends blocks (body : Mir.Graph.block list) =
+let list_own_iteration_ends blocks (body : Mir.Graph.block list) =
   let nested =
     List.concat_map
       (fun block ->
-        match (block_at blocks block).terminator with For { blocks = inner; _ } -> inner | _ -> [])
+        match (lookup_block blocks block).terminator with
+        | For { blocks = inner; _ } -> inner
+        | _ -> [])
       body
   in
   List.filter
     (fun block ->
       (not (List.mem block nested))
-      && match (block_at blocks block).terminator with Iteration_end _ -> true | _ -> false)
+      && match (lookup_block blocks block).terminator with Iteration_end _ -> true | _ -> false)
     body
 
-let tasks_in blocks (body : Mir.Graph.block list) : Mir.task list =
+let list_tasks blocks (body : Mir.Graph.block list) : Mir.task list =
   List.concat_map
     (fun block ->
-      match (block_at blocks block).terminator with
+      match (lookup_block blocks block).terminator with
       | For { loop; _ } -> [ Mir.Iteration { loop = loop.origin } ]
       | Fork { fork; branches; _ } ->
           List.mapi (fun index _ -> Mir.Branch { block = fork; index }) branches
@@ -83,34 +85,34 @@ let end_on_exits blocks ~(body : Mir.Graph.block list) ~part ~origin =
           Hashtbl.replace pads target pad;
           pad
   in
-  let inside = tasks_in blocks body in
+  let inside = list_tasks blocks body in
   List.iter
     (fun block ->
-      let basic = block_at blocks block in
+      let basic = lookup_block blocks block in
       set_block blocks block
         (match basic.terminator with
         | Return _ -> { basic with statements = basic.statements @ [ dead ] }
         | Cancel { task; _ } when not (List.mem task inside) ->
             { basic with statements = basic.statements @ [ dead ] }
         | Cancel _ | Iteration_end _ -> basic
-        | terminator -> { basic with terminator = retargeted leave terminator }))
+        | terminator -> { basic with terminator = retarget leave terminator }))
     body
 
-let ended_body (body : Mir.Graph.body) : Mir.Graph.body =
+let end_body_parts (body : Mir.Graph.body) : Mir.Graph.body =
   let blocks = Dynarray.of_array body.blocks in
   for block = 0 to Array.length body.blocks - 1 do
-    match block_at blocks block with
+    match lookup_block blocks block with
     | { terminator = For { iteration = Pull _; part; blocks = loop_body; loop; _ }; _ } ->
         let dead : Mir.Graph.statement = { kind = Dead [ part ]; origin = loop.origin } in
         List.iter
           (fun ending ->
-            let basic = block_at blocks ending in
+            let basic = lookup_block blocks ending in
             set_block blocks ending { basic with statements = basic.statements @ [ dead ] })
-          (own_iteration_ends blocks loop_body);
+          (list_own_iteration_ends blocks loop_body);
         end_on_exits blocks ~body:loop_body ~part ~origin:loop.origin
     | _ -> ()
   done;
   { body with blocks = Mir.Graph.canonical (Dynarray.to_array blocks) }
 
-let ended (mir : Mir.Graph.t) : Mir.Graph.t =
-  { body = ended_body mir.body; lambdas = Array.map ended_body mir.lambdas }
+let end_parts (mir : Mir.Graph.t) : Mir.Graph.t =
+  { body = end_body_parts mir.body; lambdas = Array.map end_body_parts mir.lambdas }

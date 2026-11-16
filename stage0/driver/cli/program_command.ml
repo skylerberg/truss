@@ -81,7 +81,7 @@ let build_program ?output snapshot packages (build : Compiler.build) =
   let main = main snapshot database packages in
   let compile = Compiler.create database snapshot packages build in
   Option.iter (refuse_unshippable snapshot packages compile main) (Report.proofs report);
-  let output = Option.value output ~default:(Compile.fresh_program compile) in
+  let output = Option.value output ~default:(Compile.make_program_path compile) in
   match Compile.build_program compile ~main ~output with
   | Error message -> Outcome.cannot_run "%s" message
   | Ok () -> output

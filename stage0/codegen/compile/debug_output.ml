@@ -2,7 +2,7 @@ let bug format = Compiler_bug.bug ~stage:"Debug_output" format
 
 type form = Structure | Text | Sequence
 
-let form : Ground.ty -> form = function
+let classify_form : Ground.ty -> form = function
   | Named { path; _ } -> (
       match Well_known.of_path path with
       | Some (String | String_slice) -> Text
@@ -10,19 +10,20 @@ let form : Ground.ty -> form = function
       | _ -> Structure)
   | _ -> Structure
 
-let int64 = Ground.builtin Int64
-let uint64 = Ground.builtin UInt64
+let int64 = Ground.make_builtin Int64
+let uint64 = Ground.make_builtin UInt64
 
-let signature env ty =
-  Writing.signature env
-    (if Memory_layout.has_zero_size env ty then [] else [ Writing.value_parameter ty ])
+let make_signature env ty =
+  Writing.make_signature env
+    (if Memory_layout.has_zero_size env ty then [] else [ Writing.make_value_parameter ty ])
 
-let text env builder ~output value =
+let write_text env builder ~output value =
   if value <> "" then
-    Writing.call_with_bytes env builder ~output Writing_append ~elements:(Constant (Bytes value))
+    Writing.emit_write_bytes_call env builder ~output Writing_append
+      ~elements:(Constant (Bytes value))
       ~length:(Lowered.make_uint64_constant (String.length value))
 
-let debug_call env builder ~output ty (place : Lowered.place) =
+let emit_debug_call env builder ~output ty (place : Lowered.place) =
   let value_argument =
     if Memory_layout.has_zero_size env ty then []
     else [ Lowered.Address { place; writable = false } ]
@@ -30,15 +31,15 @@ let debug_call env builder ~output ty (place : Lowered.place) =
   Emit_c.Builder.emit builder
     (Call
        {
-         target = Direct { function_ = Instance (Debug ty); signature = signature env ty };
+         target = Direct { function_ = Instance (Debug ty); signature = make_signature env ty };
          arguments = value_argument @ [ output ];
          result = Discarded;
        })
 
-let scalar_debug env builder ~output (scalar : Memory_layout.scalar) (place : Lowered.place) =
-  let write writer ty place = Writing.call env builder ~output writer ty place in
+let write_scalar_debug env builder ~output (scalar : Memory_layout.scalar) (place : Lowered.place) =
+  let write writer ty place = Writing.emit_write_call env builder ~output writer ty place in
   let widened writer wide (integer : Memory_layout.integer) =
-    let value = Emit_c.Builder.local builder (Value wide) in
+    let value = Emit_c.Builder.allocate_local builder (Value wide) in
     Emit_c.Builder.emit builder
       (Assign (Lowered.make_local_place value, Convert (Copy place, Integer integer)));
     write writer wide (Lowered.make_local_place value)
@@ -46,39 +47,42 @@ let scalar_debug env builder ~output (scalar : Memory_layout.scalar) (place : Lo
   match scalar with
   | Integer (Int8 | Int16 | Int32 | Int64) -> widened Writing_signed int64 Int64
   | Integer (UInt8 | UInt16 | UInt32 | UInt64) -> widened Writing_unsigned uint64 UInt64
-  | Float32 -> write Writing_float32 (Ground.builtin Float32) place
-  | Float64 -> write Writing_float64 (Ground.builtin Float64) place
-  | Bool -> write Writing_boolean (Ground.builtin Bool) place
-  | Character -> write Writing_quoted_character (Ground.builtin Character) place
-  | Pointer _ | Nullable_pointer _ -> text env builder ~output "pointer"
+  | Float32 -> write Writing_float32 (Ground.make_builtin Float32) place
+  | Float64 -> write Writing_float64 (Ground.make_builtin Float64) place
+  | Bool -> write Writing_boolean (Ground.make_builtin Bool) place
+  | Character -> write Writing_quoted_character (Ground.make_builtin Character) place
+  | Pointer _ | Nullable_pointer _ -> write_text env builder ~output "pointer"
 
-let debug env ty =
+let build_debug env ty =
   let builder = Emit_c.Builder.create env ~key:(Debug ty) in
   let parameter =
     if Memory_layout.has_zero_size env ty then None
-    else Some (Emit_c.Builder.local builder ~name:"value" (Writing.value_parameter ty))
+    else
+      Some (Emit_c.Builder.allocate_local builder ~name:"value" (Writing.make_value_parameter ty))
   in
   let value : Lowered.place =
     match parameter with
     | Some parameter_local -> { root = Local parameter_local; projections = [ Deref ] }
     | None -> Lowered.make_local_place 0
   in
-  let output_pointer = Emit_c.Builder.local builder ~name:"output" (Writing.output_parameter env) in
+  let output_pointer =
+    Emit_c.Builder.allocate_local builder ~name:"output" (Writing.make_output_parameter env)
+  in
   let output = Lowered.Copy (Lowered.make_local_place output_pointer) in
-  let text = text env builder ~output in
-  let debug_call = debug_call env builder ~output in
-  Emit_c.Builder.start builder (Emit_c.Builder.block builder);
+  let text = write_text env builder ~output in
+  let debug_call = emit_debug_call env builder ~output in
+  Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
   let rec list_of element ~element_at ~count =
     text "[";
-    Emit_c.Builder.loop builder ~count (fun index ->
-        let is_after_first = Emit_c.Builder.local builder (Raw Bool) in
+    Emit_c.Builder.emit_loop builder ~count (fun index ->
+        let is_after_first = Emit_c.Builder.allocate_local builder (Raw Bool) in
         Emit_c.Builder.emit builder
           (Assign
              ( Lowered.make_local_place is_after_first,
                Binary
                  (Not_equal, Copy (Lowered.make_local_place index), Lowered.make_uint64_constant 0)
              ));
-        Emit_c.Builder.when_ builder
+        Emit_c.Builder.emit_when builder
           (Copy (Lowered.make_local_place is_after_first))
           (fun () -> text ", ");
         debug_call element (element_at (Lowered.Copy (Lowered.make_local_place index))));
@@ -92,7 +96,7 @@ let debug env ty =
       | None, None -> bug "%s is not storage or a view" (Ground.to_string field_ty)
     in
     if as_text then
-      Writing.call_with_bytes env builder ~output Writing_quoted_text ~elements:(Copy buffer)
+      Writing.emit_write_bytes_call env builder ~output Writing_quoted_text ~elements:(Copy buffer)
         ~length:(Copy count)
     else
       list_of element
@@ -118,9 +122,11 @@ let debug env ty =
           fields;
         text ")"
   in
-  (match (form ty, Representation.classify env ty) with
+  (match (classify_form ty, Representation.classify env ty) with
   | (Text | Sequence), Shape (Record [ (field, Typed field_ty) ]) ->
-      storage_or_view field_ty (Lowered.project value (Field field)) ~as_text:(form ty = Text)
+      storage_or_view field_ty
+        (Lowered.project value (Field field))
+        ~as_text:(classify_form ty = Text)
   | _, Handle -> text "Handle"
   | _, Shared _ -> text "Shared"
   | _, Any -> text "any"
@@ -131,11 +137,13 @@ let debug env ty =
       match (ty, shape) with
       | Never, _ -> ()
       | Function _, _ -> text "fn"
-      | _, Scalar scalar -> scalar_debug env builder ~output scalar value
+      | _, Scalar scalar -> write_scalar_debug env builder ~output scalar value
       | Named { path; _ }, Record [] ->
-          text (if Ground.path_name path = "Unit" then "Unit" else Ground.path_name path ^ "()")
+          text
+            (if Ground.show_path_name path = "Unit" then "Unit"
+             else Ground.show_path_name path ^ "()")
       | Named { path; _ }, Record fields ->
-          fields_debug (Ground.path_name path) fields (fun field ->
+          fields_debug (Ground.show_path_name path) fields (fun field ->
               Lowered.project value (Field field))
       | _, Record _ -> bug "%s has the shape of a record and no name" (Ground.to_string ty)
       | _, Array (element, count) ->
@@ -143,11 +151,11 @@ let debug env ty =
             ~element_at:(fun index -> Lowered.project value (Index index))
             ~count:(Lowered.make_uint64_constant count)
       | _, Sum variants ->
-          let after = Emit_c.Builder.block builder in
+          let after = Emit_c.Builder.allocate_block builder in
           let cases =
             List.map
               (fun (variant_shape : Memory_layout.variant_shape) ->
-                let case = Emit_c.Builder.block builder in
+                let case = Emit_c.Builder.allocate_block builder in
                 Emit_c.Builder.in_block builder case (fun () ->
                     fields_debug variant_shape.name variant_shape.fields (fun field ->
                         Lowered.project value

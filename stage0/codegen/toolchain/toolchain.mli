@@ -8,7 +8,7 @@ val required_flags : string list
 type optimization = O1 | O2
 
 val link_time_optimization : t -> string list
-val optimization_flag : optimization -> string
+val show_optimization_flag : optimization -> string
 
 val compile :
   t ->

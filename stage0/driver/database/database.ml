@@ -1148,7 +1148,7 @@ and collect database keys =
 
 let list_lowered_references database key =
   match Instance_table.find_opt database.lowered key with
-  | Some (Value (Ok lowered)) -> Compile.references lowered
+  | Some (Value (Ok lowered)) -> Compile.list_references lowered
   | Some (Value (Error _) | Failed _ | Blocked) | None -> []
 
 let list_instance_edges database key =
@@ -1229,7 +1229,7 @@ let find_entry_point (names : Resolve.Names.lookups) package =
 let own_lowering_roots database (names : Resolve.Names.lookups) package =
   if Option.is_some database.lowering then
     own_roots database (Stored (Computed (Namespace package)))
-      (Compile.roots
+      (Compile.list_roots
          ~tests:
            (List.filter_map
               (fun (declaration : Resolve.Names.declaration) ->
@@ -1642,7 +1642,7 @@ let list_test_key_components database parts =
        ~successors:(fun key ->
          match Instance_table.find_opt database.lowered key with
          | Some (Value (Ok lowered)) ->
-             List.filter (Instance_table.mem in_closure) (Compile.references lowered)
+             List.filter (Instance_table.mem in_closure) (Compile.list_references lowered)
          | Some (Value (Error _) | Failed _ | Blocked) | None -> [])
        keys)
 

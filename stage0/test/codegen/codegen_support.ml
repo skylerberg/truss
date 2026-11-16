@@ -76,7 +76,7 @@ let shapes extra (ty : Ground.ty) : Memory_layout.shape =
           ("length", Typed (named "UInt64"));
           ("capacity", Typed (named "UInt64"));
         ]
-  | Function function_type -> Convention.function_value_shape function_type
+  | Function function_type -> Convention.make_function_value_shape function_type
   | _ -> (
       match List.assoc_opt (Ground.to_string ty) extra with
       | Some shape -> shape
@@ -118,9 +118,10 @@ let key name = Instance.Code { path = definition name; type_arguments = [] }
 
 let write builder (function_ : function_) =
   List.iter
-    (fun (info : local_info) -> ignore (Emit_c.Builder.local builder ?name:info.name info.ty))
+    (fun (info : local_info) ->
+      ignore (Emit_c.Builder.allocate_local builder ?name:info.name info.ty))
     function_.locals;
-  List.iter (fun _ -> ignore (Emit_c.Builder.block builder)) function_.blocks;
+  List.iter (fun _ -> ignore (Emit_c.Builder.allocate_block builder)) function_.blocks;
   List.iteri
     (fun index (block : block) ->
       Emit_c.Builder.start builder index;
@@ -179,7 +180,7 @@ let strict =
     ]
 
 let counter = ref 0
-let cache = lazy (Build.cache (Cache.make_objects_directory (Workspace.open_cache ())))
+let cache = lazy (Build.make_cache (Cache.make_objects_directory (Workspace.open_cache ())))
 
 let added_flags =
   Toolchain.split_flags (Option.value (Sys.getenv_opt Toolchain.added_flags_variable) ~default:"")
@@ -198,15 +199,17 @@ let run_program ?(extra = []) ?env ?input (instances : instance list) =
   incr counter;
   let output = Filename.concat (Lazy.force scratch) (Printf.sprintf "program%d" !counter) in
   let env = match env with Some env -> env | None -> shape_env ~extra () in
-  let fragments = List.map (fun instance -> Emit_c.fragment env (Code (instance env))) instances in
+  let fragments =
+    List.map (fun instance -> Emit_c.make_fragment env (Code (instance env))) instances
+  in
   let sources =
     [
-      ("main", Startup.For_testing.main_calling (Instance.symbol (key "entry")));
-      ("sites", Emit_c.sites_file ~position:test_position fragments);
+      ("main", Startup.For_testing.main_calling (Instance.make_symbol (key "entry")));
+      ("sites", Emit_c.render_sites_file ~position:test_position fragments);
     ]
   in
   match
-    Build.program (Lazy.force compiler) (Lazy.force cache) env (Lazy.force settings)
+    Build.build_program (Lazy.force compiler) (Lazy.force cache) env (Lazy.force settings)
       ~files:[ fragments ] ~sources ~output
   with
   | Ok () -> Process.run ?input output []
@@ -311,5 +314,5 @@ let standard module_ name ?(arguments = []) () =
 let standard_layout ty =
   Memory_layout.For_testing.to_string
     (Memory_layout.of_type
-       (Memory_layout.create host ~shape_of:(Monomorphic.shape standard_context))
+       (Memory_layout.create host ~shape_of:(Monomorphic.compute_shape standard_context))
        ty)

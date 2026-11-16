@@ -190,7 +190,7 @@ let () =
       in
       Codegen_support.expect_string ~expected:"24/8 struct(left@0 right@8 value@16)"
         (Memory_layout.For_testing.to_string
-           (Memory_layout.block env (Codegen_support.named "Tree") "Node")));
+           (Memory_layout.lay_out_block env (Codegen_support.named "Tree") "Node")));
   Codegen_support.test "an Array holds its elements in place" (fun () ->
       Codegen_support.expect_string ~expected:"32/1 array(32 x 1/1 UInt8)"
         (Codegen_support.describe (Codegen_support.array Codegen_support.uint8 32)));
@@ -217,17 +217,17 @@ let () =
       Codegen_support.expect_string ~expected:"0/1 zero" (Codegen_support.describe Never));
   Codegen_support.test "a variant's discriminant is its tag value or its niche value" (fun () ->
       let layout = Codegen_support.layout (Codegen_support.option Codegen_support.bool) in
-      (match Memory_layout.discriminant layout "None" with
+      (match Memory_layout.compute_discriminant layout "None" with
       | Niche_value { value; _ } when Z.equal value (Z.of_int 2) -> ()
       | _ -> Codegen_support.fail "None is not stored as 2");
-      match Memory_layout.discriminant layout "Some" with
+      match Memory_layout.compute_discriminant layout "Some" with
       | Not_niche { stop; _ } when Z.equal stop (Z.of_int 3) -> ()
       | _ ->
           Codegen_support.fail "Some is not the dataful variant, outside the niche values below 3")
 
 let () =
-  let int64 = Ground.builtin Int64 in
-  let bool = Ground.builtin Bool in
+  let int64 = Ground.make_builtin Int64 in
+  let bool = Ground.make_builtin Bool in
   let list element = Codegen_support.standard "list" "List" ~arguments:[ Type element ] () in
   let option value = Codegen_support.standard "option" "Option" ~arguments:[ Type value ] () in
   Codegen_support.test "the standard library's Option of a List has no tag" (fun () ->
@@ -238,7 +238,7 @@ let () =
       Codegen_support.expect_int ~expected:1
         (Memory_layout.of_type
            (Memory_layout.create Codegen_support.host
-              ~shape_of:(Monomorphic.shape Codegen_support.standard_context))
+              ~shape_of:(Monomorphic.compute_shape Codegen_support.standard_context))
            (option bool))
           .size);
   Codegen_support.test "a String is its storage's buffer, length, and capacity" (fun () ->

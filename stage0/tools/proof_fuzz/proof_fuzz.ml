@@ -18,7 +18,9 @@ let compiler =
   lazy
     (match Toolchain.find () with Ok toolchain -> toolchain | Error message -> failwith message)
 
-let cache = lazy (Build.cache (Filename.concat (Filename.get_temp_dir_name ()) "truss-proof-fuzz"))
+let cache =
+  lazy (Build.make_cache (Filename.concat (Filename.get_temp_dir_name ()) "truss-proof-fuzz"))
+
 let settings : Build.settings = { build = Development; optimization = O1; extra = [] }
 
 let load text =

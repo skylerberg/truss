@@ -81,15 +81,15 @@ let () =
       in
       let env = Codegen_support.shape_env () in
       let builder = Emit_c.Builder.create env ~key:(Codegen_support.key "entry") in
-      let parameter = Emit_c.Builder.local builder int in
-      let sum = Emit_c.Builder.local builder int in
-      let other = Emit_c.Builder.local builder int in
-      Emit_c.Builder.start builder (Emit_c.Builder.block builder);
+      let parameter = Emit_c.Builder.allocate_local builder int in
+      let sum = Emit_c.Builder.allocate_local builder int in
+      let other = Emit_c.Builder.allocate_local builder int in
+      Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
       Emit_c.Builder.emit builder
         (Assign (Codegen_support.at parameter, Use (Codegen_support.constant_int32 5)));
       let first =
         Emit_c.Builder.outline builder ~index:0 ~parts:[] (fun () ->
-            let own = Emit_c.Builder.local builder ~name:"own" int in
+            let own = Emit_c.Builder.allocate_local builder ~name:"own" int in
             Emit_c.Builder.emit builder (Assign (Codegen_support.at own, add parameter parameter));
             Emit_c.Builder.emit builder (Assign (Codegen_support.at sum, add own parameter));
             Emit_c.Builder.finish builder (Return None))
@@ -109,7 +109,7 @@ let () =
       let instance =
         Emit_c.Builder.build builder { parameters = []; result = Some int; returns = true }
       in
-      let c = Emit_c.For_testing.c (Emit_c.fragment env (Code instance)) in
+      let c = Emit_c.For_testing.c (Emit_c.make_fragment env (Code instance)) in
       List.iter
         (fun text ->
           if not (Codegen_support.contains c text) then Codegen_support.fail "no %s in:\n%s" text c)

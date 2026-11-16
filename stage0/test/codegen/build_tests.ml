@@ -21,7 +21,7 @@ let named_program ~entry_name ~helper_name returned =
 
 let lookup instances key =
   let env = Codegen_support.shape_env () in
-  Emit_c.fragment env
+  Emit_c.make_fragment env
     (Code
        (List.find
           (fun instance -> Instance.equal (Emit_c.Builder.instance_key instance) key)
@@ -94,7 +94,7 @@ let () =
       let references =
         Emit_c.references
           (let env = Codegen_support.shape_env ~extra:Codegen_support.drop_shapes () in
-           Emit_c.fragment env (Code (dropping_instance env)))
+           Emit_c.make_fragment env (Code (dropping_instance env)))
       in
       Codegen_support.expect_string ~expected:"drop Text"
         (String.concat " " (List.map Instance.to_string references)));
@@ -253,7 +253,7 @@ let () =
 let () =
   Codegen_support.test "an object that a build finds again is as new as that build" (fun () ->
       let directory = Filename.concat (Lazy.force Codegen_support.scratch) "aged-objects" in
-      let cache = Build.cache directory in
+      let cache = Build.make_cache directory in
       let objects () =
         match
           Build.For_testing.objects
