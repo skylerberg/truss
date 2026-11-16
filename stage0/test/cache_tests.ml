@@ -113,7 +113,7 @@ let () =
       if found cache "k" = None then fail "removed a result");
   test "collecting past the budget removes the cache file used least recently" (fun () ->
       let cache = Cache.open_ (fresh_directory ()) in
-      let objects = Cache.cache_files cache "objects" in
+      let objects = Cache.make_objects_directory cache in
       let file name =
         let path = Filename.concat objects name in
         write_file path "object";
@@ -126,7 +126,7 @@ let () =
       if not (Sys.file_exists recent) then fail "removed the recent file");
   test "collecting within the budget keeps an unused cache file" (fun () ->
       let cache = Cache.open_ (fresh_directory ()) in
-      let path = Filename.concat (Cache.cache_files cache "objects") "unused.o" in
+      let path = Filename.concat (Cache.make_objects_directory cache) "unused.o" in
       write_file path "object";
       Unix.utimes path 1. 1.;
       Cache.collect cache ~budget:max_int;

@@ -182,7 +182,7 @@ let strict =
     ]
 
 let counter = ref 0
-let cache = lazy (Build.cache (Database.objects_directory ()))
+let cache = lazy (Build.cache (Cache.make_objects_directory (Database.open_cache ())))
 
 let added_flags =
   Toolchain.split_flags (Option.value (Sys.getenv_opt Toolchain.added_flags_variable) ~default:"")

@@ -1,6 +1,14 @@
 let solver () =
-  let find, add = Database.results ~kind:Cache.Solver_answer in
-  match Solver.find ~cache:{ find; add } () with
+  let cache = Database.open_cache () in
+  match
+    Solver.find
+      ~cache:
+        {
+          find = (fun key -> Cache.find_result cache ~kind:Solver_answer ~key);
+          add = (fun key value -> Cache.add_result cache ~kind:Solver_answer ~key value);
+        }
+      ()
+  with
   | Ok solver -> solver
   | Error message -> Outcome.cannot_run "%s" message
 

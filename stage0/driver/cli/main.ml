@@ -439,7 +439,7 @@ let wait_until_stopped answers =
 let clean_cache () =
   wait_until_stopped (ask_running [ "stop" ]);
   Database.reset ();
-  let directory = Database.cache_directory () in
+  let directory = Cache.default_directory () in
   match File_system.remove directory with
   | () -> 0
   | exception Unix.Unix_error (error, _, _) ->

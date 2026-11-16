@@ -14,8 +14,11 @@ let requests pipeline packages =
   | None -> Outcome.cannot_run "Stage0 builds programs only for Linux and macOS."
 
 let results () : Compile.results =
-  let find, add = Database.results ~kind:Cache.Test_result in
-  { find; add }
+  let cache = Database.open_cache () in
+  {
+    find = (fun key -> Cache.find_result cache ~kind:Test_result ~key);
+    add = (fun key value -> Cache.add_result cache ~kind:Test_result ~key value);
+  }
 
 let development_settings () : Build.settings =
   { build = Development; optimization = O1; extra = c_flags () }
@@ -23,7 +26,7 @@ let development_settings () : Build.settings =
 let lowering_only pipeline packages =
   Compile.create ~results:(results ()) (requests pipeline packages)
     { compiler = "cc"; identity = "lowering only" }
-    (Build.cache (Database.objects_directory ()))
+    (Build.cache (Cache.make_objects_directory (Database.open_cache ())))
     (development_settings ())
 
 let create pipeline snapshot packages build =
@@ -45,8 +48,9 @@ let create pipeline snapshot packages build =
     | _ -> Path.show_file file
   in
   let own = List.map snd (Database.packages snapshot) in
-  Compile.create ~file_name ~results:(results ()) ~programs:(Database.programs_directory ())
+  Compile.create ~file_name ~results:(results ())
+    ~programs:(Cache.make_programs_directory (Database.open_cache ()))
     ~worked_on:(fun package -> List.mem package own)
     (requests pipeline packages) toolchain
-    (Build.cache (Database.objects_directory ()))
+    (Build.cache (Cache.make_objects_directory (Database.open_cache ())))
     settings

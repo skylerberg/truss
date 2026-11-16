@@ -15,16 +15,6 @@ let reset () =
   Option.iter Cache.close !opened_cache;
   opened_cache := None
 
-let objects_directory () = Cache.cache_files (open_cache ()) "objects"
-let programs_directory () = Cache.files (open_cache ()) "programs"
-let packages_directory () = Cache.files (open_cache ()) "packages"
-let cache_directory = Cache.default_directory
-
-let results ~kind =
-  let cache = open_cache () in
-  ( (fun key -> Cache.find_result cache ~kind ~key),
-    fun key value -> Cache.add_result cache ~kind ~key value )
-
 let budget () =
   match Option.bind (Sys.getenv_opt "TRUSS_CACHE_SIZE") int_of_string_opt with
   | Some bytes -> bytes
@@ -152,7 +142,7 @@ type kind =
 type snapshot = { kind : kind; files : (string * string) list; project : Project.t }
 
 let fetch name version ~hash =
-  let packages = packages_directory () in
+  let packages = Cache.make_packages_directory (open_cache ()) in
   let directory = Filename.concat packages hash in
   if Sys.file_exists directory then Ok directory
   else
@@ -818,7 +808,8 @@ let published name version =
       | Ok _ -> (
           let snapshot =
             snapshot_of_files Published
-              (Registry.Content.input_files (Filename.concat (packages_directory ()) hash))
+              (Registry.Content.input_files
+                 (Filename.concat (Cache.make_packages_directory (open_cache ())) hash))
           in
           match problems snapshot with
           | [] -> Ok snapshot

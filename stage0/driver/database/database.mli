@@ -24,11 +24,7 @@ val branch : snapshot -> string -> (side, string) result
 val other_worktree : snapshot -> string -> (side, string) result
 val other_worktrees : snapshot -> string list
 val published : Path.package -> Registry.Version.t -> (snapshot, string) result
-val objects_directory : unit -> string
-val programs_directory : unit -> string
-val results : kind:Cache.result_kind -> (string -> string option) * (string -> string -> unit)
 val flush : unit -> unit
-val cache_directory : unit -> string
 
 type lock_plan = { text : string; before : Registry.Lock.t; after : Registry.Lock.t }
 
@@ -52,6 +48,7 @@ val call :
 val servers : unit -> string list
 val stop : unit -> unit
 val wait_until_ended : key:string -> unit
+val open_cache : unit -> Cache.t
 val reset : unit -> unit
 
 module For_testing : sig

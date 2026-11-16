@@ -374,19 +374,19 @@ let add_result cache ~kind ~key value =
   Hashtbl.replace cache.used name ();
   if not (present cache name) then append_record cache 'r' name value
 
-let files cache name =
-  let path = Filename.concat cache.root name in
+let make_directory path =
   File_system.make_directory path;
   path
 
-let caches_directory cache = Filename.concat cache.root "caches"
+let evictable_directory cache = Filename.concat cache.root "caches"
 
-let cache_files cache name =
-  let path = Filename.concat (caches_directory cache) name in
-  File_system.make_directory path;
-  path
+let make_objects_directory cache =
+  make_directory (Filename.concat (evictable_directory cache) "objects")
 
-let files_in_caches cache =
+let make_packages_directory cache = make_directory (Filename.concat cache.root "packages")
+let make_programs_directory cache = make_directory (Filename.concat cache.root "programs")
+
+let list_evictable_files cache =
   let rec walk directory files =
     match Sys.readdir directory with
     | exception Sys_error _ -> files
@@ -401,14 +401,14 @@ let files_in_caches cache =
             | exception Unix.Unix_error _ -> files)
           files names
   in
-  walk (caches_directory cache) []
+  walk (evictable_directory cache) []
 
 let file_size path = try (Unix.stat path).st_size with Unix.Unix_error _ -> 0
 
 let size cache =
   refresh cache;
   List.fold_left (fun total segment -> total + file_size segment.path) 0 cache.segments
-  + List.fold_left (fun total (_, size, _) -> total + size) 0 (files_in_caches cache)
+  + List.fold_left (fun total (_, size, _) -> total + size) 0 (list_evictable_files cache)
   + match cache.writer with Some writer -> writer.size | None -> 0
 
 let abandoned segment =
@@ -475,7 +475,7 @@ let collect cache ~budget =
         (List.filter abandoned cache.segments)
       @ List.map
           (fun (path, size, modified) -> (modified, size, Cache_file path))
-          (files_in_caches cache)
+          (list_evictable_files cache)
     in
     let rec least_recent freed = function
       | (_, size, entry) :: rest when freed < excess -> entry :: least_recent (freed + size) rest
