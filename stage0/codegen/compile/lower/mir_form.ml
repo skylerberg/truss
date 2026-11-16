@@ -18,7 +18,7 @@ let parameter_defaults (context : Definitions.context) path : (int * Mir.Graph.t
 
 let parameter_of (body : Mir.Graph.body) local =
   match body.locals.(local) with
-  | { kind = Source { mode; name; _ }; type_; _ } -> (mode, Option.value name ~default:"_", type_)
+  | { kind = Source { mode; name; _ }; type_; _ } -> (mode, name, type_)
   | _ -> Definitions.bug "a parameter that is no source local"
 
 let spans st = (Lowering.require_written st).spans
@@ -252,7 +252,7 @@ let outlives_call ~(owns : Mir.local -> bool) ~(is_view : Types.ty -> bool) (bod
           | _ -> raise Made)
       | Lend { part; call } when part = local ->
           if holds_view then receiver call @ viewed_by call else receiver call
-      | Slice { destination; base; call } when is_local destination ->
+      | Slice { destination; base; call; _ } when is_local destination ->
           [ (base, match receiver call with (_, holds_view) :: _ -> holds_view | [] -> false) ]
       | (Call { destination = Some target; call } | Template { destination = target; call; _ })
         when is_local target ->
@@ -2146,7 +2146,7 @@ let fill_defaults (st : Lowering.state) (mask : Lowered.place) (body : Mir.Graph
           in
           let place =
             if mode = Own && not (Lowering.is_trivial st ty) then begin
-              let owned_here = Builder.at (Builder.local builder ~name (Value ty)) in
+              let owned_here = Builder.at (Builder.local builder ?name (Value ty)) in
               let passed_block = Builder.block builder in
               unless_passed passed_block;
               Builder.start builder passed_block;

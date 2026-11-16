@@ -985,15 +985,9 @@ let elaborate_definition (lookups : Lookups.t) (key : Names.key) =
           | Test { uses; _ } ->
               make_elaborated_interface context
                 (Test_interface (elaborate_capabilities context uses))
-          | Theorem { generics; parameters; clauses; _ } ->
+          | Theorem { name; generics; parameters; clauses; _ } ->
               let signature : Syntax.signature =
-                {
-                  name = Plain_name { text = ""; id = definition.id };
-                  generics;
-                  parameters;
-                  result = None;
-                  clauses;
-                }
+                { name = Plain_name name; generics; parameters; result = None; clauses }
               in
               make_elaborated_interface context
                 (Theorem_interface

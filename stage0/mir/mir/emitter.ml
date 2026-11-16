@@ -97,8 +97,7 @@ let jump builder jump origin =
   emit builder (Jump jump) origin;
   builder.reaches <- false
 
-let assign ?node builder target value origin =
-  emit builder (Basic (Assign { target; value; node })) origin
+let assign builder target value origin = emit builder (Basic (Assign { target; value })) origin
 
 let hold_in_temporary builder type_ origin write =
   if not builder.reaches then None
@@ -107,8 +106,8 @@ let hold_in_temporary builder type_ origin write =
     write (at local);
     Some (Tree.Use { place = at local; type_; origin })
 
-let hold ?node builder type_ origin value =
-  hold_in_temporary builder type_ origin (fun target -> assign ?node builder target value origin)
+let hold builder type_ origin value =
+  hold_in_temporary builder type_ origin (fun target -> assign builder target value origin)
 
 let hold_choice builder type_ origin choice =
   hold_in_temporary builder type_ origin (fun target ->

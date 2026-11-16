@@ -32,14 +32,7 @@ let called_from_other_packages (state : State.state) =
           | _ -> true)
       | _ -> false)
 
-let check (state : State.state) =
-  let clauses, name =
-    match state.definition.kind with
-    | Function { signature; _ } | Method_declaration signature ->
-        (signature.clauses, Names.signature_name signature)
-    | Theorem { name; clauses; _ } -> (clauses, name)
-    | _ -> ([], { text = ""; id = state.definition.id })
-  in
+let check_clauses (state : State.state) (name : Syntax.name) clauses =
   let requires_and_costs =
     List.filter_map
       (fun (clause : Syntax.clause) ->
@@ -75,3 +68,10 @@ let check (state : State.state) =
         match resolution with Some (Global { path; _ }) -> named id path | _ -> ())
       state.tables.resolutions
   end
+
+let check (state : State.state) =
+  match state.definition.kind with
+  | Syntax.Function { signature; _ } | Method_declaration signature ->
+      check_clauses state (Names.signature_name signature) signature.clauses
+  | Theorem { name; clauses; _ } -> check_clauses state name clauses
+  | _ -> ()

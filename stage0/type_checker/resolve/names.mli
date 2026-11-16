@@ -88,6 +88,7 @@ val lookup_module :
   lookups ->
   from:Path.module_ ->
   imports:(string * Path.module_) list ->
+  string ->
   string list ->
   module_lookup
 
