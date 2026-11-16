@@ -128,11 +128,11 @@ let frame_of_body st ?owner ?returns_into ?lending ?(passed : Ground.mode list o
   let needs_drop (path : Moves.path) =
     let rec path_type ty = function
       | [] -> Some ty
-      | step :: rest -> (
+      | projection :: rest -> (
           let member =
-            match (Memory_layout.shape st.context.env ty, (step : Moves.step)) with
+            match (Memory_layout.shape st.context.env ty, (projection : Mir.projection)) with
             | Record fields, Field name -> List.assoc_opt name fields
-            | Sum variants, Variant { variant; field } ->
+            | Sum variants, Variant_field { variant; field } ->
                 Option.bind
                   (List.find_opt
                      (fun (shape : Memory_layout.variant_shape) -> shape.name = variant)
@@ -142,7 +142,7 @@ let frame_of_body st ?owner ?returns_into ?lending ?(passed : Ground.mode list o
           in
           match member with Some (Typed field_ty) -> path_type field_ty rest | _ -> None)
     in
-    match path_type (ground st body.locals.(path.local).type_) path.steps with
+    match path_type (ground st body.locals.(path.local).type_) path.projections with
     | Some ty -> not (is_trivial st ty)
     | None -> false
   in
@@ -441,16 +441,7 @@ let break_loop st =
   | [] -> bug "a break outside a loop"
 
 let path_place st (path : Moves.path) =
-  place st
-    {
-      root = Local path.local;
-      projections =
-        List.map
-          (function
-            | Moves.Field field -> Mir.Field field
-            | Variant { variant; field } -> Mir.Variant_field { variant; field })
-          path.steps;
-    }
+  place st { root = Local path.local; projections = path.projections }
 
 let rec drop_path st (path : Moves.path) =
   let frame = mir st in
@@ -471,9 +462,9 @@ let rec drop_path st (path : Moves.path) =
               (String.concat ""
                  (List.map
                     (function
-                      | Moves.Field field -> "." ^ field
-                      | Variant { variant; field } -> Printf.sprintf ".(%s).%s" variant field)
-                    path.steps))
+                      | Mir.Field field -> "." ^ field
+                      | Variant_field { variant; field } -> Printf.sprintf ".(%s).%s" variant field)
+                    path.projections))
       in
       when_ st.builder (Copy flag) (fun () -> drop_held st path)
 
@@ -494,8 +485,8 @@ and drop_parts st (path : Moves.path) =
     | Some (Value ty) -> ty
     | _ -> bug "a path to drop that holds no value"
   in
-  let child step =
-    let inner = { path with steps = path.steps @ [ step ] } in
+  let child projection =
+    let inner = { path with projections = path.projections @ [ projection ] } in
     match place_type st (path_place st inner) with
     | Some (Value inner_ty) when not (is_trivial st inner_ty) -> drop_path st inner
     | _ -> ()
@@ -504,20 +495,20 @@ and drop_parts st (path : Moves.path) =
   | Struct fields ->
       List.iter (fun (field : Memory_layout.field) -> child (Field field.name)) fields
   | Tagged _ | Niche_encoded _ -> (
-      let depth = List.length path.steps in
+      let depth = List.length path.projections in
       let inside = Moves.inside frame.moves path in
       let variants =
         List.sort_uniq compare
           (List.filter_map
              (fun (inner : Moves.path) ->
-               match List.nth_opt inner.steps depth with
-               | Some (Variant { variant; _ }) -> Some variant
+               match List.nth_opt inner.projections depth with
+               | Some (Variant_field { variant; _ }) -> Some variant
                | _ -> None)
              inside)
       in
       let open_variant variant =
         List.iter
-          (fun (name, _) -> child (Variant { variant; field = name }))
+          (fun (name, _) -> child (Variant_field { variant; field = name }))
           (List.assoc (Some variant) (variants_of st ty));
         if
           List.exists
@@ -528,8 +519,8 @@ and drop_parts st (path : Moves.path) =
       let certain variant =
         List.exists
           (fun (inner : Moves.path) ->
-            match List.nth_opt inner.steps depth with
-            | Some (Variant { variant = inner_variant; _ }) ->
+            match List.nth_opt inner.projections depth with
+            | Some (Variant_field { variant = inner_variant; _ }) ->
                 inner_variant = variant && Moves.status frame.moves frame.state inner = Some Empty
             | _ -> false)
           inside
@@ -558,7 +549,7 @@ and drop_parts st (path : Moves.path) =
   | _ -> emit st.builder (Drop place)
 
 let drop_local st local =
-  let path : Moves.path = { local; steps = [] } in
+  let path : Moves.path = { local; projections = [] } in
   if Moves.owns (mir st).moves local && Moves.status (mir st).moves (mir st).state path <> None then
     drop_path st path
 
@@ -573,7 +564,8 @@ let drop_parameters st = List.iter (drop_local st) (mir st).body.parameters
 
 let overwritten st (target : Mir.place) (destination : Lowered.place) ty =
   match Moves.path_of_place target with
-  | Some path when Moves.status (mir st).moves (mir st).state { path with steps = [] } <> None ->
+  | Some path when Moves.status (mir st).moves (mir st).state { path with projections = [] } <> None
+    ->
       drop_path st path
   | _ -> if not (is_trivial st ty) then emit st.builder (Drop destination)
 
