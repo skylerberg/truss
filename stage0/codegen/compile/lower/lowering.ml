@@ -149,15 +149,13 @@ let own_in_scope st place =
   let scope = lookup_binding_scope st.scopes in
   scope.owned <- Drop_value place :: scope.owned
 
-let allocate_owned_local st ?name (scope : scope) ty =
-  let place =
-    Lowered.make_local_place (Emit_c.Builder.allocate_local st.builder ?name (Value ty))
-  in
+let allocate_owned_local st (scope : scope) ty =
+  let place = Lowered.make_local_place (Emit_c.Builder.allocate_local st.builder (Value ty)) in
   if not (is_trivial st ty) then scope.owned <- Drop_value place :: scope.owned;
   place
 
 let allocate_temporary st ty = allocate_owned_local st (lookup_innermost_scope st) ty
-let allocate_binding st ?name ty = allocate_owned_local st ?name (lookup_binding_scope st.scopes) ty
+let allocate_binding st ty = allocate_owned_local st (lookup_binding_scope st.scopes) ty
 
 let allocate_flagged_binding st ty ~flag =
   let place = Lowered.make_local_place (Emit_c.Builder.allocate_local st.builder (Value ty)) in
@@ -167,25 +165,24 @@ let allocate_flagged_binding st ty ~flag =
   end;
   place
 
-let allocate_parameter st ?(in_scope = true) ~owned (mode : Ground.mode) ty =
+let allocate_parameter st ?(in_scope = true) ?name ~owned (mode : Ground.mode) ty =
   let own place = if in_scope && owned && not (is_trivial st ty) then own_in_scope st place in
   match Convention.classify_parameter st.context.env mode ty with
   | None -> (None, allocate_temporary st ty)
   | Some (Lowered.Pointer _ as pointer) ->
-      let arrives = Emit_c.Builder.allocate_local st.builder pointer in
+      let arrives = Emit_c.Builder.allocate_local st.builder ?name pointer in
       let place : Lowered.place = { root = Local arrives; projections = [ Deref ] } in
       own place;
       (Some arrives, place)
   | Some passed ->
-      let arrives = Emit_c.Builder.allocate_local st.builder passed in
+      let arrives = Emit_c.Builder.allocate_local st.builder ?name passed in
       own (Lowered.make_local_place arrives);
       (Some arrives, Lowered.make_local_place arrives)
 
 let list_evidence_parameters st capabilities =
   let arriving =
     List.map
-      (fun capability ->
-        (capability, Emit_c.Builder.allocate_local st.builder ~name:"evidence" Convention.evidence))
+      (fun capability -> (capability, Emit_c.Builder.allocate_local st.builder Convention.evidence))
       capabilities
   in
   st.evidence <-
@@ -198,9 +195,8 @@ let list_evidence_parameters st capabilities =
 let set_result_slot st (convention : Convention.result) =
   st.result <-
     (match convention with
-    | Through_pointer pointer ->
-        Through (Emit_c.Builder.allocate_local st.builder ~name:"result" pointer)
-    | Returned ty -> Returned_in (Emit_c.Builder.allocate_local st.builder ~name:"result" ty)
+    | Through_pointer pointer -> Through (Emit_c.Builder.allocate_local st.builder pointer)
+    | Returned ty -> Returned_in (Emit_c.Builder.allocate_local st.builder ty)
     | Nothing -> No_result)
 
 let find_result_place st : Lowered.place option =

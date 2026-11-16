@@ -57,17 +57,14 @@ let build_debug env ty =
   let builder = Emit_c.Builder.create env ~key:(Debug ty) in
   let parameter =
     if Memory_layout.has_zero_size env ty then None
-    else
-      Some (Emit_c.Builder.allocate_local builder ~name:"value" (Writing.make_value_parameter ty))
+    else Some (Emit_c.Builder.allocate_local builder (Writing.make_value_parameter ty))
   in
   let value : Lowered.place =
     match parameter with
     | Some parameter_local -> { root = Local parameter_local; projections = [ Deref ] }
     | None -> Lowered.make_local_place 0
   in
-  let output_pointer =
-    Emit_c.Builder.allocate_local builder ~name:"output" (Writing.make_output_parameter env)
-  in
+  let output_pointer = Emit_c.Builder.allocate_local builder (Writing.make_output_parameter env) in
   let output = Lowered.Copy (Lowered.make_local_place output_pointer) in
   let write_output_text = write_text env builder ~output in
   let emit_output_call = emit_debug_call env builder ~output in

@@ -205,7 +205,7 @@ let emit_when builder condition then_ =
 
 let emit_loop builder ?(integer = Memory_layout.UInt64) ~count body =
   let make_constant number = Lowered.Constant (Integer (integer, Z.of_int number)) in
-  let index = allocate_local builder ~name:"index" (Raw (Integer integer)) in
+  let index = allocate_local builder (Raw (Integer integer)) in
   let going = allocate_local builder (Raw Bool) in
   let test = allocate_block builder in
   let inside = allocate_block builder in
@@ -236,8 +236,8 @@ let write_in builder number body =
 
 let outline builder ~index ~parts body =
   let code = (lookup_current_function builder).code in
-  let holder = allocate_local builder ~name:"environment" (Environment index) in
-  let arrives = allocate_local builder ~name:"environment" (Raw (Nullable_pointer Opaque)) in
+  let holder = allocate_local builder (Environment index) in
+  let arrives = allocate_local builder (Raw (Nullable_pointer Opaque)) in
   let environment =
     allocate_local builder (Pointer { target = Environment index; writable = false })
   in

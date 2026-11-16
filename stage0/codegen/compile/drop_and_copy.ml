@@ -57,7 +57,7 @@ let compute_first_method_slot ~is_copyable =
 
 let allocate_box context builder ty =
   let layout = Memory_layout.of_type context.env ty in
-  let box = Emit_c.Builder.allocate_local builder ~name:"box" (Raw (Pointer Opaque)) in
+  let box = Emit_c.Builder.allocate_local builder (Raw (Pointer Opaque)) in
   Emit_c.Builder.emit builder
     (Call
        {
@@ -78,8 +78,7 @@ let emit_condition builder rvalue =
 let drop context ty =
   let builder = Emit_c.Builder.create context.env ~key:(Drop ty) in
   let pointer =
-    Emit_c.Builder.allocate_local builder ~name:"value"
-      (Pointer { target = Value ty; writable = true })
+    Emit_c.Builder.allocate_local builder (Pointer { target = Value ty; writable = true })
   in
   let value : Lowered.place = { root = Local pointer; projections = [ Deref ] } in
   Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
@@ -212,7 +211,7 @@ let drop context ty =
 
 let build_any_drop context ty =
   let builder = Emit_c.Builder.create context.env ~key:(Any_drop ty) in
-  let untyped = Emit_c.Builder.allocate_local builder ~name:"value" (Raw (Pointer Opaque)) in
+  let untyped = Emit_c.Builder.allocate_local builder (Raw (Pointer Opaque)) in
   Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
   if not (is_trivial context ty) then begin
     let typed =
@@ -270,13 +269,11 @@ let copy context ty =
   let convention = Convention.classify_result context.env ty in
   let result_pointer =
     match convention with
-    | Through_pointer pointer -> Some (Emit_c.Builder.allocate_local builder ~name:"result" pointer)
+    | Through_pointer pointer -> Some (Emit_c.Builder.allocate_local builder pointer)
     | Returned _ | Nothing -> None
   in
   let parameter = Convention.classify_parameter context.env Read ty in
-  let self_local =
-    Option.map (fun ty -> Emit_c.Builder.allocate_local builder ~name:"self" ty) parameter
-  in
+  let self_local = Option.map (fun ty -> Emit_c.Builder.allocate_local builder ty) parameter in
   let self : Lowered.place =
     match (parameter, self_local) with
     | Some (Pointer _), Some local -> { root = Local local; projections = [ Deref ] }
@@ -285,7 +282,7 @@ let copy context ty =
   in
   let result_local =
     match result_pointer with
-    | None -> Some (Emit_c.Builder.allocate_local builder ~name:"copy" (Value ty))
+    | None -> Some (Emit_c.Builder.allocate_local builder (Value ty))
     | Some _ -> None
   in
   let result : Lowered.place =
@@ -349,9 +346,7 @@ let copy context ty =
       Emit_c.Builder.finish builder (Goto after);
       Emit_c.Builder.start builder allocate;
       let bytes = Emit_c.Builder.allocate_local builder (Raw (Integer UInt64)) in
-      let buffer =
-        Emit_c.Builder.allocate_local builder ~name:"buffer" (Raw (Pointer (Data element)))
-      in
+      let buffer = Emit_c.Builder.allocate_local builder (Raw (Pointer (Data element))) in
       Emit_c.Builder.emit builder
         (Assign
            ( Lowered.make_local_place bytes,
@@ -465,7 +460,7 @@ let copy context ty =
 
 let build_any_copy context ty =
   let builder = Emit_c.Builder.create context.env ~key:(Any_copy ty) in
-  let original = Emit_c.Builder.allocate_local builder ~name:"value" (Raw (Pointer Opaque)) in
+  let original = Emit_c.Builder.allocate_local builder (Raw (Pointer Opaque)) in
   Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
   let copied = allocate_box context builder ty in
   if not (Memory_layout.has_zero_size context.env ty) then begin

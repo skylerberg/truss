@@ -257,7 +257,7 @@ let lower_nested_function (st : Lowering.state) ~(function_type : Ground.functio
           }
       in
       let environment_parameter =
-        Emit_c.Builder.allocate_local builder ~name:"environment" (Raw (Nullable_pointer Opaque))
+        Emit_c.Builder.allocate_local builder (Raw (Nullable_pointer Opaque))
       in
       Lowering.set_result_slot inner
         (Convention.classify_result st.context.env function_type.result);

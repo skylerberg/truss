@@ -20,7 +20,7 @@ let bind_parameters st (body : Mir.Graph.body) ~(defaults : (int * Mir.Graph.t) 
   let filled = ref 0 in
   List.mapi
     (fun position local ->
-      let mode, _, type_ = Mir_form.extract_parameter body local in
+      let mode, name, type_ = Mir_form.extract_parameter body local in
       let ty = Lowering.ground st type_ in
       let bit =
         Option.map
@@ -30,7 +30,7 @@ let bind_parameters st (body : Mir.Graph.body) ~(defaults : (int * Mir.Graph.t) 
           (List.assoc_opt position defaults)
       in
       let arrives, place =
-        Lowering.allocate_parameter st ~in_scope:false
+        Lowering.allocate_parameter st ~in_scope:false ?name
           ~owned:(mode = Own && bit = None)
           (Monomorphic.ground_mode mode) ty
       in
@@ -42,8 +42,7 @@ let begin_body (st : Lowering.state) ~(body : Mir.Graph.body) ~defaults =
   let bound = bind_parameters st body ~defaults in
   let places = List.map (fun (_, _, place) -> place) bound in
   let mask =
-    if code.has_defaults then
-      Some (Emit_c.Builder.allocate_local st.builder ~name:"passed" (Raw (Integer UInt64)))
+    if code.has_defaults then Some (Emit_c.Builder.allocate_local st.builder (Raw (Integer UInt64)))
     else None
   in
   let evidence =
@@ -154,7 +153,7 @@ let lower_source_code context ~path ~type_arguments : Emit_c.Builder.instance =
   in
   let lending_locals =
     List.map
-      (fun ty -> Emit_c.Builder.allocate_local st.builder ~name:"lend" ty)
+      (fun ty -> Emit_c.Builder.allocate_local st.builder ty)
       (Definitions.list_lending_parameters context code.substitution code.result)
   in
   let lending : Lowering.lending option =
