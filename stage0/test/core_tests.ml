@@ -3,10 +3,9 @@ let find_core packages key =
     (fun (checked : Infer.checked) -> checked.form)
     (Database.read_checked_body (Support.make_database packages) key)
 
-type form = { core : Core.t; names : string Core_walk.For_testing.Local_table.t }
+type form = { core : Core.t }
 
-let form_of (core : Core.t) =
-  { core; names = Core_walk.For_testing.collect_local_names core.definition }
+let form_of (core : Core.t) = { core }
 
 let list_expressions form =
   let found = ref [] in
@@ -20,11 +19,11 @@ let list_calls form =
     (fun (node : Core.expression) -> match node.kind with Call call -> Some call | _ -> None)
     (list_expressions form)
 
-let name form (local : Core.local) =
+let name _ (local : Core.local) =
   match local with
   | Self -> "self"
-  | Named _ | Synthetic _ ->
-      Option.value ~default:"" (Core_walk.For_testing.Local_table.find_opt form.names local)
+  | Declared { name; _ } | Trait_parameter { name; _ } -> name
+  | Synthetic index -> Printf.sprintf "synthetic %d" index
 
 let rec show_access_path form (place : Core.place) =
   match place with
@@ -274,7 +273,7 @@ let () =
                     pattern =
                       (fun (node : Core.pattern) ->
                         match node.kind with
-                        | Bind { name; _ } ->
+                        | Bind { local = Declared { name; _ }; _ } ->
                             actual := (name ^ ": " ^ Types.show node.type_) :: !actual
                         | _ -> ());
                   }
@@ -581,15 +580,16 @@ let () =
         | Law_proof { parameters; _ } ->
             List.map
               (fun (parameter : Core.parameter) ->
-                Printf.sprintf "%s: %s, %s" parameter.name (Types.show parameter.type_)
-                  (match parameter.local with
-                  | Synthetic index -> Printf.sprintf "synthetic local %d" index
-                  | Named _ | Self -> "not synthetic"))
+                match parameter.local with
+                | Trait_parameter { index; name } ->
+                    Printf.sprintf "%s: %s, trait parameter %d" name (Types.show parameter.type_)
+                      index
+                | Declared _ | Self | Synthetic _ -> "not a trait parameter")
               parameters
         | _ -> [ "not a law's proof" ])
       @ list_final_expressions form)
     [
-      "first: Pair, synthetic local 0";
-      "second: Pair, synthetic local 1";
+      "first: Pair, trait parameter 0";
+      "second: Pair, trait parameter 1";
       "app::main::only_equal(place first, place second)";
     ]

@@ -4,9 +4,11 @@ type context = {
   lookups : Lookups.t;
   list_bounds : Types.parameter -> Types.trait_reference list;
   spans : Source.Definition_span.t array Lazy.t;
+  text : string Lazy.t;
   mode_keywords : (Core.origin, Core.mode_keyword) Hashtbl.t;
   places_without_keyword : (Core.origin, Types.mode) Hashtbl.t;
   names : string Local_table.t;
+  origins : Core.origin Local_table.t;
   binding_modes : Types.mode Local_table.t;
   types : Types.ty Local_table.t;
   mutable parameters : Core.local list;

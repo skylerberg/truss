@@ -1,7 +1,7 @@
 type local = int
 
 type local_kind =
-  | Source of { local : Core.local; mode : Types.mode; name : string option; is_var : bool }
+  | Source of { local : Core.local; mode : Types.mode; is_var : bool; is_binding : bool }
   | Temporary
   | Lent of Types.mode
 
@@ -236,15 +236,8 @@ type requirement = {
   names : (Core.local * Core.origin) list;
 }
 
-type callback = { inputs : (Core.local * string) list; requires : formula list }
-
-type parameter = {
-  local : Core.local;
-  name : string;
-  mode : Types.mode;
-  type_ : Types.ty;
-  has_default : bool;
-}
+type callback = { inputs : Core.local list; requires : formula list }
+type parameter = { local : Core.local; mode : Types.mode; type_ : Types.ty; has_default : bool }
 
 type contract = {
   parameters : parameter list;

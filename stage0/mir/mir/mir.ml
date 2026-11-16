@@ -42,8 +42,10 @@ let find_defaults (definition : Core.definition) =
   | Test _ | Law_proof _ -> Some (Parameter_defaults [])
   | Trait _ | Constant _ | Empty -> None
 
-let make_parameter ({ local; name; mode; type_; default; _ } : Core.parameter) : parameter =
-  { local; name; mode; type_; has_default = default <> None }
+let find_local_name = Core_walk.find_local_name
+
+let make_parameter ({ local; mode; type_; default; _ } : Core.parameter) : parameter =
+  { local; mode; type_; has_default = default <> None }
 
 let find_contract (definition : Core.definition) =
   match definition with
@@ -124,7 +126,6 @@ let find_type_clauses ~find_type_interface path (definition : Core.definition) =
           let self : Core.parameter =
             {
               local = Self;
-              name = "self";
               mode = Read;
               type_ =
                 Types.Named

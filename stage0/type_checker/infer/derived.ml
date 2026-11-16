@@ -64,7 +64,6 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   [
                     {
                       Core.local = Self;
-                      name = "self";
                       mode = (match receiver with Mut -> Mut | Own -> Own | _ -> Read);
                       type_;
                       default = None;
@@ -72,11 +71,10 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                     };
                   ]
               | Some (Static, _) | None -> [])
-            @ List.map
-                (fun (info : Types.parameter_info) : Core.parameter ->
+            @ List.mapi
+                (fun index (info : Types.parameter_info) : Core.parameter ->
                   {
-                    local = make_local ();
-                    name = info.name;
+                    local = Trait_parameter { index; name = info.name };
                     mode = info.mode;
                     type_ = info.type_;
                     default = None;
@@ -178,10 +176,8 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   Core.Field { base; field = field.field_name; type_ = field.field_type; origin } ))
               (record_fields ())
           in
-          let list_bound name_field (fields : Types.field list) =
-            List.map
-              (fun (field : Types.field) -> (field, make_local (), name_field field.field_name))
-              fields
+          let list_bound (fields : Types.field list) =
+            List.map (fun (field : Types.field) -> (field, make_local ())) fields
           in
           let binding variant bound : Core.pattern =
             pattern self_type
@@ -190,16 +186,15 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                    variant;
                    fields =
                      List.map
-                       (fun ((field : Types.field), local, name) ->
+                       (fun ((field : Types.field), local) ->
                          ( field.field_name,
-                           pattern field.field_type
-                             (Bind { local; name; is_var = false; mode = Read }) ))
+                           pattern field.field_type (Bind { local; is_var = false; mode = Read }) ))
                        bound;
                  })
           in
           let list_parts bound =
             List.map
-              (fun ((field : Types.field), local, _) ->
+              (fun ((field : Types.field), local) ->
                 (field, Core.Local { local; type_ = field.field_type; origin }))
               bound
           in
@@ -220,7 +215,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                           arms =
                             List.mapi
                               (fun index (variant, fields) ->
-                                let mine = list_bound Fun.id fields in
+                                let mine = list_bound fields in
                                 arm (binding variant mine)
                                   (each (Some variant) index (list_parts mine)))
                               variants;
@@ -231,7 +226,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
             match variant with
             | None -> build_same (record_parts other)
             | Some variant ->
-                let theirs = list_bound (fun name -> "other_" ^ name) (List.map fst mine) in
+                let theirs = list_bound (List.map fst mine) in
                 node type_
                   (Match
                      {
@@ -370,13 +365,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                        (make_giving_block (compare_in_turn rest rest_of_theirs));
                                      arm
                                        (pattern result
-                                          (Bind
-                                             {
-                                               local = decided;
-                                               name = "decided";
-                                               is_var = false;
-                                               mode = Own;
-                                             }))
+                                          (Bind { local = decided; is_var = false; mode = Own }))
                                        (make_giving_block
                                           (node result
                                              (Use
@@ -446,13 +435,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                {
                                  pattern =
                                    pattern number
-                                     (Bind
-                                        {
-                                          local = theirs;
-                                          name = "theirs";
-                                          is_var = false;
-                                          mode = Own;
-                                        });
+                                     (Bind { local = theirs; is_var = false; mode = Own });
                                  value = Operands.build Own numbered;
                                  else_ = None;
                                });
@@ -567,13 +550,8 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                          [
                                            ( "value",
                                              pattern ok
-                                               (Bind
-                                                  {
-                                                    local = value;
-                                                    name = "value";
-                                                    is_var = false;
-                                                    mode = Own;
-                                                  }) );
+                                               (Bind { local = value; is_var = false; mode = Own })
+                                           );
                                          ];
                                      }))
                                (make_giving_block
@@ -587,13 +565,8 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                          [
                                            ( "error",
                                              pattern error_type
-                                               (Bind
-                                                  {
-                                                    local = error;
-                                                    name = "error";
-                                                    is_var = false;
-                                                    mode = Own;
-                                                  }) );
+                                               (Bind { local = error; is_var = false; mode = Own })
+                                           );
                                          ];
                                      }))
                                (make_giving_block
@@ -714,11 +687,11 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                binds_lent_part = false;
                              })))
                 in
-                let bind_local local name type_ ~is_var value =
+                let bind_local local type_ ~is_var value =
                   statement
                     (Let
                        {
-                         pattern = pattern type_ (Bind { local; name; is_var; mode = Own });
+                         pattern = pattern type_ (Bind { local; is_var; mode = Own });
                          value = Operands.build Own value;
                          else_ = None;
                        })
@@ -742,7 +715,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   let lets =
                     List.map
                       (fun ((field : Types.field), local) ->
-                        bind_local local field.field_name field.field_type ~is_var:false
+                        bind_local local field.field_type ~is_var:false
                           (read_field Deserialize_required field field.field_type))
                       read
                   in
@@ -797,7 +770,6 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                                            (Bind
                                                               {
                                                                 local = present;
-                                                                name = field.field_name;
                                                                 is_var = false;
                                                                 mode = Own;
                                                               }) );
@@ -844,7 +816,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   {
                     statements =
                       lets
-                      @ [ bind_local built "built" self_type ~is_var:(defaulted <> []) construct ]
+                      @ [ bind_local built self_type ~is_var:(defaulted <> []) construct ]
                       @ updates
                       @ [ finish end_ ]
                       @ List.map (make_invariant_check built_place) invariant_clauses;
@@ -940,7 +912,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                     {
                       statements =
                         [
-                          bind_local name "name" string_type ~is_var:false
+                          bind_local name string_type ~is_var:false
                             (make_attempt string_type
                                (make_source_call "variant" [] (make_result_type string_type)));
                         ];

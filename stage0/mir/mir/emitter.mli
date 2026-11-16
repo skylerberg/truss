@@ -16,14 +16,7 @@ val add_source : t -> Core.local -> Tree.local -> unit
 val obtain_free_source : t -> Core.local -> type_:Types.ty -> origin:Core.origin -> Tree.local
 
 val bind_source :
-  name:string ->
-  ?is_var:bool ->
-  t ->
-  Core.local ->
-  Types.mode ->
-  Types.ty ->
-  Core.origin ->
-  Tree.local
+  ?is_var:bool -> t -> Core.local -> Types.mode -> Types.ty -> Core.origin -> Tree.local
 
 val register_binding : t -> Tree.local -> unit
 val note_bound_to_place : t -> Tree.local -> unit

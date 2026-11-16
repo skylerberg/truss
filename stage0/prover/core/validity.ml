@@ -167,7 +167,7 @@ let declare_callback_arguments context frame inputs =
 let make_callback_contract_frame (frame : State.frame) inputs arguments =
   let locals =
     List.fold_left2
-      (fun locals (input, _) term -> Locals.add (Core_local input) term locals)
+      (fun locals input term -> Locals.add (Core_local input) term locals)
       frame.old_locals inputs arguments
   in
   { frame with locals; self = frame.old_self; makes_obligations = false }
@@ -265,7 +265,7 @@ let list_callback_facts (context : State.context) frame (invocation : Invocation
                   inside with
                   locals =
                     List.fold_left2
-                      (fun locals (local, _) term -> Locals.add (Core_local local) term locals)
+                      (fun locals local term -> Locals.add (Core_local local) term locals)
                       inside.locals inputs arguments;
                 }
               in

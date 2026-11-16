@@ -525,6 +525,10 @@ let () =
     (fun () ->
       expect_one_diagnostic
         (bag ^ Fixtures.Ownership.compound_assignment_whose_index_spoils_its_operand)
+        "ownership.mutated_while_viewed");
+  Harness.test "a message quotes the operand that a compound assignment holds" (fun () ->
+      expect_one_diagnostic ~says:"through `others[0]`, which views it"
+        (bag ^ Fixtures.Ownership.compound_assignment_whose_index_spoils_its_operand)
         "ownership.mutated_while_viewed")
 
 let () =

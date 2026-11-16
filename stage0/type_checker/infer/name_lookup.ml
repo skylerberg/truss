@@ -28,12 +28,12 @@ and check_name (state : State.state) (env : State.env) (value : Syntax.expressio
       | None -> State.raise_bug "the local `%s` has no type" text)
   | Law_parameter index -> (
       match List.nth_opt state.law_parameters index with
-      | Some (_, type_) ->
+      | Some (name, type_) ->
           State.register_expression state value (fun () ->
               Use
                 (Local
                    {
-                     local = Synthetic index;
+                     local = Trait_parameter { index; name };
                      type_ = State.finalize_type state type_;
                      origin = value.id;
                    }));

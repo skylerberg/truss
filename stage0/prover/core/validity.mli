@@ -27,9 +27,7 @@ val assume_valid : State.context -> State.frame -> Types.ty -> Logic.term -> uni
 val declare_callback_arguments :
   State.context -> State.frame -> ('a * Types.ty) list -> Logic.term list
 
-val make_callback_contract_frame :
-  State.frame -> (Core.local * 'a) list -> Logic.term list -> State.frame
-
+val make_callback_contract_frame : State.frame -> Core.local list -> Logic.term list -> State.frame
 val find_own_callback : State.context -> Core.local -> (string * Mir.callback) option
 val check_escaping_callback : State.context -> State.frame -> Core.local -> unit
 val run_reading_callback : State.context -> (unit -> 'a) -> 'a

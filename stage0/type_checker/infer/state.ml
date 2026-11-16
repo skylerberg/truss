@@ -1,4 +1,4 @@
-type local = { type_ : Types.ty; is_var : bool; mode : Types.mode }
+type local = { name : string; type_ : Types.ty; is_var : bool; mode : Types.mode }
 
 type env = {
   output : Types.result option;
@@ -791,7 +791,7 @@ let build_block state (written : Syntax.block) : Core.block =
   { statements; value }
 
 let declare state (name : Syntax.name) type_ ~is_var ~mode =
-  Hashtbl.replace state.locals name.id { type_; is_var; mode };
+  Hashtbl.replace state.locals name.id { name = name.text; type_; is_var; mode };
   state.tables.local_types.(name.id) <- Some type_;
   match find_current_frame state with
   | Some frame ->

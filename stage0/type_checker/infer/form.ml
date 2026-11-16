@@ -200,7 +200,7 @@ let build_variant_value state (value : Syntax.expression) type_path variant : Co
                   id = State.allocate_node_id state;
                   origin = value.id;
                   type_ = field.field_type;
-                  kind = Bind { local; name = field.field_name; is_var = false; mode = Own };
+                  kind = Bind { local; is_var = false; mode = Own };
                 })
               fields;
           captures = [];
@@ -240,12 +240,17 @@ let read_local_type (state : State.state) (id : Syntax.id) =
   | Some type_ -> type_
   | None -> State.raise_bug "a local has no recorded type"
 
-let build_named_local state ~origin (id : Syntax.id) : Core.place =
-  Local { local = Named id; type_ = read_local_type state id; origin }
+let build_declared_local (state : State.state) (id : Syntax.id) : Core.local =
+  match Hashtbl.find_opt state.locals id with
+  | Some local -> Declared { origin = id; name = local.name }
+  | None -> State.raise_bug "a local that nothing declares"
+
+let build_declared_place state ~origin (id : Syntax.id) : Core.place =
+  Local { local = build_declared_local state id; type_ = read_local_type state id; origin }
 
 let build_local_use state ~origin (id : Syntax.id) : Core.kind =
   if State.was_hole state (fun tables -> tables.local_types) id then Todo
-  else Use (build_named_local state ~origin id)
+  else Use (build_declared_place state ~origin id)
 
 let read_self_type state (env : State.env) =
   match env.self with
@@ -352,7 +357,7 @@ let build_untagged_string state ~origin (literal : Syntax.string_literal) : Core
                    id = State.allocate_node_id state;
                    origin;
                    type_ = builder_type;
-                   kind = Bind { local = builder; name = "builder"; is_var = true; mode = Own };
+                   kind = Bind { local = builder; is_var = true; mode = Own };
                  };
                value =
                  Operands.build Own
@@ -446,7 +451,7 @@ let build_list_literal state ~origin (element : Types.ty) (elements : Core.expre
                id = State.allocate_node_id state;
                origin;
                type_ = storage_type;
-               kind = Bind { local = storage; name = "storage"; is_var = true; mode = Own };
+               kind = Bind { local = storage; is_var = true; mode = Own };
              };
            value =
              Operands.build Own
@@ -881,7 +886,6 @@ let build_collection_place state (iterable : Syntax.expression) (mode : Types.mo
             Bind
               {
                 local;
-                name = "collection";
                 is_var = false;
                 mode = (match scrutinee with Place _ -> mode | Value _ -> Own);
               };
@@ -920,7 +924,7 @@ let build_elements state ~origin (collection : Core.place) ~(count : Tables.call
         id = State.allocate_node_id state;
         origin;
         type_ = uint64;
-        kind = Bind { local; name = "position"; is_var = false; mode = Own };
+        kind = Bind { local; is_var = false; mode = Own };
       };
     element =
       Lent
@@ -1045,7 +1049,7 @@ let build_for_loop (state : State.state) (written : Syntax.statement) (iterable 
               id = State.allocate_node_id state;
               origin;
               type_ = pulled.type_;
-              kind = Bind { local; name = "cursor"; is_var = true; mode = Own };
+              kind = Bind { local; is_var = true; mode = Own };
             }
           in
           let statement : Core.statement =
@@ -1084,7 +1088,7 @@ let convert_resource state (written : Syntax.resource) : Core.resource =
   | Allocated_bytes -> Allocated_bytes
   | Calls (Call_parameter name) -> (
       match State.find_target state name with
-      | Some (Local id) -> Calls (Function_parameter (Named id))
+      | Some (Local id) -> Calls (Function_parameter (build_declared_local state id))
       | _ -> State.raise_bug "`calls(%s)` names no parameter" name.text)
   | Calls (Call_capability path) -> Calls (Capability (resolve_capability path))
   | Calls (Call_method (path, method_)) ->
@@ -1145,7 +1149,7 @@ let build_try state (value : Syntax.expression) (inner : Syntax.expression) ~(ou
                         id = State.allocate_node_id state;
                         origin = value.id;
                         type_ = field.field_type;
-                        kind = Bind { local; name = field.field_name; is_var = false; mode = Own };
+                        kind = Bind { local; is_var = false; mode = Own };
                       } ))
                   fields;
             };
@@ -1193,7 +1197,7 @@ let build_try state (value : Syntax.expression) (inner : Syntax.expression) ~(ou
         ];
     }
 
-let build_inserted_literal state ~origin (type_ : Types.ty) ~name ~insert
+let build_inserted_literal state ~origin (type_ : Types.ty) ~insert
     (entries : Core.expression list list) : Core.kind =
   let path, type_arguments =
     match type_ with
@@ -1228,7 +1232,7 @@ let build_inserted_literal state ~origin (type_ : Types.ty) ~name ~insert
                    id = State.allocate_node_id state;
                    origin;
                    type_;
-                   kind = Bind { local; name; is_var = true; mode = Own };
+                   kind = Bind { local; is_var = true; mode = Own };
                  };
                value = Operands.build Own created;
                else_ = None;
@@ -1255,7 +1259,7 @@ let build_collection_literal state (value : Syntax.expression) (elements : Core.
   | Types.Named { path; arguments = [ Types.Type element ] } when Well_known.is List path ->
       build_list_literal state ~origin:value.id element elements
   | Types.Named { path; _ } as type_ when Well_known.is Set path ->
-      build_inserted_literal state ~origin:value.id type_ ~name:"set" ~insert:"insert"
+      build_inserted_literal state ~origin:value.id type_ ~insert:"insert"
         (List.map (fun element -> [ element ]) elements)
   | Types.Named { path; _ } when Intrinsic.builtin_of_path path = Some Array ->
       Collection_literal { elements; construction = Array }
@@ -1267,7 +1271,7 @@ let build_map_literal state (value : Syntax.expression)
     (entries : (Core.expression * Core.expression) list) : Core.kind =
   match read_type state value with
   | Types.Named { path; _ } as type_ when Well_known.is Map path ->
-      build_inserted_literal state ~origin:value.id type_ ~name:"map" ~insert:"insert_absent"
+      build_inserted_literal state ~origin:value.id type_ ~insert:"insert_absent"
         (List.map (fun (key, entry) -> [ key; entry ]) entries)
   | Types.Named { path; _ } when Well_known.is Finite_map path -> Map_literal { entries }
   | type_ -> State.raise_bug "a map literal of type `%s`" (Types.show type_)

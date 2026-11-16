@@ -23,7 +23,7 @@ type loop_start = {
   loop_costs : loop_cost list;
   fresh_mark : int;
   facts_mark : int;
-  preserved : (string * Types.ty * Logic.term * (State.frame -> Logic.term option)) list;
+  preserved : (State.message * Types.ty * Logic.term * (State.frame -> Logic.term option)) list;
   havocked : State.frame;
 }
 
@@ -382,27 +382,33 @@ let havoc context frame (changed : State.changed) =
   | _ -> frame
 
 let list_validity_obligations context (entry : State.frame) (changed : State.changed) =
-  let find_obligation name ty before read =
+  let find_obligation described ty before read =
     match Validity.make_validity context entry ~assuming:false ~deep:true ty before with
     | Logic.Boolean true -> None
-    | valid -> Some (name, ty, valid, read)
+    | valid -> Some (described, ty, valid, read)
+  in
+  let describe local : State.message =
+    match
+      ( Tables.Local_table.find_opt context.local_names local,
+        Tables.Local_table.find_opt context.local_origins local )
+    with
+    | Some name, _ -> [ Text (Printf.sprintf "`%s`" name) ]
+    | None, Some origin -> [ Text "`"; Facts.quote entry.source origin; Text "`" ]
+    | None, None -> [ Text "a temporary" ]
   in
   List.filter_map
     (fun local ->
       match (Facts.find_local_type context entry local, Locals.find_opt local entry.locals) with
       | Some ty, Some before ->
-          find_obligation
-            (Option.value
-               (Tables.Local_table.find_opt context.local_names local)
-               ~default:"a local")
-            ty before
-            (fun (at : State.frame) -> Locals.find_opt local at.locals)
+          find_obligation (describe local) ty before (fun (at : State.frame) ->
+              Locals.find_opt local at.locals)
       | _ -> None)
     changed.changed_locals
   @
   match (changed.changes_self, entry.self, entry.self_type) with
   | true, Some before, Some ty ->
-      Option.to_list (find_obligation "self" ty before (fun (at : State.frame) -> at.self))
+      Option.to_list
+        (find_obligation [ State.Text "`self`" ] ty before (fun (at : State.frame) -> at.self))
   | _ -> []
 
 let assume_preserved_validity context head preserved =
@@ -418,15 +424,13 @@ let assume_preserved_validity context head preserved =
 
 let check_preserved_validity context end_ location preserved =
   List.iter
-    (fun (name, ty, valid_on_entry, read) ->
+    (fun (described, ty, valid_on_entry, read) ->
       match read end_ with
       | Some term ->
           Facts.oblige context end_ Invariant location
-            [
-              Text
-                (Printf.sprintf "The invariant of `%s` may not hold for `%s` after an iteration."
-                   (Types.show ty) name);
-            ]
+            (State.Text (Printf.sprintf "The invariant of `%s` may not hold for " (Types.show ty))
+             :: described
+            @ [ Text " after an iteration." ])
             (Logic.( ==> ) valid_on_entry
                (Validity.make_validity context end_ ~assuming:false ~deep:true ty term))
       | None -> ())

@@ -24,9 +24,11 @@ let check_definition (lookups : Lookups.t) (key : Resolve.Names.key) : result =
         (fun parameter ->
           Option.value ~default:[] (List.assoc_opt parameter elaborated.scope.bounds));
       spans = lazy (lookups.interface.names.read_spans key);
+      text = lazy (lookups.interface.names.read_text key);
       mode_keywords = Hashtbl.create 8;
       places_without_keyword = Hashtbl.create 8;
       names = Context.Local_table.create 32;
+      origins = Context.Local_table.create 32;
       binding_modes = Context.Local_table.create 32;
       types = Context.Local_table.create 32;
       parameters = [];

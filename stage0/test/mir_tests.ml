@@ -149,7 +149,7 @@ let validate definition (body : Mir.Graph.body) =
   let describe local =
     let kind =
       match body.locals.(local).kind with
-      | Source { name; _ } -> "source " ^ Option.value name ~default:"?"
+      | Source { local; _ } -> "source " ^ Option.value (Mir.find_local_name local) ~default:"?"
       | Temporary -> "temporary"
       | Lent _ -> "lent"
     in
@@ -483,7 +483,7 @@ let locate_named (body : Mir.Graph.body) name =
   Array.iteri
     (fun local (info : Mir.local_info) ->
       match info.kind with
-      | Source { name = Some written; _ } when written = name -> found := Some local
+      | Source { local = core; _ } when Mir.find_local_name core = Some name -> found := Some local
       | _ -> ())
     body.locals;
   match !found with Some local -> local | None -> failwith ("no local is named " ^ name)
@@ -978,7 +978,7 @@ let () =
         List.map
           (fun parameter ->
             match clause.locals.(parameter).kind with
-            | Source { name; _ } -> name
+            | Source { local; _ } -> Mir.find_local_name local
             | Temporary | Lent _ -> None)
           clause.parameters
       in
