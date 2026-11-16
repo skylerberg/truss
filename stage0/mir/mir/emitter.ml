@@ -95,14 +95,23 @@ let jump builder jump origin =
   emit builder (Jump jump) origin;
   builder.reaches <- false
 
-let assign ?node builder target value origin = emit builder (Assign { target; value; node }) origin
+let assign ?node builder target value origin =
+  emit builder (Basic (Assign { target; value; node })) origin
 
-let hold ?node builder type_ origin value =
+let hold_in_temporary ?node builder type_ origin write =
   if not builder.reaches then None
   else
     let local = temporary builder type_ origin in
-    assign ?node builder (at local) value origin;
+    write (at local);
     Some (Use { place = at local; type_; node = Option.value node ~default:origin; origin })
+
+let hold ?node builder type_ origin value =
+  hold_in_temporary ?node builder type_ origin (fun target ->
+      assign ?node builder target value origin)
+
+let hold_choice ?node builder type_ origin choice =
+  hold_in_temporary ?node builder type_ origin (fun target ->
+      emit builder (Choose { target; choice; node }) origin)
 
 let block_of builder (build : unit -> operand option) : block =
   let enclosing = builder.statements in
@@ -152,14 +161,14 @@ let start_loan builder borrowed mode duration origin =
   let loan = builder.loan_count in
   if not builder.is_specification then begin
     builder.loan_count <- loan + 1;
-    emit builder (Loan_start { loan; borrowed; mode; duration }) origin;
+    emit builder (Basic (Loan_start { loan; borrowed; mode; duration })) origin;
     match builder.scopes with scope :: _ -> scope.loans <- loan :: scope.loans | [] -> ()
   end;
   loan
 
 let end_loans builder loans origin =
   if loans <> [] && not builder.is_specification then begin
-    emit builder (Loan_end loans) origin;
+    emit builder (Basic (Loan_end loans)) origin;
     List.iter
       (fun scope -> scope.loans <- List.filter (fun loan -> not (List.mem loan loans)) scope.loans)
       builder.scopes
@@ -167,7 +176,7 @@ let end_loans builder loans origin =
 
 let scope_ends scope origin =
   List.map
-    (fun kind -> { kind; origin })
+    (fun basic -> { kind = Basic basic; origin })
     ((if scope.loans <> [] then [ Loan_end (List.rev scope.loans) ] else [])
     @ (if scope.bound <> [] then [ Dead (List.rev scope.bound) ] else [])
     @ (if scope.temporaries <> [] then [ Dead (List.rev scope.temporaries) ] else [])
@@ -512,7 +521,7 @@ let in_arm_scope builder build =
 
 let dead_in scope origin =
   List.map
-    (fun kind -> { kind; origin })
+    (fun basic -> { kind = Basic basic; origin })
     ((if scope.bound <> [] then [ Dead (List.rev scope.bound) ] else [])
     @ if scope.temporaries <> [] then [ Dead (List.rev scope.temporaries) ] else [])
 

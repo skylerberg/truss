@@ -51,6 +51,8 @@ let rec rvalue_locals : Mir.rvalue -> Mir.local list = function
       @ List.filter
           (fun local -> local <> parameter)
           (block_locals { statements = matches.statements @ body.statements; value = body.value })
+
+and choice_locals : Mir.choice -> Mir.local list = function
   | Conditional { condition; then_; else_; _ } ->
       operand_locals condition @ block_locals then_ @ block_locals else_
   | Cases cases ->
@@ -66,7 +68,7 @@ and block_locals (block : Mir.block) =
   let read, given =
     List.fold_left
       (fun (read, given) (statement : Mir.statement) ->
-        let reads, gives, _ = effects statement.kind in
+        let reads, gives, _ = tree_effects statement.kind in
         (List.filter (fun local -> not (List.mem local given)) reads @ read, gives @ given))
       ([], []) block.statements
   in
@@ -75,8 +77,15 @@ and block_locals (block : Mir.block) =
     (Option.fold ~none:[] ~some:operand_locals block.value)
   @ read
 
-and effects : type form. form Mir.statement_kind -> Mir.local list * Mir.local list * Mir.local list
-    = function
+and tree_effects : Mir.statement_kind -> Mir.local list * Mir.local list * Mir.local list = function
+  | Basic basic -> effects basic
+  | Choose { target; choice; _ } ->
+      let read, given = written target in
+      (choice_locals choice @ read, given, [])
+  | While _ | For _ | Fork _ | Resume _ | Yield _ | Jump _ ->
+      failwith "a statement that holds blocks or jumps, where a formula holds none"
+
+and effects : Mir.basic -> Mir.local list * Mir.local list * Mir.local list = function
   | Assign { target; value; _ } ->
       let read, given = written target in
       (rvalue_locals value @ read, given, [])
@@ -99,8 +108,6 @@ and effects : type form. form Mir.statement_kind -> Mir.local list * Mir.local l
         [] )
   | Loan_start { borrowed; _ } -> (operand_locals borrowed, [], [])
   | Provide_end | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ -> ([], [], [])
-  | While _ | For _ | Fork _ | Resume _ | Yield _ | Jump _ ->
-      failwith "a statement that holds blocks or jumps, where a formula holds none"
 
 let rec yielded_locals : Mir.yielded -> Mir.local list = function
   | Part value -> operand_locals value
@@ -158,9 +165,6 @@ let validate definition (body : Mir.Graph.body) =
                     | Function_value _ -> "function"
                     | Lambda _ -> "lambda"
                     | Value_parameter _ -> "value_parameter"
-                    | Conditional _ -> "conditional"
-                    | Cases _ -> "cases"
-                    | Connective _ -> "connective"
                     | Specification _ -> "specification")
               | None, Call { destination = Some { root = Local l; projections = [] }; _ }
                 when l = local ->
@@ -742,26 +746,18 @@ let () =
           walk [] failed);
   test "a functional body's one jump is its return, and its graph branches" (fun () ->
       let built, graph = both_of_g Fixtures.Mir.functional_body_is_one_block_of_values in
-      let chooses (kind : _ Mir.statement_kind) =
-        match kind with
-        | Assign { value = Conditional _ | Cases _ | Connective _; _ } -> true
-        | _ -> false
-      in
       let chosen = ref 0 and jumps = ref [] in
       Mir.iter_code
         (fun (statement : Mir.statement) ->
-          if chooses statement.kind then incr chosen;
-          match statement.kind with Jump jump -> jumps := jump :: !jumps | _ -> ())
+          match statement.kind with
+          | Choose _ -> incr chosen
+          | Jump jump -> jumps := jump :: !jumps
+          | _ -> ())
         built;
       if !chosen = 0 then fail "the body holds no value that chooses between blocks";
       (match !jumps with
       | [ Return (Some _) ] -> ()
       | jumps -> fail "the body holds %d jumps" (List.length jumps));
-      if
-        List.exists
-          (fun (statement : Mir.Graph.statement) -> chooses statement.kind)
-          (statements graph.body)
-      then fail "the graph holds a value that chooses between blocks";
       if
         not
           (Array.exists
@@ -790,7 +786,7 @@ let () =
               (List.exists
                  (fun (statement : Mir.statement) ->
                    match statement.kind with
-                   | Assign { value = Conditional { then_; else_; _ }; _ } ->
+                   | Choose { choice = Conditional { then_; else_; _ }; _ } ->
                        breaks then_ && else_.value <> None
                    | _ -> false)
                  body.statements)
@@ -818,7 +814,9 @@ let () =
       Mir.iter_code
         (fun (statement : Mir.statement) ->
           match statement.kind with
-          | Call { call = { arguments = Passed { function_ = Some function_; _ } :: _; _ }; _ } ->
+          | Basic
+              (Call { call = { arguments = Passed { function_ = Some function_; _ } :: _; _ }; _ })
+            ->
               functions := function_ :: !functions
           | _ -> ())
         mir;
@@ -941,7 +939,8 @@ let () =
         Mir.iter_formula
           (fun (statement : Mir.statement) ->
             match statement.kind with
-            | Assign { value = Specification specification; _ } -> found := specification :: !found
+            | Basic (Assign { value = Specification specification; _ }) ->
+                found := specification :: !found
             | _ -> ())
           clause;
         List.rev !found
@@ -950,17 +949,14 @@ let () =
         let found = ref [] in
         Mir.iter_formula
           (fun (statement : Mir.statement) ->
-            match statement.kind with
-            | Assign { value = (Conditional _ | Cases _ | Connective _) as value; _ } ->
-                found := value :: !found
-            | _ -> ())
+            match statement.kind with Choose { choice; _ } -> found := choice :: !found | _ -> ())
           clause;
         List.rev !found
       in
       let computes_a_comparison (block : Mir.block) =
         List.exists
           (fun (statement : Mir.statement) ->
-            match statement.kind with Assign { value = Compare _; _ } -> true | _ -> false)
+            match statement.kind with Basic (Assign { value = Compare _; _ }) -> true | _ -> false)
           block.statements
       in
       match Mir.contract_of_path (app_parts packages) g with
@@ -1020,7 +1016,7 @@ let () =
         (fun (statement : Mir.statement) ->
           match statement.kind with
           | While { loop; compared; _ } -> loops := (loop, compared) :: !loops
-          | Proof body -> proofs := body :: !proofs
+          | Basic (Proof body) -> proofs := body :: !proofs
           | _ -> ())
         mir;
       (match !loops with

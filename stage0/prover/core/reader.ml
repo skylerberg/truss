@@ -272,15 +272,15 @@ let changes ?(also = []) run frame (blocks : Mir.block list) : changed =
     List.iter
       (fun (statement : Mir.statement) ->
         (match statement.kind with
-        | Assign { target; value = Operand (Borrow { place; mode = Types.Mut; _ }); _ } ->
+        | Basic (Assign { target; value = Operand (Borrow { place; mode = Types.Mut; _ }); _ }) ->
             note target;
             note place
-        | Assign { target; _ } -> assigned target
-        | Call { destination; call } ->
+        | Basic (Assign { target; _ }) | Choose { target; _ } -> assigned target
+        | Basic (Call { destination; call }) ->
             Option.iter assigned destination;
             passed call
-        | Lend { call; _ } -> passed call
-        | Slice { destination; call; _ } | Template { destination; call; _ } ->
+        | Basic (Lend { call; _ }) -> passed call
+        | Basic (Slice { destination; call; _ } | Template { destination; call; _ }) ->
             assigned destination;
             passed call
         | For { iteration = Pull { cursor; _ }; _ } -> note cursor
@@ -763,8 +763,6 @@ let rec read_rvalue context frame run (value : Mir.rvalue) ~(site : Invocation.s
               }
       in
       quantifier_value context frame run ~span quantifier range ~parameter ~matches ~body
-  | Conditional _ | Cases _ | Connective _ ->
-      bug "a value that chooses between blocks, read as one that holds none"
 
 and quantifier_value context frame run ~span quantifier range ~parameter ~(matches : Mir.block)
     ~(body : Mir.block) =
@@ -827,8 +825,8 @@ and either context ~outer ~condition (entered, read) (entered_otherwise, otherwi
             (entered_otherwise, after_otherwise),
           Logic.ite condition value value_otherwise )
 
-and chosen_value context frame run (value : Mir.rvalue) =
-  match value with
+and chosen_value context frame run (choice : Mir.choice) =
+  match choice with
   | Conditional { condition; then_; else_; if_condition } ->
       let test = read_operand context frame run condition in
       (match if_condition with
@@ -886,11 +884,278 @@ and chosen_value context frame run (value : Mir.rvalue) =
               | Or -> Logic.( ||| ) left right
               | Implies -> Logic.( ==> ) left right )
       | None -> Some (restrict frame (Logic.not_ reads_right), Logic.Boolean (connective <> And)))
-  | _ -> bug "a value that holds no block, read as one that chooses between blocks"
 
 and read_statement context frame run (statement : Mir.statement) =
   let span = span_of frame.source statement.origin in
   match statement.kind with
+  | Basic basic -> read_basic context frame run statement ~span basic
+  | Choose { target; choice; _ } ->
+      let copied =
+        match choice with
+        | Conditional { then_; else_; _ } -> List.filter_map Fun.id [ then_.value; else_.value ]
+        | Cases cases -> List.filter_map (fun (case : Mir.case) -> case.value.value) cases
+        | Connective _ -> []
+      in
+      write_assignment context run target ~copied (chosen_value context frame run choice)
+  | Yield { mode; part } ->
+      let origin = statement.origin in
+      let frame, handed = yielded_value context frame run ~origin part in
+      let part_type =
+        match part with
+        | Part operand -> operand_type context frame operand
+        | Built { type_; _ } -> substituted context frame type_
+      in
+      lend_part context frame origin mode ~handed ~lends:(lends_places part)
+        ~write_back:(fun frame after -> written_back context run part_type part frame after)
+  | Jump jump ->
+      (match jump with
+      | Return returned ->
+          context.returns <-
+            (frame, Option.map (read_operand context frame run) returned) :: context.returns
+      | Break -> (
+          match run.loops with
+          | exits :: _ -> exits.breaks <- frame :: exits.breaks
+          | [] -> bug "a `break` outside a loop")
+      | Continue -> (
+          match run.loops with
+          | exits :: _ -> exits.ends <- frame :: exits.ends
+          | [] -> bug "a `continue` outside a loop")
+      | Cancel { task; winner; number; returned } -> (
+          let frame =
+            bind frame (local_key run winner) (Types.builtin UInt32)
+              (Logic.Integer (Z.of_int number))
+          in
+          let frame =
+            match returned with
+            | Some (value, local) ->
+                bind frame (local_key run local)
+                  (operand_type context frame value)
+                  (read_operand context frame run value)
+            | None -> frame
+          in
+          match task with
+          | Branch _ -> (
+              match List.assoc_opt task run.cancelled with
+              | Some frames -> frames := frame :: !frames
+              | None -> bug "an early exit of a branch that is not around it")
+          | Iteration { loop } -> (
+              match List.find_opt (fun (exits : loop_exits) -> exits.loop = loop) run.loops with
+              | Some exits -> exits.ends <- frame :: exits.ends
+              | None -> bug "an early exit of an iteration that is not around it"))
+      | Unreachable -> ()
+      | Written_unreachable -> unreachable_reached context frame span
+      | Todo -> todo_reached context frame span);
+      None
+  | Fork { fork; branches; _ } ->
+      List.fold_left
+        (fun frame (index, (branch : Mir.block)) ->
+          let* frame = frame in
+          let cancelled = ref [] in
+          run.cancelled <- (Mir.Branch { block = fork; index }, cancelled) :: run.cancelled;
+          let ended = read_statements context frame run branch.statements in
+          run.cancelled <- List.tl run.cancelled;
+          join_frames context (Option.to_list ended @ List.rev !cancelled))
+        (Some frame)
+        (List.mapi (fun index branch -> (index, branch)) branches)
+  | Resume { winner; exits } ->
+      let won =
+        read_operand context frame run
+          (Use
+             {
+               place = { root = Local winner; projections = [] };
+               type_ = Types.builtin UInt32;
+               node = statement.origin;
+               origin = statement.origin;
+             })
+      in
+      let others, resumed =
+        List.fold_left
+          (fun (frame, resumed) (number, (exit : Mir.early_exit)) ->
+            let has_won = Logic.equal won (Logic.Integer (Z.of_int number)) in
+            ( restrict frame (Logic.not_ has_won),
+              resumed
+              @ Option.to_list
+                  (read_statements context (restrict frame has_won) run exit.resumed.statements) ))
+          (frame, [])
+          (List.mapi (fun index exit -> (index + 1, exit)) exits)
+      in
+      join_frames context (others :: resumed)
+  | While { loop; condition; body; failed; compared } ->
+      while_ context frame
+        {
+          while_at = loop.origin;
+          while_clauses = loop.clauses;
+          changed = changes run frame (Mir.nested_blocks statement);
+          bind_parts = (fun frame -> bind_parts context frame run);
+          test = (fun head -> read_block context head run condition);
+          run_body =
+            (fun entered ->
+              let exits = { loop = loop.origin; breaks = []; ends = [] } in
+              run.loops <- exits :: run.loops;
+              let ended = read_statements context entered run body.statements in
+              run.loops <- List.tl run.loops;
+              (List.rev exits.ends @ Option.to_list ended, List.rev exits.breaks));
+          on_failure = (fun frame -> read_statements context frame run failed);
+          measure_operands =
+            Option.map
+              (fun ({ comparison; left; right } : Mir.compared) ->
+                ( comparison,
+                  fun at ->
+                    let after =
+                      List.fold_left
+                        (fun frame statement ->
+                          Option.value (read_statement context frame run statement) ~default:frame)
+                        at condition.statements
+                    in
+                    (read_operand context after run left, read_operand context after run right) ))
+              compared;
+        }
+  | For
+      {
+        loop =
+          { quantified = Some { quantifier; binding_count = bound; decision; holds; decides }; _ };
+        iteration;
+        part;
+        lent;
+        binding_count = positioned;
+        body;
+      } ->
+      let from start stop =
+        List.filteri (fun index _ -> index >= start && index < stop) body.statements
+      in
+      let range, parameter, binding =
+        match (lent, iteration) with
+        | Some { element; collection; _ }, _ ->
+            ( Range_of_collection
+                {
+                  collection_type = place_type context frame run collection;
+                  collected = read_place context frame run collection;
+                  element = substituted context frame run.infos.(element).type_;
+                  span;
+                },
+              element,
+              List.filter
+                (fun (statement : Mir.statement) ->
+                  match statement.kind with Basic (Lend _) -> false | _ -> true)
+                (from positioned bound) )
+        | None, Range { start; stop; inclusive } ->
+            ( Range_of_integers
+                {
+                  low = read_operand context frame run start;
+                  high = read_operand context frame run stop;
+                  inclusive;
+                  type_ = operand_type context frame start;
+                },
+              part,
+              from 0 bound )
+        | None, Pull _ -> unsupported span "a quantifier over the values of a cursor"
+      in
+      let after, term =
+        quantifier_value context frame run ~span quantifier range ~parameter
+          ~matches:
+            {
+              statements = binding;
+              value = Some (Constant { value = Boolean true; type_ = Types.bool });
+            }
+          ~body:{ statements = from bound decision; value = Some holds }
+      in
+      Some (write_place context after run { root = Local decides; projections = [] } term)
+  | For { loop; iteration; part; lent; binding_count; body } ->
+      let frame =
+        match lent with Some lent -> fst (read_value context frame run lent.count) | None -> frame
+      in
+      let run_body inside element =
+        let inside =
+          bind inside (local_key run part)
+            (substituted context inside run.infos.(part).type_)
+            element
+        in
+        let exits = { loop = loop.origin; breaks = []; ends = [] } in
+        run.loops <- exits :: run.loops;
+        let ended = read_statements context inside run body.statements in
+        run.loops <- List.tl run.loops;
+        (List.rev exits.ends @ Option.to_list ended, List.rev exits.breaks)
+      in
+      let bindings = List.filteri (fun index _ -> index < binding_count) body.statements
+      and after_bindings = List.filteri (fun index _ -> index >= binding_count) body.statements in
+      let bind_element frame element =
+        let frame =
+          bind frame (local_key run part) (substituted context frame run.infos.(part).type_) element
+        in
+        List.fold_left
+          (fun frame statement ->
+            Option.value (read_statement context frame run statement) ~default:frame)
+          frame bindings
+      in
+      let operand = read_operand context frame run in
+      let iterated = match iteration with Pull { cursor; _ } -> [ cursor ] | Range _ -> [] in
+      let iterable =
+        match iteration with
+        | Range { start; stop; inclusive } ->
+            Over_range { low = operand start; high = operand stop; inclusive }
+        | Pull { cursor; next } ->
+            Over_cursor
+              {
+                cursor = passed_place_of context run cursor;
+                cursor_type = place_type context frame run cursor;
+                next = unit_callee next;
+              }
+      in
+      let for_loop =
+        {
+          for_at = loop.origin;
+          for_clauses = loop.clauses;
+          iterable;
+          element_type = run.infos.(part).type_;
+          lent_element =
+            Option.map (fun (lent : Mir.lent_element) -> run.infos.(lent.element).type_) lent;
+          invariant_count =
+            Option.bind lent (fun (lent : Mir.lent_element) ->
+                match run.infos.(lent.element).kind with
+                | Lent Mut ->
+                    Some
+                      (fun at ->
+                        without_costs context (fun () -> snd (read_value context at run lent.count)))
+                | _ -> None);
+          collection =
+            Option.map
+              (fun (lent : Mir.lent_element) frame ->
+                ( place_type context frame run lent.collection,
+                  read_place context { frame with makes_obligations = false } run lent.collection ))
+              lent;
+          element_call =
+            Option.bind lent (fun (lent : Mir.lent_element) ->
+                match run.infos.(lent.element).kind with
+                | Lent Mut -> None
+                | _ ->
+                    Some
+                      (fun at ->
+                        let rec lend frame = function
+                          | [] -> bug "a loop over elements that no statement lends"
+                          | (statement : Mir.statement) :: rest -> (
+                              let frame =
+                                Option.value
+                                  (read_statement context frame run statement)
+                                  ~default:frame
+                              in
+                              match statement.kind with
+                              | Basic (Lend { part; _ }) when part = lent.element -> frame
+                              | _ -> lend frame rest)
+                        in
+                        without_costs context (fun () ->
+                            read_place context (lend at after_bindings) run
+                              { root = Local lent.element; projections = [] })));
+          bind_element;
+          changed_in = (fun frame -> changes ~also:iterated run frame [ body ]);
+          changed_by_body = (fun frame -> changes run frame [ body ]);
+          run_body;
+          bind_parts = (fun frame -> bind_parts context frame run);
+        }
+      in
+      for_ context frame for_loop
+
+and read_basic context frame run (statement : Mir.statement) ~span (basic : Mir.basic) =
+  match basic with
   | Assign
       {
         target = { root = Local local; projections = [] };
@@ -909,58 +1174,16 @@ and read_statement context frame run (statement : Mir.statement) =
         (write_place context frame run target
            (arrive context frame "lambda" (place_type context frame run target)))
   | Assign { target; value; node } ->
-      let copied =
-        let values =
-          match value with
-          | Operand copied -> [ copied ]
-          | Conditional { then_; else_; _ } -> List.filter_map Fun.id [ then_.value; else_.value ]
-          | Cases cases -> List.filter_map (fun (case : Mir.case) -> case.value.value) cases
-          | _ -> []
-        in
-        match List.sort_uniq compare (List.map whole_local values) with
-        | [ Some source ] -> Some source
-        | _ -> None
-      in
-      let read =
-        match value with
-        | Conditional _ | Cases _ | Connective _ -> chosen_value context frame run value
-        | _ ->
-            Some
-              (read_rvalue context frame run value
-                 ~site:
-                   {
-                     id = Option.value node ~default:(-1);
-                     origin = statement.origin;
-                     type_ = target_type context frame run target;
-                   })
-      in
-      let* frame, term = read in
-      (match target.root with
-      | Local local -> (
-          match run.infos.(local).kind with
-          | Source { local = (Named _ | Synthetic _) as core; name = Some name; _ }
-            when frame.source.key = Some context.home ->
-              Hashtbl.replace context.local_names core name
-          | Source _ | Temporary | Lent _ -> ())
-      | Constant _ -> ());
-      let copied_slice =
-        Option.bind copied (fun source -> Locals.find_opt (local_key run source) frame.slices)
-      in
-      let written = write_place context frame run target term in
-      Some
-        (match target with
-        | { root = Local local; projections = [] } ->
-            let key = local_key run local in
-            {
-              written with
-              slices =
-                (match copied_slice with
-                | Some held -> Locals.add key held written.slices
-                | None when Types.is_well_known Slice run.infos.(local).type_ ->
-                    Locals.add key Unknown_slice written.slices
-                | None -> Locals.remove key written.slices);
-            }
-        | _ -> written)
+      write_assignment context run target
+        ~copied:(match value with Operand copied -> [ copied ] | _ -> [])
+        (Some
+           (read_rvalue context frame run value
+              ~site:
+                {
+                  id = Option.value node ~default:(-1);
+                  origin = statement.origin;
+                  type_ = target_type context frame run target;
+                }))
   | Call { destination; call } -> (
       let result_type =
         match destination with
@@ -1139,262 +1362,40 @@ and read_statement context frame run (statement : Mir.statement) =
                  | _ -> frame)
                frame provided)
       | None -> Some frame)
-  | Yield { mode; part } ->
-      let origin = statement.origin in
-      let frame, handed = yielded_value context frame run ~origin part in
-      let part_type =
-        match part with
-        | Part operand -> operand_type context frame operand
-        | Built { type_; _ } -> substituted context frame type_
-      in
-      lend_part context frame origin mode ~handed ~lends:(lends_places part)
-        ~write_back:(fun frame after -> written_back context run part_type part frame after)
-  | Jump jump ->
-      (match jump with
-      | Return returned ->
-          context.returns <-
-            (frame, Option.map (read_operand context frame run) returned) :: context.returns
-      | Break -> (
-          match run.loops with
-          | exits :: _ -> exits.breaks <- frame :: exits.breaks
-          | [] -> bug "a `break` outside a loop")
-      | Continue -> (
-          match run.loops with
-          | exits :: _ -> exits.ends <- frame :: exits.ends
-          | [] -> bug "a `continue` outside a loop")
-      | Cancel { task; winner; number; returned } -> (
-          let frame =
-            bind frame (local_key run winner) (Types.builtin UInt32)
-              (Logic.Integer (Z.of_int number))
-          in
-          let frame =
-            match returned with
-            | Some (value, local) ->
-                bind frame (local_key run local)
-                  (operand_type context frame value)
-                  (read_operand context frame run value)
-            | None -> frame
-          in
-          match task with
-          | Branch _ -> (
-              match List.assoc_opt task run.cancelled with
-              | Some frames -> frames := frame :: !frames
-              | None -> bug "an early exit of a branch that is not around it")
-          | Iteration { loop } -> (
-              match List.find_opt (fun (exits : loop_exits) -> exits.loop = loop) run.loops with
-              | Some exits -> exits.ends <- frame :: exits.ends
-              | None -> bug "an early exit of an iteration that is not around it"))
-      | Unreachable -> ()
-      | Written_unreachable -> unreachable_reached context frame span
-      | Todo -> todo_reached context frame span);
-      None
-  | Fork { fork; branches; _ } ->
-      List.fold_left
-        (fun frame (index, (branch : Mir.block)) ->
-          let* frame = frame in
-          let cancelled = ref [] in
-          run.cancelled <- (Mir.Branch { block = fork; index }, cancelled) :: run.cancelled;
-          let ended = read_statements context frame run branch.statements in
-          run.cancelled <- List.tl run.cancelled;
-          join_frames context (Option.to_list ended @ List.rev !cancelled))
-        (Some frame)
-        (List.mapi (fun index branch -> (index, branch)) branches)
-  | Resume { winner; exits } ->
-      let won =
-        read_operand context frame run
-          (Use
-             {
-               place = { root = Local winner; projections = [] };
-               type_ = Types.builtin UInt32;
-               node = statement.origin;
-               origin = statement.origin;
-             })
-      in
-      let others, resumed =
-        List.fold_left
-          (fun (frame, resumed) (number, (exit : Mir.early_exit)) ->
-            let has_won = Logic.equal won (Logic.Integer (Z.of_int number)) in
-            ( restrict frame (Logic.not_ has_won),
-              resumed
-              @ Option.to_list
-                  (read_statements context (restrict frame has_won) run exit.resumed.statements) ))
-          (frame, [])
-          (List.mapi (fun index exit -> (index + 1, exit)) exits)
-      in
-      join_frames context (others :: resumed)
-  | While { loop; condition; body; failed; compared } ->
-      while_ context frame
+
+and write_assignment context run (target : Mir.place) ~(copied : Mir.operand list) read =
+  let copied =
+    match List.sort_uniq compare (List.map whole_local copied) with
+    | [ Some source ] -> Some source
+    | _ -> None
+  in
+  let* frame, term = read in
+  (match target.root with
+  | Local local -> (
+      match run.infos.(local).kind with
+      | Source { local = (Named _ | Synthetic _) as core; name = Some name; _ }
+        when frame.source.key = Some context.home ->
+          Hashtbl.replace context.local_names core name
+      | Source _ | Temporary | Lent _ -> ())
+  | Constant _ -> ());
+  let copied_slice =
+    Option.bind copied (fun source -> Locals.find_opt (local_key run source) frame.slices)
+  in
+  let written = write_place context frame run target term in
+  Some
+    (match target with
+    | { root = Local local; projections = [] } ->
+        let key = local_key run local in
         {
-          while_at = loop.origin;
-          while_clauses = loop.clauses;
-          changed = changes run frame (Mir.nested_blocks statement);
-          bind_parts = (fun frame -> bind_parts context frame run);
-          test = (fun head -> read_block context head run condition);
-          run_body =
-            (fun entered ->
-              let exits = { loop = loop.origin; breaks = []; ends = [] } in
-              run.loops <- exits :: run.loops;
-              let ended = read_statements context entered run body.statements in
-              run.loops <- List.tl run.loops;
-              (List.rev exits.ends @ Option.to_list ended, List.rev exits.breaks));
-          on_failure = (fun frame -> read_statements context frame run failed);
-          measure_operands =
-            Option.map
-              (fun ({ comparison; left; right } : Mir.compared) ->
-                ( comparison,
-                  fun at ->
-                    let after =
-                      List.fold_left
-                        (fun frame statement ->
-                          Option.value (read_statement context frame run statement) ~default:frame)
-                        at condition.statements
-                    in
-                    (read_operand context after run left, read_operand context after run right) ))
-              compared;
+          written with
+          slices =
+            (match copied_slice with
+            | Some held -> Locals.add key held written.slices
+            | None when Types.is_well_known Slice run.infos.(local).type_ ->
+                Locals.add key Unknown_slice written.slices
+            | None -> Locals.remove key written.slices);
         }
-  | For
-      {
-        loop =
-          { quantified = Some { quantifier; binding_count = bound; decision; holds; decides }; _ };
-        iteration;
-        part;
-        lent;
-        binding_count = positioned;
-        body;
-      } ->
-      let from start stop =
-        List.filteri (fun index _ -> index >= start && index < stop) body.statements
-      in
-      let range, parameter, binding =
-        match (lent, iteration) with
-        | Some { element; collection; _ }, _ ->
-            ( Range_of_collection
-                {
-                  collection_type = place_type context frame run collection;
-                  collected = read_place context frame run collection;
-                  element = substituted context frame run.infos.(element).type_;
-                  span;
-                },
-              element,
-              List.filter
-                (fun (statement : Mir.statement) ->
-                  match statement.kind with Lend _ -> false | _ -> true)
-                (from positioned bound) )
-        | None, Range { start; stop; inclusive } ->
-            ( Range_of_integers
-                {
-                  low = read_operand context frame run start;
-                  high = read_operand context frame run stop;
-                  inclusive;
-                  type_ = operand_type context frame start;
-                },
-              part,
-              from 0 bound )
-        | None, Pull _ -> unsupported span "a quantifier over the values of a cursor"
-      in
-      let after, term =
-        quantifier_value context frame run ~span quantifier range ~parameter
-          ~matches:
-            {
-              statements = binding;
-              value = Some (Constant { value = Boolean true; type_ = Types.bool });
-            }
-          ~body:{ statements = from bound decision; value = Some holds }
-      in
-      Some (write_place context after run { root = Local decides; projections = [] } term)
-  | For { loop; iteration; part; lent; binding_count; body } ->
-      let frame =
-        match lent with Some lent -> fst (read_value context frame run lent.count) | None -> frame
-      in
-      let run_body inside element =
-        let inside =
-          bind inside (local_key run part)
-            (substituted context inside run.infos.(part).type_)
-            element
-        in
-        let exits = { loop = loop.origin; breaks = []; ends = [] } in
-        run.loops <- exits :: run.loops;
-        let ended = read_statements context inside run body.statements in
-        run.loops <- List.tl run.loops;
-        (List.rev exits.ends @ Option.to_list ended, List.rev exits.breaks)
-      in
-      let bindings = List.filteri (fun index _ -> index < binding_count) body.statements
-      and after_bindings = List.filteri (fun index _ -> index >= binding_count) body.statements in
-      let bind_element frame element =
-        let frame =
-          bind frame (local_key run part) (substituted context frame run.infos.(part).type_) element
-        in
-        List.fold_left
-          (fun frame statement ->
-            Option.value (read_statement context frame run statement) ~default:frame)
-          frame bindings
-      in
-      let operand = read_operand context frame run in
-      let iterated = match iteration with Pull { cursor; _ } -> [ cursor ] | Range _ -> [] in
-      let iterable =
-        match iteration with
-        | Range { start; stop; inclusive } ->
-            Over_range { low = operand start; high = operand stop; inclusive }
-        | Pull { cursor; next } ->
-            Over_cursor
-              {
-                cursor = passed_place_of context run cursor;
-                cursor_type = place_type context frame run cursor;
-                next = unit_callee next;
-              }
-      in
-      let for_loop =
-        {
-          for_at = loop.origin;
-          for_clauses = loop.clauses;
-          iterable;
-          element_type = run.infos.(part).type_;
-          lent_element =
-            Option.map (fun (lent : Mir.lent_element) -> run.infos.(lent.element).type_) lent;
-          invariant_count =
-            Option.bind lent (fun (lent : Mir.lent_element) ->
-                match run.infos.(lent.element).kind with
-                | Lent Mut ->
-                    Some
-                      (fun at ->
-                        without_costs context (fun () -> snd (read_value context at run lent.count)))
-                | _ -> None);
-          collection =
-            Option.map
-              (fun (lent : Mir.lent_element) frame ->
-                ( place_type context frame run lent.collection,
-                  read_place context { frame with makes_obligations = false } run lent.collection ))
-              lent;
-          element_call =
-            Option.bind lent (fun (lent : Mir.lent_element) ->
-                match run.infos.(lent.element).kind with
-                | Lent Mut -> None
-                | _ ->
-                    Some
-                      (fun at ->
-                        let rec lend frame = function
-                          | [] -> bug "a loop over elements that no statement lends"
-                          | (statement : Mir.statement) :: rest -> (
-                              let frame =
-                                Option.value
-                                  (read_statement context frame run statement)
-                                  ~default:frame
-                              in
-                              match statement.kind with
-                              | Lend { part; _ } when part = lent.element -> frame
-                              | _ -> lend frame rest)
-                        in
-                        without_costs context (fun () ->
-                            read_place context (lend at after_bindings) run
-                              { root = Local lent.element; projections = [] })));
-          bind_element;
-          changed_in = (fun frame -> changes ~also:iterated run frame [ body ]);
-          changed_by_body = (fun frame -> changes run frame [ body ]);
-          run_body;
-          bind_parts = (fun frame -> bind_parts context frame run);
-        }
-      in
-      for_ context frame for_loop
+    | _ -> written)
 
 let new_run ~in_formula ~locals ~lambdas =
   { infos = locals; lambdas; in_formula; provides = Hashtbl.create 2; loops = []; cancelled = [] }

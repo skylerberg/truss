@@ -217,7 +217,7 @@ let rec fold_body ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowered.stat
         let* elements = all (List.map operand elements) in
         Some (Lowered.Static_array elements)
     | Operation _ | Is_variant _ | Convert _ | To_any _ | Function_value _ | Lambda _
-    | Value_parameter _ | Conditional _ | Cases _ | Connective _ | Specification _ ->
+    | Value_parameter _ | Specification _ ->
         None
   in
   let assign (destination : Mir.place option) value =

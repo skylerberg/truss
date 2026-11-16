@@ -2,29 +2,20 @@ open Tree
 
 let bug format = Compiler_bug.bug ~stage:"MIR" format
 
-let graph_statement (statement : statement) : Graph.statement =
-  let kind : Graph.in_graph statement_kind =
-    match statement.kind with
-    | Assign { target; value; node } -> Assign { target; value; node }
-    | Call { destination; call } -> Call { destination; call }
-    | Lend { part; call } -> Lend { part; call }
-    | Slice { destination; base; call } -> Slice { destination; base; call }
-    | Template { destination; literals; call } -> Template { destination; literals; call }
-    | Live locals -> Live locals
-    | Dead locals -> Dead locals
-    | Assert { condition; bit_vector } -> Assert { condition; bit_vector }
-    | Echo operand -> Echo operand
-    | Provide { provided; can_use_tasks } -> Provide { provided; can_use_tasks }
-    | Provide_end -> Provide_end
-    | Loan_start { loan; borrowed; mode; duration } -> Loan_start { loan; borrowed; mode; duration }
-    | Loan_end loans -> Loan_end loans
-    | Ghost_assert { condition; by_bit_vector } -> Ghost_assert { condition; by_bit_vector }
-    | Matched { patterns } -> Matched { patterns }
-    | Proof code -> Proof code
-    | While _ | For _ | Fork _ | Resume _ | Yield _ | Jump _ ->
-        bug "a statement that holds blocks or jumps, in a basic block"
-  in
-  { kind; origin = statement.origin }
+type undecided =
+  | Undecided_connective of {
+      target : place;
+      connective : connective;
+      left : operand;
+      right : block;
+      origin : Core.origin;
+    }
+  | Undecided_not of {
+      target : place;
+      negated : operand;
+      node : Core.id option;
+      origin : Core.origin;
+    }
 
 type jump_targets = {
   break_ : Graph.block option;
@@ -46,27 +37,29 @@ let expanded_body (body : body) : Graph.body =
   let assigned target value origin : Graph.statement =
     { kind = Assign { target; value = Operand value; node = None }; origin }
   in
+  let place_local : place -> local option = function
+    | { root = Local local; projections = [] } -> Some local
+    | _ -> None
+  in
   let whole_local : operand -> local option = function
-    | Use { place = { root = Local local; projections = [] }; _ } -> Some local
-    | Use _ | Borrow _ | Take _ | Constant _ -> None
+    | Use { place; _ } -> place_local place
+    | Borrow _ | Take _ | Constant _ -> None
   in
-  let assigns (statement : statement) =
-    match statement.kind with
-    | Assign { target = { root = Local local; projections = [] }; _ } -> Some local
-    | _ -> None
+  let is_use_of target (value : operand) =
+    Option.is_some (whole_local value) && place_local target = whole_local value
   in
-  let deciding (statements : statement list) (value : operand) =
-    match List.rev statements with
-    | ({ kind = Assign { value = Connective _ | Not _; _ }; _ } as last) :: before
-      when Option.is_some (whole_local value) && assigns last = whole_local value ->
-        Some (List.rev before, last)
-    | _ -> None
+  let branch_on current (value : operand) ~yes ~no origin =
+    match value with
+    | Constant { value = Boolean true; _ } -> close current (Goto yes) origin
+    | Constant { value = Boolean false; _ } -> close current (Goto no) origin
+    | _ -> close current (Branch { condition = value; yes; no; is_if_condition = false }) origin
   in
-  let rec emit targets current (undecided : statement list) (statements : statement list) =
+  let rec emit targets current (undecided : undecided list) (statements : statement list) =
     let decided () = with_values targets current undecided in
     let reads_undecided (operand : operand) =
       match List.rev undecided with
-      | last :: _ -> Option.is_some (whole_local operand) && assigns last = whole_local operand
+      | (Undecided_connective { target; _ } | Undecided_not { target; _ }) :: _ ->
+          is_use_of target operand
       | [] -> false
     in
     match statements with
@@ -75,22 +68,30 @@ let expanded_body (body : body) : Graph.body =
         let origin = statement.origin in
         let go_on current = emit targets (current, []) [] rest in
         match statement.kind with
-        | Assign
-            { target = { root = Local _; projections = [] }; value = Connective { left; _ }; _ } ->
-            if reads_undecided left then emit targets current (undecided @ [ statement ]) rest
-            else emit targets (decided ()) [ statement ] rest
-        | Assign { target = { root = Local _; projections = [] }; value = Not negated; _ }
+        | Choose { target; choice = Connective { connective; left; right }; _ } ->
+            let pending = Undecided_connective { target; connective; left; right; origin } in
+            if reads_undecided left then emit targets current (undecided @ [ pending ]) rest
+            else emit targets (decided ()) [ pending ] rest
+        | Basic
+            (Assign
+               {
+                 target = { root = Local _; projections = [] } as target;
+                 value = Not negated;
+                 node;
+               })
           when reads_undecided negated ->
-            emit targets current (undecided @ [ statement ]) rest
-        | Assign { target; value = Conditional { condition; then_; else_; _ }; _ } ->
+            emit targets current
+              (undecided @ [ Undecided_not { target; negated; node; origin } ])
+              rest
+        | Choose { target; choice = Conditional { condition; then_; else_; _ }; _ } ->
             let yes = fresh () and no = fresh () and joined = fresh () in
             if reads_undecided condition then
-              branch targets current undecided (Some condition) ~yes ~no origin
+              branch_undecided targets current undecided condition ~yes ~no origin
             else branch targets (decided ()) [] (Some condition) ~yes ~no origin;
             let reaches_then = arm targets yes then_ ~target ~joined origin in
             let reaches_else = arm targets no else_ ~target ~joined origin in
             if reaches_then || reaches_else then go_on joined else None
-        | Assign { target; value = Cases cases; _ } ->
+        | Choose { target; choice = Cases cases; _ } ->
             let joined = fresh () in
             let unmatched, reaches =
               List.fold_left
@@ -113,7 +114,7 @@ let expanded_body (body : body) : Graph.body =
             in
             close unmatched Unreachable origin;
             if reaches then go_on joined else None
-        | Assert { condition; bit_vector = Some { names; code } } ->
+        | Basic (Assert { condition; bit_vector = Some { names; code } }) ->
             let index, emitted = block targets (decided ()) code.statements in
             let assert_ : Graph.statement =
               {
@@ -264,9 +265,9 @@ let expanded_body (body : body) : Graph.body =
             in
             close (decided ()) terminator origin;
             None
-        | _ ->
+        | Basic basic ->
             let index, emitted = decided () in
-            emit targets (index, graph_statement statement :: emitted) [] rest)
+            emit targets (index, { kind = basic; origin } :: emitted) [] rest)
   and block targets current (statements : statement list) =
     match emit targets current [] statements with
     | Some (current, undecided) -> with_values targets current undecided
@@ -279,37 +280,42 @@ let expanded_body (body : body) : Graph.body =
         | None -> ()
         | Some _ -> bug "statements with no value, whose end control reaches")
     | Some value -> (
-        match deciding statements value with
-        | Some (before, { kind = Assign { value = Connective { connective; left; right }; _ }; _ })
-          ->
-            let evaluated = fresh () in
-            (match connective with
-            | And -> branch targets current before (Some left) ~yes:evaluated ~no origin
-            | Or -> branch targets current before (Some left) ~yes ~no:evaluated origin
-            | Implies -> branch targets current before (Some left) ~yes:evaluated ~no:yes origin);
-            branch targets (evaluated, []) right.statements right.value ~yes ~no origin
-        | Some (before, { kind = Assign { value = Not negated; _ }; _ }) ->
-            branch targets current before (Some negated) ~yes:no ~no:yes origin
-        | Some _ | None -> (
-            let current = block targets current statements in
-            match value with
-            | Constant { value = Boolean true; _ } -> close current (Goto yes) origin
-            | Constant { value = Boolean false; _ } -> close current (Goto no) origin
-            | _ ->
-                close current
-                  (Branch { condition = value; yes; no; is_if_condition = false })
-                  origin))
-  and with_values targets current (undecided : statement list) =
+        match List.rev statements with
+        | { kind = Choose { target; choice = Connective { connective; left; right }; _ }; _ }
+          :: before
+          when is_use_of target value ->
+            branch_connective targets connective right ~yes ~no origin ~left:(fun ~yes ~no ->
+                branch targets current (List.rev before) (Some left) ~yes ~no origin)
+        | { kind = Basic (Assign { target; value = Not negated; _ }); _ } :: before
+          when is_use_of target value ->
+            branch targets current (List.rev before) (Some negated) ~yes:no ~no:yes origin
+        | _ -> branch_on (block targets current statements) value ~yes ~no origin)
+  and branch_undecided targets current (undecided : undecided list) (value : operand) ~yes ~no
+      origin =
+    match List.rev undecided with
+    | Undecided_connective { target; connective; left; right; _ } :: before
+      when is_use_of target value ->
+        branch_connective targets connective right ~yes ~no origin ~left:(fun ~yes ~no ->
+            branch_undecided targets current (List.rev before) left ~yes ~no origin)
+    | Undecided_not { target; negated; _ } :: before when is_use_of target value ->
+        branch_undecided targets current (List.rev before) negated ~yes:no ~no:yes origin
+    | _ -> branch_on (with_values targets current undecided) value ~yes ~no origin
+  and branch_connective targets connective (right : block) ~left ~yes ~no origin =
+    let evaluated = fresh () in
+    (match connective with
+    | And -> left ~yes:evaluated ~no
+    | Or -> left ~yes ~no:evaluated
+    | Implies -> left ~yes:evaluated ~no:yes);
+    branch targets (evaluated, []) right.statements right.value ~yes ~no origin
+  and with_values targets current (undecided : undecided list) =
     match List.rev undecided with
     | [] -> current
-    | ({ kind = Assign { target; value = Connective { connective; left; right }; _ }; _ } as last)
-      :: before ->
-        let origin = last.origin in
+    | Undecided_connective { target; connective; left; right; origin } :: before ->
         let evaluated = fresh () and decided = fresh () and joined = fresh () in
         let yes, no =
           match connective with And | Implies -> (evaluated, decided) | Or -> (decided, evaluated)
         in
-        branch targets current (List.rev before) (Some left) ~yes ~no origin;
+        branch_undecided targets current (List.rev before) left ~yes ~no origin;
         ignore (arm targets evaluated right ~target ~joined origin);
         close
           ( decided,
@@ -320,9 +326,9 @@ let expanded_body (body : body) : Graph.body =
             ] )
           (Goto joined) origin;
         (joined, [])
-    | last :: before ->
+    | Undecided_not { target; negated; node; origin } :: before ->
         let index, emitted = with_values targets current (List.rev before) in
-        (index, graph_statement last :: emitted)
+        (index, { kind = Assign { target; value = Not negated; node }; origin } :: emitted)
   and arm targets entry (block : block) ~target ~joined origin =
     match (emit targets (entry, []) [] block.statements, block.value) with
     | Some (current, undecided), Some value ->

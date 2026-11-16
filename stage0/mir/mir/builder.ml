@@ -153,7 +153,7 @@ let rec expression builder (node : Core.expression) : operand option =
     | Template { literals; call = { kind = Call called; _ } } ->
         let* call = call_of builder called ~node:node.id ~origin:node.origin in
         let local = temporary builder node.type_ origin in
-        emit builder (Template { destination = at local; literals; call }) origin;
+        emit builder (Basic (Template { destination = at local; literals; call })) origin;
         Some (Use { place = at local; type_ = node.type_; node = node.id; origin = node.origin })
     | Template _ -> bug "a tagged template whose value is not a call"
     | Use place_ ->
@@ -190,7 +190,7 @@ let rec expression builder (node : Core.expression) : operand option =
         | Passed { value = Borrow { place = base; _ }; _ } :: _ ->
             let local = temporary builder node.type_ origin in
             emit builder
-              (Slice { destination = at local; base = borrowed_place builder base; call })
+              (Basic (Slice { destination = at local; base = borrowed_place builder base; call }))
               origin;
             Some
               (Use { place = at local; type_ = node.type_; node = node.id; origin = node.origin })
@@ -267,7 +267,9 @@ let rec expression builder (node : Core.expression) : operand option =
               })
             implementations values
         in
-        emit builder (Provide { provided; can_use_tasks = Core_walk.can_use_tasks body }) origin;
+        emit builder
+          (Basic (Provide { provided; can_use_tasks = Core_walk.can_use_tasks body }))
+          origin;
         in_value_scope ~provides:true builder origin (fun () ->
             List.iter
               (fun (provided : provided) ->
@@ -305,7 +307,7 @@ let rec expression builder (node : Core.expression) : operand option =
         let local = temporary builder inner.type_ origin in
         assign builder (at local) (Operand value) origin;
         emit builder
-          (Echo (Borrow { place = at local; type_ = inner.type_; mode = Read; origin }))
+          (Basic (Echo (Borrow { place = at local; type_ = inner.type_; mode = Read; origin })))
           origin;
         Some (Use { place = at local; type_ = node.type_; node = node.id; origin = node.origin })
     | Current_target -> (
@@ -506,7 +508,7 @@ and lent builder (lending : Core.expression) ~duration : place option =
       let* call = call_of builder called ~node:lending.id ~origin:lending.origin in
       let part = new_local builder (Lent mode) lending.type_ lending.origin in
       add_temporary builder part;
-      emit builder (Lend { part; call }) lending.origin;
+      emit builder (Basic (Lend { part; call })) lending.origin;
       (match call.arguments with
       | Passed { mode; value = Borrow _ as receiver; _ } :: _ ->
           ignore
@@ -623,22 +625,22 @@ and call_value builder (node : Core.expression) (called : Core.call) =
   | _ ->
       let* call = call_of builder called ~node:node.id ~origin:node.origin in
       if diverges node.type_ then begin
-        emit builder (Call { destination = None; call }) origin;
+        emit builder (Basic (Call { destination = None; call })) origin;
         jump builder Unreachable origin;
         None
       end
       else if is_unit node.type_ then begin
-        emit builder (Call { destination = None; call }) origin;
+        emit builder (Basic (Call { destination = None; call })) origin;
         Some (Constant { value = Unit; type_ = Types.unit })
       end
       else
         let local = temporary builder node.type_ origin in
-        emit builder (Call { destination = Some (at local); call }) origin;
+        emit builder (Basic (Call { destination = Some (at local); call })) origin;
         Some (Use { place = at local; type_ = node.type_; node = node.id; origin = node.origin })
 
-and chosen builder (node : Core.expression) (blocks : block list) value =
+and chosen builder (node : Core.expression) (blocks : block list) choice =
   let type_ = if diverges node.type_ then Types.unit else node.type_ in
-  let held = hold ~node:node.id builder type_ node.origin value in
+  let held = hold_choice ~node:node.id builder type_ node.origin choice in
   if List.exists (fun (block : block) -> block.value <> None) blocks then held
   else begin
     mark_unreachable builder;
@@ -649,7 +651,8 @@ and truth builder (node : Core.expression) : operand option =
   let connective connective (left : Core.expression) (right : Core.expression) =
     let* left = expression builder left in
     let right = block_of builder (fun () -> expression builder right) in
-    hold ~node:node.id builder node.type_ node.origin (Connective { connective; left; right })
+    hold_choice ~node:node.id builder node.type_ node.origin
+      (Connective { connective; left; right })
   in
   match node.kind with
   | And (left, right) -> connective And left right
@@ -678,7 +681,7 @@ and pattern_tests ?(matched = ignore) builder (patterns : Core.pattern list) pla
       | None, _ -> None
       | Some (Constant { value = Boolean true; _ }), [] -> Some left
       | Some _, _ ->
-          hold builder Types.bool origin
+          hold_choice builder Types.bool origin
             (Connective { connective = And; left; right = { statements; value = holds } }))
     (Some (Constant { value = Boolean true; type_ = Types.bool }))
     !tested
@@ -695,7 +698,7 @@ and match_patterns ?(covers = false) builder (patterns : Core.pattern list) plac
     | patterns :: later ->
         let* left = pattern_tests builder patterns places ~matched:(matched patterns) in
         let right = block_of builder (fun () -> any later) in
-        hold builder Types.bool origin (Connective { connective = Or; left; right })
+        hold_choice builder Types.bool origin (Connective { connective = Or; left; right })
   in
   any (expansions patterns)
 
@@ -765,10 +768,12 @@ and match_ builder (node : Core.expression) scrutinees (arms : Core.arm list) : 
       block_of builder (fun () ->
           if arm.patterns <> [] then
             emit builder
-              (Matched
-                 {
-                   patterns = List.map (fun (pattern : Core.pattern) -> pattern.origin) arm.patterns;
-                 })
+              (Basic
+                 (Matched
+                    {
+                      patterns =
+                        List.map (fun (pattern : Core.pattern) -> pattern.origin) arm.patterns;
+                    }))
               arm.origin;
           let value =
             match (block builder arm.body, result) with
@@ -858,41 +863,42 @@ and test builder (pattern : Core.pattern) (scrutinee : place) ~branch_on =
       | Some callee when reaches builder ->
           let local = temporary builder Types.bool origin in
           emit builder
-            (Call
-               {
-                 destination = Some (at local);
-                 call =
-                   {
-                     callee;
-                     arguments =
-                       [
-                         Passed
-                           {
-                             mode = Read;
-                             value =
-                               Borrow
-                                 {
-                                   place = scrutinee;
-                                   type_ = pattern.type_;
-                                   mode = Read;
-                                   origin = pattern.origin;
-                                 };
-                             mode_keyword = None;
-                             function_ = None;
-                           };
-                         Passed
-                           {
-                             mode = Read;
-                             value = lower_pattern_constant pattern value;
-                             mode_keyword = None;
-                             function_ = None;
-                           };
-                       ];
-                     uses = Types.no_capabilities;
-                     node = pattern.id;
-                     origin = pattern.origin;
-                   };
-               })
+            (Basic
+               (Call
+                  {
+                    destination = Some (at local);
+                    call =
+                      {
+                        callee;
+                        arguments =
+                          [
+                            Passed
+                              {
+                                mode = Read;
+                                value =
+                                  Borrow
+                                    {
+                                      place = scrutinee;
+                                      type_ = pattern.type_;
+                                      mode = Read;
+                                      origin = pattern.origin;
+                                    };
+                                mode_keyword = None;
+                                function_ = None;
+                              };
+                            Passed
+                              {
+                                mode = Read;
+                                value = lower_pattern_constant pattern value;
+                                mode_keyword = None;
+                                function_ = None;
+                              };
+                          ];
+                        uses = Types.no_capabilities;
+                        node = pattern.id;
+                        origin = pattern.origin;
+                      };
+                  }))
             origin;
           branch
             (Some
@@ -919,7 +925,7 @@ and bind ?(owned = false) builder (pattern : Core.pattern) (scrutinee : place) =
       (match mode with
       | (Read | Mut) when (not owned) && reaches builder -> note_bound_to_place builder bound
       | _ -> ());
-      emit builder (Live [ bound ]) pattern.origin;
+      emit builder (Basic (Live [ bound ])) pattern.origin;
       assign builder (at bound)
         (Operand
            (match mode with
@@ -1002,7 +1008,7 @@ and statement builder (node : Core.statement) =
                         None)
                   in
                   ignore
-                    (hold builder Types.unit origin
+                    (hold_choice builder Types.unit origin
                        (Conditional { condition; then_; else_; if_condition = None })))
                 matches;
               List.iter (register_binding builder) bound)
@@ -1036,7 +1042,7 @@ and statement builder (node : Core.statement) =
               in
               add_source builder bound local;
               add_temporary builder local;
-              emit builder (Live [ local ]) origin;
+              emit builder (Basic (Live [ local ])) origin;
               assign builder (at local) (Operand right_value) origin;
               let bound_value =
                 match right_value with
@@ -1111,7 +1117,9 @@ and statement builder (node : Core.statement) =
                 match (tested.kind, List.rev condition.statements) with
                 | ( Compare { left; right; _ },
                     {
-                      kind = Assign { value = Compare { comparison; left = low; right = high }; _ };
+                      kind =
+                        Basic
+                          (Assign { value = Compare { comparison; left = low; right = high }; _ });
                       _;
                     }
                     :: _ )
@@ -1165,10 +1173,10 @@ and statement builder (node : Core.statement) =
           if List.exists (fun (branch : block) -> branch.value = None) branches then
             jump builder Unreachable origin
       | Proof proof ->
-          emit builder (Proof (of_proof ~entry_locals:(entry_locals builder) proof)) origin
+          emit builder (Basic (Proof (of_proof ~entry_locals:(entry_locals builder) proof))) origin
       | Assert { condition = { value; executable = true }; by_bit_vector = false } -> (
           match expression builder value with
-          | Some condition -> emit builder (Assert { condition; bit_vector = None }) origin
+          | Some condition -> emit builder (Basic (Assert { condition; bit_vector = None })) origin
           | None -> ())
       | Assert { condition = { value; executable = true }; by_bit_vector = true } -> (
           let code = block_of builder (fun () -> expression builder value) in
@@ -1178,10 +1186,12 @@ and statement builder (node : Core.statement) =
                 List.sort_uniq compare
                   (List.filter_map (fun (local, _) -> source builder local) (names_of value))
               in
-              emit builder (Assert { condition; bit_vector = Some { names; code } }) origin
+              emit builder (Basic (Assert { condition; bit_vector = Some { names; code } })) origin
           | None -> ())
       | Assert { condition = { value; executable = false }; by_bit_vector } ->
-          emit builder (Ghost_assert { condition = attached builder value; by_bit_vector }) origin
+          emit builder
+            (Basic (Ghost_assert { condition = attached builder value; by_bit_vector }))
+            origin
       | Yield { mode; part = written } -> (
           match yielded builder mode written with
           | Some part -> emit builder (Yield { mode; part }) origin
@@ -1263,12 +1273,16 @@ and lent_from builder part =
   List.find_map
     (fun (statement : statement) ->
       match statement.kind with
-      | Lend
-          {
-            part = lent;
-            call =
-              { arguments = Passed { value = Borrow { place; _ } | Use { place; _ }; _ } :: _; _ };
-          }
+      | Basic
+          (Lend
+             {
+               part = lent;
+               call =
+                 {
+                   arguments = Passed { value = Borrow { place; _ } | Use { place; _ }; _ } :: _;
+                   _;
+                 };
+             })
         when lent = part ->
           Some (borrowed_place builder place)
       | _ -> None)
@@ -1321,7 +1335,7 @@ and quantifier_loop builder (node : Core.expression) (quantifier : Core.quantifi
                     None)
               and undecided = block_of builder (fun () -> Some unit_value) in
               ignore
-                (hold builder Types.unit origin
+                (hold_choice builder Types.unit origin
                    (Conditional
                       {
                         condition = holds;

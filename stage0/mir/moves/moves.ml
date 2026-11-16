@@ -56,9 +56,7 @@ let rvalue_uses ~moving ~origin (rvalue : Mir.rvalue) =
   | Is_variant { place; _ } -> [ read ~origin place ]
   | Lambda { captures; _ } ->
       List.map (fun (capture : Mir.capture) -> read ~origin capture.place) captures
-  | Function_value _ | Value_parameter _ | Conditional _ | Cases _ | Connective _ | Specification _
-    ->
-      []
+  | Function_value _ | Value_parameter _ | Specification _ -> []
 
 let call_uses ~moving (call : Mir.call) =
   (match call.callee with

@@ -24,9 +24,10 @@ val register_binding : t -> local -> unit
 val note_bound_to_place : t -> local -> unit
 val place_temporary : t -> node:Core.id -> Types.ty -> Core.origin -> local
 val free_locals : t -> local list
-val emit : t -> in_tree statement_kind -> Core.origin -> unit
+val emit : t -> statement_kind -> Core.origin -> unit
 val assign : ?node:Core.id -> t -> place -> rvalue -> Core.origin -> unit
 val hold : ?node:Core.id -> t -> Types.ty -> Core.origin -> rvalue -> operand option
+val hold_choice : ?node:Core.id -> t -> Types.ty -> Core.origin -> choice -> operand option
 val held : t -> operand -> Types.ty -> Core.origin -> operand
 val borrowed_place : t -> place -> place
 val jump : t -> jump -> Core.origin -> unit
