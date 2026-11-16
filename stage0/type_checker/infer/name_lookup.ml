@@ -274,10 +274,9 @@ and check_explicit_type_arguments ?(head = 0) state (value : Syntax.expression) 
         if List.length written <> List.length own then
           Error
             (State.make_error_type state Arity (State.read_span state value.id)
-               (Printf.sprintf "This takes %d type %s, and %d %s given." (List.length own)
-                  (if List.length own = 1 then "argument" else "arguments")
-                  (List.length written)
-                  (if List.length written = 1 then "is" else "are")))
+               (Printf.sprintf "This takes %s, and %s given."
+                  (Diagnostic.show_count (List.length own) "type argument" "type arguments")
+                  (Diagnostic.show_count (List.length written) "is" "are")))
         else
           let errors =
             List.concat

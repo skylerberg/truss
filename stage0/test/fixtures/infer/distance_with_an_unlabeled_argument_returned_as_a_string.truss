@@ -1,0 +1,7 @@
+fn distance(from: Int64, to: Int64) -> Int64 {
+  0
+}
+
+fn f(start: Int64, finish: Int64) -> String {
+  distance(start, finish)
+}
