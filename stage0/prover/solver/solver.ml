@@ -1,6 +1,7 @@
 let version = "5.3.3"
 let steps = 1_000_000
 let cardinality_bounds = [ 2; 3; 4 ]
+let entry_format_version = 1
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Solver" format
 
 type cache = { find : string -> string option; add : string -> string -> unit }
@@ -46,8 +47,8 @@ let header =
 
 let key_of_text text =
   Logic.hash
-    (Printf.sprintf
-       "z3 %s\nstatus of the query, with unknown retried at cardinality bounds %s\n%s%s" version
+    (Printf.sprintf "z3 %s\nentry format %d\ncardinality bounds %s\n%s%s" version
+       entry_format_version
        (String.concat ", " (List.map string_of_int cardinality_bounds))
        header text)
 
