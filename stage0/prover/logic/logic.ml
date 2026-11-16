@@ -675,7 +675,14 @@ let number_symbols query =
 
 type rendering = { text : string; numbering : numbering }
 
-let render query =
+let render_cardinality_bound sort_name element_count =
+  let elements = List.init element_count (Printf.sprintf "%s_e%d" sort_name) in
+  String.concat ""
+    (List.map (fun element -> Printf.sprintf "(declare-fun %s () %s)\n" element sort_name) elements)
+  ^ Printf.sprintf "(assert (forall ((b0 %s)) (or%s)))\n" sort_name
+      (String.concat "" (List.map (Printf.sprintf " (= b0 %s)") elements))
+
+let render_with ~cardinality_bound query =
   let numbering = number_symbols query in
   let render_assertion term =
     let buffer = Buffer.create 128 in
@@ -701,13 +708,21 @@ let render query =
       (Dynarray.to_list numbering.symbol_order)
   in
   let sort_order = Dynarray.to_list numbering.sort_order in
-  let sorts =
+  let uninterpreted_sorts =
     List.filter_map
       (fun name ->
         if Sort_table.mem numbering.datatypes name then None
-        else
-          Some (Printf.sprintf "(declare-sort %s 0)\n" (Sort_table.find numbering.sort_names name)))
+        else Some (Sort_table.find numbering.sort_names name))
       sort_order
+  in
+  let sorts = List.map (Printf.sprintf "(declare-sort %s 0)\n") uninterpreted_sorts in
+  let cardinality_bounds =
+    match cardinality_bound with
+    | None -> []
+    | Some element_count ->
+        List.map
+          (fun sort_name -> render_cardinality_bound sort_name element_count)
+          uninterpreted_sorts
   in
   let datatypes = List.filter (Sort_table.mem numbering.datatypes) sort_order in
   let datatype_block =
@@ -743,12 +758,19 @@ let render query =
         ]
   in
   {
-    text = String.concat "" (sorts @ datatype_block @ declarations @ assertions) ^ "(check-sat)\n";
+    text =
+      String.concat "" (sorts @ datatype_block @ cardinality_bounds @ declarations @ assertions)
+      ^ "(check-sat)\n";
     numbering;
   }
 
+let render query = render_with ~cardinality_bound:None query
 let rendered_text rendering = rendering.text
-let show_query query = (render query).text
+let show_query ?cardinality_bound query = (render_with ~cardinality_bound query).text
+
+let has_uninterpreted_sort query =
+  let { numbering; _ } = render query in
+  Dynarray.exists (fun sort -> not (Sort_table.mem numbering.datatypes sort)) numbering.sort_order
 
 let render_term { numbering; _ } term =
   let rec is_named = function

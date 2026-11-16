@@ -233,6 +233,11 @@ let show_float bits =
     | Some (mantissa, exponent) -> mantissa ^ ".0e" ^ exponent
     | None -> text ^ ".0"
 
+let is_opaque atom = String.contains atom '!'
+
+let is_opaque_value text =
+  is_opaque text && not (String.exists (fun character -> character = '(') text)
+
 let show_truss_value members text =
   let tokens =
     let buffer = Buffer.create 16 and tokens = ref [] in
@@ -266,7 +271,6 @@ let show_truss_value members text =
     | Field { field; _ } -> field
     | other -> Logic.show_symbol other
   in
-  let is_opaque atom = String.contains atom '!' in
   let parse_bits atom =
     match String.cut_first 2 atom with
     | "#b", digits when digits <> "" -> Some digits
@@ -329,10 +333,12 @@ let show_counterexample members (obligation : State.obligation) answer_values =
   let shown =
     List.filter_map
       (fun (symbol, name) ->
-        Option.map
-          (fun value -> Printf.sprintf "`%s` is %s" name (show_truss_value members value))
-          (List.assoc_opt symbol answer_values))
-      (List.rev obligation.values @ List.rev obligation.locals)
+        match List.assoc_opt symbol answer_values with
+        | Some value when not (is_opaque_value value) ->
+            Some (Printf.sprintf "`%s` is %s" name (show_truss_value members value))
+        | Some _ | None -> None)
+      (List.rev obligation.values
+      @ List.rev_map (fun (term, name) -> (Logic.Symbol.Named_term term, name)) obligation.locals)
   in
   let path =
     List.filter_map Fun.id
@@ -481,14 +487,14 @@ let list_definition_states (lookups : Lookups.t) (key : Resolve.Names.key) proof
                 | Solved (Counterexample values) ->
                     find_failure
                       (show_counterexample (Logic.list_members obligation.query) obligation values)
-                | Solved Out_of_steps ->
+                | Solved Unknown ->
                     find_failure
-                      (" The solver ran out of steps, so it may hold but needs help: a `proof` \
-                        block or a theorem."
+                      (" The solver found neither a proof nor a counterexample. If the code is \
+                        correct, a `proof` block or a theorem can lead the solver to the proof."
                       ^
                       if Logic.has_untriggered_fact obligation.query then
-                        " A quantified fact it may need has no term for the solver to use it by, \
-                         so an `assert` that names the term it is needed for may be enough."
+                        " A quantified fact in the query has no trigger, so an `assert` of that \
+                         fact at the term the proof needs may be enough."
                       else ""));
               trusts_compiled_code = (match answer with Ran true -> true | _ -> false);
             },
@@ -496,19 +502,18 @@ let list_definition_states (lookups : Lookups.t) (key : Resolve.Names.key) proof
         outcome.obligations answers
 
 let request ~with_locals (obligation : State.obligation) =
-  let symbols =
-    List.map fst obligation.values @ if with_locals then List.map fst obligation.locals else []
-  in
   let terms =
     if with_locals then
-      List.concat
-        (List.mapi
-           (fun index (_, _, reached, condition) ->
-             [ (Logic.Symbol.Reached index, reached); (Logic.Symbol.Condition index, condition) ])
-           obligation.decisions)
+      List.map (fun (term, _) -> (Logic.Symbol.Named_term term, term)) obligation.locals
+      @ List.concat
+          (List.mapi
+             (fun index (_, _, reached, condition) ->
+               [ (Logic.Symbol.Reached index, reached); (Logic.Symbol.Condition index, condition) ])
+             obligation.decisions)
     else []
   in
-  (Solver.request ~symbols ~terms obligation.query, obligation.query)
+  ( Solver.request ~symbols:(List.map fst obligation.values) ~terms obligation.query,
+    obligation.query )
 
 let solve solver requests =
   let distinct = Hashtbl.create 64 in
@@ -580,7 +585,7 @@ let decide ~runs lookups solver proofs =
                        &&
                        match await_plain_answer plain_request with
                        | Counterexample _ -> true
-                       | Proven | Out_of_steps -> false ->
+                       | Proven | Unknown -> false ->
                     Some (request ~with_locals:true obligation)
                 | Asked _ | Decided _ -> None
               in
@@ -604,7 +609,7 @@ let decide ~runs lookups solver proofs =
             | Asked (plain_request, _), Some (local_request, _) -> (
                 match await_local_answer local_request with
                 | Counterexample _ as answer -> Solved answer
-                | Proven | Out_of_steps -> Solved (await_plain_answer plain_request)))
+                | Proven | Unknown -> Solved (await_plain_answer plain_request)))
           questions
       in
       Key_table.replace verdicts key (list_definition_states lookups key proof answers))

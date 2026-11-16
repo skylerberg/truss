@@ -285,18 +285,20 @@ and make_obligation ?template_clause (context : State.context) (frame : State.fr
     values = context.values;
     decisions = List.rev context.decisions;
     locals =
-      Locals.fold
-        (fun local term shown ->
-          match (term, Tables.Local_table.find_opt context.local_names local) with
-          | Logic.Symbol symbol, Some name
-            when not (List.mem_assoc symbol context.values || List.mem_assoc symbol shown) ->
-              (symbol, name) :: shown
-          | _ -> shown)
-        frame.locals
-        (match frame.result with
-        | Some (Logic.Symbol symbol) when not (List.mem_assoc symbol context.values) ->
-            [ (symbol, "result") ]
-        | _ -> []);
+      (let is_parameter = function
+         | Logic.Symbol symbol -> List.mem_assoc symbol context.values
+         | _ -> false
+       in
+       Locals.fold
+         (fun local term shown ->
+           match Tables.Local_table.find_opt context.local_names local with
+           | Some name when not (is_parameter term || List.mem_assoc term shown) ->
+               (term, name) :: shown
+           | _ -> shown)
+         frame.locals
+         (match frame.result with
+         | Some term when not (is_parameter term) -> [ (term, "result") ]
+         | _ -> []));
     template_clause;
     may_stop_with_panic = false;
   }
