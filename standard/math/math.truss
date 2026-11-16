@@ -406,7 +406,7 @@ fn multiply_add_small(limbs: mut List[UInt64], factor: UInt64, addend: UInt64)
 
 fn divide_small(limbs: mut List[UInt64], divisor: UInt64) -> UInt64
   requires 1 <= divisor
-  requires divisor <= 4294967295
+  requires divisor < half_base
   ensures result < divisor
   ensures limbs.length() <= old(limbs.length())
   ensures limbs.length() == 0 || limbs[limbs.length() - 1] != 0
@@ -433,14 +433,14 @@ fn divide_small(limbs: mut List[UInt64], divisor: UInt64) -> UInt64
 }
 
 fn to_digits(limbs: Slice[UInt64]) -> List[UInt64]
-  ensures forall i in 0..result.length() => result.model()[i] <= 4294967295
+  ensures forall i in 0..result.length() => result.model()[i] < half_base
   cost time finite
 {
   var digits: List[UInt64] = List.with_capacity(limbs.length().saturating_multiply(2))
   var index: UInt64 = 0
   while index < limbs.length()
     invariant index <= limbs.length()
-    invariant forall i in 0..digits.length() => digits.model()[i] <= 4294967295
+    invariant forall i in 0..digits.length() => digits.model()[i] < half_base
     decreases limbs.length() - index
   {
     mut digits.push(limbs[index] % half_base)
@@ -448,7 +448,7 @@ fn to_digits(limbs: Slice[UInt64]) -> List[UInt64]
     index += 1
   }
   while digits.length() > 0 && digits[digits.length() - 1] == 0
-    invariant forall i in 0..digits.length() => digits.model()[i] <= 4294967295
+    invariant forall i in 0..digits.length() => digits.model()[i] < half_base
     decreases digits.length()
   {
     let _ = mut digits.pop()
@@ -481,7 +481,7 @@ fn from_digits(digits: Slice[UInt64]) -> List[UInt64]
 fn shifted_digit(digits: Slice[UInt64], index: UInt64, shift: UInt64) -> UInt64
   requires index <= digits.length()
   requires shift <= 32
-  ensures result <= 4294967295
+  ensures result < half_base
   cost time O(1)
 {
   let here: UInt64 = if index < digits.length() { digits[index] % half_base } else { 0 }
@@ -742,7 +742,7 @@ type DigitGroup(divisor: UInt64, digits: UInt64)
 fn digit_group(radix: UInt32) -> DigitGroup
   requires 2 <= radix && radix <= 36
   ensures 2 <= result.divisor
-  ensures result.divisor <= 4294967295
+  ensures result.divisor < half_base
   ensures 1 <= result.digits
   ensures result.digits <= 31
   cost time O(1)
@@ -1561,11 +1561,11 @@ impl Multiply[Decimal] for Decimal {
   type Output = Decimal
 
   fn multiply_is_defined(self, right: Decimal) -> Bool
-    ensures result == (-2147483648 <= self.scale + right.scale && self.scale + right.scale <= 2147483647)
+    ensures result == (Int32.minimum <= self.scale + right.scale && self.scale + right.scale <= Int32.maximum)
     cost time O(1)
   {
     let scale: Int64 = intrinsic::convert[Int32, Int64](self.scale) + intrinsic::convert[Int32, Int64](right.scale)
-    -2147483648 <= scale && scale <= 2147483647
+    intrinsic::fits[Int64, Int32](scale)
   }
 
   fn multiply(self, right: Decimal) -> Decimal {
@@ -1861,7 +1861,7 @@ fn parse_decimal(text: StringSlice) -> Result[Decimal, core::ParseFloatError]
     return Err(core::ParseFloatError.InvalidCharacter(offset: text.length()))
   }
   let scale: Int64 = intrinsic::convert[UInt64, Int64](places) - exponent
-  if scale < -2147483648 || scale > 2147483647 {
+  if !intrinsic::fits[Int64, Int32](scale) {
     return Err(core::ParseFloatError.InvalidCharacter(offset: text.length()))
   }
   Ok(Decimal(coefficient: with_sign(negative, magnitude: own limbs), scale: intrinsic::convert(scale)))

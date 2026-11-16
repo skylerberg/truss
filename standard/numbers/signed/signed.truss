@@ -166,7 +166,7 @@ impl TryFrom[Int16] for Int8 {
   type Error = core::ConversionError
 
   fn try_from(value: own Int16) -> Result[Int8, core::ConversionError]
-    ensures (result is Ok(_)) == (-128 <= value && value <= 127)
+    ensures (result is Ok(_)) == (Int8.minimum <= value && value <= Int8.maximum)
     ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
@@ -178,7 +178,7 @@ impl TryFrom[Int32] for Int8 {
   type Error = core::ConversionError
 
   fn try_from(value: own Int32) -> Result[Int8, core::ConversionError]
-    ensures (result is Ok(_)) == (-128 <= value && value <= 127)
+    ensures (result is Ok(_)) == (Int8.minimum <= value && value <= Int8.maximum)
     ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
@@ -190,7 +190,7 @@ impl TryFrom[Int64] for Int8 {
   type Error = core::ConversionError
 
   fn try_from(value: own Int64) -> Result[Int8, core::ConversionError]
-    ensures (result is Ok(_)) == (-128 <= value && value <= 127)
+    ensures (result is Ok(_)) == (Int8.minimum <= value && value <= Int8.maximum)
     ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
@@ -202,7 +202,7 @@ impl TryFrom[UInt8] for Int8 {
   type Error = core::ConversionError
 
   fn try_from(value: own UInt8) -> Result[Int8, core::ConversionError]
-    ensures (result is Ok(_)) == (value <= 127)
+    ensures (result is Ok(_)) == (value <= Int8.maximum)
     ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
@@ -214,7 +214,7 @@ impl TryFrom[UInt16] for Int8 {
   type Error = core::ConversionError
 
   fn try_from(value: own UInt16) -> Result[Int8, core::ConversionError]
-    ensures (result is Ok(_)) == (value <= 127)
+    ensures (result is Ok(_)) == (value <= Int8.maximum)
     ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
@@ -226,7 +226,7 @@ impl TryFrom[UInt32] for Int8 {
   type Error = core::ConversionError
 
   fn try_from(value: own UInt32) -> Result[Int8, core::ConversionError]
-    ensures (result is Ok(_)) == (value <= 127)
+    ensures (result is Ok(_)) == (value <= Int8.maximum)
     ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
@@ -238,7 +238,7 @@ impl TryFrom[UInt64] for Int8 {
   type Error = core::ConversionError
 
   fn try_from(value: own UInt64) -> Result[Int8, core::ConversionError]
-    ensures (result is Ok(_)) == (value <= 127)
+    ensures (result is Ok(_)) == (value <= Int8.maximum)
     ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
@@ -420,7 +420,7 @@ impl TryFrom[Int32] for Int16 {
   type Error = core::ConversionError
 
   fn try_from(value: own Int32) -> Result[Int16, core::ConversionError]
-    ensures (result is Ok(_)) == (-32768 <= value && value <= 32767)
+    ensures (result is Ok(_)) == (Int16.minimum <= value && value <= Int16.maximum)
     ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
@@ -432,7 +432,7 @@ impl TryFrom[Int64] for Int16 {
   type Error = core::ConversionError
 
   fn try_from(value: own Int64) -> Result[Int16, core::ConversionError]
-    ensures (result is Ok(_)) == (-32768 <= value && value <= 32767)
+    ensures (result is Ok(_)) == (Int16.minimum <= value && value <= Int16.maximum)
     ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
@@ -453,7 +453,7 @@ impl TryFrom[UInt16] for Int16 {
   type Error = core::ConversionError
 
   fn try_from(value: own UInt16) -> Result[Int16, core::ConversionError]
-    ensures (result is Ok(_)) == (value <= 32767)
+    ensures (result is Ok(_)) == (value <= Int16.maximum)
     ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
@@ -465,7 +465,7 @@ impl TryFrom[UInt32] for Int16 {
   type Error = core::ConversionError
 
   fn try_from(value: own UInt32) -> Result[Int16, core::ConversionError]
-    ensures (result is Ok(_)) == (value <= 32767)
+    ensures (result is Ok(_)) == (value <= Int16.maximum)
     ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
@@ -477,7 +477,7 @@ impl TryFrom[UInt64] for Int16 {
   type Error = core::ConversionError
 
   fn try_from(value: own UInt64) -> Result[Int16, core::ConversionError]
-    ensures (result is Ok(_)) == (value <= 32767)
+    ensures (result is Ok(_)) == (value <= Int16.maximum)
     ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
@@ -668,7 +668,7 @@ impl TryFrom[Int64] for Int32 {
   type Error = core::ConversionError
 
   fn try_from(value: own Int64) -> Result[Int32, core::ConversionError]
-    ensures (result is Ok(_)) == (-2147483648 <= value && value <= 2147483647)
+    ensures (result is Ok(_)) == (Int32.minimum <= value && value <= Int32.maximum)
     ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
@@ -698,7 +698,7 @@ impl TryFrom[UInt32] for Int32 {
   type Error = core::ConversionError
 
   fn try_from(value: own UInt32) -> Result[Int32, core::ConversionError]
-    ensures (result is Ok(_)) == (value <= 2147483647)
+    ensures (result is Ok(_)) == (value <= Int32.maximum)
     ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
@@ -710,7 +710,7 @@ impl TryFrom[UInt64] for Int32 {
   type Error = core::ConversionError
 
   fn try_from(value: own UInt64) -> Result[Int32, core::ConversionError]
-    ensures (result is Ok(_)) == (value <= 2147483647)
+    ensures (result is Ok(_)) == (value <= Int32.maximum)
     ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
@@ -937,7 +937,7 @@ impl TryFrom[UInt64] for Int64 {
   type Error = core::ConversionError
 
   fn try_from(value: own UInt64) -> Result[Int64, core::ConversionError]
-    ensures (result is Ok(_)) == (value <= 9223372036854775807)
+    ensures (result is Ok(_)) == (value <= Int64.maximum)
     ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
