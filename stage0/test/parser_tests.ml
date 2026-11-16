@@ -37,9 +37,18 @@ let () =
       if recovered "fn f() {\n  x as Int64\n}" <> [ "as" ] then fail "the habit is not recorded";
       if recovered "fn f() {\n  let x = (1 +\n}" = [] then
         fail "the inserted closer is not recorded";
-      if recovered "fn f() {\n  assert true\n}" <> [] then
-        fail "a rule checked after parsing is recorded";
-      if recovered "fn f(x: Int64) -> Int64" <> [] then fail "the body its fix writes is recorded");
+      if recovered "fn f() {\n  let x = 0755\n}" <> [ "0755" ] then
+        fail "the lexer's error is not recorded";
+      if recovered "fn f() {\n  assert true\n}" = [] then
+        fail "a rule checked after parsing is not recorded";
+      if recovered "fn f(x: Int64) -> Int64" = [] then fail "the missing body is not recorded");
+  test "a lexer error in a method is recorded in the method alone" (fun () ->
+      let text = "impl Clock for Fixed {\n  fn now(self) -> Instant {\n    0755\n  }\n}" in
+      match items (fst (parse text)) with
+      | [ container; method_ ] ->
+          if container.positions.recovered <> [] then fail "recorded in the container";
+          if method_.positions.recovered = [] then fail "not recorded in the method"
+      | items -> fail "expected a container and a method, got %d items" (List.length items));
   test "a missing body's recovery is where the body starts" (fun () ->
       let tokens, _ = Lexer.lex (source "fn f(x: Int64) -> Int64\nfn g() {}") in
       match
@@ -95,7 +104,7 @@ let () =
         [ "(public (error fn f))"; "(fn g () (block))" ]);
   test "a function without a body keeps its signature" (fun () ->
       recovered_definitions "fn f(x: Int64) -> Int64\nfn g() {}"
-        [ "(fn f ((x: Int64)) -> Int64 (block todo))"; "(fn g () (block))" ]);
+        [ "(fn f ((x: Int64)) -> Int64 (block error))"; "(fn g () (block))" ]);
   test "the definition after a broken one parses" (fun () ->
       let file, diagnostics = parse "fn f() -> {\n}\nfn g() {}" in
       if List.length diagnostics <> 1 then

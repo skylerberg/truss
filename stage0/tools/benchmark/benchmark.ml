@@ -10,8 +10,8 @@ let best_time run =
 let lexing source = best_time (fun () -> ignore (Lexer.lex source))
 
 let parsing source =
-  let tokens, _ = Lexer.lex source in
-  best_time (fun () -> ignore (Parser.parse tokens))
+  let tokens, lexer_diagnostics = Lexer.lex source in
+  best_time (fun () -> ignore (Parser.parse tokens ~lexer_diagnostics))
 
 let file path =
   let source = Source.read_file path in

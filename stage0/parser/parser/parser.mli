@@ -1,5 +1,4 @@
-val recovers : Diagnostic.Code.parser -> bool
-val parse : Token.t array -> Syntax.file * Diagnostic.t list
+val parse : Token.t array -> lexer_diagnostics:Diagnostic.t list -> Syntax.file * Diagnostic.t list
 
 module For_testing : sig
   type piece = Split.piece = { first : int; stop : int }

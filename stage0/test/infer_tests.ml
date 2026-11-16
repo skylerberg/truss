@@ -96,6 +96,31 @@ let has_type text written ?(occurrence = 1) expected =
   | None -> fail "`%s` has no type" written
 
 let () =
+  test "a part with a syntax error is not checked, and the other definitions are" (fun () ->
+      let packages =
+        setup
+          [
+            ( "app::main",
+              "fn double(x: Int64) -> Int64 {\n\
+              \  x\n\
+               }\n\n\
+               fn piped(name: String) -> Int64 {\n\
+              \  name |> double\n\
+               }\n\n\
+               fn compared(flag: Bool) -> Bool {\n\
+              \  flag === 1\n\
+               }\n\n\
+               fn wrong() -> Int64 {\n\
+              \  \"one\"\n\
+               }\n" );
+          ]
+      in
+      let file = file_of "app::main" in
+      if List.length (Support.parse_errors packages file) <> 2 then
+        fail "expected two syntax errors";
+      match codes (check packages file) with
+      | [ "types.mismatch" ] -> ()
+      | reported -> fail "reported [%s]" (String.concat "; " reported));
   test "a literal takes the type of the other operand" (fun () ->
       has_type Fixtures.Infer.literal_takes_the_type_of_the_other_operand "1" "UInt8");
   test "a literal nothing decides is an Int64" (fun () ->

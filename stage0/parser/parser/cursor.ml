@@ -181,26 +181,10 @@ let spelling cursor ?insertions span =
   | [||] -> None
   | tokens -> Token.spelling ?insertions tokens
 
-let recovers : Diagnostic.Code.parser -> bool = function
-  | Unexpected_token | Needs_parentheses | Reserved_word | Statement_at_top_level | Missing_body
-  | Open_range | Interpolation_not_allowed | Float_pattern | Nesting_too_deep | Cost_word
-  | Misplaced_potential | Increment | Double_negation | Match_arm_comma | Conditional_operator
-  | Let_mut | Address_of | Closure_bars | Brace_record | Turbofish | Trailing_lambda | As_conversion
-  | Elif | Angle_brackets | Path_separator | Qualified_variant | Macro_call | Tuple | Power_operator
-  | Short_declaration | Pipe_operator | Lambda_annotation | Impl_parameters | Null_coalescing ->
-      true
-  | Use_after_definition | Let_else_brace | Misplaced_opaque | Misplaced_visibility | Misplaced_self
-  | Lends_own | Repeated_clause | Finite_not_time | Loop_cost_bound | Function_type_names
-  | Misplaced_requires | Misplaced_function_type | Misplaced_associated_type | Misplaced_constraint
-  | Specification_only | Misplaced_assert | Misplaced_proof | Misplaced_loop_exit | Exits_parallel
-  | Echo_in_specification | Reserved_specification_name ->
-      false
-
 let report cursor ?notes ?fixes code span message =
   (match code with
   | Diagnostic.Code.Missing_body -> cursor.recoveries := span :: !(cursor.recoveries)
-  | _ when recovers code -> record_recovery cursor ~index:cursor.index span
-  | _ -> ());
+  | _ -> record_recovery cursor ~index:cursor.index span);
   Diagnostic.Collector.add cursor.diagnostics
     (Diagnostic.make ?notes ?fixes ~code:(Diagnostic.Code.Parser code) span message)
 
