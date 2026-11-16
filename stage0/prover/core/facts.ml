@@ -40,6 +40,11 @@ let declare (context : State.context) (declaration : Logic.declaration) =
         Tables.Symbol_table.replace context.declared name ();
         context.declarations <- declaration :: context.declarations
       end
+  | Definition { symbol; _ } ->
+      if not (Tables.Symbol_table.mem context.definitions symbol) then begin
+        Tables.Symbol_table.replace context.definitions symbol ();
+        context.declarations <- declaration :: context.declarations
+      end
   | Datatype _ -> invalid_arg "Translate.declare: a datatype is declared by its sort"
 
 let add_fact (context : State.context) fact = context.facts <- fact :: context.facts

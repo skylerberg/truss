@@ -17,6 +17,7 @@ let make_context (lookups : Lookups.t) ~home ~current ~terminates ~measures =
       measures;
       declarations = [];
       declared = Tables.Symbol_table.create 64;
+      definitions = Tables.Symbol_table.create 8;
       datatypes = Tables.Type_table.create 16;
       stated = Tables.Stated_table.create 64;
       facts = [];
