@@ -73,12 +73,12 @@ let entry context (key : Instance.key) (impl_method : Instance.impl_method) :
       ((self_mode, self_ty, { Lowered.root = Local implementation; projections = [ Deref ] })
       :: List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) parameter_places)
     ~destination:(passed_on st result_ty) ();
-  finish_function st
-    ~returns:(capability_signature.output <> Returns Never)
-    ~first:[ evidence ]
-    ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places)
-    ();
-  built st.builder
+  build st.builder
+    (finish_function st
+       ~returns:(capability_signature.output <> Returns Never)
+       ~first:[ evidence ]
+       ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places)
+       ())
 
 let locked_entry context (key : Instance.key) ~capability ~name : Emit_c.Builder.instance =
   let slot, capability_signature = capability_method context capability name in
@@ -150,12 +150,12 @@ let locked_entry context (key : Instance.key) ~capability ~name : Emit_c.Builder
          result = Convention.destination result (passed_on st result_ty);
        });
   tasks_call "unlock";
-  finish_function st
-    ~returns:(capability_signature.output <> Returns Never)
-    ~first:[ evidence ]
-    ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places)
-    ();
-  built st.builder
+  build st.builder
+    (finish_function st
+       ~returns:(capability_signature.output <> Returns Never)
+       ~first:[ evidence ]
+       ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places)
+       ())
 
 let locked_table context (key : Instance.key) ~capability : Lowered.table =
   let interface =
@@ -319,8 +319,7 @@ let program_main context (key : Instance.key) main_path : Emit_c.Builder.instanc
   | Record [ (field, _) ], Some status ->
       emit builder (Assign (status, Convert (Copy (exit / Field field), Integer Int32)))
   | _ -> bug "an ExitCode that is not a record of one field");
-  finish_function st ~first:[ count; arguments_pointer ] ~rest:[] ();
-  built st.builder
+  build st.builder (finish_function st ~first:[ count; arguments_pointer ] ~rest:[] ())
 
 let adapter context (key : Instance.key) ~(function_ : Path.t) ~type_arguments
     ~(ty : Ground.function_type) : Emit_c.Builder.instance =
@@ -344,10 +343,10 @@ let adapter context (key : Instance.key) ~(function_ : Path.t) ~type_arguments
     ~signature ~substitution
     ~arguments:(List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) parameter_places)
     ~destination:(passed_on st ty.result) ();
-  finish_function st ~returns:(ty.result <> Never) ~first:[ environment ]
-    ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ evidence)
-    ();
-  built st.builder
+  build st.builder
+    (finish_function st ~returns:(ty.result <> Never) ~first:[ environment ]
+       ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ evidence)
+       ())
 
 let any_entry context (key : Instance.key) (impl_method : Instance.impl_method) :
     Emit_c.Builder.instance =
@@ -399,13 +398,14 @@ let any_entry context (key : Instance.key) (impl_method : Instance.impl_method) 
       :: List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) parameter_places)
     ~lending:(List.map (fun local -> Lowered.Copy (at local)) lending)
     ~destination ();
-  finish_function st
-    ~returns:(method_signature.output <> Returns Never)
-    ~first:[ value ]
-    ~rest:
-      (List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ evidence @ lending)
-    ();
-  built st.builder
+  build st.builder
+    (finish_function st
+       ~returns:(method_signature.output <> Returns Never)
+       ~first:[ value ]
+       ~rest:
+         (List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places
+         @ evidence @ lending)
+       ())
 
 let any_table context (key : Instance.key) ~impl ~type_arguments : Lowered.table =
   let interface = impl_interface context impl in

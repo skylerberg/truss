@@ -200,11 +200,9 @@ let rec expression builder (node : Core.expression) : operand option =
           List.map (fun (argument : Core.expression) -> Types.Type argument.type_) arguments
         in
         hold (Operation { operation; type_arguments; operands })
-    | Compare { comparison; left; right } -> (
-        let* compared = operands builder [ left; right ] in
-        match compared with
-        | [ left; right ] -> hold (Compare { comparison; left; right })
-        | _ -> bug "a comparison without two operands")
+    | Compare { comparison; left; right } ->
+        let* left, right = evaluate_pair builder left right in
+        hold (Compare { comparison; left; right })
     | Not inner ->
         let* inner = expression builder inner in
         hold (Not inner)
@@ -331,11 +329,9 @@ let rec expression builder (node : Core.expression) : operand option =
     | Result -> hold (Specification Result)
     | Yielded -> hold (Specification Yielded)
     | Old inner -> in_old builder (fun () -> expression builder inner)
-    | Identical (first, second) -> (
-        let* compared = operands builder [ first; second ] in
-        match compared with
-        | [ first; second ] -> hold (Specification (Identical (first, second)))
-        | _ -> bug "an identity without two operands")
+    | Identical (first, second) ->
+        let* first, second = evaluate_pair builder first second in
+        hold (Specification (Identical (first, second)))
     | Specification_function { function_; arguments } ->
         let rec unconverted (argument : Core.expression) =
           match argument.kind with
@@ -357,6 +353,28 @@ and operands builder nodes =
          ((fun () -> expression builder node), node.type_, node.origin))
        nodes)
 
+and hold_operand builder ~is_last loans value type_ origin =
+  let value = held builder value type_ origin in
+  (match value with
+  | Constant _ | Take _ -> ()
+  | _ ->
+      if not is_last then loans := start_loan builder value Read Operand_evaluation origin :: !loans);
+  value
+
+and evaluate_pair builder (first : Core.expression) (second : Core.expression) =
+  let loans = ref [] in
+  let hold_node (node : Core.expression) ~is_last =
+    let* value = expression builder node in
+    Some (hold_operand builder ~is_last loans value node.type_ node.origin)
+  in
+  let pair =
+    let* first = hold_node first ~is_last:false in
+    let* second = hold_node second ~is_last:true in
+    Some (first, second)
+  in
+  end_loans builder (List.rev !loans) first.origin;
+  pair
+
 and in_order builder (operands : ((unit -> operand option) * Types.ty * Core.origin) list) =
   let count = List.length operands in
   let loans = ref [] in
@@ -370,15 +388,8 @@ and in_order builder (operands : ((unit -> operand option) * Types.ty * Core.ori
             | None -> (None, index + 1)
             | Some value ->
                 let value =
-                  if count > 1 then begin
-                    let value = held builder value type_ origin in
-                    (match value with
-                    | Constant _ | Take _ -> ()
-                    | _ ->
-                        if index < count - 1 then
-                          loans := start_loan builder value Read Operand_evaluation origin :: !loans);
-                    value
-                  end
+                  if count > 1 then
+                    hold_operand builder ~is_last:(index = count - 1) loans value type_ origin
                   else value
                 in
                 (Some (evaluated @ [ value ]), index + 1)))

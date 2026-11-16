@@ -217,56 +217,61 @@ let nested_function st ~(function_type : Ground.function_type) ~(output : Types.
       (fun (name, _, ty) -> (name, Lowered.Pointer { target = Value ty; writable = false }))
       captured
   in
-  let builder = Emit_c.Builder.nested st.builder ~index ~environment in
-  let environment_local = at (local st.builder (Environment index)) in
-  List.iter
-    (fun (name, place, _) ->
+  Emit_c.Builder.build_nested st.builder ~index ~environment (fun builder ->
+      let environment_local = at (local st.builder (Environment index)) in
+      List.iter
+        (fun (name, place, _) ->
+          emit st.builder
+            (Assign (environment_local / Field name, Use (Address { place; writable = false }))))
+        captured;
       emit st.builder
-        (Assign (environment_local / Field name, Use (Address { place; writable = false }))))
-    captured;
-  emit st.builder
-    (Assign
-       ( destination,
-         Function_value
-           {
-             code = Nested index;
-             environment = Some (Address { place = environment_local; writable = false });
-           } ));
-  let inner =
-    enter st.context ~nested:st.nested ~builder
-      {
-        st.frame with
-        exit = None;
-        code =
-          (match output with
-          | Some output -> { st.frame.code with result = output }
-          | None -> st.frame.code);
-      }
-  in
-  let environment_parameter = local builder ~name:"environment" (Raw (Nullable_pointer Opaque)) in
-  result_slot inner (Convention.result st.context.env function_type.result);
-  let parameter_places =
-    List.map
-      (fun ((mode : Ground.mode), ty) ->
-        (parameter inner ~in_scope:false ~owned:(mode = Own) mode ty, mode, ty))
-      function_type.parameters
-  in
-  let evidence = evidence_parameters inner function_type.uses in
-  let environment_pointer =
-    local builder (Pointer { target = Environment index; writable = false })
-  in
-  start builder (block builder);
-  emit builder (Assign (at environment_pointer, Use (Copy (at environment_parameter))));
-  body inner
-    ~captures:
-      (List.map
-         (fun (name, _, _) ->
-           { Lowered.root = Local environment_pointer; projections = [ Deref; Field name; Deref ] })
-         captured)
-    (List.map (fun ((_, place), mode, ty) -> (place, mode, ty)) parameter_places);
-  finish_function inner ~first:[ environment_parameter ]
-    ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ evidence)
-    ()
+        (Assign
+           ( destination,
+             Function_value
+               {
+                 code = Nested index;
+                 environment = Some (Address { place = environment_local; writable = false });
+               } ));
+      let inner =
+        enter st.context ~nested:st.nested ~builder
+          {
+            st.frame with
+            exit = None;
+            code =
+              (match output with
+              | Some output -> { st.frame.code with result = output }
+              | None -> st.frame.code);
+          }
+      in
+      let environment_parameter =
+        local builder ~name:"environment" (Raw (Nullable_pointer Opaque))
+      in
+      result_slot inner (Convention.result st.context.env function_type.result);
+      let parameter_places =
+        List.map
+          (fun ((mode : Ground.mode), ty) ->
+            (parameter inner ~in_scope:false ~owned:(mode = Own) mode ty, mode, ty))
+          function_type.parameters
+      in
+      let evidence = evidence_parameters inner function_type.uses in
+      let environment_pointer =
+        local builder (Pointer { target = Environment index; writable = false })
+      in
+      start builder (block builder);
+      emit builder (Assign (at environment_pointer, Use (Copy (at environment_parameter))));
+      body inner
+        ~captures:
+          (List.map
+             (fun (name, _, _) ->
+               {
+                 Lowered.root = Local environment_pointer;
+                 projections = [ Deref; Field name; Deref ];
+               })
+             captured)
+        (List.map (fun ((_, place), mode, ty) -> (place, mode, ty)) parameter_places);
+      finish_function inner ~first:[ environment_parameter ]
+        ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ evidence)
+        ())
 
 let call_indirect st ~(function_type : Ground.function_type) ~(value : Lowered.place)
     (places : Lowered.place list) destination =
