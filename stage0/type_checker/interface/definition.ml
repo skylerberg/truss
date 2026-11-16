@@ -402,7 +402,10 @@ let lower_definition (lookups : Lookups.t) (key : Names.key) (definition : defin
               }
             in
             ( Theorem_interface
-                (Lower.signature context ~owner:path ~head:[] ~self_type:None signature),
+                {
+                  (Lower.signature context ~owner:path ~head:[] ~self_type:None signature) with
+                  specification_only = true;
+                },
               context )
         | Law_proof { trait_; law; type_; _ } -> (
             let generics, for_type = head_type context path type_ in

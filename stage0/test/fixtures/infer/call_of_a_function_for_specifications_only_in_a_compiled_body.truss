@@ -1,0 +1,7 @@
+fn scaled(value: Integer) -> Integer {
+  value * 2
+}
+
+fn f() {
+  let _ = scaled(3)
+}

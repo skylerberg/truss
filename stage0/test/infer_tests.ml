@@ -762,6 +762,17 @@ let () =
   test "a function for specifications only cannot hold a var" (fun () ->
       one_diagnostic Fixtures.Infer.function_for_specifications_only_cannot_hold_a_var
         "types.not_in_specification");
+  test "a theorem is not a value" (fun () ->
+      one_diagnostic Fixtures.Infer.theorem_is_not_a_value "types.not_a_value"
+        ~says:"is a theorem, so it is not a value");
+  test "a theorem call in a compiled body" (fun () ->
+      one_diagnostic Fixtures.Infer.theorem_call_in_a_compiled_body "types.specification_only"
+        ~says:"is a theorem");
+  test "a theorem is called in a theorem and in a proof block" (fun () ->
+      fine Fixtures.Infer.theorem_call_in_a_proof);
+  test "a call of a function for specifications only in a compiled body is reported once" (fun () ->
+      one_diagnostic Fixtures.Infer.call_of_a_function_for_specifications_only_in_a_compiled_body
+        "types.specification_only" ~says:"`scaled` mentions `Integer`");
   test "a theorem cannot hold a loop" (fun () ->
       one_diagnostic Fixtures.Infer.theorem_cannot_hold_a_loop "types.not_in_specification");
   test "a proof block cannot hold a loop" (fun () ->

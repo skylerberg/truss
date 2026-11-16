@@ -272,8 +272,7 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
               let checked =
                 check_arguments state env instance.signature.parameters matched ~offset:0
               in
-              check_specification_call state env value signature;
-              finish_call state value
+              finish_call state env value method_path
                 (Tables.Function { path = method_path; type_arguments = instance.type_arguments })
                 instance checked left_out
           | None -> bug "the method `%s` has no signature" (Path.show method_path))
@@ -659,8 +658,7 @@ and method_with_receiver state env ?expected ?(type_arguments = []) (value : exp
           mode_keyword = None;
         }
       in
-      check_specification_call state env value signature;
-      finish_call state value
+      finish_call state env value method_path
         (Tables.Function { path = method_path; type_arguments = instance.type_arguments })
         instance (receiver_argument :: checked) left_out
 

@@ -309,8 +309,7 @@ and named_call state env ?expected (value : expression) path (signature : Types.
     | Some operation -> Tables.Intrinsic { operation; type_arguments = instance.type_arguments }
     | None -> Tables.Function { path; type_arguments = instance.type_arguments }
   in
-  check_specification_call state env value signature;
-  finish_call state value callee instance checked left_out
+  finish_call state env value path callee instance checked left_out
 
 and construct state env ?expected ?type_arguments (value : expression) type_path variant arguments =
   let type_arguments =

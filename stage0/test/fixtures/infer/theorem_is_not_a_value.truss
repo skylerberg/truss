@@ -1,0 +1,8 @@
+theorem positive(value: UInt64)
+  ensures value >= 0
+{
+}
+
+fn f() {
+  let _ = positive
+}

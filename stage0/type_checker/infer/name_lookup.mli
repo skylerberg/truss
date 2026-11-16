@@ -34,15 +34,14 @@ val explicit_type_arguments :
 
 val finish_call :
   State.state ->
+  State.env ->
   Syntax.expression ->
+  Path.t ->
   Tables.callee ->
   Instantiation.instance ->
   Tables.argument list ->
   string list ->
   Types.ty
-
-val check_specification_call :
-  State.state -> State.env -> Syntax.expression -> Types.signature -> unit
 
 val trait_static_method :
   State.state ->
