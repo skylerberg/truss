@@ -8,7 +8,7 @@ type requests = {
   source : Path.file -> Source.t;
   interface : Interface.Lookups.t;
   mir : Mir.lookups;
-  lowered : Instance.key -> (lowered, unsupported) result;
+  lowered : Instance.key -> (lowered, unsupported) result option;
   test_key : Instance.key -> (string, unsupported) result;
   reached_todo_types : Instance.key -> Path.t list;
 }
@@ -67,9 +67,9 @@ type unshippable = {
   way : Path.t list;
 }
 
-val unshippable : t -> main:Path.t -> (unshippable list, string) result
-val reached_definitions : t -> main:Path.t -> (Path.t list, string) result
-val reached_todo_types : t -> Path.t -> Path.t list
+val list_unshippable : t -> main:Path.t -> unshippable list
+val list_reached_definitions : t -> Path.t -> Path.t list
+val list_reached_todo_types : t -> Path.t -> Path.t list
 val fresh_program : t -> string
 val build_program : t -> main:Path.t -> output:string -> (unit, string) result
 

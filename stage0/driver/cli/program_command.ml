@@ -18,28 +18,22 @@ let main snapshot database packages =
 
 let refuse_unshippable snapshot packages compile main proofs =
   let in_code =
-    match Compile.unshippable compile ~main with
-    | Error message -> Outcome.cannot_run "%s" message
-    | Ok unshippable ->
-        List.map
-          (fun ({ failure; file; line; column; way } : Compile.unshippable) ->
-            ( Command_packages.shown_workspace_path snapshot packages file,
-              line,
-              column,
-              (failure :> [ `Todo | `Echo | `Proof_hole ]),
-              way ))
-          unshippable
+    List.map
+      (fun ({ failure; file; line; column; way } : Compile.unshippable) ->
+        ( Command_packages.shown_workspace_path snapshot packages file,
+          line,
+          column,
+          (failure :> [ `Todo | `Echo | `Proof_hole ]),
+          way ))
+      (Compile.list_unshippable compile ~main)
   in
   let in_proofs =
-    match Compile.reached_definitions compile ~main with
-    | Error message -> Outcome.cannot_run "%s" message
-    | Ok definitions ->
-        List.concat_map
-          (fun definition ->
-            List.map
-              (fun (file, line, column) -> (file, line, column, `Proof_hole, [ definition ]))
-              (Proofs.list_holes snapshot packages proofs definition))
-          definitions
+    List.concat_map
+      (fun definition ->
+        List.map
+          (fun (file, line, column) -> (file, line, column, `Proof_hole, [ definition ]))
+          (Proofs.list_holes snapshot packages proofs definition))
+      (Compile.list_reached_definitions compile main)
   in
   match List.sort_uniq compare (in_code @ in_proofs) with
   | [] -> ()

@@ -2482,9 +2482,12 @@ let make_lowering_requests database packages : Compile.requests =
     lowered =
       (fun key ->
         request database packages ~through:Lowered_code ~needs:(fun key -> [ Lowered key ]) [ key ];
-        let lowered = read_requested database.lowered (Lowered key) key in
-        check_calls database interface packages key lowered;
-        lowered);
+        match Instance_table.find_opt database.lowered key with
+        | Some (Value lowered) ->
+            check_calls database interface packages key lowered;
+            Some lowered
+        | Some (Failed _ | Blocked) -> None
+        | None -> report_uncomputed (Lowering (Lowered key)));
     test_key =
       (fun key ->
         request database packages ~through:Test_keys ~needs:(fun key -> [ Test_key key ]) [ key ];
@@ -2498,22 +2501,6 @@ let make_lowering_requests database packages : Compile.requests =
 let find_main database package =
   drain database ~through:Namespaces [ package ];
   find_entry_point (make_stored_name_lookups database) package
-
-let list_callers database ~viewer path =
-  drain database ~through:Recursion_groups [ viewer ];
-  match Hashtbl.find_opt database.graphs viewer with
-  | None -> []
-  | Some graph ->
-      let reached = Path_table.create 64 in
-      let rec visit = function
-        | [] -> ()
-        | node :: rest when Path_table.mem reached node -> visit rest
-        | node :: rest ->
-            Path_table.replace reached node ();
-            visit (Call_graph.predecessors graph node @ rest)
-      in
-      visit [ path ];
-      Path_table.fold (fun node () nodes -> node :: nodes) reached []
 
 module For_testing = struct
   type nonrec checker = checker =

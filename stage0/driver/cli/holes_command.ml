@@ -52,40 +52,29 @@ let with_blocks snapshot packages database holes =
         (fun (test : Test_command.test) -> ("test " ^ Test_command.label test, test.path))
         (Test_command.select snapshot database packages ~paths:[] ~match_:None)
   in
-  let callers = Hashtbl.create 16 in
-  let calls (root : Path.t) definition =
-    let viewer = Path.package root in
-    let reached =
-      match Hashtbl.find_opt callers (viewer, definition) with
-      | Some reached -> reached
-      | None ->
-          let reached = Database.list_callers database ~viewer definition in
-          Hashtbl.replace callers (viewer, definition) reached;
-          reached
-    in
-    List.exists (Path.equal root) reached
-  in
   let compile = lazy (Compiler.lowering_only database packages) in
-  let todo_types = Hashtbl.create 16 in
-  let reaches_type root definition =
-    let reached =
-      match Hashtbl.find_opt todo_types root with
-      | Some reached -> reached
-      | None ->
-          let reached = Compile.reached_todo_types (Lazy.force compile) root in
-          Hashtbl.replace todo_types root reached;
-          reached
-    in
-    List.exists (Path.equal definition) reached
+  let read_memoized table list_reached root =
+    match Hashtbl.find_opt table root with
+    | Some reached -> reached
+    | None ->
+        let reached = list_reached (Lazy.force compile) root in
+        Hashtbl.replace table root reached;
+        reached
   in
+  let reached_definitions = Hashtbl.create 16 and reached_todo_types = Hashtbl.create 16 in
   List.map
     (fun hole ->
-      let reaches = if hole.type_ = None then reaches_type else calls in
+      let list_reached =
+        if hole.type_ = None then read_memoized reached_todo_types Compile.list_reached_todo_types
+        else read_memoized reached_definitions Compile.list_reached_definitions
+      in
       {
         hole with
         blocks =
           List.filter_map
-            (fun (label, root) -> if reaches root hole.definition then Some label else None)
+            (fun (label, root) ->
+              if List.exists (Path.equal hole.definition) (list_reached root) then Some label
+              else None)
             roots;
       })
     holes

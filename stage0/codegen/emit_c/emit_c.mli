@@ -17,7 +17,9 @@ val called : fragment -> Instance.key list
 val list_linked : lookup:(Instance.key -> fragment) -> Instance.key list -> fragment list
 
 val trace_reachable :
-  lookup:(Instance.key -> fragment) -> Instance.key list -> (fragment * Instance.key list) list
+  lookup:(Instance.key -> fragment option) ->
+  Instance.key list ->
+  (fragment * Instance.key list) list
 
 val is_small : fragment -> bool
 val failures : fragment -> (failure * Lowered.site) list
