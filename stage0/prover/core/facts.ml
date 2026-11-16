@@ -1,10 +1,25 @@
 let make_variable ?(numbers = []) label = Logic.Symbol.Variable { label; numbers }
 
-exception Unsupported of State.location * string
-exception Foreign_unsupported of string
+type unsupported = {
+  location : State.location;
+  construct : string;
+  foreign_definition : string option;
+}
+
+exception Unsupported of unsupported
 
 let raise_unsupported location format =
-  Printf.ksprintf (fun message -> raise (Unsupported (location, message))) format
+  Printf.ksprintf
+    (fun construct -> raise (Unsupported { location; construct; foreign_definition = None }))
+    format
+
+let run_in_source (context : State.context) (source : State.source) read =
+  try read ()
+  with
+  | Unsupported ({ foreign_definition = None; _ } as unsupported)
+  when source.key <> Some context.home
+  ->
+    raise (Unsupported { unsupported with foreign_definition = Some source.name })
 
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Prover" format
 
@@ -484,6 +499,9 @@ let arrive context frame prefix ty =
   let value = declare_fresh context frame prefix (declare_sort context ty) in
   assume context frame (make_in_range ty value);
   value
+
+let read_or_arrive context frame prefix ty read =
+  try read frame with Unsupported _ -> arrive context frame prefix ty
 
 let bind (frame : State.frame) local ty term =
   {

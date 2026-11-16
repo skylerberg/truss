@@ -90,8 +90,7 @@ let compute_promised_amount context frame (counter : Costs.counter) (bound : Mir
   | (Order_of _ | Finite), _ -> Operations.declare_unknown_amount context frame counter
 
 let compute_growth compute_change =
-  try Costs.at_least_zero (compute_change ())
-  with Facts.Unsupported _ | Facts.Foreign_unsupported _ -> Costs.zero
+  try Costs.at_least_zero (compute_change ()) with Facts.Unsupported _ -> Costs.zero
 
 let make_may_be_target (context : State.context) frame term ty target =
   if term = target then Logic.Boolean true
@@ -430,7 +429,7 @@ and holds_potential_type context ~seen (ty : Types.ty) =
             (function
               | Types.Type element -> has_potential context ~seen:(ty :: seen) element | _ -> false)
             arguments
-        then raise (Facts.Foreign_unsupported "the potential of a collection's elements")
+        then Facts.raise_unsupported Whole_definition "the potential of a collection's elements"
         else false
     | _ -> false
 
@@ -510,13 +509,13 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
                   | [] -> Costs.zero)
             in
             Facts.add_frame_fact context frame (Logic.equal held (Costs.plus own parts))
-          with Facts.Unsupported _ | Facts.Foreign_unsupported _ -> ())
+          with Facts.Unsupported _ -> ())
       | _ -> ()
     end;
     match (find_potential_clause context ty, Facts.find_constructors context ty) with
     | None, Some [ (None, fields) ] when Option.is_none (find_buffer_elements context ty) -> (
         try compute_parts_potential context frame ~seen ty term (None, fields)
-        with Facts.Unsupported _ | Facts.Foreign_unsupported _ -> held)
+        with Facts.Unsupported _ -> held)
     | _ -> held
   end
 
@@ -533,7 +532,7 @@ and compute_parts_potential context frame ~seen ty term (variant, fields) =
     Costs.zero fields
 
 let find_method_time_bound context (method_ : Path.t) ~trait_arguments self_type =
-  let holds ty = try has_potential context ty with Facts.Foreign_unsupported _ -> true in
+  let holds ty = try has_potential context ty with Facts.Unsupported _ -> true in
   match method_ with
   | Method { owner = trait; name; receiver } -> (
       if Well_known.is Copyable trait then
@@ -601,4 +600,5 @@ let compute_method_time context frame (callee : Invocation.callee) =
         (Path.Method { owner = trait.trait; name; receiver })
         ~trait_arguments:(List.map substitute_argument trait.trait_arguments)
         (Facts.substitute_type context frame self_type)
-  | _ -> raise (Facts.Foreign_unsupported "the time of a function that is not a trait's method")
+  | _ ->
+      Facts.raise_unsupported Whole_definition "the time of a function that is not a trait's method"
