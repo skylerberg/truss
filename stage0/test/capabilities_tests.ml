@@ -6,9 +6,16 @@ let expect_one_diagnostic = Support.expect_one_diagnostic ~check
 let expect_fine text = Support.expect_no_diagnostics ~check [ ("app::main", text) ]
 
 let () =
-  Harness.test "a capability call needs its capability" (fun () ->
+  Harness.test "a capability call needs its capability, which it may declare or provide" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.clock_call_without_uses
-        "capabilities.not_available");
+        "capabilities.not_available"
+        ~says:
+          "This call uses `Clock`, which is not available here. Declare it with `uses Clock`, or \
+           `provide` an implementation.");
+  Harness.test "a call that uses Panic can only declare it, since nothing can provide Panic"
+    (fun () ->
+      expect_one_diagnostic "fn f() {\n  Panic.crash(\"no\")\n}\n" "capabilities.not_available"
+        ~says:"This call uses `Panic`, which is not available here. Declare it with `uses Panic`.");
   Harness.test "a function that declares a capability may call it" (fun () ->
       expect_fine Fixtures.Capabilities.clock_call_using_clock);
   Harness.test "a call to a function with uses needs its capabilities" (fun () ->
