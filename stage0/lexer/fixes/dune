@@ -1,0 +1,3 @@
+(library
+ (name fixes)
+ (libraries source diagnostic token compiler_bug))
