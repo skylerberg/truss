@@ -158,7 +158,7 @@ let check_impl state (written_members : impl_member node list) (impl : Types.imp
           state.diagnostics <-
             List.map
               (Diagnostic.make ~code:(Capabilities Not_granted) span)
-              (Grants.evidence_messages lookups ~package:state.key.module_.package
+              (Grants.describe_missing_in_evidence lookups ~package:state.key.module_.package
                  ~bounds:impl_bounds evidence)
             @ state.diagnostics
         in

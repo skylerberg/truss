@@ -4,7 +4,7 @@ module Environment = Interface.Environment
 
 let check_evidence_grants state (span : Source.Definition_span.t) evidence =
   let impls =
-    Interface.Grants.evidence_uses state.lookups.interface ~bounds:(bounds state) evidence
+    Interface.Grants.list_evidence_uses state.lookups.interface ~bounds:(bounds state) evidence
   in
   state.evidence_packages <-
     List.map (fun (impl, _, _) -> Path.package impl) impls @ state.evidence_packages;
@@ -12,7 +12,7 @@ let check_evidence_grants state (span : Source.Definition_span.t) evidence =
     (fun message ->
       state.diagnostics <-
         Diagnostic.make ~code:(Capabilities Not_granted) span message :: state.diagnostics)
-    (Interface.Grants.messages state.lookups.interface ~package:state.package impls)
+    (Interface.Grants.describe_missing_in_impls state.lookups.interface ~package:state.package impls)
 
 let error_at state ?fixes code (value : expression) message =
   match head state value with

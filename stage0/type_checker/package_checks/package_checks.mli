@@ -2,13 +2,9 @@ module Lookups = Lookups
 
 type placed = { key : Resolve.Names.key; diagnostic : Diagnostic.in_definition }
 
-type manifest_problem =
-  | Not_a_capability of { dependency : Path.package; name : string }
-  | Unused of Path.package
+val describe_unused_dependency : package:Path.package -> Path.package -> string
 
-val manifest_sentence : package:Path.package -> manifest_problem -> string
-
-val used_packages :
+val list_used_packages :
   Resolve.resolved -> evidence_packages:Path.package list -> Core.t -> Path.package list
 
 type check =
@@ -17,15 +13,10 @@ type check =
   | Type of Resolve.Names.key
   | Instantiations
   | Tests
-  | Grants
   | Dependencies
-  | Code_packages
 
-val checks : Resolve.Names.declaration list -> check list
+val list_checks : Resolve.Names.declaration list -> check list
 
-type outcome =
-  | Placed of placed list
-  | Problems of manifest_problem list
-  | Packages of Path.package list
+type outcome = Placed of placed list | Unused_dependencies of Path.package list
 
 val run : Lookups.t -> Path.package -> check -> outcome

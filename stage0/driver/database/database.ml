@@ -719,7 +719,9 @@ let package_parts database (names : Names.lookups) package : Part.t list =
       (fun dependency -> Part.Grant (package, dependency))
       (List.sort_uniq Path.compare_package (names.dependency_names package))
   @ List.map (fun file -> Part.Import_check file) package_database.files
-  @ List.map (fun check -> Part.Package_check (package, check)) (Package_checks.checks declarations)
+  @ List.map
+      (fun check -> Part.Package_check (package, check))
+      (Package_checks.list_checks declarations)
 
 let checked_body database note key =
   read_part database note (fun key -> Part.Checked_body key) (fun owner -> owner.checked_bodies) key
@@ -794,7 +796,7 @@ let ownership_lookups database note : Ownership.Lookups.t =
 let used_packages database note (key : Names.key) =
   let { Infer.form; evidence_packages; _ } = checked_body database note key in
   match Resolve.whole (resolved database note) key with
-  | Some resolved -> Package_checks.used_packages resolved ~evidence_packages form
+  | Some resolved -> Package_checks.list_used_packages resolved ~evidence_packages form
   | None -> raise Reads_failed_part
 
 let package_checks_lookups database note : Package_checks.Lookups.t =
@@ -1498,7 +1500,7 @@ let compute_part database (part : Part.t) =
       into (keyed package_database.grants dependency) (fun note ->
           note (Dependencies package);
           Some
-            (Interface.Grants.grant
+            (Interface.Grants.resolve_grant
                (interface_lookups database note ~is_checked:false)
                ~package entry.capabilities))
   | Signature_check key ->
@@ -2338,16 +2340,14 @@ let by_span_and_code diagnostics =
       compare (left.span, left.code) (right.span, right.code))
     diagnostics
 
-let package_check database package check =
-  Hashtbl.find_opt (owner database package).package_checks check
-
-let package_outcomes database package =
+let list_package_outcomes database package =
+  let package_checks = (owner database package).package_checks in
   List.filter_map
     (fun check ->
-      match package_check database package check with
+      match Hashtbl.find_opt package_checks check with
       | Some (Value outcome) -> Some outcome
       | Some (Failed _ | Blocked) | None -> None)
-    (Package_checks.checks ((names_lookups database).package_declarations package))
+    (Package_checks.list_checks ((names_lookups database).package_declarations package))
 
 let list_checker_diagnostics database (file : Path.file) checker =
   let names = names_lookups database in
@@ -2376,8 +2376,8 @@ let list_checker_diagnostics database (file : Path.file) checker =
                   (fun (diagnostic : Package_checks.placed) ->
                     placed diagnostic.key [ diagnostic.diagnostic ])
                   diagnostics
-            | Problems _ | Packages _ -> [])
-          (package_outcomes database file.module_.package)
+            | Unused_dependencies _ -> [])
+          (list_package_outcomes database file.module_.package)
     | Interface | Infer | Patterns | Usage | Ownership -> of_definitions ())
 
 let checkers = [ Resolve; Interface; Infer; Patterns; Usage; Ownership; Package_checks ]
@@ -2395,17 +2395,43 @@ let list_file_diagnostics database (file : Path.file) =
     ((parsed_file database file).diagnostics
     @ List.concat_map (list_checker_diagnostics database file) checkers)
 
+type manifest_problem =
+  | Not_a_capability of { dependency : Path.package; name : string }
+  | Unused_dependency of Path.package
+
 let list_manifest_problems database package =
   drain database ~through:Package_checks [ package ];
+  let grants = (owner database package).grants in
   List.concat_map
-    (function Package_checks.Problems problems -> problems | Placed _ | Packages _ -> [])
-    (package_outcomes database package)
+    (fun dependency ->
+      match Hashtbl.find_opt grants dependency with
+      | Some (grant : Environment.grant) ->
+          List.map (fun name -> Not_a_capability { dependency; name }) grant.unknown
+      | None -> unchecked (Part.show (Grant (package, dependency))))
+    ((names_lookups database).dependency_names package)
+  @ List.concat_map
+      (function
+        | Package_checks.Unused_dependencies dependencies ->
+            List.map (fun dependency -> Unused_dependency dependency) dependencies
+        | Placed _ -> [])
+      (list_package_outcomes database package)
 
 let list_code_packages database package =
-  drain database ~through:Package_checks [ package ];
-  match package_check database package Code_packages with
-  | Some (Value (Packages packages)) -> Some packages
-  | Some (Value (Placed _ | Problems _) | Failed _ | Blocked) | None -> None
+  drain database ~through:Body_checks [ package ];
+  let used_packages = (owner database package).used_packages in
+  let read_used (declaration : Names.declaration) =
+    match declaration.path with
+    | Test _ -> Some []
+    | _ -> (
+        let key = Names.key_of declaration in
+        match Hashtbl.find_opt used_packages key with
+        | Some (Value used) -> Some used
+        | Some (Failed _ | Blocked) -> None
+        | None -> unchecked (Part.show (Used_packages key)))
+  in
+  let used = List.map read_used ((names_lookups database).package_declarations package) in
+  if List.mem None used then None
+  else Some (List.sort_uniq Path.compare_package (List.concat_map Option.get used))
 
 let read_package_database database package =
   drain database ~through:Recursion_groups [ package ];

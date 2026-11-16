@@ -17,7 +17,12 @@ val restore :
 
 val check : t -> Path.package list -> unit
 val list_file_diagnostics : t -> Path.file -> Diagnostic.t list
-val list_manifest_problems : t -> Path.package -> Package_checks.manifest_problem list
+
+type manifest_problem =
+  | Not_a_capability of { dependency : Path.package; name : string }
+  | Unused_dependency of Path.package
+
+val list_manifest_problems : t -> Path.package -> manifest_problem list
 val list_code_packages : t -> Path.package -> Path.package list option
 val read_checked_body : t -> Resolve.Names.key -> Infer.checked option
 val read_parsed : t -> Path.file -> Parsed.t
