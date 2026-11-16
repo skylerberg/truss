@@ -8,17 +8,14 @@ type result = {
 let implements_capability (lookups : Lookups.t) key =
   match lookups.interface.names.find_container key with
   | Some (container : Resolve.Names.key) -> (
-      match Interface.Definition.read_impl_interface lookups.interface container.path with
-      | Some impl -> (
-          match
-            Interface.Definition.read_trait_interface lookups.interface impl.implements.trait
-          with
-          | Some trait -> trait.is_capability
-          | None -> false)
+      match Interface.Definition.find_impl_interface lookups.interface container.path with
+      | Some impl ->
+          (Interface.Definition.read_trait_interface lookups.interface impl.implements.trait)
+            .is_capability
       | None -> false)
   | None -> false
 
-let check (lookups : Lookups.t) (key : Resolve.Names.key) : result =
+let check_definition (lookups : Lookups.t) (key : Resolve.Names.key) : result =
   let elaborated = lookups.interface.read_elaborated_interface key in
   let context : Context.context =
     {
@@ -28,6 +25,7 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) : result =
           Option.value ~default:[] (List.assoc_opt parameter elaborated.scope.bounds));
       spans = lazy (lookups.interface.names.read_spans key);
       mode_keywords = Hashtbl.create 8;
+      places_without_own = Hashtbl.create 8;
       names = Context.Local_table.create 32;
       binding_modes = Context.Local_table.create 32;
       types = Context.Local_table.create 32;
@@ -44,7 +42,10 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) : result =
   in
   Option.iter
     (fun (mir : Mir.Graph.t) ->
-      Context.collect context mir;
+      Context.collect context mir ~mode_keywords:(lookups.list_mode_keywords key);
+      List.iter
+        (fun origin -> Hashtbl.replace context.places_without_own origin ())
+        (lookups.list_places_without_own key);
       let returns_to_caller =
         match elaborated.interface with Function_interface _ -> true | _ -> false
       in
@@ -66,3 +67,17 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) : result =
         context.diagnostics;
     must_be_disjoint = List.sort_uniq compare context.must_be_disjoint;
   }
+
+let check (lookups : Lookups.t) key =
+  try check_definition lookups key
+  with Interface.Properties.Recursion_limit message ->
+    let names = lookups.interface.names in
+    {
+      diagnostics =
+        [
+          Diagnostic.make ~code:(Types Recursion_limit)
+            (names.read_spans key).((names.read_definition key).id)
+            message;
+        ];
+      must_be_disjoint = [];
+    }

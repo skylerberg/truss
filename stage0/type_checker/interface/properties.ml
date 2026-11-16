@@ -8,7 +8,7 @@ let list_bound_closure lookups ~self (bound : Types.trait_reference) =
   let rec visit ancestors (bound : Types.trait_reference) =
     if not (List.exists (Path.equal bound.trait) ancestors || List.mem bound !closure) then begin
       closure := bound :: !closure;
-      match Definition.read_trait_interface lookups bound.trait with
+      match Definition.find_trait_interface lookups bound.trait with
       | Some trait ->
           List.iter
             (fun required ->
@@ -24,7 +24,7 @@ let list_bound_closure lookups ~self (bound : Types.trait_reference) =
 let find_declaring_trait lookups ~base (trait : Types.trait_reference) ~is_declared =
   List.find_opt
     (fun (reference : Types.trait_reference) ->
-      match Definition.read_interface lookups reference.trait with
+      match Definition.find_interface lookups reference.trait with
       | Some (Environment.Trait_interface interface) -> is_declared interface
       | Some (Environment.Error_interface _) -> true
       | _ -> false)
@@ -46,7 +46,7 @@ let list_associated_bounds lookups ~base trait name =
       (fun (declaring : Types.trait_reference) ->
         Option.map
           (fun interface -> (declaring, interface))
-          (Definition.read_trait_interface lookups declaring.trait))
+          (Definition.find_trait_interface lookups declaring.trait))
   with
   | Some (declaring, interface) ->
       List.concat_map
@@ -182,22 +182,20 @@ let rec compute_conditions lookups ~facts_of ~resolve ~compute_leaf ?(in_progres
           combine_each (list_type_arguments arguments)
       | Some (Storage | Array), _ -> combine_each (list_type_arguments arguments)
       | Some _, _ -> Some []
-      | None, _ -> (
-          match Definition.read_type_interface lookups path with
-          | None -> raise_bug "`%s` names no type interface" (Types.show type_)
-          | Some _ when List.exists (Types.equal type_) in_progress -> Some []
-          | Some _ when List.length in_progress > recursion_limit ->
-              fail_at_recursion_limit
-                (Printf.sprintf "Deciding whether `%s` %s" (Types.show type_)
-                   (show_property property))
-          | Some interface ->
-              Option.bind
-                (find_stored_conditions (facts_of path) property)
-                (fun arguments_conditions ->
-                  combine_conditions
-                    (compute_conditions lookups ~facts_of ~resolve ~compute_leaf
-                       ~in_progress:(type_ :: in_progress) property)
-                    (instantiate ~resolve interface arguments arguments_conditions))))
+      | None, _ ->
+          let interface = Definition.read_type_interface lookups path in
+          if List.exists (Types.equal type_) in_progress then Some []
+          else if List.length in_progress > recursion_limit then
+            fail_at_recursion_limit
+              (Printf.sprintf "Deciding whether `%s` %s" (Types.show type_) (show_property property))
+          else
+            Option.bind
+              (find_stored_conditions (facts_of path) property)
+              (fun arguments_conditions ->
+                combine_conditions
+                  (compute_conditions lookups ~facts_of ~resolve ~compute_leaf
+                     ~in_progress:(type_ :: in_progress) property)
+                  (instantiate ~resolve interface arguments arguments_conditions)))
 
 type recursion = { recursive : Types.ty; occurrence : occurrence; defining : Path.t list }
 type contents = { contained : (Types.ty * occurrence) list; recursions : recursion list }
@@ -235,7 +233,7 @@ let walk_contents lookups ~(facts_of : Path.t -> Environment.type_facts) ~resolv
             contained := (type_, occurrence) :: !contained;
             match
               ( List.find_opt (fun (named, _, _) -> Types.equal named type_) enclosing,
-                Definition.read_type_interface lookups path )
+                Definition.find_type_interface lookups path )
             with
             | Some (_, occurrence, defining), _ ->
                 recursions := { recursive = type_; occurrence; defining } :: !recursions

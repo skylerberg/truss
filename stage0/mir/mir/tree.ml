@@ -31,12 +31,7 @@ type function_argument =
   | Lambda_expression of { body : int; origin : Core.origin; type_ : Types.ty }
 
 type argument =
-  | Passed of {
-      mode : Types.mode;
-      value : operand;
-      mode_keyword : Core.mode_keyword option;
-      function_ : function_argument option;
-    }
+  | Passed of { mode : Types.mode; value : operand; function_ : function_argument option }
   | Default
 
 type call = {
@@ -73,7 +68,7 @@ type connective = And | Or | Implies
 type rvalue =
   | Operand of operand
   | Operation of {
-      operation : Intrinsic.operation;
+      operation : Intrinsic.scalar;
       type_arguments : Types.argument list;
       operands : operand list;
     }
@@ -133,7 +128,6 @@ and case = { tests : block; guard : block option; value : block }
 and quantifier_range =
   | Over_type of Types.ty
   | Over_range of { start : operand; stop : operand; inclusive : bool }
-  | Over_collection of operand
 
 and block = { statements : statement list; value : operand option }
 

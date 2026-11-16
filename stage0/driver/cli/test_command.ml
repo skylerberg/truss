@@ -66,21 +66,22 @@ let summarize (records : Compile.record list) =
 type timings = { check : int; build : int; tests : int; total : int }
 
 let print_report tests (records : Compile.record list) ~timings:show_timings timings =
+  let is_listed (record : Compile.record) = record.outcome <> Passed || record.echo <> None in
   List.iter2
     (fun test (record : Compile.record) ->
-      if record.outcome <> Passed then begin
+      if is_listed record then begin
         Output.printf "%s: %s\n" (label_test test) (Compile.show_outcome record.outcome);
         Option.iter print_indented record.message;
         Option.iter print_indented record.echo;
-        Option.iter
-          (fun output ->
-            Output.print_line "    output:";
-            print_indented ~indent:6 output)
-          record.output
+        if record.outcome <> Passed then
+          Option.iter
+            (fun output ->
+              Output.print_line "    output:";
+              print_indented ~indent:6 output)
+            record.output
       end)
     tests records;
-  if List.exists (fun (record : Compile.record) -> record.outcome <> Passed) records then
-    Output.print_line "";
+  if List.exists is_listed records then Output.print_line "";
   if show_timings then begin
     let rows =
       List.combine tests records

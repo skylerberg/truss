@@ -1,0 +1,7 @@
+type Shape =
+  | Circle(radius: Int64)
+  | Rectangle(width: Int64, height: Int64)
+
+fn f() -> Shape {
+  Shape.Circle(1, 2)
+}

@@ -20,8 +20,6 @@ val find_static : State.state -> Syntax.expression -> static_ option
 val check_named_type :
   State.state -> Syntax.expression -> Path.t -> Syntax.bracket_item list option -> Types.ty
 
-val check_type_argument : State.state -> Syntax.expression -> Types.argument
-
 val check_written_arguments :
   State.state -> Syntax.bracket_item list -> (Types.argument list, Types.ty) result
 

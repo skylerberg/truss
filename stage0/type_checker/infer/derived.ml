@@ -26,8 +26,8 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
   | Method { owner = Derived { type_; trait } as impl; name; receiver = _ } when gives trait name
     -> (
       match
-        ( Interface.Definition.read_impl_interface lookups.interface impl,
-          Interface.Definition.read_type_interface lookups.interface type_,
+        ( Interface.Definition.find_impl_interface lookups.interface impl,
+          Interface.Definition.find_type_interface lookups.interface type_,
           Interface.Impls.read_signature lookups.interface path )
       with
       | _, Some { shape = Todo_type; _ }, _ -> None
@@ -152,9 +152,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
             Operands.build_argument Read
               (node (Types.make_builtin UInt64) (Integer (Z.of_int count)))
           in
-          let read place : Core.argument =
-            Passed { mode = Read; value = Place place; mode_keyword = None }
-          in
+          let read place : Core.argument = Passed { mode = Read; value = Place place } in
           let variants =
             match shape with
             | Sum variants ->
@@ -293,9 +291,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   | Named { path; _ } -> path
                   | _ -> raise_bug "a hasher that is not a named type"
                 in
-                let changed : Core.argument =
-                  Passed { mode = Mut; value = Place hasher; mode_keyword = None }
-                in
+                let changed : Core.argument = Passed { mode = Mut; value = Place hasher } in
                 let write number =
                   statement
                     (Evaluate
@@ -320,7 +316,6 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                          Value
                                            (node (Types.make_builtin UInt64)
                                               (Integer (Z.of_int number)));
-                                       mode_keyword = None;
                                      };
                                  ];
                                lends = None;
@@ -488,9 +483,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                       (Core.Local { local; type_; origin }, type_)
                   | [] -> raise_bug "`serialize` takes a serializer"
                 in
-                let sink_argument : Core.argument =
-                  Passed { mode = Mut; value = Place sink; mode_keyword = None }
-                in
+                let sink_argument : Core.argument = Passed { mode = Mut; value = Place sink } in
                 let serializer = Well_known.make_path Serializer in
                 let call name arguments =
                   statement
@@ -539,7 +532,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   | _ -> raise_bug "`deserialize` takes a deserializer"
                 in
                 let make_source_argument mode : Core.argument =
-                  Passed { mode; value = Place source; mode_keyword = None }
+                  Passed { mode; value = Place source }
                 in
                 let deserializer = Well_known.make_path Deserializer in
                 let error_type =
@@ -677,13 +670,12 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                            callee =
                              Intrinsic
                                {
-                                 operation = Holds_invariant;
+                                 operation = Runtime Holds_invariant;
                                  type_arguments = [ Types.Type self_type ];
                                };
                            arguments =
                              [
-                               Passed
-                                 { mode = Read; value = Place built_place; mode_keyword = None };
+                               Passed { mode = Read; value = Place built_place };
                                Operands.build_argument Read (node uint64 (Integer (Z.of_int index)));
                              ];
                            lends = None;

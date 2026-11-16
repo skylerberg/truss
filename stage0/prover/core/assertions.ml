@@ -1,7 +1,7 @@
 let is_test (context : State.context) =
   match context.current with Path.Test _ -> true | _ -> false
 
-let bitwise_operations : Intrinsic.operation list =
+let bitwise_operations : Intrinsic.scalar list =
   [
     Bit_and;
     Bit_or;

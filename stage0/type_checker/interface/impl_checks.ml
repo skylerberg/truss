@@ -134,7 +134,7 @@ let make_conformance lookups ~list_bounds ~(trait_span : Source.Definition_span.
           normalize_capabilities;
           missing_associated;
         })
-      (Definition.read_trait_interface lookups impl.implements.trait)
+      (Definition.find_trait_interface lookups impl.implements.trait)
 
 let check_impl (state : Checking.state) (written_members : Syntax.impl_member Syntax.node list)
     (impl : Types.impl_interface) (trait_path : Syntax.path_type) =

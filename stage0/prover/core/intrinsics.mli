@@ -30,8 +30,7 @@ val translate_intrinsic :
   site:Invocation.site ->
   Intrinsic.operation ->
   Types.ty list ->
-  Logic.term list ->
-  arguments:Core.origin option list ->
+  State.passed list ->
   changed:Logic.term list ->
   Types.ty ->
   Logic.term
@@ -39,7 +38,7 @@ val translate_intrinsic :
 val write_element_back :
   State.context ->
   State.frame ->
-  operation:Intrinsic.operation ->
+  lend:Intrinsic.lend ->
   type_arguments:Types.argument list ->
   receiver:State.passed_place ->
   receiver_type:Types.ty ->

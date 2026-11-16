@@ -78,8 +78,6 @@ let make_document report fields =
          (List.map (fun problem -> Json.String (Project.show_problem problem)) report.problems) )
     :: fields)
 
-let pluralize count one many = Printf.sprintf "%d %s" count (if count = 1 then one else many)
-
 let print report =
   let print_files =
     List.iter (fun file ->
@@ -92,6 +90,6 @@ let print report =
   print_files (Lazy.force report.proven);
   match count report with
   | 0 -> ()
-  | error_count -> Output.eprintf "%s\n" (pluralize error_count "error" "errors")
+  | error_count -> Output.eprintf "%s\n" (Diagnostic.show_count error_count "error" "errors")
 
 exception Errors of t

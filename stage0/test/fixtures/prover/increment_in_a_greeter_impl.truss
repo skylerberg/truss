@@ -1,0 +1,11 @@
+capability Greeter {
+  fn greet() -> Int64
+}
+
+type Loud(count: Int64)
+
+impl Greeter for Loud {
+  fn greet(self) -> Int64 {
+    self.count + 1
+  }
+}
