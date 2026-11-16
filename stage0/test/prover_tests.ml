@@ -1085,7 +1085,9 @@ let () =
   Harness.test "an overflow with a literal offers the bound as a requires" (fun () ->
       let packages = Support.setup [ ("app::main", Fixtures.Prover.next_count) ] in
       match check packages (Support.file_of "app::main") with
-      | [ { fixes = [ { title; _ } ]; _ } ] when title = "Add `requires count <= 254`" -> ()
+      | [ { fixes = [ { title; _ } ]; _ } ] when title = "Add `requires count <= UInt8.maximum - 1`"
+        ->
+          ()
       | actual ->
           Harness.fail "%s"
             (String.concat "; "
@@ -1108,7 +1110,7 @@ let () =
       | actual -> Harness.fail "%s" (String.concat "; " actual));
   Harness.test "an overflow of a local offers the bound on the parameter it holds" (fun () ->
       match fix_titles Fixtures.Prover.bumped_local with
-      | [ "Add `requires start <= 9223372036854775806`" ] -> ()
+      | [ "Add `requires start <= Int64.maximum - 1`" ] -> ()
       | actual -> Harness.fail "%s" (String.concat "; " actual));
   Harness.test "a callee's requires through a local names the caller's parameter" (fun () ->
       match fix_titles Fixtures.Prover.halve_of_a_local with
@@ -1116,11 +1118,31 @@ let () =
       | actual -> Harness.fail "%s" (String.concat "; " actual));
   Harness.test "an unsigned sum that may overflow offers only its upper bound" (fun () ->
       match fix_titles Fixtures.Prover.total_of_two_bytes with
-      | [ "Add `requires count + other <= 255`" ] -> ()
+      | [ "Add `requires count + other <= UInt8.maximum`" ] -> ()
       | actual -> Harness.fail "%s" (String.concat "; " actual));
   Harness.test "an unsigned difference that may overflow offers only its lower bound" (fun () ->
       match fix_titles Fixtures.Prover.gap with
       | [ "Add `requires 0 <= high - low`" ] -> ()
+      | actual -> Harness.fail "%s" (String.concat "; " actual));
+  Harness.test "a signed product that may overflow offers both limits by name" (fun () ->
+      match fix_titles Fixtures.Prover.scaled_count with
+      | [ "Add `requires Int64.minimum <= count * 1000 && count * 1000 <= Int64.maximum`" ] -> ()
+      | actual -> Harness.fail "%s" (String.concat "; " actual));
+  Harness.test "an overflow under an if offers the if's condition as a premise" (fun () ->
+      match fix_titles Fixtures.Prover.product_under_an_if with
+      | [
+       "Add `requires (flag) ==> (Int64.minimum <= left * right && left * right <= Int64.maximum)`";
+      ] ->
+          ()
+      | actual -> Harness.fail "%s" (String.concat "; " actual));
+  Harness.test "a negation that may overflow offers to exclude the least value" (fun () ->
+      match fix_titles Fixtures.Prover.negated_value with
+      | [ "Add `requires value != Int64.minimum`" ] -> ()
+      | actual -> Harness.fail "%s" (String.concat "; " actual));
+  Harness.test "a signed quotient that may overflow offers to exclude the least value over -1"
+    (fun () ->
+      match fix_titles Fixtures.Prover.signed_quotient with
+      | [ "Add `requires dividend != Int64.minimum || divisor != -1`" ] -> ()
       | actual -> Harness.fail "%s" (String.concat "; " actual));
   Harness.test "a failed assert about a call's result offers no requires" (fun () ->
       let packages = Support.setup [ ("app::main", Fixtures.Prover.assert_on_a_list_length) ] in

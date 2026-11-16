@@ -17,6 +17,7 @@ val close_over_binders : State.frame -> Logic.term -> Logic.term option
 val add_frame_fact : State.context -> State.frame -> Logic.term -> unit
 val assume : State.context -> State.frame -> Logic.term -> unit
 val add_requires : State.context -> State.message -> State.fix list
+val add_requires_under_condition : State.context -> State.frame -> string -> State.fix list
 val truss_of_value : State.context -> Logic.term -> string option
 
 val oblige :
