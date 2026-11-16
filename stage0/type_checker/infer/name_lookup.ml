@@ -383,7 +383,10 @@ and resolve_evidence state (value : Syntax.expression) self_type (reference : Ty
       if
         Types.contains_unsolved self_type
         || List.exists
-             (function Types.Type type_ -> Types.contains_unsolved type_ | _ -> false)
+             (function
+               | Types.Type type_ -> Types.contains_unsolved type_
+               | Types.Value (Value_variable _) -> true
+               | Types.Value (Known _ | Value_parameter _) | Types.Capabilities _ -> false)
              reference.trait_arguments
       then false
       else begin

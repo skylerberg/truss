@@ -209,15 +209,8 @@ type instance = {
 let instantiate (state : State.state) (span : Source.Definition_span.t) ?(extra = [])
     (signature : Types.signature) =
   let substitution =
-    List.map
-      (fun (generic : Types.generic) ->
-        ( generic.generic,
-          match generic.kind with
-          | Value_generic -> Types.Value (Unify.make_fresh_value state.unifier)
-          | Type_generic _ -> Types.Type (State.make_fresh_type state)
-          | Capability_generic ->
-              Types.Capabilities (Unify.make_fresh_capability_variable state.unifier) ))
-      signature.generics
+    Types.make_substitution signature.generics
+      (make_fresh_generic_arguments state signature.generics)
     @ extra
   in
   require_bounds state span signature.generics substitution;
