@@ -746,8 +746,8 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
         Intrinsics.intrinsic context frame ~site operation types terms
           ~arguments:(List.map operand_origin operands)
           ~changed:terms ty )
-  | Construct { variant; fields } ->
-      Values.apply_construct context frame site variant
+  | Construct { variant; fields; type_ } ->
+      Values.apply_construct context frame { site with type_ } variant
         (List.map (fun (name, field) -> (name, Option.map operand field)) fields)
   | Array elements -> Values.apply_list_literal context frame site (List.map operand elements)
   | Lambda { body; _ } ->

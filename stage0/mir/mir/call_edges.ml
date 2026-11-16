@@ -1,5 +1,3 @@
-let raise_bug format = Compiler_bug.raise_bug ~stage:"MIR" format
-
 type entered =
   [ `Default of Path.t * string option * string | `Invariant of Path.t * Z.t | `Requires of Path.t ]
 
@@ -143,7 +141,7 @@ let list_edges (lookups : lookups) ~package ~may_panic (code : Tree.t) =
       Entered_table.replace entered code ();
       true)
   in
-  let rec statement (locals : Tree.local_info array) (statement : Tree.statement) =
+  let rec statement (statement : Tree.statement) =
     match statement.kind with
     | Basic (Call { call; _ } | Template { call; _ }) ->
         callee call.callee;
@@ -167,23 +165,16 @@ let list_edges (lookups : lookups) ~package ~may_panic (code : Tree.t) =
           (impls_for
              (list_traits_with_required lookups.interface trait.trait)
              (Walk.extract_operand_type value))
-    | Basic
-        (Assign
-           {
-             target = { root = Local local; projections = [] };
-             value = Construct { variant; fields };
-             _;
-           }) -> (
-        match find_head locals.(local).type_ with
-        | Some type_ ->
+    | Basic (Assign { value = Construct { variant; fields; type_ }; _ }) -> (
+        match find_head type_ with
+        | Some head ->
             let omitted =
               List.filter_map
                 (fun (field, value) -> if Option.is_none value then Some field else None)
                 fields
             in
-            if omitted <> [] then field_defaults type_ variant omitted
+            if omitted <> [] then field_defaults head variant omitted
         | None -> ())
-    | Basic (Assign { value = Construct _; _ }) -> raise_bug "a construction outside a temporary"
     | Basic (Provide { provided; _ }) ->
         List.iter
           (fun (implementation : Tree.provided) ->
@@ -214,14 +205,13 @@ let list_edges (lookups : lookups) ~package ~may_panic (code : Tree.t) =
             if
               default.variant = variant && List.mem default.field omitted
               && enters (`Default (type_, variant, default.field))
-            then Walk.iter_code_with_locals statement default.value)
+            then Walk.iter_code statement default.value)
           defaults
     | Some { form = Parameter_defaults _; _ } | None -> ()
   and requires_checked path =
     if may_panic && enters (`Requires path) then
       List.iter
-        (fun (requirement : Tree.requirement) ->
-          Walk.iter_formula_with_locals statement requirement.clause)
+        (fun (requirement : Tree.requirement) -> Walk.iter_formula statement requirement.clause)
         (Parts.list_checked_requires lookups.mir path)
   and invariant_checked (call : Tree.call) =
     match (call.callee, call.arguments) with
@@ -233,12 +223,12 @@ let list_edges (lookups : lookups) ~package ~may_panic (code : Tree.t) =
         | Some type_, Some { form = clauses; _ } -> (
             match List.nth_opt clauses.invariants (Z.to_int index) with
             | Some { clause; is_executable = true; _ } when enters (`Invariant (type_, index)) ->
-                Walk.iter_formula_with_locals statement clause
+                Walk.iter_formula statement clause
             | Some _ | None -> ())
         | _ -> ())
     | _ -> ()
   in
-  Walk.iter_code_with_locals statement code;
+  Walk.iter_code statement code;
   List.rev !callees
 
 let list_path_edges (lookups : lookups) path =
