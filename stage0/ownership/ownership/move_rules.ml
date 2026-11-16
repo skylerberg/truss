@@ -6,7 +6,7 @@ let copy_fix context title type_ (at : Source.Definition_span.t) =
   if Context.is_copyable context type_ then
     [
       Diagnostic.fix title
-        [ Diagnostic.insert (Source.Definition_span.zero_width at.stop) ".copy()" ];
+        [ Diagnostic.insert (Source.Definition_span.make_zero_width at.stop) ".copy()" ];
     ]
   else []
 
@@ -55,7 +55,7 @@ let decide_move context (place : Place.t) ~type_ ~is_returned ~is_captured : ver
     | (Own | Mut), _ -> Moves
 
 let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
-  let place_of (path : Moves.path) : Place.t option =
+  let find_place (path : Moves.path) : Place.t option =
     match body.locals.(path.local).kind with
     | Source { local; name = Some _; _ } ->
         Some
@@ -68,7 +68,7 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
           }
     | Source { name = None; _ } | Temporary | Lent _ -> None
   in
-  let first_move state (path : Moves.path) =
+  let find_first_move state (path : Moves.path) =
     match List.sort compare (Moves.list_moved_at moves state path) with
     | origin :: _ -> Some origin
     | [] -> None
@@ -78,9 +78,9 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
     match Moves.path_of_place place with
     | None -> ()
     | Some path -> (
-        match Moves.may_be_empty moves state path with
+        match Moves.find_possibly_empty moves state path with
         | Some moved when not (Place_table.mem reported_use_after_move moved) -> (
-            match (place_of moved, first_move state moved) with
+            match (find_place moved, find_first_move state moved) with
             | Some shown, Some moved_origin ->
                 Place_table.replace reported_use_after_move moved ();
                 let shown = Context.show context shown in
@@ -101,27 +101,27 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
         | _ -> ())
   in
   let reported_not_reinitialized = Place_table.create 8 in
-  let check_reinitialized state ~locals ?(moved_in_scope = fun _ -> true) ~at message =
+  let check_reinitialized state ~locals ?(is_moved_in_scope = fun _ -> true) ~at make_message =
     List.iter
       (fun local ->
         if Moves.is_lent_mut moves local then
-          match Moves.may_be_empty moves state { local; projections = [] } with
+          match Moves.find_possibly_empty moves state { local; projections = [] } with
           | Some moved when not (Place_table.mem reported_not_reinitialized moved) -> (
-              match (place_of moved, first_move state moved) with
-              | Some shown, Some moved_origin when moved_in_scope moved ->
+              match (find_place moved, find_first_move state moved) with
+              | Some shown, Some moved_origin when is_moved_in_scope moved ->
                   Place_table.replace reported_not_reinitialized moved ();
                   let moved_span = Context.locate_origin context moved_origin in
                   let root = Context.show context { shown with steps = [] } in
                   Context.report context Not_reinitialized
                     (Option.value ~default:moved_span at)
                     ~notes:(if at = None then [] else [ (moved_span, "It is moved out here.") ])
-                    (message (Context.show context shown) root)
+                    (make_message (Context.show context shown) root)
               | _ -> ())
           | _ -> ())
       locals
   in
   let all_locals = List.init (Array.length body.locals) Fun.id in
-  let scope_end moved root =
+  let describe_scope_end moved root =
     Printf.sprintf
       "`%s` is moved out here and not reinitialized. `%s` is borrowed `mut`, so every part of it \
        must be initialized when its loop iteration, its `match` arm, or its lambda ends."
@@ -134,7 +134,7 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
             "`%s` is moved out and not reinitialized. The caller owns it, so assign it a value \
              before the function returns."
             moved)
-    else check_reinitialized state ~locals:body.parameters ~at:None scope_end
+    else check_reinitialized state ~locals:body.parameters ~at:None describe_scope_end
   in
   let concurrent_branches =
     Array.to_list body.blocks
@@ -160,7 +160,7 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
           check_uses state (Moves.list_statement_uses moves statement);
           List.iter
             (fun (initialized : Moves.path) ->
-              match Moves.may_be_empty moves state initialized with
+              match Moves.find_possibly_empty moves state initialized with
               | Some moved when moved <> initialized && Moves.is_inside ~outer:moved initialized ->
                   check_use_after_move state
                     { root = Local moved.local; projections = [] }
@@ -168,7 +168,7 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
               | _ -> ())
             (Moves.list_given_by statement);
           List.iter
-            (fun local -> check_reinitialized state ~locals:[ local ] ~at:None scope_end)
+            (fun local -> check_reinitialized state ~locals:[ local ] ~at:None describe_scope_end)
             (Moves.list_ended statement);
           Moves.apply moves state statement)
         basic.statements;
@@ -179,14 +179,15 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
       | Iteration_end { loop } ->
           check_reinitialized state
             ~locals:[ (Mir.Graph.read_loop_head body loop).part ]
-            ~at:None scope_end
+            ~at:None describe_scope_end
       | Join _ ->
           List.iter
             (fun (blocks, entry) ->
               let branch_entry = Moves.copy_entry_state moves entry in
               if List.mem block blocks then
                 check_reinitialized state ~locals:all_locals
-                  ~moved_in_scope:(fun moved -> Moves.may_be_empty moves branch_entry moved = None)
+                  ~is_moved_in_scope:(fun moved ->
+                    Moves.find_possibly_empty moves branch_entry moved = None)
                   ~at:None
                   (fun moved _ ->
                     Printf.sprintf
@@ -203,12 +204,12 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
 
 let analyse context body =
   Moves.analyse
-    ~moving:(fun type_ -> not (Context.is_plain context type_))
+    ~is_moving:(fun type_ -> not (Context.is_plain context type_))
     ~tracks:(fun _ -> true)
     body
 
-let check context (mir : Mir.Graph.t) ~moves ~returns_to_caller =
-  check_body context mir.body (moves mir.body) ~returns_to_caller;
+let check context (mir : Mir.Graph.t) ~read_moves ~returns_to_caller =
+  check_body context mir.body (read_moves mir.body) ~returns_to_caller;
   Array.iter
-    (fun lambda -> check_body context lambda (moves lambda) ~returns_to_caller:false)
+    (fun lambda -> check_body context lambda (read_moves lambda) ~returns_to_caller:false)
     mir.lambdas

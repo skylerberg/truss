@@ -135,11 +135,11 @@ let show_promiser_kind (lookups : Lookups.t) (source : State.source) =
   | _ -> "trait"
 
 let keep_promise context (frame : State.frame) (promise : promise) ~(at : State.frame) ~location
-    ~change =
+    ~compute_change =
   let spent =
     match List.assoc_opt promise.counter frame.spent with Some term -> term | None -> Costs.zero
   in
-  let spent = if promise.clause.amortized then Costs.plus spent (change ()) else spent in
+  let spent = if promise.clause.amortized then Costs.plus spent (compute_change ()) else spent in
   let amount =
     match promise.clause.bound with
     | Order_of amount | At_most amount | Exactly amount ->
@@ -244,7 +244,7 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
         { start with yielded_so_far = Some (Amounts.make_empty_parts context start part) }
     | _ -> start
   in
-  let values_of (at : State.frame) =
+  let list_values (at : State.frame) =
     List.filter_map
       (fun (parameter : Mir.parameter) ->
         match parameter.local with
@@ -252,7 +252,7 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
         | local -> Locals.find_opt (Core_local local) at.locals)
       parameters
   in
-  let paired terms =
+  let pair_up terms =
     match (inherited, parameters, terms) with
     | Some ((part : State.part), _), { local = Self; _ } :: _, _ :: rest
       when not
@@ -262,9 +262,9 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
         rest
     | _ -> terms
   in
-  let values_of (at : State.frame) = paired (values_of at) in
-  let own_terms = values_of start in
-  let trait_frame (at : State.frame) ~result =
+  let list_paired_values (at : State.frame) = pair_up (list_values at) in
+  let own_terms = list_paired_values start in
+  let find_trait_frame (at : State.frame) ~result =
     match inherited with
     | Some ((part : State.part), substitution)
       when List.length part.parameters = List.length own_terms ->
@@ -280,7 +280,7 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
                     Locals.add (Core_local local) entry old_locals ))
             (Locals.empty, Locals.empty, None, Locals.empty)
             part.parameters
-            (List.combine own_terms (values_of at))
+            (List.combine own_terms (list_paired_values at))
         in
         Some
           ( part,
@@ -300,7 +300,7 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
     | _ -> None
   in
   let trait_requires =
-    match trait_frame start ~result:None with
+    match find_trait_frame start ~result:None with
     | Some (part, inside) ->
         Logic.conjunction
           (List.map
@@ -316,7 +316,7 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
   let promised =
     list_promises context source start.locals contract.costs ~inherited:false
     @
-    match trait_frame start ~result:None with
+    match find_trait_frame start ~result:None with
     | Some (part, inside) ->
         list_promises context part.callee inside.locals part.costs ~inherited:true
     | None -> []
@@ -329,7 +329,7 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
     { start with spent = List.map (fun counter -> (counter, Costs.zero)) context.counters }
   in
   let start =
-    match trait_frame start ~result:None with
+    match find_trait_frame start ~result:None with
     | Some (part, _)
       when not
              (match part.callee.key with
@@ -448,7 +448,7 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
                 ]
                 term)
             own_ensures);
-      let change () =
+      let compute_change () =
         let potential_change =
           List.fold_left
             (fun total (parameter : Mir.parameter) ->
@@ -490,19 +490,19 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
       List.iter
         (fun promise ->
           if promise.inherited then
-            match trait_frame frame ~result:returned with
+            match find_trait_frame frame ~result:returned with
             | Some (_, inside) ->
                 keep_promise context under_trait promise
                   ~at:{ inside with locals = inside.old_locals; self = inside.old_self }
-                  ~location:Whole_definition ~change
+                  ~location:Whole_definition ~compute_change
             | None -> ()
           else
             keep_promise context frame promise
               ~at:{ frame with locals = frame.old_locals; self = frame.old_self; result = returned }
               ~location:(Facts.locate context source promise.clause.origin)
-              ~change)
+              ~compute_change)
         promised;
-      match trait_frame frame ~result:returned with
+      match find_trait_frame frame ~result:returned with
       | Some (part, inside) ->
           List.iter
             (fun (clause : Mir.formula) ->

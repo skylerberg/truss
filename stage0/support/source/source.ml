@@ -14,7 +14,7 @@ module Definition_span = struct
       invalid_arg (Printf.sprintf "Source.Definition_span.make %d %d" start stop);
     { start; stop }
 
-  let zero_width position = make position position
+  let make_zero_width position = make position position
 
   let to_file ~base (definition_span : t) =
     make_span (base + definition_span.start) (base + definition_span.stop)
@@ -74,10 +74,10 @@ let line_index source offset =
 let line_start source offset = source.line_starts.(line_index source offset)
 
 let fragment_line_start text offset =
-  let rec back at =
-    if at > 0 && text.[at - 1] <> '\n' && text.[at - 1] <> '\r' then back (at - 1) else at
+  let rec scan_back at =
+    if at > 0 && text.[at - 1] <> '\n' && text.[at - 1] <> '\r' then scan_back (at - 1) else at
   in
-  back (min offset (String.length text))
+  scan_back (min offset (String.length text))
 
 let line_end source offset =
   let index = line_index source offset in

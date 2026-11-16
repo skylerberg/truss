@@ -116,7 +116,7 @@ let list_laws (definition : Core.definition) =
         laws
   | Function _ | Type _ | Constant _ | Test _ | Law_proof _ | Empty -> []
 
-let find_type_clauses ~type_interface path (definition : Core.definition) =
+let find_type_clauses ~find_type_interface path (definition : Core.definition) =
   match definition with
   | Type { invariants; potential; _ } ->
       Option.map
@@ -147,7 +147,7 @@ let find_type_clauses ~type_interface path (definition : Core.definition) =
                 invariants;
             potential = Option.map (Builder.of_specification ~entry_locals:[]) potential;
           })
-        (type_interface path)
+        (find_type_interface path)
   | Function _ | Trait _ | Constant _ | Test _ | Law_proof _ | Empty -> None
 
 let expand_defaults = function
@@ -161,14 +161,14 @@ let expand_defaults = function
              { default with value = Expansion.expand default.value })
            defaults)
 
-let make_contract_part ~type_interface path (form : Core.t) : contract_part =
+let make_contract_part ~find_type_interface path (form : Core.t) : contract_part =
   let defaults = find_defaults form.definition in
   {
     contract = find_contract form.definition;
     defaults;
     default_graphs = Option.map expand_defaults defaults;
     laws = list_laws form.definition;
-    type_clauses = find_type_clauses ~type_interface path form.definition;
+    type_clauses = find_type_clauses ~find_type_interface path form.definition;
   }
 
 module For_testing = struct

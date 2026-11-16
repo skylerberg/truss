@@ -64,42 +64,42 @@ let rec visit_yielded_places visit = function
       List.iter (fun (_, field) -> Option.iter (visit_yielded_places visit) field) fields
 
 let visit_rvalue_places visit rvalue =
-  let operand = visit_operand_places visit in
-  let specification = function
+  let visit_operand = visit_operand_places visit in
+  let visit_specification = function
     | Tree.Result | Yielded -> ()
     | Entry local -> visit { root = Local local; projections = [] }
     | Identical (first, second) ->
-        operand first;
-        operand second
-    | Applied { arguments; _ } -> List.iter operand arguments
+        visit_operand first;
+        visit_operand second
+    | Applied { arguments; _ } -> List.iter visit_operand arguments
     | Method_time method_ -> visit_callee_places visit method_
     | Map entries ->
         List.iter
           (fun (key, value) ->
-            operand key;
-            operand value)
+            visit_operand key;
+            visit_operand value)
           entries
     | Quantified { range; _ } -> (
         match range with
         | Over_type _ -> ()
         | Over_range { start; stop; _ } ->
-            operand start;
-            operand stop
-        | Over_collection collection -> operand collection)
+            visit_operand start;
+            visit_operand stop
+        | Over_collection collection -> visit_operand collection)
   in
   match rvalue with
   | Tree.Operand value | Not value | Convert { value; _ } | To_any { value; _ } | Copy value ->
-      operand value
-  | Operation { operands; _ } | Array operands -> List.iter operand operands
+      visit_operand value
+  | Operation { operands; _ } | Array operands -> List.iter visit_operand operands
   | Compare { left; right; _ } ->
-      operand left;
-      operand right
-  | Construct { fields; _ } -> List.iter (fun (_, field) -> Option.iter operand field) fields
+      visit_operand left;
+      visit_operand right
+  | Construct { fields; _ } -> List.iter (fun (_, field) -> Option.iter visit_operand field) fields
   | Is_variant { place; _ } -> visit place
   | Lambda { captures; _ } ->
       List.iter (fun (capture : Tree.capture) -> visit capture.place) captures
   | Function_value _ | Value_parameter _ -> ()
-  | Specification value -> specification value
+  | Specification value -> visit_specification value
 
 let rec iter_places_read visit (block : Tree.block) =
   List.iter

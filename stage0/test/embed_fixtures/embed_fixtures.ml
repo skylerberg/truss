@@ -1,12 +1,12 @@
-let rec under_fixtures = function
+let rec strip_to_fixtures = function
   | "fixtures" :: rest -> rest
-  | _ :: rest -> under_fixtures rest
+  | _ :: rest -> strip_to_fixtures rest
   | [] -> failwith "a fixture is not under fixtures/"
 
 let () =
   let files =
     List.tl (Array.to_list Sys.argv)
-    |> List.map (fun file -> (under_fixtures (String.split_on_char '/' file), file))
+    |> List.map (fun file -> (strip_to_fixtures (String.split_on_char '/' file), file))
     |> List.sort compare
   in
   let print_value indent name file =

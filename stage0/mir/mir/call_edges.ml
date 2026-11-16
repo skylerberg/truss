@@ -58,11 +58,11 @@ let list_impls_used interface package (callee : _ Core.target) =
   | Function { path; type_arguments } -> (
       match Interface.Impls.read_signature interface path with
       | Some (signature : Types.signature) ->
-          let rec pairs generics arguments =
+          let rec pair_generics generics arguments =
             match (generics, arguments) with
             | (generic : Types.generic) :: generics, Types.Type ty :: arguments ->
-                (generic, ty) :: pairs generics arguments
-            | _ :: generics, _ :: arguments -> pairs generics arguments
+                (generic, ty) :: pair_generics generics arguments
+            | _ :: generics, _ :: arguments -> pair_generics generics arguments
             | _ -> []
           in
           List.concat_map
@@ -76,7 +76,7 @@ let list_impls_used interface package (callee : _ Core.target) =
                        bounds)
                     ty
               | Value_generic | Capability_generic -> [])
-            (pairs signature.generics type_arguments)
+            (pair_generics signature.generics type_arguments)
       | None -> [])
   | _ -> []
 
@@ -100,13 +100,13 @@ let is_dispatched (called : _ Core.target) =
 let list_edges (lookups : lookups) ~package ~may_panic (code : Tree.t) =
   let callees = ref [] in
   let add paths = callees := List.rev_append paths !callees in
-  let uses_impls impls = add (List.concat_map (list_impl_methods lookups.interface) impls) in
-  let impls_for = list_impls_for lookups.interface package in
-  let callee (called : Tree.callee) =
+  let add_impl_uses impls = add (List.concat_map (list_impl_methods lookups.interface) impls) in
+  let list_package_impls_for = list_impls_for lookups.interface package in
+  let add_callee (called : Tree.callee) =
     match called with
     | Function { path; _ } ->
         add [ path ];
-        uses_impls (list_impls_used lookups.interface package called)
+        add_impl_uses (list_impls_used lookups.interface package called)
     | Trait_method { evidence = Impl { impl; _ }; trait; name; receiver; _ } ->
         let own = Path.Method { owner = impl; name; receiver } in
         add
@@ -124,7 +124,7 @@ let list_edges (lookups : lookups) ~package ~may_panic (code : Tree.t) =
                 (fun impl ->
                   let method_ = Path.Method { owner = impl; name; receiver } in
                   if writes lookups impl method_ then Some method_ else None)
-                (impls_for [ trait.trait ] (Types.make_builtin builtin)))
+                (list_package_impls_for [ trait.trait ] (Types.make_builtin builtin)))
             integer_types
         in
         match own with
@@ -141,28 +141,28 @@ let list_edges (lookups : lookups) ~package ~may_panic (code : Tree.t) =
       Entered_table.replace entered code ();
       true)
   in
-  let rec statement (statement : Tree.statement) =
+  let rec visit_statement (statement : Tree.statement) =
     match statement.kind with
     | Basic (Call { call; _ } | Template { call; _ }) ->
-        callee call.callee;
-        invariant_checked call
+        add_callee call.callee;
+        add_invariant_check call
     | Basic (Lend { call; _ }) -> (
-        callee call.callee;
-        invariant_checked call;
+        add_callee call.callee;
+        add_invariant_check call;
         match call.callee with
         | Trait_method { evidence = Impl { impl; _ }; name; receiver; _ }
           when Parts.is_index_call call.callee ->
-            requires_checked (Path.Method { owner = impl; name; receiver })
+            add_requires_check (Path.Method { owner = impl; name; receiver })
         | _ -> ())
     | Basic (Slice { call; _ }) -> (
-        callee call.callee;
-        invariant_checked call;
-        match call.callee with Function { path; _ } -> requires_checked path | _ -> ())
-    | For { iteration = Pull { next; _ }; _ } -> callee next
+        add_callee call.callee;
+        add_invariant_check call;
+        match call.callee with Function { path; _ } -> add_requires_check path | _ -> ())
+    | For { iteration = Pull { next; _ }; _ } -> add_callee next
     | Basic (Assign { value = Function_value { path; _ }; _ }) -> add [ path ]
     | Basic (Assign { value = To_any { value; trait; _ }; _ }) ->
-        uses_impls
-          (impls_for
+        add_impl_uses
+          (list_package_impls_for
              (list_traits_with_required lookups.interface trait.trait)
              (Walk.extract_operand_type value))
     | Basic (Assign { value = Construct { variant; fields; type_ }; _ }) -> (
@@ -173,7 +173,7 @@ let list_edges (lookups : lookups) ~package ~may_panic (code : Tree.t) =
                 (fun (field, value) -> if Option.is_none value then Some field else None)
                 fields
             in
-            if omitted <> [] then field_defaults head variant omitted
+            if omitted <> [] then visit_field_defaults head variant omitted
         | None -> ())
     | Basic (Provide { provided; _ }) ->
         List.iter
@@ -197,7 +197,7 @@ let list_edges (lookups : lookups) ~package ~may_panic (code : Tree.t) =
     | Jump (Return _ | Break | Continue | Cancel _ | Unreachable | Written_unreachable | Todo)
     | Choose _ | Assert_by_bit_vector _ | While _ | Fork _ | Resume _ | Yield _ ->
         ()
-  and field_defaults type_ variant omitted =
+  and visit_field_defaults type_ variant omitted =
     match Parts.read_defaults lookups.mir type_ with
     | Some { form = Field_defaults defaults; _ } ->
         List.iter
@@ -205,15 +205,16 @@ let list_edges (lookups : lookups) ~package ~may_panic (code : Tree.t) =
             if
               default.variant = variant && List.mem default.field omitted
               && enters (`Default (type_, variant, default.field))
-            then Walk.iter_code statement default.value)
+            then Walk.iter_code visit_statement default.value)
           defaults
     | Some { form = Parameter_defaults _; _ } | None -> ()
-  and requires_checked path =
+  and add_requires_check path =
     if may_panic && enters (`Requires path) then
       List.iter
-        (fun (requirement : Tree.requirement) -> Walk.iter_formula statement requirement.clause)
+        (fun (requirement : Tree.requirement) ->
+          Walk.iter_formula visit_statement requirement.clause)
         (Parts.list_checked_requires lookups.mir path)
-  and invariant_checked (call : Tree.call) =
+  and add_invariant_check (call : Tree.call) =
     match (call.callee, call.arguments) with
     | ( Intrinsic { operation = Holds_invariant; type_arguments = [ Type checked ] },
         [ _; Passed { value = Constant { value = Integer index; _ }; _ } ] ) -> (
@@ -223,12 +224,12 @@ let list_edges (lookups : lookups) ~package ~may_panic (code : Tree.t) =
         | Some type_, Some { form = clauses; _ } -> (
             match List.nth_opt clauses.invariants (Z.to_int index) with
             | Some { clause; is_executable = true; _ } when enters (`Invariant (type_, index)) ->
-                Walk.iter_formula statement clause
+                Walk.iter_formula visit_statement clause
             | Some _ | None -> ())
         | _ -> ())
     | _ -> ()
   in
-  Walk.iter_code statement code;
+  Walk.iter_code visit_statement code;
   List.rev !callees
 
 let list_path_edges (lookups : lookups) path =

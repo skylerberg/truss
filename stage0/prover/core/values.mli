@@ -38,7 +38,7 @@ val project_field :
   Logic.term ->
   Logic.term
 
-val global_value :
+val translate_global_value :
   State.context ->
   State.frame ->
   Invocation.site ->

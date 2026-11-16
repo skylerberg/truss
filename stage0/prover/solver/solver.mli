@@ -16,5 +16,5 @@ val read : request -> canonical -> answer
 val count_queries_run : t -> int
 
 module For_testing : sig
-  val key : Logic.query -> string
+  val hash_query : Logic.query -> string
 end

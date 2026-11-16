@@ -1,6 +1,6 @@
 type entry = (Lexing.lexbuf -> Truss.token) -> Lexing.lexbuf -> unit
 
-let token (kind : Token.kind) : Truss.token option =
+let token_of_kind (kind : Token.kind) : Truss.token option =
   match kind with
   | Upper _ -> Some UPPER
   | Lower _ -> Some LOWER
@@ -117,21 +117,23 @@ let token (kind : Token.kind) : Truss.token option =
         | Shift_left -> SHL
         | Shift_right -> SHR)
 
-let accepts entry (tokens : Token.t list) =
-  let converted = List.filter_map (fun (written : Token.t) -> token written.kind) tokens in
+let accepts parse_entry (tokens : Token.t list) =
+  let converted = List.filter_map (fun (written : Token.t) -> token_of_kind written.kind) tokens in
   if List.compare_lengths converted tokens <> 0 then false
   else
     let remaining = ref converted in
-    let next _ =
+    let read_next_token _ =
       match !remaining with
       | token :: rest ->
           remaining := rest;
           token
       | [] -> Truss.EOF
     in
-    match entry next (Lexing.from_string "") with () -> true | exception Truss.Error -> false
+    match parse_entry read_next_token (Lexing.from_string "") with
+    | () -> true
+    | exception Truss.Error -> false
 
-let file = Truss.file
+let parse_file = Truss.file
 
 let conflicts_resolved_by_precedence =
   List.fold_left
@@ -146,15 +148,15 @@ module Snippet = struct
   type item = { kind : kind; first : int; stop : int }
 
   let starts_definition (tokens : Token.t array) (piece : Parser.For_testing.piece) =
-    let kind offset =
+    let read_kind offset =
       if piece.first + offset < piece.stop then tokens.(piece.first + offset).kind else End_of_file
     in
-    match (kind 0, kind 1) with
+    match (read_kind 0, read_kind 1) with
     | Keyword (Public | Internal | Type | Trait | Impl | Capability | Test | Theorem), _ -> true
     | Keyword Fn, (Lower _ | Upper _) -> true
     | Keyword Proof, Upper _ -> true
     | Keyword Let, Upper _ -> (
-        match kind 2 with Punctuation (Dot | Open Square) -> true | _ -> false)
+        match read_kind 2 with Punctuation (Dot | Open Square) -> true | _ -> false)
     | _ -> false
 
   let parse tokens =
@@ -175,7 +177,7 @@ module Snippet = struct
     in
     (List.map fst pieces, List.concat_map snd pieces)
 
-  let entry = function
+  let select_entry = function
     | Use -> Truss.snippet_use
     | Definition -> Truss.snippet_definition
     | Signature -> Truss.snippet_signature

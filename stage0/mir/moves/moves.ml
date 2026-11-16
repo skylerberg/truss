@@ -28,79 +28,80 @@ type use = {
   passed : Types.mode option;
 }
 
-let list_operand_uses ?passed ~moving ~by_value (operand : Mir.operand) =
+let list_operand_uses ?passed ~is_moving ~by_value (operand : Mir.operand) =
   match operand with
   | Use { place; type_; origin; _ } | Take { place; type_; origin } ->
-      [ { place; origin; moves = by_value && moving type_; operand = Some operand; passed } ]
+      [ { place; origin; moves = by_value && is_moving type_; operand = Some operand; passed } ]
   | Borrow { place; type_; origin; _ } ->
-      let moves = by_value && Option.is_some passed && moving type_ in
+      let moves = by_value && Option.is_some passed && is_moving type_ in
       [ { place; origin; moves; operand = Some operand; passed } ]
   | Constant _ -> []
 
 let read ~origin place = { place; origin; moves = false; operand = None; passed = None }
 
-let list_rvalue_uses ~moving ~origin (rvalue : Mir.rvalue) =
-  let by_value = List.concat_map (list_operand_uses ~moving ~by_value:true)
-  and reads = List.concat_map (list_operand_uses ~moving ~by_value:false) in
+let list_rvalue_uses ~is_moving ~origin (rvalue : Mir.rvalue) =
+  let list_by_value_uses = List.concat_map (list_operand_uses ~is_moving ~by_value:true)
+  and list_read_uses = List.concat_map (list_operand_uses ~is_moving ~by_value:false) in
   match rvalue with
-  | Operand operand | To_any { value = operand; _ } -> by_value [ operand ]
-  | Operation { operands; _ } | Array operands -> by_value operands
-  | Construct { fields; _ } -> by_value (List.filter_map snd fields)
-  | Compare { left; right; _ } -> reads [ left; right ]
-  | Not operand | Convert { value = operand; _ } | Copy operand -> reads [ operand ]
+  | Operand operand | To_any { value = operand; _ } -> list_by_value_uses [ operand ]
+  | Operation { operands; _ } | Array operands -> list_by_value_uses operands
+  | Construct { fields; _ } -> list_by_value_uses (List.filter_map snd fields)
+  | Compare { left; right; _ } -> list_read_uses [ left; right ]
+  | Not operand | Convert { value = operand; _ } | Copy operand -> list_read_uses [ operand ]
   | Is_variant { place; _ } -> [ read ~origin place ]
   | Lambda { captures; _ } ->
       List.map (fun (capture : Mir.capture) -> read ~origin capture.place) captures
   | Function_value _ | Value_parameter _ | Specification _ -> []
 
-let list_call_uses ~moving (call : Mir.call) =
+let list_call_uses ~is_moving (call : Mir.call) =
   (match call.callee with
-    | Indirect operand -> list_operand_uses ~moving ~by_value:false operand
+    | Indirect operand -> list_operand_uses ~is_moving ~by_value:false operand
     | _ -> [])
   @ List.concat_map
       (function
         | Mir.Passed { mode; value; _ } ->
-            list_operand_uses ~passed:mode ~moving ~by_value:(mode = Own) value
+            list_operand_uses ~passed:mode ~is_moving ~by_value:(mode = Own) value
         | Default -> [])
       call.arguments
 
-let uses ~moving (statement : Mir.Graph.statement) =
+let list_uses ~is_moving (statement : Mir.Graph.statement) =
   let origin = statement.origin in
   match statement.kind with
-  | Assign { value; _ } -> list_rvalue_uses ~moving ~origin value
+  | Assign { value; _ } -> list_rvalue_uses ~is_moving ~origin value
   | Call { call; _ } | Lend { call; _ } | Slice { call; _ } | Template { call; _ } ->
-      list_call_uses ~moving call
-  | Assert operand | Echo operand -> list_operand_uses ~moving ~by_value:false operand
+      list_call_uses ~is_moving call
+  | Assert operand | Echo operand -> list_operand_uses ~is_moving ~by_value:false operand
   | Provide { provided; _ } ->
       List.concat_map
-        (fun (provided : Mir.provided) -> list_operand_uses ~moving ~by_value:false provided.value)
+        (fun (provided : Mir.provided) ->
+          list_operand_uses ~is_moving ~by_value:false provided.value)
         provided
   | Live _ | Dead _ | Provide_end | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _
     ->
       []
 
-let rec list_yielded_uses ~moving ~owns : Mir.yielded -> use list = function
+let rec list_yielded_uses ~is_moving ~owns : Mir.yielded -> use list = function
   | Part
       (Borrow { place = { root = Local local; projections = [] } as place; type_; origin; _ } as
        operand)
     when owns local ->
-      [ { place; origin; moves = moving type_; operand = Some operand; passed = None } ]
-  | Part operand -> list_operand_uses ~moving ~by_value:true operand
+      [ { place; origin; moves = is_moving type_; operand = Some operand; passed = None } ]
+  | Part operand -> list_operand_uses ~is_moving ~by_value:true operand
   | Built { fields; _ } ->
       List.concat_map
-        (fun (_, field) -> Option.fold ~none:[] ~some:(list_yielded_uses ~moving ~owns) field)
+        (fun (_, field) -> Option.fold ~none:[] ~some:(list_yielded_uses ~is_moving ~owns) field)
         fields
 
-let list_terminator_uses ~moving ~owns (basic : Mir.Graph.basic_block) =
+let list_terminator_uses ~is_moving ~owns (basic : Mir.Graph.basic_block) =
   let origin = basic.terminator_origin in
   match basic.terminator with
-  | Branch { condition; _ } -> list_operand_uses ~moving ~by_value:false condition
+  | Branch { condition; _ } -> list_operand_uses ~is_moving ~by_value:false condition
   | For { iteration = Range { start; stop; _ }; _ } ->
-      List.concat_map (list_operand_uses ~moving ~by_value:false) [ start; stop ]
+      List.concat_map (list_operand_uses ~is_moving ~by_value:false) [ start; stop ]
   | For { iteration = Pull { cursor; _ }; _ } -> [ read ~origin cursor ]
-  | Yield { part; _ } -> list_yielded_uses ~moving ~owns part
+  | Yield { part; _ } -> list_yielded_uses ~is_moving ~owns part
   | Return (Some operand) | Cancel { returned = Some (operand, _); _ } ->
-      list_operand_uses ~moving ~by_value:true operand
+      list_operand_uses ~is_moving ~by_value:true operand
   | Resume { winner; _ } -> [ read ~origin { root = Local winner; projections = [] } ]
   | Goto _ | Fork _ | Join _ | Iteration_end _
   | Return None
@@ -111,7 +112,7 @@ let list_terminator_uses ~moving ~owns (basic : Mir.Graph.basic_block) =
 let list_moved uses =
   List.filter_map (fun use -> if use.moves then Some (use.place, use.origin) else None) uses
 
-let list_moves ~moving statement = list_moved (uses ~moving statement)
+let list_moves ~is_moving statement = list_moved (list_uses ~is_moving statement)
 
 let list_inits (statement : Mir.Graph.statement) : Mir.place list =
   match statement.kind with
@@ -126,8 +127,8 @@ let list_inits (statement : Mir.Graph.statement) : Mir.place list =
 let list_ended (statement : Mir.Graph.statement) =
   match statement.kind with Dead locals -> locals | _ -> []
 
-let list_terminator_moves ~moving ~owns basic =
-  list_moved (list_terminator_uses ~moving ~owns basic)
+let list_terminator_moves ~is_moving ~owns basic =
+  list_moved (list_terminator_uses ~is_moving ~owns basic)
 
 type t = {
   paths : path array;
@@ -151,7 +152,7 @@ and state = {
 
 type status = Holds | Empty | Maybe
 
-let index analysis path = Place_table.find_opt analysis.positions path
+let find_index analysis path = Place_table.find_opt analysis.positions path
 
 let list_affected analysis place =
   match path_of_place place with
@@ -194,20 +195,20 @@ let apply_effects analysis state ~moves ~inits ~ends =
 
 let apply_moves analysis state statement =
   apply_effects analysis state
-    ~moves:(list_moves ~moving:analysis.is_moving statement)
+    ~moves:(list_moves ~is_moving:analysis.is_moving statement)
     ~inits:[] ~ends:[]
 
 let owns analysis local = analysis.is_owner local
 let is_lent_mut analysis local = analysis.is_lent local
-let list_statement_uses analysis statement = uses ~moving:analysis.is_moving statement
+let list_statement_uses analysis statement = list_uses ~is_moving:analysis.is_moving statement
 let move_out analysis state place ~origin = set_empty ~origin state (list_affected analysis place)
 
 let list_moved_at analysis state path =
-  match index analysis path with Some position -> state.moved_at.(position) | None -> []
+  match find_index analysis path with Some position -> state.moved_at.(position) | None -> []
 
 let list_given_by statement = List.filter_map path_of_place (list_inits statement)
 
-let may_be_empty analysis state (path : path) =
+let find_possibly_empty analysis state (path : path) =
   List.find_opt
     (fun (tracked : path) ->
       overlaps tracked path && state.maybe_empty.(Place_table.find analysis.positions tracked))
@@ -220,12 +221,12 @@ let may_be_empty analysis state (path : path) =
 
 let apply analysis state statement =
   apply_effects analysis state
-    ~moves:(list_moves ~moving:analysis.is_moving statement)
+    ~moves:(list_moves ~is_moving:analysis.is_moving statement)
     ~inits:(list_inits statement) ~ends:(list_ended statement)
 
 let apply_terminator_moves analysis state basic =
   apply_effects analysis state
-    ~moves:(list_terminator_moves ~moving:analysis.is_moving ~owns:analysis.is_owner basic)
+    ~moves:(list_terminator_moves ~is_moving:analysis.is_moving ~owns:analysis.is_owner basic)
     ~inits:[] ~ends:[]
 
 let find_status analysis state path =
@@ -235,10 +236,10 @@ let find_status analysis state path =
       | true, false -> Holds
       | false, _ -> Empty
       | true, true -> Maybe)
-    (index analysis path)
+    (find_index analysis path)
 
 let list_inside analysis path =
-  match index analysis path with
+  match find_index analysis path with
   | None -> []
   | Some position ->
       List.filter_map
@@ -310,7 +311,7 @@ let flow_into analysis state (terminator : Mir.Graph.terminator) successor =
   | Unreachable | Written_unreachable | Todo ->
       state
 
-let make_owner_test ?(passed = fun _ -> None) (body : Mir.Graph.body) =
+let make_owner_test ?(find_passed = fun _ -> None) (body : Mir.Graph.body) =
   let parts =
     Array.fold_left
       (fun parts (block : Mir.Graph.basic_block) ->
@@ -322,37 +323,40 @@ let make_owner_test ?(passed = fun _ -> None) (body : Mir.Graph.body) =
   let owns local =
     (not (List.mem local body.captures))
     &&
-    match (passed local, body.locals.(local).kind) with
+    match (find_passed local, body.locals.(local).kind) with
     | Some mode, _ -> mode = Types.Own
     | None, (Temporary | Source { mode = Own; _ }) -> true
     | None, (Source { mode = Read | Mut; _ } | Lent _) -> false
   in
-  let lent_mut local =
+  let is_lent_mut local =
     (not (owns local))
     && (not (List.mem local parts))
     && (not (List.mem local body.captures))
     &&
-    match (passed local, body.locals.(local).kind) with
+    match (find_passed local, body.locals.(local).kind) with
     | Some mode, _ -> mode = Types.Mut
     | None, (Source { mode = Mut; _ } | Lent Mut) -> true
     | None, (Source { mode = Read | Own; _ } | Lent (Read | Own) | Temporary) -> false
   in
-  (owns, lent_mut)
+  (owns, is_lent_mut)
 
-let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.Graph.body) =
-  let owns, lent_mut = make_owner_test ?passed body in
-  let tracks local = owns local || lent_mut local in
-  let moves = list_moves ~moving and terminator_moves = list_terminator_moves ~moving ~owns in
+let analyse ?find_passed ?(is_moving = fun _ -> true) ~tracks:needs_drop (body : Mir.Graph.body) =
+  let owns, is_lent_mut = make_owner_test ?find_passed body in
+  let tracks local = owns local || is_lent_mut local in
+  let list_statement_moves = list_moves ~is_moving
+  and list_basic_moves = list_terminator_moves ~is_moving ~owns in
   let candidates = Place_table.create 64 in
   let add path = Place_table.replace candidates path () in
   let consider (place : Mir.place) =
     match path_of_place place with
     | Some path when tracks path.local ->
-        let rec ancestors projections =
+        let rec consider_ancestors projections =
           add { path with projections };
-          match List.rev projections with [] -> () | _ :: rest -> ancestors (List.rev rest)
+          match List.rev projections with
+          | [] -> ()
+          | _ :: rest -> consider_ancestors (List.rev rest)
         in
-        ancestors path.projections
+        consider_ancestors path.projections
     | _ -> ()
   in
   let consider_local local = consider { root = Local local; projections = [] } in
@@ -361,11 +365,11 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.Gra
     (fun (basic : Mir.Graph.basic_block) ->
       List.iter
         (fun statement ->
-          List.iter (fun (place, _) -> consider place) (moves statement);
+          List.iter (fun (place, _) -> consider place) (list_statement_moves statement);
           List.iter consider (list_inits statement);
           List.iter consider_local (list_ended statement))
         basic.statements;
-      List.iter (fun (place, _) -> consider place) (terminator_moves basic);
+      List.iter (fun (place, _) -> consider place) (list_basic_moves basic);
       match basic.terminator with
       | For { iteration = Pull _; part; _ } -> consider_local part
       | Resume { exits; _ } ->
@@ -398,7 +402,7 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.Gra
       paths
   in
   let count = Array.length paths in
-  let empty () =
+  let make_empty () =
     {
       maybe_holds = Array.make count false;
       maybe_empty = Array.make count false;
@@ -414,8 +418,8 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.Gra
       inside;
       parameters;
       is_owner = owns;
-      is_lent = lent_mut;
-      is_moving = moving;
+      is_lent = is_lent_mut;
+      is_moving;
       loop_parts =
         (let parts = Hashtbl.create 4 in
          Array.iter
@@ -429,7 +433,7 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.Gra
            (fun block _ -> Hashtbl.replace gathered block (Hashtbl.find_all parts block))
            parts;
          gathered);
-      entries = Array.init (Array.length body.blocks) (fun _ -> empty ());
+      entries = Array.init (Array.length body.blocks) (fun _ -> make_empty ());
       flagged = [];
     }
   in
@@ -475,7 +479,7 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.Gra
         if reached.(block) then begin
           let state = copy analysis.entries.(block) in
           List.iter (apply analysis state) basic.statements;
-          apply_effects analysis state ~moves:(terminator_moves basic) ~inits:[] ~ends:[];
+          apply_effects analysis state ~moves:(list_basic_moves basic) ~inits:[] ~ends:[];
           List.iter
             (fun successor ->
               let state =
@@ -509,11 +513,12 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.Gra
           (fun statement ->
             List.iter
               (fun (place, origin) -> set_empty ~origin state (list_affected analysis place))
-              (moves statement);
+              (list_statement_moves statement);
             List.iter
               (fun place ->
                 Option.iter
-                  (fun path -> Option.iter (mark_needed_flags analysis state) (index analysis path))
+                  (fun path ->
+                    Option.iter (mark_needed_flags analysis state) (find_index analysis path))
                   (path_of_place place))
               (list_inits statement);
             List.iter drop_local (list_ended statement);
@@ -522,7 +527,7 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.Gra
           basic.statements;
         List.iter
           (fun (place, origin) -> set_empty ~origin state (list_affected analysis place))
-          (terminator_moves basic);
+          (list_basic_moves basic);
         match basic.terminator with
         | Return _ -> List.iter drop_local parameters
         | Yield _ ->
@@ -550,7 +555,7 @@ let list_reads_and_writes (statement : Mir.Graph.statement) =
   | Live locals -> ([], locals)
   | _ ->
       let given = list_inits statement in
-      ( use_locals (uses ~moving:accept_all statement)
+      ( use_locals (list_uses ~is_moving:accept_all statement)
         @ List.concat_map
             (fun (place : Mir.place) ->
               if place.projections = [] then [] else list_place_locals place)
@@ -575,8 +580,9 @@ let compute_live_after analysis (body : Mir.Graph.body) =
                 (use_locals
                    (List.filter
                       (fun use -> match use.operand with Some (Borrow _) -> true | _ -> false)
-                      (list_rvalue_uses ~moving:accept_all ~origin:statement.origin value)))
-          | Lend { part; call } -> bind part (use_locals (list_call_uses ~moving:accept_all call))
+                      (list_rvalue_uses ~is_moving:accept_all ~origin:statement.origin value)))
+          | Lend { part; call } ->
+              bind part (use_locals (list_call_uses ~is_moving:accept_all call))
           | _ -> ())
         basic.statements)
     body.blocks;
@@ -585,7 +591,7 @@ let compute_live_after analysis (body : Mir.Graph.body) =
     | local :: rest when List.mem local seen -> with_sources seen rest
     | local :: rest -> with_sources (local :: seen) (sources.(local) @ rest)
   in
-  let reads locals = with_sources [] locals in
+  let list_reads locals = with_sources [] locals in
   let effects =
     Array.map
       (fun (basic : Mir.Graph.basic_block) -> List.map list_reads_and_writes basic.statements)
@@ -599,7 +605,7 @@ let compute_live_after analysis (body : Mir.Graph.body) =
           Hashtbl.replace entered first
             ( part,
               match iteration with
-              | Pull { cursor; _ } -> reads (list_place_locals cursor)
+              | Pull { cursor; _ } -> list_reads (list_place_locals cursor)
               | Range _ -> [] )
       | _ -> ())
     body.blocks;
@@ -626,12 +632,13 @@ let compute_live_after analysis (body : Mir.Graph.body) =
       positions.(last + 1) <- Array.copy current;
       List.iter
         (fun local -> current.(local) <- true)
-        (reads (use_locals (list_terminator_uses ~moving:accept_all ~owns:analysis.is_owner basic)));
+        (list_reads
+           (use_locals (list_terminator_uses ~is_moving:accept_all ~owns:analysis.is_owner basic)));
       positions.(last) <- Array.copy current;
       List.iteri
         (fun index (read, writes) ->
           List.iter (fun local -> current.(local) <- false) writes;
-          List.iter (fun local -> current.(local) <- true) (reads read);
+          List.iter (fun local -> current.(local) <- true) (list_reads read);
           positions.(last - 1 - index) <- Array.copy current)
         (List.rev effects.(block));
       Option.iter
@@ -648,4 +655,4 @@ let compute_live_after analysis (body : Mir.Graph.body) =
   fun block step local -> before.(block).(step + 1).(local)
 
 let list_terminator_uses analysis basic =
-  list_terminator_uses ~moving:analysis.is_moving ~owns:analysis.is_owner basic
+  list_terminator_uses ~is_moving:analysis.is_moving ~owns:analysis.is_owner basic

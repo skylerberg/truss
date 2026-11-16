@@ -33,26 +33,26 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
       | _, Some { shape = Todo_type; _ }, _ -> None
       | Some interface, Some { shape; _ }, Some signature ->
           let nodes = ref 0 and locals = ref 0 in
-          let id () =
+          let take_id () =
             let id = !nodes in
             incr nodes;
             id
           in
-          let local () : Core.local =
+          let make_local () : Core.local =
             let local = !locals in
             incr locals;
             Synthetic local
           in
           let origin = 0 in
-          let node type_ kind : Core.expression = { id = id (); origin; type_; kind } in
-          let pattern type_ kind : Core.pattern = { id = id (); origin; type_; kind } in
-          let statement kind : Core.statement = { id = id (); origin; kind } in
-          let giving value : Core.block = { statements = []; value = Some value } in
+          let node type_ kind : Core.expression = { id = take_id (); origin; type_; kind } in
+          let pattern type_ kind : Core.pattern = { id = take_id (); origin; type_; kind } in
+          let statement kind : Core.statement = { id = take_id (); origin; kind } in
+          let make_giving_block value : Core.block = { statements = []; value = Some value } in
           let arm pattern body : Core.arm =
             { patterns = [ pattern ]; guard = None; body; origin }
           in
           let self_type = interface.for_type in
-          let bounds = Types.list_bounds interface.impl_generics in
+          let list_bounds = Types.list_bounds interface.impl_generics in
           let result =
             match signature.output with
             | Returns type_ -> type_
@@ -75,7 +75,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
             @ List.map
                 (fun (info : Types.parameter_info) : Core.parameter ->
                   {
-                    local = local ();
+                    local = make_local ();
                     name = info.name;
                     mode = info.mode;
                     type_ = info.type_;
@@ -84,20 +84,22 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   })
                 signature.parameters
           in
-          let other_place () : Core.place =
+          let make_other_place () : Core.place =
             match
               List.filter (fun (parameter : Core.parameter) -> parameter.local <> Self) parameters
             with
             | [ parameter ] -> Local { local = parameter.local; type_ = parameter.type_; origin }
             | _ -> raise_bug "`%s` takes one value beside its own" (Path.show path)
           in
-          let method_of ?(type_arguments = []) (wanted : Path.t) name (receiver : Path.receiver)
-              of_type arguments type_ =
+          let make_method_call ?(type_arguments = []) (wanted : Path.t) name
+              (receiver : Path.receiver) of_type arguments type_ =
             let reference : Types.trait_reference =
               { trait = wanted; trait_arguments = []; associated = [] }
             in
             let evidence : Core.evidence =
-              match Interface.Impls.implements lookups.interface ~bounds of_type reference with
+              match
+                Interface.Impls.find_evidence lookups.interface ~list_bounds of_type reference
+              with
               | Some (From_impl { impl; substitution }) -> Impl { impl; arguments = substitution }
               | Some From_bound -> Bound
               | Some From_any -> Dynamic
@@ -178,8 +180,10 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   Core.Field { base; field = field.field_name; type_ = field.field_type; origin } ))
               (record_fields ())
           in
-          let bound named (fields : Types.field list) =
-            List.map (fun (field : Types.field) -> (field, local (), named field.field_name)) fields
+          let list_bound name_field (fields : Types.field list) =
+            List.map
+              (fun (field : Types.field) -> (field, make_local (), name_field field.field_name))
+              fields
           in
           let binding variant bound : Core.pattern =
             pattern self_type
@@ -195,20 +199,22 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                        bound;
                  })
           in
-          let parts bound =
+          let list_parts bound =
             List.map
               (fun ((field : Types.field), local, _) ->
                 (field, Core.Local { local; type_ = field.field_type; origin }))
               bound
           in
           let self_place : Core.place = Local { local = Self; type_ = self_type; origin } in
-          let is variant : Core.pattern = pattern self_type (Variant { variant; fields = [] }) in
+          let make_variant_pattern variant : Core.pattern =
+            pattern self_type (Variant { variant; fields = [] })
+          in
           let of_self type_
               (each : string option -> int -> (Types.field * Core.place) list -> Core.block) =
             match variants with
             | None -> each None 0 (record_parts self_place)
             | Some variants ->
-                giving
+                make_giving_block
                   (node type_
                      (Match
                         {
@@ -216,39 +222,45 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                           arms =
                             List.mapi
                               (fun index (variant, fields) ->
-                                let mine = bound Fun.id fields in
-                                arm (binding variant mine) (each (Some variant) index (parts mine)))
+                                let mine = list_bound Fun.id fields in
+                                arm (binding variant mine)
+                                  (each (Some variant) index (list_parts mine)))
                               variants;
                         }))
           in
-          let of_other other type_ variant (mine : (Types.field * Core.place) list) ~same ~different
-              =
+          let of_other other type_ variant (mine : (Types.field * Core.place) list) ~build_same
+              ~build_different =
             match variant with
-            | None -> same (record_parts other)
+            | None -> build_same (record_parts other)
             | Some variant ->
-                let theirs = bound (fun name -> "other_" ^ name) (List.map fst mine) in
+                let theirs = list_bound (fun name -> "other_" ^ name) (List.map fst mine) in
                 node type_
                   (Match
                      {
                        scrutinees = [ Place other ];
                        arms =
-                         arm (binding variant theirs) (giving (same (parts theirs)))
+                         arm (binding variant theirs)
+                           (make_giving_block (build_same (list_parts theirs)))
                          ::
                          (if alone then []
-                          else [ arm (pattern self_type Wildcard) (giving (different ())) ]);
+                          else
+                            [
+                              arm (pattern self_type Wildcard)
+                                (make_giving_block (build_different ()));
+                            ]);
                      })
           in
           let bool = Types.bool and unit = Types.unit in
           let trait_name = match trait with Top { name; _ } -> name | _ -> Path.show trait in
-          let generated_body () : Core.block =
+          let generate_body () : Core.block =
             match (trait_name, name) with
             | "Equal", "equal" ->
-                let other = other_place () in
-                let each_equal mine theirs =
+                let other = make_other_place () in
+                let make_each_equal mine theirs =
                   List.fold_left2
                     (fun so_far ((field : Types.field), mine) (_, theirs) ->
                       let this =
-                        method_of trait "equal" Read field.field_type
+                        make_method_call trait "equal" Read field.field_type
                           [ read mine; read theirs ]
                           bool
                       in
@@ -261,13 +273,14 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   | None -> node bool (Boolean true)
                 in
                 of_self bool (fun variant _ mine ->
-                    giving
+                    make_giving_block
                       (match (variant, mine) with
                       | Some variant, [] ->
-                          node bool (Matches { value = Place other; pattern = is variant })
+                          node bool
+                            (Matches { value = Place other; pattern = make_variant_pattern variant })
                       | _ ->
-                          of_other other bool variant mine ~same:(each_equal mine)
-                            ~different:(fun () -> node bool (Boolean false))))
+                          of_other other bool variant mine ~build_same:(make_each_equal mine)
+                            ~build_different:(fun () -> node bool (Boolean false))))
             | "Hash", "hash" ->
                 let hasher, hasher_type =
                   match List.rev parameters with
@@ -322,33 +335,35 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                             (fun ((field : Types.field), mine) ->
                               statement
                                 (Evaluate
-                                   (method_of trait "hash" Read field.field_type
+                                   (make_method_call trait "hash" Read field.field_type
                                       [ read mine; changed ]
                                       unit)))
                             mine;
                       value = None;
                     })
             | "Ordered", "compare" -> (
-                let other = other_place () in
-                let ordering name = node result (Construct { variant = Some name; fields = [] }) in
-                let declared variant fields =
+                let other = make_other_place () in
+                let make_ordering name =
+                  node result (Construct { variant = Some name; fields = [] })
+                in
+                let list_declared variant fields =
                   Interface.Definition.sort_in_declared_order lookups.interface type_ ~variant
-                    ~name:(fun ((field : Types.field), _) -> field.field_name)
+                    ~name_of:(fun ((field : Types.field), _) -> field.field_name)
                     fields
                 in
-                let rec in_turn mine theirs =
+                let rec compare_in_turn mine theirs =
                   match (mine, theirs) with
-                  | [], _ | _, [] -> ordering "Equal"
+                  | [], _ | _, [] -> make_ordering "Equal"
                   | ((field : Types.field), mine) :: rest, (_, theirs) :: rest_of_theirs -> (
                       let compared =
-                        method_of trait "compare" Read field.field_type
+                        make_method_call trait "compare" Read field.field_type
                           [ read mine; read theirs ]
                           result
                       in
                       match rest with
                       | [] -> compared
                       | rest ->
-                          let decided = local () in
+                          let decided = make_local () in
                           node result
                             (Match
                                {
@@ -357,7 +372,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                    [
                                      arm
                                        (pattern result (Variant { variant = "Equal"; fields = [] }))
-                                       (giving (in_turn rest rest_of_theirs));
+                                       (make_giving_block (compare_in_turn rest rest_of_theirs));
                                      arm
                                        (pattern result
                                           (Bind
@@ -367,7 +382,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                                is_var = false;
                                                mode = Own;
                                              }))
-                                       (giving
+                                       (make_giving_block
                                           (node result
                                              (Use
                                                 (Local { local = decided; type_ = result; origin }))));
@@ -378,13 +393,14 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                 match variants with
                 | None | Some [ _ ] ->
                     of_self result (fun variant _ mine ->
-                        giving
+                        make_giving_block
                           (of_other other result variant mine
-                             ~same:(fun theirs ->
-                               in_turn (declared variant mine) (declared variant theirs))
-                             ~different:(fun () -> ordering "Equal")))
+                             ~build_same:(fun theirs ->
+                               compare_in_turn (list_declared variant mine)
+                                 (list_declared variant theirs))
+                             ~build_different:(fun () -> make_ordering "Equal")))
                 | Some variants ->
-                    let theirs = local () in
+                    let theirs = make_local () in
                     let numbered =
                       node number
                         (Match
@@ -393,12 +409,12 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                              arms =
                                List.mapi
                                  (fun index (variant, _) ->
-                                   arm (is variant)
-                                     (giving (node number (Integer (Z.of_int index)))))
+                                   arm (make_variant_pattern variant)
+                                     (make_giving_block (node number (Integer (Z.of_int index)))))
                                  variants;
                            })
                     in
-                    let by_number index =
+                    let compare_by_number index =
                       node result
                         (If
                            {
@@ -412,18 +428,19 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                         node number
                                           (Use (Local { local = theirs; type_ = number; origin }));
                                     });
-                             then_ = giving (ordering "Less");
-                             else_ = Some (giving (ordering "Greater"));
+                             then_ = make_giving_block (make_ordering "Less");
+                             else_ = Some (make_giving_block (make_ordering "Greater"));
                              binds_lent_part = false;
                            })
                     in
                     let compared =
                       of_self result (fun variant index mine ->
-                          giving
+                          make_giving_block
                             (of_other other result variant mine
-                               ~same:(fun theirs ->
-                                 in_turn (declared variant mine) (declared variant theirs))
-                               ~different:(fun () -> by_number index)))
+                               ~build_same:(fun theirs ->
+                                 compare_in_turn (list_declared variant mine)
+                                   (list_declared variant theirs))
+                               ~build_different:(fun () -> compare_by_number index)))
                     in
                     {
                       compared with
@@ -447,7 +464,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                         ];
                     })
             | "Default", "default" ->
-                giving
+                make_giving_block
                   (node self_type
                      (Construct
                         {
@@ -460,8 +477,8 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                   else
                                     Some
                                       (Core.Value
-                                         (method_of trait "default" Static field.field_type []
-                                            field.field_type)) ))
+                                         (make_method_call trait "default" Static field.field_type
+                                            [] field.field_type)) ))
                               (record_fields ());
                         }))
             | "Serialize", "serialize" ->
@@ -481,12 +498,12 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                        (trait_call ~trait:serializer ~name ~receiver:Mut ~self_type:sink_type
                           ~evidence:Bound (sink_argument :: arguments) unit))
                 in
-                let serialized ((field : Types.field), place) =
+                let serialize_field ((field : Types.field), place) =
                   [
                     call "field" [ text_argument field.field_name ];
                     statement
                       (Evaluate
-                         (method_of trait "serialize" Read field.field_type
+                         (make_method_call trait "serialize" Read field.field_type
                             ~type_arguments:[ Types.Type sink_type ]
                             [ read place; sink_argument ]
                             unit));
@@ -507,11 +524,11 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                     in
                     let mine =
                       Interface.Definition.sort_in_declared_order lookups.interface type_ ~variant
-                        ~name:(fun ((field : Types.field), _) -> field.field_name)
+                        ~name_of:(fun ((field : Types.field), _) -> field.field_name)
                         mine
                     in
                     {
-                      statements = begin_ @ List.concat_map serialized mine @ [ call end_ [] ];
+                      statements = begin_ @ List.concat_map serialize_field mine @ [ call end_ [] ];
                       value = None;
                     })
             | "Deserialize", "deserialize" -> (
@@ -521,7 +538,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                       (Core.Local { local; type_; origin }, type_)
                   | _ -> raise_bug "`deserialize` takes a deserializer"
                 in
-                let source_argument mode : Core.argument =
+                let make_source_argument mode : Core.argument =
                   Passed { mode; value = Place source; mode_keyword = None }
                 in
                 let deserializer = Well_known.make_path Deserializer in
@@ -530,18 +547,18 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   | Named { arguments = [ _; Type error ]; _ } -> error
                   | _ -> raise_bug "`deserialize` returns a `Result`"
                 in
-                let result_of ok =
+                let make_result_type ok =
                   Types.make_named (Well_known.make_path Result) [ ok; error_type ]
                 in
-                let source_call name arguments type_ =
+                let make_source_call name arguments type_ =
                   trait_call ~trait:deserializer ~name ~receiver:Mut ~self_type:source_type
                     ~evidence:Bound
-                    (source_argument Mut :: arguments)
+                    (make_source_argument Mut :: arguments)
                     type_
                 in
-                let finish name = statement (Evaluate (source_call name [] unit)) in
-                let attempted ok call =
-                  let value = local () and error = local () in
+                let finish name = statement (Evaluate (make_source_call name [] unit)) in
+                let make_attempt ok call =
+                  let value = make_local () and error = make_local () in
                   node ok
                     (Match
                        {
@@ -549,7 +566,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                          arms =
                            [
                              arm
-                               (pattern (result_of ok)
+                               (pattern (make_result_type ok)
                                   (Variant
                                      {
                                        variant = "Ok";
@@ -566,10 +583,10 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                                   }) );
                                          ];
                                      }))
-                               (giving
+                               (make_giving_block
                                   (node ok (Use (Local { local = value; type_ = ok; origin }))));
                              arm
-                               (pattern (result_of ok)
+                               (pattern (make_result_type ok)
                                   (Variant
                                      {
                                        variant = "Err";
@@ -586,7 +603,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                                   }) );
                                          ];
                                      }))
-                               (giving
+                               (make_giving_block
                                   (node Types.Never
                                      (Return
                                         (Some
@@ -613,8 +630,8 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                        })
                 in
                 let read_field function_ (field : Types.field) ok =
-                  attempted ok
-                    (node (result_of ok)
+                  make_attempt ok
+                    (node (make_result_type ok)
                        (Call
                           {
                             callee =
@@ -624,7 +641,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                   type_arguments =
                                     [ Types.Type field.field_type; Types.Type source_type ];
                                 };
-                            arguments = [ source_argument Mut; text_argument field.field_name ];
+                            arguments = [ make_source_argument Mut; text_argument field.field_name ];
                             lends = None;
                             uses = Types.no_capabilities;
                           }))
@@ -637,7 +654,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                       | { definition = Type { invariants; _ } } ->
                           let spans = lookups.interface.names.read_spans key in
                           let text = lookups.interface.names.read_text key in
-                          let quoted (origin : Core.origin) =
+                          let quote_origin (origin : Core.origin) =
                             collapse_spaces
                               (Source.Definition_span.quote text
                                  (Source.Definition_span.locate spans origin))
@@ -645,13 +662,13 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                           List.mapi
                             (fun index (invariant : Core.condition) ->
                               if invariant.executable then
-                                Some (index, quoted invariant.value.origin)
+                                Some (index, quote_origin invariant.value.origin)
                               else None)
                             invariants
                           |> List.filter_map Fun.id
                       | _ -> [])
                 in
-                let invariant_check built_place (index, text) =
+                let make_invariant_check built_place (index, text) =
                   let bool = Types.bool and uint64 = Types.make_builtin UInt64 in
                   let holds =
                     node bool
@@ -677,7 +694,8 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                     trait_call ~trait:deserializer ~name:"error" ~receiver:Read
                       ~self_type:source_type ~evidence:Bound
                       [
-                        source_argument Read; text_argument ("breaks the invariant `" ^ text ^ "`");
+                        make_source_argument Read;
+                        text_argument ("breaks the invariant `" ^ text ^ "`");
                       ]
                       error_type
                   in
@@ -713,7 +731,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                          else_ = None;
                        })
                 in
-                let fields_then_built variant (fields : Types.field list) end_ : Core.block =
+                let make_fields_then_built variant (fields : Types.field list) end_ : Core.block =
                   let required, defaulted =
                     match variant with
                     | None ->
@@ -722,8 +740,10 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                           fields
                     | Some _ -> (fields, [])
                   in
-                  let read = List.map (fun (field : Types.field) -> (field, local ())) required in
-                  let built = local () in
+                  let read =
+                    List.map (fun (field : Types.field) -> (field, make_local ())) required
+                  in
+                  let built = make_local () in
                   let built_place : Core.place =
                     Local { local = built; type_ = self_type; origin }
                   in
@@ -760,7 +780,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                         let optional =
                           Types.make_named (Well_known.make_path Option) [ field.field_type ]
                         in
-                        let present = local () in
+                        let present = make_local () in
                         statement
                           (Evaluate
                              (node unit
@@ -835,7 +855,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                       @ [ bind_local built "built" self_type ~is_var:(defaulted <> []) construct ]
                       @ updates
                       @ [ finish end_ ]
-                      @ List.map (invariant_check built_place) invariant_clauses;
+                      @ List.map (make_invariant_check built_place) invariant_clauses;
                     value =
                       Some
                         (node result
@@ -851,16 +871,17 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                               }));
                   }
                 in
-                let begun name =
-                  statement (Evaluate (attempted unit (source_call name [] (result_of unit))))
+                let make_begun name =
+                  statement
+                    (Evaluate (make_attempt unit (make_source_call name [] (make_result_type unit))))
                 in
                 match variants with
                 | None ->
-                    let body = fields_then_built None (record_fields ()) "end_record" in
-                    { body with statements = begun "begin_record" :: body.statements }
+                    let body = make_fields_then_built None (record_fields ()) "end_record" in
+                    { body with statements = make_begun "begin_record" :: body.statements }
                 | Some variants ->
                     let string_type = Types.make_named (Well_known.make_path String) [] in
-                    let name = local () in
+                    let name = make_local () in
                     let name_place : Core.place =
                       Local { local = name; type_ = string_type; origin }
                     in
@@ -873,7 +894,8 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                         }
                       in
                       match
-                        Interface.Impls.implements lookups.interface ~bounds string_type reference
+                        Interface.Impls.find_evidence lookups.interface ~list_bounds string_type
+                          reference
                       with
                       | Some (From_impl { impl; substitution }) ->
                           Core.Trait_method
@@ -913,7 +935,10 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                                                  [ Types.Type source_type ];
                                                              };
                                                          arguments =
-                                                           [ source_argument Read; read name_place ];
+                                                           [
+                                                             make_source_argument Read;
+                                                             read name_place;
+                                                           ];
                                                          lends = None;
                                                          uses = Types.no_capabilities;
                                                        }))) );
@@ -924,8 +949,8 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                       statements =
                         [
                           bind_local name "name" string_type ~is_var:false
-                            (attempted string_type
-                               (source_call "variant" [] (result_of string_type)));
+                            (make_attempt string_type
+                               (make_source_call "variant" [] (make_result_type string_type)));
                         ];
                       value =
                         Some
@@ -939,20 +964,23 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                         arm
                                           (pattern string_type
                                              (Equal_to { value = String_constant variant; equal }))
-                                          (fields_then_built (Some variant) fields "end_variant"))
+                                          (make_fields_then_built (Some variant) fields
+                                             "end_variant"))
                                       variants
-                                    @ [ arm (pattern string_type Wildcard) (giving unknown) ];
+                                    @ [
+                                        arm (pattern string_type Wildcard)
+                                          (make_giving_block unknown);
+                                      ];
                                 }));
                     })
             | _ -> raise_bug "`%s` cannot be derived" (Path.show path)
           in
-          let body = generated_body () in
+          let body = generate_body () in
           let ensures =
             match (trait_name, name) with
             | "Ordered", "compare" ->
                 [
-                  node bool
-                    (Identical (node result Result, node result (Block (generated_body ()))));
+                  node bool (Identical (node result Result, node result (Block (generate_body ()))));
                 ]
             | _ -> []
           in

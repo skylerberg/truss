@@ -137,7 +137,7 @@ let require_intrinsic_uses checking scope (origin : Core.origin) operation =
   if Option.is_none scope.implemented_capability then
     require_available checking scope origin
       (Types.make_capability_set
-         (List.map (fun capability -> Types.Capability capability) (Intrinsic.uses operation)))
+         (List.map (fun capability -> Types.Capability capability) (Intrinsic.list_uses operation)))
 
 let require_callee_uses checking scope (origin : Core.origin) (callee : Core.callee) =
   let state = checking.state in
@@ -160,7 +160,7 @@ let require_callee_uses checking scope (origin : Core.origin) (callee : Core.cal
                 method_
             in
             Interface.Impls.normalize_capabilities state.lookups.interface
-              ~bounds:(State.lookup_bounds state)
+              ~list_bounds:(State.lookup_bounds state)
               (Types.substitute_capabilities
                  (Interface.Properties.make_trait_substitution interface ~self:self_type trait
                  @ Types.make_substitution signature.generics type_arguments)
@@ -298,7 +298,7 @@ and check_provide checking scope implementations body =
           ~fixes:
             [
               Diagnostic.fix "Provide it `mut`."
-                [ Diagnostic.insert (Source.Definition_span.zero_width start) "mut " ];
+                [ Diagnostic.insert (Source.Definition_span.make_zero_width start) "mut " ];
             ]
           "This implementation mutates its own state, so the place is provided `mut`."
       else if provided_mut && not mutates then
@@ -343,15 +343,15 @@ let solve (state : State.state) =
         })
       state.capability_constraints;
   let solution = Hashtbl.create 8 in
-  let value_of variable =
+  let read_value variable =
     Option.value ~default:Types.no_capabilities (Hashtbl.find_opt solution variable)
   in
   let substitute =
     Types.flat_map_capabilities (function
-      | Types.Capability_variable variable -> (value_of variable :> Types.capability list)
+      | Types.Capability_variable variable -> (read_value variable :> Types.capability list)
       | capability -> [ capability ])
   in
-  let missing (constraint_ : State.subset_constraint) =
+  let compute_missing (constraint_ : State.subset_constraint) =
     Types.compute_missing_capabilities ~required:(substitute constraint_.subset)
       ~available:(substitute constraint_.superset)
   in
@@ -364,13 +364,13 @@ let solve (state : State.state) =
               (function Types.Capability_variable variable -> Some variable | _ -> None)
               (constraint_.superset :> Types.capability list)
           in
-          let missing = missing constraint_ in
+          let missing = compute_missing constraint_ in
           if variables = [] || missing = Types.no_capabilities then changed
           else begin
             List.iter
               (fun variable ->
                 Hashtbl.replace solution variable
-                  (Types.union_capabilities missing (value_of variable)))
+                  (Types.union_capabilities missing (read_value variable)))
               variables;
             true
           end)
@@ -382,12 +382,13 @@ let solve (state : State.state) =
   state.capability_solution <- Some solution;
   List.iter
     (fun (constraint_ : State.subset_constraint) ->
-      let missing = missing constraint_ in
+      let missing = compute_missing constraint_ in
       if missing <> Types.no_capabilities then constraint_.report_missing missing)
     (List.rev state.capability_constraints)
 
-let rec can_call_capability_code (state : State.state) ~bounds ?(seen = []) (type_ : Types.ty) =
-  let inside = can_call_capability_code state ~bounds ~seen in
+let rec can_call_capability_code (state : State.state) ~list_bounds ?(seen = []) (type_ : Types.ty)
+    =
+  let can_call_inside = can_call_capability_code state ~list_bounds ~seen in
   let trait_uses (trait : Types.trait_reference) =
     let can_hold_a_capability : Types.capability -> bool = function
       | Capability_projection _ -> ( match type_ with Types.Any _ -> false | _ -> true)
@@ -409,39 +410,43 @@ let rec can_call_capability_code (state : State.state) ~bounds ?(seen = []) (typ
         | None -> false)
       (trait :: Interface.Properties.list_bound_closure state.lookups.interface ~self:type_ trait)
   in
-  let arguments =
+  let can_call_arguments =
     List.exists (function
-      | Types.Type argument -> inside argument
+      | Types.Type argument -> can_call_inside argument
       | Types.Value _ | Types.Capabilities _ -> false)
   in
   match type_ with
   | Types.Function { uses; inputs; output; _ } ->
       uses <> Types.no_capabilities
-      || List.exists (fun (_, input) -> inside input) inputs
-      || inside output
+      || List.exists (fun (_, input) -> can_call_inside input) inputs
+      || can_call_inside output
   | Types.Any trait -> trait_uses trait
-  | Types.Parameter parameter -> List.exists trait_uses (bounds parameter)
+  | Types.Parameter parameter -> List.exists trait_uses (list_bounds parameter)
   | Types.Named { path; arguments = type_arguments } -> (
-      arguments type_arguments
+      can_call_arguments type_arguments
       || (not (List.exists (Path.equal path) seen))
          &&
-         let inside = can_call_capability_code state ~bounds ~seen:(path :: seen) in
-         let fields = List.exists (fun (field : Types.field) -> inside field.field_type) in
+         let can_call_inside = can_call_capability_code state ~list_bounds ~seen:(path :: seen) in
+         let can_call_fields =
+           List.exists (fun (field : Types.field) -> can_call_inside field.field_type)
+         in
          (match Members.find_fields state.lookups path type_arguments with
-           | Some named_fields -> fields named_fields
+           | Some named_fields -> can_call_fields named_fields
            | None -> false)
          ||
          match Members.find_variants state.lookups path type_arguments with
          | Some variants ->
              List.exists
-               (fun (variant : Types.variant) -> fields (Option.value ~default:[] variant.fields))
+               (fun (variant : Types.variant) ->
+                 can_call_fields (Option.value ~default:[] variant.fields))
                variants
          | None -> false)
   | Types.Projection _ | Types.Never | Types.Integer | Types.Literal _ | Types.Variable _
   | Types.Hole | Types.Error _ ->
       false
 
-let check_monitor_lock checking ~(solved : int -> Types.capability_set) available implementations =
+let check_monitor_lock checking ~(read_solved : int -> Types.capability_set) available
+    implementations =
   let state = checking.state in
   let provides_tasks (implementation : Core.implementation) =
     List.exists
@@ -452,7 +457,7 @@ let check_monitor_lock checking ~(solved : int -> Types.capability_set) availabl
   let available =
     Types.flat_map_capabilities
       (function
-        | Types.Capability_variable variable -> (solved variable :> Types.capability list)
+        | Types.Capability_variable variable -> (read_solved variable :> Types.capability list)
         | capability -> [ capability ])
       available
   in
@@ -492,11 +497,11 @@ let check_monitor_callbacks checking implementations =
                       Interface.Definition.read_method_signature state.lookups.interface
                         ~owner:provided.capability method_
                     in
-                    let bounds = Types.list_bounds signature.generics in
+                    let list_bounds = Types.list_bounds signature.generics in
                     match
                       List.find_opt
                         (fun (parameter : Types.parameter_info) ->
-                          can_call_capability_code state ~bounds parameter.type_)
+                          can_call_capability_code state ~list_bounds parameter.type_)
                         signature.parameters
                     with
                     | Some parameter ->
@@ -520,7 +525,7 @@ let check_monitor_callbacks checking implementations =
 let check (state : State.state) (elaborated : Interface.Environment.elaborated_interface)
     (form : Core.t) =
   let checking = { state; provides = [] } in
-  let function_body ?implemented_capability available =
+  let make_function_body_scope ?implemented_capability available =
     { available; kind = Function_body; implemented_capability }
   in
   let check_specification =
@@ -569,19 +574,20 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
       in
       Option.iter
         (check_block checking
-           (function_body ?implemented_capability
+           (make_function_body_scope ?implemented_capability
               (Interface.Impls.normalize_capabilities state.lookups.interface
-                 ~bounds:(State.lookup_bounds state) signature.uses)))
+                 ~list_bounds:(State.lookup_bounds state) signature.uses)))
         body
   | Test (Some body), _, Test_interface uses ->
       check_block checking
-        (function_body (Types.union_capabilities uses (Types.make_capability_set [ panic ])))
+        (make_function_body_scope
+           (Types.union_capabilities uses (Types.make_capability_set [ panic ])))
         body
   | Function { body = Some body; _ }, Theorem _, _ | Law_proof { body = Some body; _ }, _, _ ->
       check_block checking (make_no_capabilities_scope "a proof") body
   | _ -> ());
   solve state;
-  let solved variable =
+  let read_solved variable =
     match state.capability_solution with
     | Some solution ->
         Option.value ~default:Types.no_capabilities (Hashtbl.find_opt solution variable)
@@ -589,10 +595,10 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
   in
   List.iter
     (fun (available, implementations, body) ->
-      match Core_walk.compute_tasks_use ~solved body with
+      match Core_walk.compute_tasks_use ~read_solved body with
       | No_tasks -> ()
       | Through_parameter -> check_monitor_callbacks checking implementations
       | Uses_tasks ->
           check_monitor_callbacks checking implementations;
-          check_monitor_lock checking ~solved available implementations)
+          check_monitor_lock checking ~read_solved available implementations)
     (List.rev checking.provides)

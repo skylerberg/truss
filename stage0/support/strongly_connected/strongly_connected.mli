@@ -8,6 +8,6 @@ end
 
 val list_components :
   (module Node with type t = 'node) ->
-  successors:('node -> 'node list) ->
+  list_successors:('node -> 'node list) ->
   'node list ->
   'node list list

@@ -24,7 +24,7 @@ val measure_type : Types.ty -> Types.function_type
 val make_sequence_sum : State.context -> Types.ty -> Logic.term -> Logic.term -> Logic.term
 val append_part : State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term -> Logic.term
 
-val intrinsic :
+val translate_intrinsic :
   State.context ->
   State.frame ->
   site:Invocation.site ->
@@ -36,7 +36,7 @@ val intrinsic :
   Types.ty ->
   Logic.term
 
-val element_written_back :
+val write_element_back :
   State.context ->
   State.frame ->
   operation:Intrinsic.operation ->

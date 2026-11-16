@@ -13,7 +13,10 @@ val list_unsaved : t -> (string * string option) list
 val mark_saved : t -> unit
 
 val restore :
-  loaded:package_database list -> texts:(Path.file -> string option) -> (string * string) list -> t
+  loaded:package_database list ->
+  find_text:(Path.file -> string option) ->
+  (string * string) list ->
+  t
 
 val check : t -> Path.package list -> unit
 val list_file_diagnostics : t -> Path.file -> Diagnostic.t list
@@ -63,5 +66,5 @@ module For_testing : sig
   type observed = { recomputed : string list; collected : string list }
 
   val observe : t -> (unit -> unit) -> observed
-  val root : t -> Instance.key -> unit
+  val add_root : t -> Instance.key -> unit
 end

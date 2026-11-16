@@ -10,11 +10,11 @@ let locate_offset encoding source ~line ~column =
   Source.compute_offset (classify_units encoding) source ~line ~column
 
 let encode_range encoding source (span : Source.span) =
-  let point offset =
+  let encode_point offset =
     let line, character = locate_position encoding source offset in
     Json.Object [ ("line", Json.Int line); ("character", Json.Int character) ]
   in
-  Json.Object [ ("start", point span.start); ("end", point span.stop) ]
+  Json.Object [ ("start", encode_point span.start); ("end", encode_point span.stop) ]
 
 let path_of_uri uri =
   let prefix = "file://" in
@@ -87,7 +87,7 @@ let check ~root encoding (buffers : (string * string) list) =
          buffers)
   in
   let packages = List.map snd (Workspace.list_packages trial) in
-  let file_of path =
+  let find_file path =
     List.find_opt
       (fun file -> Shown_path.normalize (Command_packages.locate_file trial file) = path)
       (Command_packages.list_files trial packages)
@@ -95,7 +95,7 @@ let check ~root encoding (buffers : (string * string) list) =
   let opened =
     List.map
       (fun (uri, path, text) ->
-        (uri, Source.create ~path text, file_of (Shown_path.normalize path)))
+        (uri, Source.create ~path text, find_file (Shown_path.normalize path)))
       buffers
   in
   let database = Workspace.open_database trial in
@@ -129,7 +129,7 @@ let check ~root encoding (buffers : (string * string) list) =
     ]
 
 let read_message input =
-  let rec headers length =
+  let rec read_headers length =
     match In_channel.input_line input with
     | None -> None
     | Some line -> (
@@ -138,10 +138,10 @@ let read_message input =
         else
           match String.split_first ~sep:":" line with
           | Some (name, value) when String.lowercase_ascii name = "content-length" ->
-              headers (int_of_string_opt (String.trim value))
-          | _ -> headers length)
+              read_headers (int_of_string_opt (String.trim value))
+          | _ -> read_headers length)
   in
-  match headers None with
+  match read_headers None with
   | None -> None
   | Some length -> really_input_string input length |> Option.some
 
@@ -253,7 +253,7 @@ let apply_changes encoding text changes =
       | Json.Null, Json.String whole -> whole
       | range, Json.String replacement ->
           let source = Source.create ~path:"" text in
-          let point name =
+          let read_point name =
             match
               ( Json.lookup_field "line" (Json.lookup_field name range),
                 Json.lookup_field "character" (Json.lookup_field name range) )
@@ -261,7 +261,7 @@ let apply_changes encoding text changes =
             | Json.Int line, Json.Int column -> locate_offset encoding source ~line ~column
             | _ -> 0
           in
-          let start = point "start" and stop = point "end" in
+          let start = read_point "start" and stop = read_point "end" in
           String.sub text 0 start ^ replacement ^ String.drop_first stop text
       | _ -> text)
     text changes
@@ -326,13 +326,13 @@ let create ~write ~check =
 
 let serve ~input ~output ~check =
   let server = create ~write:(fun value -> write_message output (Json.to_string value)) ~check in
-  let waiting () =
+  let is_waiting () =
     match Unix.select [ Unix.descr_of_in_channel input ] [] [] 0.0 with
     | readable, _, _ -> readable <> []
     | exception Unix.Unix_error _ -> false
   in
   let rec loop pending =
-    if pending && not (waiting ()) then begin
+    if pending && not (is_waiting ()) then begin
       refresh server;
       loop false
     end
@@ -354,9 +354,9 @@ let serve ~input ~output ~check =
 
 let check_buffers = function
   | root :: encoding :: rest ->
-      let rec pairs = function uri :: text :: rest -> (uri, text) :: pairs rest | _ -> [] in
+      let rec pair_up = function uri :: text :: rest -> (uri, text) :: pair_up rest | _ -> [] in
       let encoding = if encoding = "utf-8" then Utf_8 else Utf_16 in
-      Json.print (check ~root encoding (pairs rest));
+      Json.print (check ~root encoding (pair_up rest));
       0
   | _ -> 2
 
@@ -365,8 +365,8 @@ let check_arguments ~root encoding buffers =
   :: List.concat_map (fun (uri, text) -> [ uri; text ]) buffers
 
 module For_testing = struct
-  let position = locate_position
-  let offset = locate_offset
+  let locate_position = locate_position
+  let locate_offset = locate_offset
 
   type nonrec server = server
 

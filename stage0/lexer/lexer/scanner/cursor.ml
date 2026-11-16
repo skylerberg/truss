@@ -49,7 +49,7 @@ let create ~scan_foreign_escape source diagnostics =
 let is_at_end cursor index = index >= cursor.length
 let lookup_char cursor index = cursor.text.[index]
 let is_at cursor index character = index < cursor.length && cursor.text.[index] = character
-let satisfies cursor index predicate = index < cursor.length && predicate cursor.text.[index]
+let satisfies cursor index is_wanted = index < cursor.length && is_wanted cursor.text.[index]
 
 let report cursor ?notes ?fixes ~code span message =
   Diagnostic.Collector.add cursor.diagnostics

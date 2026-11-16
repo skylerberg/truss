@@ -122,7 +122,7 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
     let span =
       match find_declared_name definition with
       | Some name -> spans.(name.id)
-      | None -> Source.Definition_span.zero_width spans.(definition.id).start
+      | None -> Source.Definition_span.make_zero_width spans.(definition.id).start
     in
     let first = lookups.read_place { key with ordinal = 0 } in
     let first =
@@ -132,7 +132,7 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
       (Printf.sprintf "%s is already defined in %s, so this definition is never used."
          (Path.show key.path) first)
   end;
-  let outcome () =
+  let compute_outcome () =
     let walked = Walk.lookup_section_names state section in
     let resolved =
       {
@@ -156,7 +156,8 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
     | Interface | Contract -> is_walked
     | Body -> is_walked && not (Names.is_broken lookups key Body)
   in
-  if is_parsed || (Walk.lookup_section_names state section).diagnostics <> [] then Some (outcome ())
+  if is_parsed || (Walk.lookup_section_names state section).diagnostics <> [] then
+    Some (compute_outcome ())
   else None
 
 let list_file_diagnostics (lookups : Names.lookups) (path : Path.file) (file : Syntax.file) ~text
@@ -225,15 +226,15 @@ type trait_header = {
 let make_trait_header (definition : Syntax.definition) (resolved : resolved) =
   match definition.kind with
   | Trait { requires; members; _ } ->
-      let member_names select =
+      let list_member_names select =
         List.filter_map (fun (line : Syntax.trait_member Syntax.node) -> select line.kind) members
       in
       Some
         {
           associated =
-            member_names (function Associated_type (name, _) -> Some name.text | _ -> None);
+            list_member_names (function Associated_type (name, _) -> Some name.text | _ -> None);
           capabilities =
-            member_names (function Associated_capability name -> Some name.text | _ -> None);
+            list_member_names (function Associated_capability name -> Some name.text | _ -> None);
           required =
             List.filter_map
               (fun (bound : Syntax.path_type) ->
@@ -241,6 +242,6 @@ let make_trait_header (definition : Syntax.definition) (resolved : resolved) =
                 | Some (Definition (_, path)) -> Some path
                 | _ -> None)
               requires;
-          laws = member_names (function Law law -> Some law.name.text | _ -> None);
+          laws = list_member_names (function Law law -> Some law.name.text | _ -> None);
         }
   | _ -> None

@@ -49,13 +49,13 @@ let lock_changes ~(before : Registry.Lock.t) ~(after : Registry.Lock.t) =
         if Registry.Lock.find after entry.name = None then Some (Left entry) else None)
       before
 
-let holds = function [] -> "" | held -> ", which holds " ^ String.concat ", " held
+let describe_held = function [] -> "" | held -> ", which holds " ^ String.concat ", " held
 
 let describe_change = function
   | Entered entry ->
       Printf.sprintf "`%s` %s enters the build%s." (Path.show_package entry.name)
         (Registry.Version.show entry.version)
-        (holds entry.holds)
+        (describe_held entry.holds)
   | Left entry ->
       Printf.sprintf "`%s` %s leaves the build." (Path.show_package entry.name)
         (Registry.Version.show entry.version)
@@ -129,7 +129,7 @@ let list_signatures snapshot trial =
       | _ -> ())
     (Database.list_dependents database
        (List.sort_uniq Path.compare (List.filter_map Database.Part.find_definition changed)));
-  let text database path =
+  let find_text database path =
     Signatures.find_signature
       (Database.make_name_lookups database [ Path.locate_package path ])
       path
@@ -140,16 +140,16 @@ let list_signatures snapshot trial =
        (fun path readers signatures ->
          {
            path;
-           before = text database path;
-           after = text upgraded path;
+           before = find_text database path;
+           after = find_text upgraded path;
            dependents = List.sort_uniq Path.compare readers;
          }
          :: signatures)
        dependents [])
 
-let new_errors snapshot trial =
+let list_new_errors snapshot trial =
   let own = List.map snd (Workspace.list_packages snapshot) in
-  let diagnostics (snapshot : Workspace.snapshot) =
+  let list_diagnostics (snapshot : Workspace.snapshot) =
     let database = Workspace.open_database snapshot in
     Database.check database own;
     List.map Project.show_problem (Workspace.problems snapshot)
@@ -161,8 +161,8 @@ let new_errors snapshot trial =
             (Database.list_file_diagnostics database file))
         (List.concat_map (Workspace.list_package_files snapshot) own)
   in
-  let now = diagnostics snapshot in
-  List.filter (fun diagnostic -> not (List.mem diagnostic now)) (diagnostics trial)
+  let now = list_diagnostics snapshot in
+  List.filter (fun diagnostic -> not (List.mem diagnostic now)) (list_diagnostics trial)
 
 let encode_signature (changed : signature) =
   Json.Object
@@ -222,7 +222,7 @@ let run ~names =
       else begin
         let trial = Workspace.make_trial snapshot [ (Project.lock_file, Some plan.text) ] in
         let signatures = list_signatures snapshot trial in
-        let broken = new_errors snapshot trial in
+        let broken = list_new_errors snapshot trial in
         Command_packages.write_file (lock_file snapshot) plan.text;
         report ~lock ~signatures ~broken;
         if broken = [] then 0 else 1

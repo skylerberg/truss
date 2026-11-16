@@ -40,7 +40,7 @@ let check_clauses (state : State.state) (name : Syntax.name) clauses =
       clauses
   in
   if is_called_from_other_packages state && requires_and_costs <> [] then begin
-    let named id (path : Path.t) =
+    let record_name id (path : Path.t) =
       let span = State.read_span state id in
       if
         List.exists
@@ -59,11 +59,11 @@ let check_clauses (state : State.state) (name : Syntax.name) clauses =
     in
     Array.iteri
       (fun id (call : Tables.call option) ->
-        match call with Some { callee = Function { path; _ }; _ } -> named id path | _ -> ())
+        match call with Some { callee = Function { path; _ }; _ } -> record_name id path | _ -> ())
       state.tables.calls;
     Array.iteri
       (fun id (resolution : Tables.resolution option) ->
-        match resolution with Some (Global { path; _ }) -> named id path | _ -> ())
+        match resolution with Some (Global { path; _ }) -> record_name id path | _ -> ())
       state.tables.resolutions
   end
 

@@ -25,42 +25,43 @@ let fold_arithmetic st ty (operation : Intrinsic.operation) (left : Lowered.stat
   match (left, right) with
   | Static_scalar (Integer (kind, x)), Static_scalar (Integer (_, y)) -> (
       let bits = 8 * Memory_layout.compute_integer_size kind in
-      let number value =
+      let fold_number value =
         let* kind = find_integer_kind st ty in
         make_static_integer kind value
       in
-      let shift by =
-        if Z.sign y >= 0 && Z.lt y (Z.of_int bits) then number (by x (Z.to_int y)) else None
+      let fold_shift apply_shift =
+        if Z.sign y >= 0 && Z.lt y (Z.of_int bits) then fold_number (apply_shift x (Z.to_int y))
+        else None
       in
       match operation with
-      | Add -> number (Z.add x y)
-      | Subtract -> number (Z.sub x y)
-      | Multiply -> number (Z.mul x y)
-      | Divide -> if Z.equal y Z.zero then None else number (Z.div x y)
-      | Remainder -> if Z.equal y Z.zero then None else number (Z.rem x y)
-      | Bit_and -> number (Z.logand x y)
-      | Bit_or -> number (Z.logor x y)
-      | Bit_xor -> number (Z.logxor x y)
-      | Shift_left -> shift Z.shift_left
-      | Shift_right -> shift Z.shift_right
+      | Add -> fold_number (Z.add x y)
+      | Subtract -> fold_number (Z.sub x y)
+      | Multiply -> fold_number (Z.mul x y)
+      | Divide -> if Z.equal y Z.zero then None else fold_number (Z.div x y)
+      | Remainder -> if Z.equal y Z.zero then None else fold_number (Z.rem x y)
+      | Bit_and -> fold_number (Z.logand x y)
+      | Bit_or -> fold_number (Z.logor x y)
+      | Bit_xor -> fold_number (Z.logxor x y)
+      | Shift_left -> fold_shift Z.shift_left
+      | Shift_right -> fold_shift Z.shift_right
       | _ -> None)
   | Static_scalar (Float64 x), Static_scalar (Float64 y) -> (
-      let number value = Some (Lowered.Static_scalar (Float64 (Int64.bits_of_float value))) in
+      let fold_number value = Some (Lowered.Static_scalar (Float64 (Int64.bits_of_float value))) in
       let x = Int64.float_of_bits x and y = Int64.float_of_bits y in
       match operation with
-      | Add -> number (x +. y)
-      | Subtract -> number (x -. y)
-      | Multiply -> number (x *. y)
-      | Divide -> number (x /. y)
+      | Add -> fold_number (x +. y)
+      | Subtract -> fold_number (x -. y)
+      | Multiply -> fold_number (x *. y)
+      | Divide -> fold_number (x /. y)
       | _ -> None)
   | Static_scalar (Float32 x), Static_scalar (Float32 y) -> (
-      let number value = Some (Lowered.Static_scalar (Float32 (Int32.bits_of_float value))) in
+      let fold_number value = Some (Lowered.Static_scalar (Float32 (Int32.bits_of_float value))) in
       let x = Int32.float_of_bits x and y = Int32.float_of_bits y in
       match operation with
-      | Add -> number (x +. y)
-      | Subtract -> number (x -. y)
-      | Multiply -> number (x *. y)
-      | Divide -> number (x /. y)
+      | Add -> fold_number (x +. y)
+      | Subtract -> fold_number (x -. y)
+      | Multiply -> fold_number (x *. y)
+      | Divide -> fold_number (x /. y)
       | _ -> None)
   | _ -> None
 
@@ -109,14 +110,14 @@ let rec project_static_value (value : Lowered.static_value) (projections : Mir.p
   | _ -> None
 
 let fold_literal st ty (constant : Mir.constant) =
-  let number literal =
+  let fold_number literal =
     match Targets.lower_literal st ty literal with
     | Constant scalar -> Some (Lowered.Static_scalar scalar)
     | _ -> None
   in
   match constant with
-  | Integer integer -> number (Integer_value integer)
-  | Float float -> number (Float_value float)
+  | Integer integer -> fold_number (Integer_value integer)
+  | Float float -> fold_number (Float_value float)
   | Boolean boolean -> make_static_bool boolean
   | Unit -> None
 
@@ -173,7 +174,7 @@ and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowere
     end
     else None
   in
-  let type_of local = Lowering.ground st body.locals.(local).type_ in
+  let ground_local_type local = Lowering.ground st body.locals.(local).type_ in
   let read (place : Mir.place) =
     let* whole =
       match place.root with
@@ -185,25 +186,25 @@ and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowere
     in
     project_static_value whole place.projections
   in
-  let operand : Mir.operand -> Lowered.static_value option = function
+  let fold_operand : Mir.operand -> Lowered.static_value option = function
     | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> read place
     | Constant { value; type_ } -> fold_literal st (Lowering.ground st type_) value
   in
-  let rvalue target : Mir.rvalue -> Lowered.static_value option = function
-    | Operand value | Copy value -> operand value
+  let fold_rvalue target : Mir.rvalue -> Lowered.static_value option = function
+    | Operand value | Copy value -> fold_operand value
     | Operation { operation = Negate; operands = [ inner ]; _ } ->
-        let* inner = operand inner in
+        let* inner = fold_operand inner in
         fold_negation inner
     | Operation { operation; operands = [ left; right ]; _ } ->
-        let* left = operand left in
-        let* right = operand right in
-        fold_arithmetic st (type_of target) operation left right
+        let* left = fold_operand left in
+        let* right = fold_operand right in
+        fold_arithmetic st (ground_local_type target) operation left right
     | Compare { comparison; left; right } ->
-        let* left = operand left in
-        let* right = operand right in
+        let* left = fold_operand left in
+        let* right = fold_operand right in
         fold_comparison comparison left right
     | Not inner -> (
-        let* inner = operand inner in
+        let* inner = fold_operand inner in
         match inner with Static_scalar (Bool x) -> make_static_bool (not x) | _ -> None)
     | Construct { variant; fields; _ } -> (
         let* fields =
@@ -211,7 +212,7 @@ and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowere
             (List.map
                (fun (name, field) ->
                  let* field = field in
-                 let* value = operand field in
+                 let* value = fold_operand field in
                  Some (name, value))
                fields)
         in
@@ -219,7 +220,7 @@ and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowere
         | Some variant -> Some (Lowered.Static_variant (variant, fields))
         | None -> Some (Static_record fields))
     | Array elements ->
-        let* elements = collect_all (List.map operand elements) in
+        let* elements = collect_all (List.map fold_operand elements) in
         Some (Lowered.Static_array elements)
     | Operation _ | Is_variant _ | Convert _ | To_any _ | Function_value _ | Lambda _
     | Value_parameter _ | Specification _ ->
@@ -233,7 +234,7 @@ and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowere
     | Some _ -> None
     | None -> Some ()
   in
-  let call (destination : Mir.place option) (called : Mir.call) =
+  let fold_call (destination : Mir.place option) (called : Mir.call) =
     match (called.callee, called.arguments) with
     | Intrinsic { operation = Storage_with_capacity; type_arguments = [ Type element ] }, _ ->
         assign destination
@@ -243,7 +244,7 @@ and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowere
           Passed { value = Borrow { place = { root = Local storage; projections = [] }; _ }; _ };
           Passed { value = element; _ };
         ] ) -> (
-        let* element = operand element in
+        let* element = fold_operand element in
         match Hashtbl.find_opt locals storage with
         | Some (Static_storage contents) ->
             Hashtbl.replace locals storage
@@ -267,7 +268,7 @@ and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowere
             (List.mapi
                (fun position (argument : Mir.argument) ->
                  match argument with
-                 | Passed { value; _ } -> operand value
+                 | Passed { value; _ } -> fold_operand value
                  | Default ->
                      let* default = List.assoc_opt position defaults in
                      fold_body ~visiting ~depth:(depth - 1) ~steps callee default [])
@@ -277,14 +278,14 @@ and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowere
         assign destination value
     | _ -> None
   in
-  let statement (statement : Mir.Graph.statement) =
+  let fold_statement (statement : Mir.Graph.statement) =
     match statement.kind with
     | Assign { target = { root = Local local; projections = [] } as target; value; _ } ->
-        let* value = rvalue local value in
+        let* value = fold_rvalue local value in
         assign (Some target) value
-    | Call { destination; call = called } -> call destination called
+    | Call { destination; call = called } -> fold_call destination called
     | Assert condition -> (
-        match operand condition with Some (Static_scalar (Bool true)) -> Some () | _ -> None)
+        match fold_operand condition with Some (Static_scalar (Bool true)) -> Some () | _ -> None)
     | Live _ | Dead _ | Loan_start _ | Loan_end _ | Matched _ | Ghost_assert _ | Proof _ -> Some ()
     | Assign _ | Lend _ | Slice _ | Template _ | Echo _ | Provide _ | Provide_end -> None
   in
@@ -293,15 +294,15 @@ and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowere
     else begin
       decr steps;
       let basic = body.blocks.(block) in
-      let* _ = collect_all (List.map statement basic.statements) in
+      let* _ = collect_all (List.map fold_statement basic.statements) in
       match basic.terminator with
       | Goto target -> run target
       | Branch { condition; yes; no; _ } -> (
-          match operand condition with
+          match fold_operand condition with
           | Some (Static_scalar (Bool true)) -> run yes
           | Some (Static_scalar (Bool false)) -> run no
           | _ -> None)
-      | Return (Some value) -> operand value
+      | Return (Some value) -> fold_operand value
       | Return None
       | For _ | Fork _ | Join _ | Iteration_end _ | Yield _ | Cancel _ | Resume _ | Unreachable
       | Written_unreachable | Todo ->

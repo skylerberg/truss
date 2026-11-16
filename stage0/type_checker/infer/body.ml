@@ -150,19 +150,21 @@ let check_defaults state env (written : Syntax.parameter list) (signature : Type
     written
 
 let build_core_contract state (clauses : Syntax.clause list) : Core.contract =
-  let each choose = List.concat_map (fun (clause : Syntax.clause) -> choose clause.kind) clauses in
+  let collect_each choose =
+    List.concat_map (fun (clause : Syntax.clause) -> choose clause.kind) clauses
+  in
   let requires =
-    each (function
+    collect_each (function
       | Requires value ->
           let value = State.build_expression state value in
           [ { Core.value; executable = Form.is_executable state value } ]
       | _ -> [])
   in
   let ensures =
-    each (function Ensures value -> [ State.build_expression state value ] | _ -> [])
+    collect_each (function Ensures value -> [ State.build_expression state value ] | _ -> [])
   in
   let decreases =
-    each (function
+    collect_each (function
       | Decreases measures -> List.map (State.build_expression state) measures
       | _ -> [])
   in
@@ -290,14 +292,15 @@ let check_deserialized_invariants state (elaborated : Interface.Environment.elab
 let check_definition (state : State.state) (elaborated : Interface.Environment.elaborated_interface)
     ~checks_body =
   let definition = state.definition in
-  let broken (part : Resolve.Parts.part) =
+  let is_broken (part : Resolve.Parts.part) =
     Resolve.Names.is_broken state.lookups.interface.names state.key part
     || (part = Body && not checks_body)
   in
-  if not (broken Header) then
+  if not (is_broken Header) then
     match (definition.kind, elaborated.interface) with
     | Function { signature; body = written }, Function_interface lowered_signature ->
-        check_function state ~broken_body:(broken Body) signature (Some written) lowered_signature
+        check_function state ~broken_body:(is_broken Body) signature (Some written)
+          lowered_signature
     | Method_declaration signature, Function_interface lowered_signature ->
         check_function state ~broken_body:true signature None lowered_signature
     | Type_definition { body = type_body; clauses; _ }, Type_interface interface -> (
@@ -320,7 +323,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                     ignore (Expressions.check_expression state env value))
             | Derives _ -> ())
           clauses;
-        let defaulted variant (fields : Syntax.field list) =
+        let list_defaulted variant (fields : Syntax.field list) =
           List.filter_map
             (fun (field : Syntax.field) ->
               match field.kind with
@@ -337,37 +340,37 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                   (fun (variant, name, value) ->
                     (variant, name, State.build_expression state value))
                   (match type_body with
-                  | Fields fields -> defaulted None fields
+                  | Fields fields -> list_defaulted None fields
                   | Variants variants ->
                       List.concat_map
                         (fun (variant : Syntax.variant) ->
-                          defaulted (Some variant.name.text)
+                          list_defaulted (Some variant.name.text)
                             (Option.value ~default:[] variant.fields))
                         variants
                   | Type_todo -> [])
               in
-              let clause choose =
+              let collect_clause choose =
                 List.filter_map (fun (clause : Syntax.type_clause) -> choose clause.kind) clauses
               in
               Type
                 {
                   defaults;
                   invariants =
-                    clause (function
+                    collect_clause (function
                       | Type_invariant value ->
                           let value = State.build_expression state value in
                           Some { Core.value; executable = Form.is_executable state value }
                       | _ -> None);
                   potential =
                     (match
-                       clause (function
+                       collect_clause (function
                          | Potential value -> Some (State.build_expression state value)
                          | _ -> None)
                      with
                     | first :: _ -> Some first
                     | [] -> None);
                 });
-        let defaults (fields : Syntax.field list) (lowered_fields : Types.field list) =
+        let check_defaults (fields : Syntax.field list) (lowered_fields : Types.field list) =
           List.iter
             (fun (field : Syntax.field) ->
               match field.kind with
@@ -387,7 +390,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
             fields
         in
         match (type_body, interface.shape) with
-        | Fields fields, Record lowered_fields -> defaults fields lowered_fields
+        | Fields fields, Record lowered_fields -> check_defaults fields lowered_fields
         | Variants variants, Sum lowered_variants ->
             List.iter
               (fun (variant : Syntax.variant) ->
@@ -399,7 +402,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                       lowered_variants )
                 with
                 | Some fields, Some { fields = Some lowered_fields; _ } ->
-                    defaults fields lowered_fields
+                    check_defaults fields lowered_fields
                 | _ -> ())
               variants
         | _ -> ())
@@ -414,7 +417,8 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                       (fun index (line : Syntax.trait_member Syntax.node) ->
                         match line.kind with
                         | Law law
-                          when not (broken (Member_header index) || broken (Member_body index)) ->
+                          when not (is_broken (Member_header index) || is_broken (Member_body index))
+                          ->
                             let parameters =
                               List.filter_map
                                 (fun (parameter : Syntax.parameter) : Core.parameter option ->
@@ -445,7 +449,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                       members)));
         List.iteri
           (fun index (line : Syntax.trait_member Syntax.node) ->
-            if not (broken (Member_header index)) then
+            if not (is_broken (Member_header index)) then
               match line.kind with
               | Law law ->
                   let env : State.env = { no_output with specification = true; self = Some self } in
@@ -463,7 +467,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                       State.run_in_statement state env (State.read_span state requirement.id)
                         (fun () -> Expressions.check state env requirement Types.bool))
                     law.requires;
-                  if not (broken (Member_body index)) then
+                  if not (is_broken (Member_body index)) then
                     check_body state { env with output = Some (Returns Types.bool) } law.body
               | Associated_type _ | Associated_capability _ | Trait_member_error -> ())
           members
@@ -472,7 +476,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
           Some
             (fun ~holds_body ->
               Constant (if holds_body then Some (State.build_expression state value) else None));
-        if not (broken Body) then begin
+        if not (is_broken Body) then begin
           let env =
             {
               constant_expression with
@@ -489,7 +493,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
           Some
             (fun ~holds_body ->
               Test (if holds_body then Some (State.build_block state written) else None));
-        if not (broken Body) then
+        if not (is_broken Body) then
           check_body state { no_output with output = Some (Returns Types.unit) } written
     | Theorem { parameters; clauses; body = written; _ }, Theorem_interface signature ->
         declare_parameters state parameters signature;
@@ -508,7 +512,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                   contract;
                   body = (if holds_body then Some (State.build_block state written) else None);
                 });
-        if not (broken Body) then check_body state env written
+        if not (is_broken Body) then check_body state env written
     | Law_proof { body = written; _ }, Law_proof_interface { trait; law; for_type; _ } ->
         (match Interface.Definition.read_trait_interface state.lookups.interface trait.trait with
         | Some interface ->
@@ -542,7 +546,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                   parameters;
                   body = (if holds_body then Some (State.build_block state written) else None);
                 });
-        if not (broken Body) then
+        if not (is_broken Body) then
           check_body state
             { no_output with specification = true; output = Some (Returns Types.unit) }
             written
@@ -555,93 +559,102 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                   parameters = [];
                   body = (if holds_body then Some (State.build_block state written) else None);
                 });
-        if not (broken Body) then
+        if not (is_broken Body) then
           check_body state
             { no_output with specification = true; output = Some (Returns Types.unit) }
             written
     | _ -> ()
 
 let finalize (state : State.state) =
-  let final_type = State.finalize_type state and argument = State.finalize_argument state in
-  let trait (reference : Types.trait_reference) =
+  let finalize_type = State.finalize_type state
+  and finalize_argument = State.finalize_argument state in
+  let finalize_trait (reference : Types.trait_reference) =
     {
       reference with
-      trait_arguments = List.map argument reference.trait_arguments;
-      associated = List.map (fun (name, type_) -> (name, final_type type_)) reference.associated;
+      trait_arguments = List.map finalize_argument reference.trait_arguments;
+      associated = List.map (fun (name, type_) -> (name, finalize_type type_)) reference.associated;
     }
   in
-  let evidence : Tables.evidence -> Tables.evidence = function
+  let finalize_evidence : Tables.evidence -> Tables.evidence = function
     | Impl { impl; arguments } ->
         Impl
           {
             impl;
-            arguments = List.map (fun (parameter, value) -> (parameter, argument value)) arguments;
+            arguments =
+              List.map (fun (parameter, value) -> (parameter, finalize_argument value)) arguments;
           }
     | other -> other
   in
-  let call (written : Tables.call) : Tables.call =
+  let finalize_call (written : Tables.call) : Tables.call =
     {
       written with
       callee =
         (match written.callee with
         | Function { path; type_arguments } ->
-            Function { path; type_arguments = List.map argument type_arguments }
+            Function { path; type_arguments = List.map finalize_argument type_arguments }
         | Trait_method method_ ->
             Trait_method
               {
                 method_ with
-                trait = trait method_.trait;
-                self_type = final_type method_.self_type;
-                type_arguments = List.map argument method_.type_arguments;
-                evidence = evidence method_.evidence;
+                trait = finalize_trait method_.trait;
+                self_type = finalize_type method_.self_type;
+                type_arguments = List.map finalize_argument method_.type_arguments;
+                evidence = finalize_evidence method_.evidence;
               }
         | Constructor constructor ->
             Constructor
-              { constructor with type_arguments = List.map argument constructor.type_arguments }
+              {
+                constructor with
+                type_arguments = List.map finalize_argument constructor.type_arguments;
+              }
         | Intrinsic intrinsic ->
-            Intrinsic { intrinsic with type_arguments = List.map argument intrinsic.type_arguments }
+            Intrinsic
+              {
+                intrinsic with
+                type_arguments = List.map finalize_argument intrinsic.type_arguments;
+              }
         | other -> other);
       uses = State.finalize_capabilities state written.uses;
-      callee_result = final_type written.callee_result;
+      callee_result = finalize_type written.callee_result;
     }
   in
   let tables = state.tables in
   let update table transform =
     Array.iteri (fun index entry -> table.(index) <- Option.map transform entry) table
   in
-  update tables.types final_type;
-  update tables.local_types final_type;
-  update tables.scrutinee_types final_type;
-  update tables.calls call;
+  update tables.types finalize_type;
+  update tables.local_types finalize_type;
+  update tables.scrutinee_types finalize_type;
+  update tables.calls finalize_call;
   update tables.resolutions (function
     | Tables.Global { path; type_arguments } ->
-        Tables.Global { path; type_arguments = List.map argument type_arguments }
-    | Field_access { type_; field } -> Field_access { type_ = final_type type_; field }
-    | Variant_value { type_; variant } -> Variant_value { type_ = final_type type_; variant }
-    | Type_name type_ -> Type_name (final_type type_)
+        Tables.Global { path; type_arguments = List.map finalize_argument type_arguments }
+    | Field_access { type_; field } -> Field_access { type_ = finalize_type type_; field }
+    | Variant_value { type_; variant } -> Variant_value { type_ = finalize_type type_; variant }
+    | Type_name type_ -> Type_name (finalize_type type_)
     | other -> other);
   update tables.loops (function
     | Tables.Integer_range { element; inclusive } ->
-        Tables.Integer_range { element = final_type element; inclusive }
+        Tables.Integer_range { element = finalize_type element; inclusive }
     | Elements { count; element; lends } ->
-        Elements { count = call count; element = call element; lends }
+        Elements { count = finalize_call count; element = finalize_call element; lends }
     | Pulled { cursor; cursor_call; remaining } ->
         Pulled
           {
-            cursor = final_type cursor;
-            cursor_call = Option.map call cursor_call;
-            remaining = Option.map call remaining;
+            cursor = finalize_type cursor;
+            cursor_call = Option.map finalize_call cursor_call;
+            remaining = Option.map finalize_call remaining;
           });
   update tables.patterns (function
     | Tables.Variant_pattern { type_; variant } ->
-        Tables.Variant_pattern { type_ = final_type type_; variant }
-    | Record_pattern { type_ } -> Record_pattern { type_ = final_type type_ }
+        Tables.Variant_pattern { type_ = finalize_type type_; variant }
+    | Record_pattern { type_ } -> Record_pattern { type_ = finalize_type type_ }
     | other -> other);
   update tables.templates (fun (template : Tables.template) ->
       {
         template with
-        from_template = Option.map call template.from_template;
-        part_conversions = List.map (Option.map call) template.part_conversions;
+        from_template = Option.map finalize_call template.from_template;
+        part_conversions = List.map (Option.map finalize_call) template.part_conversions;
       })
 
 let find_integer_literal_range bounds =
@@ -731,17 +744,17 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
     (fun type_ ->
       find_integer_literal_range
         (Interface.Properties.list_known_bounds lookups.interface
-           ~bounds:(State.lookup_bounds state) type_));
+           ~list_bounds:(State.lookup_bounds state) type_));
   check_definition state elaborated ~checks_body;
   state.diagnostics <- Interface.Elaborator.list_diagnostics context @ state.diagnostics;
   state.diagnostics <-
     Interface.Check.list_bound_diagnostics lookups.interface ~package:state.package
-      ~bounds:(State.lookup_bounds state) ~spans
+      ~list_bounds:(State.lookup_bounds state) ~spans
       (Interface.Elaborator.list_named_types context)
     @ state.diagnostics;
   finalize state;
   Exported_parts.check state;
-  let any_type unwanted =
+  let has_any_type is_unwanted =
     let contains table =
       Seq.exists
         (function
@@ -750,7 +763,7 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
               ignore
                 (Types.map
                    (fun part ->
-                     if unwanted part then has_unwanted := true;
+                     if is_unwanted part then has_unwanted := true;
                      None)
                    type_);
               !has_unwanted
@@ -764,13 +777,13 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
     state.diagnostics = []
     && (not (Resolve.Names.is_broken lookups.interface.names key Header))
     && (not (checks_body && Resolve.Names.is_broken lookups.interface.names key Body))
-    && not (any_type Types.is_error)
+    && not (has_any_type Types.is_error)
   in
   let build () : Core.t =
     state.form.next_node_id <- 0;
     state.form.next_synthetic_local <- 0;
     let checked = state.tables in
-    if any_type (fun part -> part = Types.Hole) then begin
+    if has_any_type (fun part -> part = Types.Hole) then begin
       state.form.tables_with_holes <- Some checked;
       state.tables <- Tables.copy checked;
       finalize state

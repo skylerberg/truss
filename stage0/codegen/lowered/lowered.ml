@@ -24,7 +24,7 @@ let find_struct_field (layout : Memory_layout.t) name =
 
 let find_variant_field_type env sum variant field =
   let layout = Memory_layout.of_type env sum in
-  let in_payload (payload : Memory_layout.t) =
+  let find_in_payload (payload : Memory_layout.t) =
     match payload.form with
     | Struct fields -> find_field fields field
     | Scalar (Pointer (Block _)) ->
@@ -38,13 +38,13 @@ let find_variant_field_type env sum variant field =
           (fun (variant_layout : Memory_layout.variant) -> variant_layout.name = variant)
           variants
       with
-      | Some variant_layout -> in_payload variant_layout.payload
+      | Some variant_layout -> find_in_payload variant_layout.payload
       | None -> raise_bug "%s has no variant %s" (Ground.to_string sum) variant)
-  | Niche_encoded { dataful; _ } when dataful.name = variant -> in_payload dataful.payload
+  | Niche_encoded { dataful; _ } when dataful.name = variant -> find_in_payload dataful.payload
   | Niche_encoded _ | Tag_only _ | Zero_size -> None
   | _ -> raise_bug "a variant of %s, which is not a sum type" (Ground.to_string sum)
 
-let find_projection_type env ~environment ty projection =
+let find_projection_type env ~list_environment ty projection =
   let result =
     match (projection, ty) with
     | Deref, Pointer { target; _ } -> Some target
@@ -56,7 +56,7 @@ let find_projection_type env ~environment ty projection =
         | Zero_size -> None
         | _ -> raise_bug "field %s of %s, which is not a record" name (Ground.to_string record))
     | Field name, Environment nested_index -> (
-        match List.assoc_opt name (environment nested_index) with
+        match List.assoc_opt name (list_environment nested_index) with
         | Some ty -> Some ty
         | None -> raise_bug "environment %d has no field %s" nested_index name)
     | Variant_field { variant; field }, Value sum -> find_variant_field_type env sum variant field

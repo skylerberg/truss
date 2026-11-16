@@ -109,7 +109,7 @@ let build_locked_entry context (key : Instance.key) ~capability ~name : Emit_c.B
       capability_signature.parameters
   in
   Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
-  let outer index : Lowered.operand =
+  let load_outer index : Lowered.operand =
     let outer = Emit_c.Builder.allocate_local builder Convention.evidence in
     Emit_c.Builder.emit builder
       (Call
@@ -123,7 +123,7 @@ let build_locked_entry context (key : Instance.key) ~capability ~name : Emit_c.B
          });
     Copy (Lowered.make_local_place outer)
   in
-  let implementation = outer 0 and tasks = outer 1 in
+  let implementation = load_outer 0 and tasks = load_outer 1 in
   let address = Emit_c.Builder.allocate_local builder (Raw (Pointer Opaque)) in
   Emit_c.Builder.emit builder
     (Call
@@ -138,7 +138,7 @@ let build_locked_entry context (key : Instance.key) ~capability ~name : Emit_c.B
   in
   Emit_c.Builder.emit builder
     (Assign (mutex, Convert (Copy (Lowered.make_local_place address), Integer UInt64)));
-  let tasks_call name =
+  let call_tasks name =
     let slot, signature =
       Targets.lookup_capability_method context (Well_known.make_path Tasks) name
     in
@@ -162,7 +162,7 @@ let build_locked_entry context (key : Instance.key) ~capability ~name : Emit_c.B
     | Returns ty -> Monomorphic.ground context.monomorphic [] ty
     | _ -> Definitions.raise_bug "a capability method that lends"
   in
-  tasks_call "lock";
+  call_tasks "lock";
   Emit_c.Builder.emit builder
     (Call
        {
@@ -174,7 +174,7 @@ let build_locked_entry context (key : Instance.key) ~capability ~name : Emit_c.B
              parameter_places;
          result = Convention.make_destination result (choose_result_place st result_ty);
        });
-  tasks_call "unlock";
+  call_tasks "unlock";
   Emit_c.Builder.build st.builder
     (Lowering.finish_function st
        ~returns:(capability_signature.output <> Returns Never)

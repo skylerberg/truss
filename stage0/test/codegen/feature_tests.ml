@@ -1,5 +1,5 @@
 let () =
-  Codegen_support.passes
+  Codegen_support.expect_pass
     "a derived ordering compares fields in declaration order, and a construction evaluates its \
      fields in the order written"
     Fixtures.Feature.entry_ordering_with_counted_reads;
@@ -7,10 +7,12 @@ let () =
     "derived methods satisfy the laws of their traits, and a sum type orders by variant" (fun () ->
       Codegen_support.expect_output Fixtures.Feature.derived_light_and_record_methods
         (String.concat "" (List.init 3 (Printf.sprintf "test %d passed\n"))));
-  Codegen_support.passes "an assignment through an index inserts a map's key or replaces its value"
+  Codegen_support.expect_pass
+    "an assignment through an index inserts a map's key or replaces its value"
     Fixtures.Feature.map_assignment_test;
-  Codegen_support.passes "a cursor gives each value and then None" Fixtures.Feature.count_to_cursor;
-  Codegen_support.passes "a cursor's next uses the implementation provided where it is called"
+  Codegen_support.expect_pass "a cursor gives each value and then None"
+    Fixtures.Feature.count_to_cursor;
+  Codegen_support.expect_pass "a cursor's next uses the implementation provided where it is called"
     Fixtures.Feature.meter_cursor_under_provide;
   Codegen_support.test
     "an associated capability set gives each instance the evidence that its type needs" (fun () ->
@@ -38,54 +40,57 @@ let () =
   Codegen_support.test "a lending method is called through an `any` value" (fun () ->
       Codegen_support.expect_output Fixtures.Feature.titled_through_any
         (String.concat "" (List.init 2 (Printf.sprintf "test %d passed\n"))));
-  Codegen_support.passes
+  Codegen_support.expect_pass
     "a lending method lends a local it owns, which lives until the caller's statement ends"
     Fixtures.Feature.holder_lending_an_owned_label;
-  Codegen_support.passes "a lending method owns a value on one of its paths and not on another"
+  Codegen_support.expect_pass "a lending method owns a value on one of its paths and not on another"
     Fixtures.Feature.pair_chosen;
-  Codegen_support.passes
+  Codegen_support.expect_pass
     "a lending method lends from a `return` inside a loop, while it owns a value"
     Fixtures.Feature.bag_first_matching;
-  Codegen_support.passes "a `lends mut` method lends on two paths, and owns a local on one of them"
+  Codegen_support.expect_pass
+    "a `lends mut` method lends on two paths, and owns a local on one of them"
     Fixtures.Feature.slots_slot;
-  Codegen_support.passes
+  Codegen_support.expect_pass
     "a name that a `while` condition binds from a lent value lives until the body ends"
     Fixtures.Feature.while_condition_binding_a_lent_label;
-  Codegen_support.passes "sets and maps keep one of each key, in order"
+  Codegen_support.expect_pass "sets and maps keep one of each key, in order"
     Fixtures.Feature.set_and_map_test;
-  Codegen_support.passes "strings, constants, and ranges of constants are patterns"
+  Codegen_support.expect_pass "strings, constants, and ranges of constants are patterns"
     Fixtures.Feature.command_patterns;
-  Codegen_support.passes "floats display as the shortest decimal that reads back"
+  Codegen_support.expect_pass "floats display as the shortest decimal that reads back"
     Fixtures.Feature.float_display_test;
-  Codegen_support.passes "a range is a value with its ends" Fixtures.Feature.range_width;
-  Codegen_support.passes "a loop that binds an owned value each time frees each one once"
+  Codegen_support.expect_pass "a range is a value with its ends" Fixtures.Feature.range_width;
+  Codegen_support.expect_pass "a loop that binds an owned value each time frees each one once"
     Fixtures.Feature.pop_loop_test;
-  Codegen_support.passes "provide runs its body with the implementations given, nested and narrowed"
+  Codegen_support.expect_pass
+    "provide runs its body with the implementations given, nested and narrowed"
     Fixtures.Feature.nested_and_narrowed_provides;
-  Codegen_support.passes "tagged characters are numbers, in values, constants, and patterns"
+  Codegen_support.expect_pass "tagged characters are numbers, in values, constants, and patterns"
     Fixtures.Feature.tagged_characters;
-  Codegen_support.passes "a tagged string gives its tag a template of its text and parts"
+  Codegen_support.expect_pass "a tagged string gives its tag a template of its text and parts"
     Fixtures.Feature.sum_template;
-  Codegen_support.passes "a constant that needs its code run is evaluated while compiling"
+  Codegen_support.expect_pass "a constant that needs its code run is evaluated while compiling"
     Fixtures.Feature.constants_computed_while_compiling;
-  Codegen_support.passes
+  Codegen_support.expect_pass
     "a program of many features together: generics, any, lambdas, ?, Map, mut loops"
     Fixtures.Feature.many_features_together;
-  Codegen_support.passes "a read-only parameter's default with something to drop is dropped once"
+  Codegen_support.expect_pass
+    "a read-only parameter's default with something to drop is dropped once"
     Fixtures.Feature.total_with_a_list_default;
-  Codegen_support.passes "names an is test binds are used where it holds"
+  Codegen_support.expect_pass "names an is test binds are used where it holds"
     Fixtures.Feature.describe_with_is_tests;
-  Codegen_support.passes "a guard that fails leaves the value for the next arm"
+  Codegen_support.expect_pass "a guard that fails leaves the value for the next arm"
     Fixtures.Feature.classify_with_a_guard;
-  Codegen_support.passes "an expression a pattern looks into is evaluated once"
+  Codegen_support.expect_pass "an expression a pattern looks into is evaluated once"
     Fixtures.Feature.match_on_a_counted_index;
-  Codegen_support.passes "a slice of a temporary evaluates the temporary once"
+  Codegen_support.expect_pass "a slice of a temporary evaluates the temporary once"
     Fixtures.Feature.slice_of_a_counted_temporary
 
 let () =
-  Codegen_support.passes "a list grows as it is pushed and keeps its elements"
+  Codegen_support.expect_pass "a list grows as it is pushed and keeps its elements"
     Fixtures.Feature.list_grown_to_a_thousand;
-  Codegen_support.passes "a var bound to a string literal holds a copy"
+  Codegen_support.expect_pass "a var bound to a string literal holds a copy"
     Fixtures.Feature.var_of_a_string_literal_pushed
 
 let () =

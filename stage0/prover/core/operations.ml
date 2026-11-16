@@ -73,7 +73,8 @@ let convert_from_integer context frame (site : Invocation.site) term =
     (Facts.make_in_range ty term);
   term
 
-let spend (context : State.context) (frame : State.frame) (amount : Costs.counter -> Logic.term) =
+let spend (context : State.context) (frame : State.frame) (amount_of : Costs.counter -> Logic.term)
+    =
   if context.counters = [] then frame
   else
     {
@@ -81,7 +82,7 @@ let spend (context : State.context) (frame : State.frame) (amount : Costs.counte
       State.spent =
         List.map
           (fun (counter, term) ->
-            if List.mem counter context.counters then (counter, Costs.plus term (amount counter))
+            if List.mem counter context.counters then (counter, Costs.plus term (amount_of counter))
             else (counter, term))
           frame.spent;
     }
@@ -106,7 +107,7 @@ let convert_to_any context frame (site : Invocation.site) =
   (frame, Facts.arrive context frame "any" (Facts.substitute_type context frame site.type_))
 
 let compute_current_bounds (context : State.context) : Interface.Impls.bounds =
-  let impl_generics path =
+  let list_impl_generics path =
     match Interface.Definition.read_impl_interface context.lookups.interface path with
     | Some interface -> interface.impl_generics
     | None -> []
@@ -114,7 +115,7 @@ let compute_current_bounds (context : State.context) : Interface.Impls.bounds =
   let generics =
     match context.current with
     | Method { owner; _ } -> (
-        impl_generics owner
+        list_impl_generics owner
         @
         match Interface.Impls.read_signature context.lookups.interface context.current with
         | Some signature -> signature.generics
@@ -122,18 +123,18 @@ let compute_current_bounds (context : State.context) : Interface.Impls.bounds =
     | current -> (
         match Interface.Impls.read_signature context.lookups.interface current with
         | Some signature -> signature.generics
-        | None -> impl_generics current)
+        | None -> list_impl_generics current)
   in
   fun parameter -> Types.list_bounds generics parameter
 
 let find_concrete_impl (context : State.context) (trait : Types.trait_reference) (ty : Types.ty) =
   match ty with
   | Types.Named { path; _ } ->
-      let own impl =
+      let is_own impl =
         Path.equal impl context.current
         || match context.current with Method { owner; _ } -> Path.equal owner impl | _ -> false
       in
-      let bounds = compute_current_bounds context in
+      let list_bounds = compute_current_bounds context in
       let packages =
         List.sort_uniq compare [ Path.locate_package context.current; Path.locate_package path ]
       in
@@ -155,12 +156,12 @@ let find_concrete_impl (context : State.context) (trait : Types.trait_reference)
                           interface.implements.trait_arguments trait.trait_arguments)
                   with
                   | Some arguments
-                    when own impl
+                    when is_own impl
                          || List.for_all
                               (fun (argument, bound) ->
                                 Option.is_some
-                                  (Interface.Impls.implements context.lookups.interface ~bounds
-                                     argument bound))
+                                  (Interface.Impls.find_evidence context.lookups.interface
+                                     ~list_bounds argument bound))
                               (Interface.Impls.list_required_bounds interface.impl_generics
                                  arguments) ->
                       Some (impl, arguments)
@@ -180,7 +181,7 @@ let find_written_equal context ty left right =
   | Some (((Impl _ : Path.t) as impl), arguments) -> (
       let evidence : Core.evidence = Impl { impl; arguments } in
       match
-        Contracts.method_contract context.lookups
+        Contracts.find_method_contract context.lookups
           { trait = Facts.equal_trait; trait_arguments = []; associated = [] }
           "equal" Read evidence
       with
@@ -284,23 +285,23 @@ let make_overflow_fix context frame ty (operation : Intrinsic.operation) left ri
         match (right, find_parameter_spelling context frame left) with
         | Logic.Integer limit, Some text -> (
             let magnitude = Z.to_string (Z.abs limit) in
-            let clause relation bound spelled =
+            let spell_clause relation bound spelled =
               if Z.leq low bound && Z.leq bound high then
                 Some (Printf.sprintf "%s %s %s" text relation spelled)
               else None
             in
             match operation with
             | Add when Z.sign limit > 0 ->
-                clause "<=" (Z.sub high limit) (name ^ ".maximum - " ^ magnitude)
+                spell_clause "<=" (Z.sub high limit) (name ^ ".maximum - " ^ magnitude)
             | Add when Z.sign limit < 0 ->
-                clause ">=" (Z.sub low limit) (name ^ ".minimum + " ^ magnitude)
-            | Subtract when Z.sign limit > 0 && is_unsigned -> clause ">=" limit magnitude
+                spell_clause ">=" (Z.sub low limit) (name ^ ".minimum + " ^ magnitude)
+            | Subtract when Z.sign limit > 0 && is_unsigned -> spell_clause ">=" limit magnitude
             | Subtract when Z.sign limit > 0 ->
-                clause ">=" (Z.add low limit) (name ^ ".minimum + " ^ magnitude)
+                spell_clause ">=" (Z.add low limit) (name ^ ".minimum + " ^ magnitude)
             | Subtract when Z.sign limit < 0 ->
-                clause "<=" (Z.add high limit) (name ^ ".maximum - " ^ magnitude)
+                spell_clause "<=" (Z.add high limit) (name ^ ".maximum - " ^ magnitude)
             | Multiply when Z.sign limit > 0 && is_unsigned ->
-                clause "<=" (Z.div high limit) (name ^ ".maximum / " ^ magnitude)
+                spell_clause "<=" (Z.div high limit) (name ^ ".maximum / " ^ magnitude)
             | _ -> None)
         | _ -> None
       in
@@ -336,7 +337,7 @@ let make_negation_fix context frame ty inner =
       Facts.add_requires context frame [ Text (Printf.sprintf "%s != %s.minimum" text name) ]
   | _ -> []
 
-let arithmetic context (frame : State.frame) (site : Invocation.site) ty
+let translate_arithmetic context (frame : State.frame) (site : Invocation.site) ty
     (operation : Intrinsic.operation) left right =
   let source = frame.source in
   let location = Facts.locate context frame.source site.origin in
@@ -472,12 +473,12 @@ let declare_power context frame base exponent =
   | _ -> ());
   Logic.Apply (Logic.Symbol.Cost_power, [ base; exponent ])
 
-let primitive_operation context (frame : State.frame) ~(site : Invocation.site)
+let translate_primitive_operation context (frame : State.frame) ~(site : Invocation.site)
     (operation : Intrinsic.operation) types operands ~(arguments : Core.origin option list)
     ~fallback =
   let source = frame.source in
   let location = Facts.locate context frame.source site.origin in
-  let argument index = Option.join (List.nth_opt arguments index) in
+  let find_argument index = Option.join (List.nth_opt arguments index) in
   let is_float = match types with ty :: _ -> Facts.find_float_format ty <> None | [] -> false in
   let exact operation left right =
     match (operation : Intrinsic.operation) with
@@ -493,7 +494,7 @@ let primitive_operation context (frame : State.frame) ~(site : Invocation.site)
   | Divide, _ :: _, [ left; right ] when is_float -> make_float_operation "fp.div" left right
   | Negate, _ :: _, [ value ] when is_float -> Logic.Operation ("fp.neg", [ value ])
   | (Add | Subtract | Multiply | Divide | Remainder), ty :: _, [ left; right ] when not is_float ->
-      let result = arithmetic context frame site ty operation left right in
+      let result = translate_arithmetic context frame site ty operation left right in
       if Facts.find_bounds ty <> None then
         Facts.assume context frame (Facts.make_in_range ty result);
       result
@@ -516,7 +517,7 @@ let primitive_operation context (frame : State.frame) ~(site : Invocation.site)
       (match find_width ty with
       | Some bits ->
           let at_amount, text, fixes =
-            match argument 1 with
+            match find_argument 1 with
             | Some amount ->
                 ( Facts.locate context frame.source amount,
                   [ State.Text "The shift amount `"; Facts.quote source amount; Text "`" ],

@@ -1,14 +1,14 @@
-let form head parts = "(" ^ String.concat " " (List.filter (( <> ) "") (head :: parts)) ^ ")"
-let optional print = function Some value -> print value | None -> ""
+let make_form head parts = "(" ^ String.concat " " (List.filter (( <> ) "") (head :: parts)) ^ ")"
+let show_optional print = function Some value -> print value | None -> ""
 let list print values = List.map print values
 
-let path (path : Syntax.path) =
+let show_path (path : Syntax.path) =
   String.concat "::"
     (List.map (fun (name : Syntax.name) -> name.text) (path.modules @ [ path.last ]))
 
-let mode = function Syntax.Mut -> "mut" | Own -> "own"
+let show_mode = function Syntax.Mut -> "mut" | Own -> "own"
 
-let intended_keyword = function
+let show_intended_keyword = function
   | Syntax.Intended_function -> "fn"
   | Intended_constant -> "let"
   | Intended_type -> "type"
@@ -16,7 +16,7 @@ let intended_keyword = function
   | Intended_capability -> "capability"
   | Intended_theorem -> "theorem"
 
-let operation = function
+let show_operation = function
   | Syntax.Arithmetic Multiply -> "*"
   | Arithmetic Divide -> "/"
   | Arithmetic Remainder -> "%"
@@ -28,8 +28,8 @@ let operation = function
   | Bitwise Bit_xor -> "^"
   | Bitwise Bit_or -> "|"
 
-let binary = function
-  | Syntax.Operation written -> operation written
+let show_binary = function
+  | Syntax.Operation written -> show_operation written
   | Comparison Equal -> "=="
   | Comparison Not_equal -> "!="
   | Comparison Less -> "<"
@@ -40,7 +40,9 @@ let binary = function
   | Connective Or -> "||"
   | Connective Implies -> "==>"
 
-let assignment = function Syntax.Assign -> "=" | Compound written -> operation written ^ "="
+let show_assignment = function
+  | Syntax.Assign -> "="
+  | Compound written -> show_operation written ^ "="
 
 let escape value =
   let buffer = Buffer.create (String.length value + 2) in
@@ -53,105 +55,107 @@ let escape value =
     value;
   Buffer.contents buffer
 
-let rec type_expression (type_ : Syntax.type_expression) =
+let rec show_type_expression (type_ : Syntax.type_expression) =
   match type_.kind with
-  | Path_type path_type -> path_type_text path_type
+  | Path_type path_type -> show_path_type path_type
   | Self_type None -> "Self"
   | Self_type (Some name) -> "Self." ^ name.text
   | Associated (parameter, name) -> parameter.text ^ "." ^ name.text
-  | Any_type path_type -> form "any" [ path_type_text path_type ]
-  | Function_type function_type_ -> function_type function_type_
+  | Any_type path_type -> make_form "any" [ show_path_type path_type ]
+  | Function_type function_type_ -> show_function_type function_type_
   | Type_error -> "error"
 
-and path_type_text (path_type : Syntax.path_type) =
-  path path_type.path
+and show_path_type (path_type : Syntax.path_type) =
+  show_path path_type.path
   ^
   match path_type.arguments with
   | [] -> ""
-  | arguments -> "[" ^ String.concat ", " (list type_argument arguments) ^ "]"
+  | arguments -> "[" ^ String.concat ", " (list show_type_argument arguments) ^ "]"
 
-and type_argument = function
-  | Type_argument type_ -> type_expression type_
+and show_type_argument = function
+  | Type_argument type_ -> show_type_expression type_
   | Count (value, _) -> Z.to_string value
   | Count_name name -> name.text
-  | Constraint (name, type_) -> name.text ^ " = " ^ type_expression type_
+  | Constraint (name, type_) -> name.text ^ " = " ^ show_type_expression type_
 
-and function_type { inputs; output; clauses } =
-  form "fn"
+and show_function_type { inputs; output; clauses } =
+  make_form "fn"
     ([
-       form ""
+       make_form ""
          (List.map
             (fun (input : Syntax.function_input) ->
               (match input.name with Some name -> name.text ^ ": " | None -> "")
-              ^ (match input.mode with Some input_mode -> mode input_mode ^ " " | None -> "")
-              ^ type_expression input.type_)
+              ^ (match input.mode with Some input_mode -> show_mode input_mode ^ " " | None -> "")
+              ^ show_type_expression input.type_)
             inputs);
      ]
-    @ [ optional (fun output -> "-> " ^ type_expression output) output ]
-    @ list clause clauses)
+    @ [ show_optional (fun output -> "-> " ^ show_type_expression output) output ]
+    @ list show_clause clauses)
 
-and generic (parameter : Syntax.generic_parameter) =
+and show_generic (parameter : Syntax.generic_parameter) =
   match parameter.kind with
   | Type_parameter (name, []) -> name.text
   | Type_parameter (name, bounds) ->
-      name.text ^ ": " ^ String.concat " + " (list path_type_text bounds)
-  | Value_parameter (name, type_) -> name.text ^ ": " ^ type_expression type_
+      name.text ^ ": " ^ String.concat " + " (list show_path_type bounds)
+  | Value_parameter (name, type_) -> name.text ^ ": " ^ show_type_expression type_
   | Capability_parameter name -> "capability " ^ name.text
   | Generic_error -> "error"
 
-and generics = function
+and show_generics = function
   | [] -> ""
-  | parameters -> "[" ^ String.concat ", " (list generic parameters) ^ "]"
+  | parameters -> "[" ^ String.concat ", " (list show_generic parameters) ^ "]"
 
-and capability_reference (reference : Syntax.capability_reference) =
+and show_capability_reference (reference : Syntax.capability_reference) =
   match reference.kind with
-  | Capability_path path_type -> path_type_text path_type
+  | Capability_path path_type -> show_path_type path_type
   | Self_capabilities name -> "Self." ^ name.text
   | Associated_capabilities (parameter, name) -> parameter.text ^ "." ^ name.text
 
-and clause (clause : Syntax.clause) =
+and show_clause (clause : Syntax.clause) =
   match clause.kind with
-  | Uses capabilities -> form "uses" (list capability_reference capabilities)
-  | Requires value -> form "requires" [ expression value ]
-  | Ensures value -> form "ensures" [ expression value ]
-  | Decreases measures -> form "decreases" (list expression measures)
-  | Cost cost_ -> cost cost_
+  | Uses capabilities -> make_form "uses" (list show_capability_reference capabilities)
+  | Requires value -> make_form "requires" [ show_expression value ]
+  | Ensures value -> make_form "ensures" [ show_expression value ]
+  | Decreases measures -> make_form "decreases" (list show_expression measures)
+  | Cost cost_ -> show_cost cost_
   | Clause_error -> "error"
 
-and cost { amortized; resource; bound } =
+and show_cost { amortized; resource; bound } =
   let resource =
     match resource with
     | Time -> "time"
     | Allocations -> "allocations"
     | Allocated_bytes -> "allocated_bytes"
-    | Calls (Call_parameter name) -> form "calls" [ name.text ]
-    | Calls (Call_capability capability) -> form "calls" [ path_type_text capability ]
+    | Calls (Call_parameter name) -> make_form "calls" [ name.text ]
+    | Calls (Call_capability capability) -> make_form "calls" [ show_path_type capability ]
     | Calls (Call_method (capability, name)) ->
-        form "calls" [ path_type_text capability ^ "." ^ name.text ]
+        make_form "calls" [ show_path_type capability ^ "." ^ name.text ]
   in
   let bound =
     match bound with
-    | Big_o value -> form "O" [ expression value ]
+    | Big_o value -> make_form "O" [ show_expression value ]
     | Finite -> "finite"
-    | At_most value -> form "<=" [ expression value ]
-    | Exactly value -> form "==" [ expression value ]
+    | At_most value -> make_form "<=" [ show_expression value ]
+    | Exactly value -> make_form "==" [ show_expression value ]
   in
-  form "cost" [ (if amortized then "amortized" else ""); resource; bound ]
+  make_form "cost" [ (if amortized then "amortized" else ""); resource; bound ]
 
-and string_literal (literal : Syntax.string_literal) =
-  optional path literal.tag ^ "\"" ^ escape literal.first.value
+and show_string_literal (literal : Syntax.string_literal) =
+  show_optional show_path literal.tag
+  ^ "\"" ^ escape literal.first.value
   ^ String.concat ""
       (List.map
-         (fun (value, (text : Syntax.text)) -> "${" ^ expression value ^ "}" ^ escape text.value)
+         (fun (value, (text : Syntax.text)) ->
+           "${" ^ show_expression value ^ "}" ^ escape text.value)
          literal.rest)
   ^ "\""
 
-and expression (value : Syntax.expression) =
+and show_expression (value : Syntax.expression) =
   match value.kind with
   | Integer value -> Z.to_string value
   | Float { significand; exponent } ->
       Printf.sprintf "%se%s" (Z.to_string significand) (Z.to_string exponent)
-  | String literal -> string_literal literal
+  | String literal -> show_string_literal literal
   | True -> "true"
   | False -> "false"
   | Todo -> "todo"
@@ -160,63 +164,70 @@ and expression (value : Syntax.expression) =
   | Continue -> "continue"
   | Self_value -> "self"
   | Self_type_value -> "Self"
-  | Name name -> path name
-  | Member (inner, name) -> form "." [ expression inner; name.text ]
-  | Bracket (inner, items) -> form "[]" (expression inner :: list bracket_item items)
-  | Call (callee, arguments) -> form "call" (expression callee :: list argument arguments)
-  | Try inner -> form "?" [ expression inner ]
-  | With (base, updates) -> form "with" (expression base :: list update updates)
+  | Name name -> show_path name
+  | Member (inner, name) -> make_form "." [ show_expression inner; name.text ]
+  | Bracket (inner, items) -> make_form "[]" (show_expression inner :: list show_bracket_item items)
+  | Call (callee, arguments) ->
+      make_form "call" (show_expression callee :: list show_argument arguments)
+  | Try inner -> make_form "?" [ show_expression inner ]
+  | With (base, updates) -> make_form "with" (show_expression base :: list update updates)
   | Prefix (operator, inner) ->
-      form
+      make_form
         (match operator with Negate -> "-" | Not -> "!" | Complement -> "~")
-        [ expression inner ]
-  | Mode (written, inner) -> form (mode written) [ expression inner ]
-  | Any inner -> form "any" [ expression inner ]
+        [ show_expression inner ]
+  | Mode (written, inner) -> make_form (show_mode written) [ show_expression inner ]
+  | Any inner -> make_form "any" [ show_expression inner ]
   | Binary { operator; left; right; _ } ->
-      form (binary operator) [ expression left; expression right ]
-  | Is { value = inner; pattern = tested; _ } -> form "is" [ expression inner; pattern tested ]
+      make_form (show_binary operator) [ show_expression left; show_expression right ]
+  | Is { value = inner; pattern = tested; _ } ->
+      make_form "is" [ show_expression inner; show_pattern tested ]
   | Range { start; stop; inclusive; _ } ->
-      let bound = function Some value -> expression value | None -> "_" in
-      form (if inclusive then "..=" else "..") [ bound start; bound stop ]
+      let show_bound = function Some value -> show_expression value | None -> "_" in
+      make_form (if inclusive then "..=" else "..") [ show_bound start; show_bound stop ]
   | Quantified { quantifier; binder; body } ->
       let binder =
         match binder with
-        | Binder_in (bound, collection) -> form "in" [ pattern bound; expression collection ]
-        | Binder_type (name, type_) -> name.text ^ ": " ^ type_expression type_
+        | Binder_in (bound, collection) ->
+            make_form "in" [ show_pattern bound; show_expression collection ]
+        | Binder_type (name, type_) -> name.text ^ ": " ^ show_type_expression type_
       in
-      form
+      make_form
         (match quantifier with Forall -> "forall" | Exists -> "exists")
-        [ binder; expression body ]
-  | Echo inner -> form "echo" [ expression inner ]
-  | Return inner -> form "return" [ optional expression inner ]
-  | Parenthesized inner -> form "paren" [ expression inner ]
-  | List items -> form "list" (list expression items)
+        [ binder; show_expression body ]
+  | Echo inner -> make_form "echo" [ show_expression inner ]
+  | Return inner -> make_form "return" [ show_optional show_expression inner ]
+  | Parenthesized inner -> make_form "paren" [ show_expression inner ]
+  | List items -> make_form "list" (list show_expression items)
   | Map entries ->
-      form "map" (list (fun (key, value) -> form "" [ expression key; expression value ]) entries)
-  | Lambda { parameters; body } -> form "fn" [ form "" (list pattern parameters); block body ]
+      make_form "map"
+        (list
+           (fun (key, value) -> make_form "" [ show_expression key; show_expression value ])
+           entries)
+  | Lambda { parameters; body } ->
+      make_form "fn" [ make_form "" (list show_pattern parameters); show_block body ]
   | If { condition; then_; else_ } ->
       let else_ =
         match else_ with
-        | Some (Else body) -> block body
-        | Some (Else_if value) -> expression value
+        | Some (Else body) -> show_block body
+        | Some (Else_if value) -> show_expression value
         | None -> ""
       in
-      form "if" [ expression condition; block then_; else_ ]
+      make_form "if" [ show_expression condition; show_block then_; else_ ]
   | Match { scrutinees; arms } ->
-      form "match" (form "" (list expression scrutinees) :: list arm arms)
+      make_form "match" (make_form "" (list show_expression scrutinees) :: list show_arm arms)
   | Provide { implementations; body } ->
-      form "provide" [ form "" (list expression implementations); block body ]
-  | Block body -> block body
+      make_form "provide" [ make_form "" (list show_expression implementations); show_block body ]
+  | Block body -> show_block body
   | Expression_error -> "error"
 
-and bracket_item = function
-  | Item value -> expression value
-  | Item_constraint (name, type_) -> name.text ^ " = " ^ type_expression type_
+and show_bracket_item = function
+  | Item value -> show_expression value
+  | Item_constraint (name, type_) -> name.text ^ " = " ^ show_type_expression type_
 
-and argument (argument : Syntax.argument) =
+and show_argument (argument : Syntax.argument) =
   match argument.label with
-  | Some label -> form (label.text ^ ":") [ expression argument.value ]
-  | None -> expression argument.value
+  | Some label -> make_form (label.text ^ ":") [ show_expression argument.value ]
+  | None -> show_expression argument.value
 
 and update (update : Syntax.update) =
   match update.kind with
@@ -224,171 +235,182 @@ and update (update : Syntax.update) =
       let fields =
         String.concat "." (List.map (fun (name : Syntax.name) -> name.text) (field :: path))
       in
-      match value with Some value -> form (fields ^ ":") [ expression value ] | None -> fields)
+      match value with
+      | Some value -> make_form (fields ^ ":") [ show_expression value ]
+      | None -> fields)
   | Update_error -> "error"
 
-and arm (arm : Syntax.arm) =
-  form "=>"
-    (list pattern arm.patterns
-    @ [ optional (fun guard -> form "if" [ expression guard ]) arm.guard; statement arm.body ])
+and show_arm (arm : Syntax.arm) =
+  make_form "=>"
+    (list show_pattern arm.patterns
+    @ [
+        show_optional (fun guard -> make_form "if" [ show_expression guard ]) arm.guard;
+        show_statement arm.body;
+      ])
 
-and block (block : Syntax.block) = form "block" (list statement block.statements)
+and show_block (block : Syntax.block) = make_form "block" (list show_statement block.statements)
 
-and loop_clause (clause : Syntax.loop_clause) =
+and show_loop_clause (clause : Syntax.loop_clause) =
   match clause.kind with
-  | Invariant value -> form "invariant" [ expression value ]
-  | Loop_decreases measures -> form "decreases" (list expression measures)
-  | Loop_cost cost_ -> cost cost_
+  | Invariant value -> make_form "invariant" [ show_expression value ]
+  | Loop_decreases measures -> make_form "decreases" (list show_expression measures)
+  | Loop_cost cost_ -> show_cost cost_
 
-and statement (statement : Syntax.statement) =
+and show_statement (statement : Syntax.statement) =
   match statement.kind with
   | Let { is_var; pattern = bound; annotation; value; else_ } ->
-      form
+      make_form
         (if is_var then "var" else "let")
         [
-          pattern bound;
-          optional (fun type_ -> ": " ^ type_expression type_) annotation;
-          expression value;
-          optional (fun body -> form "else" [ block body ]) else_;
+          show_pattern bound;
+          show_optional (fun type_ -> ": " ^ show_type_expression type_) annotation;
+          show_expression value;
+          show_optional (fun body -> make_form "else" [ show_block body ]) else_;
         ]
-  | Expression value -> expression value
+  | Expression value -> show_expression value
   | Assignment { target; operator; value } ->
-      form (assignment operator) [ expression target; expression value ]
+      make_form (show_assignment operator) [ show_expression target; show_expression value ]
   | For { mode; pattern = bound; annotation; iterable; clauses; body } ->
-      form
+      make_form
         (match mode with
         | Sequential -> "for"
         | Parallel_loop -> "parallel-for"
         | Concurrent_loop -> "concurrent-for")
         ([
-           pattern bound;
-           optional (fun type_ -> ": " ^ type_expression type_) annotation;
-           expression iterable;
+           show_pattern bound;
+           show_optional (fun type_ -> ": " ^ show_type_expression type_) annotation;
+           show_expression iterable;
          ]
-        @ list loop_clause clauses
-        @ [ block body ])
+        @ list show_loop_clause clauses
+        @ [ show_block body ])
   | While { condition; clauses; body } ->
-      form "while" ((expression condition :: list loop_clause clauses) @ [ block body ])
-  | Parallel body -> form "parallel" [ block body ]
-  | Concurrent body -> form "concurrent" [ block body ]
-  | Proof body -> form "proof" [ block body ]
+      make_form "while"
+        ((show_expression condition :: list show_loop_clause clauses) @ [ show_block body ])
+  | Parallel body -> make_form "parallel" [ show_block body ]
+  | Concurrent body -> make_form "concurrent" [ show_block body ]
+  | Proof body -> make_form "proof" [ show_block body ]
   | Assert { value; by_bit_vector } ->
-      form "assert" (expression value :: (if by_bit_vector then [ "by"; "bit_vector" ] else []))
+      make_form "assert"
+        (show_expression value :: (if by_bit_vector then [ "by"; "bit_vector" ] else []))
   | Statement_error -> "error"
 
-and constant = function
-  | Syntax.Module_constant constant -> path constant
-  | Type_constant (owner, name) -> path owner ^ "." ^ name.text
+and show_constant = function
+  | Syntax.Module_constant constant -> show_path constant
+  | Type_constant (owner, name) -> show_path owner ^ "." ^ name.text
 
-and literal = function
+and show_literal = function
   | Syntax.Literal_integer value -> Z.to_string value
   | Literal_true -> "true"
   | Literal_false -> "false"
-  | Literal_string literal -> string_literal literal
+  | Literal_string literal -> show_string_literal literal
 
-and pattern (written : Syntax.pattern) =
+and show_pattern (written : Syntax.pattern) =
   match written.kind with
   | Wildcard -> "_"
   | Binding name -> name.text
-  | Qualified_constant written -> constant written
-  | Literal written -> literal written
+  | Qualified_constant written -> show_constant written
+  | Literal written -> show_literal written
   | Pattern_range { start; stop; inclusive } ->
-      let range_end (written : Syntax.range_end) =
+      let show_range_end (written : Syntax.range_end) =
         match written.kind with
-        | End_literal value -> literal value
-        | End_constant value -> constant value
+        | End_literal value -> show_literal value
+        | End_constant value -> show_constant value
       in
-      form (if inclusive then "..=" else "..") [ range_end start; range_end stop ]
+      make_form (if inclusive then "..=" else "..") [ show_range_end start; show_range_end stop ]
   | Variant { name; fields = None } -> name.text
-  | Variant { name; fields = Some fields } -> form name.text (list pattern_field fields)
-  | Record fields -> form "record" (list pattern_field fields)
-  | Alternatives alternatives -> form "|" (list pattern alternatives)
+  | Variant { name; fields = Some fields } -> make_form name.text (list show_pattern_field fields)
+  | Record fields -> make_form "record" (list show_pattern_field fields)
+  | Alternatives alternatives -> make_form "|" (list show_pattern alternatives)
   | Pattern_error -> "error"
 
-and pattern_field (field : Syntax.pattern_field) =
+and show_pattern_field (field : Syntax.pattern_field) =
   match field.kind with
-  | Named_field (name, inner) -> form (name.text ^ ":") [ pattern inner ]
-  | Field inner -> pattern inner
+  | Named_field (name, inner) -> make_form (name.text ^ ":") [ show_pattern inner ]
+  | Field inner -> show_pattern inner
   | Rest -> ".."
 
-let visibility = function
+let show_visibility = function
   | Syntax.Private -> ""
   | Internal -> "internal"
   | Public -> "public"
   | Public_opaque -> "public opaque"
 
-let type_head (head : Syntax.type_head) = path head.path ^ generics head.generics
+let show_type_head (head : Syntax.type_head) = show_path head.path ^ show_generics head.generics
 
-let definition_name = function
+let show_definition_name = function
   | Syntax.Plain_name name -> name.text
-  | Member_name (head, name) -> type_head head ^ "." ^ name.text
+  | Member_name (head, name) -> show_type_head head ^ "." ^ name.text
 
-let parameter (parameter : Syntax.parameter) =
+let show_parameter (parameter : Syntax.parameter) =
   match parameter.kind with
   | Self_parameter None -> "self"
-  | Self_parameter (Some written) -> mode written ^ " self"
+  | Self_parameter (Some written) -> show_mode written ^ " self"
   | Named_parameter { name; mode = written; type_; default } ->
-      form (name.text ^ ":")
+      make_form (name.text ^ ":")
         [
-          (match written with Some written -> mode written | None -> "");
-          type_expression type_;
-          optional (fun value -> form "=" [ expression value ]) default;
+          (match written with Some written -> show_mode written | None -> "");
+          show_type_expression type_;
+          show_optional (fun value -> make_form "=" [ show_expression value ]) default;
         ]
   | Parameter_error -> "error"
 
-let moded written type_ =
-  (match written with Some written -> mode written ^ " " | None -> "") ^ type_expression type_
+let show_moded written type_ =
+  (match written with Some written -> show_mode written ^ " " | None -> "")
+  ^ show_type_expression type_
 
-let signature (signature : Syntax.signature) =
+let show_signature (signature : Syntax.signature) =
   [
-    definition_name signature.name ^ generics signature.generics;
-    form "" (list parameter signature.parameters);
+    show_definition_name signature.name ^ show_generics signature.generics;
+    make_form "" (list show_parameter signature.parameters);
     (match signature.result with
-    | Some (Returns type_) -> "-> " ^ type_expression type_
-    | Some (Lends (written, type_)) -> "lends " ^ moded written type_
+    | Some (Returns type_) -> "-> " ^ show_type_expression type_
+    | Some (Lends (written, type_)) -> "lends " ^ show_moded written type_
     | None -> "");
   ]
-  @ list clause signature.clauses
+  @ list show_clause signature.clauses
 
-let law ({ name; parameters; requires; body } : Syntax.law) =
-  form "law"
-    ([ name.text; form "" (list parameter parameters) ]
-    @ list (fun value -> form "requires" [ expression value ]) requires
-    @ [ block body ])
+let show_law ({ name; parameters; requires; body } : Syntax.law) =
+  make_form "law"
+    ([ name.text; make_form "" (list show_parameter parameters) ]
+    @ list (fun value -> make_form "requires" [ show_expression value ]) requires
+    @ [ show_block body ])
 
-let function_definition (definition : Syntax.function_definition) =
-  form "fn" (signature definition.signature @ [ block definition.body ])
+let show_function_definition (definition : Syntax.function_definition) =
+  make_form "fn" (show_signature definition.signature @ [ show_block definition.body ])
 
-let field (field : Syntax.field) =
+let show_field (field : Syntax.field) =
   match field.kind with
   | Field_declaration { name; type_; default } ->
-      form (name.text ^ ":")
-        [ type_expression type_; optional (fun value -> form "=" [ expression value ]) default ]
+      make_form (name.text ^ ":")
+        [
+          show_type_expression type_;
+          show_optional (fun value -> make_form "=" [ show_expression value ]) default;
+        ]
   | Field_error -> "error"
 
-let fields list_ = form "" (list field list_)
+let show_fields list_ = make_form "" (list show_field list_)
 
-let members print (members : _ Syntax.node list) =
+let show_members print (members : _ Syntax.node list) =
   list (fun (member : _ Syntax.node) -> print member.kind) members
 
-let definition ?(methods = []) (definition : Syntax.definition) =
+let show_definition ?(methods = []) (definition : Syntax.definition) =
   let body =
     match definition.kind with
-    | Function function_ -> function_definition function_
-    | Method_declaration declared -> form "fn" (signature declared)
+    | Function function_ -> show_function_definition function_
+    | Method_declaration declared -> make_form "fn" (show_signature declared)
     | Type_definition { name; generics = parameters; body; clauses } ->
         let body =
           match body with
-          | Fields list_ -> fields list_
+          | Fields list_ -> show_fields list_
           | Variants variants ->
-              form "="
+              make_form "="
                 (list
                    (fun (variant : Syntax.variant) ->
                      let name =
                        (if variant.indirect then "indirect " else "") ^ variant.name.text
                      in
                      match variant.fields with
-                     | Some list_ -> form name [ fields list_ ]
+                     | Some list_ -> make_form name [ show_fields list_ ]
                      | None -> name)
                    variants)
           | Type_todo -> "= todo"
@@ -397,86 +419,101 @@ let definition ?(methods = []) (definition : Syntax.definition) =
           list
             (fun (clause : Syntax.type_clause) ->
               match clause.kind with
-              | Type_invariant value -> form "invariant" [ expression value ]
-              | Derives traits -> form "derives" (list path_type_text traits)
-              | Potential value -> form "cost potential" [ expression value ])
+              | Type_invariant value -> make_form "invariant" [ show_expression value ]
+              | Derives traits -> make_form "derives" (list show_path_type traits)
+              | Potential value -> make_form "cost potential" [ show_expression value ])
             clauses
         in
-        form "type" ([ name.text ^ generics parameters; body ] @ clauses)
+        make_form "type" ([ name.text ^ show_generics parameters; body ] @ clauses)
     | Trait { name; generics = parameters; requires; members = trait_members } ->
-        form "trait"
+        make_form "trait"
           ([
-             name.text ^ generics parameters;
+             name.text ^ show_generics parameters;
              (match requires with
              | [] -> ""
-             | _ -> ": " ^ String.concat " + " (list path_type_text requires));
+             | _ -> ": " ^ String.concat " + " (list show_path_type requires));
            ]
-          @ members
+          @ show_members
               (function
-                | Syntax.Associated_type (name, []) -> form "type" [ name.text ]
+                | Syntax.Associated_type (name, []) -> make_form "type" [ name.text ]
                 | Associated_type (name, bounds) ->
-                    form "type"
-                      [ name.text ^ ": " ^ String.concat " + " (list path_type_text bounds) ]
-                | Associated_capability name -> form "capability" [ name.text ]
-                | Law written -> law written
+                    make_form "type"
+                      [ name.text ^ ": " ^ String.concat " + " (list show_path_type bounds) ]
+                | Associated_capability name -> make_form "capability" [ name.text ]
+                | Law written -> show_law written
                 | Trait_member_error -> "error")
               trait_members
           @ methods)
     | Impl { trait_; type_; uses; members = impl_members } ->
-        form "impl"
+        make_form "impl"
           ([
-             path_type_text trait_;
+             show_path_type trait_;
              "for";
-             type_head type_;
-             (match uses with [] -> "" | _ -> form "uses" (list capability_reference uses));
+             show_type_head type_;
+             (match uses with
+             | [] -> ""
+             | _ -> make_form "uses" (list show_capability_reference uses));
            ]
-          @ members
+          @ show_members
               (function
                 | Syntax.Associated_definition (name, type_) ->
-                    form "type" [ name.text; "="; type_expression type_ ]
+                    make_form "type" [ name.text; "="; show_type_expression type_ ]
                 | Capability_definition (name, capabilities) ->
-                    form "capability" (name.text :: "=" :: list capability_reference capabilities)
+                    make_form "capability"
+                      (name.text :: "=" :: list show_capability_reference capabilities)
                 | Impl_member_error -> "error")
               impl_members
           @ methods)
     | Capability { name; members = capability_members } ->
-        form "capability"
+        make_form "capability"
           (name.text
-           :: members (function Syntax.Capability_member_error -> "error") capability_members
+           :: show_members (function Syntax.Capability_member_error -> "error") capability_members
           @ methods)
     | Constant { name; type_; value } ->
-        form "let" [ definition_name name; ": " ^ type_expression type_; expression value ]
+        make_form "let"
+          [ show_definition_name name; ": " ^ show_type_expression type_; show_expression value ]
     | Test { name; uses; body } ->
-        form "test"
+        make_form "test"
           [
-            string_literal name;
-            (match uses with [] -> "" | _ -> form "uses" (list capability_reference uses));
-            block body;
+            show_string_literal name;
+            (match uses with
+            | [] -> ""
+            | _ -> make_form "uses" (list show_capability_reference uses));
+            show_block body;
           ]
     | Theorem { name; generics = parameters; parameters = theorem_parameters; clauses; body } ->
-        form "theorem"
-          ([ name.text ^ generics parameters; form "" (list parameter theorem_parameters) ]
-          @ list clause clauses
-          @ [ block body ])
+        make_form "theorem"
+          ([
+             name.text ^ show_generics parameters;
+             make_form "" (list show_parameter theorem_parameters);
+           ]
+          @ list show_clause clauses
+          @ [ show_block body ])
     | Law_proof { trait_; law; type_; body } ->
-        form "proof" [ path_type_text trait_ ^ "." ^ law.text; "for"; type_head type_; block body ]
+        make_form "proof"
+          [ show_path_type trait_ ^ "." ^ law.text; "for"; show_type_head type_; show_block body ]
     | Definition_error { intended; name } ->
-        form "error" [ optional intended_keyword intended; optional definition_name name ]
+        make_form "error"
+          [ show_optional show_intended_keyword intended; show_optional show_definition_name name ]
   in
-  match visibility definition.visibility with "" -> body | written -> form written [ body ]
+  match show_visibility definition.visibility with
+  | "" -> body
+  | written -> make_form written [ body ]
 
-let definitions (top_levels : Syntax.top_level list) =
+let show_definitions (top_levels : Syntax.top_level list) =
   List.map
     (fun (top_level : Syntax.top_level) ->
-      definition
+      show_definition
         ~methods:
           (List.map
-             (fun (method_ : Syntax.definition Syntax.item) -> definition method_.value)
+             (fun (method_ : Syntax.definition Syntax.item) -> show_definition method_.value)
              top_level.methods)
         top_level.definition.value)
     top_levels
 
-let file (file : Syntax.file) =
+let show_file (file : Syntax.file) =
   String.concat "\n"
-    (List.map (fun (item : Syntax.path Syntax.item) -> form "use" [ path item.value ]) file.uses
-    @ definitions file.definitions)
+    (List.map
+       (fun (item : Syntax.path Syntax.item) -> make_form "use" [ show_path item.value ])
+       file.uses
+    @ show_definitions file.definitions)

@@ -1,7 +1,9 @@
-let changes ?(modules = []) before after =
+let list_changes ?(modules = []) before after =
   let package : Path.package = { owner = None; name = "lib" } in
-  let state text = Support.database (Support.setup (("lib::shapes", text) :: modules)) in
-  Cli.Compatibility.compare ~before:(state before) ~after:(state after) package
+  let load_database text =
+    Support.make_database (Support.setup (("lib::shapes", text) :: modules))
+  in
+  Cli.Compatibility.compare ~before:(load_database before) ~after:(load_database after) package
 
 let show actual =
   List.map
@@ -12,12 +14,13 @@ let show actual =
     actual
 
 let expect ?modules before after expected =
-  let actual = show (changes ?modules before after) in
+  let actual = show (list_changes ?modules before after) in
   if actual <> expected then
     Harness.fail "found [%s], expected [%s]" (String.concat "; " actual)
       (String.concat "; " expected)
 
-let area body = Printf.sprintf "public fn area(side: Int64) -> Int64\n%s{\n  side\n}\n" body
+let make_area_source body =
+  Printf.sprintf "public fn area(side: Int64) -> Int64\n%s{\n  side\n}\n" body
 
 let () =
   Harness.test "a body that changes is no change" (fun () ->
@@ -33,7 +36,7 @@ let () =
       expect sides Fixtures.Compatibility.private_sides
         [ "breaks: lib::shapes::sides was removed or is no longer public" ]);
   Harness.test "a changed parameter type, parameter name, or result breaks" (fun () ->
-      let was = area "" in
+      let was = make_area_source "" in
       List.iter
         (fun now ->
           expect was now [ "breaks: lib::shapes::area changed its parameters or its result" ])
@@ -45,8 +48,8 @@ let () =
         ]);
   Harness.test "a parameter that gains a default grows, and one that loses it breaks" (fun () ->
       let with_default = Fixtures.Compatibility.area_with_a_default_side in
-      expect (area "") with_default [ "grows: lib::shapes::area gained a default" ];
-      expect with_default (area "")
+      expect (make_area_source "") with_default [ "grows: lib::shapes::area gained a default" ];
+      expect with_default (make_area_source "")
         [ "breaks: lib::shapes::area changed its parameters or its result" ]);
   Harness.test "an added capability in uses breaks, and a removed one grows" (fun () ->
       let pure = Fixtures.Compatibility.stamp_using_nothing
@@ -54,22 +57,24 @@ let () =
       expect pure timed [ "breaks: lib::shapes::stamp now uses `standard::capabilities::Clock`" ];
       expect timed pure [ "grows: lib::shapes::stamp uses fewer capabilities" ]);
   Harness.test "a requires that is added breaks, and one that is dropped grows" (fun () ->
-      let guarded = area "  requires side > 0\n" in
-      expect (area "") guarded
+      let guarded = make_area_source "  requires side > 0\n" in
+      expect (make_area_source "") guarded
         [ "breaks: lib::shapes::area has a `requires` clause it did not have" ];
-      expect guarded (area "") [ "grows: lib::shapes::area has fewer `requires` clauses" ]);
+      expect guarded (make_area_source "")
+        [ "grows: lib::shapes::area has fewer `requires` clauses" ]);
   Harness.test "an ensures that is added grows, and one that is dropped breaks" (fun () ->
-      let promised = area "  ensures result == side\n" in
-      expect (area "") promised [ "grows: lib::shapes::area has more `ensures` clauses" ];
-      expect promised (area "") [ "breaks: lib::shapes::area lost an `ensures` clause" ]);
+      let promised = make_area_source "  ensures result == side\n" in
+      expect (make_area_source "") promised
+        [ "grows: lib::shapes::area has more `ensures` clauses" ];
+      expect promised (make_area_source "") [ "breaks: lib::shapes::area lost an `ensures` clause" ]);
   Harness.test "a cost that is added grows, and one that is dropped breaks" (fun () ->
-      let bounded = area "  cost time O(1)\n" in
-      expect (area "") bounded
+      let bounded = make_area_source "  cost time O(1)\n" in
+      expect (make_area_source "") bounded
         [
           "grows: lib::shapes::area promises to terminate";
           "grows: lib::shapes::area has more `cost` clauses";
         ];
-      expect bounded (area "")
+      expect bounded (make_area_source "")
         [
           "breaks: lib::shapes::area no longer promises to terminate";
           "breaks: lib::shapes::area lost a `cost` clause";
@@ -130,14 +135,14 @@ let () =
   Harness.test "an impl that is removed breaks, and one that is added grows" (fun () ->
       let square = "public type Square(side: Int64)\n" in
       let with_impl = square ^ Fixtures.Compatibility.default_impl_for_square in
-      (match show (changes with_impl square) with
+      (match show (list_changes with_impl square) with
       | [ actual ] when String.includes ~affix:"was removed: the `impl` of" actual -> ()
       | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
-      match show (changes square with_impl) with
+      match show (list_changes square with_impl) with
       | [ actual ] when String.includes ~affix:"is new: the `impl` of" actual -> ()
       | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
   Harness.test "an impl whose associated capability set gains a capability breaks" (fun () ->
-      let feed uses =
+      let make_feed_source uses =
         Printf.sprintf
           "public trait Feed {\n\
           \  capability Uses\n\
@@ -152,30 +157,40 @@ let () =
            }\n"
           uses
       in
-      let gains = show (changes (feed "") (feed "  capability Uses = Clock\n")) in
+      let gains =
+        show (list_changes (make_feed_source "") (make_feed_source "  capability Uses = Clock\n"))
+      in
       (match gains with
       | [ actual ]
         when String.starts_with ~prefix:"breaks:" actual
              && String.includes ~affix:"added `Clock` to its `Uses`" actual ->
           ()
       | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
-      (match show (changes (feed "  capability Uses = Clock\n") (feed "")) with
+      (match
+         show (list_changes (make_feed_source "  capability Uses = Clock\n") (make_feed_source ""))
+       with
       | [ actual ]
         when String.starts_with ~prefix:"grows:" actual
              && String.includes ~affix:"removed capabilities from its `Uses`" actual ->
           ()
       | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
-      expect (feed "  capability Uses = Clock\n") (feed "  capability Uses = Clock\n") []);
+      expect
+        (make_feed_source "  capability Uses = Clock\n")
+        (make_feed_source "  capability Uses = Clock\n")
+        []);
   Harness.test "a trait that loses an associated capability set breaks" (fun () ->
-      let feed member =
+      let make_feed_source member =
         Printf.sprintf "public trait Feed {\n%s  fn pull(self) -> Int64\n}\n" member
       in
-      expect (feed "  capability Uses\n") (feed "")
+      expect
+        (make_feed_source "  capability Uses\n")
+        (make_feed_source "")
         [ "breaks: lib::shapes::Feed lost an associated capability set" ];
-      expect (feed "") (feed "  capability Uses\n")
+      expect (make_feed_source "")
+        (make_feed_source "  capability Uses\n")
         [ "grows: lib::shapes::Feed gained an associated capability set" ])
 
-let sized law =
+let make_sized_source law =
   Printf.sprintf
     "public trait Sized {\n\
     \  fn size(self) -> Int64\n\
@@ -187,11 +202,14 @@ let sized law =
 
 let () =
   Harness.test "a requires that only gains parentheses is no change" (fun () ->
-      expect (area "  requires side > 0\n") (area "  requires (side > 0)\n") []);
+      expect
+        (make_area_source "  requires side > 0\n")
+        (make_area_source "  requires (side > 0)\n")
+        []);
   Harness.test "a dropped requires leaves the ensures after it unchanged" (fun () ->
       expect
-        (area "  requires side > 0\n  ensures result == side\n")
-        (area "  ensures result == side\n")
+        (make_area_source "  requires side > 0\n  ensures result == side\n")
+        (make_area_source "  ensures result == side\n")
         [ "grows: lib::shapes::area has fewer `requires` clauses" ]);
   Harness.test "a requires whose name another use makes refer elsewhere breaks" (fun () ->
       let modules =
@@ -200,19 +218,21 @@ let () =
           ("lib::two::limits", "public let bound: Int64 = 20\n");
         ]
       in
-      let guarded imported =
+      let make_guarded_source imported =
         Printf.sprintf "use lib::%s::limits\n\n%s" imported
-          (area "  requires side < limits::bound\n")
+          (make_area_source "  requires side < limits::bound\n")
       in
-      expect ~modules (guarded "one") (guarded "two")
+      expect ~modules (make_guarded_source "one") (make_guarded_source "two")
         [ "breaks: lib::shapes::area has a `requires` clause it did not have" ]);
   Harness.test "a law whose body changes breaks" (fun () ->
-      expect (sized "    value.size() >= 0\n") (sized "    value.size() >= 1\n")
+      expect
+        (make_sized_source "    value.size() >= 0\n")
+        (make_sized_source "    value.size() >= 1\n")
         [ "breaks: lib::shapes::Sized changed its laws" ]);
   Harness.test "a law that renames a binder of its body is no change" (fun () ->
       expect
-        (sized "    let measured = value.size()\n    measured >= 0\n")
-        (sized "    let counted = value.size()\n    counted >= 0\n")
+        (make_sized_source "    let measured = value.size()\n    measured >= 0\n")
+        (make_sized_source "    let counted = value.size()\n    counted >= 0\n")
         []);
   Harness.test "a constant the evaluator cannot compute keeps its written value" (fun () ->
       let name = "public let name: String = \"square\"\n" in
@@ -232,17 +252,17 @@ let () =
         \  }\n\
          }\n"
       in
-      let state files = Support.database (Support.setup files) in
+      let load_database files = Support.make_database (Support.setup files) in
       match
         show
           (Cli.Compatibility.compare
              ~before:
-               (state
+               (load_database
                   [
                     ("lib::shapes", square ^ Fixtures.Compatibility.default_impl_for_square);
                     ("lib::extra", "");
                   ])
-             ~after:(state [ ("lib::shapes", square); ("lib::extra", moved) ])
+             ~after:(load_database [ ("lib::shapes", square); ("lib::extra", moved) ])
              package)
       with
       | [] -> ()

@@ -57,7 +57,7 @@ let describe_missing ~subject ~of_ capability =
      for `%s` in `truss.toml`."
     subject (show_as_written capability) of_ (show_as_written capability) of_
 
-let rec list_evidence_uses lookups ~bounds (evidence : Impls.evidence) =
+let rec list_evidence_uses lookups ~list_bounds (evidence : Impls.evidence) =
   match evidence with
   | From_impl { impl; substitution } -> (
       match Definition.read_impl_interface lookups impl with
@@ -73,8 +73,8 @@ let rec list_evidence_uses lookups ~bounds (evidence : Impls.evidence) =
               interface.impl_uses interface.impl_methods )
           :: List.concat_map
                (fun (argument, bound) ->
-                 match Impls.implements lookups ~bounds argument bound with
-                 | Some nested -> list_evidence_uses lookups ~bounds nested
+                 match Impls.find_evidence lookups ~list_bounds argument bound with
+                 | Some nested -> list_evidence_uses lookups ~list_bounds nested
                  | None -> [])
                (Impls.list_required_bounds interface.impl_generics substitution))
   | _ -> []
@@ -93,5 +93,5 @@ let describe_missing_in_impls lookups ~package impls =
         (list_missing lookups ~package ~of_ uses))
     impls
 
-let describe_missing_in_evidence lookups ~package ~bounds evidence =
-  describe_missing_in_impls lookups ~package (list_evidence_uses lookups ~bounds evidence)
+let describe_missing_in_evidence lookups ~package ~list_bounds evidence =
+  describe_missing_in_impls lookups ~package (list_evidence_uses lookups ~list_bounds evidence)

@@ -1,7 +1,7 @@
-let list_bound_diagnostics lookups ~package ~bounds ~spans named =
+let list_bound_diagnostics lookups ~package ~list_bounds ~spans named =
   List.concat_map
     (fun (id, (type_ : Types.ty)) ->
-      let diagnostic code message = Diagnostic.make ~code spans.(id) message in
+      let make_diagnostic code message = Diagnostic.make ~code spans.(id) message in
       match type_ with
       | Named { path; arguments } -> (
           match
@@ -14,17 +14,17 @@ let list_bound_diagnostics lookups ~package ~bounds ~spans named =
           | Some required ->
               List.concat_map
                 (fun (argument, bound) ->
-                  match Impls.implements lookups ~bounds argument bound with
+                  match Impls.find_evidence lookups ~list_bounds argument bound with
                   | None ->
                       [
-                        diagnostic (Types Unsatisfied_bound)
+                        make_diagnostic (Types Unsatisfied_bound)
                           (Printf.sprintf "`%s` needs `%s: %s`, which does not hold here."
                              (Types.show type_) (Types.show argument) (Types.show_trait bound));
                       ]
                   | Some evidence ->
                       List.map
-                        (diagnostic (Capabilities Not_granted))
-                        (Grants.describe_missing_in_evidence lookups ~package ~bounds evidence))
+                        (make_diagnostic (Capabilities Not_granted))
+                        (Grants.describe_missing_in_evidence lookups ~package ~list_bounds evidence))
                 required
           | None -> [])
       | _ -> [])
@@ -33,7 +33,7 @@ let list_bound_diagnostics lookups ~package ~bounds ~spans named =
 let check_bounds (state : Checking.state) =
   state.diagnostics :=
     list_bound_diagnostics state.lookups ~package:state.key.module_.package
-      ~bounds:(Checking.list_bounds state) ~spans:state.spans state.elaborated.named
+      ~list_bounds:(Checking.list_bounds state) ~spans:state.spans state.elaborated.named
     @ !(state.diagnostics)
 
 let rec list_mentioned_paths = function
@@ -224,10 +224,11 @@ let check_derives state (interface : Types.type_interface) (clauses : Syntax.typ
                             arguments = Types.list_generic_arguments interface.type_generics;
                           }
                       in
-                      let bounds = list_derived_bounds trait in
+                      let list_bounds = list_derived_bounds trait in
                       let holds =
-                        if Well_known.is Plain trait then Impls.is_plain state.lookups ~bounds self
-                        else Impls.is_copyable state.lookups ~bounds self
+                        if Well_known.is Plain trait then
+                          Impls.is_plain state.lookups ~list_bounds self
+                        else Impls.is_copyable state.lookups ~list_bounds self
                       in
                       if not holds then
                         Checking.report state Cannot_derive state.spans.(written.id)
@@ -265,8 +266,8 @@ let check_derives state (interface : Types.type_interface) (clauses : Syntax.typ
                         in
                         if
                           Option.is_none
-                            (Impls.implements state.lookups ~bounds:(list_derived_bounds trait)
-                               type_ wanted)
+                            (Impls.find_evidence state.lookups
+                               ~list_bounds:(list_derived_bounds trait) type_ wanted)
                         then
                           Checking.report state Cannot_derive state.spans.(written.id)
                             (Printf.sprintf
@@ -351,7 +352,7 @@ let check_proof_bounds (state : Checking.state) (written : Syntax.type_head)
                   (Types.make_capability_set [ Types.Capability_parameter of_impl.generic ]) ))
         generics impl.impl_generics
     in
-    let impl_bounds = Types.list_bounds impl.impl_generics in
+    let list_impl_bounds = Types.list_bounds impl.impl_generics in
     List.iteri
       (fun index ((proof : Types.generic), (of_impl : Types.generic)) ->
         match proof.kind with
@@ -360,7 +361,7 @@ let check_proof_bounds (state : Checking.state) (written : Syntax.type_head)
               (fun (bound : Types.trait_reference) ->
                 if
                   Option.is_none
-                    (Impls.implements state.lookups ~bounds:impl_bounds
+                    (Impls.find_evidence state.lookups ~list_bounds:list_impl_bounds
                        (Types.Parameter of_impl.generic)
                        (Types.substitute_trait renaming bound))
                 then
@@ -436,7 +437,7 @@ let check (state : Checking.state) =
           | _ -> true
         in
         if arity_matches && not (Types.is_error for_type) then
-          match Checking.implements state for_type trait with
+          match Checking.find_evidence state for_type trait with
           | None ->
               Checking.report state No_impl state.spans.(type_.id)
                 (Printf.sprintf "`%s` does not implement `%s`, so it has no law of it to keep."

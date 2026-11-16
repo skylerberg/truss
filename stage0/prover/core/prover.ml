@@ -205,22 +205,22 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
       | Facts.Foreign_unsupported message -> Unsupported (Whole_definition, message))
 
 let show_float bits =
-  let shortest ~most ~same value =
-    let rec shortest_digits digits =
+  let spell_shortest ~most ~is_same value =
+    let rec spell_digits digits =
       let text = Printf.sprintf "%.*g" digits value in
-      if digits >= most || same (float_of_string text) then text else shortest_digits (digits + 1)
+      if digits >= most || is_same (float_of_string text) then text else spell_digits (digits + 1)
     in
-    shortest_digits 1
+    spell_digits 1
   in
   let text =
     match String.length bits with
     | 64 ->
         let value = Int64.float_of_bits (Int64.of_string ("0b" ^ bits)) in
-        shortest ~most:17 ~same:(fun read -> read = value) value
+        spell_shortest ~most:17 ~is_same:(fun read -> read = value) value
     | 32 ->
         let value = Int32.float_of_bits (Int32.of_string ("0b" ^ bits)) in
-        shortest ~most:9
-          ~same:(fun read -> Int32.bits_of_float read = Int32.bits_of_float value)
+        spell_shortest ~most:9
+          ~is_same:(fun read -> Int32.bits_of_float read = Int32.bits_of_float value)
           value
     | _ -> "a float"
   in
@@ -256,18 +256,18 @@ let show_truss_value members text =
     flush ();
     List.rev !tokens
   in
-  let constructor : Logic.symbol -> string = function
+  let show_constructor : Logic.symbol -> string = function
     | Constructor { variant = Some variant; _ } -> variant
     | Constructor { type_ = Named { path = Top { name; _ }; _ }; variant = None } -> name
     | Constructor { type_; variant = None } -> Types.show type_
     | other -> Logic.show_symbol other
   in
-  let field : Logic.symbol -> string = function
+  let show_field : Logic.symbol -> string = function
     | Field { field; _ } -> field
     | other -> Logic.show_symbol other
   in
   let is_opaque atom = String.contains atom '!' in
-  let bits atom =
+  let parse_bits atom =
     match String.cut_first 2 atom with
     | "#b", digits when digits <> "" -> Some digits
     | "#x", digits when digits <> "" ->
@@ -280,9 +280,9 @@ let show_truss_value members text =
                 (List.of_seq (String.to_seq digits))))
     | _ -> None
   in
-  let rec one = function
+  let rec parse_one = function
     | `Open :: `Atom "fp" :: `Atom sign :: `Atom exponent :: `Atom fraction :: `Close :: rest -> (
-        match (bits sign, bits exponent, bits fraction) with
+        match (parse_bits sign, parse_bits exponent, parse_bits fraction) with
         | Some sign, Some exponent, Some fraction -> (show_float (sign ^ exponent ^ fraction), rest)
         | _ -> ("a float", rest))
     | `Open :: `Atom "_" :: `Atom special :: `Atom _ :: `Atom _ :: `Close :: rest ->
@@ -296,34 +296,34 @@ let show_truss_value members text =
     | `Atom atom :: rest when is_opaque atom -> ("a value the prover knows nothing more about", rest)
     | `Atom atom :: rest -> (
         match List.assoc_opt atom members with
-        | Some (internal, _) -> (constructor internal, rest)
+        | Some (internal, _) -> (show_constructor internal, rest)
         | None -> (atom, rest))
     | `Open :: `Atom "-" :: `Atom number :: `Close :: rest -> ("-" ^ number, rest)
     | `Open :: `Atom head :: rest ->
-        let rec arguments acc = function
+        let rec parse_arguments acc = function
           | `Close :: rest -> (List.rev acc, rest)
           | [] -> (List.rev acc, [])
           | tokens ->
-              let argument, rest = one tokens in
-              arguments (argument :: acc) rest
+              let argument, rest = parse_one tokens in
+              parse_arguments (argument :: acc) rest
         in
-        let items, rest = arguments [] rest in
+        let items, rest = parse_arguments [] rest in
         let shown =
           match List.assoc_opt head members with
           | Some (internal, fields) when List.length fields = List.length items ->
-              constructor internal ^ "("
+              show_constructor internal ^ "("
               ^ String.concat ", "
-                  (List.map2 (fun selector item -> field selector ^ ": " ^ item) fields items)
+                  (List.map2 (fun selector item -> show_field selector ^ ": " ^ item) fields items)
               ^ ")"
-          | Some (internal, _) -> constructor internal ^ "(" ^ String.concat ", " items ^ ")"
+          | Some (internal, _) -> show_constructor internal ^ "(" ^ String.concat ", " items ^ ")"
           | None -> head ^ "(" ^ String.concat ", " items ^ ")"
         in
         (shown, rest)
-    | `Open :: rest -> one rest
-    | `Close :: rest -> one rest
+    | `Open :: rest -> parse_one rest
+    | `Close :: rest -> parse_one rest
     | [] -> ("", [])
   in
-  fst (one tokens)
+  fst (parse_one tokens)
 
 let show_counterexample members (obligation : State.obligation) answer_values =
   let shown =
@@ -460,7 +460,7 @@ let list_definition_states (lookups : Lookups.t) (key : Resolve.Names.key) proof
                  `uses Panic`."
             | _, false -> ""
           in
-          let failed explained =
+          let find_failure explained =
             Some
               {
                 (make_diagnostic obligation.code span (message ^ explained ^ others)) with
@@ -474,15 +474,15 @@ let list_definition_states (lookups : Lookups.t) (key : Resolve.Names.key) proof
               failure =
                 (match answer with
                 | Solved Proven | Ran true -> None
-                | Ran false -> failed " Running it on this template's text gives `false`."
+                | Ran false -> find_failure " Running it on this template's text gives `false`."
                 | Run_failed report ->
-                    failed
+                    find_failure
                       (" Running it on this template's text failed, so it is not known: " ^ report)
                 | Solved (Counterexample values) ->
-                    failed
+                    find_failure
                       (show_counterexample (Logic.list_members obligation.query) obligation values)
                 | Solved Out_of_steps ->
-                    failed
+                    find_failure
                       (" The solver ran out of steps, so it may hold but needs help: a `proof` \
                         block or a theorem."
                       ^
@@ -541,7 +541,7 @@ type verdicts = { lookups : Lookups.t; verdicts : verdict Key_table.t }
 
 let decide ~runs lookups solver proofs =
   let runs = Template_check_table.of_seq (List.to_seq runs) in
-  let question (obligation : State.obligation) =
+  let make_question (obligation : State.obligation) =
     match Option.bind obligation.template_clause (run_answer runs) with
     | Some answer -> Decided answer
     | None -> Asked (request ~with_locals:false obligation)
@@ -554,10 +554,10 @@ let decide ~runs lookups solver proofs =
           | Obligations (outcome : State.outcome) -> outcome.obligations
           | Unsupported _ | Not_proven_here -> []
         in
-        (key, proof, List.map (fun obligation -> (obligation, question obligation)) obligations))
+        (key, proof, List.map (fun obligation -> (obligation, make_question obligation)) obligations))
       proofs
   in
-  let plain_answer =
+  let await_plain_answer =
     solve solver
       (List.concat_map
          (fun (_, _, questions) ->
@@ -578,7 +578,7 @@ let decide ~runs lookups solver proofs =
                 | Asked (plain_request, _)
                   when (obligation.locals <> [] || obligation.decisions <> [])
                        &&
-                       match plain_answer plain_request with
+                       match await_plain_answer plain_request with
                        | Counterexample _ -> true
                        | Proven | Out_of_steps -> false ->
                     Some (request ~with_locals:true obligation)
@@ -588,7 +588,7 @@ let decide ~runs lookups solver proofs =
             questions ))
       questions
   in
-  let local_answer =
+  let await_local_answer =
     solve solver
       (List.concat_map (fun (_, _, questions) -> List.filter_map snd questions) local_questions)
   in
@@ -600,19 +600,19 @@ let decide ~runs lookups solver proofs =
           (fun (question, local_request) ->
             match (question, local_request) with
             | Decided answer, _ -> answer
-            | Asked (plain_request, _), None -> Solved (plain_answer plain_request)
+            | Asked (plain_request, _), None -> Solved (await_plain_answer plain_request)
             | Asked (plain_request, _), Some (local_request, _) -> (
-                match local_answer local_request with
+                match await_local_answer local_request with
                 | Counterexample _ as answer -> Solved answer
-                | Proven | Out_of_steps -> Solved (plain_answer plain_request)))
+                | Proven | Out_of_steps -> Solved (await_plain_answer plain_request)))
           questions
       in
       Key_table.replace verdicts key (list_definition_states lookups key proof answers))
     local_questions;
   { lookups; verdicts }
 
-let file_states { lookups; verdicts } file =
-  let verdict key = Option.value (Key_table.find_opt verdicts key) ~default:[] in
+let list_file_states { lookups; verdicts } file =
+  let read_verdict key = Option.value (Key_table.find_opt verdicts key) ~default:[] in
   List.map
     (fun declaration ->
       let key = Resolve.Names.make_key declaration in
@@ -652,7 +652,7 @@ let file_states { lookups; verdicts } file =
                   | None -> failure)
                 state.failure;
           })
-        (verdict key))
+        (read_verdict key))
     (lookups.interface.names.list_declarations_in file)
 
 let sort_diagnostics list =
@@ -662,7 +662,7 @@ let sort_diagnostics list =
     list
 
 let list_states verdicts file =
-  List.concat (file_states verdicts file)
+  List.concat (list_file_states verdicts file)
   |> List.sort (fun left right -> compare (left.span, left.code) (right.span, right.code))
 
 let list_diagnostics verdicts file =
@@ -676,5 +676,5 @@ let list_diagnostics verdicts file =
           | _ -> (reported, diagnostics))
         ([], []) states
       |> snd)
-    (file_states verdicts file)
+    (list_file_states verdicts file)
   |> sort_diagnostics

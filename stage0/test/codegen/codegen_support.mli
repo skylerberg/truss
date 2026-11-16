@@ -1,5 +1,5 @@
 val test : string -> (unit -> unit) -> unit
-val diagnostics : Database.t -> Path.file -> Diagnostic.t list
+val list_diagnostics : Database.t -> Path.file -> Diagnostic.t list
 val fail : ('a, unit, string, unit) format4 -> 'a
 val expect_string : expected:String.t -> String.t -> unit
 val expect_int : expected:int -> int -> unit
@@ -23,8 +23,8 @@ val field : 'a -> Ground.ty -> 'a * Memory_layout.member
 val variant :
   ?indirect:bool -> string -> (string * Memory_layout.member) list -> Memory_layout.variant_shape
 
-val shapes : (string * Memory_layout.shape) list -> Ground.ty -> Memory_layout.shape
-val layout : ?extra:(string * Memory_layout.shape) list -> Ground.ty -> Memory_layout.t
+val compute_shape : (string * Memory_layout.shape) list -> Ground.ty -> Memory_layout.shape
+val lay_out : ?extra:(string * Memory_layout.shape) list -> Ground.ty -> Memory_layout.t
 val describe : ?extra:(string * Memory_layout.shape) list -> Ground.ty -> string
 val int32 : Ground.ty
 val uint64 : Ground.ty
@@ -53,7 +53,7 @@ val function_ :
 val key : string -> Instance.key
 val instance : ?nested:function_ list -> string -> function_ -> instance
 val entry : ?nested:function_ list -> local_info list -> block list -> instance
-val printed : Emit_c.Builder.instance -> instance
+val make_constant_instance : Emit_c.Builder.instance -> instance
 
 val call :
   string ->
@@ -63,7 +63,7 @@ val call :
   Lowered.place option ->
   Lowered.statement
 
-val shape_env : ?extra:(string * Memory_layout.shape) list -> unit -> Memory_layout.env
+val make_shape_env : ?extra:(string * Memory_layout.shape) list -> unit -> Memory_layout.env
 val scratch : string lazy_t
 val compiler : Toolchain.t lazy_t
 val strict : string list lazy_t
@@ -82,8 +82,8 @@ val run_program :
 val expect_status : ?extra:(string * Memory_layout.shape) list -> int -> instance list -> unit
 val example : Path.module_
 val example_file : Path.file
-val database : ?checks:bool -> Project.package list -> Database.t
-val example_package : (Path.file * string) list -> Project.package list
+val make_database : ?checks:bool -> Project.package list -> Database.t
+val make_example_package : (Path.file * string) list -> Project.package list
 val compile : ?results:Compile.results -> ?evaluation_time_limit_ms:int -> Database.t -> Compile.t
 
 val load_files :
@@ -100,16 +100,16 @@ val load :
   string ->
   Database.t * Compile.t
 
-val tests_in : Database.t -> Path.module_ -> Path.t list
-val tests_of : Database.t -> Path.t list
+val list_tests_in : Database.t -> Path.module_ -> Path.t list
+val list_tests : Database.t -> Path.t list
 val run_source : string -> string
 val expect_output : string -> String.t -> unit
-val passes : string -> string -> unit
+val expect_pass : string -> string -> unit
 
 val run_main :
   ?arguments:string list -> ?input:string -> ?checks:bool -> string -> int * string * string
 
 val drop_shapes : (string * Memory_layout.shape) list
 val standard_context : Monomorphic.context
-val standard : string -> string -> ?arguments:Ground.argument list -> unit -> Ground.ty
-val standard_layout : Ground.ty -> string
+val make_standard_type : string -> string -> ?arguments:Ground.argument list -> unit -> Ground.ty
+val show_standard_layout : Ground.ty -> string

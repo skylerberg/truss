@@ -14,7 +14,7 @@ let two_64 = Z.shift_left Z.one 64
 
 let write_head buffer major (argument : Z.t) =
   let major = major lsl 5 in
-  let bytes count =
+  let write_bytes count =
     for index = count - 1 downto 0 do
       let byte = Z.to_int (Z.logand (Z.shift_right argument (8 * index)) (Z.of_int 0xff)) in
       Buffer.add_char buffer (Char.chr byte)
@@ -24,25 +24,27 @@ let write_head buffer major (argument : Z.t) =
     Buffer.add_char buffer (Char.chr (major lor Z.to_int argument))
   else if Z.lt argument (Z.of_int 0x100) then (
     Buffer.add_char buffer (Char.chr (major lor 24));
-    bytes 1)
+    write_bytes 1)
   else if Z.lt argument (Z.of_int 0x10000) then (
     Buffer.add_char buffer (Char.chr (major lor 25));
-    bytes 2)
+    write_bytes 2)
   else if Z.lt argument (Z.shift_left Z.one 32) then (
     Buffer.add_char buffer (Char.chr (major lor 26));
-    bytes 4)
+    write_bytes 4)
   else (
     Buffer.add_char buffer (Char.chr (major lor 27));
-    bytes 8)
+    write_bytes 8)
 
 let write_head_int buffer major argument = write_head buffer major (Z.of_int argument)
 
 let encode_magnitude value =
-  let rec bytes value acc =
+  let rec encode_bytes value acc =
     if Z.equal value Z.zero then acc
-    else bytes (Z.shift_right value 8) (Char.chr (Z.to_int (Z.logand value (Z.of_int 0xff))) :: acc)
+    else
+      encode_bytes (Z.shift_right value 8)
+        (Char.chr (Z.to_int (Z.logand value (Z.of_int 0xff))) :: acc)
   in
-  let list = bytes value [] in
+  let list = encode_bytes value [] in
   String.init (List.length list) (List.nth list)
 
 let find_half_bits value =

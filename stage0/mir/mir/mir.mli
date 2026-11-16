@@ -17,7 +17,7 @@ val expand_formula : formula -> Graph.t
 val make_body_part : ?interface:Interface.Environment.interface -> Core.t -> body_part
 
 val make_contract_part :
-  type_interface:(Path.t -> Types.type_interface option) -> Path.t -> Core.t -> contract_part
+  find_type_interface:(Path.t -> Types.type_interface option) -> Path.t -> Core.t -> contract_part
 
 module For_testing : sig
   val expand : t -> Graph.t

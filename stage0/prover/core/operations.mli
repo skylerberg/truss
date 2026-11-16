@@ -18,7 +18,7 @@ val make_equality :
 val find_innermost_axiom : State.context -> State.frame -> Logic.term -> State.open_axiom option
 val declare_power : State.context -> State.frame -> Logic.term -> Logic.term -> Logic.term
 
-val primitive_operation :
+val translate_primitive_operation :
   State.context ->
   State.frame ->
   site:Invocation.site ->

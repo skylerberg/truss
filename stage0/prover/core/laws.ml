@@ -113,7 +113,8 @@ let assume_laws (context : State.context) frame ~at (trait : Types.trait_referen
             match make_law_fact context frame source ~substitution law with
             | Some fact_ ->
                 (match impl with
-                | Some impl when Contracts.law_unshown context.lookups impl required ty law.name ->
+                | Some impl when Contracts.is_law_unshown context.lookups impl required ty law.name
+                  ->
                     context.holes <- (context.home, at) :: context.holes
                 | _ -> ());
                 Facts.add_frame_fact context frame fact_
@@ -130,8 +131,8 @@ let signature_terminates (context : State.context) path =
   | None -> true
 
 let keeps_cost context path (contract : State.contract) (asked : Types.cost) =
-  let constant = Contracts.find_integer_literal in
-  let same (cost : Mir.cost) =
+  let find_constant = Contracts.find_integer_literal in
+  let is_same (cost : Mir.cost) =
     match (asked.resource, cost.resource) with
     | Time, Time | Allocations, Allocations | Allocated_bytes, Allocated_bytes -> true
     | _ -> false
@@ -143,15 +144,16 @@ let keeps_cost context path (contract : State.contract) (asked : Types.cost) =
       match
         List.find_map
           (fun (part : State.part) ->
-            List.find_map (fun cost -> if same cost then Some cost else None) part.costs)
+            List.find_map (fun cost -> if is_same cost then Some cost else None) part.costs)
           contract.parts
       with
       | Some cost -> (
           match (asked.bound, cost.bound) with
-          | Order_of, (Order_of value | At_most value | Exactly value) -> constant value <> None
+          | Order_of, (Order_of value | At_most value | Exactly value) ->
+              find_constant value <> None
           | No_more_than (Some most), (At_most value | Exactly value) -> (
-              match constant value with Some limit -> Z.leq limit most | None -> false)
-          | Exactly_cost (Some exact), Exactly value -> constant value = Some exact
+              match find_constant value with Some limit -> Z.leq limit most | None -> false)
+          | Exactly_cost (Some exact), Exactly value -> find_constant value = Some exact
           | _ -> false)
       | None -> false)
 
@@ -165,7 +167,7 @@ let check_named_callback context (frame : State.frame) (invocation : Invocation.
       let known = List.map (fun (passed : State.passed) -> (passed.position, passed.term)) values in
       let promised =
         Logic.conjunction
-          (Validity.callback_facts context frame invocation passed.position known inputs)
+          (Validity.list_callback_facts context frame invocation passed.position known inputs)
       in
       let at_call = Facts.restrict frame promised in
       (if List.length own.parameters = List.length inputs then

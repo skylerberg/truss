@@ -16,7 +16,7 @@ val find_trait_declaring_capability_set :
 
 val list_known_bounds :
   Lookups.t ->
-  bounds:(Types.parameter -> Types.trait_reference list) ->
+  list_bounds:(Types.parameter -> Types.trait_reference list) ->
   Types.ty ->
   Types.trait_reference list
 
@@ -35,7 +35,7 @@ val compute_component_facts :
 
 val has_property :
   Lookups.t ->
-  bounds:(Types.parameter -> Types.trait_reference list) ->
+  list_bounds:(Types.parameter -> Types.trait_reference list) ->
   normalize:(Types.ty -> Types.ty) ->
   property ->
   Types.ty ->
@@ -43,7 +43,7 @@ val has_property :
 
 val is_storable :
   Lookups.t ->
-  bounds:(Types.parameter -> Types.trait_reference list) ->
+  list_bounds:(Types.parameter -> Types.trait_reference list) ->
   normalize:(Types.ty -> Types.ty) ->
   Types.ty ->
   bool

@@ -16,13 +16,13 @@ val list_law_proofs :
   (string * (State.source * Types.substitution)) list
 
 val is_impl_unfinished : Lookups.t -> Resolve.Names.key -> bool
-val law_unshown : Lookups.t -> Path.t -> Types.trait_reference -> Types.ty -> string -> bool
+val is_law_unshown : Lookups.t -> Path.t -> Types.trait_reference -> Types.ty -> string -> bool
 val find_function_contract : Lookups.t -> Path.t -> State.contract option
 val find_trait_part : Lookups.t -> Path.t -> string -> Path.receiver -> State.part option
 val find_capability_contract : Lookups.t -> Path.t -> string -> State.contract option
 val find_capability_part : Lookups.t -> Path.t -> string -> State.part option
 
-val method_contract :
+val find_method_contract :
   Lookups.t ->
   Types.trait_reference ->
   string ->

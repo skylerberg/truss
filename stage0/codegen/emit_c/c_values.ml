@@ -85,7 +85,7 @@ let rec render_place context fc (place : Lowered.place) : (string * Lowered.ty) 
           (Printf.sprintf "extern const %s %s;\n" (C_types.render_value_type context ty) symbol);
         (symbol, Lowered.Value ty)
   in
-  let text (text, (ty : Lowered.ty)) (projection : Lowered.projection) =
+  let render_projection (text, (ty : Lowered.ty)) (projection : Lowered.projection) =
     match (projection, ty) with
     | Deref, _ -> "(*" ^ text ^ ")"
     | Field name, _ -> text ^ ".f_" ^ name
@@ -101,16 +101,16 @@ let rec render_place context fc (place : Lowered.place) : (string * Lowered.ty) 
     | Index index, _ -> text ^ "[" ^ render_operand_exn context fc index ^ "]"
     | Variant_field _, _ -> C_runtime.raise_bug "a variant of a place that is not a value"
   in
-  let projected (ty : Lowered.ty) (projection : Lowered.projection) =
-    Lowered.find_projection_type context.env ~environment:(list_environment context fc) ty
+  let find_projected_type (ty : Lowered.ty) (projection : Lowered.projection) =
+    Lowered.find_projection_type context.env ~list_environment:(list_environment context fc) ty
       projection
   in
   let rec walk ((_, ty) as current) = function
     | [] -> Some current
     | projection :: rest -> (
-        match projected ty projection with
+        match find_projected_type ty projection with
         | None -> None
-        | Some next -> walk (text current projection, next) rest)
+        | Some next -> walk (render_projection current projection, next) rest)
   in
   if is_erased context (snd root) then None else walk root place.projections
 
@@ -192,41 +192,44 @@ let render_lawful_less left right =
 let render_binary context (op : Lowered.binary) (left, a_ty) (right, _) =
   let scalar = classify_scalar context a_ty in
   let c_type = C_types.render_scalar_type context scalar in
-  let boolean text = Printf.sprintf "((uint8_t)%s)" text in
-  let arithmetic symbol =
+  let render_boolean text = Printf.sprintf "((uint8_t)%s)" text in
+  let render_arithmetic symbol =
     if is_float scalar then Printf.sprintf "(%s %s %s)" left symbol right
     else Printf.sprintf "((%s)(%s %s %s))" c_type left symbol right
   in
-  let compare symbol = boolean (Printf.sprintf "(%s %s %s)" left symbol right) in
+  let compare symbol = render_boolean (Printf.sprintf "(%s %s %s)" left symbol right) in
   let mask = compute_bit_width scalar - 1 in
   match op with
-  | Add -> arithmetic "+"
-  | Subtract -> arithmetic "-"
-  | Multiply -> arithmetic "*"
-  | Divide -> arithmetic "/"
+  | Add -> render_arithmetic "+"
+  | Subtract -> render_arithmetic "-"
+  | Multiply -> render_arithmetic "*"
+  | Divide -> render_arithmetic "/"
   | Remainder ->
       if is_float scalar then
         Printf.sprintf "%s(%s, %s)"
           (if scalar = Float32 then "__builtin_fmodf" else "__builtin_fmod")
           left right
-      else arithmetic "%"
-  | Bit_and -> arithmetic "&"
-  | Bit_or -> arithmetic "|"
-  | Bit_xor -> arithmetic "^"
+      else render_arithmetic "%"
+  | Bit_and -> render_arithmetic "&"
+  | Bit_or -> render_arithmetic "|"
+  | Bit_xor -> render_arithmetic "^"
   | Shift_left ->
       Printf.sprintf "((%s)((%s)%s << (%s & %d)))" c_type
         (render_unsigned_type context scalar)
         left right mask
   | Shift_right -> Printf.sprintf "((%s)(%s >> (%s & %d)))" c_type left right mask
-  | Equal -> if is_float scalar then boolean (render_lawful_equal left right) else compare "=="
+  | Equal ->
+      if is_float scalar then render_boolean (render_lawful_equal left right) else compare "=="
   | Not_equal ->
-      if is_float scalar then boolean ("!" ^ render_lawful_equal left right) else compare "!="
-  | Less -> if is_float scalar then boolean (render_lawful_less left right) else compare "<"
+      if is_float scalar then render_boolean ("!" ^ render_lawful_equal left right)
+      else compare "!="
+  | Less -> if is_float scalar then render_boolean (render_lawful_less left right) else compare "<"
   | Less_equal ->
-      if is_float scalar then boolean ("!" ^ render_lawful_less right left) else compare "<="
-  | Greater -> if is_float scalar then boolean (render_lawful_less right left) else compare ">"
+      if is_float scalar then render_boolean ("!" ^ render_lawful_less right left) else compare "<="
+  | Greater ->
+      if is_float scalar then render_boolean (render_lawful_less right left) else compare ">"
   | Greater_equal ->
-      if is_float scalar then boolean ("!" ^ render_lawful_less left right) else compare ">="
+      if is_float scalar then render_boolean ("!" ^ render_lawful_less left right) else compare ">="
   | Ieee_equal -> compare "=="
   | Ieee_less -> compare "<"
   | Ieee_less_equal -> compare "<="
@@ -325,7 +328,7 @@ let build_laid_out_c context fc ty variant (values : (string * Lowered.operand) 
                C_runtime.raise_bug "a value of %s built with a field %s, which it does not have"
                  (Ground.to_string ty) name)
            values);
-  let block_of variant =
+  let read_block variant =
     let key = C_types.Block (ty, variant) in
     C_types.register context key;
     let fields = list_payload_fields (Memory_layout.lay_out_block context.env ty variant) in
@@ -358,7 +361,7 @@ let build_laid_out_c context fc ty variant (values : (string * Lowered.operand) 
                    (Printf.sprintf "((%s){ .tag = %d, %s })" c_type candidate.index
                       (render_initializers context fc (".payload.v_" ^ name) fields values)))
           | Scalar (Pointer (Block _)) ->
-              let block, fill = block_of name in
+              let block, fill = read_block name in
               Some
                 (Allocating
                    {
@@ -379,7 +382,7 @@ let build_laid_out_c context fc ty variant (values : (string * Lowered.operand) 
                  (Printf.sprintf "((%s){ %s })" c_type
                     (render_initializers context fc "" fields values)))
         | Scalar (Pointer (Block _)) ->
-            let block, fill = block_of name in
+            let block, fill = read_block name in
             Some (Allocating { block; fill; value = (fun pointer -> pointer) })
         | _ -> C_runtime.raise_bug "a payload"
       else
@@ -413,7 +416,7 @@ let build_c context fc (ty : Ground.ty) variant (values : (string * Lowered.oper
   build_laid_out_c context fc ty variant values
 
 let render_rvalue context fc (target : Lowered.ty) (rvalue : Lowered.rvalue) : built option =
-  let operand argument =
+  let render_required_operand argument =
     match render_operand context fc argument with
     | Some expression -> expression
     | None -> C_runtime.raise_bug "an operand of zero size"
@@ -421,15 +424,18 @@ let render_rvalue context fc (target : Lowered.ty) (rvalue : Lowered.rvalue) : b
   match rvalue with
   | Use argument ->
       Option.map (fun (text, _) -> Expression text) (render_operand context fc argument)
-  | Unary (op, argument) -> Some (Expression (render_unary context op (operand argument)))
+  | Unary (op, argument) ->
+      Some (Expression (render_unary context op (render_required_operand argument)))
   | Binary (op, left, right) ->
-      Some (Expression (render_binary context op (operand left) (operand right)))
+      Some
+        (Expression
+           (render_binary context op (render_required_operand left) (render_required_operand right)))
   | Convert (argument, scalar) ->
       Some
         (Expression
            (Printf.sprintf "((%s)%s)"
               (C_types.render_scalar_type context scalar)
-              (fst (operand argument))))
+              (fst (render_required_operand argument))))
   | Build { ty; variant; fields } -> build_c context fc ty variant fields
   | Is_variant (place, variant) -> (
       match render_place context fc place with
@@ -454,7 +460,7 @@ let render_rvalue context fc (target : Lowered.ty) (rvalue : Lowered.rvalue) : b
       let environment =
         match environment with
         | None -> "((void *)0)"
-        | Some environment_operand -> fst (operand environment_operand)
+        | Some environment_operand -> fst (render_required_operand environment_operand)
       in
       Some
         (Expression

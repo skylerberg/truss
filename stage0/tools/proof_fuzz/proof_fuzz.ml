@@ -35,16 +35,16 @@ let load text =
              (Database.make_lowering_requests database [ example.package ])
              (Lazy.force compiler) (Lazy.force cache) settings) )
 
-let integer (ty : Types.ty) =
+let find_integer (ty : Types.ty) =
   if Types.is_builtin Bool ty then Some (1, false) else Types.find_integer_bits ty
 
-let extremes (bits, signed) =
+let list_extremes (bits, signed) =
   if signed then
     let half = Z.shift_left Z.one (bits - 1) in
     [ Z.neg half; Z.minus_one; Z.zero; Z.one; Z.pred half ]
   else [ Z.zero; Z.one; Z.pred (Z.shift_left Z.one bits) ]
 
-let random (bits, signed) =
+let draw_random (bits, signed) =
   let value = Z.extract (Z.of_int64 (Random.bits64 ())) 0 bits in
   if signed && Z.testbit value (bits - 1) then Z.sub value (Z.shift_left Z.one bits) else value
 
@@ -56,7 +56,7 @@ type candidate = {
   ranges : (int * bool) list;
 }
 
-let runnable database =
+let list_runnable database =
   let mir = Database.For_testing.make_mir_lookups database example.package in
   let interface = Database.make_interface_lookups database [ example.package ] in
   let lookups = Database.make_proof_lookups database in
@@ -70,13 +70,13 @@ let runnable database =
       | ( Some ({ generics = []; receiver = None; uses; output = Returns output; _ } as signature),
           Some { form = { requires; _ }; _ } )
         when uses = Types.no_capabilities
-             && integer output <> None
+             && find_integer output <> None
              && List.for_all
                   (fun (requirement : Mir.requirement) -> requirement.is_executable)
                   requires -> (
           let ranges =
             List.map
-              (fun (parameter : Types.parameter_info) -> integer parameter.type_)
+              (fun (parameter : Types.parameter_info) -> find_integer parameter.type_)
               signature.parameters
           in
           let admits =
@@ -100,7 +100,7 @@ let runnable database =
       | _ -> None)
     (lookups.interface.names.list_declarations example)
 
-let proven (names : Resolve.Names.lookups) key states =
+let is_proven (names : Resolve.Names.lookups) key states =
   let base = (names.read_place key).base and text = names.read_text key in
   List.for_all
     (fun (state : Source.span Prover.state) ->
@@ -109,7 +109,7 @@ let proven (names : Resolve.Names.lookups) key states =
       || state.failure = None)
     states
 
-let admitting index candidate =
+let make_admitting_source index candidate =
   Printf.sprintf "\nfn fuzz_requires_%d(%s) -> Bool {\n  %s\n}\n" index
     (String.concat ", "
        (List.map
@@ -139,15 +139,15 @@ let run_mutant ~samples text =
       let candidates =
         List.filter
           (fun candidate ->
-            proven (Database.make_name_lookups database [ example.package ]) candidate.key states)
-          (runnable database)
+            is_proven (Database.make_name_lookups database [ example.package ]) candidate.key states)
+          (list_runnable database)
       in
       let with_admitting =
         text
         ^ String.concat ""
             (List.mapi
                (fun index candidate ->
-                 if candidate.admits = [] then "" else admitting index candidate)
+                 if candidate.admits = [] then "" else make_admitting_source index candidate)
                candidates)
       in
       match load with_admitting with
@@ -157,10 +157,10 @@ let run_mutant ~samples text =
             (fun index candidate ->
               incr functions;
               let call function_ arguments =
-                Database.For_testing.root running (Call_evaluation { function_; arguments });
+                Database.For_testing.add_root running (Call_evaluation { function_; arguments });
                 Compile.For_testing.evaluate_call (Lazy.force compile) ~function_ ~arguments
               in
-              let admitted arguments =
+              let is_admitted arguments =
                 candidate.admits = []
                 ||
                 match
@@ -174,7 +174,7 @@ let run_mutant ~samples text =
               let tried = Arguments_table.create 16 in
               List.iter
                 (fun arguments ->
-                  if (not (Arguments_table.mem tried arguments)) && admitted arguments then begin
+                  if (not (Arguments_table.mem tried arguments)) && is_admitted arguments then begin
                     Arguments_table.replace tried arguments ();
                     incr runs;
                     match call candidate.path arguments with
@@ -189,12 +189,13 @@ let run_mutant ~samples text =
                 (List.init samples (fun sample ->
                      List.map
                        (fun range ->
-                         let edges = extremes range in
-                         if sample < List.length edges then List.nth edges sample else random range)
+                         let edges = list_extremes range in
+                         if sample < List.length edges then List.nth edges sample
+                         else draw_random range)
                        candidate.ranges)))
             candidates)
 
-let mutants text =
+let list_mutants text =
   let tokens, _ = Lexer.lex (Source.create ~path:"seed.truss" text) in
   let replace (span : Source.span) by =
     String.sub text 0 span.start ^ by ^ String.drop_first span.stop text
@@ -240,7 +241,7 @@ let () =
       (fun file ->
         List.filter
           (fun text ->
-            let shown diagnostics =
+            let print_diagnostics diagnostics =
               if !verbose then
                 List.iter
                   (fun (diagnostic : Diagnostic.t) ->
@@ -258,18 +259,19 @@ let () =
                        (Database.list_proofs (Database.prove database [ example_file ])))
                     example_file
                 in
-                shown unproven;
+                print_diagnostics unproven;
                 unproven = []
             | None ->
                 let database = build_example_database text in
                 Database.check database [ example_file.module_.package ];
-                shown (Database.list_file_diagnostics database example_file);
+                print_diagnostics (Database.list_file_diagnostics database example_file);
                 false)
-          (if Filename.check_suffix file ".md" then Documents.truss_blocks (File_system.read file)
+          (if Filename.check_suffix file ".md" then
+             Documents.list_truss_blocks (File_system.read file)
            else [ File_system.read file ]))
       (List.rev !files)
   in
-  let all = List.concat_map mutants seeds in
+  let all = List.concat_map list_mutants seeds in
   let chosen =
     List.map snd (List.sort compare (List.map (fun mutant -> (Random.bits (), mutant)) all))
     |> List.take !count

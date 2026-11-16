@@ -54,20 +54,20 @@ let parse_sexps text =
     then skip (position + 1)
     else position
   in
-  let rec one position =
+  let rec parse_one position =
     let position = skip position in
     if position >= length then None
     else if text.[position] = '(' then
-      let rec items position acc =
+      let rec parse_items position acc =
         let position = skip position in
         if position >= length then (List (List.rev acc), position)
         else if text.[position] = ')' then (List (List.rev acc), position + 1)
         else
-          match one position with
-          | Some (item, position) -> items position (item :: acc)
+          match parse_one position with
+          | Some (item, position) -> parse_items position (item :: acc)
           | None -> (List (List.rev acc), position)
       in
-      Some (items (position + 1) [])
+      Some (parse_items (position + 1) [])
     else
       let stop = ref position in
       while !stop < length && not (List.mem text.[!stop] [ ' '; '\n'; '\t'; '\r'; '('; ')' ]) do
@@ -75,12 +75,12 @@ let parse_sexps text =
       done;
       Some (Atom (String.sub text position (!stop - position)), !stop)
   in
-  let rec all position acc =
-    match one position with
-    | Some (item, position) -> all position (item :: acc)
+  let rec parse_all position acc =
+    match parse_one position with
+    | Some (item, position) -> parse_all position (item :: acc)
     | None -> List.rev acc
   in
-  all 0 []
+  parse_all 0 []
 
 let rec show_sexp = function
   | Atom atom -> atom
@@ -101,7 +101,7 @@ let request_key_of_text text value_arguments = key_of_text text ^ String.concat 
 
 let request ?(symbols = []) ?(terms = []) query =
   let rendering = Logic.render query in
-  let named = Logic.symbols rendering in
+  let named = Logic.list_symbols rendering in
   let requested_symbols =
     List.filter_map
       (fun symbol ->
@@ -111,7 +111,8 @@ let request ?(symbols = []) ?(terms = []) query =
   in
   let requested_terms =
     List.filter_map
-      (fun (name, term) -> Logic.term_text rendering term |> Option.map (fun text -> (name, text)))
+      (fun (name, term) ->
+        Logic.render_term rendering term |> Option.map (fun text -> (name, text)))
       terms
     |> List.mapi (fun index (name, text) -> ((name, Printf.sprintf "#%d" index), text))
   in
@@ -211,21 +212,21 @@ let solve_all solver requests =
   let requests = Array.of_list requests in
   let answers = Array.make (Array.length requests) Out_of_steps_canonical in
   let next = Atomic.make 0 in
-  let rec work () =
+  let rec run_worker () =
     let index = Atomic.fetch_and_add next 1 in
     if index < Array.length requests then begin
       answers.(index) <- solve solver requests.(index);
-      work ()
+      run_worker ()
     end
   in
   let helper_domains = min (Array.length requests) (Domain.recommended_domain_count ()) - 1 in
-  let domains = List.init (max 0 helper_domains) (fun _ -> Domain.spawn work) in
-  work ();
+  let domains = List.init (max 0 helper_domains) (fun _ -> Domain.spawn run_worker) in
+  run_worker ();
   List.iter Domain.join domains;
   Array.to_list answers
 
 let count_queries_run solver = run_locked (fun () -> solver.queries_run)
 
 module For_testing = struct
-  let key = hash_query
+  let hash_query = hash_query
 end

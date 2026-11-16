@@ -1,8 +1,8 @@
-let document name = File_system.read (Harness.workspace_path name)
-let source text = Source.create ~path:"test.truss" text
+let read_document name = File_system.read (Harness.make_workspace_path name)
+let make_source text = Source.create ~path:"test.truss" text
 
 let parse text =
-  let tokens, lexer_diagnostics = Lexer.lex (source text) in
+  let tokens, lexer_diagnostics = Lexer.lex (make_source text) in
   let file, parser_diagnostics = Parser.parse tokens ~lexer_diagnostics in
   let diagnostics = lexer_diagnostics @ parser_diagnostics in
   if
@@ -16,15 +16,15 @@ let parse text =
   then Harness.fail "the parser recovered in %S with no error" text;
   (file, diagnostics)
 
-let items (file : Syntax.file) =
+let list_items (file : Syntax.file) =
   List.concat_map
     (fun (top_level : Syntax.top_level) -> top_level.definition :: top_level.methods)
     file.definitions
 
-let codes diagnostics =
+let list_codes diagnostics =
   List.map (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code) diagnostics
 
-let no_diagnostics text diagnostics =
+let expect_no_diagnostics text diagnostics =
   List.iter
     (fun (diagnostic : Diagnostic.t) ->
       Harness.fail "unexpected %s at %d: %s in %S"
@@ -32,30 +32,30 @@ let no_diagnostics text diagnostics =
         diagnostic.span.start diagnostic.message text)
     diagnostics
 
-let definitions text expected =
+let expect_definitions text expected =
   let file, diagnostics = parse text in
-  no_diagnostics text diagnostics;
-  let actual = Syntax_print.definitions file.definitions in
+  expect_no_diagnostics text diagnostics;
+  let actual = Syntax_print.show_definitions file.definitions in
   Harness.expect_strings ~expected actual
 
-let definition text expected = definitions text [ expected ]
+let expect_definition text expected = expect_definitions text [ expected ]
 
-let body_of text =
+let parse_body text =
   let file, diagnostics = parse ("fn example() {\n" ^ text ^ "\n}") in
   match file.definitions with
   | [ { definition = { value = { kind = Function { body; _ }; _ }; _ }; _ } ] ->
       (body.statements, diagnostics)
   | _ -> ([], diagnostics)
 
-let statements text expected =
-  let statements, diagnostics = body_of text in
-  no_diagnostics text diagnostics;
-  let actual = List.map Syntax_print.statement statements in
+let expect_statements text expected =
+  let statements, diagnostics = parse_body text in
+  expect_no_diagnostics text diagnostics;
+  let actual = List.map Syntax_print.show_statement statements in
   Harness.expect_strings ~expected actual
 
-let statement text expected = statements text [ expected ]
+let expect_statement text expected = expect_statements text [ expected ]
 
-let error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
+let expect_error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
   match snd (parse text) with
   | [ diagnostic ] -> (
       let message = diagnostic.message in
@@ -68,7 +68,7 @@ let error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
         Harness.fail "expected %s, got %s"
           (Diagnostic.Code.name (Parser code))
           (Diagnostic.Code.name diagnostic.code);
-      let expected = Support.find_occurrence ~sub:at ~occurrence text in
+      let expected = Support.locate_occurrence ~sub:at ~occurrence text in
       if diagnostic.span.start <> expected then
         Harness.fail "expected the error at %d (%S), got %d" expected at diagnostic.span.start;
       let results = List.map (Diagnostic.apply_fix text) diagnostic.fixes in
@@ -85,28 +85,28 @@ let error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
             (fun result ->
               List.iter
                 (Harness.fail "the fixed text %S has %s" result)
-                (codes (snd (parse result))))
+                (list_codes (snd (parse result))))
             results)
   | diagnostics ->
       Harness.fail "expected one diagnostic, got [%s] for %S"
-        (String.concat "; " (codes diagnostics))
+        (String.concat "; " (list_codes diagnostics))
         text
 
-let body_error ?fixed ?alternatives ?occurrence text ~code ~at =
+let expect_body_error ?fixed ?alternatives ?occurrence text ~code ~at =
   let wrap text = "fn example() {\n" ^ text ^ "\n}" in
-  error ?fixed:(Option.map wrap fixed)
+  expect_error ?fixed:(Option.map wrap fixed)
     ?alternatives:(Option.map (List.map wrap) alternatives)
     ?occurrence (wrap text) ~code ~at
 
 let expect_codes expected diagnostics =
-  Option.iter (fun expected -> Harness.expect_strings ~expected (codes diagnostics)) expected
+  Option.iter (fun expected -> Harness.expect_strings ~expected (list_codes diagnostics)) expected
 
-let recovered_definitions ?codes:expected_codes text expected =
+let expect_recovered_definitions ?codes:expected_codes text expected =
   let file, diagnostics = parse text in
   expect_codes expected_codes diagnostics;
-  Harness.expect_strings ~expected (Syntax_print.definitions file.definitions)
+  Harness.expect_strings ~expected (Syntax_print.show_definitions file.definitions)
 
-let recovered_statements ?codes:expected_codes text expected =
-  let statements, diagnostics = body_of text in
+let expect_recovered_statements ?codes:expected_codes text expected =
+  let statements, diagnostics = parse_body text in
   expect_codes expected_codes diagnostics;
-  Harness.expect_strings ~expected (List.map Syntax_print.statement statements)
+  Harness.expect_strings ~expected (List.map Syntax_print.show_statement statements)

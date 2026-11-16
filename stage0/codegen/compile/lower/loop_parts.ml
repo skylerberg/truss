@@ -1,18 +1,19 @@
 let lookup_block (blocks : Mir.Graph.basic_block Dynarray.t) block = Dynarray.get blocks block
 let set_block blocks block basic = Dynarray.set blocks block basic
 
-let retarget (target : Mir.Graph.block -> Mir.Graph.block) (terminator : Mir.Graph.terminator) :
-    Mir.Graph.terminator =
+let retarget (retarget_block : Mir.Graph.block -> Mir.Graph.block)
+    (terminator : Mir.Graph.terminator) : Mir.Graph.terminator =
   match terminator with
-  | Goto block -> Goto (target block)
-  | Branch branch -> Branch { branch with yes = target branch.yes; no = target branch.no }
+  | Goto block -> Goto (retarget_block block)
+  | Branch branch ->
+      Branch { branch with yes = retarget_block branch.yes; no = retarget_block branch.no }
   | For loop ->
       For
         {
           loop with
-          body = target loop.body;
-          blocks = List.map target loop.blocks;
-          after = target loop.after;
+          body = retarget_block loop.body;
+          blocks = List.map retarget_block loop.blocks;
+          after = retarget_block loop.after;
         }
   | Fork fork ->
       Fork
@@ -21,24 +22,28 @@ let retarget (target : Mir.Graph.block -> Mir.Graph.block) (terminator : Mir.Gra
           branches =
             List.map
               (fun (branch : Mir.Graph.branch) ->
-                { Mir.Graph.entry = target branch.entry; blocks = List.map target branch.blocks })
+                {
+                  Mir.Graph.entry = retarget_block branch.entry;
+                  blocks = List.map retarget_block branch.blocks;
+                })
               fork.branches;
-          join = Option.map target fork.join;
+          join = Option.map retarget_block fork.join;
         }
-  | Join join -> Join { join with next = target join.next }
-  | Yield yielded -> Yield { yielded with resume = target yielded.resume }
-  | Cancel cancel -> Cancel { cancel with task_end = Option.map target cancel.task_end }
+  | Join join -> Join { join with next = retarget_block join.next }
+  | Yield yielded -> Yield { yielded with resume = retarget_block yielded.resume }
+  | Cancel cancel -> Cancel { cancel with task_end = Option.map retarget_block cancel.task_end }
   | Resume resume ->
       Resume
         {
           resume with
           exits =
             List.map
-              (fun (exit : Mir.Graph.early_exit) -> { exit with resume = target exit.resume })
+              (fun (exit : Mir.Graph.early_exit) ->
+                { exit with resume = retarget_block exit.resume })
               resume.exits;
-          next = target resume.next;
+          next = retarget_block resume.next;
         }
-  | Iteration_end { loop } -> Iteration_end { loop = target loop }
+  | Iteration_end { loop } -> Iteration_end { loop = retarget_block loop }
   | (Return _ | Unreachable | Written_unreachable | Todo) as terminator -> terminator
 
 let list_own_iteration_ends blocks (body : Mir.Graph.block list) =

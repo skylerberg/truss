@@ -36,7 +36,7 @@ let lock_file snapshot =
       ]
 
 let fix snapshot packages =
-  let rec round snapshot number fixed =
+  let rec run_round snapshot number fixed =
     let database = Workspace.open_database snapshot in
     Database.check database packages;
     let applied =
@@ -62,9 +62,9 @@ let fix snapshot packages =
       @ lock_file snapshot
     in
     if applied = [] || number = rounds then (snapshot, List.rev fixed)
-    else round (Command_packages.retake snapshot) (number + 1) (List.rev_append applied fixed)
+    else run_round (Command_packages.retake snapshot) (number + 1) (List.rev_append applied fixed)
   in
-  round snapshot 1 []
+  run_round snapshot 1 []
 
 let run ~fix:fixing ~proofs =
   let snapshot, packages = Command_packages.load_current () in

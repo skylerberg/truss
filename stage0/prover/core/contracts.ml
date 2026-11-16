@@ -55,7 +55,7 @@ let holds_todo (lookups : Lookups.t) (key : Resolve.Names.key) =
 
 let list_law_proofs (lookups : Lookups.t) package (trait : Types.trait_reference)
     (for_type : Types.ty) =
-  let same_argument (left : Types.argument) (right : Types.argument) =
+  let is_same_argument (left : Types.argument) (right : Types.argument) =
     match (left, right) with Type left, Type right -> Types.equal left right | _ -> left = right
   in
   let named_laws =
@@ -76,7 +76,7 @@ let list_law_proofs (lookups : Lookups.t) package (trait : Types.trait_reference
           in
           match Interface.Impls.match_type ~variables [] proven.for_type for_type with
           | Some renaming
-            when List.equal same_argument
+            when List.equal is_same_argument
                    (List.map (Types.substitute_argument renaming) proven.trait.trait_arguments)
                    trait.trait_arguments ->
               Some (proven.law, (read_source_at_key lookups key, renaming))
@@ -87,8 +87,8 @@ let list_law_proofs (lookups : Lookups.t) package (trait : Types.trait_reference
 let is_impl_unfinished (lookups : Lookups.t) (key : Resolve.Names.key) =
   List.exists (holds_todo lookups) (lookups.interface.names.list_contained key)
 
-let law_unshown (lookups : Lookups.t) (impl : Path.t) (trait : Types.trait_reference) for_type name
-    =
+let is_law_unshown (lookups : Lookups.t) (impl : Path.t) (trait : Types.trait_reference) for_type
+    name =
   match lookups.interface.names.find_key impl with
   | Some key ->
       is_impl_unfinished lookups key
@@ -136,8 +136,8 @@ let find_capability_part lookups (capability : Path.t) name =
   let path = Path.make_capability_method capability name in
   Option.bind (find_source lookups path) (fun (callee, _, _) -> find_part lookups path callee)
 
-let method_contract lookups (trait : Types.trait_reference) name receiver (evidence : Core.evidence)
-    =
+let find_method_contract lookups (trait : Types.trait_reference) name receiver
+    (evidence : Core.evidence) =
   let trait_side = find_trait_part lookups trait.trait name receiver in
   match evidence with
   | Impl { impl; _ } -> (

@@ -53,7 +53,7 @@ type progress =
 
 val run_tests :
   ?rerun:bool ->
-  ?progress:(progress -> unit) ->
+  ?report_progress:(progress -> unit) ->
   t ->
   time_limit_ms:int ->
   Path.t list ->
@@ -92,8 +92,8 @@ val check_calls :
   unit
 
 val derive_test_keys :
-  lowered:(Instance.key -> lowered) ->
-  known:(Instance.key -> string) ->
+  read_lowered:(Instance.key -> lowered) ->
+  read_known_key:(Instance.key -> string) ->
   Instance.key list ->
   (Instance.key * string) list
 
@@ -112,7 +112,7 @@ module For_testing : sig
     output:string ->
     (unit, string) result
 
-  val compiled : t -> Instance.key -> Emit_c.fragment
+  val compile_fragment : t -> Instance.key -> Emit_c.fragment
 
   val evaluate_call :
     t -> function_:Path.t -> arguments:Z.t list -> (Lowered.static_value ran, string) result

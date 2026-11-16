@@ -95,35 +95,35 @@ let lex_character_literal (cursor : Cursor.t) ~tag ~literal_start ~stop =
     }
 
 let format_field_edits cursor ~start ~stop =
-  let plain current =
+  let is_plain current =
     Cursor.is_ascii_name_byte current || Cursor.is_space current
     || List.mem current [ '.'; ','; '('; ')'; '['; ']'; '+'; '-'; '*'; '/' ]
   in
-  let rec field_end position =
+  let rec find_field_end position =
     if position >= stop then None
     else if Cursor.is_at cursor position '}' then Some position
-    else if plain (Cursor.lookup_char cursor position) then field_end (position + 1)
+    else if is_plain (Cursor.lookup_char cursor position) then find_field_end (position + 1)
     else None
   in
-  let rec edits position reversed_edits =
+  let rec find_edits position reversed_edits =
     if position >= stop then Some (List.rev reversed_edits)
     else
       let current = Cursor.lookup_char cursor position in
       match current with
-      | '\\' -> edits (position + 2) reversed_edits
+      | '\\' -> find_edits (position + 2) reversed_edits
       | ('{' | '}') when Cursor.is_at cursor (position + 1) current ->
-          edits (position + 2)
+          find_edits (position + 2)
             (Diagnostic.replace (Source.make_span position (position + 2)) (String.of_char current)
             :: reversed_edits)
       | '{' -> (
-          match field_end (position + 1) with
+          match find_field_end (position + 1) with
           | Some close when Cursor.skip_spaces cursor (position + 1) < close ->
-              edits (close + 1)
+              find_edits (close + 1)
                 (Diagnostic.insert (Source.make_zero_width position) "$" :: reversed_edits)
           | _ -> None)
-      | _ -> edits (position + 1) reversed_edits
+      | _ -> find_edits (position + 1) reversed_edits
   in
-  edits start []
+  find_edits start []
 
 type prefix_kind = Format | Raw_text | Bytes
 
@@ -222,13 +222,13 @@ let hash_raw_string cursor ~start =
     | None -> None
     | Some text_stop ->
         let value = String.sub cursor.text text_start (text_stop - text_start) in
-        let rec longest_run position longest =
+        let rec measure_longest_run position longest =
           if position >= text_stop then longest
           else
             let run = Cursor.run_length cursor position '"' in
-            longest_run (position + max run 1) (max longest run)
+            measure_longest_run (position + max run 1) (max longest run)
         in
-        let quotes = max 3 (longest_run text_start 0 + 1) in
+        let quotes = max 3 (measure_longest_run text_start 0 + 1) in
         let delimiter = String.make quotes '"' in
         let interpolates = String.includes ~affix:"${" value in
         let stop = text_stop + 1 + hashes in
@@ -273,7 +273,7 @@ let lex_quoted_string (cursor : Cursor.t) ~scan ~nesting ~delimiter =
   let start = cursor.position in
   let kind, ending = Strings.scan_ordinary cursor ~closing:delimiter ~scan ~tag:None ~nesting in
   let stop = cursor.position in
-  let inside_interpolation position =
+  let is_inside_interpolation position =
     match kind with
     | String { rest; _ } ->
         Array.exists
@@ -285,7 +285,7 @@ let lex_quoted_string (cursor : Cursor.t) ~scan ~nesting ~delimiter =
   let rec quote_edits position reversed_edits =
     if position >= stop - 1 then List.rev reversed_edits
     else if Cursor.is_at cursor position '\\' then quote_edits (position + 2) reversed_edits
-    else if Cursor.is_at cursor position '"' && not (inside_interpolation position) then
+    else if Cursor.is_at cursor position '"' && not (is_inside_interpolation position) then
       quote_edits (position + 1)
         (Diagnostic.insert (Source.make_zero_width position) "\\" :: reversed_edits)
     else quote_edits (position + 1) reversed_edits
@@ -354,43 +354,43 @@ type scanned = Lexed of (Token.kind * Cursor.ending) | Skipped
 let scan (cursor : Cursor.t) ~scan ~nesting =
   let start = cursor.position in
   let is offset character = Cursor.is_at cursor (start + offset) character in
-  let token (kind, ending) = Some (Lexed (kind, ending)) in
-  let rejected ?code length message =
+  let make_token (kind, ending) = Some (Lexed (kind, ending)) in
+  let make_rejected ?code length message =
     Source_text.reject ?code cursor ~length message;
     Some Skipped
   in
-  let prefixed prefix =
+  let make_prefixed prefix =
     cursor.position <- start + 1;
-    token (lex_prefixed_string cursor ~scan ~prefix ~start ~nesting)
+    make_token (lex_prefixed_string cursor ~scan ~prefix ~start ~nesting)
   in
   if is 0 '\'' then
     match find_character_literal_end cursor start with
     | Some stop ->
-        token (lex_character_literal cursor ~tag:"Character" ~literal_start:start ~stop, Closed)
+        make_token (lex_character_literal cursor ~tag:"Character" ~literal_start:start ~stop, Closed)
     | None -> (
         let is_apostrophe = touches_word_before cursor start in
         match find_closing_delimiter cursor ~start ~delimiter:'\'' with
         | Some close when (not is_apostrophe) && not (is_name_character cursor (close + 1)) ->
-            token (lex_quoted_string cursor ~scan ~nesting ~delimiter:'\'')
+            make_token (lex_quoted_string cursor ~scan ~nesting ~delimiter:'\'')
         | _
           when (not is_apostrophe)
                && Cursor.satisfies cursor (start + 1) (fun next ->
                    Cursor.is_ascii_letter next || next = '_') ->
-            let rec name_end position =
+            let rec locate_name_end position =
               if Cursor.satisfies cursor position Cursor.is_ascii_name_byte then
-                name_end (position + 1)
+                locate_name_end (position + 1)
               else position
             in
-            rejected ~code:Lifetime
-              (name_end (start + 1) - start)
+            make_rejected ~code:Lifetime
+              (locate_name_end (start + 1) - start)
               "Truss has no lifetimes. How long a view lasts is checked without annotations."
-        | _ -> rejected 1 "`'` is not used in Truss. Strings are written with `\"`.")
+        | _ -> make_rejected 1 "`'` is not used in Truss. Strings are written with `\"`.")
   else if is 0 '`' then
     match find_closing_delimiter cursor ~start ~delimiter:'`' with
-    | Some _ -> token (lex_quoted_string cursor ~scan ~nesting ~delimiter:'`')
-    | None -> rejected 1 "The backtick is not used in Truss."
-  else if is 0 '@' && is 1 '"' then prefixed "@"
-  else if is 0 '$' && is 1 '"' then prefixed "$"
+    | Some _ -> make_token (lex_quoted_string cursor ~scan ~nesting ~delimiter:'`')
+    | None -> make_rejected 1 "The backtick is not used in Truss."
+  else if is 0 '@' && is 1 '"' then make_prefixed "@"
+  else if is 0 '$' && is 1 '"' then make_prefixed "$"
   else None
 
 let lex_after_name (cursor : Cursor.t) ~scan ~nesting ~start (name : Token.kind) =

@@ -116,13 +116,13 @@ type foreign = Plus_plus | Minus_minus | Star_star | Colon_equal | Pipe_greater
 module Decimal : sig
   type t = private { significand : Z.t; exponent : Z.t }
 
-  val normalized : significand:Z.t -> exponent:Z.t -> t
+  val normalize : significand:Z.t -> exponent:Z.t -> t
 end = struct
   type t = { significand : Z.t; exponent : Z.t }
 
   let ten = Z.of_int 10
 
-  let normalized ~significand ~exponent =
+  let normalize ~significand ~exponent =
     if Z.equal significand Z.zero then { significand = Z.zero; exponent = Z.zero }
     else
       let significand, zeros = Z.remove significand ten in
@@ -339,14 +339,14 @@ let escape text =
   Buffer.contents buffer
 
 let rec spell_tokens ?(insertions = []) (tokens : t array) =
-  let inserted offset =
+  let spell_inserted offset =
     String.concat ""
       (List.filter_map (fun (at, text) -> if at = offset then Some text else None) insertions)
   in
   let buffer = Buffer.create 64 in
   let rec spell index previous_stop =
     if index = Array.length tokens then begin
-      Option.iter (fun stop -> Buffer.add_string buffer (inserted stop)) previous_stop;
+      Option.iter (fun stop -> Buffer.add_string buffer (spell_inserted stop)) previous_stop;
       true
     end
     else
@@ -359,12 +359,12 @@ let rec spell_tokens ?(insertions = []) (tokens : t array) =
           | Some text ->
               (match previous_stop with
               | Some stop ->
-                  Buffer.add_string buffer (inserted stop);
+                  Buffer.add_string buffer (spell_inserted stop);
                   if stop < token.span.start then begin
                     Buffer.add_char buffer ' ';
-                    Buffer.add_string buffer (inserted token.span.start)
+                    Buffer.add_string buffer (spell_inserted token.span.start)
                   end
-              | None -> Buffer.add_string buffer (inserted token.span.start));
+              | None -> Buffer.add_string buffer (spell_inserted token.span.start));
               Buffer.add_string buffer text;
               spell (index + 1) (Some token.span.stop))
   in

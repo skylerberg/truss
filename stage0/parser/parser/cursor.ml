@@ -184,7 +184,7 @@ let spell cursor ?insertions span =
   | tokens -> Token.spell_tokens ?insertions tokens
 
 let joins_neighbors cursor (span : Source.span) code =
-  let adjacent is_adjacent =
+  let find_adjacent is_adjacent =
     let rec search index =
       if index >= cursor.stop then None
       else
@@ -199,9 +199,11 @@ let joins_neighbors cursor (span : Source.span) code =
   let before =
     Option.map
       (fun spelling -> spelling.[String.length spelling - 1])
-      (adjacent (fun token -> token.span.stop = span.start))
+      (find_adjacent (fun token -> token.span.stop = span.start))
   and after =
-    Option.map (fun spelling -> spelling.[0]) (adjacent (fun token -> token.span.start = span.stop))
+    Option.map
+      (fun spelling -> spelling.[0])
+      (find_adjacent (fun token -> token.span.start = span.stop))
   in
   Token.joins_neighbor ~before ~after code
 
@@ -292,9 +294,9 @@ let skip_one cursor =
 let group cursor =
   Array.sub cursor.tokens cursor.index (lookup_closer cursor cursor.index - cursor.index + 1)
 
-let parse_separated cursor ~separator item =
+let parse_separated cursor ~separator parse_item =
   let rec gather items =
-    let items = item cursor :: items in
+    let items = parse_item cursor :: items in
     if accept_punctuation cursor separator then gather items else List.rev items
   in
   gather []
@@ -313,7 +315,7 @@ let skip_line cursor ~closer_index =
     skip_one cursor
   done
 
-let parse_bracketed cursor ~item ~recover =
+let parse_bracketed cursor ~parse_item ~recover =
   let opener = cursor.index in
   let closer_index = lookup_closer cursor opener in
   advance cursor;
@@ -322,7 +324,7 @@ let parse_bracketed cursor ~item ~recover =
     else
       let start = cursor.index in
       match
-        let value = item cursor in
+        let value = parse_item cursor in
         if cursor.index < closer_index then expect_punctuation cursor Comma;
         value
       with
@@ -342,7 +344,7 @@ let parse_bracketed cursor ~item ~recover =
   skip_to cursor (closer_index + 1);
   items
 
-let parse_lines cursor ~item ~recover =
+let parse_lines cursor ~parse_item ~recover =
   let enclosing_after_inserted_closer = cursor.after_inserted_closer in
   let opener = cursor.index in
   let closer_index = lookup_closer cursor opener in
@@ -354,7 +356,7 @@ let parse_lines cursor ~item ~recover =
       let value =
         match
           cursor.after_inserted_closer <- false;
-          let value = item cursor in
+          let value = parse_item cursor in
           let ends_with_comma =
             match find_previous_token cursor with
             | Some { kind = Punctuation Comma; _ } -> true

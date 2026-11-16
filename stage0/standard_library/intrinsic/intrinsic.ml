@@ -380,7 +380,7 @@ let show_operation = function
 
 let make_operation_path operation = Path.Top { module_; name = show_operation operation }
 
-let uses : operation -> Path.t list = function
+let list_uses : operation -> Path.t list = function
   | Shared_update | Shared_key -> [ Well_known.make_path Tasks ]
   | _ -> []
 

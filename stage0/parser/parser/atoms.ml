@@ -59,8 +59,8 @@ let make_text cursor (text : Token.text) : Syntax.text =
     id = Cursor.allocate_id cursor (Cursor.make_definition_span cursor text.span);
   }
 
-let make_string_literal cursor ~start ~modules (literal : Token.string_literal) ~interpolation :
-    Syntax.string_literal =
+let make_string_literal cursor ~start ~modules (literal : Token.string_literal) ~parse_interpolation
+    : Syntax.string_literal =
   Cursor.advance cursor;
   let tag =
     Option.map
@@ -78,7 +78,7 @@ let make_string_literal cursor ~start ~modules (literal : Token.string_literal) 
     rest =
       Array.to_list
         (Array.map
-           (fun (inner, piece) -> (interpolation inner, make_text cursor piece))
+           (fun (inner, piece) -> (parse_interpolation inner, make_text cursor piece))
            literal.rest);
     id = Cursor.allocate_id_from cursor start;
   }

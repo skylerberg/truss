@@ -124,4 +124,4 @@ val is_primitive : operation -> bool
 val show_operation : operation -> string
 val make_operation_path : operation -> Path.t
 val operation_of_path : Path.t -> operation option
-val uses : operation -> Path.t list
+val list_uses : operation -> Path.t list

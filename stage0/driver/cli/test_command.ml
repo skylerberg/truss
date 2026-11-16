@@ -179,11 +179,11 @@ let handle_progress progress ~build_ended (event : Compile.progress) =
       if record.outcome <> Passed then progress.not_passed <- progress.not_passed + 1;
       draw progress
 
-let run_tests ?rerun ?progress database snapshot packages tests =
+let run_tests ?rerun ?report_progress database snapshot packages tests =
   if tests = [] then []
   else
     match
-      Compile.run_tests ?rerun ?progress
+      Compile.run_tests ?rerun ?report_progress
         (Compiler.create database snapshot packages Development)
         ~time_limit_ms:(Workspace.time_limit_ms snapshot)
         (List.map (fun test -> test.path) tests)
@@ -216,7 +216,7 @@ let run ~paths ~match_ ~timings:show_timings ~rerun =
       ~finally:(fun () -> Status_line.clear progress.line)
       (fun () ->
         run_tests ~rerun
-          ~progress:(handle_progress progress ~build_ended)
+          ~report_progress:(handle_progress progress ~build_ended)
           database snapshot packages tests)
   in
   let ended = read_microseconds () in
@@ -240,5 +240,5 @@ let run ~paths ~match_ ~timings:show_timings ~rerun =
   if List.for_all (fun (record : Compile.record) -> record.outcome = Passed) records then 0 else 1
 
 module For_testing = struct
-  let duration = show_duration
+  let show_duration = show_duration
 end

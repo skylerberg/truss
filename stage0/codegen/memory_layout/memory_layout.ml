@@ -292,11 +292,11 @@ let read_tag_value values name =
   | None -> raise_bug "no variant %s" name
 
 let compute_discriminant layout name =
-  let tag_value (tag, values) = Tag_value { tag; value = read_tag_value values name } in
+  let make_tag_value (tag, values) = Tag_value { tag; value = read_tag_value values name } in
   match layout.form with
   | Zero_size -> Only
-  | Tag_only { tag; variants } -> tag_value (list_tag_only_values tag variants)
-  | Tagged { tag; variants; _ } -> tag_value (list_tagged_values tag variants)
+  | Tag_only { tag; variants } -> make_tag_value (list_tag_only_values tag variants)
+  | Tagged { tag; variants; _ } -> make_tag_value (list_tagged_values tag variants)
   | Niche_encoded { dataful; dataless = None } ->
       if dataful.name = name then Only else raise_bug "no variant %s" name
   | Niche_encoded { dataful; dataless = Some { niche; niche_values } } -> (
@@ -309,12 +309,12 @@ let compute_discriminant layout name =
   | Scalar _ | Struct _ | Array _ -> raise_bug "a discriminant of a type that is not a sum type"
 
 let dispatch layout cases =
-  let switch (tag, values) =
+  let make_switch (tag, values) =
     Switch { tag; cases = List.map (fun (name, case) -> (read_tag_value values name, case)) cases }
   in
   match layout.form with
-  | Tag_only { tag; variants } -> switch (list_tag_only_values tag variants)
-  | Tagged { tag; variants; _ } -> switch (list_tagged_values tag variants)
+  | Tag_only { tag; variants } -> make_switch (list_tag_only_values tag variants)
+  | Tagged { tag; variants; _ } -> make_switch (list_tagged_values tag variants)
   | Zero_size | Niche_encoded _ | Scalar _ | Struct _ | Array _ ->
       Tests (List.map (fun (name, case) -> (compute_discriminant layout name, case)) cases)
 

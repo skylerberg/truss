@@ -9,7 +9,7 @@ let lex_punctuation (cursor : Cursor.t) current =
     cursor.position <- start + length;
     Some (Token.Punctuation kind)
   in
-  let followed_by options default =
+  let find_following_kind options default =
     match List.find_opt (fun (character, _, _) -> is 1 character) options with
     | Some (_, kind, length) -> take kind length
     | None -> take default 1
@@ -24,26 +24,26 @@ let lex_punctuation (cursor : Cursor.t) current =
   | ',' -> take Comma 1
   | '?' -> take Question 1
   | '~' -> take Tilde 1
-  | ':' -> followed_by [ (':', Colon_colon, 2) ] Colon
+  | ':' -> find_following_kind [ (':', Colon_colon, 2) ] Colon
   | '.' ->
       if is 1 '.' then if is 2 '=' then take Dot_dot_equal 3 else take Dot_dot 2 else take Dot 1
-  | '-' -> followed_by [ ('>', Arrow, 2); ('=', Minus_equal, 2) ] Minus
-  | '+' -> followed_by [ ('=', Plus_equal, 2) ] Plus
-  | '*' -> followed_by [ ('=', Star_equal, 2) ] Star
-  | '/' -> followed_by [ ('=', Slash_equal, 2) ] Slash
-  | '%' -> followed_by [ ('=', Percent_equal, 2) ] Percent
-  | '^' -> followed_by [ ('=', Caret_equal, 2) ] Caret
-  | '&' -> followed_by [ ('&', And_and, 2); ('=', Ampersand_equal, 2) ] Ampersand
-  | '|' -> followed_by [ ('|', Or_or, 2); ('=', Bar_equal, 2) ] Bar
+  | '-' -> find_following_kind [ ('>', Arrow, 2); ('=', Minus_equal, 2) ] Minus
+  | '+' -> find_following_kind [ ('=', Plus_equal, 2) ] Plus
+  | '*' -> find_following_kind [ ('=', Star_equal, 2) ] Star
+  | '/' -> find_following_kind [ ('=', Slash_equal, 2) ] Slash
+  | '%' -> find_following_kind [ ('=', Percent_equal, 2) ] Percent
+  | '^' -> find_following_kind [ ('=', Caret_equal, 2) ] Caret
+  | '&' -> find_following_kind [ ('&', And_and, 2); ('=', Ampersand_equal, 2) ] Ampersand
+  | '|' -> find_following_kind [ ('|', Or_or, 2); ('=', Bar_equal, 2) ] Bar
   | '=' when is 1 '=' && is 2 '>' -> take Implies 3
-  | '=' -> followed_by [ ('=', Equal_equal, 2); ('>', Fat_arrow, 2) ] Equal
-  | '!' -> followed_by [ ('=', Not_equal, 2) ] Bang
+  | '=' -> find_following_kind [ ('=', Equal_equal, 2); ('>', Fat_arrow, 2) ] Equal
+  | '!' -> find_following_kind [ ('=', Not_equal, 2) ] Bang
   | '<' ->
       if is 1 '<' then if is 2 '=' then take Shift_left_equal 3 else take Shift_left 2
-      else followed_by [ ('=', Less_equal, 2) ] Less
+      else find_following_kind [ ('=', Less_equal, 2) ] Less
   | '>' ->
       if is 1 '>' then if is 2 '=' then take Shift_right_equal 3 else take Shift_right 2
-      else followed_by [ ('=', Greater_equal, 2) ] Greater
+      else find_following_kind [ ('=', Greater_equal, 2) ] Greater
   | _ -> None
 
 let check_name (cursor : Cursor.t) name =
@@ -120,65 +120,65 @@ and scan_after (cursor : Cursor.t) ~inline ~nesting previous =
 
 and scan_item cursor ~inline ~nesting =
   let start = cursor.position in
-  let again () = scan_item cursor ~inline ~nesting in
+  let scan_again () = scan_item cursor ~inline ~nesting in
   let reject length message =
     Source_text.reject cursor ~length message;
-    again ()
+    scan_again ()
   in
-  let token ?ending kind = Cursor.Token (make_token cursor ~inline ~start ?ending kind) in
-  let forbidden () =
+  let make_token_item ?ending kind = Cursor.Token (make_token cursor ~inline ~start ?ending kind) in
+  let make_forbidden () =
     Source_text.report_forbidden_run cursor ~context:Code;
     cursor.line_is_blank <- false;
-    again ()
+    scan_again ()
   in
-  let no_token item =
+  let finish_trivia item =
     Habits.Comments.report_semicolons cursor ~line_break:false;
     item
   in
-  if Cursor.is_at_end cursor start then no_token Cursor.End
+  if Cursor.is_at_end cursor start then finish_trivia Cursor.End
   else
     let current = Cursor.lookup_char cursor start in
     if Cursor.is_space current then begin
       cursor.position <- start + 1;
-      again ()
+      scan_again ()
     end
-    else if Cursor.is_line_break current then no_token Cursor.Line_end
+    else if Cursor.is_line_break current then finish_trivia Cursor.Line_end
     else if Cursor.is_ascii_letter current || current = '_' then lex_name cursor ~inline ~nesting
     else if Cursor.is_digit current then lex_number cursor ~inline ~nesting
     else if not (Cursor.is_ascii current) then begin
       let decoded = Cursor.decode cursor start in
       if not (Uchar.utf_decode_is_valid decoded) then begin
         Source_text.report_invalid_run cursor;
-        again ()
+        scan_again ()
       end
       else
         let scalar_value = Uchar.utf_decode_uchar decoded in
-        if Unicode.is_forbidden scalar_value then forbidden ()
+        if Unicode.is_forbidden scalar_value then make_forbidden ()
         else if Unicode.is_xid_start scalar_value then lex_name cursor ~inline ~nesting
         else
           let length = Uchar.utf_decode_length decoded in
-          let unused () =
+          let make_unused () =
             reject length
               (Printf.sprintf "%s is not used in Truss." (Cursor.show_character cursor start))
           in
           match Habits.Confusables.scan cursor ~scalar_value ~length with
-          | Some (Lexed kind) -> token kind
-          | Some Spaced -> again ()
-          | None -> unused ()
+          | Some (Lexed kind) -> make_token_item kind
+          | Some Spaced -> scan_again ()
+          | None -> make_unused ()
     end
-    else if current < ' ' || current = '\x7F' then forbidden ()
-    else if Habits.Comments.scan cursor ~inline then again ()
+    else if current < ' ' || current = '\x7F' then make_forbidden ()
+    else if Habits.Comments.scan cursor ~inline then scan_again ()
     else
       match Habits.Operators.scan cursor with
-      | Some (Lexed kind) -> token kind
+      | Some (Lexed kind) -> make_token_item kind
       | Some Ellipsis -> lex_ellipsis cursor ~inline ~nesting ~start
       | None -> (
           match
             if current = '$' && Strings.opens_raw_string cursor start then None
             else Habits.String_forms.scan cursor ~scan ~nesting
           with
-          | Some (Lexed (kind, ending)) -> token ~ending kind
-          | Some Skipped -> again ()
+          | Some (Lexed (kind, ending)) -> make_token_item ~ending kind
+          | Some Skipped -> scan_again ()
           | None -> (
               match current with
               | '"' -> lex_string cursor ~tag:None ~inline ~nesting ~start
@@ -193,14 +193,14 @@ and scan_item cursor ~inline ~nesting =
                 when Cursor.satisfies cursor (start + 1) Cursor.is_digit
                      && not (follows_operand cursor) -> (
                   match Habits.Number_forms.lex_leading_dot cursor with
-                  | Some kind -> token kind
+                  | Some kind -> make_token_item kind
                   | None -> (
                       match lex_punctuation cursor '.' with
-                      | Some kind -> token kind
-                      | None -> again ()))
+                      | Some kind -> make_token_item kind
+                      | None -> scan_again ()))
               | character -> (
                   match lex_punctuation cursor character with
-                  | Some kind -> token kind
+                  | Some kind -> make_token_item kind
                   | None -> reject 1 (Printf.sprintf "`%c` is not used in Truss." character))))
 
 and lex_number cursor ~inline ~nesting =

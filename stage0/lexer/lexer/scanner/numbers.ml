@@ -59,13 +59,13 @@ let clean_underscores group =
   if cleaned = group then (cleaned, None)
   else
     let length = String.length group in
-    let rec first_bad index =
+    let rec find_first_bad index =
       if index >= length then None
       else if group.[index] = '_' && (index = 0 || index = length - 1 || group.[index + 1] = '_')
       then Some index
-      else first_bad (index + 1)
+      else find_first_bad (index + 1)
     in
-    (cleaned, first_bad 0)
+    (cleaned, find_first_bad 0)
 
 let remove_underscores group = String.replace_all ~sub:"_" ~by:"" group
 
@@ -82,7 +82,7 @@ let measure_character text offset =
   if Uchar.utf_decode_is_valid decoded then Uchar.utf_decode_length decoded else 1
 
 let choose_problem value issues ~fixed =
-  let leftmost issues =
+  let find_leftmost issues =
     List.fold_left
       (fun best candidate ->
         match best with
@@ -92,9 +92,13 @@ let choose_problem value issues ~fixed =
   in
   match List.filter (fun issue -> not issue.fixable) issues with
   | _ :: _ as unfixable ->
-      { value; problem = Option.map (fun issue -> issue.problem) (leftmost unfixable); fixes = [] }
+      {
+        value;
+        problem = Option.map (fun issue -> issue.problem) (find_leftmost unfixable);
+        fixes = [];
+      }
   | [] -> (
-      match leftmost issues with
+      match find_leftmost issues with
       | None -> { value; problem = None; fixes = [] }
       | Some first ->
           { value; problem = Some first.problem; fixes = [ ("Write `" ^ fixed ^ "`", fixed) ] })
@@ -110,12 +114,12 @@ let check_radix text =
     | 2 -> character = '0' || character = '1'
     | _ -> character >= '0' && character <= '7'
   in
-  let rec digits_end index =
+  let rec locate_digits_end index =
     if index < length && (is_base_digit text.[index] || text.[index] = '_') then
-      digits_end (index + 1)
+      locate_digits_end (index + 1)
     else index
   in
-  let stop = digits_end 2 in
+  let stop = locate_digits_end 2 in
   let group = String.sub text 2 (stop - 2) in
   let cleaned, bad_underscore = clean_underscores group in
   let digits = remove_underscores group in
@@ -156,13 +160,16 @@ let check_decimal text =
     in
     (offset, String.sub text offset (stop offset - offset))
   in
-  let after (offset, group) = offset + String.length group in
+  let compute_end (offset, group) = offset + String.length group in
   let whole = group_from 0 in
   let fraction =
-    if after whole < length && text.[after whole] = '.' then Some (group_from (after whole + 1))
+    if compute_end whole < length && text.[compute_end whole] = '.' then
+      Some (group_from (compute_end whole + 1))
     else None
   in
-  let position = match fraction with Some fraction -> after fraction | None -> after whole in
+  let position =
+    match fraction with Some fraction -> compute_end fraction | None -> compute_end whole
+  in
   let exponent =
     if position < length && text.[position] = 'e' then
       let digits_offset =
@@ -175,18 +182,18 @@ let check_decimal text =
       else Some (position, String.sub text (position + 1) (digits_offset - position - 1), digits)
     else None
   in
-  let rest = match exponent with Some (_, _, digits) -> after digits | None -> position in
-  let underscore (offset, group) =
+  let rest = match exponent with Some (_, _, digits) -> compute_end digits | None -> position in
+  let list_underscore_issues (offset, group) =
     match snd (clean_underscores group) with
     | Some bad -> [ make_underscore_issue (offset + bad) ]
     | None -> []
   in
-  let cleaned (_, group) = fst (clean_underscores group) in
+  let clean_group (_, group) = fst (clean_underscores group) in
   let issues =
     List.concat
       [
-        underscore whole;
-        Option.fold ~none:[] ~some:underscore fraction;
+        list_underscore_issues whole;
+        Option.fold ~none:[] ~some:list_underscore_issues fraction;
         (match exponent with
         | Some (marker, _, digits) ->
             if remove_underscores (snd digits) = "" then
@@ -194,7 +201,7 @@ let check_decimal text =
                 make_issue ~fixable:false Number_missing_digits
                   "The exponent needs digits after `e`." marker (fst digits);
               ]
-            else underscore digits
+            else list_underscore_issues digits
         | None -> []);
         (if rest < length then
            [
@@ -209,9 +216,9 @@ let check_decimal text =
       ]
   in
   let fixed =
-    cleaned whole
-    ^ Option.fold ~none:"" ~some:(fun fraction -> "." ^ cleaned fraction) fraction
-    ^ Option.fold ~none:"" ~some:(fun (_, sign, digits) -> "e" ^ sign ^ cleaned digits) exponent
+    clean_group whole
+    ^ Option.fold ~none:"" ~some:(fun fraction -> "." ^ clean_group fraction) fraction
+    ^ Option.fold ~none:"" ~some:(fun (_, sign, digits) -> "e" ^ sign ^ clean_group digits) exponent
   in
   let whole_digits = remove_underscores (snd whole) in
   let value =
@@ -228,7 +235,7 @@ let check_decimal text =
         | _ -> Z.zero
       in
       Token.Float
-        (Token.Decimal.normalized
+        (Token.Decimal.normalize
            ~significand:(Z.of_string (whole_digits ^ fraction_digits))
            ~exponent:(Z.sub exponent_value (Z.of_int (String.length fraction_digits))))
   in

@@ -9,24 +9,24 @@ let replace cursor ~start ~length ~replacements ~code message =
 let scan (cursor : Cursor.t) =
   let start = cursor.position in
   let is offset character = Cursor.is_at cursor (start + offset) character in
-  let lexed kind length =
+  let make_lexed kind length =
     cursor.position <- start + length;
     Some (Lexed kind)
   in
-  let replaced ~length ~replacements ~message kind =
+  let make_replaced ~length ~replacements ~message kind =
     replace cursor ~start ~length ~replacements ~code:Foreign_operator message;
-    lexed kind length
+    make_lexed kind length
   in
-  if is 0 ':' && is 1 '=' then lexed (Foreign Colon_equal) 2
-  else if is 0 '-' && is 1 '-' then lexed (Foreign Minus_minus) 2
-  else if is 0 '+' && is 1 '+' then lexed (Foreign Plus_plus) 2
-  else if is 0 '*' && is 1 '*' then lexed (Foreign Star_star) 2
-  else if is 0 '|' && is 1 '>' then lexed (Foreign Pipe_greater) 2
+  if is 0 ':' && is 1 '=' then make_lexed (Foreign Colon_equal) 2
+  else if is 0 '-' && is 1 '-' then make_lexed (Foreign Minus_minus) 2
+  else if is 0 '+' && is 1 '+' then make_lexed (Foreign Plus_plus) 2
+  else if is 0 '*' && is 1 '*' then make_lexed (Foreign Star_star) 2
+  else if is 0 '|' && is 1 '>' then make_lexed (Foreign Pipe_greater) 2
   else if is 0 '.' && is 1 '.' && is 2 '<' then
-    replaced ~length:3 ~replacements:[ ".." ] ~message:"Truss has no `..<`; write `..`."
+    make_replaced ~length:3 ~replacements:[ ".." ] ~message:"Truss has no `..<`; write `..`."
       (Punctuation Dot_dot)
   else if is 0 '<' && is 1 '>' then
-    replaced ~length:2 ~replacements:[ "!=" ] ~message:"Truss has no `<>`; write `!=`."
+    make_replaced ~length:2 ~replacements:[ "!=" ] ~message:"Truss has no `<>`; write `!=`."
       (Punctuation Not_equal)
   else if (is 0 '=' || is 0 '!') && is 1 '=' && is 2 '=' && not (is 3 '=') then (
     let written, replacement, kind =
@@ -35,7 +35,7 @@ let scan (cursor : Cursor.t) =
     replace cursor ~start ~length:3 ~replacements:[ replacement ] ~code:Strict_equality
       (Printf.sprintf "Truss has no `%s`. `%s` already compares values of the same type." written
          replacement);
-    lexed (Punctuation kind) 3)
+    make_lexed (Punctuation kind) 3)
   else if is 0 '.' && is 1 '.' && is 2 '.' then begin
     cursor.position <- start + 3;
     cursor.line_is_blank <- false;
@@ -44,18 +44,18 @@ let scan (cursor : Cursor.t) =
   else None
 
 let lex_ellipsis cursor ~start ~follows_operand ~operand_follows =
-  let replaced ~replacements message kind =
+  let make_replaced ~replacements message kind =
     replace cursor ~start ~length:3 ~replacements ~code:Foreign_operator message;
     Some kind
   in
   match (follows_operand, operand_follows) with
   | true, true ->
-      replaced ~replacements:[ ".."; "..=" ]
+      make_replaced ~replacements:[ ".."; "..=" ]
         "Truss has no `...`. A range that leaves out its end is written `..`, and one that \
          includes its end is written `..=`."
         (Token.Punctuation Dot_dot_equal)
   | false, false ->
-      replaced ~replacements:[ "todo" ]
+      make_replaced ~replacements:[ "todo" ]
         "Truss has no `...`; code that is not written yet is `todo`." (Token.Keyword Todo)
   | _ ->
       Cursor.report cursor ~code:Foreign_operator

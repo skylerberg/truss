@@ -13,5 +13,5 @@ let report state ?fixes code span message =
 let list_bounds state parameter =
   Option.value ~default:[] (List.assoc_opt parameter state.elaborated.scope.bounds)
 
-let implements state type_ trait =
-  Impls.implements state.lookups ~bounds:(list_bounds state) type_ trait
+let find_evidence state type_ trait =
+  Impls.find_evidence state.lookups ~list_bounds:(list_bounds state) type_ trait

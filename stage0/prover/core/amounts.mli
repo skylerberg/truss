@@ -7,19 +7,19 @@ val compare_lexicographically : Logic.term list -> Logic.term list -> Logic.term
 val is_same_resource : Mir.cost -> locals:Logic.term Locals.t -> Costs.counter -> bool
 val declare_bounded_amount : State.context -> State.frame -> Logic.term -> Logic.term
 
-val may_be_target :
+val make_may_be_target :
   State.context -> State.frame -> Logic.term -> Types.ty -> Logic.term -> Logic.term
 
 val lambda_captures_target : State.context -> Logic.term -> Logic.term -> bool
 val make_conditional_amount : Logic.term -> Logic.term -> Logic.term
 
-val callee_amount :
+val compute_callee_amount :
   ?ends_in:Logic.term ->
   State.context ->
   State.frame ->
   path:Path.t ->
   parts:State.part list ->
-  bound_frame:(State.part -> State.frame) ->
+  bind_frame:(State.part -> State.frame) ->
   uses:Types.capability list ->
   values:State.passed list ->
   change:(unit -> Logic.term) option ->

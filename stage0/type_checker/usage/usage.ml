@@ -18,13 +18,13 @@ type binding = { name : Syntax.name; removal : removal }
 let collect_bindings context (definition : Syntax.definition) =
   let bindings = ref [] in
   let bind (name : Syntax.name) removal = bindings := { name; removal } :: !bindings in
-  let rec pattern (written : Syntax.pattern) =
+  let rec visit_pattern (written : Syntax.pattern) =
     match written.kind with
     | Binding name -> bind name Wildcard
-    | Variant { fields = Some fields; _ } | Record fields -> pattern_fields fields
-    | Alternatives alternatives -> List.iter pattern alternatives
+    | Variant { fields = Some fields; _ } | Record fields -> visit_pattern_fields fields
+    | Alternatives alternatives -> List.iter visit_pattern alternatives
     | _ -> ()
-  and pattern_fields (fields : Syntax.pattern_field list) =
+  and visit_pattern_fields (fields : Syntax.pattern_field list) =
     let has_rest = List.exists (fun (field : Syntax.pattern_field) -> field.kind = Rest) fields in
     let has_several_fields =
       List.length (List.filter (fun (field : Syntax.pattern_field) -> field.kind <> Rest) fields)
@@ -41,28 +41,31 @@ let collect_bindings context (definition : Syntax.definition) =
                       context.spans.(next.id).start))
           | Field { kind = Binding name; _ }, _ when has_rest || has_several_fields ->
               bind name Field_wildcard
-          | (Named_field (_, inner) | Field inner), _ -> pattern inner
+          | (Named_field (_, inner) | Field inner), _ -> visit_pattern inner
           | Rest, _ -> ());
           bind_fields following
     in
     bind_fields fields
   in
-  let rec expression (value : Syntax.expression) =
+  let rec visit_expression (value : Syntax.expression) =
     (match value.kind with
-    | Is { pattern = written; _ } -> pattern written
-    | Lambda { parameters; _ } -> List.iter pattern parameters
-    | Match { arms; _ } -> List.iter (fun (arm : Syntax.arm) -> List.iter pattern arm.patterns) arms
-    | Quantified { binder = Binder_in (written, _); _ } -> pattern written
+    | Is { pattern = written; _ } -> visit_pattern written
+    | Lambda { parameters; _ } -> List.iter visit_pattern parameters
+    | Match { arms; _ } ->
+        List.iter (fun (arm : Syntax.arm) -> List.iter visit_pattern arm.patterns) arms
+    | Quantified { binder = Binder_in (written, _); _ } -> visit_pattern written
     | _ -> ());
-    Syntax_walk.visit_expression_parts ~expression ~statement value
-  and statement (written : Syntax.statement) =
+    Syntax_walk.visit_expression_parts ~on_expression:visit_expression ~on_statement:visit_statement
+      value
+  and visit_statement (written : Syntax.statement) =
     (match written.kind with
     | Let { pattern = written_pattern; _ } | For { pattern = written_pattern; _ } ->
-        pattern written_pattern
+        visit_pattern written_pattern
     | _ -> ());
-    Syntax_walk.visit_statement_parts ~expression ~statement written
+    Syntax_walk.visit_statement_parts ~on_expression:visit_expression ~on_statement:visit_statement
+      written
   in
-  Syntax_walk.visit_definition ~statement expression definition;
+  Syntax_walk.visit_definition ~on_statement:visit_statement visit_expression definition;
   List.rev !bindings
 
 let describe_removal (binding : binding) =
@@ -93,15 +96,15 @@ let check_unused context (definition : Syntax.definition) =
       | Some (Resolve.Local id) when not is_binding.(index) -> is_used.(id) <- true
       | _ -> ())
     targets;
-  let rec find_first_alternative id =
+  let rec read_first_alternative id =
     match targets.(id) with
-    | Some (Resolve.Local first) when is_binding.(id) -> find_first_alternative first
+    | Some (Resolve.Local first) when is_binding.(id) -> read_first_alternative first
     | _ -> id
   in
   let later_alternatives = Hashtbl.create 8 in
   List.iter
     (fun (binding : binding) ->
-      let first = find_first_alternative binding.name.id in
+      let first = read_first_alternative binding.name.id in
       if first <> binding.name.id then Hashtbl.add later_alternatives first binding)
     bindings;
   List.iter
@@ -146,7 +149,7 @@ let check_block context (written : Syntax.block) =
   check_statements written.statements
 
 let check_unreachable context (definition : Syntax.definition) =
-  let rec expression (value : Syntax.expression) =
+  let rec visit_expression (value : Syntax.expression) =
     (match value.kind with
     | Block block | Lambda { body = block; _ } | Provide { body = block; _ } ->
         check_block context block
@@ -154,14 +157,16 @@ let check_unreachable context (definition : Syntax.definition) =
         check_block context then_;
         match else_ with Some (Else block) -> check_block context block | _ -> ())
     | _ -> ());
-    Syntax_walk.visit_expression_parts ~expression ~statement value
-  and statement (written : Syntax.statement) =
+    Syntax_walk.visit_expression_parts ~on_expression:visit_expression ~on_statement:visit_statement
+      value
+  and visit_statement (written : Syntax.statement) =
     (match written.kind with
     | For { body; _ } | While { body; _ } | Proof body -> check_block context body
     | Parallel _ | Concurrent _ -> ()
     | Let { else_ = Some block; _ } -> check_block context block
     | _ -> ());
-    Syntax_walk.visit_statement_parts ~expression ~statement written
+    Syntax_walk.visit_statement_parts ~on_expression:visit_expression ~on_statement:visit_statement
+      written
   in
   let bodies =
     match definition.kind with
@@ -175,7 +180,7 @@ let check_unreachable context (definition : Syntax.definition) =
     | _ -> []
   in
   List.iter (check_block context) bodies;
-  Syntax_walk.visit_definition ~statement expression definition
+  Syntax_walk.visit_definition ~on_statement:visit_statement visit_expression definition
 
 let check (lookups : Lookups.t) key =
   let definition = lookups.names.read_definition key in

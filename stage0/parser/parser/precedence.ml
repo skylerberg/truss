@@ -89,7 +89,7 @@ let is_name_or_literal (value : Syntax.expression) =
 type problem = Lowest_operand | Chained of string | Mixed of string | Mixed_bitwise
 
 let find_problem parent child ~right (operand : Syntax.expression) =
-  let bitwise = function Shift | Bitwise _ -> true | _ -> false in
+  let is_bitwise = function Shift | Bitwise _ -> true | _ -> false in
   match (parent, child) with
   | (And_group | Or_group | Implies_group), Lowest
     when right && match operand.kind with Quantified _ -> true | _ -> false ->
@@ -106,7 +106,7 @@ let find_problem parent child ~right (operand : Syntax.expression) =
   | Implies_group, Implies_group -> Some (Chained "`==>` does not chain.")
   | And_group, Or_group | Or_group, And_group ->
       Some (Mixed "`&&` and `||` cannot be mixed without parentheses.")
-  | _ when bitwise parent || bitwise child -> Some Mixed_bitwise
+  | _ when is_bitwise parent || is_bitwise child -> Some Mixed_bitwise
   | _ -> Some (Mixed "These operators need parentheses to say which applies first.")
 
 let wrap_edits cursor ?context (whole : Syntax.expression) last edits =
@@ -176,7 +176,7 @@ let report_problem cursor ?context (whole : Syntax.expression) (operand : Syntax
     List.filter regroups_cleanly
       (match operand.kind with Is _ when not right -> [ parsed ] | _ -> [ parsed; other ])
   in
-  let both () =
+  let list_grouping_fixes () =
     match pieces with Some pieces -> List.map (fix_for pieces) groupings | None -> []
   in
   match problem with
@@ -188,7 +188,7 @@ let report_problem cursor ?context (whole : Syntax.expression) (operand : Syntax
           fix cursor ~fallback:"Add parentheses" operand.id
             (make_parentheses cursor operand.id operand.id);
         ]
-  | Mixed message -> report cursor (extract_operator_id whole) message (both ())
+  | Mixed message -> report cursor (extract_operator_id whole) message (list_grouping_fixes ())
   | Mixed_bitwise ->
       let fixes =
         match (whole.kind, operand.kind, pieces) with
@@ -205,14 +205,14 @@ let report_problem cursor ?context (whole : Syntax.expression) (operand : Syntax
                 (if List.mem other groupings then [ parsed; other ] else [ parsed ])
             in
             List.map (fix_for pieces) ordered
-        | _ -> both ()
+        | _ -> list_grouping_fixes ()
       in
       report cursor (extract_operator_id whole)
         "Shifts and bitwise operators combine only with themselves; add parentheses." fixes
   | Chained message ->
       let fixes =
         match (whole.kind, operand.kind) with
-        | Binary { operator = Connective Implies; _ }, _ -> List.rev (both ())
+        | Binary { operator = Connective Implies; _ }, _ -> List.rev (list_grouping_fixes ())
         | Binary _, Binary { right = middle; _ } when (not right) && is_name_or_literal middle -> (
             let middle_span = Cursor.read_file_span cursor middle.id in
             match Cursor.spell cursor middle_span with
@@ -232,7 +232,7 @@ let report_problem cursor ?context (whole : Syntax.expression) (operand : Syntax
       report cursor (extract_operator_id whole) message fixes
 
 let rec check_expression_with_context ?context cursor (value : Syntax.expression) =
-  let operand parent ~right (operand : Syntax.expression) =
+  let check_operand parent ~right (operand : Syntax.expression) =
     check_expression_with_context ~context:(parent, right) cursor operand;
     match Option.bind (group operand) (fun child -> find_problem parent child ~right operand) with
     | Some problem -> report_problem cursor ?context value operand ~right problem
@@ -241,8 +241,8 @@ let rec check_expression_with_context ?context cursor (value : Syntax.expression
   match value.kind with
   | Binary { operator; left; right; _ } ->
       let group = classify_binary operator in
-      operand group ~right:false left;
-      operand group ~right:true right
+      check_operand group ~right:false left;
+      check_operand group ~right:true right
   | Is { value = left; operator_id; _ } ->
       (match left.kind with
       | Prefix (Not, _) ->
@@ -260,10 +260,10 @@ let rec check_expression_with_context ?context cursor (value : Syntax.expression
                 (make_parentheses cursor left.id left.id);
             ]
       | _ -> ());
-      operand Comparison ~right:false left
+      check_operand Comparison ~right:false left
   | Range { start; stop; _ } ->
-      Option.iter (operand Range_group ~right:false) start;
-      Option.iter (operand Range_group ~right:true) stop
+      Option.iter (check_operand Range_group ~right:false) start;
+      Option.iter (check_operand Range_group ~right:true) stop
   | Prefix (_, inner) -> (
       check_expression_with_context cursor inner;
       match group inner with

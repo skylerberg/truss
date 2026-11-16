@@ -87,7 +87,7 @@ val substitute_function : substitution -> function_type -> function_type
 val substitute_capabilities : substitution -> capability_set -> capability_set
 val extract_result_type : result -> ty
 val show_mode : mode -> string
-val map : ?capabilities:(capability_set -> capability_set) -> (ty -> ty option) -> ty -> ty
+val map : ?map_capabilities:(capability_set -> capability_set) -> (ty -> ty option) -> ty -> ty
 val exists : ?resolve:(ty -> ty) -> (ty -> bool) -> ty -> bool
 val find_specification_only_type : ty -> ty option
 val has_capability_variable : capability_set -> bool

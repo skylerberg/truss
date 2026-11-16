@@ -35,14 +35,14 @@ val classify_through_any : Lookups.t -> trait:Path.t -> Types.trait_method -> th
 
 type bounds = Types.parameter -> Types.trait_reference list
 
-val no_bounds : bounds
+val list_no_bounds : bounds
 
 val list_required_bounds :
   Types.generic list -> Types.substitution -> (Types.ty * Types.trait_reference) list
 
-val implements :
+val find_evidence :
   Lookups.t ->
-  bounds:bounds ->
+  list_bounds:bounds ->
   ?depth:int ->
   ?checks_conditions:bool ->
   Types.ty ->
@@ -50,7 +50,7 @@ val implements :
   evidence option
 
 val list_matching_bounds :
-  Lookups.t -> bounds:bounds -> Types.ty -> Types.trait_reference -> Types.trait_reference list
+  Lookups.t -> list_bounds:bounds -> Types.ty -> Types.trait_reference -> Types.trait_reference list
 
 val read_declaring_type_trait :
   Lookups.t -> base:Types.ty -> Types.trait_reference -> string -> Types.trait_reference
@@ -60,7 +60,7 @@ val read_declaring_capability_trait :
 
 val project_associated_type :
   Lookups.t ->
-  bounds:bounds ->
+  list_bounds:bounds ->
   ?defining:Path.t list ref ->
   Types.ty ->
   Types.trait_reference ->
@@ -69,7 +69,7 @@ val project_associated_type :
 
 val project_capability_set :
   Lookups.t ->
-  bounds:bounds ->
+  list_bounds:bounds ->
   ?depth:int ->
   Types.ty ->
   Types.trait_reference ->
@@ -77,12 +77,12 @@ val project_capability_set :
   Types.capability_set
 
 val normalize_capabilities :
-  Lookups.t -> bounds:bounds -> ?depth:int -> Types.capability_set -> Types.capability_set
+  Lookups.t -> list_bounds:bounds -> ?depth:int -> Types.capability_set -> Types.capability_set
 
-val normalize : Lookups.t -> bounds:bounds -> ?defining:Path.t list ref -> Types.ty -> Types.ty
+val normalize : Lookups.t -> list_bounds:bounds -> ?defining:Path.t list ref -> Types.ty -> Types.ty
 val read_signature : Lookups.t -> Path.t -> Types.signature option
-val is_copyable : Lookups.t -> bounds:bounds -> Types.ty -> bool
-val is_plain : Lookups.t -> bounds:bounds -> Types.ty -> bool
-val is_view : Lookups.t -> bounds:bounds -> Types.ty -> bool
-val holds_function : Lookups.t -> bounds:bounds -> Types.ty -> bool
-val collect_contents : Lookups.t -> bounds:bounds -> Types.ty -> Properties.contents
+val is_copyable : Lookups.t -> list_bounds:bounds -> Types.ty -> bool
+val is_plain : Lookups.t -> list_bounds:bounds -> Types.ty -> bool
+val is_view : Lookups.t -> list_bounds:bounds -> Types.ty -> bool
+val holds_function : Lookups.t -> list_bounds:bounds -> Types.ty -> bool
+val collect_contents : Lookups.t -> list_bounds:bounds -> Types.ty -> Properties.contents

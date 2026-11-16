@@ -40,14 +40,14 @@ let note_place (context : State.context) (frame : State.frame) origin place =
       context.disjoint
   end
 
-let without_costs : 'a. _ -> (unit -> 'a) -> 'a =
+let run_without_costs : 'a. _ -> (unit -> 'a) -> 'a =
  fun (context : State.context) read ->
   let saved = context.counters in
   context.counters <- [];
   Fun.protect ~finally:(fun () -> context.counters <- saved) read
 
 let read_specification context frame (formula : Mir.formula) =
-  without_costs context (fun () -> context.read_formula frame formula ~arguments:[])
+  run_without_costs context (fun () -> context.read_formula frame formula ~arguments:[])
 
 let select_field context ty variant field term =
   match (term, Facts.find_constructors context ty) with
@@ -205,7 +205,7 @@ let check_escaping_callback context frame local =
         ~why:"is used as a value whose type promises nothing of its arguments"
   | _ -> ()
 
-let reading_callback : 'a. _ -> (unit -> 'a) -> 'a =
+let run_reading_callback : 'a. _ -> (unit -> 'a) -> 'a =
  fun (context : State.context) read ->
   let saved = context.reading_callback in
   context.reading_callback <- true;
@@ -243,7 +243,7 @@ let make_callee_substitution (frame : State.frame) (signature : Types.signature)
   Types.make_substitution signature.generics
     (List.map (Types.substitute_argument frame.substitution) type_arguments)
 
-let callback_facts (context : State.context) frame (invocation : Invocation.t) position known
+let list_callback_facts (context : State.context) frame (invocation : Invocation.t) position known
     arguments =
   match invocation.callee with
   | Function { path; type_arguments } -> (
@@ -307,7 +307,7 @@ let check_forwarded_callback context frame (site : Invocation.site) (invocation 
             ~name inputs requires arguments
             ~promised:
               (Logic.conjunction
-                 (callback_facts context frame invocation passed.position known arguments))
+                 (list_callback_facts context frame invocation passed.position known arguments))
             ~why:"is passed for a parameter that may not promise its `requires`"
       | _ -> check_escaping_callback context frame local)
   | _ -> ()

@@ -636,7 +636,7 @@ let emit_statement builder (statement : Mir.Graph.statement) =
       hold builder destination (make_call_result builder called)
   | Lend { part; call = called } -> (
       let is_loop_element = List.mem part builder.loop_elements in
-      let element_of collection collection_type ~receiver =
+      let find_element collection collection_type ~receiver =
         if is_untracked_lent_part builder collection then None
         else
           let collection_place = track_place builder collection in
@@ -659,7 +659,7 @@ let emit_statement builder (statement : Mir.Graph.statement) =
             :: _ )
           when (Well_known.is Index trait.trait || Well_known.is Index_mut trait.trait)
                && Place.is_storage_type self_type ->
-            element_of collection collection_type ~receiver
+            find_element collection collection_type ~receiver
         | ( ( Trait_method { name = "element"; _ }
             | Function { path = Method { name = "element"; _ }; _ } ),
             Passed
@@ -669,7 +669,7 @@ let emit_statement builder (statement : Mir.Graph.statement) =
               }
             :: _ )
           when is_loop_element && Place.is_storage_type collection_type ->
-            element_of collection collection_type ~receiver
+            find_element collection collection_type ~receiver
         | _ -> None
       in
       match element with
@@ -734,7 +734,7 @@ let pull builder (iteration : Mir.iteration) origin =
 let emit_terminator builder ~returns_to_caller (basic : Mir.Graph.basic_block) =
   let origin = basic.terminator_origin in
   let uses = Moves.list_terminator_uses builder.moves basic in
-  let returning value =
+  let return_value value =
     read_uses builder
       ~is_returned:(fun (use : Moves.use) ->
         match use.operand with
@@ -760,10 +760,10 @@ let emit_terminator builder ~returns_to_caller (basic : Mir.Graph.basic_block) =
           hold builder part_place
             { nothing with views = list_copy_views builder cursor; owns_new_value = true })
   | Yield { mode; part; _ } ->
-      let rec leaves : Mir.yielded -> Mir.operand list = function
+      let rec list_leaves : Mir.yielded -> Mir.operand list = function
         | Part operand -> [ operand ]
         | Built { fields; _ } ->
-            List.concat_map (fun (_, field) -> Option.fold ~none:[] ~some:leaves field) fields
+            List.concat_map (fun (_, field) -> Option.fold ~none:[] ~some:list_leaves field) fields
       in
       read_uses builder
         ~skip:(fun (use : Moves.use) ->
@@ -773,7 +773,7 @@ let emit_terminator builder ~returns_to_caller (basic : Mir.Graph.basic_block) =
           | Built _, Some (Borrow _) -> true
           | _ -> false)
         uses;
-      let lent = List.concat_map (list_lent_places builder) (leaves part) in
+      let lent = List.concat_map (list_lent_places builder) (list_leaves part) in
       if mode = Mut then begin
         List.iter
           (fun lent -> Option.iter (fun place -> emit builder (Mutate place) origin) lent)
@@ -790,7 +790,7 @@ let emit_terminator builder ~returns_to_caller (basic : Mir.Graph.basic_block) =
             (Arguments { borrowed_arguments; view_arguments = []; is_yielded = true })
             origin
       end;
-      let lent_by_address (operand : Mir.operand) =
+      let find_lent_by_address (operand : Mir.operand) =
         match operand with
         | Use { place; type_; _ } | Borrow { place; type_; _ } | Take { place; type_; _ } ->
             if Context.is_plain builder.context type_ then None else Some place
@@ -798,19 +798,19 @@ let emit_terminator builder ~returns_to_caller (basic : Mir.Graph.basic_block) =
       in
       let parts =
         List.filter_map
-          (fun leaf -> Option.bind (lent_by_address leaf) (track_place builder))
-          (leaves part)
+          (fun leaf -> Option.bind (find_lent_by_address leaf) (track_place builder))
+          (list_leaves part)
       in
       let forwarded =
         List.concat_map
           (fun (leaf : Mir.operand) ->
-            match (lent_by_address leaf, find_operand_type leaf) with
+            match (find_lent_by_address leaf, find_operand_type leaf) with
             | Some place, Some type_
               when is_untracked_lent_part builder place
                    && not (Context.is_view builder.context type_) ->
                 list_operand_views builder leaf
             | _ -> [])
-          (leaves part)
+          (list_leaves part)
       in
       let views =
         match part with
@@ -825,12 +825,12 @@ let emit_terminator builder ~returns_to_caller (basic : Mir.Graph.basic_block) =
                 match leaf with
                 | Borrow { place; type_; _ } -> list_borrow_views builder place type_
                 | _ -> list_part_views builder leaf)
-              (leaves part)
+              (list_leaves part)
         | Built _ -> []
       in
       emit builder (Yield_point { views; parts; forwarded }) origin
-  | Return value -> returning value
-  | Cancel { returned; _ } -> returning (Option.map fst returned)
+  | Return value -> return_value value
+  | Cancel { returned; _ } -> return_value (Option.map fst returned)
   | Iteration_end { loop } ->
       pull builder (Mir.Graph.read_loop_head builder.body loop).iteration origin
   | Join _ | Goto _ | Fork _ | Resume _ | Unreachable | Written_unreachable | Todo -> ()
@@ -886,10 +886,10 @@ let of_body context moves (body : Mir.Graph.body) ~returns_to_caller : t =
         (fun () -> emit_terminator builder ~returns_to_caller basic))
     body.blocks;
   let is_terminator { block; index } = index = List.length body.blocks.(block).statements in
-  let positions_of ?(from = fun _ -> None) blocks =
+  let list_positions ?(find_start = fun _ -> None) blocks =
     List.concat_map
       (fun block ->
-        let first = Option.value ~default:0 (from block) in
+        let first = Option.value ~default:0 (find_start block) in
         List.init (max 0 (shape.(block) - first)) (fun offset -> { block; index = first + offset }))
       (List.sort_uniq compare blocks)
   in
@@ -902,7 +902,9 @@ let of_body context moves (body : Mir.Graph.body) ~returns_to_caller : t =
               {
                 keyword = (if concurrent then "concurrent" else "parallel");
                 branches =
-                  List.map (fun (branch : Mir.Graph.branch) -> positions_of branch.blocks) branches;
+                  List.map
+                    (fun (branch : Mir.Graph.branch) -> list_positions branch.blocks)
+                    branches;
               }
         | _ -> None)
   in
@@ -926,8 +928,8 @@ let of_body context moves (body : Mir.Graph.body) ~returns_to_caller : t =
                       (not (is_terminator position))
                       || Mir.Graph.find_iteration_loop body.blocks.(position.block).terminator
                          <> Some loop_block)
-                    (positions_of
-                       ~from:(fun block ->
+                    (list_positions
+                       ~find_start:(fun block ->
                          if block = inside then Hashtbl.find_opt builder.loop_body_starts inside
                          else None)
                        blocks);

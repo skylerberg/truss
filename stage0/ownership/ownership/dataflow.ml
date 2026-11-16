@@ -92,14 +92,14 @@ let forward context (actions : Actions.t) =
     entries.(0) <- Some { views = []; loans = [] };
     Queue.add 0 pending
   end;
-  let through steps state =
+  let transfer_through steps state =
     List.fold_left (fun state step -> transfer context step state) state steps
   in
   while not (Queue.is_empty pending) do
     let block = Queue.pop pending in
     let after =
       Array.fold_left
-        (fun state steps -> through steps state)
+        (fun state steps -> transfer_through steps state)
         (Option.get entries.(block))
         actions.steps.(block)
     in

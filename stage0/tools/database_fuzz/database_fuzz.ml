@@ -12,7 +12,7 @@ type file = { name : string; text : string }
 
 let path_of file : Path.file = { module_ = example; name = file.name }
 
-let built files =
+let build files =
   let database =
     Database.create
       ~loaded:[ Lazy.force standard_package_database ]
@@ -27,7 +27,7 @@ let built files =
   Database.propagate database;
   database
 
-let lines text =
+let split_lines text =
   match List.rev (String.split_on_char '\n' text) with
   | "" :: rest -> List.rev rest
   | lines -> List.rev lines
@@ -35,18 +35,18 @@ let lines text =
 let starts_definition line =
   String.length line > 0 && match line.[0] with 'a' .. 'z' | 'A' .. 'Z' -> true | _ -> false
 
-let chunks text =
+let split_chunks text =
   List.rev
     (List.fold_left
        (fun chunks line ->
          match chunks with
          | current :: rest when not (starts_definition line) -> (current ^ line ^ "\n") :: rest
          | chunks -> (line ^ "\n") :: chunks)
-       [] (lines text))
+       [] (split_lines text))
 
 let generator = ref (Random.State.make [| 0 |])
-let random bound = Random.State.int !generator bound
-let pick items = List.nth items (random (List.length items))
+let draw_number bound = Random.State.int !generator bound
+let pick items = List.nth items (draw_number (List.length items))
 
 let replace_nth items index replacement =
   List.concat (List.mapi (fun at item -> if at = index then replacement else [ item ]) items)
@@ -55,7 +55,7 @@ let is_identifier_start = function 'a' .. 'z' | '_' -> true | _ -> false
 let is_identifier_part = function 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true | _ -> false
 let is_digit = function '0' .. '9' -> true | _ -> false
 
-let words ~starts ~continues text =
+let list_words ~starts ~continues text =
   let length = String.length text in
   let rec scan at found =
     if at >= length then List.rev found
@@ -72,10 +72,10 @@ let words ~starts ~continues text =
 
 let keywords = List.map fst Token.keywords
 
-let identifiers text =
+let list_identifiers text =
   List.filter
     (fun (_, word) -> not (List.mem word keywords))
-    (words ~starts:is_identifier_start ~continues:is_identifier_part text)
+    (list_words ~starts:is_identifier_start ~continues:is_identifier_part text)
 
 let splice text at length replacement =
   String.sub text 0 at ^ replacement
@@ -86,7 +86,7 @@ let rename_all word replacement text =
     (fun text (at, found) ->
       if found = word then splice text at (String.length word) replacement else text)
     text
-    (List.rev (identifiers text))
+    (List.rev (list_identifiers text))
 
 let types = [ "Int64"; "Int32"; "UInt8"; "Bool"; "String" ]
 
@@ -95,44 +95,44 @@ type edit = { description : string; files : file list }
 let with_file files index text =
   List.mapi (fun at file -> if at = index then { file with text } else file) files
 
-let edits files =
-  let index = random (List.length files) in
+let make_random_edit files =
+  let index = draw_number (List.length files) in
   let file = List.nth files index in
-  let pieces = chunks file.text in
-  let in_file description text = Some { description; files = with_file files index text } in
-  let chunk_edit describe change =
+  let pieces = split_chunks file.text in
+  let make_file_edit description text = Some { description; files = with_file files index text } in
+  let make_chunk_edit describe change =
     match pieces with
     | [] -> None
     | _ ->
-        let at = random (List.length pieces) in
-        let description = describe (String.trim (List.hd (lines (List.nth pieces at)))) in
-        in_file description (String.concat "" (change at pieces))
+        let at = draw_number (List.length pieces) in
+        let description = describe (String.trim (List.hd (split_lines (List.nth pieces at)))) in
+        make_file_edit description (String.concat "" (change at pieces))
   in
   let choices =
     [
       (fun () ->
-        chunk_edit
+        make_chunk_edit
           (fun first -> Printf.sprintf "delete `%s` in %s" first file.name)
           (fun at pieces -> replace_nth pieces at []));
       (fun () ->
-        chunk_edit
+        make_chunk_edit
           (fun first -> Printf.sprintf "duplicate `%s` in %s" first file.name)
           (fun at pieces -> replace_nth pieces at [ List.nth pieces at; List.nth pieces at ]));
       (fun () ->
-        chunk_edit
+        make_chunk_edit
           (fun first -> Printf.sprintf "move `%s` within %s" first file.name)
           (fun at pieces ->
             let piece = List.nth pieces at in
             let rest = replace_nth pieces at [] in
-            let target = random (List.length rest + 1) in
+            let target = draw_number (List.length rest + 1) in
             List.take target rest @ [ piece ] @ List.drop target rest));
       (fun () ->
         match (pieces, files) with
         | [], _ | _, [ _ ] -> None
         | _ ->
-            let at = random (List.length pieces) in
+            let at = draw_number (List.length pieces) in
             let piece = List.nth pieces at in
-            let other = (index + 1 + random (List.length files - 1)) mod List.length files in
+            let other = (index + 1 + draw_number (List.length files - 1)) mod List.length files in
             let moved =
               with_file
                 (with_file files index (String.concat "" (replace_nth pieces at [])))
@@ -143,12 +143,12 @@ let edits files =
               {
                 description =
                   Printf.sprintf "move `%s` from %s to %s"
-                    (String.trim (List.hd (lines piece)))
+                    (String.trim (List.hd (split_lines piece)))
                     file.name (List.nth files other).name;
                 files = moved;
               });
       (fun () ->
-        match identifiers file.text with
+        match list_identifiers file.text with
         | [] -> None
         | found ->
             let _, word = pick found in
@@ -162,27 +162,27 @@ let edits files =
                     files;
               });
       (fun () ->
-        match identifiers file.text with
+        match list_identifiers file.text with
         | [] -> None
         | found ->
             let at, word = pick found in
-            in_file
+            make_file_edit
               (Printf.sprintf "rename one `%s` in %s" word file.name)
               (splice file.text at (String.length word) (word ^ "_renamed")));
       (fun () ->
-        match words ~starts:is_digit ~continues:is_digit file.text with
+        match list_words ~starts:is_digit ~continues:is_digit file.text with
         | [] -> None
         | found ->
             let at, digits = pick found in
             let changed = Z.to_string (Z.succ (Z.of_string digits)) in
-            in_file
+            make_file_edit
               (Printf.sprintf "change %s to %s in %s" digits changed file.name)
               (splice file.text at (String.length digits) changed));
       (fun () ->
         match
           List.filter
             (fun (_, word) -> List.mem word types)
-            (words
+            (list_words
                ~starts:(function 'A' .. 'Z' -> true | _ -> false)
                ~continues:is_identifier_part file.text)
         with
@@ -190,7 +190,7 @@ let edits files =
         | found ->
             let at, ty = pick found in
             let other = pick (List.filter (( <> ) ty) types) in
-            in_file
+            make_file_edit
               (Printf.sprintf "change a %s to %s in %s" ty other file.name)
               (splice file.text at (String.length ty) other));
       (fun () ->
@@ -204,17 +204,17 @@ let edits files =
               | _ -> None)
             (List.filter
                (fun (at, word) -> word = "type" && (at = 0 || file.text.[at - 1] = '\n'))
-               (words ~starts:is_identifier_start ~continues:is_identifier_part file.text))
+               (list_words ~starts:is_identifier_start ~continues:is_identifier_part file.text))
         in
         match starts with
         | [] -> None
         | starts ->
             let at = pick starts in
-            in_file
+            make_file_edit
               (Printf.sprintf "add a field at offset %d of %s" at file.name)
               (splice file.text at 0 "added: Bool = false, "));
       (fun () ->
-        in_file (Printf.sprintf "add a line at the top of %s" file.name) ("\n" ^ file.text));
+        make_file_edit (Printf.sprintf "add a line at the top of %s" file.name) ("\n" ^ file.text));
     ]
   in
   let rec attempt tries =
@@ -223,9 +223,9 @@ let edits files =
   in
   attempt 20
 
-let outcome run = match run () with value -> Ok value | exception failure -> Error failure
+let capture_outcome run = match run () with value -> Ok value | exception failure -> Error failure
 
-let shown_failure = function
+let show_failure = function
   | Compiler_bug.Bug bug -> Compiler_bug.to_string bug
   | failure -> Printexc.to_string failure
 
@@ -244,12 +244,12 @@ let open_database root =
   | Ok (snapshot, _) -> Workspace.open_database snapshot
   | Error message -> failwith message
 
-let checked_and_reopened root =
+let check_and_reopen root =
   Database.check (open_database root) [ example.package ];
   Workspace.flush ()
 
-let reopening root =
-  match random 8 with
+let find_reopening root =
+  match draw_number 8 with
   | 0 | 1 -> Some ("commit and reopen", Workspace.flush)
   | 2 ->
       Some
@@ -309,28 +309,28 @@ let () =
   for step = 1 to !count do
     match
       if step mod (!depth + 1) = 0 then Some { description = "restore the files"; files }
-      else edits !current
+      else make_random_edit !current
     with
     | None -> ()
     | Some edit -> (
         if !verbose then Printf.printf "%d: %s\n%!" step edit.description;
         write_project root edit.files;
-        if random 4 = 0 then begin
+        if draw_number 4 = 0 then begin
           if !verbose then Printf.printf "  check, commit and reopen\n%!";
-          ignore (outcome (fun () -> checked_and_reopened root))
+          ignore (capture_outcome (fun () -> check_and_reopen root))
         end;
         let propagated =
-          outcome (fun () ->
+          capture_outcome (fun () ->
               let hot = open_database root in
               Database.propagate hot;
               hot)
         in
-        match (propagated, outcome (fun () -> built edit.files)) with
+        match (propagated, capture_outcome (fun () -> build edit.files)) with
         | Ok hot, Ok cold -> (
             current := edit.files;
             match Database.For_testing.list_differences hot cold with
             | [] -> (
-                match reopening root with
+                match find_reopening root with
                 | Some (description, reopen) ->
                     if !verbose then Printf.printf "  %s\n%!" description;
                     reopen ()
@@ -341,13 +341,13 @@ let () =
                   ^ String.concat ", " (List.take 20 parts));
                 start_over ())
         | Error failure, Ok _ ->
-            report step edit ("propagating it raised " ^ shown_failure failure);
+            report step edit ("propagating it raised " ^ show_failure failure);
             start_over ();
             current := edit.files
         | (Ok _ | Error _), Error failure ->
             incr skipped;
             if !verbose then
-              Printf.printf "  skipped: a cold build raises %s\n%!" (shown_failure failure);
+              Printf.printf "  skipped: a cold build raises %s\n%!" (show_failure failure);
             write_project root !current)
   done;
   Workspace.flush ();

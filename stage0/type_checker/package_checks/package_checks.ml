@@ -114,9 +114,9 @@ let impls_overlap (first : Types.impl_interface) (second : Types.impl_interface)
     | Types.Named left, Types.Named right ->
         Path.equal left.path right.path
         && List.length left.arguments = List.length right.arguments
-        && List.for_all2 argument left.arguments right.arguments
+        && List.for_all2 occurs_in_argument left.arguments right.arguments
     | left, right -> Types.equal left right
-  and argument left right =
+  and occurs_in_argument left right =
     match (left, right) with
     | Types.Type left, Types.Type right -> unify left right
     | Types.Value (Types.Value_parameter parameter), _
@@ -126,7 +126,8 @@ let impls_overlap (first : Types.impl_interface) (second : Types.impl_interface)
   in
   unify first.for_type second.for_type
   && List.length first.implements.trait_arguments = List.length second.implements.trait_arguments
-  && List.for_all2 argument first.implements.trait_arguments second.implements.trait_arguments
+  && List.for_all2 occurs_in_argument first.implements.trait_arguments
+       second.implements.trait_arguments
 
 let check_method_names (lookups : Lookups.t) (declaration : Resolve.Names.declaration) spans
     (definition : Syntax.definition) (impl : Types.impl_interface) =
@@ -138,7 +139,7 @@ let check_method_names (lookups : Lookups.t) (declaration : Resolve.Names.declar
       List.filter_map
         (fun (method_ : Types.trait_method) ->
           let own = lookups.interface.names.list_members path method_.method_name in
-          let same_version (key : Resolve.Names.key) =
+          let is_same_version (key : Resolve.Names.key) =
             match key.path with
             | Method { receiver; _ } -> receiver = method_.method_receiver
             | _ -> true
@@ -149,28 +150,28 @@ let check_method_names (lookups : Lookups.t) (declaration : Resolve.Names.declar
                 name = method_.method_name && receiver = method_.method_receiver)
               impl.impl_methods
           in
-          let clash message =
+          let make_clash message =
             Some
               (make_diagnostic
                  (Resolve.Names.make_key declaration)
                  Method_name_clash (locate_header spans definition) message)
           in
           if own = [] then None
-          else if List.exists same_version own then
-            clash
+          else if List.exists is_same_version own then
+            make_clash
               (Printf.sprintf
                  "`%s` has a `%s` of its own that takes %s, so it cannot also get one from `%s`."
                  (Types.show impl.for_type) method_.method_name
                  (Path.show_receiver method_.method_receiver)
                  (Types.show_trait impl.implements))
           else if declaration.module_.package <> Path.locate_package path then
-            clash
+            make_clash
               (Printf.sprintf
                  "`%s` has a `%s` of its own, so only an `impl` in its own package can give it \
                   another."
                  (Types.show impl.for_type) method_.method_name)
           else if not written then
-            clash
+            make_clash
               (Printf.sprintf
                  "`%s` has a `%s` of its own, so this `impl` can give it another only by writing \
                   it, and `%s` is left to the body `%s` provides."
@@ -205,7 +206,7 @@ let list_type_arguments arguments =
   List.filter_map (function Types.Type type_ -> Some type_ | _ -> None) arguments
 
 let list_contained_types (lookups : Lookups.t) path =
-  let bounds =
+  let list_bounds =
     match Interface.Definition.read_type_interface lookups.interface path with
     | Some interface -> Types.list_bounds interface.type_generics
     | None -> fun _ -> []
@@ -223,7 +224,7 @@ let list_contained_types (lookups : Lookups.t) path =
                     (if indirect then Indirect else In_place)
                     occurrence )
           | _ -> None)
-        (Interface.Impls.collect_contents lookups.interface ~bounds field.field_type).contained)
+        (Interface.Impls.collect_contents lookups.interface ~list_bounds field.field_type).contained)
     (snd (list_type_fields lookups path))
 
 let memoize compute =
@@ -236,9 +237,9 @@ let memoize compute =
         Path_table.replace table path value;
         value
 
-let list_self_occurrences ~contained (start : Path.t) =
+let list_self_occurrences ~list_contained (start : Path.t) =
   let visited = Occurrence_table.create 16 in
-  let rec from path occurrence =
+  let rec trace_from path occurrence =
     if Path.equal path start then [ occurrence ]
     else if
       Path.locate_package path <> Path.locate_package start
@@ -248,17 +249,17 @@ let list_self_occurrences ~contained (start : Path.t) =
       Occurrence_table.replace visited (path, occurrence) ();
       List.concat_map
         (fun (_, target, step) ->
-          from target (Interface.Properties.compose_occurrences occurrence step))
-        (contained path)
+          trace_from target (Interface.Properties.compose_occurrences occurrence step))
+        (list_contained path)
     end
   in
   List.concat_map
     (fun (field, target, occurrence) ->
-      List.map (fun path -> (field, path)) (from target occurrence))
-    (contained start)
+      List.map (fun path -> (field, path)) (trace_from target occurrence))
+    (list_contained start)
 
 let grows lookups (start : Path.t) =
-  let edges (path, index) =
+  let list_edges (path, index) =
     let parameters, fields = list_type_fields lookups path in
     match List.nth_opt parameters index with
     | None -> []
@@ -266,7 +267,7 @@ let grows lookups (start : Path.t) =
         let mentions =
           Types.exists (function Types.Parameter other -> other = parameter | _ -> false)
         in
-        let rec targets (type_ : Types.ty) =
+        let rec list_targets (type_ : Types.ty) =
           match type_ with
           | Types.Named { path = target; arguments } ->
               let arguments = list_type_arguments arguments in
@@ -277,12 +278,12 @@ let grows lookups (start : Path.t) =
                        [ ((target, position), argument <> Types.Parameter parameter) ]
                      else [])
                    arguments)
-              @ List.concat_map targets arguments
+              @ List.concat_map list_targets arguments
           | Types.Function { inputs; output; _ } ->
-              List.concat_map (fun (_, type_) -> targets type_) inputs @ targets output
+              List.concat_map (fun (_, type_) -> list_targets type_) inputs @ list_targets output
           | _ -> []
         in
-        List.concat_map (fun (_, (field : Types.field)) -> targets field.field_type) fields
+        List.concat_map (fun (_, (field : Types.field)) -> list_targets field.field_type) fields
   in
   let visited = Grown_node_table.create 16 in
   let rec walk ((path, _) as node) grown =
@@ -290,12 +291,13 @@ let grows lookups (start : Path.t) =
     else if Grown_node_table.mem visited (node, grown) then false
     else begin
       Grown_node_table.replace visited (node, grown) ();
-      List.exists (fun (target, growing) -> walk target (grown || growing)) (edges node)
+      List.exists (fun (target, growing) -> walk target (grown || growing)) (list_edges node)
     end
   in
   let parameters, _ = list_type_fields lookups start in
   List.exists
-    (fun index -> List.exists (fun (target, growing) -> walk target growing) (edges (start, index)))
+    (fun index ->
+      List.exists (fun (target, growing) -> walk target growing) (list_edges (start, index)))
     (List.init (List.length parameters) Fun.id)
 
 let not_strictly_positive_message =
@@ -314,8 +316,10 @@ let read_written_variant (variants : Syntax.variant list) (variant : Types.varia
 
 let locate_field (spans : Source.Definition_span.t array) (body : Syntax.type_body)
     ((variant : Types.variant option), (field : Types.field)) =
-  let missing () = raise_bug "the field `%s` is not in its type's definition" field.field_name in
-  let among (fields : Syntax.field list) =
+  let raise_missing () =
+    raise_bug "the field `%s` is not in its type's definition" field.field_name
+  in
+  let locate_among (fields : Syntax.field list) =
     match
       List.find_map
         (fun (written : Syntax.field) ->
@@ -326,17 +330,17 @@ let locate_field (spans : Source.Definition_span.t array) (body : Syntax.type_bo
         fields
     with
     | Some span -> span
-    | None -> missing ()
+    | None -> raise_missing ()
   in
   match (body, variant) with
-  | Fields fields, None -> among fields
+  | Fields fields, None -> locate_among fields
   | Variants variants, Some variant -> (
       match (read_written_variant variants variant).fields with
-      | Some fields -> among fields
-      | None -> missing ())
-  | _ -> missing ()
+      | Some fields -> locate_among fields
+      | None -> raise_missing ())
+  | _ -> raise_missing ()
 
-let check_recursion lookups ~contained (declaration : Resolve.Names.declaration) spans
+let check_recursion lookups ~list_contained (declaration : Resolve.Names.declaration) spans
     (definition : Syntax.definition) =
   match definition.kind with
   | Type_definition _ when grows lookups declaration.path ->
@@ -349,8 +353,8 @@ let check_recursion lookups ~contained (declaration : Resolve.Names.declaration)
       ]
   | Type_definition { name; body; _ } ->
       let key = Resolve.Names.make_key declaration in
-      let occurrences = list_self_occurrences ~contained declaration.path in
-      let first (wanted : Interface.Properties.occurrence) =
+      let occurrences = list_self_occurrences ~list_contained declaration.path in
+      let find_first (wanted : Interface.Properties.occurrence) =
         List.find_map
           (fun (field, occurrence) -> if occurrence = wanted then Some field else None)
           occurrences
@@ -367,7 +371,7 @@ let check_recursion lookups ~contained (declaration : Resolve.Names.declaration)
                       Diagnostic.fix "Declare the variant `indirect`."
                         [
                           Diagnostic.insert
-                            (Source.Definition_span.zero_width span.start)
+                            (Source.Definition_span.make_zero_width span.start)
                             "indirect ";
                         ];
                     ]
@@ -382,7 +386,7 @@ let check_recursion lookups ~contained (declaration : Resolve.Names.declaration)
                 raise_bug
                   "the interface of `%s` and its definition disagree on whether it is a sum type"
                   name.text)
-          (first In_place)
+          (find_first In_place)
       in
       let function_input =
         Option.map
@@ -392,17 +396,17 @@ let check_recursion lookups ~contained (declaration : Resolve.Names.declaration)
                  "Through this field, `%s` contains a function type that has a `time` clause and \
                   whose input contains `%s`. %s"
                  name.text name.text not_strictly_positive_message))
-          (first Function_input)
+          (find_first Function_input)
       in
       Option.to_list in_place @ Option.to_list function_input
   | _ -> []
 
-let check_associated_types (lookups : Lookups.t) ~contained
+let check_associated_types (lookups : Lookups.t) ~list_contained
     (declaration : Resolve.Names.declaration) spans (definition : Syntax.definition)
     (impl : Types.impl_interface) =
   let key = Resolve.Names.make_key declaration in
-  let bounds = Types.list_bounds impl.impl_generics in
-  let written name =
+  let list_bounds = Types.list_bounds impl.impl_generics in
+  let find_written name =
     match definition.kind with
     | Impl { members; _ } ->
         List.find_map
@@ -413,18 +417,18 @@ let check_associated_types (lookups : Lookups.t) ~contained
           members
     | _ -> None
   in
-  let reported_at_definition (recursion : Interface.Properties.recursion) =
+  let is_reported_at_definition (recursion : Interface.Properties.recursion) =
     match recursion.recursive with
     | Types.Named { path; _ } ->
         List.exists
           (fun (_, occurrence) -> occurrence = recursion.occurrence)
-          (list_self_occurrences ~contained path)
+          (list_self_occurrences ~list_contained path)
     | _ -> false
   in
   List.concat_map
     (fun (name, type_) ->
       let span =
-        match written name with
+        match find_written name with
         | Some span -> span
         | None -> raise_bug "the associated type `%s` is not in its impl's definition" name
       in
@@ -453,10 +457,10 @@ let check_associated_types (lookups : Lookups.t) ~contained
               (fun (recursion : Interface.Properties.recursion) ->
                 if
                   List.exists (Path.equal declaration.path) recursion.defining
-                  && not (reported_at_definition recursion)
+                  && not (is_reported_at_definition recursion)
                 then Some (recursion.recursive, recursion.occurrence)
                 else None)
-              (Interface.Impls.collect_contents lookups.interface ~bounds type_).recursions)))
+              (Interface.Impls.collect_contents lookups.interface ~list_bounds type_).recursions)))
     impl.implements.associated
 
 let list_instantiation_edges (lookups : Lookups.t) (key : Resolve.Names.key) =
@@ -495,21 +499,21 @@ let check_instantiation (lookups : Lookups.t) (package : Path.package) =
       Path_table.replace edges declaration.path
         (list_instantiation_edges lookups (Resolve.Names.make_key declaration)))
     generic;
-  let outgoing path = Option.value ~default:[] (Path_table.find_opt edges path) in
+  let list_outgoing path = Option.value ~default:[] (Path_table.find_opt edges path) in
   let component_index = Path_table.create 64 in
   List.iteri
     (fun index members ->
       List.iter (fun path -> Path_table.replace component_index path index) members)
     (Strongly_connected.list_components
        (module Path)
-       ~successors:(fun path -> List.map fst (outgoing path))
+       ~list_successors:(fun path -> List.map fst (list_outgoing path))
        (List.map (fun (declaration : Resolve.Names.declaration) -> declaration.path) generic));
   let grows_on_cycle path (callee, grows) =
     grows && Path_table.find component_index callee = Path_table.find component_index path
   in
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
-      if List.exists (grows_on_cycle declaration.path) (outgoing declaration.path) then
+      if List.exists (grows_on_cycle declaration.path) (list_outgoing declaration.path) then
         let definition, spans = read_definition lookups declaration in
         Some
           (make_diagnostic
@@ -550,20 +554,20 @@ let check_overlaps (lookups : Lookups.t) (declaration : Resolve.Names.declaratio
   match Interface.Impls.find_head impl.for_type with
   | Some type_ when List.mem package (list_outer_packages impl) ->
       let trait = impl.implements.trait in
-      let rec before = function
+      let rec list_before = function
         | [] -> []
         | ((indexed_trait, indexed_type), path) :: rest ->
             if Path.equal path declaration.path then []
             else if Path.equal indexed_trait trait && Path.equal indexed_type type_ then
-              path :: before rest
-            else before rest
+              path :: list_before rest
+            else list_before rest
       in
       let earlier =
         List.filter
           (fun (other : Types.impl_interface) -> List.mem package (list_outer_packages other))
           (List.filter_map
              (Interface.Definition.read_impl_interface lookups.interface)
-             (before (lookups.interface.names.list_impls package)))
+             (list_before (lookups.interface.names.list_impls package)))
       in
       let dependencies =
         List.concat_map
@@ -589,7 +593,7 @@ let check_overlaps (lookups : Lookups.t) (declaration : Resolve.Names.declaratio
         (earlier @ dependencies)
   | _ -> []
 
-let check_impl (lookups : Lookups.t) ~contained (declaration : Resolve.Names.declaration) =
+let check_impl (lookups : Lookups.t) ~list_contained (declaration : Resolve.Names.declaration) =
   match
     ( Interface.Definition.read_impl_interface lookups.interface declaration.path,
       read_definition lookups declaration )
@@ -598,12 +602,12 @@ let check_impl (lookups : Lookups.t) ~contained (declaration : Resolve.Names.dec
       Option.to_list (check_location declaration spans definition impl)
       @ check_method_names lookups declaration spans definition impl
       @ check_overlaps lookups declaration spans definition impl
-      @ check_associated_types lookups ~contained declaration spans definition impl
+      @ check_associated_types lookups ~list_contained declaration spans definition impl
   | _ -> []
 
-let check_type lookups ~contained (declaration : Resolve.Names.declaration) =
+let check_type lookups ~list_contained (declaration : Resolve.Names.declaration) =
   let definition, spans = read_definition lookups declaration in
-  check_recursion lookups ~contained declaration spans definition
+  check_recursion lookups ~list_contained declaration spans definition
 
 let read_constant_value (lookups : Lookups.t) path =
   match Option.map lookups.read_core (lookups.interface.names.find_key path) with
@@ -763,13 +767,13 @@ let list_unused_dependencies (lookups : Lookups.t) package =
 type outcome = Placed of placed list | Unused_dependencies of Path.package list
 
 let run (lookups : Lookups.t) package check =
-  let contained = memoize (list_contained_types lookups) in
+  let list_contained = memoize (list_contained_types lookups) in
   match check with
   | Sealed key -> Placed (check_sealed lookups (lookups.interface.names.read_declaration key))
   | Impl key ->
-      Placed (check_impl lookups ~contained (lookups.interface.names.read_declaration key))
+      Placed (check_impl lookups ~list_contained (lookups.interface.names.read_declaration key))
   | Type key ->
-      Placed (check_type lookups ~contained (lookups.interface.names.read_declaration key))
+      Placed (check_type lookups ~list_contained (lookups.interface.names.read_declaration key))
   | Constant key -> Placed (check_constant lookups (lookups.interface.names.read_declaration key))
   | Instantiations -> Placed (check_instantiation lookups package)
   | Tests -> Placed (check_tests lookups package)

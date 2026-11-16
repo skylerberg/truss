@@ -39,9 +39,9 @@ let is_radix text = String.length text >= 2 && text.[0] = '0' && String.contains
 let is_hexadecimal text = is_radix text && Char.lowercase_ascii text.[1] = 'x'
 let is_hexadecimal_digit character = is_digit character || String.contains "abcdefABCDEF" character
 
-let measure_span text position accepts =
+let measure_span text position is_accepted =
   let rec loop position =
-    if position < String.length text && accepts text.[position] then loop (position + 1)
+    if position < String.length text && is_accepted text.[position] then loop (position + 1)
     else position
   in
   loop position
@@ -59,12 +59,12 @@ let scan_end text start =
     && (text.[stop] = '+' || text.[stop] = '-')
     && is_digit text.[stop + 1]
   in
-  let rec quoted stop =
+  let rec skip_quoted stop =
     if stop + 1 < length && text.[stop] = '\'' && is_digit text.[stop + 1] then
-      quoted (Numbers.compute_name_end text (stop + 1))
+      skip_quoted (Numbers.compute_name_end text (stop + 1))
     else stop
   in
-  let stop = if digits_only then quoted stop else stop in
+  let stop = if digits_only then skip_quoted stop else stop in
   if is_hexadecimal literal then
     let marker = measure_span text (stop + 1) is_hexadecimal_digit in
     let stop =
@@ -87,12 +87,12 @@ let compute_number_end text =
   if is_radix text then
     measure_span text 2 (fun character -> is_hexadecimal_digit character || character = '_')
   else
-    let digits position =
+    let skip_digits position =
       measure_span text position (fun character -> is_digit character || character = '_')
     in
-    let whole = digits 0 in
+    let whole = skip_digits 0 in
     let position =
-      if whole < String.length text && text.[whole] = '.' then digits (whole + 1) else whole
+      if whole < String.length text && text.[whole] = '.' then skip_digits (whole + 1) else whole
     in
     if position < String.length text && (text.[position] = 'e' || text.[position] = 'E') then
       let digits_start =
@@ -100,19 +100,19 @@ let compute_number_end text =
           position + 2
         else position + 1
       in
-      let stop = digits digits_start in
+      let stop = skip_digits digits_start in
       if stop > digits_start then stop else position
     else position
 
 let rec lex_foreign_number text : Numbers.checked option =
   let length = String.length text in
-  let problem code message start stop = Some { Numbers.code; message; start; stop } in
-  let translated code message start stop translation =
+  let make_problem code message start stop = Some { Numbers.code; message; start; stop } in
+  let make_translation code message start stop translation =
     let (checked : Numbers.checked) = check translation in
     Some
       {
         Numbers.value = checked.value;
-        problem = problem code message start stop;
+        problem = make_problem code message start stop;
         fixes =
           (if checked.problem = None then [ ("Write `" ^ translation ^ "`", translation) ] else []);
       }
@@ -124,7 +124,7 @@ let rec lex_foreign_number text : Numbers.checked option =
       let grouped =
         String.map (fun character -> if character = '\'' then '_' else character) text
       in
-      translated Number_digit_separator
+      make_translation Number_digit_separator
         (Printf.sprintf "Digits are grouped with `_`, as in `%s`." grouped)
         quote (quote + 1) grouped
   | None -> (
@@ -136,13 +136,13 @@ let rec lex_foreign_number text : Numbers.checked option =
           {
             value = (check (String.sub text 0 stop) : Numbers.checked).value;
             problem =
-              problem Number_hexadecimal_float
+              make_problem Number_hexadecimal_float
                 "Truss has no hexadecimal floats. Write the value as a decimal float." 0 length;
             fixes = [];
           }
       else if is_radix text && Char.uppercase_ascii text.[1] = text.[1] then
         let prefix = "0" ^ String.of_char (Char.lowercase_ascii text.[1]) in
-        translated Number_uppercase_prefix
+        make_translation Number_uppercase_prefix
           (Printf.sprintf "Number prefixes are lowercase: write `%s`." prefix)
           0 2
           (prefix ^ String.sub text 2 (length - 2))
@@ -151,7 +151,7 @@ let rec lex_foreign_number text : Numbers.checked option =
         let value =
           match (check number : Numbers.checked).value with
           | Integer digits when is_float_suffix suffix ->
-              Token.Float (Token.Decimal.normalized ~significand:digits ~exponent:Z.zero)
+              Token.Float (Token.Decimal.normalize ~significand:digits ~exponent:Z.zero)
           | value -> value
         in
         let type_name =
@@ -165,7 +165,7 @@ let rec lex_foreign_number text : Numbers.checked option =
           {
             value;
             problem =
-              problem Number_suffix
+              make_problem Number_suffix
                 (Printf.sprintf
                    "Number literals have no type suffixes such as `%s`. A literal takes its type \
                     from its context, as in `let value: %s = %s`."
@@ -176,8 +176,8 @@ let rec lex_foreign_number text : Numbers.checked option =
       else
         match String.index_opt text 'E' with
         | Some marker when (not (is_radix text)) && marker < stop ->
-            translated Number_uppercase_exponent "The exponent is written with a lowercase `e`."
-              marker (marker + 1)
+            make_translation Number_uppercase_exponent
+              "The exponent is written with a lowercase `e`." marker (marker + 1)
               (String.mapi (fun index character -> if index = marker then 'e' else character) text)
         | _ ->
             let whole =
@@ -214,7 +214,7 @@ let rec lex_foreign_number text : Numbers.checked option =
                 {
                   value = (check decimal : Numbers.checked).value;
                   problem =
-                    problem Number_leading_zero
+                    make_problem Number_leading_zero
                       (if octal_possible then
                          Printf.sprintf
                            "Decimal numbers do not start with `0`. In C and Go, `%s` would be \

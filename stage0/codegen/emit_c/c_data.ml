@@ -4,8 +4,8 @@ let allocate_static_name (context : C_types.context) =
 
 let rec render_initializer context ty (value : Lowered.static_value) : string option =
   let layout = C_types.compute_layout context ty in
-  let fields_c (fields : Memory_layout.field list) (values : (string * Lowered.static_value) list)
-      prefix =
+  let render_fields (fields : Memory_layout.field list)
+      (values : (string * Lowered.static_value) list) prefix =
     String.concat ", "
       (List.filter_map
          (fun (field : Memory_layout.field) ->
@@ -17,7 +17,7 @@ let rec render_initializer context ty (value : Lowered.static_value) : string op
            | _ -> None)
          fields)
   in
-  let block_c variant fields =
+  let render_block variant fields =
     let key = C_types.Block (ty, variant) in
     C_types.register context key;
     let block_fields =
@@ -25,7 +25,7 @@ let rec render_initializer context ty (value : Lowered.static_value) : string op
       | Struct fields -> fields
       | _ -> []
     in
-    let block_value = fields_c block_fields fields "" in
+    let block_value = render_fields block_fields fields "" in
     let name = allocate_static_name context in
     context.statics <-
       Printf.sprintf "static const %s %s = { %s };\n" (C_types.render_key_name key) name block_value
@@ -54,7 +54,7 @@ let rec render_initializer context ty (value : Lowered.static_value) : string op
         (Printf.sprintf "{ .f_%s = %s, .f_%s = %d, .f_%s = %d }" Storage.buffer_field buffer
            Storage.length_field count Storage.capacity_field count)
   | Scalar _, Static_scalar constant -> Some (fst (C_values.render_constant context constant))
-  | Struct fields, Static_record values -> Some ("{ " ^ fields_c fields values "" ^ " }")
+  | Struct fields, Static_record values -> Some ("{ " ^ render_fields fields values "" ^ " }")
   | Array { element; _ }, Static_array values ->
       Some
         ("{ .items = { "
@@ -75,17 +75,17 @@ let rec render_initializer context ty (value : Lowered.static_value) : string op
           | Struct fields ->
               Some
                 (Printf.sprintf "{ .tag = %d, %s }" variant.index
-                   (fields_c fields values (".payload.v_" ^ name)))
+                   (render_fields fields values (".payload.v_" ^ name)))
           | Scalar (Pointer (Block _)) ->
               Some
                 (Printf.sprintf "{ .tag = %d, .payload.v_%s = %s }" variant.index name
-                   (block_c name values))
+                   (render_block name values))
           | _ -> C_runtime.raise_bug "a payload"))
   | Niche_encoded { dataful; dataless }, Static_variant (name, values) ->
       if dataful.name = name then
         match dataful.payload.form with
-        | Struct fields -> Some ("{ " ^ fields_c fields values "" ^ " }")
-        | Scalar (Pointer (Block _)) -> Some (block_c name values)
+        | Struct fields -> Some ("{ " ^ render_fields fields values "" ^ " }")
+        | Scalar (Pointer (Block _)) -> Some (render_block name values)
         | _ -> C_runtime.raise_bug "a payload"
       else
         begin match dataless with

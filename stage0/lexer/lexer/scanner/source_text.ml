@@ -94,13 +94,13 @@ let report_invalid_run (cursor : Cursor.t) =
     (Source.make_span start cursor.position)
     "Source files must be UTF-8, and these bytes are not valid UTF-8."
 
-let copy_plain (cursor : Cursor.t) buffer ~special =
+let copy_plain (cursor : Cursor.t) buffer ~is_special =
   let start = cursor.position in
   let rec stop index =
     if Cursor.is_at_end cursor index then index
     else
       let current = Cursor.lookup_char cursor index in
-      if (current >= ' ' && current < '\x7F' && not (special current)) || current = '\t' then
+      if (current >= ' ' && current < '\x7F' && not (is_special current)) || current = '\t' then
         stop (index + 1)
       else index
   in

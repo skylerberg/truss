@@ -209,54 +209,54 @@ and substitute_function substitution (function_type : function_type) =
 let extract_result_type = function Returns type_ | Lends (_, type_) -> type_
 let show_mode = function Read -> "" | Mut -> "mut " | Own -> "own "
 
-let rec map ?(capabilities = Fun.id) transform type_ =
+let rec map ?(map_capabilities = Fun.id) transform type_ =
   match transform type_ with
   | Some replacement -> replacement
   | None -> (
-      let map = map ~capabilities transform in
-      let argument = function
+      let map = map ~map_capabilities transform in
+      let map_argument = function
         | Type type_ -> Type (map type_)
-        | Capabilities set -> Capabilities (capabilities set)
+        | Capabilities set -> Capabilities (map_capabilities set)
         | Value _ as value -> value
       in
-      let trait (reference : trait_reference) =
+      let map_trait (reference : trait_reference) =
         {
           reference with
-          trait_arguments = List.map argument reference.trait_arguments;
+          trait_arguments = List.map map_argument reference.trait_arguments;
           associated = List.map (fun (name, type_) -> (name, map type_)) reference.associated;
         }
       in
       match type_ with
-      | Named { path; arguments } -> Named { path; arguments = List.map argument arguments }
+      | Named { path; arguments } -> Named { path; arguments = List.map map_argument arguments }
       | Projection { base; trait = reference; name } ->
-          Projection { base = map base; trait = trait reference; name }
+          Projection { base = map base; trait = map_trait reference; name }
       | Function function_type ->
           Function
             {
               function_type with
               inputs = List.map (fun (mode, type_) -> (mode, map type_)) function_type.inputs;
               output = map function_type.output;
-              uses = capabilities function_type.uses;
+              uses = map_capabilities function_type.uses;
             }
-      | Any reference -> Any (trait reference)
+      | Any reference -> Any (map_trait reference)
       | Parameter _ | Never | Integer | Variable _ | Literal _ | Hole | Error _ -> type_)
 
 let rec exists ?(resolve = Fun.id) transform type_ =
   let type_ = resolve type_ in
   let exists = exists ~resolve transform in
-  let argument = function Type type_ -> exists type_ | Value _ | Capabilities _ -> false in
-  let trait (reference : trait_reference) =
-    List.exists argument reference.trait_arguments
+  let argument_exists = function Type type_ -> exists type_ | Value _ | Capabilities _ -> false in
+  let trait_exists (reference : trait_reference) =
+    List.exists argument_exists reference.trait_arguments
     || List.exists (fun (_, type_) -> exists type_) reference.associated
   in
   transform type_
   ||
   match type_ with
-  | Named { arguments; _ } -> List.exists argument arguments
-  | Projection { base; trait = reference; _ } -> exists base || trait reference
+  | Named { arguments; _ } -> List.exists argument_exists arguments
+  | Projection { base; trait = reference; _ } -> exists base || trait_exists reference
   | Function { inputs; output; _ } ->
       List.exists (fun (_, type_) -> exists type_) inputs || exists output
-  | Any reference -> trait reference
+  | Any reference -> trait_exists reference
   | Parameter _ | Never | Integer | Variable _ | Literal _ | Hole | Error _ -> false
 
 let is_specification_only = function

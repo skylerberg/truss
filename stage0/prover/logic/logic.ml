@@ -94,26 +94,26 @@ let show_sort = function
   | Type_sort ty -> Types.show ty
   | Function_sort arity -> Printf.sprintf "function/%d" arity
 
-let instance_text = function
+let show_instance = function
   | [] -> ""
   | arguments -> "[" ^ String.concat ", " (List.map Types.show_argument arguments) ^ "]"
 
-let variant_text = Option.value ~default:"record"
+let show_variant = Option.value ~default:"record"
 
 let rec show_symbol : symbol -> string = function
   | Variable { label; numbers } -> String.concat "." (label :: List.map string_of_int numbers)
-  | Function { callee; instance } -> "function." ^ Path.show callee ^ instance_text instance
-  | Limited { callee; instance } -> "limited." ^ Path.show callee ^ instance_text instance
-  | Function_value { callee; instance } -> "named." ^ Path.show callee ^ instance_text instance
+  | Function { callee; instance } -> "function." ^ Path.show callee ^ show_instance instance
+  | Limited { callee; instance } -> "limited." ^ Path.show callee ^ show_instance instance
+  | Function_value { callee; instance } -> "named." ^ Path.show callee ^ show_instance instance
   | Constant path -> "constant." ^ Path.show path
   | Generic_value { owner; name } -> Printf.sprintf "generic.%s.%s" (Path.show owner) name
   | Text_literal { type_; text } -> Printf.sprintf "text_literal.%s.%S" (Types.show type_) text
   | Named_term term -> "named_term(" ^ show_term term ^ ")"
   | Lambda { definition; _ } -> "lambda(" ^ show_term definition ^ ")"
   | Lifted symbol -> show_symbol symbol ^ ".lifted"
-  | Constructor { type_; variant } -> "constructor." ^ Types.show type_ ^ "." ^ variant_text variant
+  | Constructor { type_; variant } -> "constructor." ^ Types.show type_ ^ "." ^ show_variant variant
   | Field { type_; variant; field } ->
-      "field." ^ Types.show type_ ^ "." ^ variant_text variant ^ "." ^ field
+      "field." ^ Types.show type_ ^ "." ^ show_variant variant ^ "." ^ field
   | Unit -> "Unit.unit"
   | Apply sorts -> String.concat "." ("apply" :: List.map show_sort sorts)
   | Equal ty -> "equal." ^ Types.show ty
@@ -124,10 +124,10 @@ let rec show_symbol : symbol -> string = function
   | Slack ty -> "slack." ^ Types.show ty
   | Potential ty -> "potential." ^ Types.show ty
   | Potential_measure ty -> "potential.measure." ^ Types.show ty
-  | Block_bytes { type_; variant } -> "bytes." ^ Types.show type_ ^ "." ^ variant_text variant
+  | Block_bytes { type_; variant } -> "bytes." ^ Types.show type_ ^ "." ^ show_variant variant
   | Time sort -> "time." ^ show_sort sort
   | Method_time { method_; trait_arguments; self_type } ->
-      Printf.sprintf "time.method.%s%s[%s]" (Path.show method_) (instance_text trait_arguments)
+      Printf.sprintf "time.method.%s%s[%s]" (Path.show method_) (show_instance trait_arguments)
         (Types.show self_type)
   | Opaque_operation { operation; type_; _ } ->
       Printf.sprintf "operation.%s.%s" (Intrinsic.show_operation operation) (Types.show type_)
@@ -148,16 +148,16 @@ and show_term term =
     | Integer value -> show_integer value
     | Boolean value -> if value then "true" else "false"
     | Bits (width, value) -> show_bits width value
-    | Apply (name, arguments) -> applied (show_symbol name) arguments
-    | Operation (name, arguments) -> applied name arguments
+    | Apply (name, arguments) -> show_applied (show_symbol name) arguments
+    | Operation (name, arguments) -> show_applied name arguments
     | Is (constructor, argument) ->
-        applied (Printf.sprintf "(_ is %s)" (show_symbol constructor)) [ argument ]
-    | Forall (bound, _, body) -> binder "forall" bound body
-    | Exists (bound, body) -> binder "exists" bound body
-  and applied head = function
+        show_applied (Printf.sprintf "(_ is %s)" (show_symbol constructor)) [ argument ]
+    | Forall (bound, _, body) -> show_binder "forall" bound body
+    | Exists (bound, body) -> show_binder "exists" bound body
+  and show_applied head = function
     | [] -> head
     | arguments -> "(" ^ String.concat " " (head :: List.map show arguments) ^ ")"
-  and binder word bound body =
+  and show_binder word bound body =
     let sort = function
       | Int -> "Int"
       | Bool -> "Bool"
@@ -175,7 +175,7 @@ and show_term term =
   in
   show term
 
-let arguments = function
+let list_arguments = function
   | Apply (_, arguments) | Operation (_, arguments) -> arguments
   | Is (_, argument) -> [ argument ]
   | Symbol _ | Integer _ | Boolean _ | Bits _ | Forall _ | Exists _ -> []
@@ -287,15 +287,16 @@ let rec substitute substitution term =
 and remove_bound bound substitution =
   List.filter (fun (name, _) -> not (List.mem_assoc name bound)) substitution
 
-let list_triggers ~triggering variables body =
+let list_triggers ~is_triggering variables body =
   let names = List.map fst variables in
   let rec is_trigger_term = function
     | Symbol _ | Integer _ | Boolean _ | Bits _ -> true
-    | Apply (name, arguments) when triggering name -> List.for_all is_trigger_term arguments
+    | Apply (name, arguments) when is_triggering name -> List.for_all is_trigger_term arguments
     | (Apply _ | Operation _ | Is _ | Forall _ | Exists _) as term -> not (mentions names term)
   in
-  let candidate = function
-    | Apply (name, _ :: _) as term -> triggering name && mentions names term && is_trigger_term term
+  let is_candidate = function
+    | Apply (name, _ :: _) as term ->
+        is_triggering name && mentions names term && is_trigger_term term
     | _ -> false
   in
   let applications = ref [] in
@@ -310,7 +311,7 @@ let list_triggers ~triggering variables body =
   in
   walk body;
   let applications = List.rev !applications in
-  let bound_names_in term = List.filter (fun name -> mentions [ name ] term) names in
+  let list_bound_names_in term = List.filter (fun name -> mentions [ name ] term) names in
   let rec is_proper_subterm inner term =
     inner <> term
     &&
@@ -320,7 +321,7 @@ let list_triggers ~triggering variables body =
     | Is (_, argument) -> argument = inner || is_proper_subterm inner argument
     | _ -> false
   in
-  let rec matching bindings pattern term =
+  let rec find_matching bindings pattern term =
     match (pattern, bindings) with
     | _, None -> None
     | Symbol name, Some matched when List.mem name names -> (
@@ -330,7 +331,7 @@ let list_triggers ~triggering variables body =
     | Apply (name, arguments), _ -> (
         match term with
         | Apply (other, others) when name = other && List.length arguments = List.length others ->
-            List.fold_left2 matching bindings arguments others
+            List.fold_left2 find_matching bindings arguments others
         | _ -> None)
     | _ -> if pattern = term then bindings else None
   in
@@ -339,30 +340,31 @@ let list_triggers ~triggering variables body =
       (fun term ->
         term <> trigger
         &&
-        match matching (Some []) trigger term with
+        match find_matching (Some []) trigger term with
         | Some bindings ->
             List.exists (fun (name, bound) -> bound <> Symbol name && mentions names bound) bindings
         | None -> false)
       applications
   in
-  let rec conclusion = function
-    | Operation ("=>", [ _; inner ]) -> conclusion inner
+  let rec extract_conclusion = function
+    | Operation ("=>", [ _; inner ]) -> extract_conclusion inner
     | term -> term
   in
-  let names_every_variable term = candidate term && bound_names_in term = names in
-  match conclusion body with
+  let names_every_variable term = is_candidate term && list_bound_names_in term = names in
+  match extract_conclusion body with
   | Operation ("=", [ (Apply _ as defined); other ])
     when names_every_variable defined && not (names_every_variable other) ->
       [ [ defined ] ]
   | _ -> (
-      let candidates = List.filter candidate applications in
+      let candidates = List.filter is_candidate applications in
       let candidates =
         List.filter
           (fun term ->
             not
               (List.exists
                  (fun inner ->
-                   is_proper_subterm inner term && bound_names_in inner = bound_names_in term)
+                   is_proper_subterm inner term
+                   && list_bound_names_in inner = list_bound_names_in term)
                  candidates))
           candidates
       in
@@ -375,8 +377,8 @@ let list_triggers ~triggering variables body =
             candidates
         |> List.sort compare
       in
-      let covering_triggers candidates =
-        match List.filter (fun term -> bound_names_in term = names) candidates with
+      let list_covering_triggers candidates =
+        match List.filter (fun term -> list_bound_names_in term = names) candidates with
         | _ :: _ as covering -> List.map (fun term -> [ term ]) covering
         | [] ->
             List.concat_map
@@ -387,7 +389,7 @@ let list_triggers ~triggering variables body =
                       first < second
                       && List.for_all
                            (fun name ->
-                             List.mem name (bound_names_in first @ bound_names_in second))
+                             List.mem name (list_bound_names_in first @ list_bound_names_in second))
                            names
                     then Some (with_same_functions [ first; second ])
                     else None)
@@ -396,16 +398,16 @@ let list_triggers ~triggering variables body =
             |> List.sort_uniq compare
       in
       match
-        covering_triggers (List.filter (fun term -> not (makes_matching_loop term)) candidates)
+        list_covering_triggers (List.filter (fun term -> not (makes_matching_loop term)) candidates)
       with
-      | [] -> covering_triggers candidates
+      | [] -> list_covering_triggers candidates
       | triggers -> triggers)
 
 let forall ?(trigger = []) (variables, body) =
   match variables with [] -> body | _ -> Forall (variables, trigger, body)
 
-let choose_triggers ~triggering variables trigger body =
-  match trigger with [] -> list_triggers ~triggering variables body | terms -> [ terms ]
+let choose_triggers ~is_triggering variables trigger body =
+  match trigger with [] -> list_triggers ~is_triggering variables body | terms -> [ terms ]
 
 let make_triggering_test declarations =
   let functions = Symbol_table.create 64 in
@@ -423,13 +425,14 @@ let make_triggering_test declarations =
   Symbol_table.mem functions
 
 let has_untriggered_fact query =
-  let triggering = make_triggering_test query.declarations in
-  let rec without = function
-    | Operation ("=>", [ _; inner ]) -> without inner
-    | Forall (variables, trigger, body) -> choose_triggers ~triggering variables trigger body = []
+  let is_triggering = make_triggering_test query.declarations in
+  let rec is_untriggered = function
+    | Operation ("=>", [ _; inner ]) -> is_untriggered inner
+    | Forall (variables, trigger, body) ->
+        choose_triggers ~is_triggering variables trigger body = []
     | _ -> false
   in
-  List.exists without query.facts
+  List.exists is_untriggered query.facts
 
 let list_declared_symbols declared term =
   let symbols = ref [] in
@@ -459,12 +462,12 @@ let prune query =
   let reached = Symbol_table.create 64 in
   let reach symbols = List.iter (fun symbol -> Symbol_table.replace reached symbol ()) symbols in
   reach (list_declared_symbols declared query.goal);
-  let triggering = make_triggering_test query.declarations in
+  let is_triggering = make_triggering_test query.declarations in
   let rec needs fact symbols =
     match fact with
     | Operation ("=>", [ _; (Forall _ as inner) ]) -> needs inner symbols
     | Forall (variables, trigger, body) -> (
-        match choose_triggers ~triggering variables trigger body with
+        match choose_triggers ~is_triggering variables trigger body with
         | [] -> fun () -> List.exists (Symbol_table.mem reached) symbols
         | triggers ->
             let triggers = List.map (List.concat_map (list_declared_symbols declared)) triggers in
@@ -495,8 +498,8 @@ let prune query =
   while !changed do
     changed := false;
     Array.iteri
-      (fun index (symbols, ready) ->
-        if (not is_needed.(index)) && ready () then begin
+      (fun index (symbols, is_ready) ->
+        if (not is_needed.(index)) && is_ready () then begin
           is_needed.(index) <- true;
           reach symbols;
           changed := true
@@ -618,7 +621,7 @@ and render_quantifier numbering bound buffer word variables trigger body =
     named;
   add ") ";
   let bound = List.map (fun (name, canonical, _) -> (name, canonical)) named @ bound in
-  match choose_triggers ~triggering:numbering.is_triggering variables trigger body with
+  match choose_triggers ~is_triggering:numbering.is_triggering variables trigger body with
   | [] ->
       print numbering bound buffer body;
       add ")"
@@ -674,15 +677,15 @@ type rendering = { text : string; numbering : numbering }
 
 let render query =
   let numbering = number_symbols query in
-  let assertion term =
+  let render_assertion term =
     let buffer = Buffer.create 128 in
     Buffer.add_string buffer "(assert ";
     print numbering [] buffer term;
     Buffer.add_string buffer ")\n";
     Buffer.contents buffer
   in
-  let negated_goal = assertion (not_ query.goal) in
-  let assertions = List.map assertion query.facts @ [ negated_goal ] in
+  let negated_goal = render_assertion (not_ query.goal) in
+  let assertions = List.map render_assertion query.facts @ [ negated_goal ] in
   let declarations =
     List.map
       (fun name ->
@@ -716,7 +719,7 @@ let render query =
             (fun name -> Printf.sprintf "(%s 0)" (Sort_table.find numbering.sort_names name))
             datatypes
         in
-        let body name =
+        let render_body name =
           let sort = Sort_table.find numbering.sort_names name in
           let constructors =
             List.mapi
@@ -736,7 +739,7 @@ let render query =
         in
         [
           Printf.sprintf "(declare-datatypes (%s) (%s))\n" (String.concat " " heads)
-            (String.concat " " (List.map body datatypes));
+            (String.concat " " (List.map render_body datatypes));
         ]
   in
   {
@@ -747,26 +750,26 @@ let render query =
 let rendered_text rendering = rendering.text
 let show_query query = (render query).text
 
-let term_text { numbering; _ } term =
-  let rec named = function
+let render_term { numbering; _ } term =
+  let rec is_named = function
     | Symbol name -> Symbol_table.mem numbering.symbol_names name
     | Integer _ | Boolean _ | Bits _ -> true
     | Apply (name, arguments) ->
         (Symbol_table.mem numbering.member_of name || Symbol_table.mem numbering.symbol_names name)
-        && List.for_all named arguments
-    | Operation (_, arguments) -> List.for_all named arguments
+        && List.for_all is_named arguments
+    | Operation (_, arguments) -> List.for_all is_named arguments
     | Is (constructor, argument) ->
-        Symbol_table.mem numbering.member_of constructor && named argument
+        Symbol_table.mem numbering.member_of constructor && is_named argument
     | Forall _ | Exists _ -> false
   in
-  if named term then begin
+  if is_named term then begin
     let buffer = Buffer.create 64 in
     print numbering [] buffer term;
     Some (Buffer.contents buffer)
   end
   else None
 
-let symbols { numbering; _ } =
+let list_symbols { numbering; _ } =
   List.map
     (fun name -> (name, Symbol_table.find numbering.symbol_names name))
     (Dynarray.to_list numbering.symbol_order)

@@ -68,7 +68,7 @@ let declare_bounded_amount context frame bound =
     Logic.(Operation ("<=", [ int 0; amount ]) &&& Operation ("<=", [ amount; bound ]));
   amount
 
-let promised_amount context frame (counter : Costs.counter) (bound : Mir.bound) ~evaluate
+let compute_promised_amount context frame (counter : Costs.counter) (bound : Mir.bound) ~evaluate
     ~is_recursive_call ~exact_target ~change =
   match (bound, counter.counting) with
   | Order_of amount, Units ->
@@ -89,11 +89,11 @@ let promised_amount context frame (counter : Costs.counter) (bound : Mir.bound) 
       if exact_target then amount else declare_bounded_amount context frame amount
   | (Order_of _ | Finite), _ -> Operations.declare_unknown_amount context frame counter
 
-let compute_growth change =
-  try Costs.at_least_zero (change ())
+let compute_growth compute_change =
+  try Costs.at_least_zero (compute_change ())
   with Facts.Unsupported _ | Facts.Foreign_unsupported _ -> Costs.zero
 
-let may_be_target (context : State.context) frame term ty target =
+let make_may_be_target (context : State.context) frame term ty target =
   if term = target then Logic.Boolean true
   else
     match List.assoc_opt target context.call_targets with
@@ -119,7 +119,7 @@ let make_reach_formula context frame uses (values : State.passed list) (target :
         (List.map
            (fun (passed : State.passed) ->
              if lambda_captures_target context passed.term term then Logic.Boolean true
-             else may_be_target context frame passed.term passed.type_ term)
+             else make_may_be_target context frame passed.term passed.type_ term)
            values)
   | Capability path | Capability_method (path, _) ->
       Logic.Boolean
@@ -139,23 +139,23 @@ let make_conditional_amount condition amount =
   | Logic.Boolean false -> Costs.zero
   | condition -> Logic.ite condition amount Costs.zero
 
-let callee_amount ?ends_in (context : State.context) after ~path ~(parts : State.part list)
-    ~(bound_frame : State.part -> State.frame) ~uses ~(values : State.passed list) ~change
+let compute_callee_amount ?ends_in (context : State.context) after ~path ~(parts : State.part list)
+    ~(bind_frame : State.part -> State.frame) ~uses ~(values : State.passed list) ~change
     (counter : Costs.counter) =
   let is_recursive_call =
     counter.counting = Units
     && List.mem counter context.own_bounds
     && Facts.is_in_recursion_group context path
   in
-  let clauses_of (part : State.part) =
-    let frame = bound_frame part in
+  let list_clauses (part : State.part) =
+    let frame = bind_frame part in
     List.filter_map
       (fun (cost : Mir.cost) ->
         if is_same_resource cost ~locals:frame.locals counter then Some (part, frame, cost)
         else None)
       part.costs
   in
-  let amount (_, (frame : State.frame), (cost : Mir.cost)) =
+  let compute_amount (_, (frame : State.frame), (cost : Mir.cost)) =
     let exact_target =
       match (cost.resource, counter.resource) with
       | Calls (Capability _), Calls (Capability_method _) -> false
@@ -164,17 +164,19 @@ let callee_amount ?ends_in (context : State.context) after ~path ~(parts : State
     match (cost.amortized, change) with
     | true, None -> Operations.declare_unknown_amount context after counter
     | _ ->
-        promised_amount context after counter cost.bound
+        compute_promised_amount context after counter cost.bound
           ~evaluate:(fun amount -> snd (Validity.read_specification context frame amount))
           ~is_recursive_call ~exact_target
           ~change:
-            (match (cost.amortized, change) with true, Some change -> change () | _ -> Costs.zero)
+            (match (cost.amortized, change) with
+            | true, Some compute_change -> compute_change ()
+            | _ -> Costs.zero)
   in
-  let first_clauses () =
+  let find_first_clauses () =
     let amortized_first = Option.is_some change && counter.amortized in
     List.find_map
       (fun part ->
-        match clauses_of part with
+        match list_clauses part with
         | [] -> None
         | clauses ->
             let amortized, plain =
@@ -198,22 +200,26 @@ let callee_amount ?ends_in (context : State.context) after ~path ~(parts : State
           (fun (passed : State.passed) -> lambda_captures_target context passed.term term)
           values
       in
-      match first_clauses () with
+      match find_first_clauses () with
       | Some clauses
         when (not captured) && List.length clauses >= List.length receiving && receiving <> [] ->
-          List.fold_left (fun total clause -> Costs.plus total (amount clause)) Costs.zero clauses
+          List.fold_left
+            (fun total clause -> Costs.plus total (compute_amount clause))
+            Costs.zero clauses
       | _ ->
           make_conditional_amount reaches (Operations.declare_unknown_amount context after counter))
   | _ -> (
-      let within_time time =
+      let make_time_bound time =
         Costs.minus
           (Costs.plus time (Logic.int 1))
-          (match change with Some change -> compute_growth change | None -> Costs.zero)
+          (match change with
+          | Some compute_change -> compute_growth compute_change
+          | None -> Costs.zero)
       in
-      match (first_clauses (), counter.resource, counter.counting, ends_in) with
-      | Some ((_, _, { bound = Finite; _ }) :: _), Time, Units, Some time -> within_time time
-      | Some (clause :: _), _, _, _ -> amount clause
-      | _, Time, Units, Some time -> within_time time
+      match (find_first_clauses (), counter.resource, counter.counting, ends_in) with
+      | Some ((_, _, { bound = Finite; _ }) :: _), Time, Units, Some time -> make_time_bound time
+      | Some (clause :: _), _, _, _ -> compute_amount clause
+      | _, Time, Units, Some time -> make_time_bound time
       | _ -> Operations.declare_unknown_amount context after counter)
 
 let find_generic_argument context frame (operation : Intrinsic.operation) type_arguments name =
@@ -291,10 +297,10 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
                        values)
                   ~substitution:[]
               in
-              callee_amount context frame
+              compute_callee_amount context frame
                 ~path:(Path.make_capability_method capability name)
                 ~parts:[ part ]
-                ~bound_frame:(fun _ -> inside)
+                ~bind_frame:(fun _ -> inside)
                 ~uses:(invocation.uses :> Types.capability list)
                 ~values ~change:None counter
           | None -> Operations.declare_unknown_amount context frame counter))
@@ -441,8 +447,8 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
       match (find_potential_clause context ty, Facts.find_constructors context ty) with
       | None, None when Option.is_some (find_buffer_elements context ty) -> (
           match find_buffer_elements context ty with
-          | Some (element, model) ->
-              let sequence = model term in
+          | Some (element, model_of) ->
+              let sequence = model_of term in
               let slack = declare_buffer_slack context ty term in
               let length = Models.make_sequence_length context element sequence in
               Facts.add_frame_fact context frame
@@ -488,10 +494,10 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
                        written)
               | None -> Costs.zero
             in
-            let parts = compute_parts_potential context frame ~seen ty term in
+            let compute_parts = compute_parts_potential context frame ~seen ty term in
             let parts =
               match shape with
-              | [ (None, fields) ] -> parts (None, fields)
+              | [ (None, fields) ] -> compute_parts (None, fields)
               | variants -> (
                   match List.rev variants with
                   | last :: earlier ->
@@ -499,8 +505,8 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
                         (fun otherwise ((variant, _) as one) ->
                           Logic.ite
                             (Logic.Is (Facts.make_constructor_symbol ty variant, term))
-                            (parts one) otherwise)
-                        (parts last) earlier
+                            (compute_parts one) otherwise)
+                        (compute_parts last) earlier
                   | [] -> Costs.zero)
             in
             Facts.add_frame_fact context frame (Logic.equal held (Costs.plus own parts))
@@ -533,7 +539,7 @@ let find_method_time_bound context (method_ : Path.t) ~trait_arguments self_type
       if Well_known.is Copyable trait then
         if
           Interface.Impls.is_plain context.lookups.interface
-            ~bounds:(Operations.compute_current_bounds context)
+            ~list_bounds:(Operations.compute_current_bounds context)
             self_type
           && not (holds self_type)
         then Some Z.one
@@ -555,7 +561,7 @@ let find_method_time_bound context (method_ : Path.t) ~trait_arguments self_type
               | None -> false
             in
             match
-              Contracts.method_contract context.lookups reference name receiver
+              Contracts.find_method_contract context.lookups reference name receiver
                 (Impl { impl; arguments })
             with
             | Some contract when makes_no_potential ->

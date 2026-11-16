@@ -358,14 +358,14 @@ type request = {
 
 type response = { output : string; outcome : Outcome.t }
 
-let handle ~progress request =
+let handle ~report_progress request =
   let buffer = Buffer.create 1024 in
   List.iter (fun (name, value) -> Unix.putenv name value) request.environment;
   let outcome =
     Output.with_
       {
         print_out = Buffer.add_string buffer;
-        print_err = progress;
+        print_err = report_progress;
         terminal = request.terminal;
         columns = request.columns;
         json = false;
@@ -400,7 +400,9 @@ let request arguments =
 let ask_running arguments : (string * (response, string) result) list =
   List.map
     (fun key ->
-      (key, Workspace.call ~start_server:false ~key ~progress:Output.eprint (request arguments)))
+      ( key,
+        Workspace.call ~start_server:false ~key ~report_progress:Output.eprint (request arguments)
+      ))
     (Workspace.list_servers ())
 
 let wait_until_stopped answers =
@@ -423,14 +425,14 @@ let clean_cache () =
           2)
 
 let locate_directory arguments =
-  let rec named = function
+  let rec find_name = function
     | "-C" :: directory :: _ -> Some directory
     | option :: _ when String.length option > 2 && String.starts_with ~prefix:"-C" option ->
         Some (String.drop_first 2 option)
-    | _ :: rest -> named rest
+    | _ :: rest -> find_name rest
     | [] -> None
   in
-  match named arguments with
+  match find_name arguments with
   | Some directory when Filename.is_relative directory -> Filename.concat (Sys.getcwd ()) directory
   | Some directory -> directory
   | None -> Sys.getcwd ()
@@ -442,11 +444,11 @@ let run_language_server ~no_server =
     in
     let response =
       if no_server then begin
-        let response = handle ~progress:ignore request in
+        let response = handle ~report_progress:ignore request in
         Workspace.flush ();
         Ok response
       end
-      else Workspace.call ~key:(Workspace.make_server_key root) ~progress:ignore request
+      else Workspace.call ~key:(Workspace.make_server_key root) ~report_progress:ignore request
     in
     match response with Ok { output; outcome = Exit 0 } -> Some output | Ok _ | Error _ -> None
   in
@@ -456,7 +458,7 @@ let run_client argv =
   let arguments = List.tl (Arguments.prepare argv) in
   let no_server = List.mem "--no-server" arguments || Sys.getenv_opt "TRUSS_NO_SERVER" = Some "1" in
   let arguments = List.filter (( <> ) "--no-server") arguments in
-  let local () =
+  let run_locally () =
     let outcome = run_command_line arguments in
     Workspace.flush ();
     finish outcome
@@ -464,8 +466,8 @@ let run_client argv =
   match find_command arguments with
   | Some "clean" -> clean_cache ()
   | Some "lsp" -> run_language_server ~no_server
-  | None | Some "new" -> local ()
-  | _ when no_server -> local ()
+  | None | Some "new" -> run_locally ()
+  | _ when no_server -> run_locally ()
   | Some (("status" | "stop") as command) -> (
       match ask_running arguments with
       | [] ->
@@ -490,7 +492,7 @@ let run_client argv =
       match
         (Workspace.call
            ~key:(Workspace.make_server_key (locate_directory arguments))
-           ~progress:Output.eprint (request arguments)
+           ~report_progress:Output.eprint (request arguments)
           : (response, string) result)
       with
       | Ok response ->

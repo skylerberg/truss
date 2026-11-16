@@ -8,5 +8,5 @@ val discard : t -> unit
 val close : t -> unit
 
 module For_testing : sig
-  val interrupted_commit : t -> header:string list -> (string * string option) list -> unit
+  val interrupt_commit : t -> header:string list -> (string * string option) list -> unit
 end

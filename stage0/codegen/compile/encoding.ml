@@ -35,7 +35,7 @@ let encode env ty =
       ~elements:(Copy (Lowered.make_local_place first))
       ~length:(Lowered.make_uint64_constant size)
   in
-  let fields place variant (fields : (string * Memory_layout.member) list) =
+  let encode_fields place variant (fields : (string * Memory_layout.member) list) =
     List.iter
       (fun (name, member) ->
         match member with
@@ -58,7 +58,7 @@ let encode env ty =
         (fun index ->
           encode_call element (Storage.index_element value (Copy (Lowered.make_local_place index))))
   | Shape (Scalar _) -> append_bytes value (Memory_layout.of_type env ty).size
-  | Shape (Record members) -> fields value None members
+  | Shape (Record members) -> encode_fields value None members
   | Shape (Array (element, count)) ->
       Emit_c.Builder.emit_loop builder ~count:(Lowered.make_uint64_constant count) (fun index ->
           encode_call element
@@ -80,7 +80,7 @@ let encode env ty =
                 append_bytes
                   (Lowered.make_local_place encoded_index)
                   (Memory_layout.compute_integer_size variant_index);
-                fields value (Some variant_shape.name) variant_shape.fields;
+                encode_fields value (Some variant_shape.name) variant_shape.fields;
                 Emit_c.Builder.finish builder (Goto after));
             (variant_shape.name, case))
           variants
@@ -129,8 +129,8 @@ let decode_scalar reader (kind : Memory_layout.scalar) : Lowered.constant =
 
 let decode env ty encoded : Lowered.static_value =
   let reader = { encoded; offset = 0 } in
-  let rec value ty : Lowered.static_value =
-    if Memory_layout.has_zero_size env ty then empty ty
+  let rec decode_value ty : Lowered.static_value =
+    if Memory_layout.has_zero_size env ty then make_empty ty
     else
       match Representation.classify env ty with
       | Handle -> raise_bug "a handle computed while compiling"
@@ -138,44 +138,46 @@ let decode env ty encoded : Lowered.static_value =
       | Any -> raise_bug "an any value computed while compiling"
       | Storage element ->
           let count = Z.to_int (decode_integer reader UInt64) in
-          Static_storage { element; elements = List.init count (fun _ -> value element) }
+          Static_storage { element; elements = List.init count (fun _ -> decode_value element) }
       | Shape (Scalar kind) -> Static_scalar (decode_scalar reader kind)
-      | Shape (Record members) -> Static_record (fields members)
-      | Shape (Array (element, count)) -> Static_array (List.init count (fun _ -> value element))
+      | Shape (Record members) -> Static_record (decode_fields members)
+      | Shape (Array (element, count)) ->
+          Static_array (List.init count (fun _ -> decode_value element))
       | Shape (Sum variants) ->
           let variant = List.nth variants (Z.to_int (decode_integer reader variant_index)) in
-          Static_variant (variant.name, fields variant.fields)
-  and fields members =
+          Static_variant (variant.name, decode_fields variant.fields)
+  and decode_fields members =
     List.map
       (fun (name, (member : Memory_layout.member)) ->
         match member with
-        | Typed field_ty -> (name, value field_ty)
+        | Typed field_ty -> (name, decode_value field_ty)
         | Raw _ -> raise_bug "a raw field computed while compiling")
       members
-  and empty ty : Lowered.static_value =
+  and make_empty ty : Lowered.static_value =
     match Memory_layout.shape env ty with
     | Record members ->
-        Static_record (List.map (fun (name, member) -> (name, empty_member member)) members)
+        Static_record (List.map (fun (name, member) -> (name, make_empty_member member)) members)
     | Sum [ variant ] ->
         Static_variant
-          (variant.name, List.map (fun (name, member) -> (name, empty_member member)) variant.fields)
-    | Array (element, count) -> Static_array (List.init count (fun _ -> empty element))
+          ( variant.name,
+            List.map (fun (name, member) -> (name, make_empty_member member)) variant.fields )
+    | Array (element, count) -> Static_array (List.init count (fun _ -> make_empty element))
     | _ -> raise_bug "%s has no one value of zero size" (Ground.to_string ty)
-  and empty_member : Memory_layout.member -> Lowered.static_value = function
-    | Typed ty -> empty ty
+  and make_empty_member : Memory_layout.member -> Lowered.static_value = function
+    | Typed ty -> make_empty ty
     | Raw _ -> raise_bug "a raw field of zero size"
   in
-  let decoded = value ty in
+  let decoded = decode_value ty in
   if not (is_at_end reader) then raise_bug "a value written out while compiling has bytes left over";
   decoded
 
 let decode_booleans encoded =
   let reader = { encoded; offset = 0 } in
-  let rec booleans () =
+  let rec list_booleans () =
     if is_at_end reader then []
     else
       match decode_scalar reader Bool with
-      | Bool holds -> holds :: booleans ()
+      | Bool holds -> holds :: list_booleans ()
       | _ -> raise_bug "a Bool written out while compiling reads back as another scalar"
   in
-  booleans ()
+  list_booleans ()

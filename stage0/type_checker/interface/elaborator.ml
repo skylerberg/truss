@@ -282,7 +282,7 @@ and check_arity context (path : Syntax.path_type) shown expected :
                  let is_value =
                    match argument with Syntax.Count _ | Count_name _ -> true | _ -> false
                  in
-                 let argument_kind message =
+                 let report_argument_kind message =
                    [
                      record_diagnostic context.diagnostics Argument_kind context.spans.(path.id)
                        message;
@@ -290,11 +290,11 @@ and check_arity context (path : Syntax.path_type) shown expected :
                  in
                  match (kind, is_value) with
                  | Resolve.Names.Value_kind, false ->
-                     argument_kind
+                     report_argument_kind
                        (Printf.sprintf "`%s`'s parameter `%s` is a `UInt64` value, not a type."
                           shown name)
                  | (Resolve.Names.Type_kind | Resolve.Names.Capability_kind), true ->
-                     argument_kind
+                     report_argument_kind
                        (Printf.sprintf "`%s`'s parameter `%s` is a type, not a value." shown name)
                  | _ -> [])
                written expected)
@@ -342,7 +342,7 @@ and elaborate_path_type context (path : Syntax.path_type) : Types.ty =
 and elaborate_trait_reference ?(capability = false) context (path : Syntax.path_type) :
     (Types.trait_reference, Diagnostic.reported) Stdlib.result =
   let shown = show_path path.path in
-  let trait_reference_of trait : (Types.trait_reference, Diagnostic.reported) Stdlib.result =
+  let build_trait_reference trait : (Types.trait_reference, Diagnostic.reported) Stdlib.result =
     let associated =
       List.sort compare
         (List.filter_map
@@ -359,8 +359,8 @@ and elaborate_trait_reference ?(capability = false) context (path : Syntax.path_
     | Ok () -> Ok { trait; trait_arguments; associated }
   in
   match find_target context path.path.last with
-  | Some (Definition (Trait, trait)) -> trait_reference_of trait
-  | Some (Definition (Capability, trait)) when capability -> trait_reference_of trait
+  | Some (Definition (Trait, trait)) -> build_trait_reference trait
+  | Some (Definition (Capability, trait)) when capability -> build_trait_reference trait
   | Some (Definition _) ->
       Error
         (record_diagnostic context.diagnostics Not_a_trait context.spans.(path.id)
@@ -472,7 +472,7 @@ and elaborate_costs context clauses : (Types.cost list, Diagnostic.reported) Std
   let report_error code span message =
     Error (record_diagnostic context.diagnostics code span message)
   in
-  let counted (path : Syntax.path_type) (method_ : Syntax.name option) :
+  let elaborate_counted (path : Syntax.path_type) (method_ : Syntax.name option) :
       (Types.resource, Diagnostic.reported) Stdlib.result =
     let shown = show_path path.path in
     match find_target context path.path.last with
@@ -503,8 +503,8 @@ and elaborate_costs context clauses : (Types.cost list, Diagnostic.reported) Std
               | Time -> Ok Time
               | Allocations -> Ok Allocations
               | Allocated_bytes -> Ok Allocated_bytes
-              | Calls (Call_capability path) -> counted path None
-              | Calls (Call_method (path, method_)) -> counted path (Some method_)
+              | Calls (Call_capability path) -> elaborate_counted path None
+              | Calls (Call_method (path, method_)) -> elaborate_counted path (Some method_)
               | Calls (Call_parameter name) ->
                   report_error Not_a_capability context.spans.(name.id)
                     (Printf.sprintf
@@ -513,15 +513,15 @@ and elaborate_costs context clauses : (Types.cost list, Diagnostic.reported) Std
                         counted in a function's own clauses."
                        name.text)
             in
-            let constant (value : Syntax.expression) =
+            let evaluate_constant (value : Syntax.expression) =
               match value.kind with Integer value -> Some value | _ -> None
             in
             let bound : Types.cost_bound =
               match cost.bound with
               | Finite -> Finite_cost
               | Big_o _ -> Order_of
-              | At_most value -> No_more_than (constant value)
-              | Exactly value -> Exactly_cost (constant value)
+              | At_most value -> No_more_than (evaluate_constant value)
+              | Exactly value -> Exactly_cost (evaluate_constant value)
             in
             Some
               (Result.map
@@ -536,14 +536,14 @@ and elaborate_costs context clauses : (Types.cost list, Diagnostic.reported) Std
 
 let elaborate_generics context owner (written : Syntax.generic_parameter list) : Types.generic list
     =
-  let parameter (name : Syntax.name) : Types.parameter = { owner; name = name.text } in
+  let make_parameter (name : Syntax.name) : Types.parameter = { owner; name = name.text } in
   let declared =
     List.filter_map
       (fun (generic : Syntax.generic_parameter) ->
         match generic.kind with
-        | Type_parameter (name, bounds) -> Some (parameter name, `Type bounds)
-        | Value_parameter (name, type_) -> Some (parameter name, `Value type_)
-        | Capability_parameter name -> Some (parameter name, `Capability)
+        | Type_parameter (name, bounds) -> Some (make_parameter name, `Type bounds)
+        | Value_parameter (name, type_) -> Some (make_parameter name, `Value type_)
+        | Capability_parameter name -> Some (make_parameter name, `Capability)
         | Generic_error -> None)
       written
   in
@@ -972,7 +972,7 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
   let path = key.path in
   Compiler_bug.run_while_doing ~stage:"Interface" (Resolve.Names.show_key key) (fun () ->
       let context = create lookups resolved ~spans empty_scope in
-      let recovered () =
+      let recover () =
         make_elaborated_interface context
           (Error_interface (Diagnostic.make_recovered spans.(definition.id)))
       in
@@ -981,7 +981,7 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
           Option.map lookups.find_header (lookups.names.find_container key) )
       with
       | Some report, _ -> make_elaborated_interface context (Error_interface report)
-      | None, Some None -> recovered ()
+      | None, Some None -> recover ()
       | None, Some (Some header) -> elaborate_member lookups ~path ~spans resolved definition header
       | None, None -> (
           match definition.kind with
@@ -989,7 +989,7 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
               match lookups.find_header key with
               | Some header -> make_container_interface lookups key header
               | None -> raise_bug "`%s` has no header" (Resolve.Names.show_key key))
-          | Method_declaration _ | Definition_error _ -> recovered ()
+          | Method_declaration _ | Definition_error _ -> recover ()
           | Function { signature; _ } ->
               let head, self_type =
                 match signature.name with

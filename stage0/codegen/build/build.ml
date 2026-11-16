@@ -53,7 +53,7 @@ let run_parallel jobs run_job =
   let jobs = Array.of_list jobs in
   let results = Array.make (Array.length jobs) None in
   let workers = max 1 (min (Array.length jobs) (Domain.recommended_domain_count () - 1)) in
-  let work start =
+  let run_worker start =
     let next = ref start in
     while !next < Array.length jobs do
       results.(!next) <- Some (run_job jobs.(!next));
@@ -61,13 +61,13 @@ let run_parallel jobs run_job =
     done
   in
   let domains =
-    List.init (workers - 1) (fun worker -> Domain.spawn (fun () -> work (worker + 1)))
+    List.init (workers - 1) (fun worker -> Domain.spawn (fun () -> run_worker (worker + 1)))
   in
-  work 0;
+  run_worker 0;
   List.iter Domain.join domains;
   Array.to_list (Array.map Option.get results)
 
-let compile_objects ?progress toolchain cache settings sources =
+let compile_objects ?report_progress toolchain cache settings sources =
   let missing =
     List.length
       (List.filter
@@ -78,8 +78,9 @@ let compile_objects ?progress toolchain cache settings sources =
   let compiled = Atomic.make 0 in
   let lock = Mutex.create () in
   let report () =
-    match progress with
-    | Some progress -> Mutex.protect lock (fun () -> progress (Atomic.get compiled) missing)
+    match report_progress with
+    | Some report_progress ->
+        Mutex.protect lock (fun () -> report_progress (Atomic.get compiled) missing)
     | None -> ()
   in
   if missing > 0 then report ();
@@ -102,8 +103,8 @@ let compile_objects ?progress toolchain cache settings sources =
       | Error message, _ | _, Error message -> Error message)
     results (Ok [])
 
-let build_program ?progress ?(tests = false) ?(copied = fun _ -> []) toolchain cache env settings
-    ~files ~sources ~output =
+let build_program ?report_progress ?(tests = false) ?(list_copied = fun _ -> []) toolchain cache env
+    settings ~files ~sources ~output =
   let emitted =
     List.mapi
       (fun part_index fragments ->
@@ -117,7 +118,7 @@ let build_program ?progress ?(tests = false) ?(copied = fun _ -> []) toolchain c
               then copies
               else copies @ [ copy ])
             []
-            (List.concat_map copied fragments)
+            (List.concat_map list_copied fragments)
         in
         ( Printf.sprintf "file %d" part_index,
           Emit_c.render_file env settings.build
@@ -127,10 +128,12 @@ let build_program ?progress ?(tests = false) ?(copied = fun _ -> []) toolchain c
   in
 
   let runtime = ("the runtime", Startup.render_runtime ~tests) in
-  match compile_objects ?progress toolchain cache settings ((runtime :: emitted) @ sources) with
+  match
+    compile_objects ?report_progress toolchain cache settings ((runtime :: emitted) @ sources)
+  with
   | Error message -> Error message
   | Ok objects -> Toolchain.link toolchain ~extra:settings.extra ~objects ~output
 
 module For_testing = struct
-  let objects = compile_objects
+  let compile_objects = compile_objects
 end

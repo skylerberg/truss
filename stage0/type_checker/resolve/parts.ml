@@ -4,7 +4,7 @@ let list_part_spans (spans : Source.Definition_span.t array) (definition : Synta
   let split header body (whole : Source.Definition_span.t) (body_span : Source.Definition_span.t) =
     [ (header, Source.Definition_span.make whole.start body_span.start); (body, body_span) ]
   in
-  let members lines body_of =
+  let list_members lines body_of =
     List.concat
       (List.mapi
          (fun index (line : _ Syntax.node) ->
@@ -21,7 +21,7 @@ let list_part_spans (spans : Source.Definition_span.t array) (definition : Synta
           Source.Definition_span.make spans.(definition.id).start spans.(first.id).start
       | [] -> spans.(definition.id)
     in
-    (Header, header) :: members lines body_of
+    (Header, header) :: list_members lines body_of
   in
   match definition.kind with
   | Function { body; _ } | Test { body; _ } | Theorem { body; _ } | Law_proof { body; _ } ->

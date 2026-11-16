@@ -10,8 +10,8 @@ val check_buffers : string list -> int
 val check_arguments : root:string -> encoding -> (string * string) list -> string list
 
 module For_testing : sig
-  val position : encoding -> Source.t -> int -> int * int
-  val offset : encoding -> Source.t -> line:int -> column:int -> int
+  val locate_position : encoding -> Source.t -> int -> int * int
+  val locate_offset : encoding -> Source.t -> line:int -> column:int -> int
 
   type server
 

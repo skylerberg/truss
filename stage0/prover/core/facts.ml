@@ -90,28 +90,28 @@ let list_scope_facts (context : State.context) names =
     context.scopes
 
 let add_quantifier_facts ~binders (context : State.context) term =
-  let stated bound fact =
+  let is_stated bound fact =
     List.for_all
       (fun name -> List.mem name bound || not (Logic.mentions [ name ] fact))
       context.quantifier_symbols
   in
   let rec walk positive bound term =
-    let facts symbols =
+    let collect_facts symbols =
       let bound = List.map fst symbols @ bound in
       ( bound,
-        List.filter (stated bound)
+        List.filter (is_stated bound)
           (Option.value ~default:[] (Tables.Term_table.find_opt context.quantifier_facts term)) )
     in
     match term with
     | Logic.Forall (symbols, trigger, body) when positive ->
-        let bound, facts = facts symbols in
+        let bound, facts = collect_facts symbols in
         let body = walk positive bound body in
         Logic.Forall
           ( symbols,
             trigger,
             match facts with [] -> body | facts -> Logic.( ==> ) (Logic.conjunction facts) body )
     | Logic.Exists (symbols, body) when not positive ->
-        let bound, facts = facts symbols in
+        let bound, facts = collect_facts symbols in
         let body = walk positive bound body in
         Logic.Exists
           ( symbols,
@@ -157,7 +157,8 @@ let make_requires_fix (context : State.context) required =
   in
   let edit =
     match brace with
-    | Some at when at > 0 && text.[at - 1] = '\n' -> edit (Source.Definition_span.zero_width at) ""
+    | Some at when at > 0 && text.[at - 1] = '\n' ->
+        edit (Source.Definition_span.make_zero_width at) ""
     | Some at when at > 0 && text.[at - 1] = ' ' ->
         edit (Source.Definition_span.make (at - 1) at) "\n"
     | _ -> None
@@ -178,46 +179,46 @@ let collect_printed printed =
   if List.mem None printed then None else Some (List.filter_map Fun.id printed)
 
 let truss_of_value context term =
-  let parenthesized level inner text = if inner < level then "(" ^ text ^ ")" else text in
-  let rec arithmetic level = function
+  let parenthesize level inner text = if inner < level then "(" ^ text ^ ")" else text in
+  let rec show_arithmetic level = function
     | Logic.Operation ((("+" | "*") as operator), (_ :: _ :: _ as parts)) ->
         let inner = if operator = "+" then 1 else 2 in
         Option.map
-          (fun printed -> parenthesized level inner (String.concat (" " ^ operator ^ " ") printed))
-          (collect_printed (List.map (arithmetic inner) parts))
+          (fun printed -> parenthesize level inner (String.concat (" " ^ operator ^ " ") printed))
+          (collect_printed (List.map (show_arithmetic inner) parts))
     | Logic.Operation ("-", [ left; right ]) ->
         Option.map
-          (fun printed -> parenthesized level 1 (String.concat " - " printed))
-          (collect_printed [ arithmetic 1 left; arithmetic 2 right ])
+          (fun printed -> parenthesize level 1 (String.concat " - " printed))
+          (collect_printed [ show_arithmetic 1 left; show_arithmetic 2 right ])
     | Logic.Operation ("-", [ inner ]) ->
-        Option.map (fun printed -> parenthesized level 3 ("-" ^ printed)) (arithmetic 3 inner)
+        Option.map (fun printed -> parenthesize level 3 ("-" ^ printed)) (show_arithmetic 3 inner)
     | Logic.Integer value when Z.sign value < 0 && level > 0 -> Some ("(" ^ Z.to_string value ^ ")")
     | Logic.Apply (Logic.Symbol.Field { field; variant = None; _ }, [ receiver ]) ->
-        Option.map (fun receiver -> receiver ^ "." ^ field) (arithmetic 4 receiver)
+        Option.map (fun receiver -> receiver ^ "." ^ field) (show_arithmetic 4 receiver)
     | Logic.Symbol symbol -> find_parameter_name context symbol
     | Logic.Integer value -> Some (Z.to_string value)
     | Logic.Boolean value -> Some (if value then "true" else "false")
     | _ -> None
   in
-  arithmetic 0 term
+  show_arithmetic 0 term
 
 let truss_of_goal context term =
-  let value = truss_of_value context in
+  let show_value = truss_of_value context in
   let rec print = function
     | Logic.Operation ((("<" | "<=" | ">" | ">=" | "=") as operator), [ left; right ]) -> (
-        match (value left, value right) with
+        match (show_value left, show_value right) with
         | Some left, Some right ->
             Some (Printf.sprintf "%s %s %s" left (if operator = "=" then "==" else operator) right)
         | _ -> None)
-    | Logic.Operation ("and", parts) -> joined " && " parts
-    | Logic.Operation ("or", parts) -> joined " || " parts
+    | Logic.Operation ("and", parts) -> join_parts " && " parts
+    | Logic.Operation ("or", parts) -> join_parts " || " parts
     | Logic.Operation ("not", [ inner ]) -> Option.map (Printf.sprintf "!(%s)") (print inner)
     | Logic.Operation ("=>", [ premise; conclusion ]) -> (
         match (print premise, print conclusion) with
         | Some premise, Some conclusion -> Some (Printf.sprintf "(%s) ==> (%s)" premise conclusion)
         | _ -> None)
-    | term -> value term
-  and joined separator parts =
+    | term -> show_value term
+  and join_parts separator parts =
     Option.map
       (fun printed -> "(" ^ String.concat separator printed ^ ")")
       (collect_printed (List.map print parts))
@@ -384,7 +385,7 @@ let find_visible_type (context : State.context) (ty : Types.ty) =
 let find_constructors context ty =
   match find_visible_type context ty with
   | Some (interface, substitution) -> (
-      let fields (list : Types.field list) =
+      let list_fields (list : Types.field list) =
         List.sort compare
           (List.map
              (fun (field : Types.field) ->
@@ -392,14 +393,14 @@ let find_constructors context ty =
              list)
       in
       match interface.shape with
-      | Record list -> Some [ (None, fields list) ]
+      | Record list -> Some [ (None, list_fields list) ]
       | Sum variants ->
           Some
             (List.sort compare
                (List.map
                   (fun (variant : Types.variant) ->
                     ( Some variant.variant_name,
-                      match variant.fields with Some list -> fields list | None -> [] ))
+                      match variant.fields with Some list -> list_fields list | None -> [] ))
                   variants))
       | Todo_type | Builtin_type _ -> None)
   | None -> None
@@ -489,7 +490,7 @@ let bind (frame : State.frame) local ty term =
   }
 
 let substitute_type (context : State.context) (frame : State.frame) ty =
-  (Interface.Impls.normalize context.lookups.interface ~bounds:Interface.Impls.no_bounds)
+  (Interface.Impls.normalize context.lookups.interface ~list_bounds:Interface.Impls.list_no_bounds)
     (Types.substitute frame.substitution ty)
 
 let find_local_type context frame local =
@@ -499,7 +500,7 @@ let mentions_potential term =
   let rec walk = function
     | Logic.Apply ((Logic.Symbol.Potential _ | Logic.Symbol.Slack _), _) -> true
     | Logic.Forall (_, _, body) | Logic.Exists (_, body) -> walk body
-    | term -> List.exists walk (Logic.arguments term)
+    | term -> List.exists walk (Logic.list_arguments term)
   in
   walk term
 
@@ -507,7 +508,7 @@ let restrict (frame : State.frame) condition =
   { frame with State.condition = Logic.( &&& ) frame.condition condition }
 
 let merge_known_on_paths (paths : (Logic.term * State.frame) list) =
-  let known pick ~is_same ~differing =
+  let merge_known pick ~is_same ~on_differing =
     let keys =
       List.fold_left
         (fun keys ((_, frame) : Logic.term * State.frame) ->
@@ -526,21 +527,21 @@ let merge_known_on_paths (paths : (Logic.term * State.frame) list) =
                    match other with Some other -> is_same one other | None -> false)
                  rest ->
             one
-        | _ -> differing each)
+        | _ -> on_differing each)
       keys
   in
-  let under condition = List.map (fun (on, known) -> (Logic.( &&& ) condition on, known)) in
-  let each_under each =
+  let guard condition = List.map (fun (on, known) -> (Logic.( &&& ) condition on, known)) in
+  let guard_each each =
     List.concat_map
-      (fun (condition, known) -> under condition (Option.value ~default:[] known))
+      (fun (condition, known) -> guard condition (Option.value ~default:[] known))
       each
   in
-  let aliases = known (fun frame -> frame.aliases) ~is_same:( = ) ~differing:each_under in
+  let aliases = merge_known (fun frame -> frame.aliases) ~is_same:( = ) ~on_differing:guard_each in
   let slices =
-    known
+    merge_known
       (fun frame -> frame.slices)
       ~is_same:( = )
-      ~differing:(fun each ->
+      ~on_differing:(fun each ->
         if
           List.exists
             (function _, (None | Some State.Unknown_slice) -> true | _, Some (Slices _) -> false)
@@ -550,11 +551,11 @@ let merge_known_on_paths (paths : (Logic.term * State.frame) list) =
           Slices
             (List.concat_map
                (function
-                 | condition, Some (State.Slices slices) -> under condition slices
+                 | condition, Some (State.Slices slices) -> guard condition slices
                  | _, (Some Unknown_slice | None) -> [])
                each))
   in
-  let lends = known (fun frame -> frame.lends) ~is_same:( == ) ~differing:each_under in
+  let lends = merge_known (fun frame -> frame.lends) ~is_same:( == ) ~on_differing:guard_each in
   (aliases, slices, lends)
 
 let name_path_condition context (frame : State.frame) condition =
@@ -574,7 +575,7 @@ let merge context ?value_type ~condition
     merge_known_on_paths (List.map (fun (on, frame, _) -> (on, frame)) paths)
   in
   let merged = { first with condition; aliases; slices; lends } in
-  let chosen values =
+  let choose values =
     match List.rev values with
     | (_, _, last) :: earlier ->
         List.fold_left (fun otherwise (on, _, term) -> Logic.ite on term otherwise) last earlier
@@ -601,7 +602,7 @@ let merge context ?value_type ~condition
                   || Logic.mentions first.bound frame.condition
                   || Logic.mentions first.bound term)
                 values ->
-        chosen values
+        choose values
     | _ ->
         let symbol = declare_fresh context first prefix sort in
         List.iter
@@ -610,7 +611,7 @@ let merge context ?value_type ~condition
           values;
         symbol
   in
-  let held pick =
+  let find_held pick =
     let values =
       List.filter_map
         (fun (on, frame, _) -> Option.map (fun term -> (on, frame, term)) (pick frame))
@@ -627,7 +628,7 @@ let merge context ?value_type ~condition
   let locals =
     Locals.mapi
       (fun id () ->
-        match held (fun frame -> Locals.find_opt id frame.locals) with
+        match find_held (fun frame -> Locals.find_opt id frame.locals) with
         | Some values ->
             let sort =
               match find_local_type context first id with
@@ -653,11 +654,11 @@ let merge context ?value_type ~condition
       Locals.empty paths
   in
   let self =
-    match (first.self_type, held (fun frame -> frame.self)) with
+    match (first.self_type, find_held (fun frame -> frame.self)) with
     | Some ty, Some values -> Some (define "self" (declare_sort context ty) values)
     | _ -> first.self
   in
-  let in_joined (frame : State.frame) amount =
+  let rename_into_joined (frame : State.frame) amount =
     let renamed =
       Locals.fold
         (fun id joined renamed ->
@@ -680,7 +681,7 @@ let merge context ?value_type ~condition
           List.map
             (fun (on, (frame : State.frame), _) ->
               ( on,
-                in_joined frame
+                rename_into_joined frame
                   (match List.assoc_opt key frame.spent with
                   | Some spent_term -> spent_term
                   | None -> term) ))
@@ -716,10 +717,10 @@ let merge context ?value_type ~condition
     else
       match value_type with
       | Some ty -> Some (define "value" (declare_sort context ty) values)
-      | None -> Some (chosen values)
+      | None -> Some (choose values)
   in
   let yielded_so_far =
-    match (context.yielded_part, held (fun frame -> frame.yielded_so_far)) with
+    match (context.yielded_part, find_held (fun frame -> frame.yielded_so_far)) with
     | Some part, Some values ->
         Some
           (define "parts"

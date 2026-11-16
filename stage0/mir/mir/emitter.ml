@@ -399,7 +399,7 @@ let leave_tasks builder tasks exit origin =
         let moved =
           match (returned, slot) with Some value, Some slot -> Some (value, slot) | _ -> None
         in
-        let resumed () =
+        let build_resumed () =
           build_block builder (fun () ->
               leave
                 (Option.map
@@ -414,7 +414,7 @@ let leave_tasks builder tasks exit origin =
                 outer;
               if builder.reaches then Some unit_value else None)
         in
-        group.exits <- group.exits @ [ (slot, resumed) ];
+        group.exits <- group.exits @ [ (slot, build_resumed) ];
         jump builder
           (Cancel
              { task; winner = group.winner; number = List.length group.exits; returned = moved })
@@ -435,7 +435,9 @@ let resume_group builder key origin =
   match Hashtbl.find_opt builder.groups key with
   | Some { winner; exits = _ :: _ as exits } ->
       let exits =
-        List.map (fun (returned, resumed) -> { Tree.resumed = resumed (); returned }) exits
+        List.map
+          (fun (returned, build_resumed) -> { Tree.resumed = build_resumed (); returned })
+          exits
       in
       emit builder (Resume { winner; exits }) origin
   | _ -> ()
@@ -582,7 +584,7 @@ let finish ?(captures = []) ?(is_functional = false) ?value_type builder ~parame
 let build_formula builder ~origin ~type_ (build : unit -> Tree.local list * Tree.operand option) :
     Tree.formula =
   let built = ref None in
-  let formula_so_far parameters value =
+  let record_formula parameters value =
     built :=
       Some
         {
@@ -600,10 +602,10 @@ let build_formula builder ~origin ~type_ (build : unit -> Tree.local list * Tree
           let parameters, value = build () in
           match value with
           | Some value when reaches builder ->
-              if is_specification builder then formula_so_far parameters value
+              if is_specification builder then record_formula parameters value
               else held := Some (parameters, hold_past_scopes builder origin value)
           | _ -> raise_bug "a formula that jumps or gives no value"));
-  Option.iter (fun (parameters, value) -> formula_so_far parameters value) !held;
+  Option.iter (fun (parameters, value) -> record_formula parameters value) !held;
   match !built with
   | Some formula -> { formula with locals = collect_locals builder; lambdas = lambdas builder }
   | None -> raise_bug "a formula that was not built"

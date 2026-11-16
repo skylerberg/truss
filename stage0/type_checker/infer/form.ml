@@ -285,7 +285,9 @@ let list_capability_impls (state : State.state) (type_ : Types.ty) =
       List.filter_map
         (fun (trait, _) ->
           if Resolve.Names.find_kind state.lookups.interface.names trait = Some Capability then
-            match State.implements state type_ (State.make_trait_reference ~arguments:[] trait) with
+            match
+              State.find_evidence state type_ (State.make_trait_reference ~arguments:[] trait)
+            with
             | Some (Interface.Impls.From_impl { impl; substitution }) ->
                 Option.map
                   (fun interface ->
@@ -384,7 +386,7 @@ let build_untagged_string state ~origin (literal : Syntax.string_literal) : Core
                        ])));
           ]
       in
-      let display part (conversion : Tables.call option) =
+      let make_display part (conversion : Tables.call option) =
         match conversion with
         | Some recorded ->
             make_statement
@@ -409,7 +411,7 @@ let build_untagged_string state ~origin (literal : Syntax.string_literal) : Core
             (let_builder :: write literal.first)
             @ List.concat
                 (List.map2
-                   (fun (part, after) conversion -> display part conversion :: write after)
+                   (fun (part, after) conversion -> make_display part conversion :: write after)
                    rest (read_template state literal).part_conversions);
           value =
             Some
@@ -583,7 +585,7 @@ let build_constant_pattern state (id : Syntax.id) (value : Core.pattern_constant
   if is_built_in_scalar type_ then Literal value
   else
     let equal = State.make_trait_reference ~arguments:[] (Well_known.make_path Equal) in
-    match State.implements state type_ equal with
+    match State.find_evidence state type_ equal with
     | Some implementation ->
         Equal_to
           {
@@ -945,9 +947,11 @@ let build_elements state ~origin (collection : Core.place) ~(count : Tables.call
   }
 
 let quantify_over_elements state (collection : Syntax.expression) ~count ~element ~lends ~origin
-    quantified : Core.kind =
+    make_quantified : Core.kind =
   let place, wrap = build_collection_place state collection lends in
-  let kind = quantified (build_elements state ~origin:collection.id place ~count ~element ~lends) in
+  let kind =
+    make_quantified (build_elements state ~origin:collection.id place ~count ~element ~lends)
+  in
   match wrap with
   | None -> kind
   | Some wrap ->
@@ -959,7 +963,7 @@ let quantify_over_elements state (collection : Syntax.expression) ~count ~elemen
 
 let build_cursor_next state (cursor : Types.ty) : Core.callee =
   let trait = State.make_trait_reference ~arguments:[] (Well_known.make_path Cursor) in
-  match State.implements state cursor trait with
+  match State.find_evidence state cursor trait with
   | Some implementation ->
       Trait_method
         {

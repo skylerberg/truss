@@ -1,9 +1,9 @@
 let list_bodies ~opaque (spans : Source.Definition_span.t array) (definition : Syntax.definition) =
-  let function_body (function_definition : Syntax.function_definition) =
+  let list_body_spans (function_definition : Syntax.function_definition) =
     [ spans.(function_definition.body.id) ]
   in
   match definition.kind with
-  | Function function_definition -> function_body function_definition
+  | Function function_definition -> list_body_spans function_definition
   | Theorem { body; _ } | Test { body; _ } | Law_proof { body; _ } -> [ spans.(body.id) ]
   | Trait { members; _ } ->
       List.concat_map

@@ -54,13 +54,13 @@ let tokenize text =
       | '#' ->
           let stop = try String.index_from text index '\n' with Not_found -> length in
           scan stop
-      | '[' -> punctuation Open index
-      | ']' -> punctuation Close index
-      | '{' -> punctuation Open_brace index
-      | '}' -> punctuation Close_brace index
-      | '=' -> punctuation Equals index
-      | ',' -> punctuation Comma index
-      | '"' -> quoted (Buffer.create 16) (index + 1)
+      | '[' -> add_punctuation Open index
+      | ']' -> add_punctuation Close index
+      | '{' -> add_punctuation Open_brace index
+      | '}' -> add_punctuation Close_brace index
+      | '=' -> add_punctuation Equals index
+      | ',' -> add_punctuation Comma index
+      | '"' -> scan_quoted (Buffer.create 16) (index + 1)
       | character when is_bare character ->
           let stop = ref index in
           while !stop < length && is_bare text.[!stop] do
@@ -69,10 +69,10 @@ let tokenize text =
           add (Bare (String.sub text index (!stop - index)));
           scan !stop
       | character -> raise_malformed !line "`%c` cannot be written here." character
-  and punctuation token index =
+  and add_punctuation token index =
     add token;
     scan (index + 1)
-  and quoted buffer index =
+  and scan_quoted buffer index =
     if index >= length || text.[index] = '\n' then
       raise_malformed !line "This string is not closed on its line."
     else
@@ -82,10 +82,10 @@ let tokenize text =
           scan (index + 1)
       | '\\' when index + 1 < length && (text.[index + 1] = '"' || text.[index + 1] = '\\') ->
           Buffer.add_char buffer text.[index + 1];
-          quoted buffer (index + 2)
+          scan_quoted buffer (index + 2)
       | character ->
           Buffer.add_char buffer character;
-          quoted buffer (index + 1)
+          scan_quoted buffer (index + 1)
   in
   scan 0;
   List.rev !lexed
@@ -133,11 +133,11 @@ let expect_end_of_line line = function
 
 let parse_tables text =
   let final_line = List.length (String.split_on_char '\n' text) in
-  let rec statements tables current = function
+  let rec parse_statements tables current = function
     | [] -> List.rev (close tables current)
-    | (Line_break, _) :: rest -> statements tables current rest
+    | (Line_break, _) :: rest -> parse_statements tables current rest
     | (Open, line) :: ((Bare name | Quoted name), _) :: (Close, _) :: rest ->
-        statements (close tables current)
+        parse_statements (close tables current)
           (Some { name; line; entries = [] })
           (expect_end_of_line line rest)
     | (((Bare key | Quoted key) as token), line) :: (Equals, _) :: rest -> (
@@ -146,7 +146,7 @@ let parse_tables text =
         let last_line = match rest with (_, last) :: _ -> last | [] -> final_line in
         match current with
         | Some table ->
-            statements tables
+            parse_statements tables
               (Some
                  {
                    table with
@@ -163,7 +163,7 @@ let parse_tables text =
     | Some table -> { table with entries = List.rev table.entries } :: tables
     | None -> tables
   in
-  statements [] None (tokenize text)
+  parse_statements [] None (tokenize text)
 
 let name_expected =
   "a `lower_snake_case` name, or an owner and a name joined by `::`, such as `weather` or \
@@ -234,8 +234,8 @@ let parse text =
           Hashtbl.replace keys entry.key ())
         table.entries)
     tables;
-  let table name = List.find_opt (fun (table : table) -> table.name = name) tables in
-  let entries name = match table name with Some table -> table.entries | None -> [] in
+  let find_table name = List.find_opt (fun (table : table) -> table.name = name) tables in
+  let list_entries name = match find_table name with Some table -> table.entries | None -> [] in
   List.iter
     (fun (table : table) ->
       if not (List.mem table.name [ "package"; "dependencies"; "test"; "project" ]) then
@@ -270,7 +270,7 @@ let parse text =
       | key ->
           raise_malformed entry.line "`[package]` has no key `%s`. Its keys are `name` and `truss`."
             key)
-    (entries "package");
+    (list_entries "package");
   let time_limit_seconds = ref None in
   List.iter
     (fun (entry : entry) ->
@@ -281,29 +281,29 @@ let parse text =
             raise_malformed entry.line "`time_limit` is a whole number of seconds, more than 0.";
           time_limit_seconds := Some seconds
       | key -> raise_malformed entry.line "`[test]` has no key `%s`. Its key is `time_limit`." key)
-    (entries "test");
+    (list_entries "test");
   List.iter
     (fun (entry : entry) -> raise_malformed entry.line "`[project]` has no key `%s`." entry.key)
-    (entries "project");
+    (list_entries "project");
   let package =
-    match (table "package", !name) with
+    match (find_table "package", !name) with
     | Some _, Some name ->
         Some
           {
             name;
             truss = !truss;
-            dependencies = List.map parse_dependency (entries "dependencies");
+            dependencies = List.map parse_dependency (list_entries "dependencies");
           }
     | Some table, None ->
         raise_malformed table.line "`[package]` names its package, with `name = \"...\"` under it."
     | None, _ -> (
-        match table "dependencies" with
+        match find_table "dependencies" with
         | Some table ->
             raise_malformed table.line
               "`[dependencies]` are a package's, and this manifest has no `[package]`."
         | None -> None)
   in
-  if package = None && table "project" = None then
+  if package = None && find_table "project" = None then
     raise_malformed 1 "A manifest has a `[package]` table, a `[project]` table, or both.";
   { package; time_limit_seconds = !time_limit_seconds }
 

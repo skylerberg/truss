@@ -18,31 +18,31 @@ type context = {
 }
 
 let is_plain context type_ =
-  Interface.Impls.is_plain context.lookups.interface ~bounds:context.list_bounds type_
+  Interface.Impls.is_plain context.lookups.interface ~list_bounds:context.list_bounds type_
 
 let is_copyable context type_ =
-  Interface.Impls.is_copyable context.lookups.interface ~bounds:context.list_bounds type_
+  Interface.Impls.is_copyable context.lookups.interface ~list_bounds:context.list_bounds type_
 
 let is_view context type_ =
-  Interface.Impls.is_view context.lookups.interface ~bounds:context.list_bounds type_
+  Interface.Impls.is_view context.lookups.interface ~list_bounds:context.list_bounds type_
 
 let holds_function context type_ =
-  Interface.Impls.holds_function context.lookups.interface ~bounds:context.list_bounds type_
+  Interface.Impls.holds_function context.lookups.interface ~list_bounds:context.list_bounds type_
 
 let list_callee_signatures context (callee : Mir.callee) : Types.signature list =
-  let signature path =
+  let list_signatures path =
     Option.to_list (Interface.Impls.read_signature context.lookups.interface path)
   in
   match callee with
-  | Function { path; _ } -> signature path
+  | Function { path; _ } -> list_signatures path
   | Trait_method { trait; name; receiver; _ } ->
-      signature (Method { owner = trait.trait; name; receiver })
+      list_signatures (Method { owner = trait.trait; name; receiver })
   | Capability_method { capability; name } ->
-      signature (Path.make_capability_method capability name)
+      list_signatures (Path.make_capability_method capability name)
   | Intrinsic _ | Indirect _ -> []
 
 let stores_function context (callee : Mir.callee) position =
-  let declared (signature : Types.signature) =
+  let is_declared (signature : Types.signature) =
     let parameter =
       match signature.receiver with
       | None -> List.nth_opt signature.parameters position
@@ -55,7 +55,7 @@ let stores_function context (callee : Mir.callee) position =
   in
   match callee with
   | Indirect _ -> true
-  | _ -> List.exists declared (list_callee_signatures context callee)
+  | _ -> List.exists is_declared (list_callee_signatures context callee)
 
 let locate_origin context (origin : Core.origin) : Source.Definition_span.t =
   Source.Definition_span.locate (Lazy.force context.spans) origin
@@ -105,7 +105,7 @@ let collect context (mir : Mir.Graph.t) =
     | Passed _ | Default -> ()
   in
   let record_mode_keywords (call : Mir.call) = List.iter record_mode_keyword call.arguments in
-  let body (body : Mir.Graph.body) =
+  let visit_body (body : Mir.Graph.body) =
     Array.iteri
       (fun local (info : Mir.local_info) ->
         match info.kind with
@@ -130,8 +130,8 @@ let collect context (mir : Mir.Graph.t) =
           block.statements)
       body.blocks
   in
-  body mir.body;
-  Array.iter body mir.lambdas;
+  visit_body mir.body;
+  Array.iter visit_body mir.lambdas;
   context.parameters <-
     List.rev
       (List.filter_map
@@ -152,7 +152,7 @@ let copy_edits context (moved : Core.origin) =
     | Some ((Read | Mut), _) | None -> [])
   @ [
       Diagnostic.insert
-        (Source.Definition_span.zero_width (locate_origin context moved).stop)
+        (Source.Definition_span.make_zero_width (locate_origin context moved).stop)
         ".copy()";
     ]
 

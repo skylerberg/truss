@@ -116,7 +116,7 @@ type foreign = Plus_plus | Minus_minus | Star_star | Colon_equal | Pipe_greater
 module Decimal : sig
   type t = private { significand : Z.t; exponent : Z.t }
 
-  val normalized : significand:Z.t -> exponent:Z.t -> t
+  val normalize : significand:Z.t -> exponent:Z.t -> t
 end
 
 type t = {
