@@ -703,19 +703,3 @@ let () =
           if not (String.includes ~affix:"many arguments" errors) then
             Codegen_support.fail "panicked with %S" errors
       | status, _, errors -> Codegen_support.fail "ended with status %d: %s" status errors)
-
-let () =
-  Codegen_support.test "a main that uses a capability with no real implementation is not built"
-    (fun () ->
-      let _, compile = Codegen_support.load Fixtures.Program.main_using_a_greeter in
-      match
-        Compile.For_testing.run_program compile
-          ~main:(Top { module_ = Codegen_support.example; name = "main" })
-          ~arguments:[]
-      with
-      | Ok _ -> Codegen_support.fail "the program ran"
-      | Error message ->
-          if
-            not
-              (String.includes ~affix:"main uses Greeter, which has no real implementation" message)
-          then Codegen_support.fail "failed with: %s" message)

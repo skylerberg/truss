@@ -11,3 +11,5 @@ val read_trait_interface : Lookups.t -> Path.t -> Types.trait_interface option
 val read_impl_interface : Lookups.t -> Path.t -> Types.impl_interface option
 val read_constant_type : Lookups.t -> Path.t -> Types.ty option
 val read_test_uses : Lookups.t -> Path.t -> Types.capability_set option
+val is_external_test : Lookups.t -> Path.t -> bool
+val find_real_implementation : Lookups.t -> Path.t -> Path.t option

@@ -163,6 +163,7 @@ module Code = struct
     | Not_constant
     | Constant_overflow
     | Main_signature
+    | No_real_implementation
     | Duplicate_field
     | Cannot_derive
     | Derives_inferred
@@ -418,6 +419,7 @@ module Code = struct
     | Not_constant -> "not_constant"
     | Constant_overflow -> "constant_overflow"
     | Main_signature -> "main_signature"
+    | No_real_implementation -> "no_real_implementation"
     | Duplicate_field -> "duplicate_field"
     | Cannot_derive -> "cannot_derive"
     | Derives_inferred -> "derives_inferred"

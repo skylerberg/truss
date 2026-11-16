@@ -81,6 +81,24 @@ let read_impl_interface (lookups : Lookups.t) (path : Path.t) =
 let read_test_uses lookups path =
   match read_interface lookups path with Some (Test_interface uses) -> Some uses | _ -> None
 
+let is_external_test lookups path =
+  match read_test_uses lookups path with
+  | Some uses -> uses <> Types.no_capabilities
+  | None -> Compiler_bug.raise_bug ~stage:"Interface" "%s is not a test" (Path.show path)
+
+let find_real_implementation (lookups : Lookups.t) capability =
+  match
+    List.filter
+      (function Path.Impl { module_; _ } -> Well_known.is_system_module module_ | _ -> false)
+      (lookups.names.list_impls_of_trait Path.standard_package capability)
+  with
+  | [] -> None
+  | [ impl ] -> Some impl
+  | impls ->
+      Compiler_bug.raise_bug ~stage:"Interface" "%s has %d real implementations: %s"
+        (Path.show capability) (List.length impls)
+        (String.concat ", " (List.map Path.show impls))
+
 let read_constant_type lookups (path : Path.t) =
   match read_interface lookups path with
   | Some (Constant_interface constant) -> Some constant.constant_type

@@ -97,7 +97,7 @@ let list_failed_tests database snapshot packages =
   let tests =
     List.filter
       (fun (test : Test_command.test) ->
-        Interface.Definition.read_test_uses interface test.path = Some Types.no_capabilities)
+        not (Interface.Definition.is_external_test interface test.path))
       (Test_command.select snapshot database packages ~paths:[] ~match_:None)
   in
   List.concat

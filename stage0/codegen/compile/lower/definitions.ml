@@ -112,11 +112,8 @@ let make_code context (path : Path.t) type_arguments : code =
             written = Some (read_written context key);
             real =
               (match Interface.Definition.read_test_uses context.lookups.interface path with
-              | Some uses ->
-                  List.filter_map
-                    (function Types.Capability path -> Some path | _ -> None)
-                    (uses :> Types.capability list)
-              | None -> []);
+              | Some uses -> Monomorphic.list_evidence context.monomorphic [] uses
+              | None -> raise_bug "%s has no test interface" (Path.show path));
           }
       | _ -> raise_bug "%s is not a test" (Path.show path))
   | Top _ | Method _ -> (

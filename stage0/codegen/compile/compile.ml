@@ -569,11 +569,6 @@ type progress =
   | Started of { test : int }
   | Ended of { test : int; record : record }
 
-let is_external_test compiler test =
-  match Interface.Definition.read_test_uses compiler.requests.interface test with
-  | Some uses -> uses <> Types.no_capabilities
-  | None -> false
-
 let make_incomplete_record compiler todo_types =
   {
     outcome = Incomplete;
@@ -596,7 +591,9 @@ let run_tests ?(rerun = false) ?(report_progress = ignore) compiler ~time_limit_
   let results = compiler.results in
   let roots = List.map make_test_root tests in
   report_progress Lowering;
-  let is_keyed test = results <> None && not (is_external_test compiler test) in
+  let is_keyed test =
+    results <> None && not (Interface.Definition.is_external_test compiler.requests.interface test)
+  in
   let known =
     List.mapi
       (fun index (test, root) ->
