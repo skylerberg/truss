@@ -51,7 +51,7 @@
   reference_parser
   cbor
   blake3
-  database
+  workspace
   cache
   unix
   path

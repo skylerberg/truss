@@ -1,5 +1,5 @@
 (library
- (name database)
+ (name workspace)
  (libraries
   unix
   compiler_bug

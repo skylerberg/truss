@@ -121,7 +121,7 @@ let print hole =
 
 let run ~paths =
   let snapshot, packages = Command_packages.current () in
-  let pipeline = Database.pipeline snapshot in
+  let pipeline = Workspace.pipeline snapshot in
   let report = Report.gather pipeline snapshot packages in
   let holes =
     match gather snapshot packages pipeline paths with

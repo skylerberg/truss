@@ -137,7 +137,7 @@ let plan_module pipeline snapshot packages (old_module : Path.module_) to_ =
       (fun (file, (span : Source.span), (target : References.target)) ->
         match target with
         | Module edit_module when edit_module = old_module ->
-            let text = Source.text (Database.source snapshot file) in
+            let text = Source.text (Workspace.source snapshot file) in
             let written = String.sub text span.start (span.stop - span.start) in
             Some (file, Diagnostic.replace span (if String.contains written ':' then full else last))
         | _ -> None)
@@ -155,7 +155,7 @@ let plan_module pipeline snapshot packages (old_module : Path.module_) to_ =
   in
   { edits = by_file edits; moved = Some (old_module, new_module) }
 
-let text_of snapshot file = Source.text (Database.source snapshot file)
+let text_of snapshot file = Source.text (Workspace.source snapshot file)
 
 let applied snapshot packages plan =
   List.map
@@ -179,7 +179,7 @@ let path_of snapshot packages (file : Path.file) =
   Filename.concat (directory_of snapshot packages file.module_) (file.name ^ ".truss")
 
 let trial snapshot after =
-  let path file = Database.file_path snapshot file in
+  let path file = Workspace.file_path snapshot file in
   let written = List.map (fun (_, file, text) -> (path file, Some text)) after in
   let removed =
     List.filter_map
@@ -188,7 +188,7 @@ let trial snapshot after =
         if List.mem_assoc old_path written then None else Some (old_path, None))
       after
   in
-  Database.trial snapshot (written @ removed)
+  Workspace.trial snapshot (written @ removed)
 
 let edits_json snapshot packages plan =
   List.concat_map
@@ -209,7 +209,7 @@ let edits_json snapshot packages plan =
 let run ~from_ ~to_ =
   let json = Output.json () in
   let snapshot, packages = Command_packages.worktree () in
-  let pipeline = Database.pipeline snapshot in
+  let pipeline = Workspace.pipeline snapshot in
   let report = Report.gather pipeline snapshot packages in
   if not (Report.clean report) then raise (Report.Errors report);
   let plan =
@@ -218,7 +218,7 @@ let run ~from_ ~to_ =
     | Module module_ -> plan_module pipeline snapshot packages module_ to_
   in
   let after = applied snapshot packages plan in
-  let pipeline = Database.pipeline (trial snapshot after) in
+  let pipeline = Workspace.pipeline (trial snapshot after) in
   Pipeline.check pipeline packages;
   let caused =
     List.filter_map

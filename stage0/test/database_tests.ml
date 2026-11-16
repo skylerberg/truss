@@ -77,7 +77,7 @@ let expect_included recomputed ~parts =
         fail "did not recompute %s; it recomputed %s" part (String.concat ", " recomputed))
     parts
 
-let standard = lazy (Database.For_testing.standard_state ())
+let standard = lazy (Workspace.For_testing.standard_state ())
 
 let settled loaded packages =
   let pipeline = Pipeline.create ~loaded:(Lazy.force standard :: loaded) packages in
@@ -195,7 +195,7 @@ let () =
   test "a client whose background process exits without serving gets an error at once" (fun () ->
       let started = Unix.gettimeofday () in
       (match
-         (Database.call ~program:"/usr/bin/false" ~key:(scratch "unserved") ~progress:ignore 0
+         (Workspace.call ~program:"/usr/bin/false" ~key:(scratch "unserved") ~progress:ignore 0
            : (int, string) result)
        with
       | Error _ -> ()
@@ -205,7 +205,7 @@ let () =
   test "the background process answers each request and sends its progress" (fun () ->
       let key = scratch "served" in
       let socket =
-        match Database.For_testing.listen ~key with
+        match Workspace.For_testing.listen ~key with
         | Ok socket -> socket
         | Error message -> failwith message
       in
@@ -213,9 +213,9 @@ let () =
       | 0 -> (
           Unix.dup2 socket Unix.stdin;
           match
-            Database.serve ~key ~handle:(fun ~progress request ->
+            Workspace.serve ~key ~handle:(fun ~progress request ->
                 progress "working";
-                if request = "stop" then Database.stop ();
+                if request = "stop" then Workspace.stop ();
                 String.length request)
           with
           | () -> Unix._exit 0
@@ -230,7 +230,7 @@ let () =
               let progressed = ref false in
               let served_length request =
                 match
-                  Database.call ~start_server:false ~key
+                  Workspace.call ~start_server:false ~key
                     ~progress:(fun text -> if text = "working" then progressed := true)
                     request
                 with
@@ -700,15 +700,15 @@ let project files =
   root
 
 let opened root =
-  match Database.take_snapshot root with
+  match Workspace.take_snapshot root with
   | Ok (snapshot, _) -> snapshot
   | Error message -> failwith message
 
 let settled_on_disk root =
   let snapshot = opened root in
-  let pipeline = Database.pipeline snapshot in
+  let pipeline = Workspace.pipeline snapshot in
   let observed = Pipeline.For_testing.observe pipeline (fun () -> Pipeline.propagate pipeline) in
-  let cold = Database.For_testing.cold_pipeline snapshot in
+  let cold = Workspace.For_testing.cold_pipeline snapshot in
   Pipeline.propagate cold;
   (match Pipeline.For_testing.differences pipeline cold with
   | [] -> ()
@@ -722,39 +722,39 @@ let () =
   test "a database written to .truss and reopened recomputes nothing" (fun () ->
       let root = project [ ("main/main", callee_and_caller) ] in
       ignore (settled_on_disk root);
-      Database.flush ();
+      Workspace.flush ();
       expect_recomputed (settled_on_disk root) ~exactly:[];
-      Database.flush ());
+      Workspace.flush ());
   test "a copy of a project with a changed file recomputes what propagating the change does"
     (fun () ->
       let root = project [ ("main/main", callee_and_caller) ] in
       ignore (settled_on_disk root);
-      Database.flush ();
+      Workspace.flush ();
       let copy = Harness.scratch "copy" in
       if Sys.command (Filename.quote_command "cp" [ "-R"; root ^ "/."; copy ]) <> 0 then
         fail "cannot copy %s" root;
       Harness.write_files copy [ ("main/main.truss", edited_body) ];
       let copied = settled_on_disk copy in
-      Database.flush ();
+      Workspace.flush ();
       ignore (opened root);
       Harness.write_files root [ ("main/main.truss", edited_body) ];
       let propagated = settled_on_disk root in
-      Database.flush ();
+      Workspace.flush ();
       expect_recomputed copied ~exactly:propagated);
   test "an interrupted commit leaves the database as it was before the change set" (fun () ->
       let root = project [ ("main/main", callee_and_caller) ] in
       ignore (settled_on_disk root);
-      Database.flush ();
+      Workspace.flush ();
       Harness.write_files root [ ("main/main.truss", edited_body) ];
       ignore (settled_on_disk root);
-      Database.For_testing.interrupt_commit (Database.root (opened root));
+      Workspace.For_testing.interrupt_commit (Workspace.root (opened root));
       Harness.write_files root [ ("main/main.truss", callee_and_caller) ];
       expect_recomputed (settled_on_disk root) ~exactly:[];
-      Database.flush ());
+      Workspace.flush ());
   test "a database written by another compiler is rebuilt" (fun () ->
       let root = project [ ("main/main", callee_and_caller) ] in
       ignore (settled_on_disk root);
-      Database.flush ();
+      Workspace.flush ();
       let list = Filename.concat root ".truss/list" in
       File_system.write list
         (String.concat "\n"
@@ -765,10 +765,10 @@ let () =
               (String.split_on_char '\n' (File_system.read list))));
       expect_included (settled_on_disk root)
         ~parts:[ "namespace app"; "checked body app::main::caller" ];
-      Database.flush ())
+      Workspace.flush ())
 
 let expect_cold pipeline snapshot =
-  let cold = Database.For_testing.cold_pipeline snapshot in
+  let cold = Workspace.For_testing.cold_pipeline snapshot in
   Pipeline.propagate cold;
   match Pipeline.For_testing.differences pipeline cold with
   | [] -> ()
@@ -778,10 +778,10 @@ let () =
   test "a trial is a copy of the database, propagated with the files that differ" (fun () ->
       let root = project [ ("main/main", callee_and_caller) ] in
       let snapshot = opened root in
-      let worktree = Database.pipeline snapshot in
+      let worktree = Workspace.pipeline snapshot in
       Pipeline.propagate worktree;
-      let trial = Database.trial snapshot [ ("main/main.truss", Some edited_body) ] in
-      let pipeline = Database.pipeline trial in
+      let trial = Workspace.trial snapshot [ ("main/main.truss", Some edited_body) ] in
+      let pipeline = Workspace.pipeline trial in
       let recomputed =
         (Pipeline.For_testing.observe pipeline (fun () -> Pipeline.propagate pipeline)).recomputed
       in
@@ -789,18 +789,18 @@ let () =
       expect_untouched recomputed ~names:[ "app::main::caller" ];
       expect_cold pipeline trial;
       expect_cold worktree snapshot;
-      Database.flush ());
+      Workspace.flush ());
   test "a trial that renames the package leaves the worktree's database as it was" (fun () ->
       let root = project [ ("main/main", callee_and_caller) ] in
       let snapshot = opened root in
-      let worktree = Database.pipeline snapshot in
+      let worktree = Workspace.pipeline snapshot in
       Pipeline.propagate worktree;
       let trial =
-        Database.trial snapshot
+        Workspace.trial snapshot
           [ ("truss.toml", Some "[package]\nname = \"tool\"\ntruss = \"0.1\"\n") ]
       in
-      let pipeline = Database.pipeline trial in
+      let pipeline = Workspace.pipeline trial in
       Pipeline.propagate pipeline;
       expect_cold pipeline trial;
       expect_cold worktree snapshot;
-      Database.flush ())
+      Workspace.flush ())

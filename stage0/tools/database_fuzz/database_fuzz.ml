@@ -6,7 +6,7 @@ let usage =
    every stage, or stops a commit before its rename. With no file, it edits the corpus beside it."
 
 let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [] }
-let standard_state = lazy (Database.For_testing.standard_state ())
+let standard_state = lazy (Workspace.For_testing.standard_state ())
 
 type file = { name : string; text : string }
 
@@ -242,21 +242,21 @@ let write_project root files =
     files
 
 let database root =
-  match Database.take_snapshot root with
-  | Ok (snapshot, _) -> Database.pipeline snapshot
+  match Workspace.take_snapshot root with
+  | Ok (snapshot, _) -> Workspace.pipeline snapshot
   | Error message -> failwith message
 
 let checked_and_reopened root =
   Pipeline.check (database root) [ example.package ];
-  Database.flush ()
+  Workspace.flush ()
 
 let reopening root =
   match random 8 with
-  | 0 | 1 -> Some ("commit and reopen", Database.flush)
+  | 0 | 1 -> Some ("commit and reopen", Workspace.flush)
   | 2 ->
       Some
         ( "stop a commit before its rename",
-          fun () -> Database.For_testing.interrupt_commit (Unix.realpath root) )
+          fun () -> Workspace.For_testing.interrupt_commit (Unix.realpath root) )
   | _ -> None
 
 let () =
@@ -305,7 +305,7 @@ let () =
     Printf.printf "seed %d, edit %d (%s): %s\n%!" !seed step edit.description problem
   in
   let start_over () =
-    Database.flush ();
+    Workspace.flush ();
     File_system.remove (Filename.concat root ".truss")
   in
   for step = 1 to !count do
@@ -352,7 +352,7 @@ let () =
               Printf.printf "  skipped: a cold build raises %s\n%!" (shown_failure failure);
             write_project root !current)
   done;
-  Database.flush ();
+  Workspace.flush ();
   Printf.printf "%d edits, %d skipped because a cold build raises, %d failures\n" !count !skipped
     !failures;
   exit (if !failures > 0 then 1 else 0)

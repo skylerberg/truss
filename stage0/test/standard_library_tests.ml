@@ -54,7 +54,7 @@ let modules =
       List.filter (fun entry -> List.memq entry mine) library
 
 let solver =
-  let cache = Database.open_cache () in
+  let cache = Workspace.open_cache () in
   match
     Solver.find
       ~cache:
@@ -178,4 +178,4 @@ let () =
                     | errors -> errors))
                 files)))
     checked;
-  timed "collecting the cache" Database.For_testing.collect_cache
+  timed "collecting the cache" Workspace.For_testing.collect_cache

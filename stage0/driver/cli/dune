@@ -25,7 +25,7 @@
   pipeline
   solver
   prover
-  database
+  workspace
   cache
   project
   types

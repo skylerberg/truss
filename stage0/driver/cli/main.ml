@@ -263,7 +263,7 @@ let status =
   command "status" ~doc:"List the package states that the background process holds."
     Term.(
       const (fun () ->
-          List.iter Output.print_line (Database.states ());
+          List.iter Output.print_line (Workspace.states ());
           Outcome.Exit 0)
       $ common)
 
@@ -271,7 +271,7 @@ let stop =
   command "stop" ~doc:"Stop the background process."
     Term.(
       const (fun () ->
-          Database.stop ();
+          Workspace.stop ();
           Outcome.Exit 0)
       $ common)
 
@@ -402,7 +402,7 @@ let handle ~progress request =
   in
   { output = Buffer.contents buffer; outcome }
 
-let serve key = Database.serve ~key ~handle
+let serve key = Workspace.serve ~key ~handle
 
 let command_of arguments =
   List.find_opt (fun argument -> not (String.starts_with ~prefix:"-" argument)) arguments
@@ -428,17 +428,17 @@ let request arguments =
 let ask_running arguments : (string * (response, string) result) list =
   List.map
     (fun key ->
-      (key, Database.call ~start_server:false ~key ~progress:Output.eprint (request arguments)))
-    (Database.servers ())
+      (key, Workspace.call ~start_server:false ~key ~progress:Output.eprint (request arguments)))
+    (Workspace.servers ())
 
 let wait_until_stopped answers =
   List.iter
-    (fun (key, answer) -> if Result.is_ok answer then Database.wait_until_ended ~key)
+    (fun (key, answer) -> if Result.is_ok answer then Workspace.wait_until_ended ~key)
     answers
 
 let clean_cache () =
   wait_until_stopped (ask_running [ "stop" ]);
-  Database.reset ();
+  Workspace.reset ();
   let directory = Cache.default_directory () in
   match File_system.remove directory with
   | () -> 0
@@ -467,10 +467,10 @@ let language_server ~no_server =
     let response =
       if no_server then begin
         let response = handle ~progress:ignore request in
-        Database.flush ();
+        Workspace.flush ();
         Ok response
       end
-      else Database.call ~key:(Database.server_key root) ~progress:ignore request
+      else Workspace.call ~key:(Workspace.server_key root) ~progress:ignore request
     in
     match response with Ok { output; outcome = Exit 0 } -> Some output | Ok _ | Error _ -> None
   in
@@ -482,7 +482,7 @@ let client argv =
   let arguments = List.filter (( <> ) "--no-server") arguments in
   let local () =
     let outcome = run_command_line arguments in
-    Database.flush ();
+    Workspace.flush ();
     finish outcome
   in
   match command_of arguments with
@@ -512,8 +512,8 @@ let client argv =
           status)
   | Some _ -> (
       match
-        (Database.call
-           ~key:(Database.server_key (directory_of arguments))
+        (Workspace.call
+           ~key:(Workspace.server_key (directory_of arguments))
            ~progress:Output.eprint (request arguments)
           : (response, string) result)
       with

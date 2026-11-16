@@ -36,7 +36,7 @@ let gather ?(proofs = false) pipeline snapshot packages =
               files
         | None -> []);
     problems =
-      Database.problems snapshot
+      Workspace.problems snapshot
       @ List.map
           (fun (file, package, problem) ->
             {

@@ -1,6 +1,6 @@
 let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [] }
 let example_file : Path.file = { module_ = example; name = "main" }
-let standard_state = lazy (Database.For_testing.standard_state ())
+let standard_state = lazy (Workspace.For_testing.standard_state ())
 
 let example_pipeline text =
   Pipeline.create

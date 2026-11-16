@@ -7,5 +7,5 @@
   token
   file_system
   compiler_bug
-  database
+  workspace
   pipeline))

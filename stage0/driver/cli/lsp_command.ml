@@ -84,12 +84,12 @@ let check ~root encoding (buffers : (string * string) list) =
       buffers
   in
   let snapshot, _ = Command_packages.load root in
-  let base = Database.root snapshot in
+  let base = Workspace.root snapshot in
   let trial =
-    Database.trial snapshot
+    Workspace.trial snapshot
       (List.map (fun (_, path, text) -> (Shown_path.relative ~from:base path, Some text)) buffers)
   in
-  let packages = List.map snd (Database.packages trial) in
+  let packages = List.map snd (Workspace.packages trial) in
   let file_of path =
     List.find_opt
       (fun file -> Shown_path.normalize (Command_packages.path trial file) = path)
@@ -101,7 +101,7 @@ let check ~root encoding (buffers : (string * string) list) =
         (uri, Source.create ~path text, file_of (Shown_path.normalize path)))
       buffers
   in
-  let pipeline = Database.pipeline trial in
+  let pipeline = Workspace.pipeline trial in
   Pipeline.check pipeline packages;
   let proofs =
     Proofs.check pipeline trial packages (List.filter_map (fun (_, _, file) -> file) opened)

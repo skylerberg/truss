@@ -4,7 +4,7 @@ let main_of snapshot pipeline packages (package : Path.package) =
   else None
 
 let mains snapshot packages =
-  List.filter_map (main_of snapshot (Database.pipeline snapshot) packages) packages
+  List.filter_map (main_of snapshot (Workspace.pipeline snapshot) packages) packages
 
 let main snapshot pipeline packages =
   let package = Command_packages.one packages in
@@ -81,7 +81,7 @@ let refuse_unshippable snapshot packages compile main proofs =
 
 let build_program ?output snapshot packages (build : Compiler.build) =
   let is_release = build = Release in
-  let pipeline = Database.pipeline ~checks:(not is_release) snapshot in
+  let pipeline = Workspace.pipeline ~checks:(not is_release) snapshot in
   let report = Report.gather ~proofs:is_release pipeline snapshot packages in
   if not (Report.clean report) then raise (Report.Errors report);
   let main = main snapshot pipeline packages in

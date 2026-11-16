@@ -31,12 +31,12 @@ let files directory (record : Lock.t) =
   @ if record = [] then [] else [ ("truss.lock", Lock.print record) ]
 
 let record pipeline snapshot registry (package : Path.package) =
-  let root = Database.root snapshot in
-  let built = Database.registry_packages snapshot in
+  let root = Workspace.root snapshot in
+  let built = Workspace.registry_packages snapshot in
   let directory_of name =
     Option.map
       (fun (relative, _) -> if relative = "" then root else Filename.concat root relative)
-      (List.find_opt (fun (_, other) -> other = name) (Database.packages snapshot))
+      (List.find_opt (fun (_, other) -> other = name) (Workspace.packages snapshot))
   in
   let in_registry name = List.find_opt (fun (other, _, _) -> other = name) built in
   let dependencies ~code name =
@@ -49,7 +49,7 @@ let record pipeline snapshot registry (package : Path.package) =
     in
     List.filter
       (fun dependency -> (not code) || List.mem dependency used)
-      (Database.dependency_names snapshot name)
+      (Workspace.dependency_names snapshot name)
   in
   let problems = ref [] in
   let rec closure name : Lock.t =
@@ -140,10 +140,10 @@ let decide pipeline snapshot registry (package : Path.package) =
       | None -> Published { version = Version.first name; files; grows = [] }
       | Some (version, newest) when newest = hash -> Unchanged version
       | Some (((major, minor, patch) as version), _) -> (
-          match Database.published name version with
+          match Workspace.published name version with
           | Error message -> Refused [ message ]
           | Ok published ->
-              let before = Pipeline.interface_lookups (Database.pipeline published) [ name ]
+              let before = Pipeline.interface_lookups (Workspace.pipeline published) [ name ]
               and after = Pipeline.interface_lookups pipeline [ name ] in
               let changes = Compatibility.compare ~before ~after name in
               let breaks =
@@ -199,7 +199,7 @@ let run () =
         Outcome.cannot_run "No registry is set. Set `%s` to the registry's directory."
           Registry.Index.variable
   in
-  let pipeline = Database.pipeline snapshot in
+  let pipeline = Workspace.pipeline snapshot in
   let report = Report.gather ~proofs:true pipeline snapshot packages in
   let refuse sentences =
     if json then

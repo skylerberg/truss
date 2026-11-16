@@ -1,7 +1,7 @@
 let rounds = 32
 
 let unused_dependencies snapshot pipeline packages =
-  let root = Database.root snapshot in
+  let root = Workspace.root snapshot in
   List.filter_map
     (fun (file, package, (problem : Package_checks.manifest_problem)) ->
       match problem with
@@ -20,10 +20,10 @@ let unused_dependencies snapshot pipeline packages =
     (Command_packages.manifest_problems snapshot pipeline packages)
 
 let lock_file snapshot =
-  match Database.lock_fix snapshot with
+  match Workspace.lock_fix snapshot with
   | None -> []
   | Some text ->
-      let path = Filename.concat (Database.root snapshot) "truss.lock" in
+      let path = Filename.concat (Workspace.root snapshot) "truss.lock" in
       Command_packages.write_file path text;
       [
         Json.to_string
@@ -36,7 +36,7 @@ let lock_file snapshot =
 
 let fix snapshot packages =
   let rec round snapshot number fixed =
-    let pipeline = Database.pipeline snapshot in
+    let pipeline = Workspace.pipeline snapshot in
     Pipeline.check pipeline packages;
     let applied =
       List.concat_map
@@ -68,7 +68,7 @@ let fix snapshot packages =
 let run ~fix:fixing ~proofs =
   let snapshot, packages = Command_packages.current () in
   let snapshot, fixed = if fixing then fix snapshot packages else (snapshot, []) in
-  let pipeline = Database.pipeline snapshot in
+  let pipeline = Workspace.pipeline snapshot in
   let report = Report.gather ~proofs pipeline snapshot packages in
   let overlaps = Overlap_command.with_other_worktrees snapshot pipeline in
   if Output.json () then

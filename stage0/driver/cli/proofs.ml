@@ -1,5 +1,5 @@
 let solver () =
-  let cache = Database.open_cache () in
+  let cache = Workspace.open_cache () in
   match
     Solver.find
       ~cache:

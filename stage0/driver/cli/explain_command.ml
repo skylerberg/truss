@@ -21,10 +21,10 @@ let run ~position =
   with
   | None -> Outcome.cannot_run "%s is not a file of a package in this worktree." file
   | Some written -> (
-      let pipeline = Database.pipeline snapshot in
+      let pipeline = Workspace.pipeline snapshot in
       let offset =
         Source.offset Source.Scalar_values
-          (Database.source snapshot written)
+          (Workspace.source snapshot written)
           ~line:(line - 1) ~column:(column - 1)
       in
       let names = Pipeline.names pipeline packages in

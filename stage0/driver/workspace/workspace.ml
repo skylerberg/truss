@@ -123,7 +123,7 @@ let standard_state =
          Standard_library.files
      in
      if rendered <> [] then
-       Compiler_bug.bug ~stage:"Database" "the standard library has diagnostics:\n%s"
+       Compiler_bug.bug ~stage:"Workspace" "the standard library has diagnostics:\n%s"
          (String.concat "" rendered);
      standard)
 
@@ -266,12 +266,12 @@ let source snapshot (file : Path.file) =
         List.assoc_opt file package.files)
   with
   | Some text -> Source.create ~path:(Path.show_file file) text
-  | None -> Compiler_bug.bug ~stage:"Database" "%s is not a file" (Path.show_file file)
+  | None -> Compiler_bug.bug ~stage:"Workspace" "%s is not a file" (Path.show_file file)
 
 let root snapshot =
   match snapshot.kind with
   | Worktree root | Trial { root; _ } -> root
-  | Published -> Compiler_bug.bug ~stage:"Database" "only a worktree's snapshot has a root"
+  | Published -> Compiler_bug.bug ~stage:"Workspace" "only a worktree's snapshot has a root"
 
 let registry_packages snapshot =
   List.map
@@ -305,7 +305,7 @@ let package_states snapshot =
                 ~visible:
                   (standard
                   :: List.map state_of (List.sort_uniq Path.compare_package (visible name)))
-          | None -> Compiler_bug.bug ~stage:"Database" "%s has no files" (Path.show_package name)
+          | None -> Compiler_bug.bug ~stage:"Workspace" "%s has no files" (Path.show_package name)
         in
         Hashtbl.replace states name loaded;
         loaded
@@ -866,5 +866,5 @@ module For_testing = struct
         Segments.For_testing.interrupted_commit worktree.segments ~header:(header worktree.loaded)
           (Pipeline.unsaved worktree.pipeline);
         close worktree
-    | None -> Compiler_bug.bug ~stage:"Database" "%s has no open database" root
+    | None -> Compiler_bug.bug ~stage:"Workspace" "%s has no open database" root
 end

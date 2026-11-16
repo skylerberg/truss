@@ -108,8 +108,8 @@ type signature = {
 }
 
 let signatures snapshot trial =
-  let pipeline = Database.pipeline snapshot and upgraded = Database.pipeline trial in
-  let own = List.map snd (Database.packages snapshot) in
+  let pipeline = Workspace.pipeline snapshot and upgraded = Workspace.pipeline trial in
+  let own = List.map snd (Workspace.packages snapshot) in
   let is_own path = List.mem (Path.package path) own in
   let changed =
     List.filter
@@ -145,18 +145,18 @@ let signatures snapshot trial =
        dependents [])
 
 let new_errors snapshot trial =
-  let own = List.map snd (Database.packages snapshot) in
-  let diagnostics (snapshot : Database.snapshot) =
-    let pipeline = Database.pipeline snapshot in
+  let own = List.map snd (Workspace.packages snapshot) in
+  let diagnostics (snapshot : Workspace.snapshot) =
+    let pipeline = Workspace.pipeline snapshot in
     Pipeline.check pipeline own;
-    List.map Project.show_problem (Database.problems snapshot)
+    List.map Project.show_problem (Workspace.problems snapshot)
     @ List.concat_map
         (fun file ->
           List.map
             (fun (diagnostic : Diagnostic.t) ->
-              Printf.sprintf "%s: %s" (Database.file_path snapshot file) diagnostic.message)
+              Printf.sprintf "%s: %s" (Workspace.file_path snapshot file) diagnostic.message)
             (Pipeline.file_diagnostics pipeline file))
-        (List.concat_map (Database.package_files snapshot) own)
+        (List.concat_map (Workspace.package_files snapshot) own)
   in
   let now = diagnostics snapshot in
   List.filter (fun diagnostic -> not (List.mem diagnostic now)) (diagnostics trial)
@@ -199,12 +199,12 @@ let report ~lock ~signatures ~broken =
     end
   end
 
-let lock_file snapshot = Filename.concat (Database.root snapshot) "truss.lock"
+let lock_file snapshot = Filename.concat (Workspace.root snapshot) "truss.lock"
 
 let run ~names =
   let snapshot, _ = Command_packages.current () in
   let set = List.map wanted names in
-  match Database.plan_lock snapshot ~set ~all:(names = []) with
+  match Workspace.plan_lock snapshot ~set ~all:(names = []) with
   | Error message -> Outcome.cannot_run "%s" message
   | Ok plan ->
       let lock = lock_changes ~before:plan.before ~after:plan.after in
@@ -215,7 +215,7 @@ let run ~names =
         0
       end
       else begin
-        let trial = Database.trial snapshot [ (Project.lock_file, Some plan.text) ] in
+        let trial = Workspace.trial snapshot [ (Project.lock_file, Some plan.text) ] in
         let signatures = signatures snapshot trial in
         let broken = new_errors snapshot trial in
         Command_packages.write_file (lock_file snapshot) plan.text;

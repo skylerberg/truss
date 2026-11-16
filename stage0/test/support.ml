@@ -16,7 +16,7 @@ let file_of text : Path.file =
       let module_ = module_of text in
       { module_; name = (match List.rev module_.modules with last :: _ -> last | [] -> "main") }
 
-let standard_state = lazy (Database.For_testing.standard_state ())
+let standard_state = lazy (Workspace.For_testing.standard_state ())
 let pipeline packages = Pipeline.create ~loaded:[ Lazy.force standard_state ] packages
 
 let setup ?(dependencies = []) files : Project.package list =

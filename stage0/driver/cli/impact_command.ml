@@ -12,7 +12,7 @@ type change = {
 }
 
 let declared snapshot pipeline =
-  let packages = List.map snd (Database.packages snapshot) in
+  let packages = List.map snd (Workspace.packages snapshot) in
   let names = Pipeline.names pipeline packages in
   Path.Set.of_list
     (List.concat_map
@@ -24,10 +24,10 @@ let declared snapshot pipeline =
        packages)
 
 let signature snapshot pipeline path =
-  Signatures.of_path (Pipeline.names pipeline (List.map snd (Database.packages snapshot))) path
+  Signatures.of_path (Pipeline.names pipeline (List.map snd (Workspace.packages snapshot))) path
 
 let changes ~snapshot ~pipeline ~base_snapshot ~base changed_parts =
-  let own = List.map snd (Database.packages snapshot) in
+  let own = List.map snd (Workspace.packages snapshot) in
   let by_definition = Hashtbl.create 32 in
   List.iter
     (fun part ->
@@ -84,7 +84,7 @@ let changes ~snapshot ~pipeline ~base_snapshot ~base changed_parts =
        by_definition [])
 
 let tests_changed ~snapshot ~pipeline ~base_snapshot ~base =
-  let own snapshot = List.map snd (Database.packages snapshot) in
+  let own snapshot = List.map snd (Workspace.packages snapshot) in
   let before = declared base_snapshot base in
   let compile = Compiler.lowering_only pipeline (own snapshot)
   and base_compile = lazy (Compiler.lowering_only base (own base_snapshot)) in
@@ -169,17 +169,17 @@ let print ~commit changes tests =
 
 let run ~base =
   let snapshot, packages = Command_packages.current () in
-  let pipeline = Database.pipeline snapshot in
+  let pipeline = Workspace.pipeline snapshot in
   let report = Report.gather pipeline snapshot packages in
-  match Database.base_commit snapshot base with
+  match Workspace.base_commit snapshot base with
   | None ->
       Outcome.cannot_run
         "No base commit: name one with --base, or work in a git worktree with a default branch."
   | Some commit -> (
-      match Database.of_commit snapshot commit with
+      match Workspace.of_commit snapshot commit with
       | Error message -> Outcome.cannot_run "%s" message
       | Ok base_snapshot ->
-          let base = Database.pipeline base_snapshot in
+          let base = Workspace.pipeline base_snapshot in
           let changes =
             changes ~snapshot ~pipeline ~base_snapshot ~base (Pipeline.changes pipeline base)
           in

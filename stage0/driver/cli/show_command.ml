@@ -102,7 +102,7 @@ let find snapshot pipeline packages ~body text =
 
 let run ~paths ~body =
   let snapshot, packages = Command_packages.current () in
-  let pipeline = Database.pipeline snapshot in
+  let pipeline = Workspace.pipeline snapshot in
   let results = List.map (fun path -> (path, find snapshot pipeline packages ~body path)) paths in
   let missing = List.filter (fun (_, definitions) -> definitions = []) results in
   if Output.json () then

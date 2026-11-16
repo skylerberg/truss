@@ -19,7 +19,7 @@ let matches name (path : Path.t) =
   | _ -> false
 
 let definitions snapshot pipeline name =
-  let packages = List.map snd (Database.packages snapshot) in
+  let packages = List.map snd (Workspace.packages snapshot) in
   let names = Pipeline.names pipeline packages in
   List.sort_uniq Path.compare
     (List.concat_map
@@ -83,7 +83,7 @@ let to_json line =
 
 let run ~direction ~name =
   let snapshot, _ = Command_packages.current () in
-  let pipeline = Database.pipeline snapshot in
+  let pipeline = Workspace.pipeline snapshot in
   match definitions snapshot pipeline name with
   | [] -> Outcome.cannot_run "No definition named %s in this worktree." name
   | targets ->

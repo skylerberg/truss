@@ -1,7 +1,7 @@
 type test = { path : Path.t; module_ : Path.module_; name : string; file : string; line : int }
 
 val select :
-  Database.snapshot ->
+  Workspace.snapshot ->
   Pipeline.t ->
   Path.package list ->
   paths:string list ->
@@ -14,7 +14,7 @@ val run_tests :
   ?rerun:bool ->
   ?progress:(Compile.progress -> unit) ->
   Pipeline.t ->
-  Database.snapshot ->
+  Workspace.snapshot ->
   Path.package list ->
   test list ->
   Compile.record list

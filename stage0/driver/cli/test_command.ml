@@ -183,7 +183,7 @@ let run_tests ?rerun ?progress pipeline snapshot packages tests =
     match
       Compile.run_tests ?rerun ?progress
         (Compiler.create pipeline snapshot packages Development)
-        ~time_limit_ms:(Database.time_limit_ms snapshot)
+        ~time_limit_ms:(Workspace.time_limit_ms snapshot)
         (List.map (fun test -> test.path) tests)
     with
     | Ok records -> records
@@ -193,7 +193,7 @@ let run ~paths ~match_ ~timings:show_timings ~rerun =
   let json = Output.json () in
   let started = now_microseconds () in
   let snapshot, packages = Command_packages.current () in
-  let pipeline = Database.pipeline snapshot in
+  let pipeline = Workspace.pipeline snapshot in
   let report = Report.gather pipeline snapshot packages in
   let checked = now_microseconds () in
   let tests = select snapshot pipeline packages ~paths ~match_ in

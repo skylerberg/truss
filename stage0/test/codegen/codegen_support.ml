@@ -182,7 +182,7 @@ let strict =
     ]
 
 let counter = ref 0
-let cache = lazy (Build.cache (Cache.make_objects_directory (Database.open_cache ())))
+let cache = lazy (Build.cache (Cache.make_objects_directory (Workspace.open_cache ())))
 
 let added_flags =
   Toolchain.split_flags (Option.value (Sys.getenv_opt Toolchain.added_flags_variable) ~default:"")
@@ -218,7 +218,7 @@ let expect_status ?extra ?anchors expected instances =
 
 let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [] }
 let example_file : Path.file = { module_ = example; name = "main" }
-let standard_state = lazy (Database.For_testing.standard_state ())
+let standard_state = lazy (Workspace.For_testing.standard_state ())
 let pipeline packages = Pipeline.create ~loaded:[ Lazy.force standard_state ] packages
 
 let example_package files : Project.package list =

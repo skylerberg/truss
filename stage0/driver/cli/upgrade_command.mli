@@ -14,5 +14,5 @@ val lock_changes : before:Lock.t -> after:Lock.t -> change list
 type signature
 
 val report : lock:change list -> signatures:signature list -> broken:string list -> unit
-val lock_file : Database.snapshot -> string
+val lock_file : Workspace.snapshot -> string
 val run : names:string list -> int

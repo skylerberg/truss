@@ -32,7 +32,7 @@ let sentence = function
         (Path.show change.path) (Output.listed change.kinds) (describe reads)
 
 let own_changes snapshot pipeline base =
-  let own = List.map snd (Database.packages snapshot) in
+  let own = List.map snd (Workspace.packages snapshot) in
   Part_set.of_list
     (List.filter
        (fun part ->
@@ -85,8 +85,8 @@ let reading_overlaps ~this_worktree pipeline ~changed ~changed_by_other =
       :: overlaps)
     groups []
 
-let overlaps snapshot pipeline (side : Database.side) =
-  let base = Database.pipeline side.base and theirs = Database.pipeline side.other in
+let overlaps snapshot pipeline (side : Workspace.side) =
+  let base = Workspace.pipeline side.base and theirs = Workspace.pipeline side.other in
   let mine_changed = own_changes snapshot pipeline base in
   let theirs_changed = own_changes side.other theirs base in
   List.sort compare
@@ -99,21 +99,21 @@ let overlaps snapshot pipeline (side : Database.side) =
         ~changed_by_other:mine_changed)
 
 let keyed_diagnostics snapshot =
-  let pipeline = Database.pipeline snapshot in
-  let packages = List.map snd (Database.packages snapshot) in
+  let pipeline = Workspace.pipeline snapshot in
+  let packages = List.map snd (Workspace.packages snapshot) in
   Pipeline.check pipeline packages;
   List.concat_map
     (fun file ->
       List.map
         (fun (diagnostic : Diagnostic.t) ->
-          ( ( Database.file_path snapshot file,
+          ( ( Workspace.file_path snapshot file,
               Diagnostic.Code.name diagnostic.code,
               diagnostic.message ),
             diagnostic ))
         (Pipeline.file_diagnostics pipeline file))
     (Command_packages.files snapshot packages)
 
-let merge_diagnostics snapshot (side : Database.side) =
+let merge_diagnostics snapshot (side : Workspace.side) =
   Result.map
     (fun merged ->
       let sides = List.map fst (keyed_diagnostics snapshot @ keyed_diagnostics side.other) in
@@ -191,8 +191,8 @@ let print comparisons =
 
 let worktree_sides snapshot =
   List.map
-    (fun other -> (Shown_path.shown other, Database.other_worktree snapshot other))
-    (Database.other_worktrees snapshot)
+    (fun other -> (Shown_path.shown other, Workspace.other_worktree snapshot other))
+    (Workspace.other_worktrees snapshot)
 
 let with_other_worktrees snapshot pipeline =
   List.filter
@@ -201,11 +201,11 @@ let with_other_worktrees snapshot pipeline =
 
 let run ~with_ ~merge =
   let snapshot, _ = Command_packages.current () in
-  let pipeline = Database.pipeline snapshot in
+  let pipeline = Workspace.pipeline snapshot in
   let sides =
     match with_ with
     | Some name -> (
-        match Database.branch snapshot name with
+        match Workspace.branch snapshot name with
         | Ok side -> [ (name, Ok side) ]
         | Error message -> Outcome.cannot_run "%s" message)
     | None -> worktree_sides snapshot
