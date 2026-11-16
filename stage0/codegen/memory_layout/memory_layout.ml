@@ -50,9 +50,18 @@ module Type_table = Hashtbl.Make (struct
   let hash = Hashtbl.hash_param 64 256
 end)
 
-type env = { system : Libc.system; shape_of : Ground.ty -> shape; layouts : t Type_table.t }
+exception Infinite_size of Ground.ty
 
-let create system ~shape_of = { system; shape_of; layouts = Type_table.create 64 }
+type env = {
+  system : Libc.system;
+  shape_of : Ground.ty -> shape;
+  layouts : t Type_table.t;
+  in_progress : unit Type_table.t;
+}
+
+let create system ~shape_of =
+  { system; shape_of; layouts = Type_table.create 64; in_progress = Type_table.create 8 }
+
 let system env = env.system
 let shape env ty = env.shape_of ty
 
@@ -138,7 +147,13 @@ let rec of_type env ty =
   match Type_table.find_opt env.layouts ty with
   | Some layout -> layout
   | None ->
-      let layout = lay_out env ty (env.shape_of ty) in
+      if Type_table.mem env.in_progress ty then raise (Infinite_size ty);
+      Type_table.replace env.in_progress ty ();
+      let layout =
+        Fun.protect
+          ~finally:(fun () -> Type_table.remove env.in_progress ty)
+          (fun () -> lay_out env ty (env.shape_of ty))
+      in
       Type_table.replace env.layouts ty layout;
       layout
 

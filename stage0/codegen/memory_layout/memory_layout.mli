@@ -43,6 +43,8 @@ and step = Field of string | Tag
 
 type env
 
+exception Infinite_size of Ground.ty
+
 val create : Libc.system -> shape_of:(Ground.ty -> shape) -> env
 val system : env -> Libc.system
 val shape : env -> Ground.ty -> shape

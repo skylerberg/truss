@@ -18,6 +18,7 @@ type requests = {
 }
 
 exception Todo_type = Monomorphic.Todo_type
+exception Infinite_size = Memory_layout.Infinite_size
 
 let bug format = Compiler_bug.bug ~stage:"Compile" format
 
@@ -46,13 +47,13 @@ let make (context : Lower.context) (key : Instance.key) : lowered =
   | Call_evaluation { function_; arguments } ->
       code (Lower.lower_call_evaluation context ~function_ ~arguments)
 
-let lower (settings : Lookups.settings) (lookups : Lookups.t) ~lowered key =
+let lower (settings : Lookups.settings) (lookups : Lookups.t) ~lowered_constant key =
   let env =
     Memory_layout.create settings.system
       ~shape_of:(Monomorphic.shape (Lower.monomorphic lookups.interface))
   in
   let constant path =
-    match lowered (Instance.Constant path) with
+    match lowered_constant path with
     | Ok (Folded (data, _)) -> Some data.Lowered.value
     | Ok (Evaluate _) -> None
     | Ok (Compiled _) -> bug "%s is not a constant" (Path.show path)

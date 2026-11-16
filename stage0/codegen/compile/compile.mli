@@ -14,6 +14,7 @@ type requests = {
 }
 
 exception Todo_type of Ground.ty
+exception Infinite_size of Ground.ty
 
 type t
 type results = { find : string -> string option; add : string -> string -> unit }
@@ -85,7 +86,7 @@ val list_folded_constants : Mir.lookups -> Path.t -> Path.t list
 val lower :
   Lookups.settings ->
   Lookups.t ->
-  lowered:(Instance.key -> (lowered, unsupported) result) ->
+  lowered_constant:(Path.t -> (lowered, unsupported) result) ->
   Instance.key ->
   (lowered, unsupported) result
 

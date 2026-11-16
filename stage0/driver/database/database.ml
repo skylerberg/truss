@@ -869,6 +869,27 @@ let instance_part database note table part instance =
 let lowered database note key = instance_part database note database.lowered (Lowered key) key
 let test_key database note key = instance_part database note database.test_keys (Test_key key) key
 
+let make_constant_reader database note (key : Instance.key) =
+  match key with
+  | Constant path ->
+      let part = Part.Folded_constants path in
+      read database note part;
+      let folded_constants =
+        match Path_table.find_opt database.folded_constants path with
+        | Some (Value folded_constants) -> folded_constants
+        | Some (Failed _ | Blocked) -> raise Reads_failed_part
+        | None -> unchecked (Part.show part)
+      in
+      fun constant ->
+        if not (List.exists (Path.equal constant) folded_constants) then
+          Compiler_bug.bug ~stage:"Database" "%s folds %s, which its folded constants lack"
+            (Path.show path) (Path.show constant);
+        lowered database note (Constant constant)
+  | key ->
+      fun constant ->
+        Compiler_bug.bug ~stage:"Database" "%s reads the value of %s, and only a constant folds"
+          (Instance.to_string key) (Path.show constant)
+
 let instance_slot table instance =
   {
     stored = Instance_table.find_opt table instance;
@@ -1573,11 +1594,12 @@ let compute_part database (part : Part.t) =
             (match
                Compile.lower (lowering_settings database)
                  (stage_lowering_lookups database note)
-                 ~lowered:(lowered database note) key
+                 ~lowered_constant:(make_constant_reader database note key)
+                 key
              with
             | lowered -> Value lowered
             | exception Reads_failed_part -> Blocked
-            | exception Compile.Todo_type _ -> Failed []));
+            | exception (Compile.Todo_type _ | Compile.Infinite_size _) -> Failed []));
       update_references database key
   | Source _ | Packages | Modules _ | Dependencies _ | Derived_interface _ | Entry _ | Entries _
   | Imports _ | Declaration _ | Tree _ | Text _ | Place _ | Container _ | Contained _
@@ -2455,15 +2477,18 @@ let check_calls database interface viewers key = function
   | Error _ -> ()
 
 let reached_todo_types database key =
-  let reads part = Option.value (Part_table.find_opt database.reads part) ~default:[] in
-  let blocked = function Some Blocked -> true | Some (Value _ | Failed _) | None -> false in
+  let list_reads part = Option.value (Part_table.find_opt database.reads part) ~default:[] in
+  let is_stored_blocked = function
+    | Some Blocked -> true
+    | Some (Value _ | Failed _) | None -> false
+  in
   let is_blocked (part : Part.t) =
     match part with
-    | Test_key key -> blocked (Instance_table.find_opt database.test_keys key)
-    | Lowered key -> blocked (Instance_table.find_opt database.lowered key)
+    | Test_key key -> is_stored_blocked (Instance_table.find_opt database.test_keys key)
+    | Lowered key -> is_stored_blocked (Instance_table.find_opt database.lowered key)
     | _ -> false
   in
-  let todo_type (part : Part.t) =
+  let find_todo_type (part : Part.t) =
     match part with
     | Interface key -> (
         match Hashtbl.find_opt (owner database key.module_.package).interfaces key with
@@ -2478,8 +2503,8 @@ let reached_todo_types database key =
       Part_table.replace visited part ();
       match part with
       | Lowered _ when (stored database part).is_failed ->
-          List.filter_map todo_type (reads part) @ todo_types
-      | _ when is_blocked part -> List.fold_left visit todo_types (reads part)
+          List.filter_map find_todo_type (list_reads part) @ todo_types
+      | _ when is_blocked part -> List.fold_left visit todo_types (list_reads part)
       | _ -> todo_types
     end
   in

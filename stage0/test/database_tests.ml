@@ -521,6 +521,15 @@ let () =
       expect_included
         (propagated ~before:(program " = todo") ~after:(program "(id: Int64)"))
         ~parts:[ lowered "none" ]);
+  test "a type that comes to contain itself in place fails the lowered code that lays it out"
+    (fun () ->
+      let program held =
+        [ ("app::main", "type Chain(next: " ^ held ^ ")\nfn size(chain: Chain) -> Int64 { 1 }\n") ]
+      in
+      expect_included
+        (propagated_with_roots ~roots:[ "size" ] ~before:(program "List[Chain]")
+           ~after:(program "Option[Chain]"))
+        ~parts:[ lowered "size" ]);
   test "an edit to a constant recomputes the constants that fold it, in order" (fun () ->
       let constants first =
         [
