@@ -20,7 +20,13 @@ type tables = Tables.published = {
 
 val statement_diverges : tables -> Syntax.statement -> bool
 
-type checked = Body.checked = { form : Core.t; tables : tables; used_packages : Path.package list }
+type checked = Body.checked = {
+  form : Core.t;
+  tables : tables;
+  used_packages : Path.package list;
+  places_without_own : Core.origin list;
+  mode_keywords : Core.mode_keyword list;
+}
 
 val check_contract :
   Lookups.t -> Resolve.Names.key -> (checked, Diagnostic.in_definition list) result

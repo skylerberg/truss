@@ -4,5 +4,4 @@ let build (mode : Types.mode) (node : Core.expression) : Core.operand =
   | Read, String _ -> Place (Temporary node)
   | _ -> Value node
 
-let build_argument mode node : Core.argument =
-  Passed { mode; value = build mode node; mode_keyword = None }
+let build_argument mode node : Core.argument = Passed { mode; value = build mode node }

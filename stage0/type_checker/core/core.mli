@@ -1,5 +1,6 @@
 type id = int
 type origin = int
+type mode_keyword = { mode : Types.mode; written : origin; operand : origin; place : origin }
 type local = Named of origin | Self | Synthetic of int
 type quantifier = Forall | Exists
 type evidence = Impl of { impl : Path.t; arguments : Types.substitution } | Bound | Dynamic
@@ -35,11 +36,7 @@ and call = {
   uses : Types.capability_set;
 }
 
-and argument =
-  | Passed of { mode : Types.mode; value : operand; mode_keyword : mode_keyword option }
-  | Default
-
-and mode_keyword = { written : origin; operand : origin }
+and argument = Passed of { mode : Types.mode; value : operand } | Default
 and operand = Place of place | Value of expression
 
 and place =
@@ -110,7 +107,6 @@ and conversion = Widen | To_integer | From_integer
 and binder =
   | Over_type of { local : local; name : string; type_ : Types.ty }
   | Over_range of { pattern : pattern; start : expression; stop : expression; inclusive : bool }
-  | Over_collection of { pattern : pattern; collection : expression }
   | Over_elements of { pattern : pattern; elements : elements }
 
 and implementation = {

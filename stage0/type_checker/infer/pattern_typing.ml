@@ -295,7 +295,7 @@ and check_unknown_pattern state env (written : Syntax.pattern) unknown ~is_var ~
 
 and check_constant_pattern (state : State.state) id span path type_ =
   state.tables.patterns.(id) <- Some (Constant_pattern path);
-  match Interface.Definition.read_constant_type state.lookups.interface path with
+  match Interface.Definition.find_constant_type state.lookups.interface path with
   | Some constant_type ->
       if not (State.unify state constant_type type_) then
         State.report_mismatch state span ~expected:type_ ~actual:constant_type
@@ -323,7 +323,7 @@ and is_structural ?(seen = []) state (type_ : Types.ty) =
   else
     match type_ with
     | Types.Named { path; arguments } -> (
-        match Interface.Definition.read_interface state.lookups.interface path with
+        match Interface.Definition.find_interface state.lookups.interface path with
         | Some (Interface.Environment.Type_interface interface)
           when (not interface.opaque) || Path.locate_package path = state.package ->
             let derives_equal =

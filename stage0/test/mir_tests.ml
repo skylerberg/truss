@@ -50,8 +50,7 @@ let rec list_rvalue_locals : Mir.rvalue -> Mir.local list = function
   | Specification (Quantified { range; parameter; matches; body; _ }) ->
       (match range with
         | Over_type _ -> []
-        | Over_range { start; stop; _ } -> list_operand_locals start @ list_operand_locals stop
-        | Over_collection collection -> list_operand_locals collection)
+        | Over_range { start; stop; _ } -> list_operand_locals start @ list_operand_locals stop)
       @ List.filter
           (fun local -> local <> parameter)
           (list_block_locals

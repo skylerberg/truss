@@ -9,7 +9,6 @@ type loop_exits = {
 type run = {
   infos : Mir.local_info array;
   lambdas : Mir.body array;
-  in_formula : bool;
   provides : (Core.origin, Mir.provided list) Hashtbl.t;
   mutable loops : loop_exits list;
   mutable cancelled : (Mir.task * State.frame list ref) list;
@@ -52,7 +51,7 @@ let rec compute_place_type context frame run (place : Mir.place) =
   | [] -> (
       match place.Mir.root with
       | Local local -> Facts.substitute_type context frame run.infos.(local).type_
-      | Constant path -> Values.compute_constant_type context path
+      | Constant path -> Interface.Definition.read_constant_type context.lookups.interface path
       | Literal { type_; _ } -> Facts.substitute_type context frame type_)
   | _ -> (
       let base =
@@ -66,7 +65,7 @@ let rec compute_place_type context frame run (place : Mir.place) =
       in
       match Option.bind (find_declared_fields context base_type variant) (List.assoc_opt field) with
       | Some field_type -> Facts.substitute_type context frame field_type
-      | None -> raise (Facts.Foreign_unsupported (Printf.sprintf "the field `%s`" field)))
+      | None -> Facts.raise_unsupported Whole_definition "the field `%s`" field)
 
 let rec resolve_aliases (frame : State.frame) run (place : Mir.place) :
     (Logic.term * Mir.place) list =
@@ -92,7 +91,8 @@ let expand_place frame run (place : Mir.place) =
   match resolve_aliases frame run place with
   | [ (_, place) ] -> place
   | _ ->
-      raise (Facts.Foreign_unsupported "a name that the alternatives of a pattern bind `mut`, here")
+      Facts.raise_unsupported Whole_definition
+        "a name that the alternatives of a pattern bind `mut`, here"
 
 let describe_local : Mir.local_kind -> string = function
   | Source { name = Some name; _ } -> Printf.sprintf "`%s`" name
@@ -110,19 +110,17 @@ let read_root context frame run (root : Mir.root) =
       | Core_local Self -> (
           match frame.self with
           | Some self -> self
-          | None -> raise (Facts.Foreign_unsupported "`self` outside a method"))
+          | None -> Facts.raise_bug "`%s` reads `self` outside a method" frame.source.name)
       | key -> (
           (match key with
           | Core_local core when frame.makes_obligations && not context.reading_callback ->
               Validity.check_escaping_callback context frame core
           | Core_local _ | Mir_local _ -> ());
-          match (Locals.find_opt key frame.locals, run.infos.(local).kind) with
-          | Some term, _ -> term
-          | None, Source _ when run.in_formula ->
-              raise (Facts.Foreign_unsupported "a local the prover did not bind")
-          | None, kind ->
+          match Locals.find_opt key frame.locals with
+          | Some term -> term
+          | None ->
               Facts.raise_bug "`%s` reads %s before the prover binds it" frame.source.name
-                (describe_local kind)))
+                (describe_local run.infos.(local).kind)))
 
 let read_resolved context frame run (place : Mir.place) =
   let _, term =
@@ -137,10 +135,8 @@ let read_resolved context frame run (place : Mir.place) =
         in
         let projected = { place with Mir.projections = prefix @ [ projection ] } in
         if Facts.find_constructors context base_type = None then
-          raise
-            (Facts.Foreign_unsupported
-               (Printf.sprintf "a field of `%s`, whose fields the prover does not see"
-                  (Types.show base_type)));
+          Facts.raise_unsupported Whole_definition
+            "a field of `%s`, whose fields the prover does not see" (Types.show base_type);
         ignore (Facts.declare_sort context base_type);
         ( prefix @ [ projection ],
           Values.project_field context frame base_type variant field
@@ -174,7 +170,7 @@ let replace_field context ty variant field whole new_value =
               if name = field then new_value
               else Validity.select_field context ty variant name whole)
             fields )
-  | None -> raise (Facts.Foreign_unsupported (Printf.sprintf "the fields of `%s`" (Types.show ty)))
+  | None -> Facts.raise_unsupported Whole_definition "the fields of `%s`" (Types.show ty)
 
 let write_resolved context frame run (place : Mir.place) new_value =
   let rec rebuild prefix whole = function
@@ -197,7 +193,7 @@ let write_resolved context frame run (place : Mir.place) new_value =
           (rebuild (prefix @ [ projection ]) part rest)
   in
   match place.Mir.root with
-  | Constant _ | Literal _ -> raise (Facts.Foreign_unsupported "assigning to a constant")
+  | Constant _ | Literal _ -> Facts.raise_unsupported Whole_definition "assigning to a constant"
   | Local local -> (
       let whole =
         if place.Mir.projections = [] then new_value
@@ -344,7 +340,7 @@ let read_operand context frame run (operand : Mir.operand) =
       | Float number -> (
           match Facts.find_float_format ty with
           | Some format -> make_float_literal format number
-          | None -> raise (Facts.Foreign_unsupported "a float literal without a float type"))
+          | None -> Facts.raise_unsupported Whole_definition "a float literal without a float type")
       | Boolean truth -> Logic.Boolean truth)
 
 let compute_operand_type context frame operand =
@@ -606,8 +602,7 @@ let rec write_back_part context run ty (part : Mir.yielded) frame after =
                   write_back_part context run field_type field frame value
               | _ -> frame)
             frame fields
-      | None ->
-          raise (Facts.Foreign_unsupported (Printf.sprintf "the fields of `%s`" (Types.show ty))))
+      | None -> Facts.raise_unsupported Whole_definition "the fields of `%s`" (Types.show ty))
   | Part (Use _ | Take _ | Constant _) -> frame
 
 let bind_parts context (frame : State.frame) run =
@@ -622,7 +617,7 @@ let bind_parts context (frame : State.frame) run =
               (List.fold_left
                  (fun otherwise (condition, part) -> Logic.ite condition (read part) otherwise)
                  (read first) later)
-          with Facts.Unsupported _ | Facts.Foreign_unsupported _ -> frame)
+          with Facts.Unsupported _ -> frame)
       | _ -> frame)
     frame.aliases frame
 
@@ -758,23 +753,26 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
   | Specification Result -> (
       match frame.result with
       | Some result -> (frame, result)
-      | None -> Facts.raise_unsupported location "`result` here")
+      | None -> Facts.raise_bug "`%s` reads `result` outside an `ensures`" frame.source.name)
   | Specification (Entry local) -> (
       match Locals.make_key run.infos local with
       | Core_local Self -> (
           match frame.old_self with
           | Some self -> (frame, self)
-          | None -> raise (Facts.Foreign_unsupported "`self` outside a method"))
+          | None -> Facts.raise_bug "`%s` reads `old(self)` outside a method" frame.source.name)
       | key -> (
           match Locals.find_opt key frame.old_locals with
           | Some term -> (frame, term)
-          | None -> raise (Facts.Foreign_unsupported "a local the prover did not bind")))
+          | None ->
+              Facts.raise_bug "`%s` reads the entry value of %s, which the prover did not bind"
+                frame.source.name
+                (describe_local run.infos.(local).kind)))
   | Specification Yielded -> (
       match (frame.yielded, frame.yielded_so_far) with
       | Some yielded, _ -> (frame, yielded)
       | None, Some yielded_so_far when frame.source.key = Some context.home ->
           (frame, yielded_so_far)
-      | _ -> Facts.raise_unsupported location "`yielded` here")
+      | _ -> Facts.raise_bug "`%s` reads `yielded` outside a lending method" frame.source.name)
   | Specification (Identical (first, second)) ->
       let first_value = translate_operand first and second_value = translate_operand second in
       Values.assume_extensional context frame
@@ -808,35 +806,20 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
                 inclusive;
                 type_ = compute_operand_type context frame start;
               }
-        | Over_collection collection ->
-            Range_of_collection
-              {
-                collection_type = compute_operand_type context frame collection;
-                collected = translate_operand collection;
-                element = Facts.substitute_type context frame run.infos.(parameter).type_;
-                location;
-              }
       in
-      translate_quantifier_value context frame run ~location quantifier range ~parameter ~matches
-        ~body
+      translate_quantifier_value context frame run quantifier range ~parameter ~matches ~body
 
-and translate_quantifier_value context frame run ~location quantifier range ~parameter
-    ~(matches : Mir.block) ~(body : Mir.block) =
-  match
-    Models.quantify_over context frame quantifier range
-      ~bind:(fun inner value ty ->
-        let after, matched =
-          read_value context
-            (Facts.bind inner (Locals.make_key run.infos parameter) ty value)
-            run matches
-        in
-        (matched, after))
-      ~read:(fun body_frame _ ->
-        let after, term = read_value context body_frame run body in
-        ({ body_frame with spent = after.spent }, term))
-  with
-  | Some quantified -> quantified
-  | None -> Facts.raise_unsupported location "a quantifier that gives no value"
+and translate_quantifier_value context frame run quantifier range ~parameter ~(matches : Mir.block)
+    ~(body : Mir.block) =
+  Models.quantify_over context frame quantifier range
+    ~bind:(fun inner value ty -> Facts.bind inner (Locals.make_key run.infos parameter) ty value)
+    ~read:(fun body_frame _ ->
+      let after_matches, matched = read_value context body_frame run matches in
+      let after, holds = read_value context (Facts.restrict after_matches matched) run body in
+      ( { body_frame with spent = after.spent },
+        match quantifier with
+        | Forall -> Logic.( ==> ) matched holds
+        | Exists -> Logic.( &&& ) matched holds ))
 
 and read_statements context frame run (statements : Mir.statement list) =
   List.fold_left
@@ -858,7 +841,7 @@ and read_block context frame run (block : Mir.block) =
 and read_value context frame run (block : Mir.block) =
   match read_block context frame run block with
   | Some read -> read
-  | None -> raise (Facts.Foreign_unsupported "a call in a specification that never returns")
+  | None -> Facts.raise_unsupported Whole_definition "a call in a specification that never returns"
 
 and join_after_either context ~(outer : State.frame) ~condition
     ((entered : State.frame), (after : State.frame))
@@ -953,7 +936,7 @@ and read_statement context frame run (statement : Mir.statement) =
   let location = Facts.locate context frame.source statement.origin in
   match statement.kind with
   | Basic basic -> read_basic context frame run statement ~location basic
-  | Assert_by_bit_vector { condition; names; code } ->
+  | Assert_by_bit_vector { names; code; _ } ->
       let named =
         List.map
           (fun local ->
@@ -964,8 +947,7 @@ and read_statement context frame run (statement : Mir.statement) =
           names
       in
       let frame, term = read_value context frame run code in
-      Assertions.check_assertion context frame
-        ~origin:(Option.value (find_operand_origin condition) ~default:statement.origin)
+      Assertions.check_assertion context frame ~origin:statement.origin
         ~bit_vector:(Some (named, fun isolated -> snd (read_value context isolated run code)))
         term;
       Some frame
@@ -1118,7 +1100,7 @@ and read_statement context frame run (statement : Mir.statement) =
           }
       in
       let after, term =
-        translate_quantifier_value context frame run ~location quantifier range ~parameter:part
+        translate_quantifier_value context frame run quantifier range ~parameter:part
           ~matches:
             {
               statements = [];
@@ -1318,9 +1300,7 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
         }
   | Lend { part; call } -> read_lend context frame run part call
   | Assert condition ->
-      Assertions.check_assertion context frame
-        ~origin:(Option.value (find_operand_origin condition) ~default:statement.origin)
-        ~bit_vector:None
+      Assertions.check_assertion context frame ~origin:statement.origin ~bit_vector:None
         (read_operand context frame run condition);
       Some frame
   | Ghost_assert { condition; by_bit_vector } ->
@@ -1475,11 +1455,11 @@ and write_assignment context run (target : Mir.place) ~(copied : Mir.operand lis
         }
     | _ -> written)
 
-let make_run ~in_formula ~locals ~lambdas =
-  { infos = locals; lambdas; in_formula; provides = Hashtbl.create 2; loops = []; cancelled = [] }
+let make_run ~locals ~lambdas =
+  { infos = locals; lambdas; provides = Hashtbl.create 2; loops = []; cancelled = [] }
 
 let read_formula context (frame : State.frame) (formula : Mir.formula) ~arguments =
-  let run = make_run ~in_formula:true ~locals:formula.locals ~lambdas:formula.lambdas in
+  let run = make_run ~locals:formula.locals ~lambdas:formula.lambdas in
   let inside =
     {
       frame with
@@ -1501,14 +1481,12 @@ let read_formula context (frame : State.frame) (formula : Mir.formula) ~argument
             argument)
         inside formula.parameters arguments
   in
-  try
-    let after, term = read_value context inside run formula.value in
-    ({ frame with spent = after.spent }, term)
-  with Facts.Unsupported (_, message) when frame.source.key <> Some context.home ->
-    raise (Facts.Foreign_unsupported (Printf.sprintf "%s, in `%s`" message frame.source.name))
+  Facts.run_in_source context frame.source (fun () ->
+      let after, term = read_value context inside run formula.value in
+      ({ frame with spent = after.spent }, term))
 
 let read_body context start ~(lambdas : Mir.body array) (body : Mir.body) =
-  let run = make_run ~in_formula:false ~locals:body.locals ~lambdas in
+  let run = make_run ~locals:body.locals ~lambdas in
   let start =
     { start with State.aliases = Locals.empty; slices = Locals.empty; lends = Locals.empty }
   in

@@ -375,13 +375,22 @@ impl Iterable for Set[Element: Hash + Ordered] {
 
   fn count(self) -> UInt64
     ensures result == self.length()
+    ensures forall member: Element =>
+      self.model().contains(member) ==>
+        (exists position in 0..result => identical(self.element(position), member))
     cost time O(1)
   {
+    proof {
+      assert forall position in 0..self.elements.length() =>
+        identical(self.element(position), self.elements.model()[position])
+    }
     self.elements.length()
   }
 
   fn element(self, position: UInt64) lends Element
     requires position < self.count()
+    ensures self.model().contains(result)
+    ensures identical(result, self.elements.model()[position])
     cost time O(1)
   {
     self.elements[position]

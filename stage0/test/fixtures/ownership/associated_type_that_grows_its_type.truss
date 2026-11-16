@@ -12,6 +12,6 @@ type Wrap[Inner: Grows](next: List[Inner.Next])
 
 fn keep(value: own Wrap[Box[Int64]]) {}
 
-fn pass(value: Wrap[Box[Int64]]) {
-  keep(value)
+fn pass(value: own Wrap[Box[Int64]]) {
+  keep(own value)
 }

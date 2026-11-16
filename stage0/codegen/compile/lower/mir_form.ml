@@ -25,9 +25,6 @@ let read_spans st = (Lowering.require_written st).spans
 let locate_site st (origin : Core.origin) =
   Lowering.make_site st (Source.Definition_span.locate (read_spans st) origin)
 
-let raise_lending_capability_call st origin =
-  Lowering.raise_unsupported ~at:(locate_site st origin) "a call of a capability method that lends"
-
 let find_reported_site (st : Lowering.state) : Lowered.operand option =
   match st.frame.mir with
   | Some { lending = Some { site; _ }; _ }
@@ -1211,14 +1208,7 @@ and lower_statement st (statement : Mir.Graph.statement) =
       and after = Emit_c.Builder.allocate_block st.builder in
       Emit_c.Builder.branch st.builder holds ~yes:after ~no:failed;
       Emit_c.Builder.start st.builder failed;
-      let text =
-        match condition with
-        | Constant { value = Boolean truth; _ } -> string_of_bool truth
-        | Use { origin; _ } | Borrow { origin; _ } | Take { origin; _ } ->
-            Lowering.quote_span st (read_spans st).(origin)
-        | Constant _ -> Lowering.quote_span st (read_spans st).(origin)
-      in
-      let message = "assert " ^ text in
+      let message = "assert " ^ Lowering.quote_span st (read_spans st).(origin) in
       Emit_c.Builder.finish st.builder
         (Fail
            {
@@ -1548,9 +1538,6 @@ and lower_call_into ?failure st (call : Mir.call) destination ~origin =
       | None -> ())
   | None, Capability_method { capability; name } ->
       let slot, signature = Targets.lookup_capability_method st.context capability name in
-      (match signature.output with
-      | Lends _ -> raise_lending_capability_call st origin
-      | Returns _ -> ());
       let arguments, _ =
         evaluate_arguments st { signature with receiver = None } [] call.arguments
       in
@@ -1807,7 +1794,8 @@ and lend ?(forwards = 0) st part (call : Mir.call) ~origin =
                     Targets.lower_call_through_any st ~any_type ~trait:trait.trait ~name ~receiver
                       ~any ~arguments ~lending destination)
             | [] -> Definitions.raise_bug "a call through any with no receiver")
-        | None, Capability_method _ -> raise_lending_capability_call st origin
+        | None, Capability_method { capability; name } ->
+            Targets.raise_lending_capability_method capability name
         | None, Indirect _ ->
             Definitions.raise_bug "a lending call of a function value, whose type cannot lend"
         | None, (Function _ | Intrinsic _) ->

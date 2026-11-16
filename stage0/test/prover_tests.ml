@@ -100,6 +100,24 @@ let () =
         (not (String.includes ~affix:"may overflow `UInt8`" actual))
         || String.includes ~affix:"uses Panic" actual
       then Harness.fail "message %S" actual);
+  Harness.test "an overflow in an impl names where the impl can declare `Panic`" (fun () ->
+      List.iter
+        (fun (text, declaration) ->
+          let actual = read_message text in
+          if not (String.includes ~affix:("allowed to stop the program with " ^ declaration) actual)
+          then Harness.fail "message %S" actual)
+        [
+          (Fixtures.Prover.increment_in_a_greeter_impl, "`uses Panic` on the `impl`.");
+          ( Fixtures.Prover.decrement_in_a_countdown_cursor,
+            "`capability Uses = Panic` in the `impl`." );
+        ]);
+  Harness.test "an overflow in an impl of a trait that fixes its method's capabilities omits Panic"
+    (fun () ->
+      let actual = read_message Fixtures.Prover.increment_in_a_describe_impl in
+      if
+        (not (String.includes ~affix:"may overflow `Int64`" actual))
+        || String.includes ~affix:"Panic" actual
+      then Harness.fail "message %S" actual);
   Harness.test "an index through a bound is proven, since its precondition cannot run" (fun () ->
       expect_not_proven Fixtures.Prover.index_through_a_bound_of_a_function_that_may_panic
         "prover.requires");
@@ -206,7 +224,7 @@ let () =
           (Support.list_declarations packages (Support.parse_module "app::main"))
       in
       match
-        Database.For_testing.read_proof
+        Database.For_testing.find_proof
           (Support.prove (Support.make_database packages) main)
           (Resolve.Names.make_key caller)
       with
@@ -236,7 +254,7 @@ let () =
           (Support.list_declarations packages (Support.parse_module "app::main"))
       in
       match
-        Database.For_testing.read_proof
+        Database.For_testing.find_proof
           (Support.prove (Support.make_database packages) main)
           (Resolve.Names.make_key caller)
       with
@@ -266,7 +284,7 @@ let () =
           (Support.list_declarations packages (Support.parse_module "app::main"))
       in
       match
-        Database.For_testing.read_proof
+        Database.For_testing.find_proof
           (Support.prove (Support.make_database packages) main)
           (Resolve.Names.make_key caller)
       with
@@ -302,7 +320,7 @@ let () =
       let proofs = Support.prove database main in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
-          match Database.For_testing.read_proof proofs (Resolve.Names.make_key declaration) with
+          match Database.For_testing.find_proof proofs (Resolve.Names.make_key declaration) with
           | Some (Value (Obligations _)) -> ()
           | Some (Value (Unsupported _ | Not_proven_here)) ->
               Harness.fail "%s has no obligations" (Path.show declaration.path)
@@ -765,7 +783,15 @@ let () =
       expect_not_proven Fixtures.Prover.quantifier_over_items_in_a_body_ensured_true
         "prover.ensures");
   Harness.test "a quantifier in a body reads the collection's `count` and `element`" (fun () ->
-      expect_proven Fixtures.Prover.quantifier_over_counted_elements_in_a_body)
+      expect_proven Fixtures.Prover.quantifier_over_counted_elements_in_a_body);
+  Harness.test "a quantifier in a specification reads the collection's `count` and `element`"
+    (fun () -> expect_proven Fixtures.Prover.specification_quantifier_over_counted_elements);
+  Harness.test "a quantifier's pattern leaves out the elements it does not match" (fun () ->
+      expect_proven Fixtures.Prover.specification_quantifier_with_a_refutable_pattern);
+  Harness.test "a quantifier over a range value reads the range's `count` and `element`" (fun () ->
+      expect_proven Fixtures.Prover.quantifier_over_a_range_value);
+  Harness.test "a quantifier in a body over a set reaches every member of the set" (fun () ->
+      expect_proven Fixtures.Prover.quantifier_over_set_members_in_a_body)
 
 let swap = Fixtures.Prover.exchange
 
@@ -1177,6 +1203,18 @@ let () =
         List.map (fun (fix : _ Diagnostic.fix) -> fix.title) diagnostic.fixes)
       (check packages (Support.parse_file "app::main"))
   in
+  Harness.test "an impl's method offers no requires, since the trait's would have to imply it"
+    (fun () ->
+      List.iter
+        (fun text ->
+          match fix_titles text with
+          | [] -> ()
+          | actual -> Harness.fail "%s" (String.concat "; " actual))
+        [
+          Fixtures.Prover.increment_in_a_describe_impl;
+          Fixtures.Prover.increment_in_a_greeter_impl;
+          Fixtures.Prover.decrement_in_a_countdown_cursor;
+        ]);
   Harness.test "a divisor that may be zero offers a requires that it is not" (fun () ->
       match fix_titles Fixtures.Prover.halves_of_an_unchecked_divisor with
       | [ "Add `requires parts != 0`" ] -> ()

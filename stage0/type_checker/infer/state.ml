@@ -75,6 +75,8 @@ type state = {
   mutable frames : frame list;
   mutable locals_read : Syntax.id list;
   mutable receiver_modes : (Syntax.id * Types.mode) list;
+  mutable places_without_own : Syntax.id list;
+  mutable mode_keywords : Core.mode_keyword list;
   yielded : (Syntax.id, Types.mode) Hashtbl.t;
   lent_tails : (Syntax.id, unit) Hashtbl.t;
   mutable lambdas : Source.Definition_span.t list;
@@ -928,9 +930,28 @@ let rec find_call_with_mode_keyword state (value : Syntax.expression) =
   match value.kind with
   | Call ({ kind = Member (base, _); _ }, _)
   | Call ({ kind = Bracket ({ kind = Member (base, _); _ }, _); _ }, _) ->
-      if is_place state base then Some value.id else find_call_with_mode_keyword state base
+      if is_place state base then Some (value.id, base) else find_call_with_mode_keyword state base
   | Member (base, _) | Bracket (base, _) | Try base -> find_call_with_mode_keyword state base
   | _ -> None
+
+let note_mode_keyword state (written : Syntax.expression) (mode : Syntax.mode)
+    (operand : Syntax.expression) =
+  let rec strip_parentheses (value : Syntax.expression) =
+    match value.kind with Parenthesized inner -> strip_parentheses inner | _ -> value
+  in
+  let place =
+    match find_call_with_mode_keyword state operand with
+    | Some (_, receiver) -> receiver
+    | None -> operand
+  in
+  state.mode_keywords <-
+    {
+      mode = (match mode with Mut -> Mut | Own -> Own);
+      written = written.id;
+      operand = operand.id;
+      place = (strip_parentheses place).id;
+    }
+    :: state.mode_keywords
 
 let check_resource state (resource : Syntax.resource) =
   let check_capability (path : Syntax.path_type) (method_ : Syntax.name option) =

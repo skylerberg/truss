@@ -1,0 +1,5 @@
+fn has_zero(range: Range[Int64]) -> Bool
+  ensures result == (exists value in range => value == 0)
+{
+  exists value in range => value == 0
+}

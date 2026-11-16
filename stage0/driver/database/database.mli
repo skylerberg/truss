@@ -69,9 +69,9 @@ module For_testing : sig
   val read_core : t -> Path.t -> (Core.t * Types.substitution) option
   val make_mir_lookups : t -> Path.package -> Mir.lookups
   val read_ownership : t -> Resolve.Names.key -> (Core.origin * Core.origin) list part
-  val read_proof : proofs -> Resolve.Names.key -> Prover.proof part option
+  val find_proof : proofs -> Resolve.Names.key -> Prover.proof part option
   val list_reads : t -> string -> string list
-  val list_unread_parts : t -> Path.package list -> Part.computed list
+  val list_unread_parts : t -> Path.package list -> Part.any list
   val list_differences : t -> t -> string list
 
   type observed = { recomputed : string list; collected : string list }

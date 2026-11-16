@@ -811,6 +811,7 @@ module For_testing = struct
   let collect_cache = collect
   let listen = Server.listen
   let call_starting = Server.For_testing.call_starting
+  let remove_ended_servers = Server.For_testing.remove_ended_servers
 
   let interrupt_commit root =
     match Hashtbl.find_opt worktrees root with

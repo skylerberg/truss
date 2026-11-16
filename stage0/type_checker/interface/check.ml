@@ -9,7 +9,7 @@ let list_bound_diagnostics lookups ~package ~list_bounds ~spans named =
               (fun (interface : Types.type_interface) ->
                 Impls.list_required_bounds interface.type_generics
                   (Types.make_substitution interface.type_generics arguments))
-              (Definition.read_type_interface lookups path)
+              (Definition.find_type_interface lookups path)
           with
           | Some required ->
               List.concat_map
@@ -359,7 +359,7 @@ let check_redeclared (state : Checking.state) (name : Syntax.name) (receiver : P
       (fun (required : Types.trait_reference) ->
         List.concat_map
           (fun (bound : Types.trait_reference) ->
-            match Definition.read_trait_interface state.lookups bound.trait with
+            match Definition.find_trait_interface state.lookups bound.trait with
             | Some interface ->
                 List.map
                   (fun (method_ : Types.trait_method) ->
@@ -488,7 +488,7 @@ let check (state : Checking.state) =
           | Some (Impls.From_impl { impl; _ }) ->
               Option.iter
                 (check_proof_bounds state type_ generics)
-                (Definition.read_impl_interface lookups impl)
+                (Definition.find_impl_interface lookups impl)
           | Some _ -> ())
     | None, Type_definition { name; generics; body; clauses }, Type_interface interface ->
         check_no_capability_parameter state "the type" name generics;

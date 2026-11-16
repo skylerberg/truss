@@ -16,7 +16,13 @@ type tables = Tables.published = {
   callees : Path.t option array;
 }
 
-type checked = Body.checked = { form : Core.t; tables : tables; used_packages : Path.package list }
+type checked = Body.checked = {
+  form : Core.t;
+  tables : tables;
+  used_packages : Path.package list;
+  places_without_own : Core.origin list;
+  mode_keywords : Core.mode_keyword list;
+}
 
 let check lookups (key : Resolve.Names.key) ~checks_body =
   Compiler_bug.run_while_doing ~stage:"Infer" (Resolve.Names.show_key key) (fun () ->
@@ -54,7 +60,7 @@ let find_form_origin (interface : Interface.Lookups.t) ~is_derived (path : Path.
   | None, Method { owner = Derived { type_; _ }; _ } when is_derived path ->
       Option.map (fun type_key -> (Derived type_key, [])) (interface.names.find_key type_)
   | None, Method { owner = (Impl _ | Derived _) as owner; name; receiver } ->
-      Option.bind (Interface.Definition.read_impl_interface interface owner)
+      Option.bind (Interface.Definition.find_impl_interface interface owner)
         (fun (impl : Types.impl_interface) ->
           Option.bind (Interface.Impls.make_impl_substitution interface owner) (fun substitution ->
               Option.map
