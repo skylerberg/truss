@@ -59,6 +59,8 @@ module Code = struct
     | Loop_cost_bound
     | Function_type_names
     | Misplaced_requires
+    | Misplaced_function_type
+    | Misplaced_associated_type
     | Misplaced_potential
     | Increment
     | Double_negation
@@ -307,6 +309,8 @@ module Code = struct
     | Loop_cost_bound -> "loop_cost_bound"
     | Function_type_names -> "function_type_names"
     | Misplaced_requires -> "misplaced_requires"
+    | Misplaced_function_type -> "misplaced_function_type"
+    | Misplaced_associated_type -> "misplaced_associated_type"
     | Misplaced_potential -> "misplaced_potential"
     | Increment -> "increment"
     | Double_negation -> "double_negation"

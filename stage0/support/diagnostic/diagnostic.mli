@@ -59,6 +59,8 @@ module Code : sig
     | Loop_cost_bound
     | Function_type_names
     | Misplaced_requires
+    | Misplaced_function_type
+    | Misplaced_associated_type
     | Misplaced_potential
     | Increment
     | Double_negation

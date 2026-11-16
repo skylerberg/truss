@@ -184,6 +184,39 @@ let parameters ?(lends = false) cursor (parameters : parameter list) =
       | Self_parameter _ | Parameter_error -> ())
     parameters
 
+let rec trait_arguments cursor ~is_law_proof (trait_ : path_type) =
+  List.iter
+    (function
+      | Type_argument type_ | Constraint (_, type_) -> trait_argument cursor ~is_law_proof type_
+      | Count _ | Count_name _ -> ())
+    trait_.arguments
+
+and trait_argument cursor ~is_law_proof (type_ : type_expression) =
+  let report_associated_type written =
+    report cursor Misplaced_associated_type type_.id
+      (if is_law_proof then
+         Printf.sprintf
+           "`%s` cannot be a trait argument of a law proof, since no `impl` can have one." written
+       else
+         Printf.sprintf
+           "`%s` cannot be a trait argument of an `impl`: an associated type may stand for any \
+            type, so the `impl` could overlap every other `impl` of the trait for its type."
+           written)
+  in
+  match type_.kind with
+  | Path_type path | Any_type path -> trait_arguments cursor ~is_law_proof path
+  | Function_type _ ->
+      report cursor Misplaced_function_type type_.id
+        (if is_law_proof then
+           "A function type cannot be a trait argument of a law proof, since no `impl` can have \
+            one."
+         else
+           "A function type cannot be a trait argument of an `impl`. Use a record that holds the \
+            function, such as `type Callback(run: fn(Int64) -> Int64)`, as the argument.")
+  | Associated (parameter, name) -> report_associated_type (parameter.text ^ "." ^ name.text)
+  | Self_type (Some name) -> report_associated_type ("Self." ^ name.text)
+  | Self_type None | Type_error -> ()
+
 let clauses cursor clauses =
   List.iter (Syntax_walk.clause (expression cursor (specification plain))) clauses
 
@@ -257,7 +290,8 @@ let definition cursor (definition : definition) =
               block cursor (specification plain) law.body
           | Associated_type _ | Associated_capability _ | Trait_member_error -> ())
         members
-  | Impl { type_; members; _ } ->
+  | Impl { trait_; type_; members; _ } ->
+      trait_arguments cursor ~is_law_proof:false trait_;
       generic_parameters cursor type_.generics;
       List.iter
         (fun (member : impl_member node) ->
@@ -275,7 +309,8 @@ let definition cursor (definition : definition) =
       parameters cursor theorem_parameters;
       clauses cursor theorem_clauses;
       block cursor (proof plain) body
-  | Law_proof { type_; body; _ } ->
+  | Law_proof { trait_; type_; body; _ } ->
+      trait_arguments cursor ~is_law_proof:true trait_;
       generic_parameters cursor type_.generics;
       block cursor (proof plain) body
   | Definition_error _ -> ()
