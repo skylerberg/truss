@@ -181,7 +181,7 @@ let loop_entry context frame costs =
               ignore (specification_value context frame amount)
           | Finite -> ());
           oblige context frame Cost
-            (span_of frame.source written.origin)
+            (locate context frame.source written.origin)
             [
               Text "The loop's `";
               quote frame.source written.origin;
@@ -192,7 +192,7 @@ let loop_entry context frame costs =
     costs
 
 let loop_iterations context loop_at head costs ~mark ~facts ~ends ~breaks =
-  let span = span_of head.source loop_at in
+  let location = locate context head.source loop_at in
   List.iter
     (fun cost ->
       match cost.rule with
@@ -210,7 +210,7 @@ let loop_iterations context loop_at head costs ~mark ~facts ~ends ~breaks =
           List.iter
             (fun (frame, when_) ->
               oblige context frame Cost
-                (span_of frame.source written_cost.origin)
+                (locate context frame.source written_cost.origin)
                 [
                   Text "The loop's `";
                   quote frame.source written_cost.origin;
@@ -257,7 +257,7 @@ let loop_iterations context loop_at head costs ~mark ~facts ~ends ~breaks =
               fact context head (Logic.equal per bound);
               List.iter2
                 (fun (frame : frame) spent ->
-                  oblige context frame Cost span
+                  oblige context frame Cost location
                     [
                       Text
                         "The prover cannot show that this iteration of the loop costs no more than \
@@ -267,7 +267,7 @@ let loop_iterations context loop_at head costs ~mark ~facts ~ends ~breaks =
                     (counted_with ~counter:cost.counter ~at:spent ~bound:per))
                 frames spent
           | None ->
-              oblige context head Cost span
+              oblige context head Cost location
                 [
                   Text
                     "The prover cannot bound the cost of one iteration of this loop by the values \
@@ -407,12 +407,12 @@ let assume_preserved_validity context head preserved =
       | None -> ())
     preserved
 
-let check_preserved_validity context end_ span preserved =
+let check_preserved_validity context end_ location preserved =
   List.iter
     (fun (name, ty, valid_on_entry, read) ->
       match read end_ with
       | Some term ->
-          oblige context end_ Invariant span
+          oblige context end_ Invariant location
             [
               Text
                 (Printf.sprintf "The invariant of `%s` may not hold for `%s` after an iteration."
@@ -428,7 +428,7 @@ let check_invariants context frame clauses ~when_ =
     (fun (invariant : Mir.formula) ->
       let _, term = specification_value context frame invariant in
       oblige context frame Invariant
-        (span_of frame.source invariant.origin)
+        (locate context frame.source invariant.origin)
         [
           Text "The loop invariant `";
           quote frame.source invariant.origin;
@@ -473,7 +473,7 @@ let end_iterations context frame loop_at clauses (start : loop_start) ~head ~ins
   List.iter
     (fun (end_ : frame) ->
       check_invariants context (with_through end_) clauses ~when_:"after an iteration";
-      check_preserved_validity context end_ (span_of frame.source loop_at) start.preserved)
+      check_preserved_validity context end_ (locate context frame.source loop_at) start.preserved)
     ends
 
 let iterations_so_far context head costs =
@@ -588,7 +588,7 @@ let some_parts context frame element =
 
 let own_cursor_loop ~(for_loop : for_loop) context frame (cursor_access : passed_place)
     (next : Invocation.callee) ~cursor_type =
-  let span = span_of frame.source for_loop.for_at in
+  let location = locate context frame.source for_loop.for_at in
   let clauses = for_loop.for_clauses in
   ignore (cursor_access.read frame);
   let element_type = substituted context frame for_loop.element_type in
@@ -596,7 +596,7 @@ let own_cursor_loop ~(for_loop : for_loop) context frame (cursor_access : passed
     match next with
     | Trait_method { trait; evidence = Impl _ as evidence; _ } -> (trait, evidence)
     | _ ->
-        unsupported span "a loop over `%s`, whose `Cursor` the prover cannot find"
+        unsupported location "a loop over `%s`, whose `Cursor` the prover cannot find"
           (Types.show cursor_type)
   in
   let impl, impl_arguments =
@@ -613,7 +613,7 @@ let own_cursor_loop ~(for_loop : for_loop) context frame (cursor_access : passed
     match method_contract context.lookups trait "next" Mut evidence with
     | Some contract -> contract
     | None ->
-        unsupported span "a loop over `%s`, whose `next` the prover cannot read"
+        unsupported location "a loop over `%s`, whose `next` the prover cannot read"
           (Types.show cursor_type)
   in
   let path = Path.Method { owner = impl; name = "next"; receiver = Mut } in
@@ -624,7 +624,7 @@ let own_cursor_loop ~(for_loop : for_loop) context frame (cursor_access : passed
   in
   let measures = measures_of clauses in
   if context.terminates && not (signature_terminates context path) then
-    oblige context frame Termination span
+    oblige context frame Termination location
       [
         Text
           (Printf.sprintf "This loop may not end: `%s`'s `next` has no `time` clause."
@@ -632,7 +632,7 @@ let own_cursor_loop ~(for_loop : for_loop) context frame (cursor_access : passed
       ]
       (Logic.Boolean false);
   if context.terminates && measures = None then
-    oblige context frame Termination span
+    oblige context frame Termination location
       [
         Text
           "This loop may not end: a cursor of a type's own promises no end, so give the loop a \
@@ -665,7 +665,7 @@ let own_cursor_loop ~(for_loop : for_loop) context frame (cursor_access : passed
               (fun (end_ : frame) ->
                 match measured end_ with
                 | Some after ->
-                    oblige context end_ Termination span
+                    oblige context end_ Termination location
                       [ Text "This loop's measure may not decrease." ]
                       (lexicographically_less before after)
                 | None -> ())
@@ -802,7 +802,7 @@ let for_ context frame (for_loop : for_loop) =
         (fun (end_ : frame) ->
           Option.iter
             (oblige context end_ Invariant
-               (span_of frame.source for_loop.for_at)
+               (locate context frame.source for_loop.for_at)
                [
                  Text
                    "An iteration of this loop may change how many elements the collection has. The \
@@ -833,7 +833,7 @@ let for_ context frame (for_loop : for_loop) =
 
 let while_ context frame (loop : while_loop) =
   let clauses = loop.while_clauses in
-  let span = span_of frame.source loop.while_at in
+  let location = locate context frame.source loop.while_at in
   check_invariants context frame clauses ~when_:"on entry to the loop";
   let { loop_costs = costs; fresh_mark = mark; facts_mark; preserved; havocked = head } =
     enter_loop context frame ~entry:frame clauses ~changed:loop.changed
@@ -873,7 +873,7 @@ let while_ context frame (loop : while_loop) =
   in
   let start_measures = if context.terminates then measure_terms inside else None in
   if context.terminates && start_measures = None then
-    oblige context inside Termination span
+    oblige context inside Termination location
       [ Text "This loop may not end: give it a `decreases` clause." ]
       (Logic.Boolean false);
   let most =
@@ -902,10 +902,10 @@ let while_ context frame (loop : while_loop) =
   List.iter
     (fun (end_ : frame) ->
       check_invariants context end_ clauses ~when_:"after an iteration";
-      check_preserved_validity context end_ span preserved;
+      check_preserved_validity context end_ location preserved;
       match (start_measures, measure_terms end_) with
       | Some before, Some after ->
-          oblige context end_ Termination span
+          oblige context end_ Termination location
             [ Text "This loop's measure may not decrease." ]
             (lexicographically_less before after)
       | _ -> ())

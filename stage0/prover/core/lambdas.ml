@@ -267,11 +267,11 @@ let lambda_definition context frame (function_type : Types.function_type) (writt
       | _ -> None)
   | _ -> None
 
-let check_valid context frame span ty term ~deep ~when_ =
+let check_valid context frame location ty term ~deep ~when_ =
   match validity context frame ~assuming:false ~deep ty term with
   | Logic.Boolean true -> ()
   | valid ->
-      oblige context frame Invariant span
+      oblige context frame Invariant location
         [ Text (Printf.sprintf "The invariant of `%s` may not hold %s." (Types.show ty) when_) ]
         valid
 
@@ -311,13 +311,15 @@ let facts_since context count =
 
 let read_lambda ?(capture_free = false) context frame ~(site : Invocation.site)
     (written : lambda_code) ~facts =
-  let span = span_of frame.source site.origin in
+  let location = locate context frame.source site.origin in
   let ty = substituted context frame site.type_ in
   let function_type =
-    match ty with Types.Function function_type -> function_type | _ -> unsupported span "a lambda"
+    match ty with
+    | Types.Function function_type -> function_type
+    | _ -> unsupported location "a lambda"
   in
   if List.length written.code.parameters <> List.length function_type.inputs then
-    unsupported span "a lambda with a different number of parameters";
+    unsupported location "a lambda with a different number of parameters";
   let called = fresh context frame "called" Logic.Bool in
   let inside = { (restrict frame called) with result = None } in
   let start_fresh = context.fresh
@@ -426,7 +428,7 @@ let read_lambda ?(capture_free = false) context frame ~(site : Invocation.site)
           (fun ((exit_ : frame), returned) ->
             Option.iter
               (fun term ->
-                check_valid context exit_ span
+                check_valid context exit_ location
                   (substituted context frame function_type.output)
                   term ~deep:true ~when_:"for the value this lambda returns")
               returned;
@@ -436,7 +438,7 @@ let read_lambda ?(capture_free = false) context frame ~(site : Invocation.site)
                 | Types.Mut, Source { local; _ } -> (
                     match Locals.find_opt local exit_.locals with
                     | Some term ->
-                        check_valid context exit_ span (substituted context frame input) term
+                        check_valid context exit_ location (substituted context frame input) term
                           ~deep:true ~when_:"for a `mut` parameter when this lambda ends"
                     | None -> ())
                 | _ -> ())
@@ -457,7 +459,7 @@ let read_lambda ?(capture_free = false) context frame ~(site : Invocation.site)
                   | Exactly_cost (Some limit) -> Logic.equal spent (Logic.Integer limit)
                   | _ -> Logic.Boolean true
                 in
-                oblige context exit_ Cost span
+                oblige context exit_ Cost location
                   [
                     Text
                       (Printf.sprintf "This lambda may spend more than its type, `%s`, allows."
@@ -486,7 +488,7 @@ let read_lambda ?(capture_free = false) context frame ~(site : Invocation.site)
                 ( bound,
                   List.filter_map
                     (fun ((exit_ : frame), spent) ->
-                      obligation_at context exit_ Cost span
+                      obligation_at context exit_ Cost location
                         [
                           Text
                             "The prover cannot show that a call of this lambda takes no more time \

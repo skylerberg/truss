@@ -20,7 +20,7 @@ val apply_map_literal :
   State.context ->
   State.frame ->
   ty:Types.ty ->
-  span:Source.Definition_span.t ->
+  location:State.location ->
   (int option * Logic.term * Logic.term) list ->
   State.frame * Logic.term
 
@@ -56,13 +56,12 @@ val apply_construct :
   (string * Logic.term option) list ->
   State.frame * Logic.term
 
-val text_matches :
-  State.context -> Source.Definition_span.t -> Types.ty -> Logic.term -> string -> Logic.term
+val text_matches : State.context -> State.location -> Types.ty -> Logic.term -> string -> Logic.term
 
 val apply_specification_function :
   State.context ->
   State.frame ->
-  span:Source.Definition_span.t ->
+  location:State.location ->
   Core.specification_function ->
   Logic.term list ->
   unconverted:Types.ty list ->

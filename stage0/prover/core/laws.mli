@@ -19,12 +19,7 @@ val law_frame :
   State.frame
 
 val assume_laws :
-  State.context ->
-  State.frame ->
-  at:Source.Definition_span.t ->
-  Types.trait_reference ->
-  Types.ty ->
-  unit
+  State.context -> State.frame -> at:State.location -> Types.trait_reference -> Types.ty -> unit
 
 val template_trait : Path.t
 val signature_terminates : State.context -> Path.t -> bool

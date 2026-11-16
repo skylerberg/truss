@@ -7,7 +7,7 @@ module Symbol = Logic.Symbol
 
 type proof =
   | Obligations of State.outcome
-  | Unsupported of Source.Definition_span.t * string
+  | Unsupported of State.location * string
   | Not_proven_here
 
 let inherited (lookups : Lookups.t) (path : Path.t) =
@@ -38,7 +38,7 @@ let impl_laws (lookups : Lookups.t) (key : Names.key) source =
           ~proofs:
             (Contracts.law_proofs lookups (Path.package key.path) interface.implements
                interface.for_type)
-          ~at:(Translate.definition_span source);
+          ~at:Whole_definition;
       ]
   | _ -> []
 
@@ -119,7 +119,6 @@ let derived_default (lookups : Lookups.t) (key : Names.key) (source : State.sour
   in
   if derives_default && Option.is_some (Mir.code_of_path lookups.mir path) then
     let outcome = Translate.function_ lookups source ~path in
-    let span = Translate.definition_span source in
     List.map
       (fun (obligation : State.obligation) ->
         let message =
@@ -132,12 +131,12 @@ let derived_default (lookups : Lookups.t) (key : Names.key) (source : State.sour
               ]
           | _ -> Text "In the derived `Default`: " :: obligation.message
         in
-        { obligation with span; message })
+        { obligation with location = Whole_definition; message })
       outcome.obligations
   else []
 
 let proof (lookups : Lookups.t) (key : Names.key) =
-  match (lookups.interface.names.declaration key, Contracts.home_source lookups key) with
+  match (lookups.interface.names.declaration key, Contracts.source_at_key lookups key) with
   | _ when is_specification_module key -> Not_proven_here
   | declaration, source -> (
       lookups.patterns key;
@@ -210,8 +209,7 @@ let proof (lookups : Lookups.t) (key : Names.key) =
         | Trait | Capability | Member_constant | Law_proof -> Not_proven_here
       with
       | Facts.Unsupported (span, message) -> Unsupported (span, message)
-      | Facts.Foreign_unsupported message -> Unsupported (Translate.definition_span source, message)
-      )
+      | Facts.Foreign_unsupported message -> Unsupported (Whole_definition, message))
 
 let float_text bits =
   let shortest ~most ~same value =
@@ -361,11 +359,9 @@ let counterexample members (obligation : State.obligation) answer_values =
 
 let diagnostic code span message = Diagnostic.make ~code:(Diagnostic.Code.Prover code) span message
 
-let require_in_definition (lookups : Lookups.t) (key : Names.key) (span : Source.Definition_span.t)
-    =
-  if span.stop > String.length (lookups.interface.names.text key) then
-    Facts.bug "%s has no span %d..%d" (Names.show_key key) span.start span.stop;
-  span
+let resolve_location (names : Names.lookups) (key : Names.key) (location : State.location) =
+  Source.Definition_span.locate (names.spans key)
+    (match location with Node origin -> origin | Whole_definition -> (names.definition key).id)
 
 let substituted text spans clause replacements =
   let clause_span = Source.Definition_span.locate spans clause in
@@ -431,11 +427,11 @@ type 'span state = {
 
 type verdict = (Source.Definition_span.t state * (Names.key * Core.origin) option) list
 
-let definition_states lookups (key : Names.key) proof answers =
-  let require_in_definition span = require_in_definition lookups key span in
+let definition_states (lookups : Lookups.t) (key : Names.key) proof answers =
+  let resolve location = resolve_location lookups.interface.names key location in
   match proof with
   | Not_proven_here -> []
-  | Unsupported (span, construct) ->
+  | Unsupported (location, construct) ->
       let message =
         Printf.sprintf "The prover cannot read %s yet, so nothing in this definition is proven."
           construct
@@ -443,9 +439,9 @@ let definition_states lookups (key : Names.key) proof answers =
       [
         ( {
             code = Unsupported;
-            span = require_in_definition span;
+            span = resolve location;
             shows = message;
-            failure = Some (diagnostic Unsupported (require_in_definition span) message);
+            failure = Some (diagnostic Unsupported (resolve location) message);
             trusts_compiled_code = false;
           },
           None );
@@ -453,7 +449,7 @@ let definition_states lookups (key : Names.key) proof answers =
   | Obligations outcome ->
       List.map2
         (fun (obligation : State.obligation) answer ->
-          let span = require_in_definition obligation.span in
+          let span = resolve obligation.location in
           let message = render lookups obligation.message in
           let others =
             match obligation.code with

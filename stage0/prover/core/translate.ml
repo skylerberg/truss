@@ -98,10 +98,6 @@ let empty_frame source =
     spent = [];
   }
 
-let definition_span (source : source) =
-  let spans = Lazy.force source.spans in
-  Source.Definition_span.locate spans (Array.length spans - 1)
-
 type promise = { counter : Costs.counter; clause : Mir.cost; written_in : source; inherited : bool }
 
 let promises context (source : source) locals (costs : Mir.cost list) ~inherited =
@@ -111,7 +107,7 @@ let promises context (source : source) locals (costs : Mir.cost list) ~inherited
       | { resource = Time; bound = Finite; _ } -> None
       | _ -> (
           match resource_of cost ~locals with
-          | None -> unsupported (span_of source cost.origin) "this `calls` target"
+          | None -> unsupported (locate context source cost.origin) "this `calls` target"
           | Some resource ->
               let counter =
                 { Costs.resource; counting = counting_of cost; amortized = cost.amortized }
@@ -132,7 +128,7 @@ let promised_by (lookups : Lookups.t) (source : source) =
       "capability"
   | _ -> "trait"
 
-let keep_promise context (frame : frame) (promise : promise) ~(at : frame) ~span ~change =
+let keep_promise context (frame : frame) (promise : promise) ~(at : frame) ~location ~change =
   let spent =
     match List.assoc_opt promise.counter frame.spent with Some term -> term | None -> Costs.zero
   in
@@ -149,7 +145,7 @@ let keep_promise context (frame : frame) (promise : promise) ~(at : frame) ~span
     | Exactly -> Logic.equal spent amount
     | At_most -> Costs.at_most spent amount
   in
-  oblige context frame Cost span
+  oblige context frame Cost location
     [
       Text
         (if promise.inherited then
@@ -183,7 +179,6 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
   in
   let home = home source in
   let context = new_context lookups ~home ~current:path ~terminates ~measures:contract.decreases in
-  let returns_span = definition_span source in
   context.proving <- proof;
   context.callbacks <-
     List.filter_map
@@ -202,7 +197,7 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
             let self_type =
               match signature with
               | Some { receiver = Some (_, ty); _ } -> ty
-              | _ -> unsupported returns_span "`self` without a type"
+              | _ -> unsupported Whole_definition "`self` without a type"
             in
             let self = arrive context frame "self" self_type in
             (match self with
@@ -331,7 +326,7 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
                (fun frame (requirement : Mir.formula) ->
                  let frame, term = specification_value context frame requirement in
                  oblige context frame Requires
-                   (span_of frame.source requirement.origin)
+                   (locate context frame.source requirement.origin)
                    [
                      Text "`";
                      quote source requirement.origin;
@@ -383,7 +378,7 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
       let frame = { frame with result = returned } in
       (match (returned, output) with
       | Some term, Some output ->
-          check_valid context frame returns_span output term ~deep:true
+          check_valid context frame Whole_definition output term ~deep:true
             ~when_:"for the value returned"
       | _ -> ());
       List.iter
@@ -392,13 +387,13 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
             (Locals.find_opt parameter.local frame.locals, local_type context frame parameter.local)
           with
           | Some term, Some ty ->
-              check_valid context frame returns_span ty term ~deep:true
+              check_valid context frame Whole_definition ty term ~deep:true
                 ~when_:(Printf.sprintf "for `%s` when the function returns" parameter.name)
           | _ -> ())
         mut_parameters;
       (match (mut_self, is_updating_helper, frame.self, frame.self_type) with
       | true, false, Some self, Some self_type ->
-          check_valid context frame returns_span self_type self ~deep:true
+          check_valid context frame Whole_definition self_type self ~deep:true
             ~when_:"for `self` when the method returns"
       | _ -> ());
       (match (context.yield_ensures, frame.yielded_so_far) with
@@ -409,7 +404,7 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
                 specification_value context { frame with yielded = Some yielded_so_far } ensured
               in
               oblige context frame Ensures
-                (span_of frame.source ensured.origin)
+                (locate context frame.source ensured.origin)
                 [
                   Text "`"; quote source ensured.origin; Text "` may not hold when the method ends.";
                 ]
@@ -420,7 +415,7 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
             (fun (ensured : Mir.formula) ->
               let _, term = specification_value context frame ensured in
               oblige context frame Ensures
-                (span_of frame.source ensured.origin)
+                (locate context frame.source ensured.origin)
                 [
                   Text "`";
                   quote source ensured.origin;
@@ -471,12 +466,12 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
             | Some (_, inside) ->
                 keep_promise context under_trait promise
                   ~at:{ inside with locals = inside.old_locals; self = inside.old_self }
-                  ~span:returns_span ~change
+                  ~location:Whole_definition ~change
             | None -> ()
           else
             keep_promise context frame promise
               ~at:{ frame with locals = frame.old_locals; self = frame.old_self; result = returned }
-              ~span:(span_of source promise.clause.origin)
+              ~location:(locate context source promise.clause.origin)
               ~change)
         promised;
       match trait_frame frame ~result:returned with
@@ -484,7 +479,7 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
           List.iter
             (fun (clause : Mir.formula) ->
               let _, term = specification_value context inside clause in
-              oblige context under_trait Ensures returns_span
+              oblige context under_trait Ensures Whole_definition
                 [
                   Text (Printf.sprintf "The %s's `" (promised_by lookups part.callee));
                   quote part.callee clause.origin;
@@ -607,7 +602,7 @@ let type_ (lookups : Lookups.t) (source : source) ~path =
         (fun (written : Mir.formula) ->
           let _, own = specification_value context at_value written in
           oblige context at_value Cost
-            (span_of at_value.source written.origin)
+            (locate context at_value.source written.origin)
             [
               Text
                 (Printf.sprintf

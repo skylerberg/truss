@@ -457,12 +457,7 @@ let () =
                   fn caller() -> Int64 { callee(1) }\n" );
              ])
         ~exactly:
-          [
-            "import check app/main/main.truss";
-            "namespace app";
-            "parsed app/main/main.truss";
-            "proof app::main::callee";
-          ]);
+          [ "import check app/main/main.truss"; "namespace app"; "parsed app/main/main.truss" ]);
   test "an edit to a callee's body recomputes its lowered code and not its caller's" (fun () ->
       let recomputed =
         propagated_with_roots ~roots:[ "caller" ]
@@ -608,7 +603,6 @@ let () =
             "namespace app";
             "package check app type app::main::Signup";
             "parsed app/main/main.truss";
-            "proof app::main::Signup";
           ])
 
 let lowered_program test =

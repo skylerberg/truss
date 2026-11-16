@@ -58,7 +58,7 @@ let requires_fix context frame (part : part) (requirement : Mir.requirement) ter
           requirement.names
       in
       if List.for_all Option.is_some replacements then
-        add_requires context frame
+        add_requires context
           [
             Substituted
               { key; clause = clause.origin; replacements = List.filter_map Fun.id replacements };
@@ -122,7 +122,7 @@ let contract_call context frame (site : Invocation.site) (invocation : Invocatio
     else values
   in
   let caller = frame.source in
-  let span = span_of frame.source site.origin in
+  let location = locate context frame.source site.origin in
   let argument_at index =
     List.find_map
       (fun (passed : passed) -> if passed.position = index then Some passed.term else None)
@@ -199,7 +199,7 @@ let contract_call context frame (site : Invocation.site) (invocation : Invocatio
         let after =
           List.map (fun (ty, _, index) -> rank context ty (argument_at_index values index)) pairs
         in
-        oblige context frame Termination span
+        oblige context frame Termination location
           [
             Text
               "This recursive call may not be on a part of its parameters: give the function a \
@@ -210,7 +210,7 @@ let contract_call context frame (site : Invocation.site) (invocation : Invocatio
               (List.map (fun right_term -> Operation ("<=", [ int 0; right_term ])) before)
             &&& lexicographically_less before after)
     | [], _ | _, [] ->
-        oblige context frame Termination span
+        oblige context frame Termination location
           [
             Text
               (Printf.sprintf
@@ -240,7 +240,7 @@ let contract_call context frame (site : Invocation.site) (invocation : Invocatio
             callee_measures
         in
         let before, after = prefix before after in
-        oblige context frame Termination span
+        oblige context frame Termination location
           (Text "This call may not decrease `"
            :: List.concat
                 (List.mapi
@@ -263,7 +263,7 @@ let contract_call context frame (site : Invocation.site) (invocation : Invocatio
           (fun (requirement : Mir.requirement) ->
             let clause = requirement.clause in
             let _, term = specification_value context entry clause in
-            oblige context frame Requires span
+            oblige context frame Requires location
               ?cited:(Option.map (fun key -> (key, clause.origin)) part.callee.key)
               ~fixes:(requires_fix context frame part requirement term values)
               [
@@ -381,7 +381,7 @@ let contract_call context frame (site : Invocation.site) (invocation : Invocatio
   let check_left () =
     match left_valid with
     | Some (_, leave) ->
-        check_valid context after span result_type (leave result) ~deep:true
+        check_valid context after location result_type (leave result) ~deep:true
           ~when_:"when the lend of this part ends"
     | None -> ()
   in
@@ -722,7 +722,7 @@ let function_value_amount context frame (function_type : Types.function_type) ca
 
 let apply_call ?lent_final context frame (site : Invocation.site) (invocation : Invocation.t)
     ~through (values : passed list) =
-  let span = span_of frame.source site.origin in
+  let location = locate context frame.source site.origin in
   List.iter
     (fun (passed : passed) ->
       match passed.shape with
@@ -746,7 +746,7 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
       List.iter
         (fun (passed : passed) ->
           if not (exempt && passed.position = 0) then
-            check_valid context frame span passed.type_ passed.term ~deep:true
+            check_valid context frame location passed.type_ passed.term ~deep:true
               ~when_:"when it is passed to this call")
         values);
   let havoc_mut frame =
@@ -819,7 +819,7 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
       | Intrinsic _ -> true
     in
     if not ends then
-      oblige context frame Termination span
+      oblige context frame Termination location
         [
           Text
             "This call may not end, since its callee has no `time` clause, so neither may this \
@@ -833,7 +833,7 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
             (Mir.Call_edges.written_methods context.lookups.interface.names impl)
         in
         if reaches_here then
-          oblige context frame Termination span
+          oblige context frame Termination location
             [
               Text
                 (Printf.sprintf
@@ -876,7 +876,7 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
             | None -> evidence)
         | _ -> evidence
       in
-      assume_laws context frame ~at:span trait self_type;
+      assume_laws context frame ~at:location trait self_type;
       let operands () = List.map (fun (passed : passed) -> passed.term) values in
       match (name, evidence, operands ()) with
       | ("minimum_value" | "maximum_value" | "bit_width"), _, []
@@ -897,7 +897,7 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
           (match evidence with
           | (Bound | Dynamic) when name = "from_template" && Path.equal trait.trait template_trait
             ->
-              oblige context frame Requires span
+              oblige context frame Requires location
                 [
                   Text
                     "A call of `from_template` through a bound or `any` cannot see the tag's \
@@ -1004,7 +1004,7 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
             match array.type_ with
             | Types.Named { arguments = Types.Type element :: _; _ } -> (
                 let model = array_model context frame array.type_ array.term in
-                oblige context frame Requires span
+                oblige context frame Requires location
                   [
                     Text "`"; quote frame.source site.origin; Text "` may not be within the array.";
                   ]
@@ -1044,7 +1044,7 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
             | Types.Named { arguments = [ Types.Type element; Types.Value count ]; _ } ->
                 let elements = buffer_model context Storage element storage.term in
                 let count = value_term context frame count in
-                oblige context frame Requires span
+                oblige context frame Requires location
                   [
                     Text "`";
                     quote frame.source site.origin;

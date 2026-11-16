@@ -5,10 +5,13 @@ module Lookups = Lookups
 
 type proof =
   | Obligations of State.outcome
-  | Unsupported of Source.Definition_span.t * string
+  | Unsupported of State.location * string
   | Not_proven_here
 
 val proof : Lookups.t -> Resolve.Names.key -> proof
+
+val resolve_location :
+  Resolve.Names.lookups -> Resolve.Names.key -> State.location -> Source.Definition_span.t
 
 type 'span state = {
   code : Diagnostic.Code.prover;
