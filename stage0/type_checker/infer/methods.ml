@@ -531,7 +531,9 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
         Some (Path.Read, List.assoc Path.Read overloads)
     | None
       when (not has_mode_keyword)
-           && ((not place) || not (Modes.is_known_not_plain state receiver_type)) -> (
+           && ((not place)
+              || State.decide_property state Interface.Properties.Plain receiver_type
+                 <> Interface.Properties.Fails) -> (
         match List.assoc_opt Path.Own overloads with
         | Some method_path -> Some (Path.Own, method_path)
         | None -> None)

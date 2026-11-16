@@ -6,7 +6,6 @@ val classify_scrutinee_mode : State.state -> Syntax.expression -> Types.mode
 type mutation = Assignment | Passed_mut
 
 val mutate : State.state -> State.env -> by:mutation -> Syntax.expression -> unit
-val is_known_not_plain : State.state -> Types.ty -> bool
 val find_lent_field_mode : State.state -> Syntax.expression -> Types.ty -> Types.mode option
 
 val check_mode :
