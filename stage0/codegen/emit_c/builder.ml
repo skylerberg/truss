@@ -56,7 +56,7 @@ type t = {
   mentions : Locals.t Dynarray.t;
   successors : Lowered.block list Dynarray.t;
   facts : facts Dynarray.t;
-  owners : int Dynarray.t;
+  owners : int option Dynarray.t;
   mutable current : Lowered.block;
   mutable pending : Buffer.t;
   functions : function_ Dynarray.t;
@@ -97,7 +97,7 @@ let block builder =
   Dynarray.add_last builder.mentions Locals.empty;
   Dynarray.add_last builder.successors [];
   Dynarray.add_last builder.facts (no_facts ());
-  Dynarray.add_last builder.owners (-1);
+  Dynarray.add_last builder.owners None;
   Dynarray.length builder.texts - 1
 
 let start_function builder ~code =
@@ -135,7 +135,7 @@ let prologue_context builder (function_ : function_) =
       function_.mentioned <- Locals.add local function_.mentioned)
 
 let start builder block =
-  Dynarray.set builder.owners block builder.function_;
+  Dynarray.set builder.owners block (Some builder.function_);
   Dynarray.set builder.mentions block Locals.empty;
   Dynarray.set builder.facts block (no_facts ());
   builder.current <- block;
@@ -303,16 +303,17 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
   let add key keys = if List.exists (Instance.equal key) keys then keys else key :: keys in
   Array.iteri
     (fun block is_reached ->
-      if is_reached && owners.(block) >= 0 then begin
-        let function_ = functions.(owners.(block)) in
-        function_.mentioned <-
-          Locals.union (Dynarray.get builder.mentions block) function_.mentioned;
-        let facts = Dynarray.get builder.facts block and context = function_.code.context in
-        context.instances <- List.fold_right add facts.instances context.instances;
-        context.called <- List.fold_right add facts.called context.called;
-        context.calls <- facts.calls @ context.calls;
-        context.failures <- facts.failures @ context.failures
-      end)
+      match owners.(block) with
+      | Some owner when is_reached ->
+          let function_ = functions.(owner) in
+          function_.mentioned <-
+            Locals.union (Dynarray.get builder.mentions block) function_.mentioned;
+          let facts = Dynarray.get builder.facts block and context = function_.code.context in
+          context.instances <- List.fold_right add facts.instances context.instances;
+          context.called <- List.fold_right add facts.called context.called;
+          context.calls <- facts.calls @ context.calls;
+          context.failures <- facts.failures @ context.failures
+      | Some _ | None -> ())
     reached;
   let own = functions.(0) in
   own.mentioned <- List.fold_left (fun set local -> Locals.add local set) own.mentioned parameters;
@@ -452,7 +453,8 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
       let blocks =
         function_.entry
         :: List.filter
-             (fun block -> block <> function_.entry && owners.(block) = number && reached.(block))
+             (fun block ->
+               block <> function_.entry && owners.(block) = Some number && reached.(block))
              (List.init (Array.length texts) Fun.id)
       in
       List.iter
