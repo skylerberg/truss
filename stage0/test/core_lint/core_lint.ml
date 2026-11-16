@@ -450,7 +450,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
   let name = match key with Some key -> Resolve.Names.show_key key | None -> Path.show path in
   let source =
     lazy
-      (Option.map (fun key -> (interface.names.list_spans key, interface.names.read_text key)) key)
+      (Option.map (fun key -> (interface.names.read_spans key, interface.names.read_text key)) key)
   in
   let quoted () =
     match (!at, Lazy.force source) with

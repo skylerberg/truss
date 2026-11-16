@@ -635,7 +635,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   | Some key -> (
                       match lookups.read_contract key with
                       | { definition = Type { invariants; _ } } ->
-                          let spans = lookups.interface.names.list_spans key in
+                          let spans = lookups.interface.names.read_spans key in
                           let text = lookups.interface.names.read_text key in
                           let quoted (origin : Core.origin) =
                             collapse_spaces

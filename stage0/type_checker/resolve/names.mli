@@ -61,7 +61,7 @@ type lookups = {
   list_package_declarations : Path.package -> declaration list;
   read_definition : key -> Syntax.definition;
   read_text : key -> string;
-  list_spans : key -> Source.Definition_span.t array;
+  read_spans : key -> Source.Definition_span.t array;
   list_recovered : key -> Source.Definition_span.t list;
   read_place : key -> place;
   find_container : key -> key option;

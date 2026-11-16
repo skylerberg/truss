@@ -405,7 +405,7 @@ let check (state : Checking.state) =
             Impl_checks.check_impl_method state name
               (Resolve.Names.classify_receiver signature.parameters)
               written impl
-              ~trait_span:(lookups.names.list_spans container).(trait_.id)
+              ~trait_span:(lookups.names.read_spans container).(trait_.id)
               trait_
         | _ -> ())
     | Some _, _, _ -> ()
@@ -486,7 +486,7 @@ let list_diagnostics (lookups : Lookups.t) key =
       key;
       definition = lookups.names.read_definition key;
       elaborated = lookups.read_elaborated_interface key;
-      spans = lookups.names.list_spans key;
+      spans = lookups.names.read_spans key;
       diagnostics = ref [];
     }
   in

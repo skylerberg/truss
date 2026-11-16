@@ -95,7 +95,7 @@ let list_occurrences database snapshot packages =
               List.map
                 (fun ({ span; target } : Inspect.References.occurrence) ->
                   (file, Source.Definition_span.to_file ~base span, target))
-                (Inspect.References.list_occurrences ~path:key.path (names.list_spans key)
+                (Inspect.References.list_occurrences ~path:key.path (names.read_spans key)
                    (names.read_definition key) resolved tables)
           | None -> [])
         (names.list_declarations_in file))

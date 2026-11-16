@@ -20,7 +20,7 @@ let list_unfinished snapshot database packages =
                 Source.path source,
                 line,
                 column ))
-            (Inspect.list_unfinished (names.list_spans key) (names.read_definition key)))
+            (Inspect.list_unfinished (names.read_spans key) (names.read_definition key)))
         (names.list_declarations_in file))
     (Command_packages.list_files snapshot packages)
 

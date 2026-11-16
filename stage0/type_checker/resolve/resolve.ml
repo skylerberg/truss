@@ -86,7 +86,7 @@ let find_declared_name (definition : Syntax.definition) : Syntax.name option =
   | Impl _ | Test _ | Definition_error _ -> None
 
 let resolve (lookups : Names.lookups) (key : Names.key) section =
-  let definition = lookups.read_definition key and spans = lookups.list_spans key in
+  let definition = lookups.read_definition key and spans = lookups.read_spans key in
   let module_ = key.module_ in
   let state = Walk.create lookups key ~spans ~walked:section in
   let container =

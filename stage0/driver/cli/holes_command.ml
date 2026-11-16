@@ -29,7 +29,7 @@ let list_holes snapshot packages database (names : Resolve.Names.lookups)
             in_scope = hole.scope;
             blocks = [];
           })
-        (Inspect.list_holes (names.list_spans key) (names.read_definition key) resolved
+        (Inspect.list_holes (names.read_spans key) (names.read_definition key) resolved
            (Option.map
               (fun (checked : Infer.checked) -> checked.tables)
               (Database.read_checked_body database key)))

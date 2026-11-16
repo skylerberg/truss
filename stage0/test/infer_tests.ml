@@ -15,7 +15,7 @@ let expression_at text written occurrence =
         let key = Resolve.Names.make_key declaration in
         match
           ( (Support.names packages key.module_.package).read_definition key,
-            (Support.names packages key.module_.package).list_spans key,
+            (Support.names packages key.module_.package).read_spans key,
             (Support.names packages key.module_.package).read_place key,
             Database.read_checked_body (Support.database packages) key )
         with

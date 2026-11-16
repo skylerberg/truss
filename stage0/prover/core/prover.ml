@@ -355,7 +355,7 @@ let make_diagnostic code span message =
 
 let resolve_location (names : Resolve.Names.lookups) (key : Resolve.Names.key)
     (location : State.location) =
-  Source.Definition_span.locate (names.list_spans key)
+  Source.Definition_span.locate (names.read_spans key)
     (match location with
     | Node origin -> origin
     | Whole_definition -> (names.read_definition key).id)
@@ -391,11 +391,11 @@ let render (lookups : Lookups.t) (message : State.message) =
          | Quote (key, origin) ->
              Facts.quote_span
                (lookups.interface.names.read_text key)
-               (Source.Definition_span.locate (lookups.interface.names.list_spans key) origin)
+               (Source.Definition_span.locate (lookups.interface.names.read_spans key) origin)
          | Substituted { key; clause; replacements } ->
              substitute_clause
                (lookups.interface.names.read_text key)
-               (lookups.interface.names.list_spans key)
+               (lookups.interface.names.read_spans key)
                clause replacements)
        message)
 
@@ -410,7 +410,7 @@ let locate_citation (lookups : Lookups.t) ((key : Resolve.Names.key), origin) =
   let place = lookups.interface.names.read_place key in
   ( place,
     Source.Definition_span.to_file ~base:place.base
-      (Source.Definition_span.locate (lookups.interface.names.list_spans key) origin) )
+      (Source.Definition_span.locate (lookups.interface.names.read_spans key) origin) )
 
 type answer = Solved of Solver.answer | Ran of bool | Run_failed of string
 

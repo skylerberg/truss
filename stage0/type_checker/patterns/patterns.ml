@@ -572,7 +572,7 @@ let check (lookups : Lookups.t) key =
   let context =
     {
       lookups;
-      spans = lazy (lookups.interface.names.list_spans key);
+      spans = lazy (lookups.interface.names.read_spans key);
       text = lazy (lookups.interface.names.read_text key);
       diagnostics = [];
     }

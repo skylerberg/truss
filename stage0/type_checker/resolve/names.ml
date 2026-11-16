@@ -113,7 +113,7 @@ type lookups = {
   list_package_declarations : Path.package -> declaration list;
   read_definition : key -> Syntax.definition;
   read_text : key -> string;
-  list_spans : key -> Source.Definition_span.t array;
+  read_spans : key -> Source.Definition_span.t array;
   list_recovered : key -> Source.Definition_span.t list;
   read_place : key -> place;
   find_container : key -> key option;
@@ -181,7 +181,7 @@ let lookup_module lookups ~(from : Path.module_) ~imports first rest =
 let make_top_path module_ name : Path.t = Top { module_; name }
 
 let find_recovery_report (lookups : lookups) key part =
-  Parts.find_recovered_report ~spans:(lookups.list_spans key)
+  Parts.find_recovered_report ~spans:(lookups.read_spans key)
     ~recovered:(lookups.list_recovered key) (lookups.read_definition key) part
 
 let is_broken lookups key part = Option.is_some (find_recovery_report lookups key part)
@@ -1044,7 +1044,7 @@ let of_namespaces ~(namespace : Path.package -> namespace) ~module_exists ~split
     list_package_declarations = (fun package -> (namespace package).declarations);
     read_definition = (fun key -> (read_declared key).item.value);
     read_text = (fun key -> (read_declared key).text);
-    list_spans = (fun key -> (read_declared key).item.positions.spans);
+    read_spans = (fun key -> (read_declared key).item.positions.spans);
     list_recovered = (fun key -> (read_declared key).item.positions.recovered);
     read_place = (fun key -> (read_declared key).place);
     find_container = (fun key -> (read_declared key).container);

@@ -292,7 +292,7 @@ let () =
           let key = Resolve.Names.make_key declaration in
           match
             ( core_of packages key,
-              (Support.names packages key.module_.package).list_spans key,
+              (Support.names packages key.module_.package).read_spans key,
               (Support.names packages key.module_.package).read_text key )
           with
           | Some form, spans, written ->
@@ -396,7 +396,7 @@ let () =
           let key = Resolve.Names.make_key declaration in
           match
             ( core_of packages key,
-              (Support.names packages key.module_.package).list_spans key,
+              (Support.names packages key.module_.package).read_spans key,
               (Support.names packages key.module_.package).read_text key )
           with
           | ( Some { definition = Function { contract = { costs = [ cost ]; _ }; _ }; _ },

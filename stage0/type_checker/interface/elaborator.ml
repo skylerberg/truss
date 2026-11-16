@@ -849,7 +849,7 @@ let elaborate_header (lookups : Lookups.t) (key : Resolve.Names.key) =
   else
     match
       elaborate_container
-        (create lookups resolved ~spans:(lookups.names.list_spans key) empty_scope)
+        (create lookups resolved ~spans:(lookups.names.read_spans key) empty_scope)
         key.path
         (lookups.names.read_definition key)
     with
@@ -970,7 +970,7 @@ let elaborate_member (lookups : Lookups.t) ~path ~spans resolved (definition : S
 let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
   let resolved = lookups.read_resolved Interface key in
   let definition = lookups.names.read_definition key in
-  let spans = lookups.names.list_spans key in
+  let spans = lookups.names.read_spans key in
   let path = key.path in
   Compiler_bug.run_while_doing ~stage:"Interface" (Resolve.Names.show_key key) (fun () ->
       let context = create lookups resolved ~spans empty_scope in

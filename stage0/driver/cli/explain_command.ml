@@ -40,7 +40,7 @@ let run ~position =
                       (fun (checked : Infer.checked) -> checked.tables)
                       (Database.read_checked_body database key)
                   in
-                  Inspect.explain_at ~path:key.path (names.list_spans key)
+                  Inspect.explain_at ~path:key.path (names.read_spans key)
                     (names.read_definition key) resolved tables ~text (offset - base)
               | None -> None
             else None)

@@ -27,7 +27,7 @@ let make_diagnostic (key : Resolve.Names.key) ?(fixes = []) code (span : Source.
 
 let read_definition (lookups : Lookups.t) (declaration : Resolve.Names.declaration) =
   let key = Resolve.Names.make_key declaration in
-  (lookups.interface.names.read_definition key, lookups.interface.names.list_spans key)
+  (lookups.interface.names.read_definition key, lookups.interface.names.read_spans key)
 
 let locate_header (spans : Source.Definition_span.t array) (definition : Syntax.definition) =
   match definition.kind with
@@ -710,7 +710,7 @@ let check_constant (lookups : Lookups.t) (declaration : Resolve.Names.declaratio
            end
       in
       let key = Resolve.Names.make_key declaration in
-      let spans = lookups.interface.names.list_spans key in
+      let spans = lookups.interface.names.read_spans key in
       List.filter_map
         (fun (named : named_constant) ->
           if depends_on_constant named.constant then

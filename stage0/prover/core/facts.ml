@@ -148,7 +148,7 @@ let make_requires_fix (context : State.context) required =
   let brace =
     match names.read_definition context.home with
     | { kind = Function { body; _ }; _ } ->
-        Some (Source.Definition_span.locate (names.list_spans context.home) body.id).start
+        Some (Source.Definition_span.locate (names.read_spans context.home) body.id).start
     | _ -> None
   in
   let edit at before =
@@ -346,7 +346,7 @@ let quote_origin (context : State.context) (frame : State.frame) origin =
     raise_bug "a quote of %s, outside the definition being proven" frame.source.name;
   let names = context.lookups.interface.names in
   quote_span (names.read_text context.home)
-    (Source.Definition_span.locate (names.list_spans context.home) origin)
+    (Source.Definition_span.locate (names.read_spans context.home) origin)
 
 let find_bounds (ty : Types.ty) =
   if Types.is_builtin Character ty then Some (Z.zero, Z.of_int 0x10FFFF)
