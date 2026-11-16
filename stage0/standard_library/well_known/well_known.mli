@@ -35,8 +35,10 @@ type t =
   | Literal
   | Template
   | From_template
-  | Set
+  | From_elements
   | Map
+  | Entry
+  | From_entries
   | Sequence
   | Finite_set
   | Finite_map

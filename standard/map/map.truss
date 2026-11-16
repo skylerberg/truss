@@ -8,6 +8,16 @@ public opaque type Map[Key: Hash + Ordered, Value](entries: List[Entry[Key, Valu
 
 public type Entry[Key, Value](key: Key, value: Value)
 
+public trait FromEntries {
+  type Key: Equal
+  type Value
+
+  fn from_entries(entries: own List[Entry[Self.Key, Self.Value]]) -> Self
+    requires forall i in 0..entries.length() => forall j in 0..entries.length() =>
+      i < j ==> !(entries.model()[i].key == entries.model()[j].key)
+    cost time finite
+}
+
 internal fn entries_model[Key, Value](entries: Sequence[Entry[Key, Value]]) -> FiniteMap[Key, Value]
   ensures identical(result, entries.to_map(fn(entry) { entry.key }, value: fn(entry) { entry.value }))
   cost time finite
@@ -174,23 +184,6 @@ public fn Map[Key: Hash + Ordered, Value].insert(mut self, key: own Key, value: 
   } else {
     mut self.push_entry(own key, value: own value)
   }
-}
-
-internal fn Map[Key: Hash + Ordered, Value].insert_absent(mut self, key: own Key, value: own Value)
-  requires !contains_equal_key(self.model(), key: key)
-  ensures contains_equal_key(self.model(), key: key)
-  ensures forall other: Key =>
-    self.model().contains_key(other) && other == key ==> identical(self.model().get(other), value)
-  ensures forall other: Key =>
-    !(other == key) ==> self.model().contains_key(other) == old(self.model()).contains_key(other)
-  ensures forall other: Key =>
-    !(other == key) && old(self.model()).contains_key(other) ==>
-      identical(self.model().get(other), old(self.model()).get(other))
-  ensures self.length() == old(self.length()) + 1
-  cost time O(1 + old(self.length()))
-  cost amortized time O(1)
-{
-  mut self.push_entry(own key, value: own value)
 }
 
 internal fn Map[Key: Hash + Ordered, Value].push_entry(mut self, key: own Key, value: own Value)
@@ -653,15 +646,22 @@ impl Default for Map[Key: Hash + Ordered, Value] {
   }
 }
 
-impl From[List[Entry[Key, Value]]] for Map[Key: Hash + Ordered, Value] {
-  fn from(value: own List[Entry[Key, Value]]) -> Map[Key, Value] {
-    var map: Map[Key, Value] = Map.with_capacity(value.length())
-    for entry in own value
-      invariant forall i in 0..map.entries.length() => forall j in 0..map.entries.length() =>
-        i < j ==> !(map.entries.model()[i].key == map.entries.model()[j].key)
-    {
-      mut map.insert(own entry.key, value: own entry.value)
-    }
-    map
+impl FromEntries for Map[Key: Hash + Ordered, Value] {
+  type Key = Key
+  type Value = Value
+
+  fn from_entries(entries: own List[Entry[Key, Value]]) -> Map[Key, Value]
+    requires forall i in 0..entries.length() => forall j in 0..entries.length() =>
+      i < j ==> !(entries.model()[i].key == entries.model()[j].key)
+    ensures result.length() == entries.length()
+    ensures forall i in 0..entries.length() =>
+      result.model().contains_key(entries.model()[i].key)
+        && identical(result.model().get(entries.model()[i].key), entries.model()[i].value)
+    ensures forall key: Key =>
+      result.model().contains_key(key) ==> exists i in 0..entries.length() => identical(key, entries.model()[i].key)
+    cost time O(1)
+    cost allocations == 0
+  {
+    Map(entries: own entries)
   }
 }

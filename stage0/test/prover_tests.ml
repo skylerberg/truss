@@ -770,6 +770,20 @@ let () =
       expect_not_proven Fixtures.Prover.map_literal_with_a_repeated_key "prover.requires");
   Harness.test "a set literal contains its listed elements and nothing else" (fun () ->
       expect_proven Fixtures.Prover.set_literal_contains);
+  Harness.test "a set literal may repeat an element" (fun () ->
+      expect_proven Fixtures.Prover.set_literal_with_a_repeated_element);
+  Harness.test "a sorted map literal's keys must be distinct" (fun () ->
+      expect_not_proven Fixtures.Prover.sorted_map_literal_with_a_repeated_key "prover.requires");
+  Harness.test "an empty map literal allocates nothing" (fun () ->
+      expect_proven Fixtures.Prover.empty_map_literal_without_allocations);
+  Harness.test "a map literal is one allocation" (fun () ->
+      expect_proven Fixtures.Prover.map_literal_with_one_allocation);
+  Harness.test "a deque literal has its length and is one allocation" (fun () ->
+      expect_proven Fixtures.Prover.deque_literal_length);
+  Harness.test "an empty sorted set literal is empty and takes constant time" (fun () ->
+      expect_proven Fixtures.Prover.empty_sorted_set_literal);
+  Harness.test "a literal of a type that implements FromElements is proven against its impl"
+    (fun () -> expect_proven Fixtures.Prover.literal_of_a_type_with_from_elements);
   Harness.test "any is one allocation" (fun () ->
       expect_proven Fixtures.Prover.any_of_a_value_with_one_allocation);
   Harness.test "a provided implementation's calls keep the capability's contract" (fun () ->

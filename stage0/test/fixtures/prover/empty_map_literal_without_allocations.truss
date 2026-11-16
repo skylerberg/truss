@@ -1,0 +1,5 @@
+fn f() -> Map[String, Int64]
+  cost allocations == 0
+{
+  [:]
+}

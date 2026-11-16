@@ -1,0 +1,15 @@
+type Stack[Element](items: List[Element])
+
+impl FromElements for Stack[Element] {
+  type Element = Element
+
+  fn from_elements(elements: own List[Element]) -> Stack[Element]
+    cost time O(1)
+  {
+    Stack(items: own elements)
+  }
+}
+
+fn f() -> Stack[Int64] {
+  [1, 2, 3]
+}

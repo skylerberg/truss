@@ -147,14 +147,6 @@ theorem absent_where_split[Key: Ordered, Value](
   }
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].new() -> collections::SortedMap[Key, Value]
-  ensures result.length() == 0
-  cost time O(1)
-  cost allocations == 0
-{
-  collections::SortedMap(entries: [])
-}
-
 type Numbered[Key, Value](entry: map::Entry[Key, Value], ordinal: UInt64)
 
 fn map_of[Key: Ordered, Value](entries: own List[map::Entry[Key, Value]]) -> collections::SortedMap[Key, Value]
@@ -169,7 +161,7 @@ fn map_of[Key: Ordered, Value](entries: own List[map::Entry[Key, Value]]) -> col
     let order = first.entry.key.compare(second.entry.key)
     if order == Ordering.Equal { first.ordinal.compare(second.ordinal) } else { order }
   })
-  var map: collections::SortedMap[Key, Value] = collections::SortedMap.new()
+  var map: collections::SortedMap[Key, Value] = [:]
   for item in own numbered
     invariant strictly_ascending(map.entries.model())
   {
@@ -334,6 +326,7 @@ fn collections::SortedMap[Key: Ordered, Value].find_or_insert(mut self, key: own
 
 public fn collections::SortedMap[Key: Ordered, Value].insert(mut self, key: own Key, value: own Value)
   ensures self.contains(key)
+  ensures self.length() == old(self.length()) + (if old(self.contains(key)) { 0 } else { 1 })
   cost time O(old(self.length()) + log(old(self.length())) * time(Key.compare))
 {
   let _ = mut self.replace(own key, value: own value)
@@ -342,6 +335,7 @@ public fn collections::SortedMap[Key: Ordered, Value].insert(mut self, key: own 
 public fn collections::SortedMap[Key: Ordered, Value].replace(mut self, key: own Key, value: own Value) -> Option[Value]
   ensures self.contains(key)
   ensures (result is Some(_)) == old(self.contains(key))
+  ensures self.length() == old(self.length()) + (if result is Some(_) { 0 } else { 1 })
   cost time O(old(self.length()) + log(old(self.length())) * time(Key.compare))
 {
   match self.search(key) {
@@ -782,12 +776,36 @@ impl Equal for collections::SortedMap[Key: Ordered, Value: Equal] {
 
 impl Default for collections::SortedMap[Key: Ordered, Value] {
   fn default() -> collections::SortedMap[Key, Value] {
-    collections::SortedMap.new()
+    [:]
   }
 }
 
-impl From[List[map::Entry[Key, Value]]] for collections::SortedMap[Key: Ordered, Value] {
-  fn from(value: own List[map::Entry[Key, Value]]) -> collections::SortedMap[Key, Value] {
-    map_of(own value)
+impl FromEntries for collections::SortedMap[Key: Ordered, Value] {
+  type Key = Key
+  type Value = Value
+
+  fn from_entries(entries: own List[map::Entry[Key, Value]]) -> collections::SortedMap[Key, Value]
+    requires forall i in 0..entries.length() => forall j in 0..entries.length() =>
+      i < j ==> !(entries.model()[i].key == entries.model()[j].key)
+    ensures result.length() <= entries.length()
+    cost time O(entries.length() * (entries.length() + time(Key.compare)))
+  {
+    let count = entries.length()
+    var pending = own entries
+    var map: collections::SortedMap[Key, Value] = collections::SortedMap(entries: [])
+    while pending.length() > 0
+      invariant strictly_ascending(map.entries.model())
+      invariant map.length() + pending.length() <= count
+      decreases pending.length()
+      cost time O((count - pending.length()) * (count + time(Key.compare)))
+    {
+      match mut pending.pop() {
+        Some(entry) => {
+          mut map.insert(own entry.key, value: own entry.value)
+        }
+        None => {}
+      }
+    }
+    map
   }
 }

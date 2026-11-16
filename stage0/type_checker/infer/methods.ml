@@ -220,6 +220,41 @@ and check_method_time state (value : Syntax.expression) (type_ : Types.ty) (memb
             read-only, so `time` cannot tell which one is meant."
            (State.show state type_) member.text)
 
+and report_unknown_static_method state ?expected (value : Syntax.expression) type_
+    (member : Syntax.name) (arguments : Syntax.argument list) =
+  let implements known =
+    Option.is_some
+      (State.find_evidence state type_
+         (State.make_trait_reference ~arguments:[] (Well_known.make_path known)))
+  in
+  let empty_literal =
+    if member.text <> "new" || arguments <> [] then None
+    else if implements From_elements then Some "[]"
+    else if implements From_entries then Some "[:]"
+    else None
+  in
+  let is_expected =
+    match (Option.map (State.normalize state) expected, type_) with
+    | Some (Types.Named { path = expected; _ }), Types.Named { path; _ } -> Path.equal expected path
+    | _ -> false
+  in
+  match empty_literal with
+  | Some literal ->
+      State.make_error_type state Unknown_member (State.read_span state member.id)
+        ~fixes:
+          (if is_expected then
+             [
+               State.fix
+                 (Printf.sprintf "Write `%s`." literal)
+                 [ State.replace (State.read_span state value.id) literal ];
+             ]
+           else [])
+        (Printf.sprintf "`%s` has no method `new`. The literal `%s` is an empty `%s`."
+           (State.show state type_) literal (State.show state type_))
+  | None ->
+      State.make_error_type state Unknown_member (State.read_span state member.id)
+        (Printf.sprintf "`%s` has no method `%s`." (State.show state type_) member.text)
+
 and check_static_call state env ?expected (value : Syntax.expression) type_ (member : Syntax.name)
     arguments =
   let report_ambiguous (traits : Types.trait_reference list) =
@@ -324,10 +359,8 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                         "A method written in full takes its receiver as its first argument."
                   | _ ->
                       Calls.check_arguments_alone state env arguments
-                        (State.make_error_type state Unknown_member
-                           (State.read_span state member.id)
-                           (Printf.sprintf "`%s` has no method `%s`." (State.show state type_)
-                              member.text))))))
+                        (report_unknown_static_method state ?expected value type_ member arguments))
+              )))
   | Types.Parameter parameter -> (
       let without_self =
         List.fold_left

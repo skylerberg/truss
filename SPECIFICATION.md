@@ -638,10 +638,10 @@ public let seconds_per_day: Int64 = 24 * 60 * 60
 ```
 
 - The value is a *constant expression*: literals, arithmetic on numbers,
-  other constants, and records, variants, lists, maps, arrays, sets, and
-  strings built from those. It calls no function. The compiler evaluates it,
-  building a `Map` or `Set` with the standard library's compiled code and no
-  random hash key.
+  other constants, and records, variants, collection literals, and strings
+  built from those. It calls no function. The compiler evaluates it, running
+  the compiled `from_elements` or `from_entries` of a collection that takes
+  its literal through one, with no random hash key.
 - A constant's value does not depend on itself, through another constant or
   through the default of a field that a record or variant in it leaves out.
 - A constant lives in static memory. Reading it or taking a view of it costs
@@ -1409,18 +1409,38 @@ map_entry = expression ":" expression ;
 
 | Literal | Value |
 |---|---|
-| `[2, 3, 5, 7]` | A `List`, or an `Array`, a `Set`, or a type of specifications where one is expected |
+| `[2, 3, 5, 7]` | A `List`, or where one is expected an `Array`, a `Sequence`, a `FiniteSet`, or a type that implements `FromElements` |
 | `[]` | An empty one of the same |
-| `["http": 80, "https": 443]` | A `Map`, or a `FiniteMap` where one is expected |
-| `[:]` | An empty `Map` |
+| `["http": 80, "https": 443]` | A `Map`, or where one is expected a `FiniteMap` or a type that implements `FromEntries` |
+| `[:]` | An empty one of the same |
+
+```truss
+impl FromElements for Stack[Element] {
+  type Element = Element
+
+  fn from_elements(elements: own List[Element]) -> Stack[Element] {
+    Stack(items: own elements)
+  }
+}
+
+let pending: Stack[Int64] = [1, 2, 3]
+```
 
 - An `Array` literal has exactly as many elements as its type says.
 - A non-empty list literal in a function body counts as one allocation, and
   an empty one as none.
-- A set or map literal makes an empty collection with room for every
-  element, then calls `insert` for each element in order, and costs as much
-  as those calls. `insert` requires a key that is not there yet, so a map
-  literal's keys are proven distinct.
+- A type takes a list literal by implementing the prelude trait
+  `FromElements`, and a map literal by implementing the prelude trait
+  `FromEntries`. The literal's elements have the type's `Element`, and a map
+  literal's keys and values its `Key` and its `Value`.
+- Such a literal is a call of `from_elements` with the `List` of its
+  elements, or of `from_entries` with a `List` of one `map::Entry` for each
+  key and value, in the order written. It costs that list and that call.
+- `from_entries` requires keys that are pairwise distinct by `==`, so a map
+  literal's keys are proven distinct. An `impl` for a type that holds a key
+  more than once states a weaker `requires`.
+- A list literal may repeat an element, and `from_elements` decides which of
+  two equal elements a collection keeps.
 
 ### Indexing
 
@@ -2318,7 +2338,8 @@ The prelude is in scope in every file, and all its names are
   `Set`
 - the core traits, such as `Equal`, `Ordered`, `From`, `TryFrom`, `Default`,
   `Copyable`, `Plain`, `Storable`, `Index`, `IndexMut`, `IndexAssign`,
-  `Iterable`, `Cursor`, `FromTemplate`, `Model`, and the arithmetic traits
+  `Iterable`, `Cursor`, `FromTemplate`, `FromElements`, `FromEntries`,
+  `Model`, and the arithmetic traits
 - `Integer`, `Sequence`, `FiniteSet`, `FiniteMap`, and `Multiset`
 - the standard capabilities, and `Path`, `Instant`, `Duration`, and
   `SystemError`
