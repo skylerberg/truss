@@ -73,6 +73,19 @@ let is_ascii_name_byte character =
   is_ascii_letter character || is_digit character || character = '_'
 
 let is_ascii character = Char.code character < 0x80
+
+let joins_neighbor cursor (span : Source.span) code =
+  let before = if span.start > 0 then Some cursor.text.[span.start - 1] else None
+  and after = if span.stop < cursor.length then Some cursor.text.[span.stop] else None in
+  Token.joins_neighbor ~before ~after code
+
+let code_fixes cursor span codes =
+  List.filter_map
+    (fun code ->
+      if joins_neighbor cursor span code then None
+      else Some (Diagnostic.fix ("Write `" ^ code ^ "`") [ Diagnostic.replace span code ]))
+    codes
+
 let decode cursor index = Unicode.decode cursor.text index
 
 let run_length cursor index character =

@@ -12,7 +12,8 @@
   core
   manifest
   project
-  parsed
+  lexer
+  parser
   resolve
   interface
   infer

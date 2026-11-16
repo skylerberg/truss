@@ -209,10 +209,12 @@ and number cursor ~inline ~nesting =
   | Some problem ->
       report cursor ~code:problem.code
         ~fixes:
-          (List.map
-             (fun (title, replacement) ->
-               Diagnostic.fix title [ Diagnostic.replace (span start stop) replacement ])
-             checked.fixes)
+          (if is_at cursor stop '.' then []
+           else
+             List.map
+               (fun (title, replacement) ->
+                 Diagnostic.fix title [ Diagnostic.replace (span start stop) replacement ])
+               checked.fixes)
         (span (start + problem.start) (start + problem.stop))
         problem.message
   | None -> ());
@@ -290,15 +292,19 @@ and name cursor ~inline ~nesting =
           let checked = checked_name cursor spelling in
           (match checked.problem with
           | Some (code, message) ->
+              let opens_literal =
+                is_at cursor stop '"' || is_at cursor stop '\''
+                || (is_at cursor stop '$' && Strings.opens_raw_string cursor stop)
+              in
               let fixes =
                 match checked.fix with
-                | Some fixed ->
+                | Some fixed when (not opens_literal) || (fixed.[0] >= 'A' && fixed.[0] <= 'Z') ->
                     [
                       Diagnostic.fix
                         ("Write `" ^ fixed ^ "`")
                         [ Diagnostic.replace (span start stop) fixed ];
                     ]
-                | None -> []
+                | Some _ | None -> []
               in
               report cursor ~code ~fixes (span start stop) message
           | None -> ());

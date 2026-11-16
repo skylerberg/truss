@@ -5,13 +5,7 @@ type scanned = Lexed of Token.kind | Ellipsis
 
 let replace cursor ~start ~length ~replacements ~code message =
   report cursor ~code
-    ~fixes:
-      (List.map
-         (fun replacement ->
-           Diagnostic.fix
-             ("Write `" ^ replacement ^ "`")
-             [ Diagnostic.replace (span start (start + length)) replacement ])
-         replacements)
+    ~fixes:(code_fixes cursor (span start (start + length)) replacements)
     (span start (start + length))
     message
 

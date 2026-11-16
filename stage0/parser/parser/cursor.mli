@@ -29,6 +29,8 @@ val set_span : t -> Syntax.id -> Source.Definition_span.t -> unit
 val read_file_span : t -> Syntax.id -> Source.span
 val file_span : t -> Source.Definition_span.t -> Source.span
 val spelling : t -> ?insertions:(int * string) list -> Source.span -> string option
+val joins_neighbors : t -> Source.span -> string -> bool
+val has_reported : t -> bool
 
 val report :
   t ->

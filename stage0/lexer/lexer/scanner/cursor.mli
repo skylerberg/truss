@@ -52,6 +52,7 @@ val is_hexadecimal_digit : char -> bool
 val is_ascii_letter : char -> bool
 val is_ascii_name_byte : char -> bool
 val is_ascii : char -> bool
+val code_fixes : t -> Source.span -> string list -> Source.span Diagnostic.fix list
 val decode : t -> int -> Unicode.Decoded.t
 val run_length : t -> int -> char -> int
 val skip_spaces : t -> int -> int

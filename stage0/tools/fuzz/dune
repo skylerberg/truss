@@ -9,5 +9,4 @@
   syntax
   syntax_walk
   parser
-  parsed
   reference_parser))

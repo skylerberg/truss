@@ -623,21 +623,6 @@ let apply_edits text (edits : Source.span edit list) =
 
 let apply_fix text (fix : Source.span fix) = apply_edits text fix.edits
 
-let adds_none ~(before : _ diagnostic list) ~(after : _ diagnostic list) =
-  let codes diagnostics =
-    List.sort compare (List.map (fun (diagnostic : _ diagnostic) -> diagnostic.code) diagnostics)
-  in
-  let rec contained smaller larger =
-    match (smaller, larger) with
-    | [], _ -> true
-    | _ :: _, [] -> false
-    | first :: rest, candidate :: larger_rest ->
-        if first = candidate then contained rest larger_rest
-        else if first > candidate then contained smaller larger_rest
-        else false
-  in
-  contained (codes after) (codes before)
-
 module Starts = Map.Make (Int)
 
 type accepted = { stop : int; has_insertion : bool }

@@ -55,7 +55,8 @@ let source packages (file : Path.file) =
 let parse_errors packages file =
   List.map
     (fun (diagnostic : Diagnostic.t) -> diagnostic.message)
-    (Parsed.parse (source packages file)).diagnostics
+    (let tokens, lexer_diagnostics = Lexer.lex (source packages file) in
+     lexer_diagnostics @ snd (Parser.parse tokens ~lexer_diagnostics))
 
 let diagnostics database (file : Path.file) =
   Database.check database [ file.module_.package ];

@@ -73,9 +73,9 @@ let check_robust text =
 
 let parse text =
   let source = Source.create ~path:"fuzz.truss" text in
-  let tokens, _ = Lexer.lex source in
-  let parsed = Parsed.parse source in
-  (tokens, parsed.file, parsed.diagnostics)
+  let tokens, lexer_diagnostics = Lexer.lex source in
+  let file, parser_diagnostics = Parser.parse tokens ~lexer_diagnostics in
+  (tokens, file, lexer_diagnostics @ parser_diagnostics)
 
 let check_tree text (item : Syntax.definition Syntax.item) =
   let quoted = Diagnostic.quote text in
@@ -213,6 +213,74 @@ let check_parsers_agree text =
         (if reference_rejects then "rejects" else "accepts")
         (Diagnostic.quote text)
 
+let adds_none ~(before : Diagnostic.t list) ~(after : Diagnostic.t list) =
+  let codes diagnostics =
+    List.sort compare (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.code) diagnostics)
+  in
+  let rec contained smaller larger =
+    match (smaller, larger) with
+    | [], _ -> true
+    | _ :: _, [] -> false
+    | first :: rest, candidate :: larger_rest ->
+        if first = candidate then contained rest larger_rest
+        else if first > candidate then contained smaller larger_rest
+        else false
+  in
+  contained (codes after) (codes before)
+
+let rec joined_spans ~(edits : Source.span Diagnostic.edit list) ~(written : Token.t array)
+    ~(fixed : Token.t array) =
+  let is_replaced (span : Source.span) =
+    List.exists
+      (fun (edit : Source.span Diagnostic.edit) ->
+        edit.span.start < edit.span.stop && edit.span.start <= span.start
+        && span.stop <= edit.span.stop)
+      edits
+  in
+  let tokens ~is_kept array =
+    List.filter
+      (fun (token : Token.t) ->
+        token.kind <> Newline && token.kind <> End_of_file
+        && token.span.start < token.span.stop
+        && is_kept token)
+      (Array.to_list array)
+  in
+  let inside (token : Token.t) =
+    match token.kind with
+    | String literal ->
+        Array.concat
+          (Array.to_list
+             (Array.map
+                (fun (interpolation : Token.interpolation) -> interpolation.tokens)
+                (Token.interpolations literal)))
+    | _ -> [||]
+  in
+  let rec walk (written : Token.t list) (fixed : Token.t list) =
+    match fixed with
+    | [] -> []
+    | token :: rest -> (
+        let rec after = function
+          | (other : Token.t) :: others when other.span.stop <= token.span.start -> after others
+          | written -> written
+        in
+        let written = after written in
+        let overlaps (other : Token.t) = other.span.start < token.span.stop in
+        match written with
+        | first :: second :: _ when overlaps first && overlaps second ->
+            token.span :: walk written rest
+        | first :: _ when overlaps first ->
+            joined_spans ~edits ~written:(inside first) ~fixed:(inside token) @ walk written rest
+        | _ -> walk written rest)
+  in
+  walk
+    (tokens ~is_kept:(fun _ -> true) written)
+    (tokens ~is_kept:(fun (token : Token.t) -> not (is_replaced token.span)) fixed)
+
+let alters_neighbors text ~edits ~fixed_text =
+  let scan text = fst (Lexer.For_testing.scan (Source.create ~path:"fuzz.truss" text)) in
+  let written = scan text and fixed = Lexer.For_testing.to_original edits (scan fixed_text) in
+  joined_spans ~edits ~written ~fixed @ joined_spans ~edits ~written:fixed ~fixed:written <> []
+
 let check_fixes_work text =
   let all text =
     let _, _, diagnostics = parse text in
@@ -232,8 +300,12 @@ let check_fixes_work text =
           | exception Invalid_argument _ ->
               fail "the fix %S has overlapping edits in %s" fix.title (Diagnostic.quote text)
           | fixed ->
-              if not (Diagnostic.adds_none ~before ~after:(judged (all fixed))) then
+              if not (adds_none ~before ~after:(judged (all fixed))) then
                 fail "the fix %S for %s leaves or adds an error in %s" fix.title
+                  (Diagnostic.Code.name diagnostic.code)
+                  (Diagnostic.quote text);
+              if alters_neighbors text ~edits:fix.edits ~fixed_text:fixed then
+                fail "the fix %S for %s joins or splits a neighboring token in %s" fix.title
                   (Diagnostic.Code.name diagnostic.code)
                   (Diagnostic.quote text))
         diagnostic.fixes)
@@ -241,7 +313,7 @@ let check_fixes_work text =
 
 let check_machine_fixes_work text =
   let _, diagnostics = lex text in
-  let adds_none applied =
+  let applies_cleanly applied =
     let edits =
       List.concat_map
         (fun (diagnostic : Diagnostic.t) ->
@@ -250,18 +322,18 @@ let check_machine_fixes_work text =
     in
     let _, remaining = lex (Diagnostic.apply_edits text edits) in
     let others = List.filter (fun diagnostic -> not (List.memq diagnostic applied)) diagnostics in
-    Diagnostic.adds_none ~before:others ~after:remaining
+    adds_none ~before:others ~after:remaining
   in
   match Diagnostic.machine_applicable diagnostics with
   | [] -> ()
   | applied ->
-      if not (adds_none applied) then
+      if not (applies_cleanly applied) then
         fail "the machine-applicable fixes of the lexer leave or add an error in %s"
           (Diagnostic.quote text);
       if List.length applied > 1 then
         List.iter
           (fun (diagnostic : Diagnostic.t) ->
-            if not (adds_none [ diagnostic ]) then
+            if not (applies_cleanly [ diagnostic ]) then
               fail "the machine-applicable fix for %s leaves or adds an error alone in %s"
                 (Diagnostic.Code.name diagnostic.code)
                 (Diagnostic.quote text))

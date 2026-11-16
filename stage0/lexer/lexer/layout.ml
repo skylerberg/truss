@@ -1,32 +1,5 @@
 open Token
 
-let can_end = function
-  | Upper _ | Lower _ | Underscore | Integer _ | Float _ | String _ -> true
-  | Punctuation (Close _ | Question) -> true
-  | Keyword (True | False | Self_value | Self_type | Todo | Unreachable | Break | Continue | Return)
-    ->
-      true
-  | Foreign (Plus_plus | Minus_minus) -> true
-  | Foreign (Star_star | Colon_equal | Pipe_greater) -> false
-  | Keyword _ | Reserved _ | Punctuation _ | Newline | End_of_file -> false
-
-let can_begin = function
-  | Upper _ | Lower _ | Underscore | Integer _ | Float _ | String _ | Reserved _ -> true
-  | Foreign (Plus_plus | Minus_minus) -> true
-  | Foreign (Star_star | Colon_equal | Pipe_greater) -> false
-  | Punctuation (Open _ | Minus | Bang | Tilde) -> true
-  | Keyword
-      ( Any | Assert | Break | Capability | Concurrent | Continue | Echo | Exists | False | Fn | For
-      | Forall | If | Impl | Internal | Law | Let | Match | Mut | Own | Parallel | Proof | Provide
-      | Public | Return | Self_value | Self_type | Test | Theorem | Todo | Trait | True | Type
-      | Unreachable | Use | Var | While ) ->
-      true
-  | Keyword
-      ( Cost | Decreases | Derives | Else | Ensures | In | Indirect | Invariant | Is | Lends
-      | Opaque | Requires | Uses | With ) ->
-      false
-  | Punctuation _ | Newline | End_of_file -> false
-
 type input =
   | Next of {
       kind : Token.kind;

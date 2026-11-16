@@ -46,13 +46,15 @@ end
 
 module Entry_table = Hashtbl.Make (Entry)
 
+type parsed = { tree : Syntax.file; diagnostics : Diagnostic.t list; text : string }
+
 type package_database = {
   name : Path.package;
   mutable dependencies : Manifest.dependency list;
   mutable modules : Path.module_ list;
   mutable files : Path.file list;
   sources : (Path.file, Source.t) Hashtbl.t;
-  parsed : (Path.file, Parsed.t) Hashtbl.t;
+  parsed : (Path.file, parsed) Hashtbl.t;
   mutable namespace : Names.namespace option;
   resolved_names : (Names.key * Resolve.section, Resolve.resolved part) Hashtbl.t;
   import_checks : (Path.file, Diagnostic.t list) Hashtbl.t;
@@ -570,7 +572,7 @@ let namespace_of database note (package_database : package_database) =
                if file.module_ = module_ then begin
                  read database note (Parsed file);
                  let parsed = parsed_file database file in
-                 Some (file, parsed.file, parsed.text)
+                 Some (file, parsed.tree, parsed.text)
                end
                else None)
              package_database.files ))
@@ -835,8 +837,7 @@ let used_imports database note file =
 let import_diagnostics database note (file : Path.file) =
   read database note (Parsed file);
   note (Source file);
-  let parsed = parsed_file database file in
-  Resolve.file_diagnostics (recording_names database note) file parsed.file
+  Resolve.file_diagnostics (recording_names database note) file (parsed_file database file).tree
     ~text:(Source.text (source database file))
     ~used:(used_imports database note file)
 
@@ -1434,7 +1435,15 @@ let compute_part database (part : Part.t) =
   | Parsed file ->
       into (keyed package_database.parsed file) (fun note ->
           note (Source file);
-          Some (Parsed.parse (source database file)))
+          let source = source database file in
+          let tokens, lexer_diagnostics = Lexer.lex source in
+          let tree, parser_diagnostics = Parser.parse tokens ~lexer_diagnostics in
+          Some
+            {
+              tree;
+              diagnostics = lexer_diagnostics @ parser_diagnostics;
+              text = Source.text source;
+            })
   | Namespace _ -> compute_namespace database package_database
   | Resolved (key, section) ->
       into
@@ -2521,7 +2530,7 @@ let make_proof_lookups database = proof_lookups database ignore
 
 let read_parsed database (file : Path.file) =
   drain database ~through:Parse [ file.module_.package ];
-  parsed_file database file
+  (parsed_file database file).tree
 
 let make_name_lookups database packages =
   drain database ~through:Namespaces packages;

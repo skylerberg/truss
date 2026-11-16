@@ -173,6 +173,8 @@ let () =
   test "shift and addition: C and Rust's reading, then Go and Swift's" (fun () ->
       combination "a << b + 1" ~at:"<<" ~code:Needs_parentheses
         ~fixes:[ "a << (b + 1)"; "(a << b) + 1" ]);
+  test "a reading whose parentheses would mix operators inside them is not offered" (fun () ->
+      combination "a + b * c << d" ~at:"<<" ~code:Needs_parentheses ~fixes:[ "(a + b * c) << d" ]);
   test "& and | read the same everywhere" (fun () ->
       combination "a & b | c" ~at:"|" ~code:Needs_parentheses ~fixes:[ "(a & b) | c" ]);
   test "& and | read the same on the right" (fun () ->

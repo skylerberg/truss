@@ -440,15 +440,6 @@ let () =
         [ "lexer.unexpected_character"; "lexer.unexpected_character" ]
         (codes "don't it's");
       error "f('ab')" ~code:String_delimiter ~at:"'" ~fixed:{|f("ab")|});
-  test "more than eight touching fixes are all withheld" (fun () ->
-      let fixed_count count =
-        List.length
-          (List.filter
-             (fun (diagnostic : Diagnostic.t) -> diagnostic.fixes <> [])
-             (snd (lex ("a" ^ String.make count ';' ^ "b"))))
-      in
-      if fixed_count 8 <> 8 then fail "eight touching semicolons have %d fixes" (fixed_count 8);
-      if fixed_count 9 <> 0 then fail "nine touching semicolons have %d fixes" (fixed_count 9));
   test "strict equality" (fun () ->
       error "a === b" ~code:Strict_equality ~at:"===" ~fixed:"a == b";
       error "a !== b" ~code:Strict_equality ~at:"!==" ~fixed:"a != b");
@@ -542,6 +533,7 @@ let () =
       equal_lists Fun.id "fixed" [] (fixed_texts "x =..<.y" ~code:Foreign_operator);
       equal_lists Fun.id "fixed" [] (fixed_texts "f(01.: 0)" ~code:Number_leading_zero);
       equal_lists Fun.id "fixed" [] (fixed_texts "x = 0..<.0" ~code:Foreign_operator);
+      equal_lists Fun.id "fixed" [] (fixed_texts "x = 0.'a" ~code:Number_missing_digits);
       equal_lists Fun.id "fixed" [ "a !=\u{21D2} b" ]
         (fixed_texts "a \u{2260}\u{21D2} b" ~code:Confusable_character));
   test "a float with no digit before its `.` and a suffix" (fun () ->
@@ -793,9 +785,8 @@ let () =
       in
       List.iter
         (fun kind ->
-          if Lexer.For_testing.can_end kind <> List.mem kind can_end then
-            fail "can_end %s" (spelling kind);
-          if Lexer.For_testing.can_begin kind <> List.mem kind can_begin then
+          if Token.can_end kind <> List.mem kind can_end then fail "can_end %s" (spelling kind);
+          if Token.can_begin kind <> List.mem kind can_begin then
             fail "can_begin %s" (spelling kind))
         (List.map (fun (_, keyword) -> Keyword keyword) Token.keywords
         @ List.map (fun (_, punctuation) -> Punctuation punctuation) Token.punctuation
