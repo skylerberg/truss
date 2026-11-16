@@ -515,15 +515,8 @@ and read_raw_lines cursor ~scan ~dollars ~quotes ~line_end =
   line ()
 
 and find_leading_whitespace ((first : Token.text), rest) =
-  let value = first.value in
-  let rec count index =
-    if index < String.length value && (value.[index] = ' ' || value.[index] = '\t') then
-      count (index + 1)
-    else index
-  in
-  let length = count 0 in
-  if length = String.length value && Array.length rest = 0 then None
-  else Some (String.sub value 0 length)
+  let whitespace = String.take_first_while Char.Ascii.is_blank first.value in
+  if whitespace = first.value && Array.length rest = 0 then None else Some whitespace
 
 and compute_common_indentation lines =
   let common first second =
@@ -642,7 +635,7 @@ and build_multi_line cursor ~tag ~form ~quotes ~delimiter_stop lines closing =
                 delimiter, which is %s. This line starts with %s."
                (describe_whitespace indentation)
                (describe_whitespace line_whitespace));
-          String.sub value at (String.length value - at)
+          String.drop_first at value
         end
       in
       Buffer.add_string joined.buffer stripped;

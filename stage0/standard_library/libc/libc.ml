@@ -1394,10 +1394,9 @@ let make_declaration system function_ : declaration =
 
 let render_prototype (declaration : declaration) =
   let named =
-    List.filteri
-      (fun index _ ->
-        match declaration.variadic_from with Some first -> index < first | None -> true)
-      declaration.takes
+    match declaration.variadic_from with
+    | Some first -> List.take first declaration.takes
+    | None -> declaration.takes
   in
   let declared =
     List.sort_uniq String.compare (List.concat_map list_structures (declaration.returns :: named))

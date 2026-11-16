@@ -1095,8 +1095,8 @@ and read_statement context frame run (statement : Mir.statement) =
         binding_count = positioned;
         body;
       } ->
-      let from start stop =
-        List.filteri (fun index _ -> index >= start && index < stop) body.statements
+      let slice_statements start stop =
+        List.take (stop - start) (List.drop start body.statements)
       in
       let range, parameter, binding =
         match (lent, iteration) with
@@ -1112,7 +1112,7 @@ and read_statement context frame run (statement : Mir.statement) =
               List.filter
                 (fun (statement : Mir.statement) ->
                   match statement.kind with Basic (Lend _) -> false | _ -> true)
-                (from positioned bound) )
+                (slice_statements positioned bound) )
         | None, Range { start; stop; inclusive } ->
             ( Range_of_integers
                 {
@@ -1122,7 +1122,7 @@ and read_statement context frame run (statement : Mir.statement) =
                   type_ = compute_operand_type context frame start;
                 },
               part,
-              from 0 bound )
+              slice_statements 0 bound )
         | None, Pull _ ->
             Facts.raise_unsupported location "a quantifier over the values of a cursor"
       in
@@ -1133,7 +1133,7 @@ and read_statement context frame run (statement : Mir.statement) =
               statements = binding;
               value = Some (Constant { value = Boolean true; type_ = Types.bool });
             }
-          ~body:{ statements = from bound decision; value = Some holds }
+          ~body:{ statements = slice_statements bound decision; value = Some holds }
       in
       Some (write_place context after run { root = Local decides; projections = [] } term)
   | For { loop; iteration; part; lent; binding_count; body } ->
@@ -1152,8 +1152,8 @@ and read_statement context frame run (statement : Mir.statement) =
         run.loops <- List.tl run.loops;
         (List.rev exits.ends @ Option.to_list ended, List.rev exits.breaks)
       in
-      let bindings = List.filteri (fun index _ -> index < binding_count) body.statements
-      and after_bindings = List.filteri (fun index _ -> index >= binding_count) body.statements in
+      let bindings = List.take binding_count body.statements
+      and after_bindings = List.drop binding_count body.statements in
       let bind_element frame element =
         let frame =
           Facts.bind frame (Locals.make_key run.infos part)

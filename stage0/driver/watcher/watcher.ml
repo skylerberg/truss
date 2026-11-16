@@ -50,8 +50,7 @@ let find_relative_path watcher path =
   if path = watcher.root then Some ""
   else
     let prefix = watcher.root ^ "/" in
-    if String.starts_with ~prefix path then
-      Some (String.sub path (String.length prefix) (String.length path - String.length prefix))
+    if String.starts_with ~prefix path then Some (String.drop_first (String.length prefix) path)
     else None
 
 let is_skipped watcher relative = List.exists watcher.skipped (String.split_on_char '/' relative)

@@ -2,9 +2,8 @@ module Path_table = Hashtbl.Make (Path)
 
 let parse_wanted text =
   let written, version =
-    match String.index_opt text '@' with
-    | Some at ->
-        (String.sub text 0 at, Some (String.sub text (at + 1) (String.length text - at - 1)))
+    match String.split_first ~sep:"@" text with
+    | Some (written, version) -> (written, Some version)
     | None -> (text, None)
   in
   let name =

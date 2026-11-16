@@ -279,9 +279,9 @@ let print_table name numbers =
   let rec rows = function
     | [] -> ()
     | numbers ->
-        let row = List.filteri (fun index _ -> index < 12) numbers in
+        let row = List.take 12 numbers in
         Printf.printf "  %s,\n" (String.concat ", " (List.map string_of_int row));
-        rows (List.filteri (fun index _ -> index >= 12) numbers)
+        rows (List.drop 12 numbers)
   in
   rows numbers;
   print_string "]\n"

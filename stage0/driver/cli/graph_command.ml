@@ -2,7 +2,7 @@ type direction = Dependents | Dependencies
 
 let has_suffix names ~suffix =
   let skipped = List.length names - List.length suffix in
-  skipped >= 0 && List.filteri (fun index _ -> index >= skipped) names = suffix
+  skipped >= 0 && List.drop skipped names = suffix
 
 let matches (argument : Path_argument.t) (path : Path.t) =
   let suffix = argument.prefix @ [ argument.last ] in

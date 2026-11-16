@@ -24,12 +24,8 @@ let sort_in_declared_order lookups path ~variant ~name fields =
   match List.assoc_opt variant (list_declared_fields lookups path) with
   | Some declared ->
       let find_position field =
-        let rec find index = function
-          | [] -> index
-          | declared_name :: rest ->
-              if declared_name = name field then index else find (index + 1) rest
-        in
-        find 0 declared
+        Option.value ~default:(List.length declared)
+          (List.find_index (fun declared_name -> declared_name = name field) declared)
       in
       List.stable_sort (fun left right -> compare (find_position left) (find_position right)) fields
   | None -> fields

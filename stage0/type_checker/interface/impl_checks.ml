@@ -283,10 +283,7 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
             let written =
               {
                 written with
-                generics =
-                  List.filteri
-                    (fun index _ -> index >= List.length impl.impl_generics)
-                    written.generics;
+                generics = List.drop (List.length impl.impl_generics) written.generics;
                 uses = Types.subtract_capabilities written.uses impl.impl_uses;
               }
             in

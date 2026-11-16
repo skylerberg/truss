@@ -358,9 +358,7 @@ let list_tasks_left builder exit =
   | (`Break | `Continue) as exit -> (
       match builder.loops with
       | loop :: _ ->
-          List.filteri
-            (fun index _ -> index < List.length builder.tasks - loop.tasks_around)
-            builder.tasks
+          List.take (List.length builder.tasks - loop.tasks_around) builder.tasks
           |> List.filter_map (fun (task, _) ->
               match (task, exit) with Tree.Iteration _, `Continue -> None | _ -> Some task)
       | [] -> raise_bug "a loop exit outside a loop")

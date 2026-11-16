@@ -20,7 +20,7 @@ let make_manifest_path directory =
   if directory = "" then "truss.toml" else directory ^ "/truss.toml"
 
 let compute_parent path =
-  match String.rindex_opt path '/' with Some separator -> String.sub path 0 separator | None -> ""
+  match String.split_last ~sep:"/" path with Some (parent, _) -> parent | None -> ""
 
 let split_segments path = if path = "" then [] else String.split_on_char '/' path
 

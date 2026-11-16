@@ -310,9 +310,7 @@ let parse text =
 let has_project_table text =
   List.exists
     (fun line ->
-      let line =
-        match String.index_opt line '#' with Some index -> String.sub line 0 index | None -> line
-      in
+      let line = String.take_first_while (fun character -> character <> '#') line in
       String.trim line = "[project]")
     (String.split_on_char '\n' text)
 

@@ -21,13 +21,7 @@ let truss_blocks text =
       | Some line -> leading line
       | None -> 0
     in
-    String.concat "\n"
-      (List.map
-         (fun line ->
-           if String.length line >= indentation then
-             String.sub line indentation (String.length line - indentation)
-           else "")
-         block)
+    String.concat "\n" (List.map (String.drop_first indentation) block)
   in
   List.map dedent (loop false [] [] (String.split_on_char '\n' text))
 

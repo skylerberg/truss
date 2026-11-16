@@ -128,7 +128,7 @@ let render_intrinsic context (intrinsic : Lowered.intrinsic)
         List.mapi
           (fun position (text, _) ->
             Printf.sprintf "%s->outer[%d] = (const struct t_evidence *)%s, " slot position text)
-          (List.filteri (fun position _ -> position >= 3) arguments)
+          (List.drop 3 arguments)
       in
       Printf.sprintf
         "(%s->evidence.implementation = (void *)%s, %s->evidence.table = (const void *const *)%s, \

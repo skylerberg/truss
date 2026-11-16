@@ -6,12 +6,8 @@ let module_of text : Path.module_ =
 let top module_ name : Path.t = Top { module_ = module_of module_; name }
 
 let file_of text : Path.file =
-  match String.index_opt text '/' with
-  | Some slash ->
-      {
-        module_ = module_of (String.sub text 0 slash);
-        name = String.sub text (slash + 1) (String.length text - slash - 1);
-      }
+  match String.split_first ~sep:"/" text with
+  | Some (module_, name) -> { module_ = module_of module_; name }
   | None ->
       let module_ = module_of text in
       { module_; name = (match List.rev module_.modules with last :: _ -> last | [] -> "main") }

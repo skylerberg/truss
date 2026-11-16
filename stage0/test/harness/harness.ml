@@ -33,15 +33,7 @@ let wanted =
   | Some affix -> String.includes ~affix
 
 let read_environment () =
-  List.filter_map
-    (fun entry ->
-      match String.index_opt entry '=' with
-      | Some equals ->
-          Some
-            ( String.sub entry 0 equals,
-              String.sub entry (equals + 1) (String.length entry - equals - 1) )
-      | None -> None)
-    (Array.to_list (Unix.environment ()))
+  List.filter_map (String.split_first ~sep:"=") (Array.to_list (Unix.environment ()))
 
 let restore_environment saved =
   let current = read_environment () in

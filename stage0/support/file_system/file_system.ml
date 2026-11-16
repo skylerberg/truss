@@ -1,12 +1,6 @@
 let read path = In_channel.with_open_bin path In_channel.input_all
 let write path text = Out_channel.with_open_bin path (fun channel -> output_string channel text)
-
-let write_all descriptor text =
-  let rec from offset =
-    if offset < String.length text then
-      from (offset + Unix.write_substring descriptor text offset (String.length text - offset))
-  in
-  from 0
+let write_all descriptor text = ignore (Unix.write_substring descriptor text 0 (String.length text))
 
 let write_atomically path text =
   let temporary, channel =

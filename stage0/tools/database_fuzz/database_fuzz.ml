@@ -125,9 +125,7 @@ let edits files =
             let piece = List.nth pieces at in
             let rest = replace_nth pieces at [] in
             let target = random (List.length rest + 1) in
-            List.filteri (fun position _ -> position < target) rest
-            @ [ piece ]
-            @ List.filteri (fun position _ -> position >= target) rest));
+            List.take target rest @ [ piece ] @ List.drop target rest));
       (fun () ->
         match (pieces, files) with
         | [], _ | _, [ _ ] -> None
@@ -340,7 +338,7 @@ let () =
             | parts ->
                 report step edit
                   ("the propagated database differs from a cold build in "
-                  ^ String.concat ", " (List.filteri (fun index _ -> index < 20) parts));
+                  ^ String.concat ", " (List.take 20 parts));
                 start_over ())
         | Error failure, Ok _ ->
             report step edit ("propagating it raised " ^ shown_failure failure);

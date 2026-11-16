@@ -45,10 +45,7 @@ let located at (visit : Core_walk.visit) : Core_walk.visit =
   }
 
 let excerpt text =
-  let line =
-    match String.index_opt text '\n' with Some stop -> String.sub text 0 stop | None -> text
-  in
-  let line = String.trim line in
+  let line = String.trim (String.take_first_while (fun character -> character <> '\n') text) in
   if String.length line > 60 then String.sub line 0 57 ^ "..." else line
 
 let operand_type (operand : Core.operand) =

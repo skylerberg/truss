@@ -67,7 +67,7 @@ let clean_underscores group =
     in
     (cleaned, first_bad 0)
 
-let remove_underscores group = String.concat "" (String.split_on_char '_' group)
+let remove_underscores group = String.replace_all ~sub:"_" ~by:"" group
 
 type issue = { problem : problem; fixable : bool }
 
