@@ -2379,20 +2379,3 @@ the reference parser fail on any other conflict:
 - **A name after `return`** starts the returned value, so in
   `assert return by bit_vector`, `by` is `return`'s operand and not the
   start of `by bit_vector`.
-
-## Layout
-
-`truss fmt` writes every file in one layout:
-
-- It removes a byte order mark, indents with spaces, and writes line feeds
-  only.
-- It puts line breaks only where they continue a statement.
-- It writes a sum type that fits on one line without the first `|`, and
-  otherwise each variant on its own line starting with `|`.
-- It removes `-> Unit`, and writes `x = x + y` as `x += y`.
-- It orders clauses by kind, `uses`, `requires`, `ensures`, `decreases`,
-  `cost`, keeping the order within a kind.
-- It sorts `use` lines, and puts each element of a long literal on its own
-  line.
-- It never breaks a string or changes the text inside one, and removes
-  spaces after an opening `"""`.
