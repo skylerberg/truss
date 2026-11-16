@@ -1000,7 +1000,10 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
   | _, Types.Integer, _ when env.specification && integer_type state actual_type -> Some To_integer
   | Types.Function actual_function, Types.Function wanted_function, _
     when not (Types.has_same_clauses actual_function wanted_function) ->
-      let unlisted = Types.subtract_capabilities actual_function.uses wanted_function.uses in
+      let unlisted =
+        Types.list_missing_capabilities ~required:actual_function.uses
+          ~available:wanted_function.uses
+      in
       let unknown =
         Types.has_unsolved_capabilities actual_function.uses
         || Types.has_unsolved_capabilities wanted_function.uses

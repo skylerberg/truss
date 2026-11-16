@@ -125,7 +125,8 @@ let require_available checking scope (origin : Core.origin) ?(for_implementation
                 report checking Not_available origin
                   (Printf.sprintf
                      "This call uses `%s`, which is not available here. Declare it with `uses %s`."
-                     shown shown)))
+                     shown shown)
+            | Capability_error _ -> State.bug "a capability with an error is missing"))
       (missing :> Types.capability list)
   in
   if required <> Types.no_capabilities then
@@ -349,7 +350,8 @@ let solve (state : State.state) =
       | capability -> [ capability ])
   in
   let missing (constraint_ : State.subset_constraint) =
-    Types.subtract_capabilities (substitute constraint_.subset) (substitute constraint_.superset)
+    Types.list_missing_capabilities ~required:(substitute constraint_.subset)
+      ~available:(substitute constraint_.superset)
   in
   let rec grow () =
     let changed =
@@ -388,6 +390,7 @@ let rec can_call_capability_code (state : State.state) ~bounds ?(seen = []) (typ
     let can_hold_a_capability : Types.capability -> bool = function
       | Capability_projection _ -> ( match type_ with Types.Any _ -> false | _ -> true)
       | Capability _ | Capability_parameter _ | Capability_variable _ -> true
+      | Capability_error _ -> State.bug "a trait's method uses a capability with an error"
     in
     List.exists
       (fun (bound : Types.trait_reference) ->

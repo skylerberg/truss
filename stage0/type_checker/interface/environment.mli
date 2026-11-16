@@ -20,6 +20,7 @@ type scope = {
   self_associated : (string * Types.ty) list;
   self_capabilities : (string * Types.capability_set) list;
   bounds : (Types.parameter * Types.trait_reference list) list;
+  broken_parameters : (Types.parameter * Diagnostic.reported) list;
 }
 
 type elaborated_interface = {

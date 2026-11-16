@@ -493,7 +493,8 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                 wrong "%s contains `%s.%s`, which is not normalized" subject (Types.show base) name);
             type_ subject base;
             trait subject reference
-        | Types.Capability_variable _ -> wrong "%s contains a capability inference variable" subject)
+        | Types.Capability_variable _ -> wrong "%s contains a capability inference variable" subject
+        | Types.Capability_error _ -> wrong "%s contains a capability with an error" subject)
       (set :> Types.capability list)
   and type_ subject (ty : Types.ty) =
     match ty with

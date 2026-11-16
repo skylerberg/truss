@@ -6,6 +6,7 @@ module Elaborator : sig
     lookups : Lookups.t;
     resolved : Resolve.resolved;
     bounds : (Types.parameter, Types.trait_reference list) Hashtbl.t;
+    broken_parameters : (Types.parameter, Diagnostic.reported) Hashtbl.t;
     self_type : Types.ty option;
     self_trait : Types.trait_reference option;
     self_associated : (string * Types.ty) list;

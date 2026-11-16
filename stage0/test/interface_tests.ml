@@ -51,6 +51,10 @@ let () =
       | _ -> Harness.fail "no receiver");
   Harness.test "a type with the wrong number of arguments is an error" (fun () ->
       one_diagnostic "fn f(value: Option[Int64, Int64]) {}\n" "types.arity");
+  Harness.test "a parameter whose bound is an error is an error, not an unbounded parameter"
+    (fun () ->
+      one_diagnostic "fn sum[Item: Add](left: Item, right: Item) -> Item.Output {\n  todo\n}\n"
+        "types.arity");
   Harness.test "a trait in a type position is an error" (fun () ->
       one_diagnostic "fn f(value: Equal) {}\n" "types.not_a_type");
   Harness.test "a type argument must meet the type's bounds" (fun () ->

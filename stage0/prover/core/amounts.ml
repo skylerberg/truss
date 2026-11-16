@@ -128,7 +128,8 @@ let make_reach_formula context frame uses (values : State.passed list) (target :
              | Types.Capability used -> Path.equal used path
              | Types.Capability_parameter _ | Types.Capability_projection _
              | Types.Capability_variable _ ->
-                 true)
+                 true
+             | Types.Capability_error _ -> Facts.bug "the prover reads a capability with an error")
            uses)
 
 let make_conditional_amount condition amount =

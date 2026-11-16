@@ -57,6 +57,8 @@ let uses_more : Types.capability -> change = function
       Breaks (Printf.sprintf "now uses `%s`" (Types.show_capability capability))
   | Capability_variable _ ->
       Compiler_bug.bug ~stage:"Compatibility" "a signature holds an unknown set of capabilities"
+  | Capability_error _ ->
+      Compiler_bug.bug ~stage:"Compatibility" "a signature holds a capability with an error"
 
 let signature ~(before : Types.signature) ~(after : Types.signature) =
   let same_parameters =
