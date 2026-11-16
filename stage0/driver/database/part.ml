@@ -109,20 +109,19 @@ let type_package : Ground.ty -> Path.package = function
   | Any { trait; _ } -> Path.package trait
   | Function _ | Never -> Path.standard_package
 
-let rec instance_package : Instance.key -> Path.package = function
+let instance_package : Instance.key -> Path.package = function
   | Code { path; _ }
   | Constant path
   | Evaluator path
   | Template_check { from_template = path; _ }
   | Call_evaluation { function_ = path; _ }
-  | Table { impl = path; _ }
-  | Any_table { impl = path; _ }
-  | Program_main path
-  | Locked_entry { capability = path; _ }
-  | Locked_table path ->
+  | Generated
+      (Locked_entry { capability = path; _ } | Adapter { function_ = path; _ } | Program_main path)
+  | Table (Impl_table { impl = path; _ } | Any_table { impl = path; _ } | Locked_table path) ->
       Path.package path
   | Drop ty | Copy ty | Debug ty | Any_drop ty | Any_copy ty | Encode ty -> type_package ty
-  | Adapter { function_ = key; _ } | Entry key | Any_entry key -> instance_package key
+  | Generated (Entry impl_method | Any_entry impl_method) ->
+      Path.package (Instance.make_method_path impl_method)
 
 let package = function
   | Ground_types key | Lowered key | Test_key key -> instance_package key
@@ -217,20 +216,19 @@ let type_definition : Ground.ty -> Path.t option = function
   | Any { trait; _ } -> Some trait
   | Function _ | Never -> None
 
-let rec instance_definition : Instance.key -> Path.t option = function
+let instance_definition : Instance.key -> Path.t option = function
   | Code { path; _ }
   | Constant path
   | Evaluator path
   | Template_check { from_template = path; _ }
   | Call_evaluation { function_ = path; _ }
-  | Table { impl = path; _ }
-  | Any_table { impl = path; _ }
-  | Program_main path
-  | Locked_entry { capability = path; _ }
-  | Locked_table path ->
+  | Generated
+      (Locked_entry { capability = path; _ } | Adapter { function_ = path; _ } | Program_main path)
+  | Table (Impl_table { impl = path; _ } | Any_table { impl = path; _ } | Locked_table path) ->
       Some path
   | Drop ty | Copy ty | Debug ty | Any_drop ty | Any_copy ty | Encode ty -> type_definition ty
-  | Adapter { function_ = key; _ } | Entry key | Any_entry key -> instance_definition key
+  | Generated (Entry impl_method | Any_entry impl_method) ->
+      Some (Instance.make_method_path impl_method)
 
 let definition = function
   | Source _ | Parsed _ | Packages | Modules _ | Dependencies _ | Namespace _ | Entries _

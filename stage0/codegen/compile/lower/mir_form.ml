@@ -810,7 +810,7 @@ let locked_evidence st ~(tasks : Lowered.operand) (evidence : (Path.t * Lowered.
                [
                  Address { place = at slot; writable = true };
                  Address { place = mutex; writable = true };
-                 Constant (Symbol_address (Locked_table capability));
+                 Constant (Symbol_address (Table (Locked_table capability)));
                  implementation;
                  tasks;
                ];
@@ -1312,12 +1312,15 @@ and into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.place) ty ~or
   | Function_value { path; type_arguments; _ } -> (
       match ty with
       | Function function_type ->
-          let function_ =
-            Instance.Code { path; type_arguments = List.map (ground_argument st) type_arguments }
+          let adapter : Instance.generated =
+            Adapter
+              {
+                function_ = path;
+                type_arguments = List.map (ground_argument st) type_arguments;
+                ty = function_type;
+              }
           in
-          assign
-            (Function_value
-               { code = Instance (Adapter { function_; ty = function_type }); environment = None })
+          assign (Function_value { code = Instance (Generated adapter); environment = None })
       | _ -> bug "a function value of type %s" (Ground.to_string ty))
   | Value_parameter parameter -> (
       match ground_argument st (Value (Value_parameter parameter)) with

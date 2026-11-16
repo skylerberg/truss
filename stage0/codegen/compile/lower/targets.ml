@@ -164,7 +164,7 @@ let implementation_evidence st ~impl ~type_arguments ~implementation =
          arguments =
            Address { place = at slot; writable = true }
            :: implementation
-           :: Constant (Symbol_address (Table { impl; type_arguments }))
+           :: Constant (Symbol_address (Table (Impl_table { impl; type_arguments })))
            :: outer;
          result = Discarded;
        });
@@ -382,7 +382,7 @@ let any_into st ~any_ty ~inner_ty ~impl ~type_arguments ~(value : Lowered.place)
              fields =
                [
                  ("value", Copy (at box));
-                 ("vtable", Constant (Symbol_address (Any_table { impl; type_arguments })));
+                 ("vtable", Constant (Symbol_address (Table (Any_table { impl; type_arguments }))));
                ];
            } ))
 

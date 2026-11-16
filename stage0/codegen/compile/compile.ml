@@ -30,10 +30,11 @@ let make (context : Lower.context) (key : Instance.key) : lowered =
   let drop_and_copy = Lower.drop_and_copy context in
   let code instance = emitted (Code instance) in
   match key with
-  | Code _ | Entry _ | Program_main _ | Any_entry _ | Adapter _ | Locked_entry _ ->
-      code (Lower.instance context key)
+  | Code { path; type_arguments } -> code (Lower.lower_source_code context ~path ~type_arguments)
+  | Generated generated -> code (Lower.lower_generated context generated)
+  | Table table -> emitted (Table (Lower.lower_table context table))
   | Constant path -> (
-      match Lower.constant context path with
+      match Lower.lower_constant context path with
       | Folded data -> Folded (data, Emit_c.fragment env (Data data))
       | Run ty -> Evaluate (path, ty))
   | Drop ty -> code (Drop_and_copy.drop drop_and_copy ty)
@@ -42,14 +43,11 @@ let make (context : Lower.context) (key : Instance.key) : lowered =
   | Any_copy ty -> code (Drop_and_copy.any_copy drop_and_copy ty)
   | Debug ty -> code (Debug_output.debug env ty)
   | Encode ty -> code (Encoding.encode env ty)
-  | Evaluator path -> code (Lower.evaluator context path)
+  | Evaluator path -> code (Lower.lower_evaluator context path)
   | Template_check { from_template; literals; clauses } ->
-      code (Lower.template_check context key ~from_template ~literals ~clauses)
+      code (Lower.lower_template_check context ~from_template ~literals ~clauses)
   | Call_evaluation { function_; arguments } ->
-      code (Lower.call_evaluation context key ~function_ ~arguments)
-  | Any_table _ -> emitted (Table (Lower.any_table context key))
-  | Table _ -> emitted (Table (Lower.table context key))
-  | Locked_table capability -> emitted (Table (Lower.locked_table context key ~capability))
+      code (Lower.lower_call_evaluation context ~function_ ~arguments)
 
 let lower (settings : Lookups.settings) (lookups : Lookups.t) ~layout_of ~lowered key =
   let env =
@@ -262,7 +260,7 @@ let test_runner : Instance.key = Code { path = Well_known.path Run_tests; type_a
 
 let roots ~tests ~mains =
   (if tests = [] then [] else test_runner :: List.map Lower.test_key tests)
-  @ List.map (fun main -> Instance.Program_main main) mains
+  @ List.map (fun main -> Instance.Generated (Program_main main)) mains
 
 let rec build ?progress ?tests ?(supplied = []) compiler ~roots ~startup ~output =
   let lookup key =
@@ -620,8 +618,8 @@ type unshippable = {
 }
 
 let reached compiler ~main =
-  match compiler.requests.reached_todo_types (Program_main main) with
-  | [] -> Reachable.running ~lookup:(compiled compiler) [ Instance.Program_main main ]
+  match compiler.requests.reached_todo_types (Generated (Program_main main)) with
+  | [] -> Reachable.running ~lookup:(compiled compiler) [ Instance.Generated (Program_main main) ]
   | _ :: _ -> []
 
 let reached_definitions compiler ~main =
@@ -630,7 +628,8 @@ let reached_definitions compiler ~main =
     (List.filter_map
        (fun (_, way) ->
          match List.rev way with
-         | (Instance.Code { path; _ } | Constant path | Program_main path) :: _ -> Some path
+         | (Instance.Code { path; _ } | Constant path | Generated (Program_main path)) :: _ ->
+             Some path
          | _ -> None)
        (reached compiler ~main))
 
@@ -653,7 +652,7 @@ let unshippable compiler ~main =
         (fun path ->
           let ({ file; line; column } : Emit_c.position) = todo_type_position compiler path in
           { failure = `Todo; file; line; column; way = [ main; path ] })
-        (compiler.requests.reached_todo_types (Program_main main))
+        (compiler.requests.reached_todo_types (Generated (Program_main main)))
       @ List.concat_map
           (fun (compiled, keys) ->
             List.map
@@ -687,7 +686,7 @@ let unshippable compiler ~main =
   end
 
 let program_root compiler ~main =
-  let root = Instance.Program_main main in
+  let root = Instance.Generated (Program_main main) in
   match compiler.requests.reached_todo_types root with
   | [] -> root
   | todo_types ->
@@ -716,7 +715,7 @@ let build_program compiler ~main ~output =
 
 let reached_todo_types compiler (root : Path.t) =
   compiler.requests.reached_todo_types
-    (match root with Test _ -> Lower.test_key root | _ -> Program_main root)
+    (match root with Test _ -> Lower.test_key root | _ -> Generated (Program_main root))
 
 let run_template_check compiler ~from_template ~literals ~clauses =
   let ran =
