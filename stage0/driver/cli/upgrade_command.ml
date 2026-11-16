@@ -11,7 +11,7 @@ let parse_wanted text =
     match Manifest.parse_name written with
     | Some ({ owner = Some _; _ } as name) -> name
     | _ ->
-        Outcome.cannot_run
+        Outcome.raise_cannot_run
           "`%s` is not a registry package's name, which is an owner and a name, such as \
            `acme::geometry`."
           written
@@ -22,7 +22,7 @@ let parse_wanted text =
         match Registry.Version.parse version with
         | Some version -> version
         | None ->
-            Outcome.cannot_run "`%s` is not a version, which is three numbers, such as 1.4.2."
+            Outcome.raise_cannot_run "`%s` is not a version, which is three numbers, such as 1.4.2."
               version)
       version )
 
@@ -211,7 +211,7 @@ let run ~names =
   let snapshot, _ = Command_packages.load_current () in
   let set = List.map parse_wanted names in
   match Workspace.plan_lock snapshot ~set ~all:(names = []) with
-  | Error message -> Outcome.cannot_run "%s" message
+  | Error message -> Outcome.raise_cannot_run "%s" message
   | Ok plan ->
       let lock = lock_changes ~before:plan.before ~after:plan.after in
       if lock = [] then begin

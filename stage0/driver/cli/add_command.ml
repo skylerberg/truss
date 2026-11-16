@@ -6,7 +6,7 @@ let run ~names =
     match Registry.Index.find_current_registry () with
     | Some registry -> registry
     | None ->
-        Outcome.cannot_run "No registry is set. Set `%s` to the registry's directory."
+        Outcome.raise_cannot_run "No registry is set. Set `%s` to the registry's directory."
           Registry.Index.variable
   in
   List.iter
@@ -14,10 +14,10 @@ let run ~names =
       match version with
       | None ->
           if Registry.Index.find_newest registry name = None then
-            Outcome.cannot_run "The registry has no package `%s`." (Path.show_package name)
+            Outcome.raise_cannot_run "The registry has no package `%s`." (Path.show_package name)
       | Some version ->
           if Registry.Index.hash_of registry name version = None then
-            Outcome.cannot_run "The registry has no `%s` %s." (Path.show_package name)
+            Outcome.raise_cannot_run "The registry has no `%s` %s." (Path.show_package name)
               (Registry.Version.show version))
     wanted;
   let manifest =
@@ -29,13 +29,13 @@ let run ~names =
   let with_entries =
     try List.fold_left (fun text (name, _) -> Manifest.add_dependency text name) written wanted
     with Manifest.Malformed { line; message } ->
-      Outcome.cannot_run "%s:%d: %s" (Shown_path.show_path manifest) line message
+      Outcome.raise_cannot_run "%s:%d: %s" (Shown_path.show_path manifest) line message
   in
   if with_entries <> written then Command_packages.write_file manifest with_entries;
   match Workspace.plan_lock (Command_packages.retake snapshot) ~set:wanted ~all:false with
   | Error message ->
       if with_entries <> written then Command_packages.write_file manifest written;
-      Outcome.cannot_run "%s" message
+      Outcome.raise_cannot_run "%s" message
   | Ok plan ->
       Command_packages.write_file (Upgrade_command.lock_file snapshot) plan.text;
       Upgrade_command.report

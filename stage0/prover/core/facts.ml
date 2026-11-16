@@ -3,10 +3,10 @@ let make_variable ?(numbers = []) label = Logic.Symbol.Variable { label; numbers
 exception Unsupported of State.location * string
 exception Foreign_unsupported of string
 
-let unsupported location format =
+let raise_unsupported location format =
   Printf.ksprintf (fun message -> raise (Unsupported (location, message))) format
 
-let bug format = Compiler_bug.bug ~stage:"Prover" format
+let raise_bug format = Compiler_bug.raise_bug ~stage:"Prover" format
 
 let is_in_recursion_group (context : State.context) path =
   List.exists (Path.equal path) (context.lookups.recursion_group context.current)
@@ -343,7 +343,7 @@ let quote_span text (span : Source.Definition_span.t) =
 
 let quote_origin (context : State.context) (frame : State.frame) origin =
   if frame.source.key <> Some context.home then
-    bug "a quote of %s, outside the definition being proven" frame.source.name;
+    raise_bug "a quote of %s, outside the definition being proven" frame.source.name;
   let names = context.lookups.interface.names in
   quote_span (names.text context.home)
     (Source.Definition_span.locate (names.spans context.home) origin)
@@ -568,7 +568,7 @@ let name_path_condition context (frame : State.frame) condition =
 
 let merge context ?value_type ~condition
     (paths : (Logic.term * State.frame * Logic.term option) list) =
-  let first = match paths with (_, first, _) :: _ -> first | [] -> bug "no paths meet" in
+  let first = match paths with (_, first, _) :: _ -> first | [] -> raise_bug "no paths meet" in
   let is_expression = not first.makes_obligations in
   let aliases, slices, lends =
     merge_known_on_paths (List.map (fun (on, frame, _) -> (on, frame)) paths)
@@ -578,7 +578,7 @@ let merge context ?value_type ~condition
     match List.rev values with
     | (_, _, last) :: earlier ->
         List.fold_left (fun otherwise (on, _, term) -> Logic.ite on term otherwise) last earlier
-    | [] -> bug "a value that no path gives"
+    | [] -> raise_bug "a value that no path gives"
   in
   let define prefix sort (values : (Logic.term * State.frame * Logic.term) list) =
     match values with
@@ -643,7 +643,7 @@ let merge context ?value_type ~condition
                 paths
             with
             | Some term -> term
-            | None -> bug "a local that no path binds"))
+            | None -> raise_bug "a local that no path binds"))
       keys
   in
   let types =

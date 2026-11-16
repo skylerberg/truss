@@ -6,12 +6,12 @@ let read_c_flags () =
 let require_toolchain () =
   match Toolchain.find () with
   | Ok toolchain -> toolchain
-  | Error message -> Outcome.cannot_run "%s" message
+  | Error message -> Outcome.raise_cannot_run "%s" message
 
 let make_requests database packages =
   match Libc.host with
   | Some _ -> Database.make_lowering_requests database packages
-  | None -> Outcome.cannot_run "Stage0 builds programs only for Linux and macOS."
+  | None -> Outcome.raise_cannot_run "Stage0 builds programs only for Linux and macOS."
 
 let make_results () : Compile.results =
   let cache = Workspace.open_cache () in

@@ -4,12 +4,12 @@ let apply_slice context (frame : State.frame) (site : Invocation.site) ~(base_ty
   let element =
     match base_type with
     | Types.Named { arguments = Types.Type element :: _; _ } -> element
-    | _ -> Facts.unsupported location "a slice of `%s`" (Types.show base_type)
+    | _ -> Facts.raise_unsupported location "a slice of `%s`" (Types.show base_type)
   in
   let model =
     match Models.find_model context base_type collection ~element with
     | Some model -> model
-    | None -> Facts.unsupported location "a slice of `%s`" (Types.show base_type)
+    | None -> Facts.raise_unsupported location "a slice of `%s`" (Types.show base_type)
   in
   let length = Models.make_sequence_length context element model in
   let high =
@@ -730,7 +730,7 @@ let element_written_back context frame ~(operation : Intrinsic.operation) ~type_
   let element () =
     match type_arguments with
     | Types.Type element :: _ -> Facts.substitute_type context frame element
-    | _ -> Facts.bug "an element's lend with no element type"
+    | _ -> Facts.raise_bug "an element's lend with no element type"
   in
   match operation with
   | Storage_at_mut ->
@@ -747,4 +747,4 @@ let element_written_back context frame ~(operation : Intrinsic.operation) ~type_
         ~after:(make_buffer_model context View element updated)
         index final;
       receiver.write frame updated
-  | _ -> Facts.bug "a lend of an element by an operation that lends none"
+  | _ -> Facts.raise_bug "a lend of an element by an operation that lends none"

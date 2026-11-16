@@ -1,4 +1,4 @@
-let bug format = Compiler_bug.bug ~stage:"Infer" format
+let raise_bug format = Compiler_bug.raise_bug ~stage:"Infer" format
 
 let gives (trait : Path.t) name =
   match (Well_known.of_path trait, name) with
@@ -56,7 +56,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
           let result =
             match signature.output with
             | Returns type_ -> type_
-            | Lends _ -> bug "a derived method that lends"
+            | Lends _ -> raise_bug "a derived method that lends"
           in
           let parameters : Core.parameter list =
             (match signature.receiver with
@@ -89,7 +89,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
               List.filter (fun (parameter : Core.parameter) -> parameter.local <> Self) parameters
             with
             | [ parameter ] -> Local { local = parameter.local; type_ = parameter.type_; origin }
-            | _ -> bug "`%s` takes one value beside its own" (Path.show path)
+            | _ -> raise_bug "`%s` takes one value beside its own" (Path.show path)
           in
           let method_of ?(type_arguments = []) (wanted : Path.t) name (receiver : Path.receiver)
               of_type arguments type_ =
@@ -102,7 +102,8 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
               | Some From_bound -> Bound
               | Some From_any -> Dynamic
               | Some Built_in | Some (Accepted _) | None ->
-                  bug "`%s` is derived for a type with a field that has none" (Path.show wanted)
+                  raise_bug "`%s` is derived for a type with a field that has none"
+                    (Path.show wanted)
             in
             node type_
               (Call
@@ -162,11 +163,13 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                      variants)
             | Record _ -> None
             | Todo_type | Builtin_type _ ->
-                bug "`%s` is derived for a type with no fields" (Path.show trait)
+                raise_bug "`%s` is derived for a type with no fields" (Path.show trait)
           in
           let alone = match variants with Some [ _ ] -> true | _ -> false in
           let record_fields () =
-            match shape with Record fields -> fields | _ -> bug "a record's fields of a sum type"
+            match shape with
+            | Record fields -> fields
+            | _ -> raise_bug "a record's fields of a sum type"
           in
           let record_parts base =
             List.map
@@ -270,12 +273,12 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   match List.rev parameters with
                   | ({ local; type_; _ } : Core.parameter) :: _ ->
                       (Core.Local { local; type_; origin }, type_)
-                  | [] -> bug "`hash` takes a hasher"
+                  | [] -> raise_bug "`hash` takes a hasher"
                 in
                 let hasher_path =
                   match hasher_type with
                   | Named { path; _ } -> path
-                  | _ -> bug "a hasher that is not a named type"
+                  | _ -> raise_bug "a hasher that is not a named type"
                 in
                 let changed : Core.argument =
                   Passed { mode = Mut; value = Place hasher; mode_keyword = None }
@@ -466,7 +469,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   match List.rev parameters with
                   | ({ local; type_; _ } : Core.parameter) :: _ ->
                       (Core.Local { local; type_; origin }, type_)
-                  | [] -> bug "`serialize` takes a serializer"
+                  | [] -> raise_bug "`serialize` takes a serializer"
                 in
                 let sink_argument : Core.argument =
                   Passed { mode = Mut; value = Place sink; mode_keyword = None }
@@ -516,7 +519,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   match parameters with
                   | [ ({ local; type_; _ } : Core.parameter) ] ->
                       (Core.Local { local; type_; origin }, type_)
-                  | _ -> bug "`deserialize` takes a deserializer"
+                  | _ -> raise_bug "`deserialize` takes a deserializer"
                 in
                 let source_argument mode : Core.argument =
                   Passed { mode; value = Place source; mode_keyword = None }
@@ -525,7 +528,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                 let error_type =
                   match result with
                   | Named { arguments = [ _; Type error ]; _ } -> error
-                  | _ -> bug "`deserialize` returns a `Result`"
+                  | _ -> raise_bug "`deserialize` returns a `Result`"
                 in
                 let result_of ok =
                   Types.make_named (Well_known.make_path Result) [ ok; error_type ]
@@ -805,7 +808,8 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                                                   origin;
                                                                 }
                                                           | Some _ ->
-                                                              bug "a variant's field with a default");
+                                                              raise_bug
+                                                                "a variant's field with a default");
                                                         value =
                                                           node field.field_type
                                                             (Use
@@ -881,7 +885,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                               type_arguments = [];
                               evidence = Impl { impl; arguments = substitution };
                             }
-                      | _ -> bug "`String` has no `Equal`"
+                      | _ -> raise_bug "`String` has no `Equal`"
                     in
                     let unknown =
                       node Types.Never
@@ -940,7 +944,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                     @ [ arm (pattern string_type Wildcard) (giving unknown) ];
                                 }));
                     })
-            | _ -> bug "`%s` cannot be derived" (Path.show path)
+            | _ -> raise_bug "`%s` cannot be derived" (Path.show path)
           in
           let body = generated_body () in
           let ensures =

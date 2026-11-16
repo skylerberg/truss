@@ -100,7 +100,7 @@ let report_error_type context code span message =
 let report_error_capability context code span message =
   [ Types.Capability_error (record_diagnostic context.diagnostics code span message) ]
 
-let bug format = Compiler_bug.bug ~stage:"Interface" format
+let raise_bug format = Compiler_bug.raise_bug ~stage:"Interface" format
 let find_target context (name : Syntax.name) = context.resolved.names.(name.id)
 
 let find_parameter context (name : Syntax.name) =
@@ -116,7 +116,7 @@ let find_parameter context (name : Syntax.name) =
               "`%s` is a capability parameter, which has no associated types or capability sets."
               name.text))
   | Some (Unknown report) -> Error report
-  | _ -> bug "`%s` is not resolved as a generic parameter" name.text
+  | _ -> raise_bug "`%s` is not resolved as a generic parameter" name.text
 
 let show_path (path : Syntax.path) =
   String.concat "::"
@@ -256,7 +256,7 @@ and elaborate_count_name context (name : Syntax.name) : Types.argument =
                      to itself, and is made of literals, arithmetic, and other such constants."
                     name.text)))
   | Some (Unknown report) -> Types.Type (Types.Error report)
-  | _ -> bug "`%s` is not resolved as a type argument" name.text
+  | _ -> raise_bug "`%s` is not resolved as a type argument" name.text
 
 and check_arity context (path : Syntax.path_type) shown expected :
     (unit, Diagnostic.reported) Stdlib.result =
@@ -337,7 +337,7 @@ and elaborate_path_type context (path : Syntax.path_type) : Types.ty =
       report_error_type context Not_a_type context.spans.(path.id)
         (Printf.sprintf "`%s` is a capability, not a type." shown)
   | Some (Unknown report) -> Types.Error report
-  | _ -> bug "`%s` is not resolved as a type" shown
+  | _ -> raise_bug "`%s` is not resolved as a type" shown
 
 and elaborate_trait_reference ?(capability = false) context (path : Syntax.path_type) :
     (Types.trait_reference, Diagnostic.reported) Stdlib.result =
@@ -370,7 +370,7 @@ and elaborate_trait_reference ?(capability = false) context (path : Syntax.path_
         (record_diagnostic context.diagnostics Not_a_trait context.spans.(path.id)
            (Printf.sprintf "`%s` is a generic parameter, not a trait." shown))
   | Some (Unknown report) -> Error report
-  | _ -> bug "`%s` is not resolved as a trait" shown
+  | _ -> raise_bug "`%s` is not resolved as a trait" shown
 
 and elaborate_trait_bounds context paths =
   let references = List.map (elaborate_trait_reference context) paths in
@@ -391,7 +391,7 @@ and elaborate_capability_path context (path : Syntax.path_type) : Types.capabili
       report_error_capability context Not_a_capability context.spans.(path.id)
         (Printf.sprintf "`%s` is not a capability." shown)
   | Some (Unknown report) -> [ Types.Capability_error report ]
-  | _ -> bug "`%s` is not resolved as a capability" shown
+  | _ -> raise_bug "`%s` is not resolved as a capability" shown
 
 and find_capability_projection context base traits (key : Syntax.name) =
   List.find_map
@@ -654,7 +654,7 @@ let elaborate_type_head context owner (head : Syntax.type_head) =
              (show_path head.path)
              (Resolve.Names.show_kind (Resolve.Names.kind_of_named kind))) )
   | Some (Unknown report) -> (generics, Types.Error report)
-  | _ -> bug "the type head `%s` is not resolved" (show_path head.path)
+  | _ -> raise_bug "the type head `%s` is not resolved" (show_path head.path)
 
 let elaborate_fields context (written : Syntax.field list) =
   List.stable_sort
@@ -971,7 +971,7 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
   let definition = lookups.names.definition key in
   let spans = lookups.names.spans key in
   let path = key.path in
-  Compiler_bug.while_doing ~stage:"Interface" (Resolve.Names.show_key key) (fun () ->
+  Compiler_bug.run_while_doing ~stage:"Interface" (Resolve.Names.show_key key) (fun () ->
       let context = create lookups resolved ~spans empty_scope in
       let recovered () =
         make_elaborated_interface context
@@ -989,7 +989,7 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
           | Trait _ | Capability _ | Impl _ -> (
               match lookups.header key with
               | Some header -> make_container_interface lookups key header
-              | None -> bug "`%s` has no header" (Resolve.Names.show_key key))
+              | None -> raise_bug "`%s` has no header" (Resolve.Names.show_key key))
           | Method_declaration _ | Definition_error _ -> recovered ()
           | Function { signature; _ } ->
               let head, self_type =

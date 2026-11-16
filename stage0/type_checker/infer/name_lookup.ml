@@ -25,7 +25,7 @@ and check_name (state : State.state) (env : State.env) (value : Syntax.expressio
           Form.build_local_use state ~origin:value.id id);
       match Hashtbl.find_opt state.locals id with
       | Some local -> local.type_
-      | None -> State.bug "the local `%s` has no type" text)
+      | None -> State.raise_bug "the local `%s` has no type" text)
   | Law_parameter index -> (
       match List.nth_opt state.law_parameters index with
       | Some (_, type_) ->
@@ -38,7 +38,7 @@ and check_name (state : State.state) (env : State.env) (value : Syntax.expressio
                      origin = value.id;
                    }));
           type_
-      | None -> State.bug "the law has no parameter `%s`" text)
+      | None -> State.raise_bug "the law has no parameter `%s`" text)
   | Value_parameter parameter ->
       state.tables.resolutions.(value.id) <- Some (Value_parameter parameter);
       State.register_expression state value (fun () -> Value_parameter parameter);
@@ -66,14 +66,14 @@ and check_name (state : State.state) (env : State.env) (value : Syntax.expressio
               state.tables.resolutions.(value.id) <-
                 Some (Global { path; type_arguments = instance.type_arguments });
               check_function_value state value instance.signature)
-      | None -> State.bug "`%s` has no signature" (Path.show path))
+      | None -> State.raise_bug "`%s` has no signature" (Path.show path))
   | Definition (Constant, path) -> (
       state.tables.resolutions.(value.id) <- Some (Global { path; type_arguments = [] });
       State.register_expression state value (fun () ->
           Use (Form.build_constant_place state ~origin:value.id path));
       match Interface.Definition.read_constant_type state.lookups.interface path with
       | Some type_ -> type_
-      | None -> State.bug "the constant `%s` has no type" (Path.show path))
+      | None -> State.raise_bug "the constant `%s` has no type" (Path.show path))
   | Definition (Type, path) ->
       if Intrinsic.builtin_of_path path = Some Unit then begin
         state.tables.resolutions.(value.id) <-
@@ -109,15 +109,15 @@ and check_name (state : State.state) (env : State.env) (value : Syntax.expressio
                              origin = value.id;
                            }));
                   written.field_type
-              | None -> State.bug "the field `%s` is not in its record" field)
-          | None -> State.bug "the field `%s` is not in a record" field)
-      | _ -> State.bug "the field `%s` is named outside its type" field)
+              | None -> State.raise_bug "the field `%s` is not in its record" field)
+          | None -> State.raise_bug "the field `%s` is not in a record" field)
+      | _ -> State.raise_bug "the field `%s` is named outside its type" field)
   | Result_value -> (
       state.tables.resolutions.(value.id) <- Some Specification_value;
       State.register_expression state value (fun () -> Result);
       match env.output with
       | Some output -> Types.extract_result_type output
-      | None -> State.bug "`result` is named where nothing is returned")
+      | None -> State.raise_bug "`result` is named where nothing is returned")
   | Old | Identical | Final | Specification_function _ ->
       state.tables.resolutions.(value.id) <- Some Specification_value;
       State.make_error_type state Not_a_value (State.read_span state value.id)
@@ -128,9 +128,9 @@ and check_name (state : State.state) (env : State.env) (value : Syntax.expressio
       match env.loop_element with
       | Some element ->
           Types.Named { path = Well_known.make_path Sequence; arguments = [ Types.Type element ] }
-      | None -> State.bug "`visited` is named outside a loop's clauses")
+      | None -> State.raise_bug "`visited` is named outside a loop's clauses")
   | Unknown report -> Types.Error report
-  | Binding | Module _ -> State.bug "the name `%s` is not resolved" text
+  | Binding | Module _ -> State.raise_bug "the name `%s` is not resolved" text
 
 and check_variant_value state (value : Syntax.expression) type_path variant ~arguments =
   let type_ = Types.Named { path = type_path; arguments } in
@@ -239,7 +239,7 @@ and check_static_member state (value : Syntax.expression) type_ (member : Syntax
                 Use (Form.build_constant_place state ~origin:value.id constant));
             match Interface.Definition.read_constant_type state.lookups.interface constant with
             | Some type_ -> type_
-            | None -> State.bug "the constant `%s` has no type" (Path.show constant))
+            | None -> State.raise_bug "the constant `%s` has no type" (Path.show constant))
         | None -> (
             match Members.list_own_methods state.lookups path member.text with
             | (_, method_path) :: _ -> (
@@ -254,7 +254,8 @@ and check_static_member state (value : Syntax.expression) type_ (member : Syntax
                     state.tables.resolutions.(value.id) <-
                       Some (Global { path = method_path; type_arguments = instance.type_arguments });
                     check_function_value state value instance.signature
-                | None -> State.bug "the method `%s` has no signature" (Path.show method_path))
+                | None -> State.raise_bug "the method `%s` has no signature" (Path.show method_path)
+                )
             | [] ->
                 State.make_error_type state Unknown_member (State.read_span state member.id)
                   (Printf.sprintf "`%s` has no member `%s`." (State.show state type_) member.text))

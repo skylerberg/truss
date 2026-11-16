@@ -2,7 +2,7 @@ type build = Development | Release
 type linkage = External | Internal
 type failure = Echo | Todo
 
-let bug format = Compiler_bug.bug ~stage:"Emit_c" format
+let raise_bug format = Compiler_bug.raise_bug ~stage:"Emit_c" format
 
 let render_site_symbol (site : Lowered.site) =
   Printf.sprintf "t_Site_%s_%d" (Instance.mangle_path site.definition) site.offset

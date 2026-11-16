@@ -4,8 +4,8 @@ let parse_position text =
       match (int_of_string_opt line, int_of_string_opt column) with
       | Some line, Some column when line > 0 && column > 0 ->
           (String.concat ":" (List.rev file), line, column)
-      | _ -> Outcome.cannot_run "`%s` is not FILE:LINE:COLUMN." text)
-  | _ -> Outcome.cannot_run "`%s` is not FILE:LINE:COLUMN." text
+      | _ -> Outcome.raise_cannot_run "`%s` is not FILE:LINE:COLUMN." text)
+  | _ -> Outcome.raise_cannot_run "`%s` is not FILE:LINE:COLUMN." text
 
 let run ~position =
   let json = Output.json () in
@@ -17,7 +17,7 @@ let run ~position =
       (fun written -> Command_packages.locate_file snapshot written = path)
       (Command_packages.list_files snapshot packages)
   with
-  | None -> Outcome.cannot_run "%s is not a file of a package in this worktree." file
+  | None -> Outcome.raise_cannot_run "%s is not a file of a package in this worktree." file
   | Some written -> (
       let database = Workspace.open_database snapshot in
       let offset =

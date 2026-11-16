@@ -121,14 +121,14 @@ type unsupported = { construct : string; at : Lowered.site option }
 
 exception Unsupported of unsupported
 
-let unsupported ?at format =
+let raise_unsupported ?at format =
   Printf.ksprintf (fun construct -> raise (Unsupported { construct; at })) format
 
 let require_written st =
   match st.frame.code.written with
   | Some written -> written
   | None ->
-      Definitions.bug "%s is generated code, which has no source"
+      Definitions.raise_bug "%s is generated code, which has no source"
         (Path.show st.frame.code.definition)
 
 let quote_span st span = Source.Definition_span.quote (require_written st).text span
@@ -136,10 +136,10 @@ let quote_span st span = Source.Definition_span.quote (require_written st).text 
 let rec lookup_binding_scope = function
   | ({ kind = Bindings; _ } as scope) :: _ -> scope
   | { kind = Statement; _ } :: rest -> lookup_binding_scope rest
-  | [] -> Definitions.bug "no scope"
+  | [] -> Definitions.raise_bug "no scope"
 
 let lookup_innermost_scope st =
-  match st.scopes with scope :: _ -> scope | [] -> Definitions.bug "no scope"
+  match st.scopes with scope :: _ -> scope | [] -> Definitions.raise_bug "no scope"
 
 let move_place st place =
   if not (List.mem place st.moved) then st.moved <- place :: st.moved;
@@ -243,7 +243,7 @@ let open_scope st kind =
 let pop_scope st scope =
   match st.scopes with
   | top :: rest when top == scope -> st.scopes <- rest
-  | _ -> Definitions.bug "a scope closed out of order"
+  | _ -> Definitions.raise_bug "a scope closed out of order"
 
 let close_scope st scope =
   drop_scope st scope;
@@ -255,13 +255,13 @@ let with_scope st kind body =
   close_scope st scope;
   result
 
-let in_scope st body = with_scope st Bindings body
-let in_statement st body = with_scope st Statement body
+let run_in_scope st body = with_scope st Bindings body
+let run_in_statement st body = with_scope st Statement body
 
 let finish_function st ?(returns = true) ~first ~rest () : Emit_c.Builder.prototype =
   (match st.scopes with
   | [ scope ] -> drop_scope st scope
-  | _ -> Definitions.bug "a function ended in a scope");
+  | _ -> Definitions.raise_bug "a function ended in a scope");
   Emit_c.Builder.finish st.builder (if returns then return_result st else Unreachable);
   let pointer = match st.result with Through pointer -> Some pointer | _ -> None in
   let result =
@@ -302,14 +302,14 @@ let snapshot st (place : Lowered.place) =
         place.projections;
   }
 
-let looping st ~continue_ ~break_ ~depth body =
+let run_in_loop st ~continue_ ~break_ ~depth body =
   st.loops <- { continue_; continue_depth = depth; break_; break_depth = depth } :: st.loops;
   body ();
   st.loops <- List.tl st.loops
 
 let find_place_type st (place : Lowered.place) =
   let environment _ =
-    Definitions.bug "a place in an environment, whose type lowering does not track"
+    Definitions.raise_bug "a place in an environment, whose type lowering does not track"
   in
   let rec projected (ty : Lowered.ty) = function
     | [] -> Some ty
@@ -332,4 +332,4 @@ let make_int_constant integer value = Lowered.Constant (Integer (integer, value)
 let classify_scalar st ty =
   match (Memory_layout.of_type st.context.env ty).form with
   | Scalar scalar -> scalar
-  | _ -> Definitions.bug "%s is not a number" (Ground.to_string ty)
+  | _ -> Definitions.raise_bug "%s is not a number" (Ground.to_string ty)

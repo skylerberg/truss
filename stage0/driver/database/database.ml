@@ -428,12 +428,13 @@ let find_call_graph database package =
       graph
 
 let report_uncomputed part =
-  Compiler_bug.bug ~stage:"Database" "%s is not computed" (Part.show_computed part)
+  Compiler_bug.raise_bug ~stage:"Database" "%s is not computed" (Part.show_computed part)
 
 let read database note part =
   note (Part.Stored (Computed part));
   if is_stale database part then
-    Compiler_bug.bug ~stage:"Database" "%s is read while it is stale" (Part.show_computed part)
+    Compiler_bug.raise_bug ~stage:"Database" "%s is read while it is stale"
+      (Part.show_computed part)
 
 let read_part database note part_of select (key : Resolve.Names.key) =
   let part = part_of key in
@@ -467,7 +468,8 @@ let list_modules database name =
 let find_source database (file : Path.file) =
   match File_table.find_opt (find_owner database file.module_.package).sources file with
   | Some source -> source
-  | None -> Compiler_bug.bug ~stage:"Database" "%s is not a file of the build" (Path.show_file file)
+  | None ->
+      Compiler_bug.raise_bug ~stage:"Database" "%s is not a file of the build" (Path.show_file file)
 
 let sort_in_dependency_order database packages =
   let seen = Package_table.create 8 in
@@ -1203,7 +1205,7 @@ let is_drained ~ready (part : Part.computed) =
 let find_lowering_settings database =
   match database.lowering with
   | Some settings -> settings
-  | None -> Compiler_bug.bug ~stage:"Database" "this host has no lowering settings"
+  | None -> Compiler_bug.raise_bug ~stage:"Database" "this host has no lowering settings"
 
 let list_proof_template_checks database (key : Resolve.Names.key) =
   match Key_table.find_opt (find_owner database key.module_.package).proofs key with
@@ -1353,7 +1355,7 @@ let compute_type_facts database paths =
                match List.assoc_opt path facts with
                | Some facts -> Value facts
                | None ->
-                   Compiler_bug.bug ~stage:"Database" "the type facts of a component omit %s"
+                   Compiler_bug.raise_bug ~stage:"Database" "the type facts of a component omit %s"
                      (Path.show path))
            | Failed _ | Blocked -> Blocked)))
     paths
@@ -1614,8 +1616,8 @@ let compute database unit =
     | Type_fact_component paths -> compute_type_facts database paths
     | Test_key_component keys -> compute_test_keys database keys
   with Interface.Properties.Recursion_limit message ->
-    Compiler_bug.bug ~stage:"Database" "a stage after the checks reached a recursion limit: %s"
-      message
+    Compiler_bug.raise_bug ~stage:"Database"
+      "a stage after the checks reached a recursion limit: %s" message
 
 let list_components database (stage : Stage.t) package parts =
   match stage with
@@ -1867,7 +1869,7 @@ let update database changes =
         match Package_table.find_opt database.package_databases package with
         | Some package_database -> package_database
         | None ->
-            Compiler_bug.bug ~stage:"Database" "%s is not a package of the build"
+            Compiler_bug.raise_bug ~stage:"Database" "%s is not a package of the build"
               (Path.show_package package)
       in
       let previous = File_table.find_opt package_database.sources file in
@@ -2348,7 +2350,7 @@ let read_package_database database package =
   match Package_table.find_opt database.package_databases package with
   | Some package_database -> package_database
   | None ->
-      Compiler_bug.bug ~stage:"Database" "%s is not a package of the build"
+      Compiler_bug.raise_bug ~stage:"Database" "%s is not a package of the build"
         (Path.show_package package)
 
 type proofs = { database : t; keys : Resolve.Names.key list }
@@ -2445,15 +2447,15 @@ let request database packages ~through ~needs keys =
   List.iter
     (fun key ->
       if not (List.for_all (is_current database) (needs key)) then
-        Compiler_bug.bug ~stage:"Database" "%s is requested, and no root of lowering reaches it"
-          (Instance.to_string key))
+        Compiler_bug.raise_bug ~stage:"Database"
+          "%s is requested, and no root of lowering reaches it" (Instance.to_string key))
     keys
 
 let read_requested table part key =
   match Instance_table.find_opt table key with
   | Some (Value value) -> value
   | Some (Failed _ | Blocked) ->
-      Compiler_bug.bug ~stage:"Database" "%s is requested from code with errors"
+      Compiler_bug.raise_bug ~stage:"Database" "%s is requested from code with errors"
         (Part.show_computed (Lowering part))
   | None -> report_uncomputed (Lowering part)
 
@@ -2593,7 +2595,7 @@ module For_testing = struct
         database.reads None
     with
     | Some reads -> List.sort compare (List.map Part.show reads)
-    | None -> Compiler_bug.bug ~stage:"Database" "%s is not computed" shown
+    | None -> Compiler_bug.raise_bug ~stage:"Database" "%s is not computed" shown
 
   let list_unread_parts database packages =
     drain database ~through:Recursion_groups packages;

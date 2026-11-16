@@ -172,7 +172,7 @@ and parse_pattern_fields cursor =
     fields;
   fields
 
-and parse_pattern cursor : Syntax.pattern = Cursor.nested cursor parse_alternatives
+and parse_pattern cursor : Syntax.pattern = Cursor.run_nested cursor parse_alternatives
 
 and parse_alternatives cursor : Syntax.pattern =
   let start = Cursor.index cursor in

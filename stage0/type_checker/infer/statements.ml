@@ -27,7 +27,7 @@ let rec check_block_value state env ?expected (written : Syntax.block) =
             if State.statement_diverges state last then Types.Never else Types.unit)
     | (first : Syntax.statement) :: rest ->
         ignore
-          (State.in_statement state env (State.read_span state first.id) (fun () ->
+          (State.run_in_statement state env (State.read_span state first.id) (fun () ->
                check_statement state env first ~last:false));
         statements_value rest
   in
@@ -163,7 +163,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
         | _ -> (Types.Read, iterable)
       in
       let loop_element = ref None in
-      State.in_statement state env (State.read_span state iterable.id) (fun () ->
+      State.run_in_statement state env (State.read_span state iterable.id) (fun () ->
           let element, variable_mode = check_loop_iterable state env written ~mode inner in
           (match annotation with
           | Some written_annotation ->
@@ -206,7 +206,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
       check_loop_body state env body
   | While { condition = test; clauses; body } ->
       State.reject_in_formula state env (State.read_span state written.id) "A `while` loop";
-      State.in_statement state env (State.read_span state test.id) (fun () ->
+      State.run_in_statement state env (State.read_span state test.id) (fun () ->
           Hooks.check state env test Types.bool);
       List.iter (check_loop_clause state env) clauses;
       State.register_statement state written (fun () ->
@@ -230,7 +230,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
           if concurrent then Concurrent branches else Parallel branches);
       List.iter
         (fun (branch : Syntax.statement) ->
-          State.in_statement state env (State.read_span state branch.id) (fun () ->
+          State.run_in_statement state env (State.read_span state branch.id) (fun () ->
               check_statement state env branch ~last:false))
         body.statements
   | Proof body ->
@@ -311,7 +311,7 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
 and check_loop_body state env (body : Syntax.block) =
   List.iter
     (fun (written : Syntax.statement) ->
-      State.in_statement state env (State.read_span state written.id) (fun () ->
+      State.run_in_statement state env (State.read_span state written.id) (fun () ->
           check_statement state env written ~last:false))
     body.statements
 
@@ -349,7 +349,7 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
                 true
               end);
           (element, mode)
-      | _ -> State.bug "a range is not of the range type")
+      | _ -> State.raise_bug "a range is not of the range type")
   | _ -> (
       let type_ = State.normalize state (Hooks.check_expression state env iterable) in
       match type_ with

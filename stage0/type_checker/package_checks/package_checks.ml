@@ -17,7 +17,7 @@ module Field_default_table = Hashtbl.Make (Structural_key.Make (struct
   type t = Path.t * string option * string
 end))
 
-let bug format = Compiler_bug.bug ~stage:"Package_checks" format
+let raise_bug format = Compiler_bug.raise_bug ~stage:"Package_checks" format
 
 type placed = { key : Resolve.Names.key; diagnostic : Diagnostic.in_definition }
 
@@ -310,11 +310,11 @@ let find_written_variant (variants : Syntax.variant list) (variant : Types.varia
       variants
   with
   | Some written -> written
-  | None -> bug "the variant `%s` is not in its type's definition" variant.variant_name
+  | None -> raise_bug "the variant `%s` is not in its type's definition" variant.variant_name
 
 let locate_field (spans : Source.Definition_span.t array) (body : Syntax.type_body)
     ((variant : Types.variant option), (field : Types.field)) =
-  let missing () = bug "the field `%s` is not in its type's definition" field.field_name in
+  let missing () = raise_bug "the field `%s` is not in its type's definition" field.field_name in
   let among (fields : Syntax.field list) =
     match
       List.find_map
@@ -379,7 +379,8 @@ let check_recursion lookups ~contained (declaration : Resolve.Names.declaration)
                    has no variant to declare `indirect`; use a sum type with an `indirect` \
                    variant, or a collection."
             | _ ->
-                bug "the interface of `%s` and its definition disagree on whether it is a sum type"
+                raise_bug
+                  "the interface of `%s` and its definition disagree on whether it is a sum type"
                   name.text)
           (first In_place)
       in
@@ -425,7 +426,7 @@ let check_associated_types (lookups : Lookups.t) ~contained
       let span =
         match written name with
         | Some span -> span
-        | None -> bug "the associated type `%s` is not in its impl's definition" name
+        | None -> raise_bug "the associated type `%s` is not in its impl's definition" name
       in
       List.filter_map
         (fun (recursive, (occurrence : Interface.Properties.occurrence)) ->

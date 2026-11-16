@@ -73,7 +73,7 @@ let build_entry context (key : Instance.key) (impl_method : Instance.impl_method
   let result_ty =
     match capability_signature.output with
     | Returns ty -> Monomorphic.ground context.monomorphic [] ty
-    | _ -> Definitions.bug "a capability method that lends"
+    | _ -> Definitions.raise_bug "a capability method that lends"
   in
   Targets.lower_instance_call st
     (Code { path; type_arguments })
@@ -160,7 +160,7 @@ let build_locked_entry context (key : Instance.key) ~capability ~name : Emit_c.B
   let result_ty =
     match capability_signature.output with
     | Returns ty -> Monomorphic.ground context.monomorphic [] ty
-    | _ -> Definitions.bug "a capability method that lends"
+    | _ -> Definitions.raise_bug "a capability method that lends"
   in
   tasks_call "lock";
   Emit_c.Builder.emit builder
@@ -187,7 +187,7 @@ let build_locked_table (context : Definitions.context) (key : Instance.key) ~cap
   let interface =
     match Interface.Definition.read_trait_interface context.lookups.interface capability with
     | Some interface -> interface
-    | None -> Definitions.bug "no interface for %s" (Path.show capability)
+    | None -> Definitions.raise_bug "no interface for %s" (Path.show capability)
   in
   {
     table_key = key;
@@ -208,7 +208,7 @@ let build_impl_table context (key : Instance.key) ~impl ~type_arguments : Lowere
   let capability_interface =
     match Interface.Definition.read_trait_interface context.lookups.interface capability with
     | Some position -> position
-    | None -> Definitions.bug "no interface for %s" (Path.show capability)
+    | None -> Definitions.raise_bug "no interface for %s" (Path.show capability)
   in
   let entries =
     List.map
@@ -218,7 +218,8 @@ let build_impl_table context (key : Instance.key) ~impl ~type_arguments : Lowere
             List.find_opt (fun (name, _) -> name = trait_method.method_name) interface.impl_methods
           with
           | Some (_, receiver) -> receiver
-          | None -> Definitions.bug "%s does not write %s" (Path.show impl) trait_method.method_name
+          | None ->
+              Definitions.raise_bug "%s does not write %s" (Path.show impl) trait_method.method_name
         in
         ( Instance.Generated
             (Entry { impl; name = trait_method.method_name; receiver; type_arguments }),
@@ -240,9 +241,10 @@ let find_real_implementation (interface : Interface.Lookups.t) (capability : Pat
   | [ impl ] -> (
       match Interface.Definition.read_impl_interface interface impl with
       | Some impl_interface -> Some (impl, impl_interface)
-      | None -> Definitions.bug "the real implementation %s has no interface" (Path.show impl))
+      | None -> Definitions.raise_bug "the real implementation %s has no interface" (Path.show impl)
+      )
   | impls ->
-      Definitions.bug "%s has %d real implementations: %s" (Path.show capability)
+      Definitions.raise_bug "%s has %d real implementations: %s" (Path.show capability)
         (List.length impls)
         (String.concat ", " (List.map Path.show impls))
 
@@ -254,7 +256,7 @@ let list_real_implementations (st : Lowering.state) ~user capabilities =
         | Some (impl, impl_interface) ->
             (impl, Monomorphic.ground st.context.monomorphic [] impl_interface.for_type)
         | None ->
-            Lowering.unsupported "%s uses %s, which has no real implementation" user
+            Lowering.raise_unsupported "%s uses %s, which has no real implementation" user
               (Ground.show_path_name capability)
       in
       let implementation =
@@ -264,7 +266,9 @@ let list_real_implementations (st : Lowering.state) ~user capabilities =
           let constructor : Path.t =
             match ty with
             | Named { path; _ } -> Method { owner = path; name = "new"; receiver = Static }
-            | _ -> Definitions.bug "%s implements %s" (Ground.to_string ty) (Path.show capability)
+            | _ ->
+                Definitions.raise_bug "%s implements %s" (Ground.to_string ty)
+                  (Path.show capability)
           in
           Targets.lower_instance_call st
             (Code { path = constructor; type_arguments = [] })
@@ -291,7 +295,7 @@ let build_program_main context (key : Instance.key) main_path : Emit_c.Builder.i
   let list_ty, list_mode =
     match signature.parameters with
     | [ info ] -> (Monomorphic.ground context.monomorphic [] info.type_, info.mode)
-    | _ -> Definitions.bug "main takes its arguments"
+    | _ -> Definitions.raise_bug "main takes its arguments"
   in
   let storage_field, _, string_ty = Targets.list_parts context.monomorphic list_ty in
   let list = Lowering.allocate_temporary st list_ty in
@@ -351,7 +355,7 @@ let build_program_main context (key : Instance.key) main_path : Emit_c.Builder.i
   let exit_ty =
     match signature.output with
     | Returns ty -> Monomorphic.ground context.monomorphic [] ty
-    | _ -> Definitions.bug "main lends"
+    | _ -> Definitions.raise_bug "main lends"
   in
   let exit = Lowering.allocate_temporary st exit_ty in
   Targets.lower_instance_call st
@@ -363,7 +367,7 @@ let build_program_main context (key : Instance.key) main_path : Emit_c.Builder.i
   | Record [ (field, _) ], Some status ->
       Emit_c.Builder.emit builder
         (Assign (status, Convert (Copy (Lowered.project exit (Field field)), Integer Int32)))
-  | _ -> Definitions.bug "an ExitCode that is not a record of one field");
+  | _ -> Definitions.raise_bug "an ExitCode that is not a record of one field");
   Emit_c.Builder.build st.builder
     (Lowering.finish_function st ~first:[ count; arguments_pointer ] ~rest:[] ())
 

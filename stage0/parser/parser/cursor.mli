@@ -43,7 +43,7 @@ val report :
 val fail : t -> string -> 'a
 val expect_punctuation : t -> Token.punctuation -> unit
 val expect_keyword : t -> Token.keyword -> unit
-val nested : t -> (t -> 'a) -> 'a
+val run_nested : t -> (t -> 'a) -> 'a
 val check_chain_length : t -> chain_length:int -> unit
 val lookup_closer : t -> int -> int
 val skip_to : t -> int -> unit

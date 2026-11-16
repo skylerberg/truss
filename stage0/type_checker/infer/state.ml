@@ -104,7 +104,7 @@ let reject_in_formula state env span what =
          what)
 
 let read_span state id = Interface.Elaborator.read_span state.context id
-let bug format = Compiler_bug.bug ~stage:"Infer" format
+let raise_bug format = Compiler_bug.raise_bug ~stage:"Infer" format
 
 let make_error_type state ?fixes code span message =
   Types.Error (add_diagnostic state ?fixes code span message)
@@ -126,7 +126,8 @@ let register_expression state (value : Syntax.expression) kind =
         let id = allocate_node_id state in
         match state.tables.types.(value.id) with
         | Some type_ -> { Core.id; origin = value.id; type_; kind = kind () }
-        | None -> bug "`%s` has a node and no type" (quote_span state (read_span state value.id)))
+        | None ->
+            raise_bug "`%s` has a node and no type" (quote_span state (read_span state value.id)))
 
 let was_hole state (table : Tables.t -> Types.ty option array) (id : Syntax.id) =
   match state.form.tables_with_holes with
@@ -190,7 +191,8 @@ let rec build_expression state (value : Syntax.expression) : Core.expression =
   else
     match state.form.expression_builders.(value.id) with
     | Some build -> build ()
-    | None -> bug "`%s` has no node in the core form" (quote_span state (read_span state value.id))
+    | None ->
+        raise_bug "`%s` has no node in the core form" (quote_span state (read_span state value.id))
 
 let register_statement state (written : Syntax.statement) kind =
   state.form.statement_builders.(written.id) <-
@@ -222,7 +224,8 @@ let build_statement state (written : Syntax.statement) : Core.statement =
       match state.form.statement_builders.(written.id) with
       | Some build -> build ()
       | None ->
-          bug "`%s` has no node in the core form" (quote_span state (read_span state written.id)))
+          raise_bug "`%s` has no node in the core form"
+            (quote_span state (read_span state written.id)))
 
 let register_pattern state (written : Syntax.pattern) kind =
   state.form.pattern_builders.(written.id) <-
@@ -231,7 +234,8 @@ let register_pattern state (written : Syntax.pattern) kind =
         let id = allocate_node_id state in
         match state.tables.scrutinee_types.(written.id) with
         | Some type_ -> { Core.id; origin = written.id; type_; kind = kind () }
-        | None -> bug "`%s` has a node and no type" (quote_span state (read_span state written.id)))
+        | None ->
+            raise_bug "`%s` has a node and no type" (quote_span state (read_span state written.id)))
 
 let build_pattern state (written : Syntax.pattern) : Core.pattern =
   if was_hole state (fun tables -> tables.scrutinee_types) written.id then
@@ -240,7 +244,8 @@ let build_pattern state (written : Syntax.pattern) : Core.pattern =
     match state.form.pattern_builders.(written.id) with
     | Some build -> build ()
     | None ->
-        bug "`%s` has no node in the core form" (quote_span state (read_span state written.id))
+        raise_bug "`%s` has no node in the core form"
+          (quote_span state (read_span state written.id))
 
 let alias_expression state (value : Syntax.expression) (inner : Syntax.expression) =
   state.form.expression_builders.(value.id) <- Some (fun () -> build_expression state inner)
@@ -672,7 +677,7 @@ let settle state frame =
   | Some parent -> parent.deferred_checks <- frame.deferred_checks @ parent.deferred_checks
   | None -> ()
 
-let in_statement state env (span : Source.Definition_span.t) body =
+let run_in_statement state env (span : Source.Definition_span.t) body =
   let frame =
     {
       first_variable = state.unifier.next + 1;
@@ -912,7 +917,7 @@ let make_slice state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.
   let path, type_arguments =
     match Core_walk.compute_place_type base with
     | Types.Named { path; arguments } -> (path, arguments)
-    | type_ -> bug "a slice of `%s`" (Types.show type_)
+    | type_ -> raise_bug "a slice of `%s`" (Types.show type_)
   in
   let callee name : Core.callee =
     Function { path = Method { owner = path; name; receiver = Read }; type_arguments }
@@ -976,7 +981,7 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
                              lends = None;
                              uses = Types.no_capabilities;
                            })
-                  | other -> bug "`%s` is viewed and has no view" (Types.show other)))
+                  | other -> raise_bug "`%s` is viewed and has no view" (Types.show other)))
             before
     | _ -> ()
   in

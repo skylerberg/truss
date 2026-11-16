@@ -111,7 +111,7 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
               | Some part ->
                   Form.build_tagged_string state value literal
                     ~part:(State.finalize_type state part)
-              | None -> State.bug "a tagged string's part type was not inferred");
+              | None -> State.raise_bug "a tagged string's part type was not inferred");
           State.defer state (fun () ->
               let tag_type = State.normalize state tag_type in
               if Types.contains_unsolved tag_type then false
@@ -301,14 +301,14 @@ and check_lambda (state : State.state) env ?expected (value : Syntax.expression)
           result =
             (match Form.read_type state value with
             | Types.Function function_type -> function_type.output
-            | type_ -> State.bug "a lambda of type `%s`" (Types.show type_));
+            | type_ -> State.raise_bug "a lambda of type `%s`" (Types.show type_));
         });
   result
 
 and check_if state env ?expected (value : Syntax.expression) (test : Syntax.expression) then_ else_
     =
   let condition_type =
-    State.in_statement state env (State.read_span state test.id) (fun () ->
+    State.run_in_statement state env (State.read_span state test.id) (fun () ->
         Hooks.check_expression state env test)
   in
   Name_lookup.coerce state env test ~actual:condition_type ~expected:Types.bool;
@@ -386,7 +386,7 @@ and match_ state env ?expected (value : Syntax.expression) scrutinees arms =
     List.map
       (fun (scrutinee : Syntax.expression) ->
         ( scrutinee,
-          State.in_statement state env (State.read_span state scrutinee.id) (fun () ->
+          State.run_in_statement state env (State.read_span state scrutinee.id) (fun () ->
               Hooks.check_expression state env scrutinee) ))
       scrutinees
   in
