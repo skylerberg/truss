@@ -43,19 +43,18 @@ let scope context : Environment.scope =
            context.bounds []);
   }
 
-let rec trait_closure context ?(seen = []) path =
-  if List.exists (Path.equal path) seen then []
-  else
-    match context.lookups.trait_header path with
-    | None -> [ path ]
-    | Some header ->
-        path
-        :: List.concat_map
-             (fun required -> trait_closure context ~seen:(path :: seen) required)
-             header.required
-        |> List.fold_left
-             (fun acc path -> if List.exists (Path.equal path) acc then acc else acc @ [ path ])
-             []
+let trait_closure context path =
+  let closure = ref [] in
+  let rec visit path =
+    if not (List.exists (Path.equal path) !closure) then begin
+      closure := path :: !closure;
+      match context.lookups.trait_header path with
+      | Some header -> List.iter visit header.required
+      | None -> ()
+    end
+  in
+  visit path;
+  List.rev !closure
 
 let reported context code (span : Source.Definition_span.t) message =
   let diagnostic = Diagnostic.make ~code:(Types code) span message in

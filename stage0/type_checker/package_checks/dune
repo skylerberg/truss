@@ -13,4 +13,5 @@
   well_known
   core
   core_walk
-  interface))
+  interface
+  strongly_connected))

@@ -8,7 +8,7 @@
   syntax
   types
   diagnostic
-  components
+  strongly_connected
   core
   manifest
   project

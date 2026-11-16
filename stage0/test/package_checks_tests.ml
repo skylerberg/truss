@@ -59,6 +59,50 @@ let () =
       in
       if not (List.mem "package.instantiation_cycle" (codes (check packages (file_of "app::main"))))
       then fail "no cycle");
+  test "of generic functions that instantiate each other, only the one whose call grows is an error"
+    (fun () ->
+      let packages =
+        setup
+          [
+            ( "app::main",
+              "fn ping[Element](value: own Element) -> Int64 {\n\
+              \  pong(Some(own value))\n\
+               }\n\n\
+               fn pong[Element](value: own Element) -> Int64 {\n\
+              \  ping(own value)\n\
+               }\n" );
+          ]
+      in
+      match
+        List.filter
+          (String.equal "package.instantiation_cycle")
+          (codes (check packages (file_of "app::main")))
+      with
+      | [ _ ] -> ()
+      | reported -> fail "found %d instantiation cycles" (List.length reported));
+  test "generic code that calls through many diamonds is checked quickly" (fun () ->
+      let levels = 24 in
+      let text =
+        String.concat ""
+          ("fn start[Element](value: own Element) {\n  g0(Some(own value))\n}\n\n"
+           :: List.init levels (fun index ->
+               Printf.sprintf
+                 "fn g%d[Element](value: Element) {\n\
+                 \  a%d(value)\n\
+                 \  b%d(value)\n\
+                  }\n\n\
+                  fn a%d[Element](value: Element) {\n\
+                 \  g%d(value)\n\
+                  }\n\n\
+                  fn b%d[Element](value: Element) {\n\
+                 \  g%d(value)\n\
+                  }\n\n"
+                 index index index index (index + 1) index (index + 1))
+          @ [ Printf.sprintf "fn g%d[Element](value: Element) {}\n" levels ])
+      in
+      let started = Sys.time () in
+      fine text;
+      if Sys.time () -. started > 5.0 then fail "took %.1f seconds" (Sys.time () -. started));
   test "two tests of a package cannot share a name" (fun () ->
       let packages =
         setup [ ("app::main", "test \"adds\" {\n}\n"); ("app::other", "test \"adds\" {\n}\n") ]

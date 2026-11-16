@@ -131,6 +131,7 @@ let package = function
 
 let equal = ( = )
 let hash part = Hashtbl.hash_param 64 256 part
+let compare = Stdlib.compare
 
 let show part =
   let key = Resolve.Names.show_key in

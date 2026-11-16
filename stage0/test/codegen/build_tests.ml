@@ -24,13 +24,16 @@ let lookup instances key =
 
 let references program key = Emit_c.references (lookup program key)
 
-module Instance_components = Components.Make (struct
+module Instance_key = struct
   type t = Instance.key
 
   let equal = Instance.equal
   let hash = Hashtbl.hash
   let compare = Instance.compare
-end)
+end
+
+let find_components program root =
+  Strongly_connected.find_components (module Instance_key) ~successors:(references program) [ root ]
 
 let reach_key program root =
   let link key = (Reachable.own_hash (lookup program key), references program key) in
@@ -40,12 +43,13 @@ let reach_key program root =
       List.iter
         (fun (key, reach_key) -> Hashtbl.replace known key reach_key)
         (Reachable.component_keys ~link ~deep:(Hashtbl.find known) members))
-    (Instance_components.of_graph ~successors:(references program) [ root ]);
+    (find_components program root);
   Hashtbl.find known root
 
-let components program root =
-  List.map (List.map Instance.to_string)
-    (Instance_components.of_graph ~successors:(references program) [ key root ])
+let show_components program root =
+  List.map
+    (fun members -> String.concat " " (List.map Instance.to_string members))
+    (find_components program (key root))
 
 let ping_pong ?(ping = "ping") ?(pong = "pong") returned =
   let calls name callees =
@@ -108,7 +112,7 @@ let () =
   test "instances that call each other are one component, after the ones they reach" (fun () ->
       Harness.expect_strings
         ~expected:[ "test::helper"; "test::ping test::pong"; "test::start" ]
-        (List.map (String.concat " ") (components (ping_pong 1) "start")));
+        (show_components (ping_pong 1) "start"));
   test "an instance that calls only itself is a component of its own" (fun () ->
       let again =
         instance "again"
@@ -116,8 +120,7 @@ let () =
              [ local (Lowered.Value int32) ]
              [ block [ call "again" [] (Some (at 0)) ] (Return (Some (copy 0))) ])
       in
-      Harness.expect_strings ~expected:[ "test::again" ]
-        (List.map (String.concat " ") (components [ again ] "again")));
+      Harness.expect_strings ~expected:[ "test::again" ] (show_components [ again ] "again"));
   test "a test that reaches instances that call each other has a key" (fun () ->
       if reach_key (ping_pong 1) (key "start") = reach_key (ping_pong 2) (key "start") then
         fail "a change inside the group left the key the same");

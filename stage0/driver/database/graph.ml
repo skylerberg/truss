@@ -1,14 +1,5 @@
-module type Node = sig
-  type t
-
-  val equal : t -> t -> bool
-  val hash : t -> int
-  val compare : t -> t -> int
-end
-
-module Make (Node : Node) = struct
+module Make (Node : Strongly_connected.Node) = struct
   module Table = Hashtbl.Make (Node)
-  module Node_components = Components.Make (Node)
 
   type component = { id : int; members : Node.t list; mutable is_blocked : bool }
 
@@ -333,7 +324,8 @@ module Make (Node : Node) = struct
         if List.exists is_with_node removed then begin
           let split = component_of graph node in
           replace
-            (Node_components.of_graph
+            (Strongly_connected.find_components
+               (module Node)
                ~successors:(fun member ->
                  List.filter
                    (fun successor -> (component_of graph successor).id = split.id)

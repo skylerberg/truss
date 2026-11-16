@@ -463,31 +463,27 @@ let check_instantiation (lookups : Lookups.t) (package : Path.package) =
         && (declaration.kind = Function || declaration.kind = Method))
       (lookups.interface.names.package_declarations package)
   in
-  let edges =
-    List.map
-      (fun (declaration : Names.declaration) ->
-        (declaration, instantiation_edges lookups (Names.key_of declaration)))
-      generic
-  in
-  let reaches from target =
-    let rec reaches_from seen path =
-      if Path.equal path target then true
-      else if List.exists (Path.equal path) seen then false
-      else
-        match
-          List.find_opt
-            (fun ((declaration : Names.declaration), _) -> Path.equal declaration.path path)
-            edges
-        with
-        | Some (_, outgoing) ->
-            List.exists (fun (next, _) -> reaches_from (path :: seen) next) outgoing
-        | None -> false
-    in
-    reaches_from [] from
+  let edges = Hashtbl.create 64 in
+  List.iter
+    (fun (declaration : Names.declaration) ->
+      Hashtbl.replace edges declaration.path
+        (instantiation_edges lookups (Names.key_of declaration)))
+    generic;
+  let outgoing path = Option.value ~default:[] (Hashtbl.find_opt edges path) in
+  let component_index = Hashtbl.create 64 in
+  List.iteri
+    (fun index members ->
+      List.iter (fun path -> Hashtbl.replace component_index path index) members)
+    (Strongly_connected.find_components
+       (module Path)
+       ~successors:(fun path -> List.map fst (outgoing path))
+       (List.map (fun (declaration : Names.declaration) -> declaration.path) generic));
+  let grows_on_cycle path (callee, grows) =
+    grows && Hashtbl.find component_index callee = Hashtbl.find component_index path
   in
   List.filter_map
-    (fun ((declaration : Names.declaration), outgoing) ->
-      if List.exists (fun (callee, grows) -> grows && reaches callee declaration.path) outgoing then
+    (fun (declaration : Names.declaration) ->
+      if List.exists (grows_on_cycle declaration.path) (outgoing declaration.path) then
         match read_definition lookups declaration with
         | Some (definition, spans) ->
             Some
@@ -497,7 +493,7 @@ let check_instantiation (lookups : Lookups.t) (package : Path.package) =
                   around, so it would be compiled without end.")
         | None -> None
       else None)
-    edges
+    generic
 
 let check_tests (lookups : Lookups.t) (package : Path.package) =
   let tests =

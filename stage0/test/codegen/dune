@@ -72,7 +72,7 @@
   source
   compile
   database
-  components
+  strongly_connected
   prover
   solver
   documents
