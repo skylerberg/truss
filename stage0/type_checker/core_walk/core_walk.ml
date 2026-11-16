@@ -206,13 +206,6 @@ let rec deep visit =
 
 let expression visit node = (deep visit).expression node
 
-exception Found
-
-let expression_exists ?(expression = fun _ -> false) ?(statement = fun _ -> false) node =
-  let test check node = if check node then raise Found in
-  let visit = deep { ignore_all with expression = test expression; statement = test statement } in
-  match visit.expression node with () -> false | exception Found -> true
-
 let parameter visit (parameter : parameter) =
   Option.iter visit.expression parameter.default;
   Option.iter
@@ -243,37 +236,6 @@ let definition_children visit = function
   | Empty -> ()
 
 let definition visit core_definition = definition_children (deep visit) core_definition
-
-let local_names core_definition =
-  let names = Hashtbl.create 16 in
-  let parameter (declared : parameter) =
-    Hashtbl.replace names declared.local declared.name;
-    Option.iter
-      (fun (contract : callback_contract) ->
-        List.iter (fun (input, name) -> Hashtbl.replace names input name) contract.inputs)
-      declared.callback_contract
-  in
-  (match core_definition with
-  | Function { parameters; _ } | Law_proof { parameters; _ } -> List.iter parameter parameters
-  | Trait laws -> List.iter (fun (law : law) -> List.iter parameter law.parameters) laws
-  | Type _ | Constant _ | Test _ | Empty -> ());
-  definition
-    {
-      ignore_all with
-      pattern =
-        (fun (node : pattern) ->
-          match node.kind with
-          | Bind { local; name; _ } -> Hashtbl.replace names local name
-          | _ -> ());
-      expression =
-        (fun (node : expression) ->
-          match node.kind with
-          | Quantified { binder = Over_type { local; name; _ }; _ } ->
-              Hashtbl.replace names local name
-          | _ -> ());
-    }
-    core_definition;
-  names
 
 type tasks_use = Uses_tasks | Through_parameter | No_tasks
 
@@ -314,3 +276,43 @@ let traverse_indirect (change : 'a -> 'b option) : 'a target -> 'b target option
   | Capability_method { capability; name } -> Some (Capability_method { capability; name })
   | Intrinsic { operation; type_arguments } -> Some (Intrinsic { operation; type_arguments })
   | Indirect value -> Option.map (fun value -> Indirect value) (change value)
+
+module For_testing = struct
+  let local_names core_definition =
+    let names = Hashtbl.create 16 in
+    let parameter (declared : parameter) =
+      Hashtbl.replace names declared.local declared.name;
+      Option.iter
+        (fun (contract : callback_contract) ->
+          List.iter (fun (input, name) -> Hashtbl.replace names input name) contract.inputs)
+        declared.callback_contract
+    in
+    (match core_definition with
+    | Function { parameters; _ } | Law_proof { parameters; _ } -> List.iter parameter parameters
+    | Trait laws -> List.iter (fun (law : law) -> List.iter parameter law.parameters) laws
+    | Type _ | Constant _ | Test _ | Empty -> ());
+    definition
+      {
+        ignore_all with
+        pattern =
+          (fun (node : pattern) ->
+            match node.kind with
+            | Bind { local; name; _ } -> Hashtbl.replace names local name
+            | _ -> ());
+        expression =
+          (fun (node : expression) ->
+            match node.kind with
+            | Quantified { binder = Over_type { local; name; _ }; _ } ->
+                Hashtbl.replace names local name
+            | _ -> ());
+      }
+      core_definition;
+    names
+
+  exception Found
+
+  let expression_exists ?(expression = fun _ -> false) ?(statement = fun _ -> false) node =
+    let test check node = if check node then raise Found in
+    let visit = deep { ignore_all with expression = test expression; statement = test statement } in
+    match visit.expression node with () -> false | exception Found -> true
+end

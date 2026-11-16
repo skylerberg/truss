@@ -130,7 +130,7 @@ let () =
       let input = String.init length (fun index -> Char.chr (index mod 251)) in
       test (Printf.sprintf "BLAKE3 of the BLAKE3 repository's %d-byte test vector" length)
         (fun () ->
-          let actual = hex (Blake3.hash input) in
+          let actual = hex (Blake3.For_testing.hash input) in
           if actual <> expected_hash then fail "expected %s, got %s" expected_hash actual);
       test
         (Printf.sprintf "BLAKE3 derive-key of the BLAKE3 repository's %d-byte test vector" length)

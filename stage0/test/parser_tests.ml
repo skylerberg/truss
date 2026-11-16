@@ -543,8 +543,9 @@ let () =
             fail "got %s" (Syntax_print.For_testing.definition value)
       | _ -> fail "wrong definitions");
       let statements, _ = body_of "let y = x with (1)" in
-      if List.map Syntax_print.statement statements <> [ "(let y (with x error))" ] then
-        fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
+      if List.map Syntax_print.For_testing.statement statements <> [ "(let y (with x error))" ] then
+        fail "got [%s]"
+          (String.concat "; " (List.map Syntax_print.For_testing.statement statements)));
   test "lists and maps" (fun () ->
       expression "[1, 2,]" "(list 1 2)";
       expression "[]" "(list)";

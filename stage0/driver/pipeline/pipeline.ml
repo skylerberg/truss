@@ -2651,6 +2651,7 @@ module For_testing = struct
           | Generated -> derived pipeline path))
 
   let proof_lookups pipeline = proof_lookups pipeline ignore
+  let proof = proof
 
   let mir pipeline package =
     drain pipeline ~through:Mir [ package ];

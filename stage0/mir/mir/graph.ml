@@ -160,3 +160,7 @@ let block_successors (body : body) block =
     | Some (For { body = first; after; _ }) -> [ first; after ]
     | _ -> [])
   @ successors terminator
+
+module For_testing = struct
+  let successors = successors
+end
