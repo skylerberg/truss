@@ -82,22 +82,20 @@ let lex source =
         (Source.create ~path:(Source.path source)
            (Diagnostic.apply_edits (Source.text source) edits))
     in
-    let fixed_tokens = Recovery.to_original edits fixed_tokens in
+    let fixed_tokens = Fixes.to_original edits fixed_tokens in
     if
-      Recovery.alters_neighbors ~edits ~written:tokens ~fixed:fixed_tokens
+      Fixes.alters_neighbors ~edits ~written:tokens ~fixed:fixed_tokens
       || not (Diagnostic.adds_none ~before:unfixed ~after:remaining)
     then None
     else Some fixed_tokens
   in
   let diagnostics, fixed =
-    Recovery.recover ~stage:"Lexer" ~path:(Source.path source) ~attempt
+    Fixes.apply ~stage:"Lexer" ~path:(Source.path source) ~attempt
       ~is_applied:(fun _ -> true)
       tokens
       (without_colliding_renames (Source.text source) tokens diagnostics)
   in
   (with_inserted_closers_marked (Option.value fixed ~default:tokens), diagnostics)
-
-module Recovery = Recovery
 
 module For_testing = struct
   let can_end = Layout.can_end

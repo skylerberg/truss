@@ -91,10 +91,10 @@ develop as well as make it easier to bootstrap the compiler in parts.
   to the file's offsets, so the parser reads the file as its fixes would
   write it. A fix whose text adds an error, or joins or splits a neighboring
   token, is withheld, so a habit needs no guard of its own against those.
-  Recovery cannot see a fix that lexes cleanly but changes a value, such as
-  a string's text that would become an escape or an interpolation; the
-  habit that offers the fix must withhold it.
-- **Recovery checks fixes in groups, never one lex per fix.** A fix changes
+  A fix can lex cleanly and still change a value, as when a string's text
+  would become an escape or an interpolation. `Fixes` cannot see that
+  change, so the habit that offers the fix must withhold it.
+- **The lexer checks fixes in groups, never one lex per fix.** A fix changes
   how the text lexes only between the tokens on either side of its edits,
   so fixes whose edits an untouched token separates are independent, and
   one lex checks them all. When the lex fails, halving the group finds the
@@ -126,10 +126,9 @@ develop as well as make it easier to bootstrap the compiler in parts.
   parser recovered, lexes the fixed text, maps the tokens back to the
   file's offsets, and parses them again, and that tree is the file's.
 - **The parser's fixes are checked as the lexer's are,** in groups, by
-  `Lexer.Recovery`. The fix of a diagnostic where the parser did not
-  recover, such as moving a misplaced `use` line, is checked but not
-  applied: the tree is already right, and code a fix moves maps to
-  zero-width spans.
+  `Fixes`. The fix of a diagnostic where the parser did not recover, such
+  as moving a misplaced `use` line, is checked but not applied: the tree is
+  already right, and code a fix moves maps to zero-width spans.
 - **The tree holds no positions.** A node holds an id, and its item's span
   table holds the node's span at that index. The parser fills the table as
   it allocates ids, so the definition's id is the last. A definition that

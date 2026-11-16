@@ -219,7 +219,7 @@ let accepted works tokens ~combines fixes =
   done;
   List.concat (Array.to_list accepted)
 
-let recover ~stage ~path ~attempt ~is_applied tokens (diagnostics : Diagnostic.t list) =
+let apply ~stage ~path ~attempt ~is_applied tokens (diagnostics : Diagnostic.t list) =
   let works fixes =
     let is_fixed = membership fixes in
     let unfixed =

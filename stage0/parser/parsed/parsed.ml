@@ -12,8 +12,8 @@ let parse source =
         (Source.create ~path:(Source.path source)
            (Diagnostic.apply_edits (Source.text source) edits))
     in
-    let fixed_tokens = Lexer.Recovery.to_original edits fixed_tokens in
-    if Lexer.Recovery.alters_neighbors ~edits ~written:tokens ~fixed:fixed_tokens then None
+    let fixed_tokens = Fixes.to_original edits fixed_tokens in
+    if Fixes.alters_neighbors ~edits ~written:tokens ~fixed:fixed_tokens then None
     else
       let fixed, fixed_parser_diagnostics = Parser.parse fixed_tokens in
       if
@@ -23,8 +23,8 @@ let parse source =
       else None
   in
   let parser_diagnostics, fixed =
-    Lexer.Recovery.recover ~stage:"Parser" ~path:(Source.path source) ~attempt
-      ~is_applied:is_recovery tokens parser_diagnostics
+    Fixes.apply ~stage:"Parser" ~path:(Source.path source) ~attempt ~is_applied:is_recovery tokens
+      parser_diagnostics
   in
   {
     file = Option.value fixed ~default:written;

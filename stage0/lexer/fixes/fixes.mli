@@ -3,7 +3,7 @@ val to_original : Source.span Diagnostic.edit list -> Token.t array -> Token.t a
 val alters_neighbors :
   edits:Source.span Diagnostic.edit list -> written:Token.t array -> fixed:Token.t array -> bool
 
-val recover :
+val apply :
   stage:string ->
   path:string ->
   attempt:(Source.span Diagnostic.edit list -> unfixed:Diagnostic.t list -> 'fixed option) ->
