@@ -1,7 +1,6 @@
 module Impls = Interface.Impls
 module Properties = Interface.Properties
 
-val build_operand : Types.mode -> Core.expression -> Core.operand
 val convert_evidence : Tables.evidence -> Core.evidence
 val register_call : ?function_value:Syntax.expression -> State.state -> Syntax.expression -> unit
 val register_index : State.state -> Syntax.expression -> unit

@@ -119,12 +119,17 @@ let names_of (written : Core.expression) =
     written;
   List.rev !names
 
+let literal_place text type_ = { root = Literal { text; type_ }; projections = [] }
+
+let read_literal text type_ origin =
+  Borrow { place = literal_place text type_; type_; mode = Read; origin }
+
 let lower_pattern_constant (pattern : Core.pattern) (value : Core.pattern_constant) : operand =
   let type_ = pattern.type_ in
   match value with
   | Boolean_constant value -> Constant { value = Boolean value; type_ }
   | Integer_constant value -> Constant { value = Integer value; type_ }
-  | String_constant value -> Constant { value = String value; type_ }
+  | String_constant text -> read_literal text type_ pattern.origin
   | Named_constant path ->
       Use { place = { root = Constant path; projections = [] }; type_; origin = pattern.origin }
 
@@ -143,7 +148,7 @@ let rec expression builder (node : Core.expression) : operand option =
     | Integer value -> Some (Constant { value = Integer value; type_ = node.type_ })
     | Float value -> Some (Constant { value = Float value; type_ = node.type_ })
     | Boolean value -> Some (Constant { value = Boolean value; type_ = node.type_ })
-    | String value -> Some (Constant { value = String value; type_ = node.type_ })
+    | String text -> hold (Copy (read_literal text node.type_ origin))
     | Template { literals; call = { kind = Call called; _ } } ->
         let* call = call_of builder called ~node:node.id ~origin:node.origin in
         let local = temporary builder node.type_ origin in
@@ -488,6 +493,7 @@ and place builder (written : Core.place) : place option =
         let* base = place builder base in
         Some (project base (Field field))
     | Lent lending -> lent builder lending ~duration:Rest_of_statement
+    | Temporary { kind = String text; type_; _ } -> Some (literal_place text type_)
     | Temporary written ->
         let* value = expression builder written in
         let local = place_temporary builder ~node:written.id written.type_ written.origin in
@@ -1224,7 +1230,7 @@ and elements_loop builder ~origin ~(pattern : Core.pattern) ~(elements : Core.el
                       | Some collection ->
                           lent_part := Some { element; collection; count = counted }
                       | None -> bug "a loop over elements whose collection no call borrows")
-                  | Constant _ -> bug "a loop over elements that a constant lends");
+                  | Constant _ | Literal _ -> bug "a loop over elements that a constant lends");
                   bind builder pattern part)
                 (lent builder lending ~duration:Loop_body)))
   | Some _, _ -> bug "a loop over elements that no call lends"

@@ -9,9 +9,6 @@ let build_expression_by_id state (id : id) : Core.expression =
   | Some build -> build ()
   | None -> bug "a call's argument has no core node"
 
-let build_operand (mode : Types.mode) (node : Core.expression) : Core.operand =
-  match (mode, node.kind) with (Read | Mut), Use place -> Place place | _ -> Value node
-
 let read_call state (id : id) : Tables.call =
   match state.tables.calls.(id) with
   | Some call -> call

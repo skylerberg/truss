@@ -1,0 +1,6 @@
+fn f(code: Int64) -> StringSlice {
+  match code {
+    1 => "one"
+    _ => "other"
+  }
+}

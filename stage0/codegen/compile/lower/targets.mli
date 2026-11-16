@@ -113,7 +113,7 @@ val call_instance :
 type literal = Integer_value of Z.t | Float_value of float
 
 val constant_of : Lowering.state -> Ground.ty -> literal -> Lowered.operand
-val string_literal : Lowering.state -> Ground.ty -> string -> destination:Lowered.place -> unit
+val literal_place : Lowering.state -> Ground.ty -> string -> Lowered.place
 val static_constant : Lowering.state -> Path.t -> Lowered.place
 val list_parts : Monomorphic.context -> Ground.ty -> string * Ground.ty * Ground.ty
 

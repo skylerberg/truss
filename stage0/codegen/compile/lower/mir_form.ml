@@ -90,6 +90,7 @@ let place st (written : Mir.place) : Lowered.place =
     match written.root with
     | Local local -> local_place st local
     | Constant path -> static_constant st path
+    | Literal { text; type_ } -> literal_place st (ground st type_) text
   in
   List.fold_left
     (fun place (projection : Mir.projection) ->
@@ -278,7 +279,7 @@ let outlives_call ~(owns : Mir.local -> bool) ~(is_view : Types.ty -> bool) (bod
   in
   let rec outlives seen ~holds_view (place : Mir.place) =
     match place.root with
-    | Constant _ -> true
+    | Constant _ | Literal _ -> true
     | Local local when List.mem (local, holds_view) seen -> true
     | Local local -> (
         match body.locals.(local).kind with
@@ -299,10 +300,15 @@ let outlives_call ~(owns : Mir.local -> bool) ~(is_view : Types.ty -> bool) (bod
 let field_of variant field : Lowered.projection =
   match variant with Some variant -> Variant_field { variant; field } | None -> Field field
 
+let owned_place st (written : Mir.place) =
+  match written.root with
+  | Literal { text; _ } -> bug "the string literal %S used as an owned value" text
+  | Local _ | Constant _ -> place st written
+
 let taken st (written : Mir.place) =
   let frame = mir st in
   frame.taken <- written :: frame.taken;
-  place st written
+  owned_place st written
 
 let operand_type st operand = ground st (Mir.operand_type operand)
 
@@ -312,17 +318,12 @@ let constant st ty (value : Mir.constant) : Lowered.operand =
   | Integer number -> constant_of st ty (Integer_value number)
   | Float number -> constant_of st ty (Float_value number)
   | Boolean truth -> Constant (Bool truth)
-  | String _ -> bug "a string literal as an operand"
 
 let value st (operand : Mir.operand) : Lowered.operand =
   let ty = operand_type st operand in
   match operand with
-  | Constant { value = String text; _ } ->
-      let held = temporary st ty in
-      string_literal st ty text ~destination:held;
-      owned st held ty
   | Constant { value; _ } -> constant st ty value
-  | Use { place = written; _ } -> owned st (place st written) ty
+  | Use { place = written; _ } -> owned st (owned_place st written) ty
   | Take { place = written; _ } -> owned st (taken st written) ty
   | Borrow { place = written; _ } -> Copy (place st written)
 
@@ -335,15 +336,11 @@ let operand_place st (operand : Mir.operand) : Lowered.place =
       place st written
   | Use { place = written; _ } ->
       let held = temporary st ty in
-      take st (place st written) ty ~destination:held;
+      take st (owned_place st written) ty ~destination:held;
       held
   | Take { place = written; _ } ->
       let held = temporary st ty in
       take st (taken st written) ty ~destination:held;
-      held
-  | Constant { value = String text; _ } ->
-      let held = temporary st ty in
-      string_literal st ty text ~destination:held;
       held
   | Constant { value = Unit; _ } -> temporary st ty
   | Constant { value; _ } ->
@@ -355,9 +352,8 @@ let write_operand st (operand : Mir.operand) (destination : Lowered.place) =
   let ty = operand_type st operand in
   match operand with
   | Constant { value = Unit; _ } -> ()
-  | Constant { value = String text; _ } -> string_literal st ty text ~destination
   | Constant { value; _ } -> emit st.builder (Assign (destination, Use (constant st ty value)))
-  | Use { place = written; _ } -> take st (place st written) ty ~destination
+  | Use { place = written; _ } -> take st (owned_place st written) ty ~destination
   | Take { place = written; _ } -> take st (taken st written) ty ~destination
   | Borrow { place = written; _ } ->
       emit st.builder (Assign (destination, Use (Copy (place st written))))
@@ -697,8 +693,8 @@ let intrinsic st ?reported (operation : Intrinsic.operation) ~type_arguments
                 Intrinsics.Place (operand_place st borrowed)
             | Passed { value = passed; _ } ->
                 let ty = operand_type st passed in
-                if Storage.elements_of ty <> None || Storage.viewed ty <> None then
-                  Intrinsics.Place (operand_place st passed)
+                if Storage.match_storage_element ty <> None || Storage.match_view_element ty <> None
+                then Intrinsics.Place (operand_place st passed)
                 else Intrinsics.Value (value st passed)
             | Default -> bug "an intrinsic called with an omitted argument")
           arguments
@@ -1184,7 +1180,7 @@ and assign st (target : Mir.place) (value : Mir.rvalue) ~origin =
         | _ -> None
       in
       let reads_target =
-        match target.root with Local local -> reads value local | Constant _ -> false
+        match target.root with Local local -> reads value local | Constant _ | Literal _ -> false
       in
       let evaluated =
         if reads_target then begin
@@ -1259,8 +1255,10 @@ and into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.place) ty ~or
            (List.map
               (fun operand ->
                 let operand_ty = operand_type st operand in
-                if Storage.elements_of operand_ty <> None || Storage.viewed operand_ty <> None then
-                  Intrinsics.Place (operand_place st operand)
+                if
+                  Storage.match_storage_element operand_ty <> None
+                  || Storage.match_view_element operand_ty <> None
+                then Intrinsics.Place (operand_place st operand)
                 else Intrinsics.Value (value st operand))
               operands)
            ~destination:(Some destination) ~site:(site_of st origin))

@@ -114,6 +114,7 @@ val error :
 
 val source : state -> Source.Definition_span.t -> string
 val fresh_node_id : state -> int
+val build_operand : Types.mode -> Core.expression -> Core.operand
 val synthetic_expression : state -> origin:Core.origin -> Types.ty -> Core.kind -> Core.expression
 val register_expression : state -> Syntax.expression -> (unit -> Core.kind) -> unit
 val was_hole : state -> (Tables.t -> Types.ty option array) -> Syntax.id -> bool

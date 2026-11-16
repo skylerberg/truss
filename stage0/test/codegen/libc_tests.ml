@@ -2,8 +2,8 @@ module Intrinsics = Compile.For_testing.Intrinsics
 open Codegen_support
 
 let view_ty = named "View" ~arguments:[ Type uint8 ]
-let bytes_ty = Storage.of_elements uint8
-let extra = [ (Ground.to_string view_ty, Storage.view_shape ~uint64 uint8) ]
+let bytes_ty = Storage.make_storage_type uint8
+let extra = [ (Ground.to_string view_ty, Storage.make_view_shape ~uint64 uint8) ]
 let intrinsic_types : Intrinsics.types = { uint64; string_slice = named "StringSlice" }
 
 let operate builder ?destination ?(type_arguments = []) operation arguments =
@@ -27,7 +27,7 @@ let view_of builder text =
   emit builder
     (Assign
        ( at view,
-         Storage.view view_ty ~elements:(Constant (Bytes text))
+         Storage.build_view view_ty ~elements:(Constant (Bytes text))
            ~length:(constant_uint64 (String.length text)) ));
   view
 
@@ -48,7 +48,7 @@ let free builder storage =
     (Call
        {
          target = Intrinsic Free;
-         arguments = [ Copy (Storage.buffer storage) ];
+         arguments = [ Copy (Storage.project_buffer storage) ];
          result = Discarded;
        })
 
@@ -243,8 +243,9 @@ let () =
                 emit builder
                   (Assign
                      ( at first,
-                       Convert (Copy (Storage.at (at storage) (constant_uint64 1)), Integer Int32)
-                     ));
+                       Convert
+                         ( Copy (Storage.index_element (at storage) (constant_uint64 1)),
+                           Integer Int32 ) ));
                 emit builder (Assign (at count, Convert (Copy (at got), Integer Int32)));
                 emit builder (Assign (at first, Binary (Add, Copy (at first), Copy (at count))));
                 free builder (at storage);
@@ -297,20 +298,15 @@ let () =
               operate builder ~destination:(at socket) (Libc Socket)
                 [ Value (Copy (at domain)); Value (Copy (at kind)); Value (constant_int32 0) ];
               let name = local builder (value bytes_ty) in
-              emit builder
-                (Assign
-                   ( at name,
-                     Build
-                       {
-                         ty = bytes_ty;
-                         variant = None;
-                         fields =
-                           [
-                             ("buffer", Constant (Bytes (String.make 28 '\000')));
-                             ("length", constant_uint64 28);
-                             ("capacity", constant_uint64 0);
-                           ];
-                       } ));
+              let operate_on_bytes ?destination operation arguments =
+                ignore
+                  (Intrinsics.lower (shape_env ~extra ()) builder intrinsic_types operation
+                     ~type_arguments:[ uint8 ] arguments ~destination
+                     ~site:{ definition = definition "entry"; offset = 0 })
+              in
+              operate_on_bytes ~destination:(at name) Storage_with_capacity
+                [ Value (constant_uint64 28) ];
+              operate_on_bytes Storage_lengthen [ Place (at name); Value (constant_uint64 28) ];
               let length = local builder (value uint32) in
               emit builder (Assign (at length, Use (Constant (Integer (UInt32, Z.of_int 28)))));
               let failed = local builder (value int32) in
@@ -357,7 +353,7 @@ let () =
   test "a pipe's two ends arrive in the arguments named for them, and poll finds the written data"
     (fun () ->
       let open Emit_c.Builder in
-      let waited_ty = Storage.of_elements int32 in
+      let waited_ty = Storage.make_storage_type int32 in
       expect_status ~extra 1
         [
           built_entry (fun builder ->
@@ -387,7 +383,7 @@ let () =
                    ( at actual,
                      Binary
                        ( Shift_right,
-                         Copy (Storage.at (at waited) (constant_uint64 1)),
+                         Copy (Storage.index_element (at waited) (constant_uint64 1)),
                          constant_int32 16 ) ));
               emit builder
                 (Assign (at actual, Binary (Bit_and, Copy (at actual), Copy (at reading))));
@@ -404,7 +400,7 @@ let () =
       let env = Memory_layout.create host ~shape_of:(Monomorphic.shape standard_context) in
       let drop_and_copy = Compile.For_testing.drop_and_copy env in
       let int32 = Ground.builtin Int32 in
-      let view_ty = Storage.view_of_elements (Ground.builtin UInt8) in
+      let view_ty = Storage.make_view_type (Ground.builtin UInt8) in
       let handle_ty = Ground.builtin Handle in
       let types : Intrinsics.types =
         { uint64 = Ground.builtin UInt64; string_slice = standard "text" "StringSlice" () }
@@ -417,7 +413,7 @@ let () =
         emit builder
           (Assign
              ( at name,
-               Storage.view view_ty ~elements:(Constant (Bytes text))
+               Storage.build_view view_ty ~elements:(Constant (Bytes text))
                  ~length:(constant_uint64 (String.length text)) ));
         let opened () =
           let descriptor = local builder (value int32) in

@@ -1,7 +1,7 @@
 open Memory_layout
 open Codegen_support
 
-let storage = Storage.of_elements
+let storage = Storage.make_storage_type
 
 let fill_storage ~target ~buffer values =
   let count = List.length values in
@@ -117,7 +117,7 @@ let () =
                 (Return (Some (copy ~projections:[ Index (Constant (Integer (UInt64, Z.one))) ] 3)));
             ];
         ]);
-  test "dropping storage of static bytes frees nothing" (fun () ->
+  test "dropping a storage with nothing allocated frees nothing" (fun () ->
       let ty = storage uint8 in
       expect_status 0
         [
@@ -135,8 +135,8 @@ let () =
                           variant = None;
                           fields =
                             [
-                              ("buffer", Constant (Bytes "static"));
-                              ("length", Constant (Integer (UInt64, Z.of_int 6)));
+                              ("buffer", Constant (Bytes ""));
+                              ("length", Constant (Integer (UInt64, Z.zero)));
                               ("capacity", Constant (Integer (UInt64, Z.zero)));
                             ];
                         } );

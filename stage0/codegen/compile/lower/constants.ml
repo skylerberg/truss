@@ -125,22 +125,19 @@ let literal st ty (constant : Mir.constant) =
   | Integer integer -> number (Integer_value integer)
   | Float float -> number (Float_value float)
   | Boolean boolean -> truth boolean
-  | String text -> (
-      match Monomorphic.shape st.context.monomorphic ty with
-      | Record [ (field, Typed _) ] ->
-          let bytes =
-            List.init (String.length text) (fun index ->
-                Lowered.Static_scalar (Integer (UInt8, Z.of_int (Char.code text.[index]))))
-          in
-          Some
-            (Lowered.Static_record
-               [
-                 ( field,
-                   Static_storage
-                     { element = Ground.builtin UInt8; elements = bytes; owned = false } );
-               ])
-      | _ -> None)
   | Unit -> None
+
+let literal_value st ty text =
+  match Monomorphic.shape st.context.monomorphic ty with
+  | Record [ (field, Typed storage) ] when Option.is_some (Storage.match_storage_element storage) ->
+      let bytes =
+        List.init (String.length text) (fun index ->
+            Lowered.Static_scalar (Integer (UInt8, Z.of_int (Char.code text.[index]))))
+      in
+      Some
+        (Lowered.Static_record
+           [ (field, Static_storage { element = Ground.builtin UInt8; elements = bytes }) ])
+  | _ -> None
 
 let constant_state context path =
   let key = key_of context path in
@@ -179,6 +176,7 @@ let rec fold_body ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowered.stat
       match place.root with
       | Local local -> Hashtbl.find_opt locals local
       | Constant path -> st.context.constant path
+      | Literal { text; type_ } -> literal_value st (ground st type_) text
     in
     part whole place.projections
   in
@@ -233,8 +231,7 @@ let rec fold_body ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowered.stat
   let call (destination : Mir.place option) (called : Mir.call) =
     match (called.callee, called.arguments) with
     | Intrinsic { operation = Storage_with_capacity; type_arguments = [ Type element ] }, _ ->
-        assign destination
-          (Lowered.Static_storage { element = ground st element; elements = []; owned = true })
+        assign destination (Lowered.Static_storage { element = ground st element; elements = [] })
     | ( Intrinsic { operation = Storage_push; _ },
         [
           Passed { value = Borrow { place = { root = Local storage; projections = [] }; _ }; _ };
@@ -318,7 +315,9 @@ let list_folded_constants (lookups : Mir.lookups) path =
   let constants = ref [] in
   let walked_depths = Path_table.create 16 in
   let note_constant (place : Mir.place) =
-    match place.root with Constant constant -> constants := constant :: !constants | Local _ -> ()
+    match place.root with
+    | Constant constant -> constants := constant :: !constants
+    | Local _ | Literal _ -> ()
   in
   let rec walk ~depth (graph : Mir.Graph.t) =
     Mir.iter_graph_places_read note_constant graph.body;
@@ -359,15 +358,15 @@ let write_fully = Well_known.path Write_fully
 let write_output st output =
   let builder = st.builder in
   let int32 = Ground.builtin Int32 in
-  let view_ty = Storage.view_of_elements (Ground.builtin UInt8) in
+  let view_ty = Storage.make_view_type (Ground.builtin UInt8) in
   let descriptor = temporary st int32 and view = temporary st view_ty in
   emit builder (Assign (descriptor, Use (Constant (Integer (Int32, Z.one)))));
   emit builder
     (Assign
        ( view,
-         Storage.view view_ty
-           ~elements:(Copy (Storage.buffer output))
-           ~length:(Copy (Storage.length output)) ));
+         Storage.build_view view_ty
+           ~elements:(Copy (Storage.project_buffer output))
+           ~length:(Copy (Storage.project_length output)) ));
   let signature = signature_of st.context write_fully in
   let result =
     match signature.output with

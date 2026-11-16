@@ -689,7 +689,16 @@ let () =
         "ownership.views_temporary");
   test "a slice of a temporary cannot outlive the `let` that keeps the temporary" (fun () ->
       one_diagnostic Fixtures.Ownership.slice_of_a_temporary_cannot_outlive_the_let_that_keeps_it
-        "ownership.views_temporary")
+        "ownership.views_temporary");
+  test "a view of a string literal outlives the function" (fun () ->
+      fine Fixtures.Ownership.view_of_a_string_literal_outlives_the_function);
+  test "a match of string literals where a StringSlice is expected is one" (fun () ->
+      fine Fixtures.Ownership.match_of_string_literals_is_a_string_slice);
+  test "a `let` bound to a string literal is a view" (fun () ->
+      fine Fixtures.Ownership.let_bound_to_a_string_literal_is_a_view);
+  test "a `let` bound to a string literal is not owned" (fun () ->
+      one_diagnostic Fixtures.Ownership.let_bound_to_a_string_literal_is_not_owned
+        "ownership.needs_owned")
 
 let () =
   test "a view of a local cannot outlive the local's block" (fun () ->

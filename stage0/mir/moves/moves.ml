@@ -2,7 +2,7 @@ type path = { local : Mir.local; projections : Mir.projection list }
 
 let path_of_place (place : Mir.place) =
   match place.root with
-  | Constant _ -> None
+  | Constant _ | Literal _ -> None
   | Local local -> Some { local; projections = place.projections }
 
 let rec is_prefix prefix projections =
@@ -523,7 +523,7 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.Gra
   analysis
 
 let place_locals (place : Mir.place) =
-  match place.root with Local local -> [ local ] | Constant _ -> []
+  match place.root with Local local -> [ local ] | Constant _ | Literal _ -> []
 
 let use_locals uses = List.concat_map (fun use -> place_locals use.place) uses
 let every _ = true

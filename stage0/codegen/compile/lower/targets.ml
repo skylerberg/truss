@@ -353,7 +353,7 @@ let in_type_definition st (ty : Ground.ty) nested_function =
 
 let begin_output st =
   let output = temporary st Writing.output_ty in
-  emit st.builder (Assign (output, Storage.empty Writing.output_ty));
+  emit st.builder (Assign (output, Storage.build_empty Writing.output_ty));
   output
 
 let echo st place ty ~site =
@@ -362,7 +362,12 @@ let echo st place ty ~site =
     ~output:(Address { place = output; writable = true })
     ty place;
   emit st.builder
-    (Echo { text = Copy (Storage.buffer output); length = Copy (Storage.length output); site })
+    (Echo
+       {
+         text = Copy (Storage.project_buffer output);
+         length = Copy (Storage.project_length output);
+         site;
+       })
 
 let any_into st ~any_ty ~inner_ty ~impl ~type_arguments ~(value : Lowered.place) destination =
   let box = Drop_and_copy.box st.context.drop_and_copy st.builder inner_ty in
@@ -444,23 +449,23 @@ let constant_of st ty (literal : literal) : Lowered.operand =
   | Float_value value, Float32 -> Constant (Float32 (Int32.bits_of_float value))
   | _ -> bug "a literal of type %s" (Ground.to_string ty)
 
-let string_literal st (ty : Ground.ty) text ~(destination : Lowered.place) =
+let literal_place st (ty : Ground.ty) text =
+  let bytes : Lowered.operand = Constant (Bytes text) in
   let length = constant_uint64 (String.length text) in
-  let build field operand =
-    emit st.builder
-      (Assign (destination, Build { ty; variant = None; fields = [ (field, operand) ] }))
+  let build part_ty value =
+    let built = held st (Value part_ty) in
+    emit st.builder (Assign (built, value));
+    built
   in
-  match (ty, Monomorphic.shape st.context.monomorphic ty) with
-  | Named { path; _ }, Record [ (field, Typed storage) ] when Well_known.is String path ->
-      let bytes = temporary st storage in
-      emit st.builder
-        (Assign (bytes, Storage.static storage ~elements:(Constant (Bytes text)) ~length));
-      build field (moved st bytes)
-  | _, Record [ (field, Typed view) ] ->
-      let bytes = temporary st view in
-      emit st.builder (Assign (bytes, Storage.view view ~elements:(Constant (Bytes text)) ~length));
-      build field (Copy bytes)
-  | _ -> bug "a string literal of type %s" (Ground.to_string ty)
+  let field, part =
+    match (ty, Monomorphic.shape st.context.monomorphic ty) with
+    | Named { path; _ }, Record [ (field, Typed storage) ] when Well_known.is String path ->
+        (field, build storage (Storage.build_storage storage ~buffer:bytes ~length ~capacity:length))
+    | _, Record [ (field, Typed view) ] ->
+        (field, build view (Storage.build_view view ~elements:bytes ~length))
+    | _ -> bug "a string literal of type %s" (Ground.to_string ty)
+  in
+  build ty (Build { ty; variant = None; fields = [ (field, Copy part) ] })
 
 let static_constant st path : Lowered.place =
   match Interface.Definition.constant_type st.context.lookups.interface path with
@@ -470,7 +475,7 @@ let static_constant st path : Lowered.place =
 let list_parts monomorphic ty =
   match Monomorphic.shape monomorphic ty with
   | Record [ (field, Typed storage) ] -> (
-      match Storage.elements_of storage with
+      match Storage.match_storage_element storage with
       | Some element -> (field, storage, element)
       | None -> bug "%s is not a list" (Ground.to_string ty))
   | _ -> bug "%s is not a list" (Ground.to_string ty)
@@ -512,11 +517,15 @@ let template_value st template_ty literals ~site ~parts =
   list_of st literals_ty (built / Field "literals") ~site
     (List.map
        (fun text value ->
-         let slice = temporary st slice_ty in
-         string_literal st slice_ty text ~destination:slice;
          emit st.builder
            (Assign
-              (value, Build { ty = literal_ty; variant = None; fields = [ ("text", Copy slice) ] })))
+              ( value,
+                Build
+                  {
+                    ty = literal_ty;
+                    variant = None;
+                    fields = [ ("text", Copy (literal_place st slice_ty text)) ];
+                  } )))
        literals);
   list_of st parts_ty (built / Field "parts") ~site parts;
   built
