@@ -1839,12 +1839,9 @@ fn parse_decimal(text: StringSlice) -> Result[Decimal, core::ParseFloatError]
       invariant start <= index
       invariant index <= text.length()
       invariant 0 <= exponent
-      invariant exponent <= 99999999999
       decreases text.length() - index
     {
-      if exponent < 9999999999 {
-        exponent = exponent * 10 + intrinsic::convert[UInt8, Int64](text.byte(index) - 48)
-      }
+      exponent = exponent.saturating_multiply(10).saturating_add(intrinsic::convert[UInt8, Int64](text.byte(index) - 48))
       index += 1
     }
     if index == start {
@@ -1857,10 +1854,13 @@ fn parse_decimal(text: StringSlice) -> Result[Decimal, core::ParseFloatError]
   if index < text.length() {
     return Err(core::ParseFloatError.InvalidCharacter(offset: index))
   }
-  if places > 2147483647 {
+  if !intrinsic::fits[UInt64, Int64](places) {
     return Err(core::ParseFloatError.InvalidCharacter(offset: text.length()))
   }
-  let scale: Int64 = intrinsic::convert[UInt64, Int64](places) - exponent
+  let scale = match intrinsic::convert[UInt64, Int64](places).checked_subtract(exponent) {
+    Some(scale) => scale
+    None => return Err(core::ParseFloatError.InvalidCharacter(offset: text.length()))
+  }
   if !intrinsic::fits[Int64, Int32](scale) {
     return Err(core::ParseFloatError.InvalidCharacter(offset: text.length()))
   }
