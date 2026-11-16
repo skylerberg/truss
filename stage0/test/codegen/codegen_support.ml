@@ -82,11 +82,7 @@ let shapes extra (ty : Ground.ty) : shape =
       | Some shape -> shape
       | None -> invalid_arg ("no shape for " ^ Ground.to_string ty))
 
-let computed_env system shape_of =
-  let rec layout_of ty = Memory_layout.layout ~layout_of ty (shape_of ty) in
-  create system ~shape_of ~layout_of
-
-let layout ?(extra = []) ty = of_type (computed_env host (shapes extra)) ty
+let layout ?(extra = []) ty = of_type (create host ~shape_of:(shapes extra)) ty
 let describe ?extra ty = Memory_layout.For_testing.to_string (layout ?extra ty)
 let int32 = named "Int32"
 let uint64 = named "UInt64"
@@ -159,7 +155,7 @@ let call name ?(result = Some (value int32)) ?(parameters = []) arguments place 
       result = (match place with Some place -> Returned place | None -> Discarded);
     }
 
-let shape_env ?(extra = []) () = computed_env host (shapes extra)
+let shape_env ?(extra = []) () = create host ~shape_of:(shapes extra)
 let scratch = lazy (Harness.scratch "codegen")
 
 let compiler =
@@ -313,4 +309,6 @@ let standard module_ name ?(arguments = []) () =
 
 let standard_layout ty =
   Memory_layout.For_testing.to_string
-    (Memory_layout.of_type (computed_env host (Monomorphic.shape standard_context)) ty)
+    (Memory_layout.of_type
+       (Memory_layout.create host ~shape_of:(Monomorphic.shape standard_context))
+       ty)

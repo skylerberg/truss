@@ -22,8 +22,7 @@ type t =
   | Successors
   | Recursion_groups
   | Proofs
-  | Ground_types
-  | Layouts
+  | Folded_constants
   | Lowered_code
   | Test_keys
 
@@ -52,8 +51,7 @@ let all =
     Successors;
     Recursion_groups;
     Proofs;
-    Ground_types;
-    Layouts;
+    Folded_constants;
     Lowered_code;
     Test_keys;
   ]
@@ -66,7 +64,7 @@ let position stage =
 let precedes earlier later = position earlier <= position later
 
 let is_lowering = function
-  | Ground_types | Layouts | Lowered_code | Test_keys -> true
+  | Folded_constants | Lowered_code | Test_keys -> true
   | Input | Parse | Namespaces | Resolution | Import_checks | Trait_headers | Constant_values
   | Headers | Interfaces | Derived_interfaces | Type_facts | Grants | Signature_checks | Contracts
   | Checked_bodies | Derived_forms | Mir | Call_edges | Body_checks | Package_checks | Successors
@@ -106,7 +104,6 @@ let of_part : Part.t -> t = function
   | Successors _ -> Successors
   | Recursion_group _ -> Recursion_groups
   | Proof _ -> Proofs
-  | Ground_types _ -> Ground_types
-  | Layout _ -> Layouts
+  | Folded_constants _ -> Folded_constants
   | Lowered _ -> Lowered_code
   | Test_key _ -> Test_keys

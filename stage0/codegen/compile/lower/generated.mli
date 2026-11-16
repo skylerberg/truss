@@ -1,6 +1,3 @@
-val find_real_implementation :
-  Interface.Lookups.t -> Path.t -> (Path.t * Types.impl_interface) option
-
 val real_implementations :
   Lowering.state -> user:string -> Path.t list -> (Path.t * Lowered.operand) list
 

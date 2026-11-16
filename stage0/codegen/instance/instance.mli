@@ -37,7 +37,6 @@ and impl_method = {
 }
 
 val make_method_path : impl_method -> Path.t
-val make_method_code : impl_method -> key
 val compare : key -> key -> int
 val equal : key -> key -> bool
 val symbol : key -> string

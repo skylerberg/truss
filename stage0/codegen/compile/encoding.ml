@@ -1,5 +1,4 @@
 let bug format = Compiler_bug.bug ~stage:"Encoding" format
-let ground_types = Writing.ground_types
 let variant_index : Memory_layout.integer = UInt32
 
 open Emit_c.Builder

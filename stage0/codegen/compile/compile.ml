@@ -7,8 +7,6 @@ type lowered =
   | Folded of Lowered.data * Emit_c.fragment
   | Evaluate of Path.t * Ground.ty
 
-type ground_types = Lower.ground_types = { types : Ground.ty list; folded_constants : Path.t list }
-
 type requests = {
   settings : Lookups.settings;
   source : Path.file -> Source.t;
@@ -17,10 +15,10 @@ type requests = {
   lowered : Instance.key -> (lowered, unsupported) result;
   test_key : Instance.key -> (string, unsupported) result;
   reached_todo_types : Instance.key -> Path.t list;
-  layouts : Instance.key list -> Ground.ty -> Memory_layout.t;
 }
 
 exception Todo_type = Monomorphic.Todo_type
+exception Infinite_size = Memory_layout.Infinite_size
 
 let bug format = Compiler_bug.bug ~stage:"Compile" format
 
@@ -49,14 +47,13 @@ let make (context : Lower.context) (key : Instance.key) : lowered =
   | Call_evaluation { function_; arguments } ->
       code (Lower.lower_call_evaluation context ~function_ ~arguments)
 
-let lower (settings : Lookups.settings) (lookups : Lookups.t) ~layout_of ~lowered key =
+let lower (settings : Lookups.settings) (lookups : Lookups.t) ~lowered_constant key =
   let env =
     Memory_layout.create settings.system
       ~shape_of:(Monomorphic.shape (Lower.monomorphic lookups.interface))
-      ~layout_of
   in
   let constant path =
-    match lowered (Instance.Constant path) with
+    match lowered_constant path with
     | Ok (Folded (data, _)) -> Some data.Lowered.value
     | Ok (Evaluate _) -> None
     | Ok (Compiled _) -> bug "%s is not a constant" (Path.show path)
@@ -183,10 +180,9 @@ type t = {
   runs : (string, string ran) Hashtbl.t;
 }
 
-let env compiler keys =
+let env compiler =
   Memory_layout.create compiler.requests.settings.system
     ~shape_of:(Monomorphic.shape compiler.monomorphic)
-    ~layout_of:(compiler.requests.layouts keys)
 
 let lowered compiler key =
   match compiler.requests.lowered key with
@@ -284,12 +280,7 @@ let rec build ?progress ?tests ?(supplied = []) compiler ~roots ~startup ~output
     | Release -> fun _ -> []
   in
   match
-    Build.program ?progress ?tests ~copied compiler.toolchain compiler.cache
-      (env compiler
-         (List.filter
-            (fun key ->
-              not (List.exists (fun fragment -> Instance.equal (Emit_c.key fragment) key) supplied))
-            (List.map Emit_c.key units)))
+    Build.program ?progress ?tests ~copied compiler.toolchain compiler.cache (env compiler)
       compiler.settings
       ~files:(List.map (fun unit -> [ unit ]) units)
       ~sources ~output
@@ -349,14 +340,14 @@ and run_while_compiling : 'value. t -> Instance.key -> read:(string -> 'value) -
   | Stopped report -> Stopped report
 
 and compiled compiler key =
-  let data (data : Lowered.data) = Emit_c.fragment (env compiler [ key ]) (Data data) in
+  let data (data : Lowered.data) = Emit_c.fragment (env compiler) (Data data) in
   let compiled =
     match lowered compiler key with
     | Compiled fragment | Folded (_, fragment) -> fragment
     | Evaluate (path, ty) -> (
         match
           run_while_compiling compiler (Instance.Evaluator path) ~read:(fun encoded ->
-              Encoding.decode (env compiler [ key ]) ty encoded)
+              Encoding.decode (env compiler) ty encoded)
         with
         | Ran value -> data { data_key = Constant path; ty; value }
         | Ran_too_long ->
@@ -601,7 +592,7 @@ let run_tests ?(rerun = false) ?(progress = ignore) compiler ~time_limit_ms test
 
 let build_supplied_tests compiler ~time_limit_ms supplied ~output =
   reporting compiler @@ fun () ->
-  let supplied_env = env compiler [ test_runner ] in
+  let supplied_env = env compiler in
   let supplied = List.map (fun instance -> instance supplied_env) supplied in
   build_test_program compiler
     ~supplied:(List.map (fun instance -> Emit_c.fragment supplied_env (Code instance)) supplied)
@@ -742,7 +733,7 @@ let evaluate_call compiler ~function_ ~arguments =
       let ty = Monomorphic.ground compiler.monomorphic [] result in
       let key = Instance.Call_evaluation { function_; arguments } in
       run_while_compiling compiler key ~read:(fun encoded ->
-          Encoding.decode (env compiler [ key ]) ty encoded)
+          Encoding.decode (env compiler) ty encoded)
   | _ -> bug "%s has no result to evaluate" (Path.show function_)
 
 let create ?(file_name = Path.show_file) ?results ?(evaluation_time_limit_ms = 10_000)
@@ -763,18 +754,10 @@ let create ?(file_name = Path.show_file) ?results ?(evaluation_time_limit_ms = 1
     runs = Hashtbl.create 8;
   }
 
-let ground_types settings lookups key =
+let list_folded_constants lookups path =
   Compiler_bug.while_doing ~stage:"Compile"
-    ("finding the ground types of " ^ Instance.to_string key)
-    (fun () -> Lower.ground_types settings lookups key)
-
-let shape interface ty = Monomorphic.shape (Lower.monomorphic interface) ty
-let layout interface ~layout_of ty = Memory_layout.layout ~layout_of ty (shape interface ty)
-
-let stored_in_place interface ty =
-  match shape interface ty with
-  | shape -> Memory_layout.stored_in_place shape
-  | exception Todo_type _ -> []
+    ("listing the constants that " ^ Path.show path ^ " folds")
+    (fun () -> Lower.list_folded_constants lookups path)
 
 module For_testing = struct
   let is_folded compiler path =

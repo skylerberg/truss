@@ -48,8 +48,7 @@ type t =
   | Successors of Path.t * Path.package
   | Recursion_group of Path.t
   | Proof of Resolve.Names.key
-  | Ground_types of Instance.key
-  | Layout of Ground.ty
+  | Folded_constants of Path.t
   | Lowered of Instance.key
   | Test_key of Instance.key
 
@@ -101,8 +100,8 @@ let package_of_definition = function
   | Call_edges path
   | Recursion_group path ->
       Path.package path
-  | Ground_types _ | Layout _ | Lowered _ | Test_key _ ->
-      Compiler_bug.bug ~stage:"Database" "a part of lowering belongs to the package of its type"
+  | Folded_constants _ | Lowered _ | Test_key _ ->
+      Compiler_bug.bug ~stage:"Database" "a part of lowering belongs to the package of its instance"
 
 let type_package : Ground.ty -> Path.package = function
   | Named { path; _ } -> Path.package path
@@ -124,8 +123,8 @@ let instance_package : Instance.key -> Path.package = function
       Path.package (Instance.make_method_path impl_method)
 
 let package = function
-  | Ground_types key | Lowered key | Test_key key -> instance_package key
-  | Layout ty -> type_package ty
+  | Folded_constants path -> Path.package path
+  | Lowered key | Test_key key -> instance_package key
   | part -> package_of_definition part
 
 let equal = ( = )
@@ -204,10 +203,9 @@ let show part =
       Printf.sprintf "successors %s %s" (Path.show_package package) (Path.show path)
   | Recursion_group path -> "recursion group " ^ Path.show path
   | Proof declared -> "proof " ^ key declared
-  | Ground_types instance -> "ground types " ^ Instance.to_string instance
+  | Folded_constants path -> "folded constants " ^ Path.show path
   | Lowered instance -> "lowered " ^ Instance.to_string instance
   | Test_key instance -> "test key " ^ Instance.to_string instance
-  | Layout ty -> "layout " ^ Ground.to_string ty
 
 let type_definition : Ground.ty -> Path.t option = function
   | Named { path; _ } -> Some path
@@ -271,8 +269,8 @@ let definition = function
   | Successors (path, _)
   | Recursion_group path ->
       Some path
-  | Ground_types key | Lowered key | Test_key key -> instance_definition key
-  | Layout ty -> type_definition ty
+  | Folded_constants path -> Some path
+  | Lowered key | Test_key key -> instance_definition key
 
 let kind_name = function
   | Source _ -> "source"
@@ -324,7 +322,6 @@ let kind_name = function
   | Successors _ -> "successors"
   | Recursion_group _ -> "recursion group"
   | Proof _ -> "proof"
-  | Ground_types _ -> "ground types"
-  | Layout _ -> "layout"
+  | Folded_constants _ -> "folded constants"
   | Lowered _ -> "lowered code"
   | Test_key _ -> "test key"

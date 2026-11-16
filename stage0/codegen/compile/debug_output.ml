@@ -12,7 +12,6 @@ let form : Ground.ty -> form = function
 
 let int64 = Ground.builtin Int64
 let uint64 = Ground.builtin UInt64
-let ground_types = [ int64; uint64 ] @ Writing.ground_types
 
 open Emit_c.Builder
 

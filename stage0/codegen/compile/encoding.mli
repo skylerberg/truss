@@ -1,5 +1,3 @@
-val ground_types : Ground.ty list
-
 val encode_call :
   Memory_layout.env ->
   Emit_c.Builder.t ->

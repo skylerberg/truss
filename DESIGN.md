@@ -1877,7 +1877,7 @@ The database holds, for each definition and under its fully qualified name,
 its source tree and the facts derived from it: its header, which holds a type's
 or trait's generic parameters and bounds, the resolved names of its interface,
 of its contract, and of its body, its interface and its contract, its type
-facts and layout, its checked body, its MIR and call edges, the checks of its
+facts, its checked body, its MIR and call edges, the checks of its
 body (patterns, usage, and ownership), the packages its body uses, its proof,
 its lowered code, and its test key. Each of these is a *part*. A stage
 computes each part from the definition's earlier parts and from parts of
@@ -1901,7 +1901,11 @@ points, which the namespace lists, and the template checks that its proofs
 run. A request never adds a root, so the lowered code the database holds is
 a function of the files too, and not of the requests it served. An instance
 stays in the database while a root reaches it: when one loses its last
-referrer, the database collects it and the instances only it reached.
+referrer, the database collects it and the instances only it reached. The
+database lowers an instance only when a root reaches it through current
+lowered code. Stale code may stop referring to an instance once it is
+lowered again, and lowering that instance first could read a type that the
+edit removed.
 
 **A definition is identified by its name, not by its content.** Unison
 identifies a definition by a hash of its content and of its dependencies'
@@ -1948,8 +1952,6 @@ before the stage runs, on a cold build as on a hot one:
 |---|---|
 | A member's interface | Its container's header, which the declarations name |
 | A type's type facts | Those of the types that its resolved fields name |
-| A ground type's layout | The layouts of the ground types it stores in place |
-| An instance's lowered code | The layouts of the ground types it uses, which its MIR and type arguments name |
 | A constant's value | The values of the constants that its MIR names, directly or in the functions it calls. A constant computed by running code is a run, cached by its test key. |
 | A test key | The test keys of the instances that its lowered code refers to |
 
@@ -1958,13 +1960,12 @@ its parts are computed as one unit.
 
 **Propagation stops where a part comes out unchanged.** Most changes stop
 one hop from the edit, because a caller reads the callee's signature and
-contract, which are written in the source. Four facts are derived from facts
+contract, which are written in the source. Three facts are derived from facts
 of other definitions, so a change to one can travel further:
 
 | Fact | Derived from | Read by |
 |---|---|---|
 | `Plain` and `Copyable` | The same facts of the types of its fields | The type checks of the functions that use the type |
-| Layout | The layouts of the types it stores in place | The lowered code that uses the type |
 | A value computed at compile time, by a constant or a template check | The bodies of the functions that the computation runs | The code that embeds the value, and the template check's verdict |
 | A recursion group | The call edges of the functions on a cycle, as one package sees them: a trait method's edges go to every implementation the package can see, including those in its dependencies | The termination proofs of its members |
 
@@ -1977,11 +1978,19 @@ as the strongly connected components of each package's call edges: an added
 edge can only merge components, and a removed edge can only split the
 component that held it.
 
+**Lowering computes layouts, and the database stores none.** Lowering reads
+the shape of every type it handles, to decide which values it drops, so a
+stored layout would stop no propagation that those reads do not carry
+already. A stored layout would also have to be computed before the lowered
+code that reads it. That takes a list, made before lowering, of the types
+that each instance lays out, and a type missing from the list is a compiler
+error.
+
 ### Stages and lookups
 
 **A stage is a pure function that reads only through its lookups.** A lookup
-returns a stored part, such as a definition's signature, contract, type
-facts, or layout, or a namespace's entry for a name, and records the read. A
+returns a stored part, such as a definition's signature, contract, or type
+facts, or a namespace's entry for a name, and records the read. A
 stage has no handle on the database and no global state. Every read is
 therefore recorded, and no part keeps a stale result because a read went
 unrecorded.

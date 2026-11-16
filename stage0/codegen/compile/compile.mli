@@ -2,7 +2,6 @@ module Lookups = Lookups
 
 type unsupported = { construct : string; at : Lowered.site option }
 type lowered
-type ground_types = { types : Ground.ty list; folded_constants : Path.t list }
 
 type requests = {
   settings : Lookups.settings;
@@ -12,10 +11,10 @@ type requests = {
   lowered : Instance.key -> (lowered, unsupported) result;
   test_key : Instance.key -> (string, unsupported) result;
   reached_todo_types : Instance.key -> Path.t list;
-  layouts : Instance.key list -> Ground.ty -> Memory_layout.t;
 }
 
 exception Todo_type of Ground.ty
+exception Infinite_size of Ground.ty
 
 type t
 type results = { find : string -> string option; add : string -> string -> unit }
@@ -82,13 +81,12 @@ val run_template_check :
   (bool list, string) result
 
 val roots : tests:Path.t list -> mains:Path.t list -> Instance.key list
-val ground_types : Lookups.settings -> Lookups.t -> Instance.key -> ground_types
+val list_folded_constants : Mir.lookups -> Path.t -> Path.t list
 
 val lower :
   Lookups.settings ->
   Lookups.t ->
-  layout_of:(Ground.ty -> Memory_layout.t) ->
-  lowered:(Instance.key -> (lowered, unsupported) result) ->
+  lowered_constant:(Path.t -> (lowered, unsupported) result) ->
   Instance.key ->
   (lowered, unsupported) result
 
@@ -106,11 +104,6 @@ val test_keys :
   known:(Instance.key -> string) ->
   Instance.key list ->
   (Instance.key * string) list
-
-val layout :
-  Interface.Lookups.t -> layout_of:(Ground.ty -> Memory_layout.t) -> Ground.ty -> Memory_layout.t
-
-val stored_in_place : Interface.Lookups.t -> Ground.ty -> Ground.ty list
 
 module For_testing : sig
   val is_folded : t -> Path.t -> bool

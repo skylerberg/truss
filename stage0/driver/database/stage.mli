@@ -22,8 +22,7 @@ type t =
   | Successors
   | Recursion_groups
   | Proofs
-  | Ground_types
-  | Layouts
+  | Folded_constants
   | Lowered_code
   | Test_keys
 

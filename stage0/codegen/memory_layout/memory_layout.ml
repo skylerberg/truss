@@ -43,12 +43,27 @@ and variant = { name : string; index : int; payload : t }
 and niche = { path : step list; scalar : scalar; start : Z.t; count : Z.t }
 and step = Field of string | Tag
 
-type env = { system : Libc.system; shape_of : Ground.ty -> shape; layout_of : Ground.ty -> t }
+module Type_table = Hashtbl.Make (struct
+  type t = Ground.ty
 
-let create system ~shape_of ~layout_of = { system; shape_of; layout_of }
+  let equal left right = Ground.compare left right = 0
+  let hash = Hashtbl.hash_param 64 256
+end)
+
+exception Infinite_size of Ground.ty
+
+type env = {
+  system : Libc.system;
+  shape_of : Ground.ty -> shape;
+  layouts : t Type_table.t;
+  in_progress : unit Type_table.t;
+}
+
+let create system ~shape_of =
+  { system; shape_of; layouts = Type_table.create 64; in_progress = Type_table.create 8 }
+
 let system env = env.system
 let shape env ty = env.shape_of ty
-let of_type env ty = env.layout_of ty
 
 let integer_size = function
   | Int8 | UInt8 -> 1
@@ -128,18 +143,32 @@ let place (fields : (string * member * t) list) =
   else
     { size = round_up offset alignment; alignment; form = Struct placed; niche = best_niche placed }
 
-let of_member layout_of = function Typed ty -> layout_of ty | Raw scalar -> of_scalar scalar
+let rec of_type env ty =
+  match Type_table.find_opt env.layouts ty with
+  | Some layout -> layout
+  | None ->
+      if Type_table.mem env.in_progress ty then raise (Infinite_size ty);
+      Type_table.replace env.in_progress ty ();
+      let layout =
+        Fun.protect
+          ~finally:(fun () -> Type_table.remove env.in_progress ty)
+          (fun () -> lay_out env ty (env.shape_of ty))
+      in
+      Type_table.replace env.layouts ty layout;
+      layout
 
-let fields layout_of fields =
-  place (List.map (fun (name, member) -> (name, member, of_member layout_of member)) fields)
+and of_member env = function Typed ty -> of_type env ty | Raw scalar -> of_scalar scalar
 
-let rec layout ~layout_of ty (shape : shape) =
+and fields env fields =
+  place (List.map (fun (name, member) -> (name, member, of_member env member)) fields)
+
+and lay_out env ty (shape : shape) =
   match shape with
   | Scalar scalar -> of_scalar scalar
-  | Record fields' -> fields layout_of fields'
+  | Record fields' -> fields env fields'
   | Array (_, 0) -> zero_size
   | Array (element, count) ->
-      let element_layout = layout_of element in
+      let element_layout = of_type env element in
       if element_layout.size = 0 then zero_size
       else
         {
@@ -148,17 +177,17 @@ let rec layout ~layout_of ty (shape : shape) =
           form = Array { element; element_layout; count };
           niche = None;
         }
-  | Sum variants -> of_sum layout_of ty variants
+  | Sum variants -> of_sum env ty variants
 
-and payload layout_of ty (variant : variant_shape) =
+and payload env ty (variant : variant_shape) =
   if variant.indirect then of_scalar (Pointer (Block (ty, variant.name)))
-  else fields layout_of variant.fields
+  else fields env variant.fields
 
-and of_sum layout_of ty shapes =
+and of_sum env ty shapes =
   let variants =
     List.mapi
       (fun index (shape : variant_shape) ->
-        { name = shape.name; index; payload = payload layout_of ty shape })
+        { name = shape.name; index; payload = payload env ty shape })
       shapes
   in
   let count = List.length variants in
@@ -225,7 +254,7 @@ let block env ty name =
   match env.shape_of ty with
   | Sum variants -> (
       match List.find_opt (fun (variant : variant_shape) -> variant.name = name) variants with
-      | Some { indirect = true; fields = fields'; _ } -> fields env.layout_of fields'
+      | Some { indirect = true; fields = fields'; _ } -> fields env fields'
       | Some _ -> bug "variant %s is not indirect" name
       | None -> bug "no variant %s" name)
   | _ -> bug "a block of a type that is not a sum type"
@@ -306,38 +335,6 @@ let rec to_string layout =
     (match layout.niche with None -> "" | Some niche -> " " ^ niche_to_string niche)
 
 let has_zero_size env ty = (of_type env ty).size = 0
-let typed members = List.filter_map (function _, Typed ty -> Some ty | _, Raw _ -> None) members
-
-let stored_in_place (shape : shape) =
-  match shape with
-  | Scalar _ | Array (_, 0) -> []
-  | Record members -> typed members
-  | Array (element, _) -> [ element ]
-  | Sum variants ->
-      List.concat_map
-        (fun (variant : variant_shape) -> if variant.indirect then [] else typed variant.fields)
-        variants
-
-let pointee_types = function
-  | Data ty | Block (ty, _) -> [ ty ]
-  | Code { parameters; result; _ } -> result :: List.map snd parameters
-  | Opaque -> []
-
-let member_reaches = function
-  | _, Typed ty -> [ ty ]
-  | _, Raw (Pointer pointee | Nullable_pointer pointee) -> pointee_types pointee
-  | _, Raw (Integer _ | Float32 | Float64 | Bool | Character) -> []
-
-let reaches (shape : shape) =
-  match shape with
-  | Scalar (Pointer pointee | Nullable_pointer pointee) -> pointee_types pointee
-  | Scalar (Integer _ | Float32 | Float64 | Bool | Character) -> []
-  | Record members -> List.concat_map member_reaches members
-  | Array (element, _) -> [ element ]
-  | Sum variants ->
-      List.concat_map
-        (fun (variant : variant_shape) -> List.concat_map member_reaches variant.fields)
-        variants
 
 module For_testing = struct
   let to_string = to_string
