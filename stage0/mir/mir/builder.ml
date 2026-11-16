@@ -324,10 +324,10 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
         in
         let* condition = lowered.value in
         let result = allocate_value_local builder node in
-        let lower_arm ?held ended (body : Core.block option) =
+        let lower_arm ended block_scope (body : Core.block option) =
           Emitter.build_block builder (fun () ->
               Emitter.end_scope builder ended tested.origin;
-              Emitter.run_in_scope ?held builder origin (fun () ->
+              Emitter.run_in_block_scope builder block_scope origin (fun () ->
                   match (Option.map (lower_block builder) body, result) with
                   | Some (Some value), Some local ->
                       Emitter.assign builder (Emitter.make_local_place local) (Operand value) origin;
@@ -337,8 +337,8 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
                   | Some None, _ -> None
                   | (Some (Some _) | None), _ -> Some Emitter.unit_value))
         in
-        let then_ = lower_arm ~held:lowered.held_if_true lowered.ended_if_true (Some then_) in
-        let else_ = lower_arm lowered.ended_if_false else_ in
+        let then_ = lower_arm lowered.ended_if_true lowered.block_scope_if_true (Some then_) in
+        let else_ = lower_arm lowered.ended_if_false (Emitter.make_block_scope ()) else_ in
         lower_choice builder node [ then_; else_ ]
           (Tree.Conditional { condition; then_; else_; if_condition = Some tested.origin })
     | Match { scrutinees; arms } -> match_ builder node scrutinees arms
@@ -1221,8 +1221,8 @@ and lower_statement builder (node : Core.statement) =
                     Emitter.end_scope builder lowered.ended_if_true tested.origin;
                     Emitter.run_in_loop builder (fun () ->
                         ignore
-                          (Emitter.run_in_scope ~held:lowered.held_if_true builder origin (fun () ->
-                               lower_block builder body)));
+                          (Emitter.run_in_block_scope builder lowered.block_scope_if_true origin
+                             (fun () -> lower_block builder body)));
                     if Emitter.reaches builder then Some Emitter.unit_value else None)
               in
               let failed =
