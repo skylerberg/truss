@@ -2224,14 +2224,17 @@ let sort_by_span_and_code diagnostics =
     diagnostics
 
 let list_package_outcomes database package =
-  let package_checks = (find_owner database package).package_checks in
-  List.filter_map
-    (fun check ->
-      match Hashtbl.find_opt package_checks check with
-      | Some (Value outcome) -> Some outcome
-      | Some (Failed _ | Blocked) -> None
-      | None -> report_uncomputed (Package_check (package, check)))
-    (Package_checks.list_checks ((make_stored_name_lookups database).package_declarations package))
+  match find_package database package with
+  | None -> []
+  | Some package_database ->
+      List.filter_map
+        (fun check ->
+          match Hashtbl.find_opt package_database.package_checks check with
+          | Some (Value outcome) -> Some outcome
+          | Some (Failed _ | Blocked) -> None
+          | None -> report_uncomputed (Package_check (package, check)))
+        (Package_checks.list_checks
+           ((make_stored_name_lookups database).package_declarations package))
 
 let list_checker_diagnostics database (file : Path.file) checker =
   let names = make_stored_name_lookups database in
