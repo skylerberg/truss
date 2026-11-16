@@ -620,7 +620,6 @@ let finalize (state : State.state) =
                 type_arguments = List.map finalize_argument intrinsic.type_arguments;
               }
         | other -> other);
-      uses = State.finalize_capabilities state written.uses;
       callee_result = finalize_type written.callee_result;
     }
   in

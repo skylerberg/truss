@@ -763,7 +763,7 @@ public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Elemen
 
 | Clause | Meaning | Count |
 |---|---|---|
-| `uses` | The capabilities the function may use. Without it, the function is pure. | At most one |
+| `uses` | The capabilities the function may use. Without it, the function uses none. | At most one |
 | `requires` | A precondition, proven at every call | Any |
 | `ensures` | A postcondition, proven for the body | Any |
 | `decreases` | A measure that proves recursion ends | At most one |
@@ -780,6 +780,12 @@ public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Elemen
 
 - A function with a `time` clause terminates; `cost time finite` promises
   termination without a bound. A function without one may not terminate.
+- **A function with a `time` clause makes no call that may not terminate,**
+  and neither does a specification. A call may not terminate when its
+  callee has no `time` clause, or when it passes a function that may not
+  terminate for a parameter whose type takes one. The one exception is a
+  call through the function's own parameter, where its bound names that
+  parameter's `time` (see [Capability parameters](#capability-parameters)).
 - A recursive call on a part of a parameter needs nothing written. A part is
   a field taken out by a pattern, or an element of a collection that is
   itself a part:
@@ -844,7 +850,10 @@ and `/` and `-` where the result stays at or above zero, and:
 
 - `time(visit)` cannot depend on `visit`'s arguments. It is a constant for a
   parameter of type `(fn(Item) cost time O(1))`, and a fixed bound that is
-  not known for one with `cost time finite`.
+  not known for any other function that terminates. It has no value for a
+  function that may not terminate, and a bound that names it is then
+  unbounded. So a bound names `time(visit)` only where the type of `visit`
+  has a `time` clause, or a capability parameter in its `uses`.
 - An operator counts as the method it calls: `==` spends
   `time(Element.equal)`, and `<` spends `time(Element.compare)`. If a name has
   several overloads, the term means the read-only one.
@@ -897,8 +906,13 @@ fn sort_by(items: mut List[Item], compare: fn(Item, Item) -> Ordering)
 fn serve(handle: (fn(Request) -> Response uses Database, Log cost time finite))
 ```
 
-- A function type without `uses` is pure, and one without a `time` clause may
-  not terminate. Its `uses` and `cost` clauses cannot mention its inputs.
+- A function type without `uses` uses no capability. Its `uses` and `cost`
+  clauses cannot mention its inputs.
+- **A function type with a `time` clause takes only functions that
+  terminate.** One without a `time` clause takes any function, and a call
+  through it may not terminate. Where its `uses` names a capability
+  parameter, the parameter records whether the function terminates (see
+  [Capability parameters](#capability-parameters)).
 - Clauses after a definition's result type belong to the definition.
 - A function type names its inputs exactly when it has a `requires`. Only
   the type of a definition's parameter may have one, at the top level of
@@ -927,15 +941,29 @@ fn serve(handle: (fn(Request) -> Response uses Database, Log cost time finite))
 ```truss
 public fn for_each[Item, capability Granted](
   items: List[Item],
-  visit: (fn(Item) uses Granted cost time finite),
+  visit: (fn(Item) uses Granted),
 )
   uses Granted
   cost calls(visit) == items.length()
   cost time O(items.length() * time(visit))
 ```
 
-A capability parameter passes on whatever capabilities a callback uses. A
-type that holds a function writes the capabilities in the field's type.
+A capability parameter passes on whatever a callback may do: the
+capabilities it uses, and whether it terminates.
+
+- A call infers `Granted` from the functions it passes. Where the type of
+  `visit` has no `time` clause and the function passed may not terminate,
+  `Granted` records that, and so the call may not terminate.
+- `(fn(Item) uses Granted cost time finite)` takes only functions that
+  terminate, whatever capabilities they use.
+- A `time` clause follows a function parameter only through its bound.
+  `O(items.length() * time(visit))` is unbounded where `visit` may not
+  terminate, so `for_each` can call `visit`. A bound that does not name
+  `time(visit)`, as `finite` does not, promises termination whatever is
+  passed, and the function cannot call `visit` unless the type of `visit`
+  has a `time` clause. A function with several `time` clauses follows a
+  parameter only if each bound names its `time`.
+- A type that holds a function writes the capabilities in the field's type.
 
 ## Methods
 
@@ -1004,9 +1032,10 @@ mut grid.cell(position).visit()
   that is not a copy aliases the part, which stays lent until the then-block
   or the body ends. It is never lent into the `else` block.
 - **For that long, the receiver is lent whole:** the statement makes no other
-  use of a receiver lent `mut`, and does not mutate one lent read-only. Two
-  indexes or slices of one `List`, `Slice`, or `Array` can be lent together
-  when the prover shows that they do not overlap.
+  use of a receiver lent `mut`, and does not mutate one lent read-only. A
+  receiver that is a view lends its original too, so `names[..].first()`
+  lends `names`. Two indexes or slices of one `List`, `Slice`, or `Array` can
+  be lent together when the prover shows that they do not overlap.
 - The `mut` on the receiver selects the overload that lends `mut`, and the
   part is then mutated with no keyword of its own.
 - **A lent part is not the caller's to keep.** It is not moved, returned,
@@ -1299,7 +1328,10 @@ mut scores.update_each(fn(score) { score = score / 2 })
 - A lambda captures local variables by view and cannot mutate them. A
   lambda that captures a variable is a view; one that captures none can be
   returned, stored, and moved.
-- A lambda's capabilities are inferred from its body.
+- A lambda's capabilities are inferred from its body, and so is whether it
+  terminates: a lambda may not terminate when it calls a function that may
+  not, or holds a loop without a measure. Such a lambda is an error where
+  its function type promises that it terminates.
 - `return` and `?` exit the lambda. `break` and `continue` do not reach a
   loop outside it.
 - A lambda is always passed inside the call's parentheses.
@@ -1354,9 +1386,11 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
 - `invariant` holds at the start of every iteration and when the loop ends.
 - `decreases` names a measure that every iteration makes smaller and that
   never goes below zero. A `while` loop in a function with a `time` clause is
-  proven to terminate, and so is a `for` loop over a cursor. A `for` loop
-  over a cursor whose type has a `remaining(self) -> UInt64` method has that
-  method's value as its measure where it states none.
+  proven to terminate, and so is a `for` loop over a cursor. Where a loop
+  states no measure, a `while` loop whose condition is `<`, `<=`, `>`, or
+  `>=` has the distance between the two sides as its measure, and a `for`
+  loop over a cursor whose type has a `remaining(self) -> UInt64` method has
+  that method's value.
 - In the clauses of a loop over a range, the loop variable is the index of
   the next iteration: in `for i in start..end`, `i` is `start` on entry and
   `end` where the loop ends, and `end + 1` after `start..=end`.
@@ -1550,13 +1584,14 @@ public trait Add[Right] {
 
   fn add(self, right: Right) -> Self.Output
     requires self.add_is_defined(right)
+    cost time finite
 }
 ```
 
-- Each operation requires its `_is_defined` method. For a fixed-width
-  integer, an operation is defined where its result fits the type and,
-  for `/` and `%`, where the divisor is not 0 and the operation is not
-  `minimum / -1`. A float operation is defined everywhere.
+- Each operation terminates, and requires its `_is_defined` method. For a
+  fixed-width integer, an operation is defined where its result fits the
+  type and, for `/` and `%`, where the divisor is not 0 and the operation is
+  not `minimum / -1`. A float operation is defined everywhere.
 - The built-in number types implement these traits only with themselves on
   both sides. The bitwise operators and shifts work only on the built-in
   integer types.
@@ -2177,8 +2212,10 @@ proof Ordered.transitive for Box[Item: Ordered] {
 A *specification* is a `requires`, `ensures`, `decreases`, or `cost` clause,
 an invariant, a law, or a proof.
 
-- A function called in a specification is pure, with no `uses` at all, and
-  has a `time` clause.
+- A call in a specification uses no capability and terminates. Its callee
+  has a `time` clause, and a capability parameter in the callee's `uses`
+  stands for nothing at that call: `values.map(fn(value) { value + 1 })` is
+  such a call, although `map` passes a capability parameter on.
 - Every specification is well defined: each call meets its callee's
   `requires`, and each index is in bounds. `&&`, `||`, `==>`, and `if` read
   left to right, so the right side can rely on the left.

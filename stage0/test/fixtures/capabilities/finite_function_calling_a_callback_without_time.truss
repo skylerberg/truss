@@ -1,0 +1,6 @@
+fn f[capability Granted](value: Int64, change: (fn(Int64) -> Int64 uses Granted)) -> Int64
+  uses Granted
+  cost time finite
+{
+  change(value)
+}

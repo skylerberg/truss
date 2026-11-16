@@ -177,7 +177,7 @@ let forward_call ~(substitution : Types.substitution) ~(make_fresh_local : unit 
           | Default -> None)
         inner.arguments (Some [])
     in
-    if inner.uses = Types.no_capabilities then
+    if Types.remove_divergence inner.uses = Types.no_capabilities then
       Some { outer with callee; arguments; uses = inner.uses }
     else None
   in

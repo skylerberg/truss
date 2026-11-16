@@ -442,9 +442,11 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                   name);
             check_type subject base;
             check_trait subject reference
-        | Types.Capability_variable _ ->
+        | Types.Capability_variable _ | Types.Divergence (Of_variable _) ->
             raise_wrong "%s contains a capability inference variable" subject
-        | Types.Capability_error _ -> raise_wrong "%s contains a capability with an error" subject)
+        | Types.Capability_error _ -> raise_wrong "%s contains a capability with an error" subject
+        | Types.Divergence Always -> ()
+        | Types.Divergence (Of_parameter mentioned) -> check_parameter subject mentioned)
       (set :> Types.capability list)
   and check_type subject (ty : Types.ty) =
     match ty with

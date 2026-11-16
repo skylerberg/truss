@@ -1,0 +1,11 @@
+fn show(text: String) {}
+
+fn f(names: mut List[String]) {
+  match names[..].get(0) {
+    Some(name) => {
+      mut names.clear()
+      show(name)
+    }
+    None => {}
+  }
+}

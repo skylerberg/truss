@@ -837,7 +837,7 @@ public fn Slice[Element: Copyable].copy_from(mut self, source: Slice[Element])
 
 public fn Slice[Element].update_each[capability Granted](
   mut self,
-  change: (fn(mut Element) uses Granted cost time finite),
+  change: (fn(mut Element) uses Granted),
 )
   uses Granted
   ensures self.length() == old(self.length())
@@ -1358,13 +1358,14 @@ public fn Slice[Element: Ordered].sort(mut self)
   }
 }
 
-fn sift_down_by[Element](
+fn sift_down_by[Element, capability Granted](
   items: mut Slice[Element],
   position: UInt64,
   limit: UInt64,
   room: UInt64,
-  compare: (fn(Element, Element) -> Ordering cost time finite),
+  compare: (fn(Element, Element) -> Ordering uses Granted),
 )
+  uses Granted
   requires 1 <= position
   requires limit <= items.length()
   ensures items.length() == old(items.length())
@@ -1383,7 +1384,8 @@ fn sift_down_by[Element](
   }
 }
 
-fn build_heap_by[Element](items: mut Slice[Element], compare: (fn(Element, Element) -> Ordering cost time finite))
+fn build_heap_by[Element, capability Granted](items: mut Slice[Element], compare: (fn(Element, Element) -> Ordering uses Granted))
+  uses Granted
   ensures items.length() == old(items.length())
   cost time O(items.length() * log(items.length()) * time(compare))
 {
@@ -1400,7 +1402,8 @@ fn build_heap_by[Element](items: mut Slice[Element], compare: (fn(Element, Eleme
   }
 }
 
-fn drain_heap_by[Element](items: mut Slice[Element], compare: (fn(Element, Element) -> Ordering cost time finite))
+fn drain_heap_by[Element, capability Granted](items: mut Slice[Element], compare: (fn(Element, Element) -> Ordering uses Granted))
+  uses Granted
   ensures items.length() == old(items.length())
   cost time O(items.length() * log(items.length()) * time(compare))
 {
@@ -1418,7 +1421,8 @@ fn drain_heap_by[Element](items: mut Slice[Element], compare: (fn(Element, Eleme
   }
 }
 
-public fn Slice[Element].sort_by(mut self, compare: (fn(Element, Element) -> Ordering cost time finite))
+public fn Slice[Element].sort_by[capability Granted](mut self, compare: (fn(Element, Element) -> Ordering uses Granted))
+  uses Granted
   ensures self.length() == old(self.length())
   cost time O(self.length() * log(self.length()) * time(compare))
 {
@@ -1426,18 +1430,20 @@ public fn Slice[Element].sort_by(mut self, compare: (fn(Element, Element) -> Ord
   drain_heap_by(mut self, compare: compare)
 }
 
-public fn Slice[Element].sort_by_key[Key: Ordered](mut self, key: (fn(Element) -> Key cost time finite))
+public fn Slice[Element].sort_by_key[Key: Ordered, capability Granted](mut self, key: (fn(Element) -> Key uses Granted))
+  uses Granted
   ensures self.length() == old(self.length())
-  cost time finite
+  cost time O(self.length() * log(self.length()) * (time(key) + time(Key.compare)))
 {
   mut self.sort_by(fn(first, second) { key(first).compare(key(second)) })
 }
 
-internal fn Slice[Element].extreme_position(
+internal fn Slice[Element].extreme_position[capability Granted](
   self,
-  compare: (fn(Element, Element) -> Ordering cost time finite),
+  compare: (fn(Element, Element) -> Ordering uses Granted),
   greatest: Bool,
 ) -> UInt64
+  uses Granted
   requires self.length() > 0
   ensures result < self.length()
   cost time O(self.length() * time(compare))
@@ -1460,10 +1466,11 @@ internal fn Slice[Element].extreme_position(
   best
 }
 
-public fn Slice[Element].min_by(
+public fn Slice[Element].min_by[capability Granted](
   self,
-  compare: (fn(Element, Element) -> Ordering cost time finite),
+  compare: (fn(Element, Element) -> Ordering uses Granted),
 ) lends Option[Element]
+  uses Granted
   ensures (result is Some(_)) == (self.length() > 0)
   cost time O(self.length() * time(compare))
 {
@@ -1475,10 +1482,11 @@ public fn Slice[Element].min_by(
   }
 }
 
-public fn Slice[Element].max_by(
+public fn Slice[Element].max_by[capability Granted](
   self,
-  compare: (fn(Element, Element) -> Ordering cost time finite),
+  compare: (fn(Element, Element) -> Ordering uses Granted),
 ) lends Option[Element]
+  uses Granted
   ensures (result is Some(_)) == (self.length() > 0)
   cost time O(self.length() * time(compare))
 {

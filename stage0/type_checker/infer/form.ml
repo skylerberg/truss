@@ -43,15 +43,12 @@ let build_arguments state (call : Tables.call) : Core.argument list =
       | None -> Default)
 
 let build_call state ~lends ?function_value (call : Tables.call) : Core.call =
-  {
-    callee =
+  State.make_call state
+    ~callee:
       (match (call.callee, function_value) with
       | Indirect, Some function_value -> Indirect (Operands.build Read function_value)
-      | direct, _ -> convert_callee direct);
-    arguments = build_arguments state call;
-    lends;
-    uses = call.uses;
-  }
+      | direct, _ -> convert_callee direct)
+    ~arguments:(build_arguments state call) ~lends
 
 let arithmetic_traits : (Well_known.t * string * Intrinsic.scalar) list =
   [
@@ -346,7 +343,7 @@ let build_untagged_string state ~origin (literal : Syntax.string_literal) : Core
       let builder = State.allocate_synthetic_local state in
       let builder_place : Core.place = Local { local = builder; type_ = builder_type; origin } in
       let make_call callee arguments : Core.kind =
-        Call { callee; arguments; lends = None; uses = Types.no_capabilities }
+        Call (State.make_call state ~callee ~arguments ~lends:None)
       in
       let let_builder =
         make_statement
@@ -395,16 +392,13 @@ let build_untagged_string state ~origin (literal : Syntax.string_literal) : Core
               (Evaluate
                  (make Types.unit
                     (Call
-                       {
-                         callee = convert_callee recorded.callee;
-                         arguments =
-                           [
-                             Operands.build_argument Read (State.build_expression state part);
-                             Passed { mode = Mut; value = Place builder_place };
-                           ];
-                         lends = None;
-                         uses = recorded.uses;
-                       })))
+                       (State.make_call state ~callee:(convert_callee recorded.callee)
+                          ~arguments:
+                            [
+                              Operands.build_argument Read (State.build_expression state part);
+                              Passed { mode = Mut; value = Place builder_place };
+                            ]
+                          ~lends:None))))
         | None -> State.raise_bug "an interpolated value has no `display`"
       in
       Block
@@ -434,12 +428,9 @@ let build_list_literal state ~origin (element : Types.ty) (elements : Core.expre
   let make_intrinsic_call operation type_ arguments =
     make type_
       (Call
-         {
-           callee = Intrinsic { operation; type_arguments = [ Types.Type element ] };
-           arguments;
-           lends = None;
-           uses = Types.no_capabilities;
-         })
+         (State.make_call state
+            ~callee:(Intrinsic { operation; type_arguments = [ Types.Type element ] })
+            ~arguments ~lends:None))
   in
   let capacity = make (Types.make_builtin UInt64) (Integer (Z.of_int (List.length elements))) in
   let let_storage =
@@ -484,33 +475,31 @@ let build_list_literal state ~origin (element : Types.ty) (elements : Core.expre
           (make
              (Types.make_named (Well_known.make_path List) [ element ])
              (Call
-                {
-                  callee =
-                    Function
-                      {
-                        path =
-                          Method
-                            {
-                              owner = Well_known.make_path List;
-                              name = "from_storage";
-                              receiver = Static;
-                            };
-                        type_arguments = [ Types.Type element ];
-                      };
-                  arguments =
-                    [
-                      Passed
+                (State.make_call state
+                   ~callee:
+                     (Function
                         {
-                          mode = Own;
-                          value =
-                            Value
-                              (make storage_type
-                                 (Use (Local { local = storage; type_ = storage_type; origin })));
-                        };
-                    ];
-                  lends = None;
-                  uses = Types.no_capabilities;
-                }));
+                          path =
+                            Method
+                              {
+                                owner = Well_known.make_path List;
+                                name = "from_storage";
+                                receiver = Static;
+                              };
+                          type_arguments = [ Types.Type element ];
+                        })
+                   ~arguments:
+                     [
+                       Passed
+                         {
+                           mode = Own;
+                           value =
+                             Value
+                               (make storage_type
+                                  (Use (Local { local = storage; type_ = storage_type; origin })));
+                         };
+                     ]
+                   ~lends:None)));
     }
 
 let build_tagged_string state (value : Syntax.expression) (literal : Syntax.string_literal)
@@ -566,12 +555,10 @@ let build_tagged_string state (value : Syntax.expression) (literal : Syntax.stri
       call =
         make from_template.callee_result
           (Call
-             {
-               callee = convert_callee from_template.callee;
-               arguments = [ Operands.build_argument Read template ];
-               lends = None;
-               uses = from_template.uses;
-             });
+             (State.make_call state
+                ~callee:(convert_callee from_template.callee)
+                ~arguments:[ Operands.build_argument Read template ]
+                ~lends:None));
     }
 
 let read_pattern_type (state : State.state) (id : Syntax.id) =
@@ -805,16 +792,13 @@ let build_compound_assign state (written : Syntax.statement) (target : Syntax.ex
               | None -> Types.Read
             in
             ( Call
-                {
-                  callee = convert_callee recorded.callee;
-                  arguments =
-                    [
-                      Operands.build_argument (read_argument_mode 0) current;
-                      Operands.build_argument (read_argument_mode 1) bound_value;
-                    ];
-                  lends = None;
-                  uses = recorded.uses;
-                },
+                (State.make_call state ~callee:(convert_callee recorded.callee)
+                   ~arguments:
+                     [
+                       Operands.build_argument (read_argument_mode 0) current;
+                       Operands.build_argument (read_argument_mode 1) bound_value;
+                     ]
+                   ~lends:None),
               Operands.build (read_argument_mode 1) right ))
     | Some _ -> State.raise_bug "a compound assignment's call is not a trait method call"
     | None -> make_built_in (convert_to_operation operation)
@@ -913,12 +897,9 @@ let build_elements state ~origin (collection : Core.place) ~(count : Tables.call
     count =
       State.make_synthetic_expression state ~origin uint64
         (Call
-           {
-             callee = convert_callee count.callee;
-             arguments = [ make_receiver Read ];
-             lends = None;
-             uses = count.uses;
-           });
+           (State.make_call state ~callee:(convert_callee count.callee)
+              ~arguments:[ make_receiver Read ]
+              ~lends:None));
     position =
       {
         id = State.allocate_node_id state;
@@ -930,16 +911,13 @@ let build_elements state ~origin (collection : Core.place) ~(count : Tables.call
       Lent
         (State.make_synthetic_expression state ~origin element.callee_result
            (Call
-              {
-                callee = convert_callee element.callee;
-                arguments =
-                  [
-                    make_receiver lends;
-                    Passed { mode = Read; value = Operands.build Read position };
-                  ];
-                lends = Some lends;
-                uses = element.uses;
-              }));
+              (State.make_call state ~callee:(convert_callee element.callee)
+                 ~arguments:
+                   [
+                     make_receiver lends;
+                     Passed { mode = Read; value = Operands.build Read position };
+                   ]
+                 ~lends:(Some lends))));
   }
 
 let quantify_over_elements state (collection : Syntax.expression) ~count ~element ~lends ~origin
@@ -1003,12 +981,10 @@ let build_for_loop (state : State.state) (written : Syntax.statement) (iterable 
         | Some cursor_call ->
             State.make_synthetic_expression state ~origin:iterable.id cursor
               (Call
-                 {
-                   callee = convert_callee cursor_call.callee;
-                   arguments = [ Passed { mode = Own; value = Operands.build Own collection } ];
-                   lends = None;
-                   uses = cursor_call.uses;
-                 })
+                 (State.make_call state
+                    ~callee:(convert_callee cursor_call.callee)
+                    ~arguments:[ Passed { mode = Own; value = Operands.build Own collection } ]
+                    ~lends:None))
       in
       let next = build_cursor_next state cursor in
       let states_measure = List.exists (function Core.Decreases _ -> true | _ -> false) clauses in
@@ -1021,12 +997,9 @@ let build_for_loop (state : State.state) (written : Syntax.statement) (iterable 
                   State.make_synthetic_expression state ~origin:iterable.id
                     (Types.make_builtin UInt64)
                     (Call
-                       {
-                         callee = convert_callee remaining.callee;
-                         arguments = [ Passed { mode = Read; value = Place place } ];
-                         lends = None;
-                         uses = remaining.uses;
-                       });
+                       (State.make_call state ~callee:(convert_callee remaining.callee)
+                          ~arguments:[ Passed { mode = Read; value = Place place } ]
+                          ~lends:None));
                 ])
             remaining
         in
@@ -1209,12 +1182,9 @@ let build_inserted_literal state ~origin (type_ : Types.ty) ~insert
   let make_call name receiver arguments result =
     make result
       (Call
-         {
-           callee = Function { path = Method { owner = path; name; receiver }; type_arguments };
-           arguments;
-           lends = None;
-           uses = Types.no_capabilities;
-         })
+         (State.make_call state
+            ~callee:(Function { path = Method { owner = path; name; receiver }; type_arguments })
+            ~arguments ~lends:None))
   in
   let capacity = make (Types.make_builtin UInt64) (Integer (Z.of_int (List.length entries))) in
   let created = make_call "with_capacity" Static [ Operands.build_argument Read capacity ] type_ in
