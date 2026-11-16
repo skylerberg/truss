@@ -1,7 +1,6 @@
 (library
  (name resolve)
  (libraries
-  zarith
   path
   intrinsic
   well_known
