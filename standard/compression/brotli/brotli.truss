@@ -626,6 +626,9 @@ fn decode_compressed(bits: mut Bits, stream: mut Stream, output: mut List[UInt8]
     }
     let insert_length = insert_length_bases[insert_code].saturating_add(intrinsic::convert[UInt32, UInt64](mut bits.read(insert_length_bits[insert_code])))
     let copy_length = copy_length_bases[copy_code].saturating_add(intrinsic::convert[UInt32, UInt64](mut bits.read(copy_length_bits[copy_code])))
+    proof {
+      assert copy_length >= 2
+    }
     if insert_length > end - output.length() {
       return malformed("literals past the end of their meta-block")
     }
