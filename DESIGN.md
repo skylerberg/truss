@@ -2086,6 +2086,16 @@ nothing, so a revert or a branch switch is a change to the files like any
 other. The database computes the cheap stages again, and the solver, the C
 compiler, and the tests are cache hits.
 
+Only the cache's user can write its directory. The compiler trusts what the
+cache holds: it links the cached object files, takes the cached solver
+answers as proofs, and loads the cached databases as they were written. A
+user who could write another user's cache could run code as that user, or
+make a false contract pass. The compiler makes the directory with mode 0700,
+and it refuses a directory that belongs to another user or that its group or
+other users can write. Without `$HOME`, the home directory is the one that
+the user's account names, never the temporary directory, which every user
+can write.
+
 The cache's directory also holds two kinds of file that are not results.
 The background process and its clients both use them. The two processes can
 have different environments, so neither process's `$TMPDIR` is sure to be

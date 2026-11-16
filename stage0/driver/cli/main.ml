@@ -308,7 +308,7 @@ let evaluate arguments =
     | exception Report.Errors report ->
         if Output.json () then Json.print (Report.document report []) else Report.print report;
         Outcome.Exit 1
-    | exception Outcome.Cannot_run message ->
+    | exception (Outcome.Cannot_run message | Workspace.Unusable_cache message) ->
         Output.eprint_line message;
         Outcome.Exit 2
     | exception Compiler_bug.Bug bug ->
@@ -409,12 +409,16 @@ let wait_until_stopped answers =
 let clean_cache () =
   wait_until_stopped (ask_running [ "stop" ]);
   Workspace.reset ();
-  let directory = Cache.default_directory () in
-  match File_system.remove directory with
-  | () -> 0
-  | exception Unix.Unix_error (error, _, _) ->
-      Output.eprintf "Cannot delete %s: %s\n" directory (Unix.error_message error);
+  match Cache.default_directory () with
+  | Error message ->
+      Output.eprint_line message;
       2
+  | Ok directory -> (
+      match File_system.remove directory with
+      | () -> 0
+      | exception Unix.Unix_error (error, _, _) ->
+          Output.eprintf "Cannot delete %s: %s\n" directory (Unix.error_message error);
+          2)
 
 let directory_of arguments =
   let rec named = function

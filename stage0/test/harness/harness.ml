@@ -84,6 +84,15 @@ let () =
       end
       else Printf.printf "%d tests pass\n" !count)
 
+let with_environment variables work =
+  let previous =
+    List.map (fun (name, _) -> (name, Option.value (Sys.getenv_opt name) ~default:"")) variables
+  in
+  List.iter (fun (name, value) -> Unix.putenv name value) variables;
+  Fun.protect
+    ~finally:(fun () -> List.iter (fun (name, value) -> Unix.putenv name value) previous)
+    work
+
 let scratch_root =
   lazy
     (let root = Filename.temp_dir ~temp_dir:"/tmp" "truss-tests" "" in
