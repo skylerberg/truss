@@ -75,6 +75,7 @@ type state = {
   mutable locals_read : Syntax.id list;
   mutable receiver_modes : (Syntax.id * Types.mode) list;
   mutable places_without_own : Syntax.id list;
+  mutable mode_keywords : Core.mode_keyword list;
   yielded : (Syntax.id, Types.mode) Hashtbl.t;
   lent_tails : (Syntax.id, unit) Hashtbl.t;
   mutable lambdas : Source.Definition_span.t list;
@@ -192,7 +193,11 @@ val report_mismatch :
   state -> Source.Definition_span.t -> expected:Types.ty -> actual:Types.ty -> unit
 
 val is_place : state -> Syntax.expression -> bool
-val find_call_with_mode_keyword : state -> Syntax.expression -> Syntax.id option
+
+val find_call_with_mode_keyword :
+  state -> Syntax.expression -> (Syntax.id * Syntax.expression) option
+
+val note_mode_keyword : state -> Syntax.expression -> Syntax.mode -> Syntax.expression -> unit
 val check_resource : state -> Syntax.resource -> unit
 
 val make_slice :

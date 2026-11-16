@@ -42,7 +42,7 @@ let check_definition (lookups : Lookups.t) (key : Resolve.Names.key) : result =
   in
   Option.iter
     (fun (mir : Mir.Graph.t) ->
-      Context.collect context mir;
+      Context.collect context mir ~mode_keywords:(lookups.list_mode_keywords key);
       List.iter
         (fun origin -> Hashtbl.replace context.places_without_own origin ())
         (lookups.list_places_without_own key);

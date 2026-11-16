@@ -31,12 +31,7 @@ type function_argument =
   | Lambda_expression of { body : int; origin : Core.origin; type_ : Types.ty }
 
 type argument =
-  | Passed of {
-      mode : Types.mode;
-      value : operand;
-      mode_keyword : Core.mode_keyword option;
-      function_ : function_argument option;
-    }
+  | Passed of { mode : Types.mode; value : operand; function_ : function_argument option }
   | Default
 
 type call = {

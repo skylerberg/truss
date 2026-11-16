@@ -75,7 +75,7 @@ and is_equivalent_call renaming ({ callee = called; arguments; lends; uses } : C
 
 and is_equivalent_argument renaming (before : Core.argument) (after : Core.argument) =
   match (before, after) with
-  | Passed { mode; value; mode_keyword = _ }, Passed after ->
+  | Passed { mode; value }, Passed after ->
       mode = after.mode && is_equivalent_operand renaming value after.value
   | Default, Default -> true
   | (Passed _ | Default), _ -> false

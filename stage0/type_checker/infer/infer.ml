@@ -21,6 +21,7 @@ type checked = Body.checked = {
   tables : tables;
   used_packages : Path.package list;
   places_without_own : Core.origin list;
+  mode_keywords : Core.mode_keyword list;
 }
 
 let check lookups (key : Resolve.Names.key) ~checks_body =

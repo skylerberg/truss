@@ -2,12 +2,9 @@ module Place_table = Hashtbl.Make (Structural_key.Make (struct
   type t = Moves.path
 end))
 
-let copy_fix context title type_ (at : Source.Definition_span.t) =
+let copy_fix context title type_ origin =
   if Context.is_copyable context type_ then
-    [
-      Diagnostic.fix title
-        [ Diagnostic.insert (Source.Definition_span.make_zero_width at.stop) ".copy()" ];
-    ]
+    [ Diagnostic.fix title (Context.copy_edits context origin) ]
   else []
 
 type verdict =
@@ -20,7 +17,9 @@ let decide_move context (place : Place.t) ~origin ~type_ ~is_returned ~is_captur
   let refuse message =
     Refused
       (fun context at type_ ->
-        Context.report context Not_owned at ~fixes:(copy_fix context "Copy it." type_ at) message)
+        Context.report context Not_owned at
+          ~fixes:(copy_fix context "Copy it." type_ origin)
+          message)
   in
   let root_mode : Types.mode =
     if is_captured then Read else Context.classify_binding_mode context place.root
@@ -31,7 +30,7 @@ let decide_move context (place : Place.t) ~origin ~type_ ~is_returned ~is_captur
       Refused
         (fun context at type_ ->
           Context.report context Needs_owned at
-            ~fixes:(copy_fix context "Return a copy." type_ at)
+            ~fixes:(copy_fix context "Return a copy." type_ origin)
             (Printf.sprintf
                "A returned value must be owned, and `%s` is not owned here. Return a copy." shown))
   else if List.exists (function Place.Element _ -> true | Field _ -> false) place.steps then
@@ -57,7 +56,7 @@ let decide_move context (place : Place.t) ~origin ~type_ ~is_returned ~is_captur
               ~fixes:
                 (Diagnostic.fix "Move it with `own`."
                    [ Diagnostic.insert (Source.Definition_span.make_zero_width at.start) "own " ]
-                :: copy_fix context "Copy it." type_ at)
+                :: copy_fix context "Copy it." type_ origin)
               (Printf.sprintf
                  "An owned value is needed here, and `%s` is a place. Pass it `own` to move it, or \
                   copy it."
