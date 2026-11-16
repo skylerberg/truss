@@ -713,13 +713,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
              | Slice { call } -> (
                  Hashtbl.replace slice_calls call.id ();
                  match call.kind with
-                 | Call
-                     {
-                       arguments =
-                         Passed { value = Place base; _ } :: Passed { value = Value _; _ } :: rest;
-                       _;
-                     }
-                   when List.length rest <= 1 ->
+                 | Call { arguments = Passed { value = Place base; _ } :: ([ _ ] | [ _; _ ]); _ } ->
                      place base
                  | _ -> wrong "the call of a `Slice` does not take its base and then its bounds")
              | Matches { value; pattern } -> binds_own "an `is`" value pattern

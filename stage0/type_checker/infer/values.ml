@@ -377,7 +377,7 @@ and match_ state env ?expected (value : expression) scrutinees arms =
       let scrutinees =
         List.map
           (fun scrutinee ->
-            build_operand (scrutinee_mode state scrutinee) (build_expression state scrutinee))
+            Operands.build (scrutinee_mode state scrutinee) (build_expression state scrutinee))
           scrutinees
       in
       Match
