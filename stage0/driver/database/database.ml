@@ -2327,7 +2327,7 @@ let restore ~loaded ~texts entries =
   mark_saved database;
   database
 
-type stage = Resolve | Interface | Infer | Patterns | Usage | Ownership | Package_checks
+type checker = Resolve | Interface | Infer | Patterns | Usage | Ownership | Package_checks
 
 let without_duplicates diagnostics =
   List.sort_uniq
@@ -2340,9 +2340,9 @@ let failed table key =
   | Some (Failed diagnostics) -> diagnostics
   | Some (Value _ | Blocked) | None -> []
 
-let definition_diagnostics database (key : Names.key) stage =
+let definition_diagnostics database (key : Names.key) checker =
   let owner = owner database key.module_.package in
-  match stage with
+  match checker with
   | Resolve ->
       List.concat_map (fun section -> failed owner.resolved_names (key, section)) Resolve.sections
   | Interface ->
@@ -2371,7 +2371,7 @@ let package_outcomes database package =
       | Some (Failed _ | Blocked) | None -> None)
     (Package_checks.checks ((names_lookups database).package_declarations package))
 
-let stage_diagnostics database (file : Path.file) stage =
+let list_checker_diagnostics database (file : Path.file) checker =
   let names = names_lookups database in
   let package_database = owner database file.module_.package in
   let placed key diagnostics =
@@ -2382,11 +2382,11 @@ let stage_diagnostics database (file : Path.file) stage =
   in
   let of_definitions () =
     List.concat_map
-      (fun key -> placed key (definition_diagnostics database key stage))
+      (fun key -> placed key (definition_diagnostics database key checker))
       (file_keys database file)
   in
   by_span_and_code
-    (match stage with
+    (match checker with
     | Resolve ->
         Option.value ~default:[] (Hashtbl.find_opt package_database.import_checks file)
         @ of_definitions ()
@@ -2402,7 +2402,7 @@ let stage_diagnostics database (file : Path.file) stage =
           (package_outcomes database file.module_.package)
     | Interface | Infer | Patterns | Usage | Ownership -> of_definitions ())
 
-let stages = [ Resolve; Interface; Infer; Patterns; Usage; Ownership; Package_checks ]
+let checkers = [ Resolve; Interface; Infer; Patterns; Usage; Ownership; Package_checks ]
 let check database packages = drain database ~through:Package_checks packages
 
 let tables database (key : Names.key) =
@@ -2415,7 +2415,7 @@ let file_diagnostics database (file : Path.file) =
   drain database ~through:Package_checks [ file.module_.package ];
   without_duplicates
     ((parsed_file database file).diagnostics
-    @ List.concat_map (stage_diagnostics database file) stages)
+    @ List.concat_map (list_checker_diagnostics database file) checkers)
 
 let manifest_problems database package =
   drain database ~through:Package_checks [ package ];
@@ -2655,7 +2655,7 @@ let callers database ~viewer path =
       Path_table.fold (fun node () nodes -> node :: nodes) reached []
 
 module For_testing = struct
-  type nonrec stage = stage =
+  type nonrec checker = checker =
     | Resolve
     | Interface
     | Infer
@@ -2664,17 +2664,17 @@ module For_testing = struct
     | Ownership
     | Package_checks
 
-  let diagnostics stages database (file : Path.file) =
+  let diagnostics checkers database (file : Path.file) =
     let through : Stage.t =
-      if List.mem Package_checks stages then Package_checks
-      else if List.exists (fun stage -> List.mem stage [ Patterns; Usage; Ownership ]) stages then
-        Body_checks
-      else if List.mem Infer stages then Checked_bodies
-      else if List.mem Interface stages then Signature_checks
+      if List.mem Package_checks checkers then Package_checks
+      else if List.exists (fun checker -> List.mem checker [ Patterns; Usage; Ownership ]) checkers
+      then Body_checks
+      else if List.mem Infer checkers then Checked_bodies
+      else if List.mem Interface checkers then Signature_checks
       else Import_checks
     in
     drain database ~through [ file.module_.package ];
-    List.concat_map (stage_diagnostics database file) stages
+    List.concat_map (list_checker_diagnostics database file) checkers
 
   let checked_body database (key : Names.key) =
     drain database ~through:Checked_bodies [ key.module_.package ];

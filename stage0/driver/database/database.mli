@@ -45,9 +45,9 @@ val list_proofs : proofs -> (Resolve.Names.key * Prover.proof) list
 val make_proof_lookups : t -> Prover.Lookups.t
 
 module For_testing : sig
-  type stage = Resolve | Interface | Infer | Patterns | Usage | Ownership | Package_checks
+  type checker = Resolve | Interface | Infer | Patterns | Usage | Ownership | Package_checks
 
-  val diagnostics : stage list -> t -> Path.file -> Diagnostic.t list
+  val diagnostics : checker list -> t -> Path.file -> Diagnostic.t list
   val checked_body : t -> Resolve.Names.key -> Infer.checked option
   val derived : t -> Path.t -> Core.t option
   val core_of_path : t -> Path.t -> (Core.t * Types.substitution) option
