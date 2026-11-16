@@ -147,12 +147,16 @@ let obtain_free_source builder (local : Core.local) ~type_ ~origin =
       free
   | None -> raise_bug "a local that nothing binds"
 
-let find_scope builder frame =
-  match List.find_opt (fun scope -> scope.frame = frame) builder.scopes with
-  | Some scope -> Some scope
-  | None -> List.find_opt (fun scope -> scope.frame <> Condition) builder.scopes
+let find_statement_scope builder =
+  match List.find_opt (fun scope -> scope.frame = Statement) builder.scopes with
+  | Some scope -> scope
+  | None -> raise_bug "code lowered outside any statement"
 
-let find_binding_scope builder = find_scope builder builder.binds_into
+let find_binding_scope builder =
+  match builder.binds_into with
+  | Statement -> Some (find_statement_scope builder)
+  | (Bindings | Condition) as frame ->
+      List.find_opt (fun scope -> scope.frame = frame) builder.scopes
 
 let register_binding builder local =
   Option.iter (fun scope -> scope.bound <- local :: scope.bound) (find_binding_scope builder)
@@ -281,8 +285,8 @@ let run_in_condition_scope :
     (unit -> 'value) ->
     'value * scope * scope * (Tree.local list * Tree.local list * int list) =
  fun ~lends builder evaluate ->
-  let naming = find_scope builder Statement in
-  let named_before = match naming with Some scope -> scope.bound | None -> [] in
+  let statement_scope = find_statement_scope builder in
+  let bound_before = statement_scope.bound in
   let scope = { frame = Condition; bound = []; loans = []; temporaries = []; provides = false } in
   builder.scopes <- scope :: builder.scopes;
   let value = evaluate () in
@@ -301,12 +305,14 @@ let run_in_condition_scope :
     | [] -> ()
   end;
   let names =
-    match (lends, naming) with
-    | For_block, Some named ->
-        let names = List.filter (fun local -> not (List.mem local named_before)) named.bound in
-        named.bound <- named_before;
+    match lends with
+    | For_block ->
+        let names =
+          List.filter (fun local -> not (List.mem local bound_before)) statement_scope.bound
+        in
+        statement_scope.bound <- bound_before;
         names
-    | _ -> []
+    | For_statement | For_condition -> []
   in
   let without_lends = { scope with temporaries = others; loans = [] } in
   let on_true, on_false =
