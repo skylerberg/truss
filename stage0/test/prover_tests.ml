@@ -737,7 +737,14 @@ let () =
   Harness.test "a quantifier over a range may ignore its index" (fun () ->
       expect_proven Fixtures.Prover.quantifier_ignoring_its_index);
   Harness.test "a quantifier over a list ranges over its elements" (fun () ->
-      expect_proven Fixtures.Prover.quantifier_over_positive_items)
+      expect_proven Fixtures.Prover.quantifier_over_positive_items);
+  Harness.test "a quantifier over a list in a body equals one over its indices" (fun () ->
+      expect_proven Fixtures.Prover.quantifier_over_items_in_a_body);
+  Harness.test "a quantifier's pattern in a body takes each element apart" (fun () ->
+      expect_proven Fixtures.Prover.quantifier_over_span_fields_in_a_body);
+  Harness.test "a quantifier over a list in a body may be false" (fun () ->
+      expect_not_proven Fixtures.Prover.quantifier_over_items_in_a_body_ensured_true
+        "prover.ensures")
 
 let swap = Fixtures.Prover.exchange
 

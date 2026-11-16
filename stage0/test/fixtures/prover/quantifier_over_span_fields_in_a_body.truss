@@ -1,0 +1,7 @@
+type Span(low: Int64, high: Int64)
+
+fn ordered(spans: List[Span]) -> Bool
+  ensures result == (forall (low, high) in spans => low <= high)
+{
+  forall (low, high) in spans => low <= high
+}
