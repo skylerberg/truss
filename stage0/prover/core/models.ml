@@ -1,5 +1,3 @@
-module Symbol = Logic.Symbol
-
 type quantified_range =
   | Range_of_type of Types.ty
   | Range_of_integers of { low : Logic.term; high : Logic.term; inclusive : bool; type_ : Types.ty }
@@ -42,7 +40,7 @@ let sequence_type element = Types.Named { path = sequence_path; arguments = [ Ty
 
 let sequence_length context element term =
   let path = Path.Method { owner = sequence_path; name = "length"; receiver = Read } in
-  let symbol = Symbol.Function { callee = path; instance = [ Types.Type element ] } in
+  let symbol = Logic.Symbol.Function { callee = path; instance = [ Types.Type element ] } in
   Facts.declare context
     (Logic.Function (symbol, [ Facts.sort_of context (sequence_type element) ], Logic.Int));
   Logic.Apply (symbol, [ term ])
@@ -56,15 +54,15 @@ let rec sequence_at (context : State.context) element term index =
   with
   | impl :: _ ->
       let path = Path.Method { owner = impl; name = "at"; receiver = Read } in
-      let symbol = Symbol.Function { callee = path; instance = [ Types.Type sequence ] } in
+      let symbol = Logic.Symbol.Function { callee = path; instance = [ Types.Type sequence ] } in
       Facts.declare context
         (Logic.Function
            (symbol, [ Facts.sort_of context sequence; Logic.Int ], Facts.sort_of context element));
       let at sequence index = Logic.Apply (symbol, [ sequence; index ]) in
       if context.ranking && Facts.constructors context element <> None then
         Facts.once context (Ranked_elements sequence) (fun () ->
-            let each = Symbol.Variable { label = "ranked.sequence"; numbers = [] }
-            and index = Symbol.Variable { label = "ranked.index"; numbers = [] } in
+            let each = Logic.Symbol.Variable { label = "ranked.sequence"; numbers = [] }
+            and index = Logic.Symbol.Variable { label = "ranked.index"; numbers = [] } in
             let ranked = Logic.Symbol each and position = Logic.Symbol index in
             let below = rank context element (at ranked position) in
             let fact =
@@ -81,7 +79,7 @@ let rec sequence_at (context : State.context) element term index =
   | [] -> None
 
 and rank context ty term =
-  let symbol = Symbol.Rank ty in
+  let symbol = Logic.Symbol.Rank ty in
   Facts.declare context (Logic.Function (symbol, [ Facts.sort_of context ty ], Logic.Int));
   (match ty with
   | Types.Named { path; arguments = [ Types.Type element ] }
@@ -94,7 +92,7 @@ let finite_function context (ty : Types.ty) name output inputs =
   match ty with
   | Types.Named { path; arguments } ->
       let symbol =
-        Symbol.Function
+        Logic.Symbol.Function
           { callee = Path.Method { owner = path; name; receiver = Read }; instance = arguments }
       in
       Facts.declare context
@@ -108,7 +106,7 @@ let substituted_value_term context (value : Types.value) =
   match value with
   | Known number -> Logic.Integer number
   | Value_parameter parameter ->
-      let symbol = Symbol.Generic_value { owner = parameter.owner; name = parameter.name } in
+      let symbol = Logic.Symbol.Generic_value { owner = parameter.owner; name = parameter.name } in
       Facts.once context (In_range symbol) (fun () ->
           Facts.declare context (Logic.Constant (symbol, Int));
           Facts.add_fact context (Facts.in_range (Types.make_builtin UInt64) (Logic.Symbol symbol)));
@@ -118,7 +116,7 @@ let substituted_value_term context (value : Types.value) =
 let model_ranked (context : State.context) (ty : Types.ty) ~(model : Types.ty) symbol =
   if context.ranking then
     Facts.once context (Ranked_model symbol) (fun () ->
-        let each = Symbol.Variable { label = "ranked.value"; numbers = [] } in
+        let each = Logic.Symbol.Variable { label = "ranked.value"; numbers = [] } in
         let fact =
           Logic.forall
             ( [ (each, Facts.sort_of context ty) ],
@@ -138,7 +136,7 @@ let find_model_function (context : State.context) (ty : Types.ty) ~(model : Type
   with
   | impl :: _ ->
       let path = Path.Method { owner = impl; name = "model"; receiver = Read } in
-      let symbol = Symbol.Function { callee = path; instance = [ Types.Type ty ] } in
+      let symbol = Logic.Symbol.Function { callee = path; instance = [ Types.Type ty ] } in
       Facts.declare context
         (Logic.Function (symbol, [ Facts.sort_of context ty ], Facts.sort_of context model));
       model_ranked context ty ~model symbol;
@@ -146,7 +144,7 @@ let find_model_function (context : State.context) (ty : Types.ty) ~(model : Type
       | Types.Named { path; arguments = [ Types.Type element; Types.Value count ] }
         when Intrinsic.builtin_of_path path = Some Array ->
           Facts.once context (Array_length symbol) (fun () ->
-              let each = Symbol.Variable { label = "array.value"; numbers = [] } in
+              let each = Logic.Symbol.Variable { label = "array.value"; numbers = [] } in
               let elements = Logic.Apply (symbol, [ Logic.Symbol each ]) in
               Facts.add_fact context
                 (Logic.forall

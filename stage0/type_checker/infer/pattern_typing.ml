@@ -1,5 +1,3 @@
-module Environment = Interface.Environment
-
 let rec binding_pattern state env written type_ ~is_var ~mode =
   pattern_with state env written type_ ~is_var ~mode
 
@@ -320,7 +318,7 @@ and structural ?(seen = []) state (type_ : Types.ty) =
     match type_ with
     | Types.Named { path; arguments } -> (
         match Interface.Definition.read_interface state.lookups.interface path with
-        | Some (Environment.Type_interface interface)
+        | Some (Interface.Environment.Type_interface interface)
           when (not interface.opaque) || Path.package path = state.package ->
             let derives_equal =
               List.exists (fun derived -> Well_known.is Equal derived) interface.derives

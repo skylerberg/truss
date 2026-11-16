@@ -1,6 +1,5 @@
-module Names = Resolve.Names
-
-let source_of (key : Names.key) = { State.key = Some key; name = Names.show_key key }
+let source_of (key : Resolve.Names.key) =
+  { State.key = Some key; name = Resolve.Names.show_key key }
 
 let source_at_key (lookups : Lookups.t) key =
   ignore (lookups.mir.body_part key);
@@ -43,7 +42,7 @@ let part_of ?(inherited = false) (lookups : Lookups.t) path callee =
        (fun ({ form; _ } : Mir.contract Mir.sourced) -> form)
        (Mir.contract_of_path lookups.mir path))
 
-let holds_todo (lookups : Lookups.t) (key : Names.key) =
+let holds_todo (lookups : Lookups.t) (key : Resolve.Names.key) =
   match Mir.code (lookups.mir.body_part key) with
   | Some code ->
       let holds = ref false in
@@ -68,7 +67,7 @@ let law_proofs (lookups : Lookups.t) package (trait : Types.trait_reference) (fo
     | _ -> []
   in
   List.filter_map
-    (fun (key : Names.key) ->
+    (fun (key : Resolve.Names.key) ->
       match Interface.Definition.read_interface lookups.interface key.path with
       | Some (Interface.Environment.Law_proof_interface proven) -> (
           let variables =
@@ -84,7 +83,7 @@ let law_proofs (lookups : Lookups.t) package (trait : Types.trait_reference) (fo
       | _ -> None)
     named_laws
 
-let impl_unfinished (lookups : Lookups.t) (key : Names.key) =
+let impl_unfinished (lookups : Lookups.t) (key : Resolve.Names.key) =
   List.exists (holds_todo lookups) (lookups.interface.names.contained key)
 
 let law_unshown (lookups : Lookups.t) (impl : Path.t) (trait : Types.trait_reference) for_type name

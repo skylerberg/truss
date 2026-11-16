@@ -1,5 +1,5 @@
 val of_definition : is_specification:bool -> Core.definition -> Tree.t option
-val of_expression : ?parameters:Core.parameter list -> Core.expression -> Tree.t
+val of_expression : Core.expression -> Tree.t
 
 val of_clause :
   ?is_executable:bool -> parameters:Core.parameter list -> Core.expression -> Tree.formula

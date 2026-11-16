@@ -50,8 +50,8 @@ jobs:
       - name: Check that no file has a comment
         run: git ls-files -z | xargs -0 ./_build/default/stage0/tools/comments/comments.exe
 
-      - name: Check that code opens only operator modules, in an expression
-        run: git ls-files -z '*.ml' '*.mli' | xargs -0 ./_build/default/stage0/tools/opens/opens.exe
+      - name: Check that code names each module by its path
+        run: git ls-files -z '*.ml' '*.mli' | xargs -0 ./_build/default/stage0/tools/qualified_names/qualified_names.exe
 
       - if: github.event_name == 'push'
         run: opam exec -- dune cache trim --size=200MB

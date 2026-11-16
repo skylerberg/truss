@@ -1,5 +1,3 @@
-module Impls = Interface.Impls
-
 let check_evidence_grants (state : State.state) (span : Source.Definition_span.t) evidence =
   let impls =
     Interface.Grants.list_evidence_uses state.lookups.interface ~bounds:(State.bounds state)
@@ -13,10 +11,10 @@ let check_evidence_grants (state : State.state) (span : Source.Definition_span.t
         Diagnostic.make ~code:(Capabilities Not_granted) span message :: state.diagnostics)
     (Interface.Grants.describe_missing_in_impls state.lookups.interface ~package:state.package impls)
 
-let error_at state ?fixes code (value : Syntax.expression) message =
+let error_at state code (value : Syntax.expression) message =
   match State.head state value with
   | Some { target = Unknown report; _ } -> Types.Error report
-  | _ -> State.error state ?fixes code (State.read_span state value.id) message
+  | _ -> State.error state code (State.read_span state value.id) message
 
 type static_ =
   | Static_type of Types.ty
@@ -73,7 +71,7 @@ let require_bounds state (span : Source.Definition_span.t) ?of_type generics sub
               | Some (name, associated_type) ->
                   Printf.sprintf "%s, and its `%s` is `%s`." needs name
                     (State.show state associated_type))))
-    (Impls.list_required_bounds generics substitution)
+    (Interface.Impls.list_required_bounds generics substitution)
 
 let fresh_arguments (state : State.state) (path : Path.t) =
   match Interface.Definition.read_type_interface state.lookups.interface path with

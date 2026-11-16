@@ -429,7 +429,6 @@ let check_semantics context (form : Core.t) =
 
 let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolve.Names.key option)
     (form : Core.t) =
-  let module T = Types in
   let bounds parameter =
     let of_key key =
       Option.value ~default:[]
@@ -456,14 +455,14 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
     Printf.ksprintf (fun message -> Harness.fail "%s: %s%s" name message (quoted ())) format
   in
   let own =
-    let of_generics = List.map (fun (generic : T.generic) -> generic.generic) in
+    let of_generics = List.map (fun (generic : Types.generic) -> generic.generic) in
     let declared path =
       match Interface.Definition.read_interface interface path with
       | Some (Function_interface signature | Theorem_interface signature) ->
           of_generics signature.generics
       | Some (Type_interface interface) -> of_generics interface.type_generics
       | Some (Trait_interface interface) ->
-          T.make_self_parameter path :: of_generics interface.trait_generics
+          Types.make_self_parameter path :: of_generics interface.trait_generics
       | Some (Impl_interface interface) -> of_generics interface.impl_generics
       | Some (Law_proof_interface interface) -> of_generics interface.generics
       | _ -> []
@@ -477,25 +476,26 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
     | Some container -> declared container.path
     | None -> []
   in
-  let parameter subject (mentioned : T.parameter) =
+  let parameter subject (mentioned : Types.parameter) =
     if not (List.mem mentioned own) then
       wrong "%s mentions `%s`, a generic parameter of `%s`" subject mentioned.name
         (Path.show mentioned.owner)
   in
-  let rec capabilities subject (set : T.capability_set) =
+  let rec capabilities subject (set : Types.capability_set) =
     List.iter
       (function
-        | T.Capability _ -> ()
-        | T.Capability_parameter mentioned -> parameter subject mentioned
-        | T.Capability_projection { base; trait = reference; name } ->
+        | Types.Capability _ -> ()
+        | Types.Capability_parameter mentioned -> parameter subject mentioned
+        | Types.Capability_projection { base; trait = reference; name } ->
             (match base with
             | Parameter _ | Projection _ -> ()
-            | _ -> wrong "%s contains `%s.%s`, which is not normalized" subject (T.show base) name);
+            | _ ->
+                wrong "%s contains `%s.%s`, which is not normalized" subject (Types.show base) name);
             type_ subject base;
             trait subject reference
-        | T.Capability_variable _ -> wrong "%s contains a capability inference variable" subject)
-      (set :> T.capability list)
-  and type_ subject (ty : T.ty) =
+        | Types.Capability_variable _ -> wrong "%s contains a capability inference variable" subject)
+      (set :> Types.capability list)
+  and type_ subject (ty : Types.ty) =
     match ty with
     | Named { arguments; _ } -> List.iter (argument subject) arguments
     | Parameter named -> parameter subject named
@@ -509,14 +509,14 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
     | Any reference -> trait subject reference
     | Never | Integer -> ()
     | Variable _ | Literal _ | Hole | Error _ ->
-        wrong "%s has the type `%s`, which is not fully inferred" subject (T.show ty)
+        wrong "%s has the type `%s`, which is not fully inferred" subject (Types.show ty)
   and argument subject = function
-    | T.Type inner -> type_ subject inner
-    | T.Value (Value_parameter named) -> parameter subject named
-    | T.Value (Known _) -> ()
-    | T.Value (Value_variable _) -> wrong "%s contains a value inference variable" subject
-    | T.Capabilities set -> capabilities subject set
-  and trait subject (reference : T.trait_reference) =
+    | Types.Type inner -> type_ subject inner
+    | Types.Value (Value_parameter named) -> parameter subject named
+    | Types.Value (Known _) -> ()
+    | Types.Value (Value_variable _) -> wrong "%s contains a value inference variable" subject
+    | Types.Capabilities set -> capabilities subject set
+  and trait subject (reference : Types.trait_reference) =
     List.iter (argument subject) reference.trait_arguments;
     List.iter (fun (_, inner) -> type_ subject inner) reference.associated
   in
@@ -552,17 +552,19 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
         List.iter (argument "an intrinsic's type argument") type_arguments
     | Capability_method _ | Indirect _ -> ()
   in
-  let callee_parameters (callee : Core.callee) : (T.mode * bool) list option =
-    let of_signature ~has_receiver (signature : T.signature) =
+  let callee_parameters (callee : Core.callee) : (Types.mode * bool) list option =
+    let of_signature ~has_receiver (signature : Types.signature) =
       let receiver =
         match signature.receiver with
         | Some (((Read | Mut | Own) as receiver), _) when has_receiver ->
-            [ ((match receiver with Read -> T.Read | Mut -> Mut | Own | Static -> Own), false) ]
+            [
+              ((match receiver with Read -> Types.Read | Mut -> Mut | Own | Static -> Own), false);
+            ]
         | _ -> []
       in
       receiver
       @ List.map
-          (fun (parameter : T.parameter_info) -> (parameter.mode, parameter.has_default))
+          (fun (parameter : Types.parameter_info) -> (parameter.mode, parameter.has_default))
           signature.parameters
     in
     match callee with
@@ -600,7 +602,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
             match argument with
             | Passed { mode = passed; _ } when passed <> mode ->
                 wrong "argument %d of a call of `%s` has the mode `%s`, and its parameter `%s`"
-                  position callee (T.show_mode passed) (T.show_mode mode)
+                  position callee (Types.show_mode passed) (Types.show_mode mode)
             | Default when not has_default ->
                 wrong "a call of `%s` omits argument %d, whose parameter has no default" callee
                   position
@@ -608,7 +610,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
           (List.combine parameters call.arguments)
   in
   let compound_assignments = ref 0 and current_targets = ref 0 in
-  let local_types : (Core.local, T.ty) Hashtbl.t = Hashtbl.create 16 in
+  let local_types : (Core.local, Types.ty) Hashtbl.t = Hashtbl.create 16 in
   let parameters =
     List.iter (fun (parameter : Core.parameter) ->
         Hashtbl.replace local_types parameter.local parameter.type_)
@@ -639,9 +641,9 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
     | Local { local; type_ = used; _ } -> (
         type_ "a local" used;
         match Hashtbl.find_opt local_types local with
-        | Some bound when not (T.equal (normalize bound) (normalize used)) ->
-            wrong "a local is used with the type `%s` and bound with the type `%s`" (T.show used)
-              (T.show bound)
+        | Some bound when not (Types.equal (normalize bound) (normalize used)) ->
+            wrong "a local is used with the type `%s` and bound with the type `%s`"
+              (Types.show used) (Types.show bound)
         | _ -> ())
     | Constant { type_ = constant; _ } -> type_ "a constant" constant
     | Lent { kind = Call { lends = Some _; _ }; _ } | Temporary _ -> ()
@@ -663,7 +665,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
     | Lent _ -> wrong "%s mutates a place that is lent read-only" subject
   in
   let yielded = Hashtbl.create 8 in
-  let rec yielded_operand (mode : T.mode) (part : Core.operand) =
+  let rec yielded_operand (mode : Types.mode) (part : Core.operand) =
     match part with
     | Place core_place ->
         if mode = Mut then mutable_place "a `Yield` with the mode `mut`" core_place
@@ -682,7 +684,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
              match node.kind with Yield { mode; part } -> yielded_operand mode part | _ -> ());
        })
     form.definition;
-  let rec bindings (pattern : Core.pattern) : (Core.local * T.ty * T.mode) list =
+  let rec bindings (pattern : Core.pattern) : (Core.local * Types.ty * Types.mode) list =
     match pattern.kind with
     | Bind { local; mode; _ } -> [ (local, pattern.type_, mode) ]
     | Variant { fields; _ } | Record fields ->
@@ -694,7 +696,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
     operand value;
     match value with
     | Value _ ->
-        if List.exists (fun (_, _, mode) -> mode <> T.Own) (bindings pattern) then
+        if List.exists (fun (_, _, mode) -> mode <> Types.Own) (bindings pattern) then
           wrong "%s on a value binds a name that is not `own`" subject
     | Place _ -> ()
   in
@@ -724,7 +726,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                      arguments =
                        Passed { mode = Read; value = Place base; mode_keyword = None } :: bounds;
                      lends = None;
-                     uses = T.no_capabilities;
+                     uses = Types.no_capabilities;
                    }
              | Matches { value; pattern } -> binds_own "an `is`" value pattern
              | Match { scrutinees; arms; _ } ->

@@ -82,9 +82,24 @@ let find_builtin = function
 
 let is_builtin wanted type_ = find_builtin type_ = Some wanted
 let is_well_known wanted = function Named { path; _ } -> Well_known.is wanted path | _ -> false
+let signed_integer_types : Intrinsic.builtin list = [ Int8; Int16; Int32; Int64 ]
+let unsigned_integer_types : Intrinsic.builtin list = [ UInt8; UInt16; UInt32; UInt64 ]
+let integer_types = signed_integer_types @ unsigned_integer_types
 
-let integer_types : Intrinsic.builtin list =
-  [ Int8; Int16; Int32; Int64; UInt8; UInt16; UInt32; UInt64 ]
+let find_integer_implementors trait =
+  if Well_known.is Signed_integer trait then Some signed_integer_types
+  else if Well_known.is Unsigned_integer trait then Some unsigned_integer_types
+  else if Well_known.is Fixed_width_integer trait then Some integer_types
+  else None
+
+let find_bound_integer_implementors bounds =
+  List.fold_left
+    (fun implementors (bound : trait_reference) ->
+      match (implementors, find_integer_implementors bound.trait) with
+      | Some implementors, Some these ->
+          Some (List.filter (fun builtin -> List.mem builtin these) implementors)
+      | None, these | these, None -> these)
+    None bounds
 
 let float_types : Intrinsic.builtin list = [ Float32; Float64 ]
 

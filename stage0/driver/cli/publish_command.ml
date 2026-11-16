@@ -1,7 +1,3 @@
-module Names = Resolve.Names
-module Version = Registry.Version
-module Lock = Registry.Lock
-
 let unfinished snapshot database packages =
   let names = Database.make_name_lookups database packages in
   List.concat_map
@@ -9,8 +5,8 @@ let unfinished snapshot database packages =
       let source = Command_packages.source snapshot packages file in
       List.concat_map
         (fun declaration ->
-          let key = Names.key_of declaration in
-          let ({ base; _ } : Names.place) = names.place key in
+          let key = Resolve.Names.key_of declaration in
+          let ({ base; _ } : Resolve.Names.place) = names.place key in
           List.map
             (fun ({ keyword; span; _ } : Inspect.unfinished) ->
               let line, column =
@@ -24,9 +20,9 @@ let unfinished snapshot database packages =
         (names.declarations_in file))
     (Command_packages.files snapshot packages)
 
-let files directory (record : Lock.t) =
+let files directory (record : Registry.Lock.t) =
   List.filter (fun (path, _) -> path <> "truss.lock") (Registry.Content.published_files directory)
-  @ if record = [] then [] else [ ("truss.lock", Lock.print record) ]
+  @ if record = [] then [] else [ ("truss.lock", Registry.Lock.print record) ]
 
 let record database snapshot registry (package : Path.package) =
   let root = Workspace.root snapshot in
@@ -46,9 +42,11 @@ let record database snapshot registry (package : Path.package) =
       (Workspace.dependency_names snapshot name)
   in
   let problems = ref [] in
-  let rec closure name : Lock.t =
+  let rec closure name : Registry.Lock.t =
     let seen = Hashtbl.create 16 and entries = ref [] in
-    let add name version hash = entries := { Lock.name; version; hash; holds = [] } :: !entries in
+    let add name version hash =
+      entries := { Registry.Lock.name; version; hash; holds = [] } :: !entries
+    in
     let rec visit name =
       if not (Hashtbl.mem seen name) then begin
         Hashtbl.replace seen name ();
@@ -75,7 +73,9 @@ let record database snapshot registry (package : Path.package) =
       end
     in
     List.iter visit (dependencies ~code:true name);
-    List.sort (fun (left : Lock.entry) right -> Path.compare_package left.name right.name) !entries
+    List.sort
+      (fun (left : Registry.Lock.entry) right -> Path.compare_package left.name right.name)
+      !entries
   and published_as name directory =
     let hash = Registry.Content.hash (files directory (closure name)) in
     List.find_map
@@ -105,7 +105,7 @@ let failed_tests database snapshot packages =
        (Test_command.run_tests database snapshot packages tests))
 
 let next_name (package : Path.package) =
-  let major = Version.major_of_name package in
+  let major = Registry.Version.major_of_name package in
   let base =
     let suffix = Printf.sprintf "_v%d" major in
     if major > 1 && String.ends_with ~suffix package.name then
@@ -116,11 +116,11 @@ let next_name (package : Path.package) =
 
 type outcome =
   | Published of {
-      version : Version.t;
+      version : Registry.Version.t;
       files : (string * string) list;
       grows : (Path.t * string) list;
     }
-  | Unchanged of Version.t
+  | Unchanged of Registry.Version.t
   | Refused of string list
 
 let decide database snapshot registry (package : Path.package) =
@@ -131,7 +131,7 @@ let decide database snapshot registry (package : Path.package) =
       let files = files (Command_packages.directory snapshot package) record in
       let hash = Registry.Content.hash files in
       match Registry.Index.newest registry name with
-      | None -> Published { version = Version.first name; files; grows = [] }
+      | None -> Published { version = Registry.Version.first name; files; grows = [] }
       | Some (version, newest) when newest = hash -> Unchanged version
       | Some (((major, minor, patch) as version), _) -> (
           match Workspace.fetch_published name version with
@@ -163,7 +163,7 @@ let decide database snapshot registry (package : Path.package) =
                   (Printf.sprintf
                      "This release is incompatible with `%s` %s, so it cannot be published under \
                       that name:"
-                     (Path.show_package name) (Version.show version)
+                     (Path.show_package name) (Registry.Version.show version)
                    :: List.map (fun sentence -> "  " ^ sentence) breaks
                   @ [
                       Printf.sprintf "Publish it under a new name, such as `%s`."
@@ -221,10 +221,11 @@ let run () =
   | Refused sentences -> refuse sentences
   | Unchanged version ->
       if json then
-        Json.print (Report.document report [ ("version", Json.String (Version.show version)) ])
+        Json.print
+          (Report.document report [ ("version", Json.String (Registry.Version.show version)) ])
       else
         Output.printf "`%s` %s already has these files.\n" (Path.show_package name)
-          (Version.show version);
+          (Registry.Version.show version);
       0
   | Published { version; files; grows } ->
       Registry.Index.add registry name version files;
@@ -234,7 +235,7 @@ let run () =
           (Report.document report
              [
                ("package", Json.String (Path.show_package name));
-               ("version", Json.String (Version.show version));
+               ("version", Json.String (Registry.Version.show version));
                ("hash", Json.String hash);
                ( "grows",
                  Json.List
@@ -248,7 +249,8 @@ let run () =
                       grows) );
              ])
       else begin
-        Output.printf "Published `%s` %s.\n" (Path.show_package name) (Version.show version);
+        Output.printf "Published `%s` %s.\n" (Path.show_package name)
+          (Registry.Version.show version);
         List.iter
           (fun (path, description) -> Output.printf "  %s %s.\n" (Path.show path) description)
           grows

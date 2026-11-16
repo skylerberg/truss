@@ -1,5 +1,3 @@
-module Symbol = Logic.Symbol
-
 let ghost_code (context : State.context) frame (code : Mir.t) =
   let proving = context.proving and unfinished = context.unfinished in
   context.proving <- true;
@@ -285,7 +283,7 @@ let apply_map_literal context frame ~(ty : Types.ty) ~location terms =
 let literal_bytes_limit = 256
 
 let text_value context frame (ty : Types.ty) text =
-  let symbol = Symbol.Text_literal { type_ = ty; text } in
+  let symbol = Logic.Symbol.Text_literal { type_ = ty; text } in
   let literal = Logic.Symbol symbol in
   Facts.once context (Value_of symbol) (fun () ->
       Facts.declare context (Logic.Constant (symbol, Facts.sort_of context ty));
@@ -423,7 +421,7 @@ let named_function (context : State.context) (frame : State.frame) (site : Invoc
       end
   | _ -> ());
   let instance = List.map (Types.substitute_argument frame.substitution) type_arguments in
-  let symbol = Symbol.Function_value { callee = path; instance } in
+  let symbol = Logic.Symbol.Function_value { callee = path; instance } in
   Facts.declare context (Logic.Constant (symbol, Facts.sort_of context ty));
   let term = Logic.Symbol symbol in
   (match ty with
@@ -431,7 +429,7 @@ let named_function (context : State.context) (frame : State.frame) (site : Invoc
     when Lambdas.in_the_logic function_type && contract.is_logic_function ->
       let parameters = Lambdas.parameters_of context frame function_type in
       let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
-      let function_symbol = Symbol.Function { callee = path; instance } in
+      let function_symbol = Logic.Symbol.Function { callee = path; instance } in
       Facts.declare context
         (Logic.Function
            (function_symbol, List.map snd parameters, Facts.sort_of context function_type.output));
@@ -477,7 +475,7 @@ let constant_value (context : State.context) frame path =
     (Contracts.source_at context.lookups path, Mir.initializer_of_path context.lookups.mir path)
   with
   | Some (constant_source, _, _), Some { form = code; _ } ->
-      let symbol = Symbol.Constant path in
+      let symbol = Logic.Symbol.Constant path in
       let empty =
         {
           frame with
@@ -551,7 +549,7 @@ let construct_amount context frame (ty : Types.ty) variant (counter : Costs.coun
   | Allocations -> Logic.int 1
   | Allocated_bytes when counter.counting = Units -> Logic.int 1
   | Allocated_bytes ->
-      let symbol = Symbol.Block_bytes { type_ = ty; variant } in
+      let symbol = Logic.Symbol.Block_bytes { type_ = ty; variant } in
       Facts.declare context (Logic.Constant (symbol, Logic.Int));
       Facts.fact context frame (Logic.Operation ("<=", [ Logic.int 1; Logic.Symbol symbol ]));
       Logic.Symbol symbol
@@ -562,7 +560,7 @@ let apply_construct context frame (site : Invocation.site) variant
   let ty = Facts.substituted context frame site.type_ in
   if Types.equal ty Types.unit then begin
     ignore (Facts.sort_of context Types.unit);
-    (frame, Logic.Apply (Symbol.Unit, []))
+    (frame, Logic.Apply (Logic.Symbol.Unit, []))
   end
   else
     let frame, field_terms =
@@ -603,7 +601,7 @@ let text_matches context location ty term text =
   | None -> Facts.unsupported location "a string pattern on `%s`" (Types.show ty)
 
 let log_facts number ~halving =
-  let log number = Logic.Apply (Symbol.Cost_log, [ number ]) in
+  let log number = Logic.Apply (Logic.Symbol.Cost_log, [ number ]) in
   let basic =
     Logic.(
       Operation ("<=", [ int 0; log number ])
@@ -622,14 +620,14 @@ let log_facts number ~halving =
   else ([ basic ], None)
 
 let log_order left right =
-  let log number = Logic.Apply (Symbol.Cost_log, [ number ]) in
+  let log number = Logic.Apply (Logic.Symbol.Cost_log, [ number ]) in
   Logic.(
     Operation ("<=", [ left; right ])
     ==> Operation ("<=", [ log left; log right ])
     &&& (Operation ("<=", [ right; left ]) ==> Operation ("<=", [ log right; log left ])))
 
 let log_of context frame log_argument =
-  Facts.declare context (Logic.Function (Symbol.Cost_log, [ Logic.Int ], Logic.Int));
+  Facts.declare context (Logic.Function (Logic.Symbol.Cost_log, [ Logic.Int ], Logic.Int));
   let rec add log_argument ~halving =
     match List.assoc_opt log_argument context.logs with
     | Some true -> ()
@@ -649,10 +647,10 @@ let log_of context frame log_argument =
   | Logic.Integer limit ->
       Facts.fact context frame
         (Logic.equal
-           (Logic.Apply (Symbol.Cost_log, [ log_argument ]))
+           (Logic.Apply (Logic.Symbol.Cost_log, [ log_argument ]))
            (Logic.int (if Z.sign limit <= 0 then 0 else Z.numbits limit)))
   | _ -> ());
-  Logic.Apply (Symbol.Cost_log, [ log_argument ])
+  Logic.Apply (Logic.Symbol.Cost_log, [ log_argument ])
 
 let apply_specification_function context frame ~location (measure : Core.specification_function)
     values ~unconverted ~types =

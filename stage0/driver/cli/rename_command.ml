@@ -1,6 +1,3 @@
-module Names = Resolve.Names
-module References = Inspect.References
-
 type target = Definition of Path.t | Module of Path.module_
 
 type plan = {
@@ -47,7 +44,7 @@ let target_of snapshot database packages from_ =
         let module_ : Path.module_ = { package; modules = List.rev rest } in
         let declared path =
           List.exists
-            (fun (declaration : Names.declaration) ->
+            (fun (declaration : Resolve.Names.declaration) ->
               match (declaration.path, path) with
               | Method { owner; name; _ }, Path.Method { owner = other_owner; name = other_name; _ }
                 ->
@@ -86,20 +83,20 @@ let occurrences database snapshot packages =
     (fun file ->
       List.concat_map
         (fun declaration ->
-          let key = Names.key_of declaration in
+          let key = Resolve.Names.key_of declaration in
           match Database.read_resolved database key with
           | Some resolved ->
-              let ({ file; base } : Names.place) = names.place key in
+              let ({ file; base } : Resolve.Names.place) = names.place key in
               let tables =
                 Option.map
                   (fun (checked : Infer.checked) -> checked.tables)
                   (Database.read_checked_body database key)
               in
               List.map
-                (fun ({ span; target } : References.occurrence) ->
+                (fun ({ span; target } : Inspect.References.occurrence) ->
                   (file, Source.Definition_span.to_file ~base span, target))
-                (References.occurrences ~path:key.path (names.spans key) (names.definition key)
-                   resolved tables)
+                (Inspect.References.occurrences ~path:key.path (names.spans key)
+                   (names.definition key) resolved tables)
           | None -> [])
         (names.declarations_in file))
     (Command_packages.files snapshot packages)
@@ -108,7 +105,8 @@ let plan_definition database snapshot packages path name =
   let edits =
     List.filter_map
       (fun (file, span, target) ->
-        if References.names_definition path target then Some (file, Diagnostic.replace span name)
+        if Inspect.References.names_definition path target then
+          Some (file, Diagnostic.replace span name)
         else None)
       (occurrences database snapshot packages)
   in
@@ -135,7 +133,7 @@ let plan_module database snapshot packages (old_module : Path.module_) to_ =
   let last = List.nth modules (List.length modules - 1) in
   let edits =
     List.filter_map
-      (fun (file, (span : Source.span), (target : References.target)) ->
+      (fun (file, (span : Source.span), (target : Inspect.References.target)) ->
         match target with
         | Module edit_module when edit_module = old_module ->
             let text = Source.text (Workspace.source snapshot file) in
@@ -148,9 +146,9 @@ let plan_module database snapshot packages (old_module : Path.module_) to_ =
           List.filter_map
             (fun (module_, span) ->
               if module_ = old_module then Some (file, Diagnostic.replace span full) else None)
-            (References.uses
+            (Inspect.References.uses
                ~used_module:
-                 (Names.used_module
+                 (Resolve.Names.used_module
                     (Database.make_name_lookups database packages)
                     ~from:file.module_)
                (Database.read_parsed database file).uses))

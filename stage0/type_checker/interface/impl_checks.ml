@@ -1,5 +1,3 @@
-module Names = Resolve.Names
-
 let show_signature (signature : Types.signature) =
   Printf.sprintf "(%s)%s"
     (String.concat ", "
@@ -167,7 +165,7 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
         state.diagnostics := List.map snd missing_associated @ !(state.diagnostics);
         let written_methods =
           List.filter_map
-            (fun (member : Names.key) ->
+            (fun (member : Resolve.Names.key) ->
               match member.path with
               | Method { name; receiver; _ } -> Some (name, receiver)
               | _ -> None)

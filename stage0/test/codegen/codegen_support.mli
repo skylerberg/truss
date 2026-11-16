@@ -46,7 +46,6 @@ val block : Lowered.statement list -> Lowered.terminator -> block
 val function_ :
   ?parameters:Lowered.local list ->
   ?result:Lowered.ty ->
-  ?returns:bool ->
   ?environment:(string * Lowered.ty) list ->
   local_info list ->
   block list ->
