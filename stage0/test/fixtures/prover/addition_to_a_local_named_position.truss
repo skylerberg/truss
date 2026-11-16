@@ -1,0 +1,4 @@
+fn f(count: UInt8) -> UInt8 {
+  let position = count / 2
+  position + 200
+}

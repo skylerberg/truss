@@ -306,8 +306,9 @@ and make_obligation ?template_clause (context : State.context) (frame : State.fr
        in
        Locals.fold
          (fun local term shown ->
-           match Tables.Local_table.find_opt context.local_names local with
-           | Some name when not (is_parameter term || List.mem_assoc term shown) ->
+           match (local, Tables.Local_table.find_opt context.local_names local) with
+           | Core_local (Named _), Some name
+             when not (is_parameter term || List.mem_assoc term shown) ->
                (term, name) :: shown
            | _ -> shown)
          frame.locals

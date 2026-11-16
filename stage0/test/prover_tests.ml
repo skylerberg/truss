@@ -39,6 +39,12 @@ let () =
       let actual = read_message Fixtures.Prover.increment_of_a_word_count in
       if not (String.includes ~affix:"`count` is 9223372036854775807" actual) then
         Harness.fail "message %S" actual);
+  Harness.test "a counterexample leaves out the local that a `for` loop introduces" (fun () ->
+      let actual = read_message Fixtures.Prover.increment_of_a_word_count in
+      if String.includes ~affix:"`position` is" actual then Harness.fail "message %S" actual);
+  Harness.test "a counterexample names a local that the code declares" (fun () ->
+      let actual = read_message Fixtures.Prover.addition_to_a_local_named_position in
+      if not (String.includes ~affix:"`position` is" actual) then Harness.fail "message %S" actual);
   Harness.test "a counterexample leaves out a value that nothing constrains" (fun () ->
       let actual = read_message Fixtures.Prover.increment_under_a_long_name in
       if
