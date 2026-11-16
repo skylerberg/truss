@@ -275,9 +275,7 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
         let call =
           {
             Tree.callee;
-            arguments =
-              Passed { mode = Read; value = receiver; mode_keyword = None; function_ = None }
-              :: bounds;
+            arguments = Passed { mode = Read; value = receiver; function_ = None } :: bounds;
             uses = Types.no_capabilities;
             node = node.id;
             origin = node.origin;
@@ -659,9 +657,9 @@ and lower_call builder (called : Core.call) ~node ~origin : Tree.call option =
 and plan_argument builder (argument : Core.argument) =
   match argument with
   | Default -> In_order.pure Tree.Default
-  | Passed { mode; value; mode_keyword } ->
+  | Passed { mode; value } ->
       In_order.map
-        (fun (value, function_) -> Tree.Passed { mode; value; mode_keyword; function_ })
+        (fun (value, function_) -> Tree.Passed { mode; value; function_ })
         (In_order.evaluate_operand_with builder
            (fun () ->
              match value with
@@ -972,14 +970,12 @@ and test builder (pattern : Core.pattern) (scrutinee : Tree.place) ~branch_on =
                                       mode = Read;
                                       origin = pattern.origin;
                                     };
-                                mode_keyword = None;
                                 function_ = None;
                               };
                             Passed
                               {
                                 mode = Read;
                                 value = lower_pattern_constant pattern value;
-                                mode_keyword = None;
                                 function_ = None;
                               };
                           ];

@@ -662,6 +662,37 @@ let () =
         Fixtures.Ownership.list_of_a_capture,
         Fixtures.Ownership.list_of_a_copied_capture );
     ];
+  List.iter
+    (fun (place, text, code, fixed) ->
+      Harness.test
+        ("a copy of " ^ place ^ " removes the `own` before it, with a fix")
+        (fun () -> expect_one_diagnostic text code ~fixed))
+    [
+      ( "a read-only parameter passed `own`",
+        keep ^ Fixtures.Ownership.read_only_list_moved,
+        "ownership.not_owned",
+        keep ^ Fixtures.Ownership.read_only_list_passed_without_own_fixed );
+      ( "a `let` bound to a string literal and moved into a `var`",
+        Fixtures.Ownership.string_literal_let_moved_into_a_var,
+        "ownership.not_owned",
+        Fixtures.Ownership.var_initialized_from_a_string_literal_let_fixed );
+      ( "an element moved into a `var`",
+        Fixtures.Ownership.element_moved_into_a_var,
+        "ownership.not_owned",
+        Fixtures.Ownership.var_initialized_from_an_element_fixed );
+      ( "a read-only parameter moved into a list literal",
+        Fixtures.Ownership.list_of_a_moved_string_parameter,
+        "ownership.not_owned",
+        Fixtures.Ownership.list_of_a_copied_string_parameter );
+      ( "a place moved into a `var` and used afterward",
+        Fixtures.Ownership.list_moved_into_a_var_then_read,
+        "ownership.use_after_move",
+        Fixtures.Ownership.list_copied_into_a_var_then_read );
+      ( "a receiver moved with `own` and used afterward",
+        Fixtures.Ownership.bag_moved_by_its_receiver_then_read,
+        "ownership.use_after_move",
+        Fixtures.Ownership.bag_copied_for_its_receiver_then_read );
+    ];
   Harness.test "an associated type that grows a type reaches the recursion limit" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.associated_type_that_grows_its_type
         "types.recursion_limit" ~says:"needs more than 64 nested types");

@@ -4,11 +4,6 @@ let check_arguments_alone state env (arguments : Syntax.argument list) (type_ : 
     arguments;
   type_
 
-let find_mode_keyword (value : Syntax.expression) : Core.mode_keyword option =
-  match value.kind with
-  | Mode (_, operand) -> Some { written = value.id; operand = operand.id }
-  | _ -> None
-
 let make_arity_error state ?constructor ~has_receiver (value : Syntax.expression) ~parameter_count
     ~argument_count =
   let show_count count singular plural =
@@ -66,12 +61,7 @@ let rec check_function_value_call state env (value : Syntax.expression) (callee 
               { name = "the function value"; mode; type_ = input; has_default = false }
             in
             let mode = check_argument state env argument.value parameter in
-            {
-              Tables.expression = argument.value.id;
-              core_argument_index = index;
-              mode;
-              mode_keyword = find_mode_keyword argument.value;
-            })
+            { Tables.expression = argument.value.id; core_argument_index = index; mode })
           arguments
       in
       let result = function_type.output in
@@ -96,7 +86,9 @@ let rec check_function_value_call state env (value : Syntax.expression) (callee 
 and check_argument state env (value : Syntax.expression) (parameter : Types.parameter_info) =
   let inner =
     match value.kind with
-    | Mode (_, inner) when Option.is_none (State.find_call_with_mode_keyword state inner) -> inner
+    | Mode (mode, inner) when Option.is_none (State.find_call_with_mode_keyword state inner) ->
+        State.note_mode_keyword state value mode inner;
+        inner
     | _ -> value
   in
   let actual = Hooks.check_expression state env ~expected:parameter.type_ inner in
@@ -304,7 +296,6 @@ and check_arguments state env ?constructor (value : Syntax.expression)
         Tables.expression = argument.value.id;
         core_argument_index = (if has_receiver then index + 1 else index);
         mode;
-        mode_keyword = find_mode_keyword argument.value;
       }
     in
     let non_lambdas = List.map check (List.filter (fun pair -> not (is_lambda pair)) matched) in

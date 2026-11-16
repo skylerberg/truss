@@ -41,8 +41,7 @@ and show_expression form (node : Core.expression) =
   | Use place -> "use " ^ show_access_path form place
   | Slice { base; callee; bounds } ->
       Printf.sprintf "slice %s(%s)" (Core_lint.show_callee callee)
-        (list (show_argument form)
-           (Passed { mode = Read; value = Place base; mode_keyword = None } :: bounds))
+        (list (show_argument form) (Passed { mode = Read; value = Place base } :: bounds))
   | Operator { operation; arguments } ->
       Printf.sprintf "%s(%s)"
         (Intrinsic.show_operation (Scalar operation))

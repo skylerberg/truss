@@ -6,7 +6,7 @@ type context = {
   lookups : Lookups.t;
   list_bounds : Types.parameter -> Types.trait_reference list;
   spans : Source.Definition_span.t array Lazy.t;
-  mode_keywords : (Core.origin, Types.mode * Core.mode_keyword) Hashtbl.t;
+  mode_keywords : (Core.origin, Core.mode_keyword) Hashtbl.t;
   places_without_own : (Core.origin, unit) Hashtbl.t;
   names : string Local_table.t;
   binding_modes : Types.mode Local_table.t;
@@ -92,20 +92,11 @@ let show context (place : Place.t) =
   ^ String.concat ""
       (List.map (function Place.Field name -> "." ^ name | Element _ -> "[...]") place.steps)
 
-let collect context (mir : Mir.Graph.t) =
-  let record_mode_keyword (argument : Mir.argument) =
-    match argument with
-    | Passed
-        {
-          mode;
-          value = Use { origin; _ } | Borrow { origin; _ } | Take { origin; _ };
-          mode_keyword = Some mode_keyword;
-          _;
-        } ->
-        Hashtbl.replace context.mode_keywords origin (mode, mode_keyword)
-    | Passed _ | Default -> ()
-  in
-  let record_mode_keywords (call : Mir.call) = List.iter record_mode_keyword call.arguments in
+let collect context (mir : Mir.Graph.t) ~mode_keywords =
+  List.iter
+    (fun (keyword : Core.mode_keyword) ->
+      Hashtbl.replace context.mode_keywords keyword.place keyword)
+    mode_keywords;
   let visit_body (body : Mir.Graph.body) =
     Array.iteri
       (fun local (info : Mir.local_info) ->
@@ -117,19 +108,7 @@ let collect context (mir : Mir.Graph.t) =
             Local_table.replace context.types core info.type_;
             if is_var then context.mutable_locals <- core :: context.mutable_locals
         | Source _ | Temporary | Lent _ -> ())
-      body.locals;
-    Array.iter
-      (fun (block : Mir.Graph.basic_block) ->
-        List.iter
-          (fun (statement : Mir.Graph.statement) ->
-            match statement.kind with
-            | Call { call; _ } | Lend { call; _ } | Slice { call; _ } | Template { call; _ } ->
-                record_mode_keywords call
-            | Assign _ | Live _ | Dead _ | Assert _ | Echo _ | Provide _ | Provide_end
-            | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ ->
-                ())
-          block.statements)
-      body.blocks
+      body.locals
   in
   visit_body mir.body;
   Array.iter visit_body mir.lambdas;
@@ -144,13 +123,13 @@ let collect context (mir : Mir.Graph.t) =
 
 let copy_edits context (moved : Core.origin) =
   (match Hashtbl.find_opt context.mode_keywords moved with
-    | Some (Own, { written; operand }) ->
+    | Some { mode = Own; written; operand; _ } ->
         [
           Diagnostic.delete
             (Source.Definition_span.make (locate_origin context written).start
                (locate_origin context operand).start);
         ]
-    | Some ((Read | Mut), _) | None -> [])
+    | Some { mode = Read | Mut; _ } | None -> [])
   @ [
       Diagnostic.insert
         (Source.Definition_span.make_zero_width (locate_origin context moved).stop)
@@ -159,5 +138,7 @@ let copy_edits context (moved : Core.origin) =
 
 let locate_with_mode_keyword context (place : Core.origin) : Source.Definition_span.t =
   match Hashtbl.find_opt context.mode_keywords place with
-  | Some (_, { written; _ }) -> locate_origin context written
+  | Some { written; _ } ->
+      Source.Definition_span.make (locate_origin context written).start
+        (locate_origin context place).stop
   | None -> locate_origin context place

@@ -678,8 +678,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                  check_arguments_fit
                    {
                      callee = sliced;
-                     arguments =
-                       Passed { mode = Read; value = Place base; mode_keyword = None } :: bounds;
+                     arguments = Passed { mode = Read; value = Place base } :: bounds;
                      lends = None;
                      uses = Types.no_capabilities;
                    }
