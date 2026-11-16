@@ -120,7 +120,12 @@ val in_scope : state -> (unit -> 'a) -> 'a
 val in_statement : state -> (unit -> 'a) -> 'a
 
 val finish_function :
-  state -> ?returns:bool -> first:Lowered.local list -> rest:Lowered.local list -> unit -> unit
+  state ->
+  ?returns:bool ->
+  first:Lowered.local list ->
+  rest:Lowered.local list ->
+  unit ->
+  Emit_c.Builder.signature
 
 val finish_instance :
   state -> ?returns:bool -> rest:Lowered.local list -> unit -> Emit_c.Builder.instance

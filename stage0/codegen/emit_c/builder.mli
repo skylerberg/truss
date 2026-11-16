@@ -1,9 +1,10 @@
 type t
 type instance = C_instance.t
+type signature = { parameters : Lowered.local list; result : Lowered.ty option; returns : bool }
 
 val instance_key : instance -> Instance.key
 val create : Memory_layout.env -> key:Instance.key -> t
-val nested : t -> index:int -> environment:(string * Lowered.ty) list -> t
+val nested : t -> index:int -> environment:(string * Lowered.ty) list -> (t -> signature) -> unit
 val local : t -> ?name:string -> ?is_zeroed:bool -> Lowered.ty -> Lowered.local
 val local_type : t -> Lowered.local -> Lowered.ty
 val block : t -> Lowered.block
@@ -18,8 +19,7 @@ val loop :
   t -> ?integer:Memory_layout.integer -> count:Lowered.operand -> (Lowered.local -> unit) -> unit
 
 val outline : t -> nested:int -> parts:Lowered.local list -> (unit -> unit) -> Lowered.local
-val build : ?returns:bool -> t -> parameters:Lowered.local list -> result:Lowered.ty option -> unit
-val built : t -> instance
+val build : t -> signature -> instance
 val at : Lowered.local -> Lowered.place
 val ( / ) : Lowered.place -> Lowered.projection -> Lowered.place
 val constant_uint64 : int -> Lowered.operand

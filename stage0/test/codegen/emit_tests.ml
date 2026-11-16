@@ -490,8 +490,7 @@ let built_entry body : instance =
   Emit_c.Builder.start builder (Emit_c.Builder.block builder);
   let result = body builder in
   Emit_c.Builder.finish builder (Return (Some (Copy (Emit_c.Builder.at result))));
-  Emit_c.Builder.build builder ~parameters:[] ~result:(Some (value int32));
-  Emit_c.Builder.built builder
+  Emit_c.Builder.build builder { parameters = []; result = Some (value int32); returns = true }
 
 let operate builder ?destination ?(type_arguments = [ int32 ]) ?value_arguments operation arguments
     =

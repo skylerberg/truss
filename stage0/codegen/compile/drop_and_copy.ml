@@ -197,8 +197,7 @@ let drop context ty =
       start builder after
   | Shape (Scalar _) -> ());
   finish builder (Return None);
-  build builder ~parameters:[ pointer ] ~result:None;
-  built builder
+  build builder { parameters = [ pointer ]; result = None; returns = true }
 
 let any_drop context ty =
   let builder = create context.env ~key:(Any_drop ty) in
@@ -217,8 +216,7 @@ let any_drop context ty =
          })
   end;
   finish builder (Return None);
-  build builder ~parameters:[ untyped ] ~result:None;
-  built builder
+  build builder { parameters = [ untyped ]; result = None; returns = true }
 
 let copy_signature context ty : Lowered.signature =
   Convention.signature
@@ -408,9 +406,13 @@ let copy context ty =
   | Some local -> finish builder (Return (Some (Move (at local))))
   | None -> finish builder (Return None));
   let parameters = Option.to_list result_pointer @ Option.to_list self_local in
-  build builder ~parameters
-    ~result:(match convention with Returned ty -> Some ty | Nothing | Through_pointer _ -> None);
-  built builder
+  build builder
+    {
+      parameters;
+      result =
+        (match convention with Returned ty -> Some ty | Nothing | Through_pointer _ -> None);
+      returns = true;
+    }
 
 let any_copy context ty =
   let builder = create context.env ~key:(Any_copy ty) in
@@ -428,8 +430,7 @@ let any_copy context ty =
       ty
   end;
   finish builder (Return (Some (Copy (at copied))));
-  build builder ~parameters:[ original ] ~result:(Some (Raw (Pointer Opaque)));
-  built builder
+  build builder { parameters = [ original ]; result = Some (Raw (Pointer Opaque)); returns = true }
 
 module For_testing = struct
   let copy_signature = copy_signature
