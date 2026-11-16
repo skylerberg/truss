@@ -57,8 +57,8 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
             root = Local local;
             steps =
               List.map
-                (function Moves.Field field | Variant { field; _ } -> Place.Field field)
-                path.steps;
+                (function Mir.Field field | Variant_field { field; _ } -> Place.Field field)
+                path.projections;
           }
     | Source { name = None; _ } | Temporary | Lent _ -> None
   in
@@ -94,7 +94,7 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
     List.iter
       (fun local ->
         if Moves.lent_mut moves local then
-          match Moves.may_be_empty moves state { local; steps = [] } with
+          match Moves.may_be_empty moves state { local; projections = [] } with
           | Some moved when not (Hashtbl.mem reported_not_reinitialized moved) -> (
               match (place_of moved, first_move state moved) with
               | Some shown, Some moved_origin when moved_in_scope moved ->
