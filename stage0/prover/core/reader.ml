@@ -1105,18 +1105,18 @@ and read_statement context frame run (statement : Mir.statement) =
       let bindings = List.take binding_count body.statements in
       let range, parameter, bindings =
         match (lent, iteration) with
-        | Some { element; collection; _ }, _ -> (
-            (* The statements before the element's lend bind the position and evaluate the
-               lending call's arguments, so they read the position. The prover binds the element
-               to each element of the collection's model, which has no position. Only the
-               statements after the lend are read: they bind the pattern. *)
-            let lend_index =
-              List.find_index
-                (fun (statement : Mir.statement) ->
-                  match statement.kind with
-                  | Basic (Lend { part; _ }) -> part = element
-                  | _ -> false)
-                bindings
+        | Some { element; collection; _ }, _ ->
+            let pattern_bindings =
+              match
+                List.find_index
+                  (fun (statement : Mir.statement) ->
+                    match statement.kind with
+                    | Basic (Lend { part; _ }) -> part = element
+                    | _ -> false)
+                  bindings
+              with
+              | Some lend_index -> List.drop (lend_index + 1) bindings
+              | None -> Facts.raise_bug "a quantifier over elements that no statement lends"
             in
             ( Models.Range_of_collection
                 {
@@ -1126,9 +1126,7 @@ and read_statement context frame run (statement : Mir.statement) =
                   location;
                 },
               element,
-              match lend_index with
-              | Some index -> List.drop (index + 1) bindings
-              | None -> Facts.raise_bug "a quantifier over elements that no statement lends" ))
+              pattern_bindings )
         | None, Range { start; stop; inclusive } ->
             ( Range_of_integers
                 {
