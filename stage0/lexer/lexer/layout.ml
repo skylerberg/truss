@@ -108,11 +108,11 @@ let find_closing_edits source tokens ~closers ~is_unterminated_string openers =
     | (opener : opener) :: outer -> (
         match find_closing_position source tokens ~closers ~is_unterminated_string opener with
         | None -> None
-        | Some (position, own_line) ->
+        | Some (position, starts_line) ->
             let position = max position earliest in
             let closer = spell_closer opener.bracket in
             let replacement =
-              if own_line && opener.bracket = Curly then
+              if starts_line && opener.bracket = Curly then
                 "\n" ^ extract_indentation source opener.span.start ^ closer
               else closer
             in

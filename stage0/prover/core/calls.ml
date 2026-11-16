@@ -87,7 +87,7 @@ let evaluate_default_value (context : State.context) frame (part : State.part) p
 
 let is_datatype ty = match ty with Types.Named _ -> Types.find_builtin ty = None | _ -> false
 
-let list_structural_parameters context (frame : State.frame) (own : State.part) =
+let list_structural_parameters context (frame : State.frame) (part : State.part) =
   List.concat
     (List.mapi
        (fun index (parameter : Mir.parameter) ->
@@ -103,7 +103,7 @@ let list_structural_parameters context (frame : State.frame) (own : State.part) 
              with
              | Some entry, Some ty when is_datatype ty -> [ (ty, entry, index) ]
              | _ -> []))
-       own.parameters)
+       part.parameters)
 
 let call_contract context (frame : State.frame) (site : Invocation.site) (invocation : Invocation.t)
     path (contract : State.contract) (values : State.passed list) ~lent_final ~havoc_mut
@@ -181,7 +181,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       substitution = substitution_of part;
     }
   in
-  let own = List.hd contract.parts in
+  let declared_part = List.hd contract.parts in
   if
     context.terminates && frame.makes_obligations
     && (match invocation.callee with
@@ -189,10 +189,11 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       | _ -> true)
     && Facts.is_in_recursion_group context path
   then
-    begin match (context.measures, own.decreases) with
+    begin match (context.measures, declared_part.decreases) with
     | [], []
-      when Path.equal path context.current && list_structural_parameters context frame own <> [] ->
-        let pairs = list_structural_parameters context frame own in
+      when Path.equal path context.current
+           && list_structural_parameters context frame declared_part <> [] ->
+        let pairs = list_structural_parameters context frame declared_part in
         let before = List.map (fun (ty, entry, _) -> Models.rank context ty entry) pairs in
         let after =
           List.map
@@ -223,7 +224,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
         let current_frame =
           { frame with makes_obligations = false; locals = frame.old_locals; self = frame.old_self }
         in
-        let callee_entry = read_entry_frame own in
+        let callee_entry = read_entry_frame declared_part in
         let rec split_prefix before after =
           match (before, after) with
           | right_term :: before, left_term :: after ->
@@ -255,7 +256,9 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
     end;
   let requiring =
     match contract.parts with
-    | own :: others -> if own.requires <> [] || others = [] then [ own ] else others
+    | declared_part :: inherited_parts ->
+        if declared_part.requires <> [] || inherited_parts = [] then [ declared_part ]
+        else inherited_parts
     | [] -> []
   in
   let is_checked =
@@ -311,14 +314,15 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
         | _ -> None)
       values
   in
-  let own_bound = list_bindings own in
-  let own_arguments = List.filter_map snd own_bound in
-  let is_on_bound_values = List.exists (Logic.mentions after.bound) own_arguments in
+  let declared_bindings = list_bindings declared_part in
+  let declared_arguments = List.filter_map snd declared_bindings in
+  let is_on_bound_values = List.exists (Logic.mentions after.bound) declared_arguments in
   let result_type = Facts.substitute_type context frame site.type_ in
   let applied_as = ref None in
   let is_limited_call = ref false in
   let result =
-    if contract.is_logic_function && List.length own_arguments = List.length own_bound then begin
+    if contract.is_logic_function && List.length declared_arguments = List.length declared_bindings
+    then begin
       let function_symbol = Logic.Symbol.Function { callee = path; instance } in
       let sorts =
         List.mapi
@@ -329,17 +333,17 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                 Facts.declare_sort context
                   ((Interface.Impls.normalize context.lookups.interface
                       ~list_bounds:Interface.Impls.list_no_bounds)
-                     (Types.substitute (substitution_of own) parameter.type_)))
-          own_bound
+                     (Types.substitute (substitution_of declared_part) parameter.type_)))
+          declared_bindings
       in
       let result_sort = Facts.declare_sort context result_type in
       Facts.declare context (Logic.Function (function_symbol, sorts, result_sort));
-      (match (path, own_bound) with
+      (match (path, declared_bindings) with
       | Method { name = "model"; receiver = Read; _ }, [ (self, _) ] when self.local = Self ->
           Models.rank_model context
             ((Interface.Impls.normalize context.lookups.interface
                 ~list_bounds:Interface.Impls.list_no_bounds)
-               (Types.substitute (substitution_of own) self.type_))
+               (Types.substitute (substitution_of declared_part) self.type_))
             ~model:result_type function_symbol
       | _ -> ());
       let symbol =
@@ -364,7 +368,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
         else function_symbol
       in
       applied_as := Some (symbol, sorts);
-      let term = Logic.Apply (symbol, own_arguments) in
+      let term = Logic.Apply (symbol, declared_arguments) in
       Facts.assume context after (Facts.make_in_range result_type term);
       if Facts.find_bounds result_type <> None && is_on_bound_values then
         Facts.run_once context (In_range symbol) (fun () ->
@@ -439,10 +443,10 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       Logic.conjunction
         (List.map2
            (fun ((parameter : Mir.parameter), _) input ->
-             let ty = Types.substitute (substitution_of own) parameter.type_ in
+             let ty = Types.substitute (substitution_of declared_part) parameter.type_ in
              Logic.( &&& ) (Facts.make_in_range ty input)
                (Validity.make_validity context outside ~assuming:true ty input))
-           own_bound inputs)
+           declared_bindings inputs)
     in
     let axiomatize symbol parameters make =
       let mark = context.fresh in
@@ -678,7 +682,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   | Some (symbol, _) when not !is_limited_call ->
       List.iter
         (fun (axiom : State.open_axiom) ->
-          let substitute = Logic.substitute (List.combine axiom.parameters own_arguments) in
+          let substitute = Logic.substitute (List.combine axiom.parameters declared_arguments) in
           List.iter
             (fun hypothesis -> Amounts.assume_typed context after (substitute hypothesis))
             axiom.hypotheses;
@@ -989,7 +993,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
             pair (list_generics trait_path) arguments
               ~fixed:(Contracts.make_trait_substitution context.lookups trait self_type)
           in
-          let path, own_substitution =
+          let path, declared_substitution =
             match evidence with
             | Impl { impl; arguments = impl_arguments } ->
                 let impl_substitution =
@@ -1003,7 +1007,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
             | _ -> (trait_path, trait_substitution)
           in
           let compute_substitution (part : State.part) =
-            if part.inherited then trait_substitution else own_substitution
+            if part.inherited then trait_substitution else declared_substitution
           in
           with_contract ~substitution_of:compute_substitution
             ~instance:(Types.Type self_type :: arguments)

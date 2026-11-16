@@ -205,7 +205,7 @@ let make_fragment env (compiled : compiled) =
     match compiled with
     | Code code ->
         let nested = List.sort compare code.nested in
-        ( List.map snd nested @ [ code.own ],
+        ( List.map snd nested @ [ code.enclosing ],
           "",
           Functions { nested = List.length nested; weight = code.weight } )
     | Data data -> ([], C_data.render_data context data, Static_data)
@@ -254,7 +254,7 @@ let render_file env build (fragments : (fragment * linkage) list) =
         fragment.environments)
     fragments;
   let render_linkage = function Internal -> "static inline " | External -> "" in
-  let own =
+  let function_texts =
     List.concat_map
       (fun ((fragment : fragment), linkage) ->
         let count = List.length fragment.functions in
@@ -275,7 +275,7 @@ let render_file env build (fragments : (fragment * linkage) list) =
     (fun (header, _) ->
       Hashtbl.replace declared (render_symbol header) ();
       Buffer.add_string declarations (header ^ ";\n"))
-    own;
+    function_texts;
   List.iter
     (fun ((fragment : fragment), _) ->
       List.iter
@@ -386,7 +386,7 @@ let render_file env build (fragments : (fragment * linkage) list) =
   List.iter
     (fun ((fragment : fragment), _) -> Buffer.add_string buffer fragment.definition)
     fragments;
-  List.iter (fun (header, body) -> Buffer.add_string buffer (header ^ body)) own;
+  List.iter (fun (header, body) -> Buffer.add_string buffer (header ^ body)) function_texts;
   Buffer.contents buffer
 
 type position = { file : string; line : int; column : int }

@@ -683,13 +683,13 @@ let build_namespace lookups package
        else Module_map.empty)
       modules
   in
-  let find_own (module_ : Path.module_) name =
+  let find_pass_name (module_ : Path.module_) name =
     if module_.package = package then
       Option.bind (Module_map.find_opt module_ modules_map) (fun names ->
           String_map.find_opt name names.index)
     else lookups.find module_ name
   in
-  let own_module_exists (module_ : Path.module_) =
+  let pass_module_exists (module_ : Path.module_) =
     if module_.package = package then Module_map.mem module_ modules_map
     else lookups.module_exists module_
   in
@@ -710,7 +710,7 @@ let build_namespace lookups package
       File_map.empty modules
   in
   let list_file_imports file = Option.value ~default:[] (File_map.find_opt file imports) in
-  let pass_lookups = { lookups with find = find_own; module_exists = own_module_exists } in
+  let pass_lookups = { lookups with find = find_pass_name; module_exists = pass_module_exists } in
   let module_declarations =
     List.map
       (fun (module_, files) ->

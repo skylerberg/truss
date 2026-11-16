@@ -1121,7 +1121,7 @@ struct t_caller {
   struct t_caller *next;
 };
 
-static _Thread_local struct t_caller t_caller_own;
+static _Thread_local struct t_caller t_thread_caller;
 static _Thread_local int t_caller_listed;
 static pthread_mutex_t t_monitor_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t t_monitor_wake = PTHREAD_COND_INITIALIZER;
@@ -1134,11 +1134,11 @@ __attribute__((noinline)) static struct t_caller *t_caller_self(void) {
   if (!t_caller_listed) {
     t_caller_listed = 1;
     pthread_mutex_lock(&t_monitor_lock);
-    t_caller_own.next = t_callers;
-    t_callers = &t_caller_own;
+    t_thread_caller.next = t_callers;
+    t_callers = &t_thread_caller;
     pthread_mutex_unlock(&t_monitor_lock);
   }
-  return &t_caller_own;
+  return &t_thread_caller;
 }
 
 static void *t_monitor_main(void *argument) {

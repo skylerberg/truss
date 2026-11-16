@@ -40,7 +40,7 @@ type package = {
 }
 
 type t = {
-  own : layout;
+  project_layout : layout;
   selection : selection;
   places : (Path.package * place) list;
   packages : package list;

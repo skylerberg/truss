@@ -228,7 +228,7 @@ let make_relative_to root directory =
 let list_packages snapshot =
   List.map
     (fun (directory, (package : Manifest.package)) -> (directory, package.name))
-    snapshot.project.own.packages
+    snapshot.project.project_layout.packages
 
 let list_target_packages snapshot requested =
   let packages = list_packages snapshot in
@@ -667,7 +667,7 @@ let locate_file snapshot (file : Path.file) =
   | Some { root = Project.Project; directory; _ } -> Project.make_file_path ~directory file
   | _ -> Path.show_file file
 
-let time_limit_ms snapshot = snapshot.project.own.time_limit_ms
+let time_limit_ms snapshot = snapshot.project.project_layout.time_limit_ms
 let lock_fix snapshot = snapshot.project.selection.lock_fix
 
 type lock_plan = { text : string; before : Registry.Lock.t; after : Registry.Lock.t }
@@ -726,7 +726,7 @@ let plan_lock snapshot ~set ~all =
                   not (List.exists (fun (name, _, _) -> name = entry.name) wanted))
                 before
           in
-          let manifests = List.map snd snapshot.project.own.packages in
+          let manifests = List.map snd snapshot.project.project_layout.packages in
           let is_local name =
             List.exists (fun (package : Manifest.package) -> package.name = name) manifests
           in

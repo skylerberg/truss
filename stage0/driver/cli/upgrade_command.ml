@@ -107,15 +107,15 @@ type signature = {
 
 let list_signatures snapshot trial =
   let database = Workspace.open_database snapshot and upgraded = Workspace.open_database trial in
-  let own = List.map snd (Workspace.list_packages snapshot) in
-  let is_own path = List.mem (Path.locate_package path) own in
+  let project_packages = List.map snd (Workspace.list_packages snapshot) in
+  let is_in_project path = List.mem (Path.locate_package path) project_packages in
   let changed =
     List.filter
       (fun part ->
         Signatures.is_signature part
         &&
         match Database.Part.find_definition part with
-        | Some path -> not (is_own path)
+        | Some path -> not (is_in_project path)
         | None -> false)
       (Database.list_changes database upgraded)
   in
@@ -123,7 +123,7 @@ let list_signatures snapshot trial =
   List.iter
     (fun ({ dependent; dependency } : Database.read) ->
       match (Database.Part.find_definition dependent, Database.Part.find_definition dependency) with
-      | Some reader, Some path when is_own reader && List.mem dependency changed ->
+      | Some reader, Some path when is_in_project reader && List.mem dependency changed ->
           Path_table.replace dependents path
             (reader :: Option.value (Path_table.find_opt dependents path) ~default:[])
       | _ -> ())
@@ -148,10 +148,10 @@ let list_signatures snapshot trial =
        dependents [])
 
 let list_new_errors snapshot trial =
-  let own = List.map snd (Workspace.list_packages snapshot) in
+  let project_packages = List.map snd (Workspace.list_packages snapshot) in
   let list_diagnostics (snapshot : Workspace.snapshot) =
     let database = Workspace.open_database snapshot in
-    Database.check database own;
+    Database.check database project_packages;
     List.map Project.show_problem (Workspace.problems snapshot)
     @ List.concat_map
         (fun file ->
@@ -159,7 +159,7 @@ let list_new_errors snapshot trial =
             (fun (diagnostic : Diagnostic.t) ->
               Printf.sprintf "%s: %s" (Workspace.locate_file snapshot file) diagnostic.message)
             (Database.list_file_diagnostics database file))
-        (List.concat_map (Workspace.list_package_files snapshot) own)
+        (List.concat_map (Workspace.list_package_files snapshot) project_packages)
   in
   let now = list_diagnostics snapshot in
   List.filter (fun diagnostic -> not (List.mem diagnostic now)) (list_diagnostics trial)
