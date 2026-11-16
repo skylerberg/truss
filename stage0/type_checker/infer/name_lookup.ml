@@ -379,16 +379,11 @@ and list_trait_static_methods (state : State.state) path name receiver =
 and resolve_evidence state (value : Syntax.expression) self_type (reference : Types.trait_reference)
     =
   State.defer state (fun () ->
-      let self_type = State.zonk state self_type
-      and reference = Unify.zonk_trait state.unifier reference in
+      let self_type = State.zonk state self_type in
+      let reference = State.solve_trait_arguments state self_type reference in
       if
         Types.contains_unsolved self_type
-        || List.exists
-             (function
-               | Types.Type type_ -> Types.contains_unsolved type_
-               | Types.Value (Value_variable _) -> true
-               | Types.Value (Known _ | Value_parameter _) | Types.Capabilities _ -> false)
-             reference.trait_arguments
+        || List.exists Types.is_unsolved_argument reference.trait_arguments
       then false
       else begin
         (match State.implements state self_type reference with
@@ -426,40 +421,44 @@ and list_trait_candidates (state : State.state) receiver_type name =
     | [] -> None
     | methods -> Some (trait, methods)
   in
-  let unique candidates =
-    List.fold_left
-      (fun acc ((trait : Types.trait_reference), methods) ->
-        if
-          List.exists
-            (fun ((other : Types.trait_reference), _) -> Path.equal other.trait trait.trait)
-            acc
-        then acc
-        else acc @ [ (trait, methods) ])
-      [] candidates
-  in
   match receiver_type with
   | Types.Parameter parameter ->
-      unique
-        (List.filter_map with_method
+      List.filter_map with_method
+        (merge_bounds_by_trait state
            (Interface.Properties.list_known_bounds state.lookups.interface
               ~bounds:(State.lookup_bounds state) (Types.Parameter parameter)))
   | Types.Any trait ->
-      unique
-        (List.filter_map with_method
+      List.filter_map with_method
+        (merge_bounds_by_trait state
            (Interface.Properties.list_bound_closure state.lookups.interface ~self:receiver_type
               trait))
   | _ ->
-      unique
-        (List.concat_map
-           (fun package ->
-             List.filter_map
-               (fun trait ->
-                 let reference = Instantiation.make_fresh_trait_reference state trait in
-                 if Option.is_some (State.implements state receiver_type reference) then
-                   with_method reference
-                 else None)
-               (state.lookups.interface.names.list_traits_declaring package name))
-           (Resolve.Names.list_visible_packages state.lookups.interface.names state.package))
+      List.concat_map
+        (fun package ->
+          List.filter_map
+            (fun trait ->
+              let reference = Instantiation.make_fresh_trait_reference state trait in
+              if Option.is_some (State.implements state receiver_type reference) then
+                with_method reference
+              else None)
+            (state.lookups.interface.names.list_traits_declaring package name))
+        (Resolve.Names.list_visible_packages state.lookups.interface.names state.package)
+
+and merge_bounds_by_trait state = function
+  | [] -> []
+  | (bound : Types.trait_reference) :: rest ->
+      let same_trait, other_traits =
+        List.partition
+          (fun (other : Types.trait_reference) -> Path.equal other.trait bound.trait)
+          rest
+      in
+      (if
+         List.for_all
+           (fun (other : Types.trait_reference) -> other.trait_arguments = bound.trait_arguments)
+           same_trait
+       then bound
+       else Instantiation.make_fresh_trait_reference state bound.trait)
+      :: merge_bounds_by_trait state other_traits
 
 and is_one_family (state : State.state) (traits : Types.trait_reference list) =
   let requires (first : Types.trait_reference) (second : Types.trait_reference) =

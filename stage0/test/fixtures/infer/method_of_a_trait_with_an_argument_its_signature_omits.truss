@@ -1,0 +1,13 @@
+trait Tagged[Tag] {
+  fn name(self) -> String
+}
+
+type Point(x: Int64)
+
+impl Tagged[Int64] for Point {
+  fn name(self) -> String { "point" }
+}
+
+fn name_of(point: Point) -> String {
+  point.name()
+}

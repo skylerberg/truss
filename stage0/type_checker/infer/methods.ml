@@ -773,7 +773,5 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
                 callee_result = result;
               };
           Form.register_call state value;
-          (match receiver_type with
-          | Types.Any _ -> ()
-          | _ -> Name_lookup.resolve_evidence state value receiver_type trait);
+          Name_lookup.resolve_evidence state value receiver_type trait;
           State.normalize state result)

@@ -162,35 +162,6 @@ let list_required_bounds (generics : Types.generic list) (substitution : Types.s
 
 let rec implements lookups ~(bounds : bounds) ?(depth = 0) ?(checks_conditions = true)
     (type_ : Types.ty) (wanted : Types.trait_reference) : evidence option =
-  let arguments_match actual_arguments =
-    List.length actual_arguments = List.length wanted.trait_arguments
-    && List.for_all2
-         (fun wanted actual ->
-           match (wanted, actual) with
-           | Types.Type wanted, Types.Type actual ->
-               is_open_type wanted || is_open_type actual
-               || Types.equal (normalize lookups ~bounds wanted) (normalize lookups ~bounds actual)
-           | Types.Value wanted, Types.Value actual ->
-               is_open_value wanted || is_open_value actual || wanted = actual
-           | _ -> false)
-         wanted.trait_arguments actual_arguments
-  in
-  let associated_match ~base fixed =
-    List.for_all
-      (fun (name, wanted_type) ->
-        let wanted_type = normalize lookups ~bounds wanted_type in
-        if is_open_type wanted_type then true
-        else
-          match List.assoc_opt name fixed with
-          | Some defined ->
-              is_open_type defined || Types.equal (normalize lookups ~bounds defined) wanted_type
-          | None -> (
-              match (base, wanted_type) with
-              | Some base, Types.Projection { base = projected; name = projected_name; _ } ->
-                  Types.equal base projected && projected_name = name
-              | _ -> false))
-      wanted.associated
-  in
   let broken_trait =
     match Definition.read_interface lookups wanted.trait with
     | Some (Error_interface report) -> Some report
@@ -226,27 +197,9 @@ let rec implements lookups ~(bounds : bounds) ?(depth = 0) ?(checks_conditions =
     | Types.Error _ | Types.Hole | Types.Variable _ -> Some (Accepted type_)
     | Types.Never | Types.Integer | Types.Literal _ | Types.Function _ -> None
     | Types.Parameter _ | Types.Projection _ ->
-        if
-          List.exists
-            (fun (bound : Types.trait_reference) ->
-              Path.equal bound.trait wanted.trait
-              && arguments_match bound.trait_arguments
-              && associated_match ~base:(Some type_) bound.associated)
-            (Properties.list_known_bounds lookups ~bounds type_)
-        then Some From_bound
-        else None
-    | Types.Any trait ->
-        if
-          List.exists
-            (fun (bound : Types.trait_reference) ->
-              Path.equal bound.trait wanted.trait
-              && arguments_match bound.trait_arguments
-              && associated_match ~base:None
-                   (if Path.equal bound.trait trait.trait then trait.associated
-                    else bound.associated))
-            (Properties.list_bound_closure lookups ~self:type_ trait)
-        then Some From_any
-        else None
+        if list_matching_bounds lookups ~bounds type_ wanted <> [] then Some From_bound else None
+    | Types.Any _ ->
+        if list_matching_bounds lookups ~bounds type_ wanted <> [] then Some From_any else None
     | Types.Named { path; _ } ->
         let packages =
           List.sort_uniq compare
@@ -293,10 +246,63 @@ let rec implements lookups ~(bounds : bounds) ?(depth = 0) ?(checks_conditions =
                                    (implements lookups ~bounds ~depth:(depth + 1) argument bound))
                                (list_required_bounds impl.impl_generics substitution)
                         in
-                        if conditions_hold && associated_match ~base:None associated then
-                          Some (From_impl { impl = impl_path; substitution })
+                        if
+                          conditions_hold
+                          && has_matching_associated_types lookups ~bounds wanted ~base:None
+                               associated
+                        then Some (From_impl { impl = impl_path; substitution })
                         else None)))
           candidates
+
+and list_matching_bounds lookups ~bounds (type_ : Types.ty) (wanted : Types.trait_reference) =
+  let arguments_match actual_arguments =
+    List.length actual_arguments = List.length wanted.trait_arguments
+    && List.for_all2
+         (fun wanted actual ->
+           match (wanted, actual) with
+           | Types.Type wanted, Types.Type actual ->
+               is_open_type wanted || is_open_type actual
+               || Types.equal (normalize lookups ~bounds wanted) (normalize lookups ~bounds actual)
+           | Types.Value wanted, Types.Value actual ->
+               is_open_value wanted || is_open_value actual || wanted = actual
+           | _ -> false)
+         wanted.trait_arguments actual_arguments
+  in
+  let matches ~base ~associated (bound : Types.trait_reference) =
+    Path.equal bound.trait wanted.trait
+    && arguments_match bound.trait_arguments
+    && has_matching_associated_types lookups ~bounds wanted ~base associated
+  in
+  match type_ with
+  | Types.Any trait ->
+      List.filter
+        (fun (bound : Types.trait_reference) ->
+          matches ~base:None
+            ~associated:
+              (if Path.equal bound.trait trait.trait then trait.associated else bound.associated)
+            bound)
+        (Properties.list_bound_closure lookups ~self:type_ trait)
+  | _ ->
+      List.filter
+        (fun (bound : Types.trait_reference) ->
+          matches ~base:(Some type_) ~associated:bound.associated bound)
+        (Properties.list_known_bounds lookups ~bounds type_)
+
+and has_matching_associated_types lookups ~bounds (wanted : Types.trait_reference) ~base fixed =
+  List.for_all
+    (fun (name, wanted_type) ->
+      let wanted_type = normalize lookups ~bounds wanted_type in
+      if is_open_type wanted_type then true
+      else
+        match List.assoc_opt name fixed with
+        | Some defined ->
+            is_open_type defined || Types.equal (normalize lookups ~bounds defined) wanted_type
+        | None -> (
+            match (base, wanted_type) with
+            | Some base, Types.Projection { base = projected; name = projected_name; _ } ->
+                Types.equal base projected && projected_name = name
+            | _ -> false))
+    wanted.associated
 
 and project_associated_type lookups ~bounds ?defining type_ (trait : Types.trait_reference) name =
   project_declared_type lookups ~bounds ?defining type_
