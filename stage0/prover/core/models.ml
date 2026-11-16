@@ -136,10 +136,28 @@ let rank_model (context : State.context) (ty : Types.ty) ~(model : Types.ty) sym
 
 let compute_model_function (context : State.context) (ty : Types.ty) ~(model : Types.ty) =
   let model_trait = Well_known.make_path Model in
+  let packages =
+    match ty with
+    | Types.Named { path; _ } ->
+        List.sort_uniq compare [ Path.standard_package; Path.locate_package path ]
+    | _ -> [ Path.standard_package ]
+  in
+  let declared_model =
+    Interface.Impls.normalize context.lookups.interface ~list_bounds:Interface.Impls.list_no_bounds
+      (Projection
+         {
+           base = ty;
+           trait = { trait = model_trait; trait_arguments = []; associated = [] };
+           name = "Value";
+         })
+  in
   match
-    Mir.Call_edges.list_impls_for context.lookups.interface Path.standard_package [ model_trait ] ty
+    List.concat_map
+      (fun package ->
+        Mir.Call_edges.list_impls_for context.lookups.interface package [ model_trait ] ty)
+      packages
   with
-  | impl :: _ ->
+  | impl :: _ when Types.equal declared_model model ->
       let path = Path.Method { owner = impl; name = "model"; receiver = Read } in
       let symbol = Logic.Symbol.Function { callee = path; instance = [ Types.Type ty ] } in
       Facts.declare context
@@ -159,7 +177,7 @@ let compute_model_function (context : State.context) (ty : Types.ty) ~(model : T
                        (substitute_value_term context count) )))
       | _ -> ());
       Some (fun term -> Logic.Apply (symbol, [ term ]))
-  | [] -> None
+  | _ -> None
 
 let find_model_function (context : State.context) (ty : Types.ty) ~(model : Types.ty) =
   let key = (ty, model) in

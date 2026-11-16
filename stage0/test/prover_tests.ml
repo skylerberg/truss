@@ -453,6 +453,8 @@ let () =
   Harness.test
     "the elements that a loop has read meet the postcondition of the collection's `element`"
     (fun () -> expect_proven (couple ^ Fixtures.Prover.couple_loop_with_known_elements));
+  Harness.test "a loop over a user's collection has visited the collection's model when it ends"
+    (fun () -> expect_proven Fixtures.Prover.couple_with_a_model_totaled_by_a_loop);
   Harness.test "the elements that a loop has read are not known beyond that postcondition"
     (fun () ->
       expect_not_proven

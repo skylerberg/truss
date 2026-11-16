@@ -1,0 +1,52 @@
+type Couple(first: Int64, second: Int64)
+
+impl Model for Couple {
+  type Value = Sequence[Int64]
+
+  fn model(self) -> Sequence[Int64]
+    ensures result.length() == 2
+    ensures identical(result[0], self.first)
+    ensures identical(result[1], self.second)
+    cost time finite
+  {
+    Sequence.empty().append(self.first).append(self.second)
+  }
+}
+
+impl Iterable for Couple {
+  type Element = Int64
+
+  fn count(self) -> UInt64
+    ensures result == self.model().length()
+    cost time O(1)
+  {
+    2
+  }
+
+  fn element(self, position: UInt64) lends Int64
+    requires position < self.count()
+    ensures identical(result, self.model()[position])
+    cost time O(1)
+  {
+    if position == 0 {
+      self.first
+    } else {
+      self.second
+    }
+  }
+}
+
+fn total(couple: Couple) -> Int64
+  requires couple.first >= 0 && couple.first <= 10
+  requires couple.second >= 0 && couple.second <= 10
+  ensures result == couple.model().sum(fn(value) { value })
+{
+  var total: Int64 = 0
+  for value in couple
+    invariant total == visited.sum(fn(value) { value })
+    invariant total >= 0 && total <= 10 * visited.length()
+  {
+    total += value
+  }
+  total
+}
