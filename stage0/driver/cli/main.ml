@@ -301,7 +301,7 @@ let evaluate arguments =
   in
   let outcome =
     match
-      Compiler_bug.while_doing ~stage:"Command"
+      Compiler_bug.run_while_doing ~stage:"Command"
         ("running `truss " ^ String.concat " " arguments ^ "`")
         run
     with

@@ -201,5 +201,5 @@ let check_named_callback context (frame : State.frame) (invocation : Invocation.
         expected.costs
   | _ ->
       if own.requires <> [] || own.costs <> [] then
-        Facts.unsupported location
+        Facts.raise_unsupported location
           "a function passed for a parameter whose type the prover cannot read"

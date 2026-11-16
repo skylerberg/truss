@@ -3,4 +3,4 @@ type t = Exit of int | Run_program of { program : string; arguments : string lis
 exception Stop of int
 exception Cannot_run of string
 
-let cannot_run format = Printf.ksprintf (fun message -> raise (Cannot_run message)) format
+let raise_cannot_run format = Printf.ksprintf (fun message -> raise (Cannot_run message)) format

@@ -1,4 +1,4 @@
-let bug format = Compiler_bug.bug ~stage:"Debug_output" format
+let raise_bug format = Compiler_bug.raise_bug ~stage:"Debug_output" format
 
 type form = Structure | Text | Sequence
 
@@ -93,7 +93,7 @@ let build_debug env ty =
       | Some element, _ -> (element, Storage.project_buffer place, Storage.project_length place)
       | None, Some element ->
           (element, Storage.project_view_elements place, Storage.project_view_length place)
-      | None, None -> bug "%s is not storage or a view" (Ground.to_string field_ty)
+      | None, None -> raise_bug "%s is not storage or a view" (Ground.to_string field_ty)
     in
     if as_text then
       Writing.emit_write_bytes_call env builder ~output Writing_quoted_text ~elements:(Copy buffer)
@@ -145,7 +145,7 @@ let build_debug env ty =
       | Named { path; _ }, Record fields ->
           fields_debug (Ground.show_path_name path) fields (fun field ->
               Lowered.project value (Field field))
-      | _, Record _ -> bug "%s has the shape of a record and no name" (Ground.to_string ty)
+      | _, Record _ -> raise_bug "%s has the shape of a record and no name" (Ground.to_string ty)
       | _, Array (element, count) ->
           list_of element
             ~element_at:(fun index -> Lowered.project value (Index index))
@@ -156,7 +156,7 @@ let build_debug env ty =
             List.map
               (fun (variant_shape : Memory_layout.variant_shape) ->
                 let case = Emit_c.Builder.allocate_block builder in
-                Emit_c.Builder.in_block builder case (fun () ->
+                Emit_c.Builder.run_in_block builder case (fun () ->
                     fields_debug variant_shape.name variant_shape.fields (fun field ->
                         Lowered.project value
                           (Variant_field { variant = variant_shape.name; field }));

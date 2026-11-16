@@ -11,7 +11,7 @@ let require_main snapshot database packages =
   match find_main snapshot database packages package with
   | Some main -> main
   | None ->
-      Outcome.cannot_run
+      Outcome.raise_cannot_run
         "The package %s has no `main` in its root module, a file in its top directory, so it has \
          no program."
         (Path.show_package package)
@@ -83,7 +83,7 @@ let build_program ?output snapshot packages (build : Compiler.build) =
   Option.iter (refuse_unshippable snapshot packages compile main) (Report.force_proofs report);
   let output = Option.value output ~default:(Compile.make_program_path compile) in
   match Compile.build_program compile ~main ~output with
-  | Error message -> Outcome.cannot_run "%s" message
+  | Error message -> Outcome.raise_cannot_run "%s" message
   | Ok () -> output
 
 let run ~release ~arguments =

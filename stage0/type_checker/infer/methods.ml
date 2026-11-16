@@ -51,7 +51,7 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
           let evidence =
             match State.implements state parts index with
             | Some evidence -> Form.convert_evidence (State.convert_evidence evidence)
-            | None -> State.bug "`Sequence` does not implement `Index`"
+            | None -> State.raise_bug "`Sequence` does not implement `Index`"
           in
           state.tables.resolutions.(value.id) <- Some Specification_value;
           State.register_expression state value (fun () ->
@@ -146,7 +146,7 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
           Calls.check_named_call state env ?expected value path signature
             ~type_arguments:(Option.value ~default:[] type_arguments)
             arguments
-      | None -> State.bug "`%s` has no signature" (Path.show path))
+      | None -> State.raise_bug "`%s` has no signature" (Path.show path))
   | Definition ((Trait | Capability), _) | Type_parameter _ | Capability_parameter _ ->
       Calls.check_arguments_alone state env arguments
         (State.make_error_type state Not_callable (State.read_span state callee.id)
@@ -156,7 +156,7 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
   | Definition (Constant, _)
   | Field _ | Result_value | Visited ->
       Calls.check_function_value_call state env value callee arguments
-  | Binding | Module _ -> State.bug "the name `%s` is not resolved" name.text
+  | Binding | Module _ -> State.raise_bug "the name `%s` is not resolved" name.text
 
 and check_method_time state (value : Syntax.expression) (type_ : Types.ty) (member : Syntax.name) =
   let overloads =
@@ -274,7 +274,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
               Name_lookup.finish_call state env value method_path
                 (Tables.Function { path = method_path; type_arguments = instance.type_arguments })
                 instance checked left_out
-          | None -> State.bug "the method `%s` has no signature" (Path.show method_path))
+          | None -> State.raise_bug "the method `%s` has no signature" (Path.show method_path))
       | None -> (
           match Name_lookup.list_trait_static_methods state path member.text Static with
           | [ (trait, method_) ] ->
@@ -348,7 +348,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
           | Some (Trait_overload (trait, method_)) ->
               check_trait_method_through_type state env ?expected value type_ trait method_
                 arguments
-          | Some (Type_overload _) -> State.bug "a generic parameter has a method of its own"
+          | Some (Type_overload _) -> State.raise_bug "a generic parameter has a method of its own"
           | None when overloads <> [] -> wrong_receiver ()
           | None ->
               State.make_error_type state Unknown_member (State.read_span state member.id)
@@ -644,7 +644,7 @@ and check_method_with_receiver state env ?expected ?(type_arguments = [])
     (value : Syntax.expression) ~(receiver : Syntax.expression) ~receiver_type method_path arguments
     =
   match Instantiation.find_function_signature state method_path with
-  | None -> State.bug "the method `%s` has no signature" (Path.show method_path)
+  | None -> State.raise_bug "the method `%s` has no signature" (Path.show method_path)
   | Some signature -> (
       let instance = Instantiation.instantiate state (State.read_span state value.id) signature in
       match

@@ -152,7 +152,7 @@ let render_call context fc (target : Lowered.target) arguments =
       let leading = match target with Direct _ -> 0 | _ -> 1 in
       let arity = List.length signature.parameters in
       if leading + List.length arguments <> arity then
-        C_runtime.bug "a call that passes %d arguments to a target that takes %d"
+        C_runtime.raise_bug "a call that passes %d arguments to a target that takes %d"
           (leading + List.length arguments)
           arity
   | Intrinsic _ | Foreign _ -> ());
@@ -175,7 +175,7 @@ let render_call context fc (target : Lowered.target) arguments =
       let value =
         match C_values.render_operand context fc value with
         | Some (text, _) -> text
-        | None -> C_runtime.bug "a function value of zero size"
+        | None -> C_runtime.raise_bug "a function value of zero size"
       in
       Printf.sprintf "%s.f_code(%s)" value
         (String.concat ", " ((value ^ ".f_environment") :: List.map fst arguments))
@@ -188,7 +188,7 @@ let render_call context fc (target : Lowered.target) arguments =
             (fun c_type (text, _) -> Printf.sprintf "(%s)(%s)" (Libc.show_c_type c_type) text)
             declaration.takes arguments
         with Invalid_argument _ ->
-          C_runtime.bug "a call of %s with an argument of zero size" declaration.symbol
+          C_runtime.raise_bug "a call of %s with an argument of zero size" declaration.symbol
       in
       let called = Printf.sprintf "%s(%s)" declaration.symbol (String.concat ", " cast_arguments) in
       match declaration.returns with Pointer _ -> "((void *)" ^ called ^ ")" | _ -> called)
@@ -196,12 +196,12 @@ let render_call context fc (target : Lowered.target) arguments =
       let table =
         match C_values.render_operand context fc table with
         | Some (text, _) -> text
-        | None -> C_runtime.bug "a table of zero size"
+        | None -> C_runtime.raise_bug "a table of zero size"
       in
       let texts =
         match C_values.render_operand context fc value with
         | Some (value, _) -> String.concat ", " (value :: List.map fst arguments)
-        | None -> C_runtime.bug "an any value of zero size"
+        | None -> C_runtime.raise_bug "an any value of zero size"
       in
       let result =
         match signature.result with
@@ -216,7 +216,7 @@ let render_call context fc (target : Lowered.target) arguments =
       let evidence =
         match C_values.render_operand context fc evidence with
         | Some (text, _) -> text
-        | None -> C_runtime.bug "evidence of zero size"
+        | None -> C_runtime.raise_bug "evidence of zero size"
       in
       let result =
         match signature.result with
@@ -265,7 +265,7 @@ let write_statement context fc buffer (statement : Lowered.statement) =
         (fun (argument : Lowered.operand) ->
           match argument with
           | (Address { place = passed; _ } | Moved_address passed) when may_alias place passed ->
-              C_runtime.bug "a call that writes its result to a place it is also given"
+              C_runtime.raise_bug "a call that writes its result to a place it is also given"
           | _ -> ())
         arguments;
       line "%s;" (render_call context fc target (Address { place; writable = true } :: arguments))
@@ -288,13 +288,13 @@ let write_statement context fc buffer (statement : Lowered.statement) =
                (Convention.drop_signature ty)
             ^ ";\n");
           line "%s(&%s);" symbol text
-      | Some _ -> C_runtime.bug "a drop of a place that is not a value")
+      | Some _ -> C_runtime.raise_bug "a drop of a place that is not a value")
   | Echo { text; length; site } ->
       context.failures <- (Echo, site) :: context.failures;
       let operand argument =
         match C_values.render_operand context fc argument with
         | Some (text, _) -> text
-        | None -> C_runtime.bug "an echo of nothing"
+        | None -> C_runtime.raise_bug "an echo of nothing"
       in
       line "t_runtime_echo(%s, %s, %s);" (operand text) (operand length)
         (C_values.render_site context site)
@@ -302,7 +302,7 @@ let write_statement context fc buffer (statement : Lowered.statement) =
       match C_values.render_place context fc place with
       | Some (text, Value sum) ->
           line "t_runtime_free(%s);" (C_values.render_block_pointer context text sum variant)
-      | _ -> C_runtime.bug "a block of a place that is not a sum type")
+      | _ -> C_runtime.raise_bug "a block of a place that is not a sum type")
   | Defer_free_block { lend; place; variant } -> (
       match (C_values.render_operand context fc lend, C_values.render_place context fc place) with
       | Some (lend, _), Some (text, Value sum) ->
@@ -310,12 +310,12 @@ let write_statement context fc buffer (statement : Lowered.statement) =
             (C_types.use_helper context "t_lend")
             lend
             (C_values.render_block_pointer context text sum variant)
-      | _ -> C_runtime.bug "a block of a place that is not a sum type")
+      | _ -> C_runtime.raise_bug "a block of a place that is not a sum type")
   | Fork { branches } ->
       let operand argument =
         match C_values.render_operand context fc argument with
         | Some (text, _) -> text
-        | None -> C_runtime.bug "an environment of zero size"
+        | None -> C_runtime.raise_bug "an environment of zero size"
       in
       line "{";
       line "  const struct t_branch branches[%d] = { %s };" (List.length branches)
@@ -332,7 +332,7 @@ let write_statement context fc buffer (statement : Lowered.statement) =
       let operand argument =
         match C_values.render_operand context fc argument with
         | Some (text, _) -> text
-        | None -> C_runtime.bug "an operand of zero size"
+        | None -> C_runtime.raise_bug "an operand of zero size"
       in
       line "t_runtime_parallel_range(&%s, (void *)%s, %s, %s);"
         (C_values.render_function_ref_symbol fc (Nested body))
@@ -347,7 +347,7 @@ let write_terminator context fc buffer (terminator : Lowered.terminator) =
   let operand argument =
     match C_values.render_operand context fc argument with
     | Some expression -> expression
-    | None -> C_runtime.bug "an operand of zero size"
+    | None -> C_runtime.raise_bug "an operand of zero size"
   in
   let default = function
     | Some block -> Printf.sprintf "goto b%d;" block
@@ -387,7 +387,7 @@ let write_terminator context fc buffer (terminator : Lowered.terminator) =
                     block)
                 tests;
               line "%s" (default otherwise))
-      | Some _ -> C_runtime.bug "a variant switch on a place that is not a value")
+      | Some _ -> C_runtime.raise_bug "a variant switch on a place that is not a value")
   | Return None -> line "return;"
   | Return (Some value) -> (
       match C_values.render_operand context fc value with

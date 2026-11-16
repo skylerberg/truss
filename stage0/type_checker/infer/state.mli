@@ -97,7 +97,7 @@ val report :
 val is_formula : env -> bool
 val reject_in_formula : state -> env -> Source.Definition_span.t -> string -> unit
 val read_span : state -> Syntax.id -> Source.Definition_span.t
-val bug : ('a, unit, string, 'b) format4 -> 'a
+val raise_bug : ('a, unit, string, 'b) format4 -> 'a
 
 val make_error_type :
   state ->
@@ -158,7 +158,7 @@ val resolve_associated_type :
 val convert_evidence : Interface.Impls.evidence -> Tables.evidence
 val make_trait_reference : arguments:Types.argument list -> Path.t -> Types.trait_reference
 val string_type : Types.ty
-val in_statement : state -> env -> Source.Definition_span.t -> (unit -> 'a) -> 'a
+val run_in_statement : state -> env -> Source.Definition_span.t -> (unit -> 'a) -> 'a
 val diverges : is_never:(Syntax.expression -> bool) -> Syntax.statement -> bool
 val statement_diverges : state -> Syntax.statement -> bool
 val build_block : state -> Syntax.block -> Core.block

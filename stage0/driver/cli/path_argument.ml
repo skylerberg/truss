@@ -2,7 +2,7 @@ type t = { prefix : string list; last : string; member : string option }
 
 let parse text =
   let refuse () =
-    Outcome.cannot_run
+    Outcome.raise_cannot_run
       "`%s` is not a path, such as `weather::forecast::parse` or \
        `weather::forecast::Forecast.summary`."
       text

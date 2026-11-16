@@ -1,4 +1,4 @@
-let bug format = Compiler_bug.bug ~stage:"MIR" format
+let raise_bug format = Compiler_bug.raise_bug ~stage:"MIR" format
 
 type entered =
   [ `Default of Path.t * string option * string | `Invariant of Path.t * Z.t | `Requires of Path.t ]
@@ -184,7 +184,7 @@ let list_edges (lookups : lookups) ~package ~may_panic (code : Tree.t) =
             in
             if omitted <> [] then field_defaults type_ variant omitted
         | None -> ())
-    | Basic (Assign { value = Construct _; _ }) -> bug "a construction outside a temporary"
+    | Basic (Assign { value = Construct _; _ }) -> raise_bug "a construction outside a temporary"
     | Basic (Provide { provided; _ }) ->
         List.iter
           (fun (implementation : Tree.provided) ->

@@ -109,7 +109,7 @@ let run ~direction ~name =
   let snapshot, _ = Command_packages.load_current () in
   let database = Workspace.open_database snapshot in
   match find_definitions snapshot database argument with
-  | [] -> Outcome.cannot_run "No definition named %s in this worktree." name
+  | [] -> Outcome.raise_cannot_run "No definition named %s in this worktree." name
   | targets ->
       let lines =
         list_lines

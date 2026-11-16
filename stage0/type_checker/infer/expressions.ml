@@ -100,7 +100,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
   | Name path -> (
       match State.find_head state value with
       | Some resolution -> Name_lookup.check_name state env value resolution
-      | None -> State.bug "the name `%s` is not resolved" path.last.text)
+      | None -> State.raise_bug "the name `%s` is not resolved" path.last.text)
   | Member (base, member) -> check_member_value state env value base member
   | Bracket (base, items) -> check_bracket state env ?expected value base items
   | Call (callee, arguments) -> Methods.check_call state env ?expected value callee arguments
@@ -123,7 +123,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
       Operators.check_binary state env ?expected value operator left right
   | Is { value = tested; pattern = written; _ } ->
       let tested_type =
-        State.in_statement state env (State.read_span state tested.id) (fun () ->
+        State.run_in_statement state env (State.read_span state tested.id) (fun () ->
             check_expression state env tested)
       in
       let mode = Modes.classify_scrutinee_mode state tested in
@@ -291,7 +291,7 @@ and check_bracket state env ?expected (value : Syntax.expression) (base : Syntax
   | Some Type_arguments -> (
       match State.find_head state value with
       | Some resolution -> Name_lookup.check_name state env value resolution
-      | None -> State.bug "type arguments are written after an expression that is not a name")
+      | None -> State.raise_bug "type arguments are written after an expression that is not a name")
   | Some Method_bracket -> (
       match base.kind with
       | Member (inner, member)

@@ -81,8 +81,9 @@ let evaluate_default_value (context : State.context) frame (part : State.part) p
           snd
             (Amounts.run_code context frame default
                ~type_:(Facts.substitute_type context frame parameter.type_))
-      | _ -> Facts.bug "a parameter's default has no MIR")
-  | Some { form = Field_defaults _; _ } | None -> Facts.bug "a callee with no MIR of its defaults"
+      | _ -> Facts.raise_bug "a parameter's default has no MIR")
+  | Some { form = Field_defaults _; _ } | None ->
+      Facts.raise_bug "a callee with no MIR of its defaults"
 
 let is_datatype ty = match ty with Types.Named _ -> Types.find_builtin ty = None | _ -> false
 
@@ -742,7 +743,8 @@ let function_value_amount context frame (function_type : Types.function_type) ca
             | Types.Capability_parameter _ | Types.Capability_projection _
             | Types.Capability_variable _ ->
                 true
-            | Types.Capability_error _ -> Facts.bug "the prover reads a capability with an error")
+            | Types.Capability_error _ ->
+                Facts.raise_bug "the prover reads a capability with an error")
           (function_type.uses :> Types.capability list)
       then Operations.declare_unknown_amount context frame counter
       else Costs.zero

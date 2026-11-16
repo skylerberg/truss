@@ -1,5 +1,7 @@
 let require_home (source : State.source) =
-  match source.key with Some key -> key | None -> Facts.bug "%s has no definition key" source.name
+  match source.key with
+  | Some key -> key
+  | None -> Facts.raise_bug "%s has no definition key" source.name
 
 let make_context (lookups : Lookups.t) ~home ~current ~terminates ~measures =
   let rec context =
@@ -105,7 +107,9 @@ let list_promises context (source : State.source) locals (costs : Mir.cost list)
       | _ -> (
           match Contracts.find_resource cost ~locals with
           | None ->
-              Facts.unsupported (Facts.locate context source cost.origin) "this `calls` target"
+              Facts.raise_unsupported
+                (Facts.locate context source cost.origin)
+                "this `calls` target"
           | Some resource ->
               let counter =
                 {
@@ -165,7 +169,7 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
   let contract =
     match Mir.read_contract lookups.mir path with
     | Some { form; _ } -> form
-    | None -> Facts.bug "`%s` has no MIR of its contract" source.name
+    | None -> Facts.raise_bug "`%s` has no MIR of its contract" source.name
   in
   let parameters = contract.parameters in
   let signature =
@@ -200,7 +204,7 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
             let self_type =
               match signature with
               | Some { receiver = Some (_, ty); _ } -> ty
-              | _ -> Facts.unsupported Whole_definition "`self` without a type"
+              | _ -> Facts.raise_unsupported Whole_definition "`self` without a type"
             in
             let self = Facts.arrive context frame "self" self_type in
             (match self with
@@ -307,7 +311,7 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
   let mir =
     match Mir.read_code lookups.mir path with
     | Some { form; _ } -> form
-    | None -> Facts.bug "`%s` has a body and no MIR" source.name
+    | None -> Facts.raise_bug "`%s` has a body and no MIR" source.name
   in
   let promised =
     list_promises context source start.locals contract.costs ~inherited:false
@@ -548,7 +552,7 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
                       Mir.find_code (lookups.mir.body_part key))
                 with
                 | Some proof -> proof
-                | None -> Facts.bug "the proof `%s` has no MIR" proof_source.name
+                | None -> Facts.raise_bug "the proof `%s` has no MIR" proof_source.name
               in
               let parameters =
                 List.map
@@ -556,7 +560,8 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
                     match proof.body.locals.(parameter) with
                     | { kind = Source { local; _ }; type_; _ } -> (local, type_)
                     | { kind = Temporary | Lent _; _ } ->
-                        Facts.bug "a parameter of the proof `%s` is a temporary" proof_source.name)
+                        Facts.raise_bug "a parameter of the proof `%s` is a temporary"
+                          proof_source.name)
                   proof.body.parameters
               in
               let locals, types =
@@ -648,7 +653,7 @@ let test (lookups : Lookups.t) (source : State.source) ~path =
   (match Mir.find_code (lookups.mir.body_part home) with
   | Some (mir : Mir.t) ->
       Reader.read_body context (make_empty_frame source) ~lambdas:mir.lambdas mir.body
-  | None -> Facts.bug "the test `%s` has no MIR" source.name);
+  | None -> Facts.raise_bug "the test `%s` has no MIR" source.name);
   make_outcome context
 
 let translate_constant (lookups : Lookups.t) (source : State.source) ~path =
@@ -659,7 +664,7 @@ let translate_constant (lookups : Lookups.t) (source : State.source) ~path =
       ignore
         (Amounts.run_code context (make_empty_frame source) code
            ~type_:(Values.compute_constant_type context path))
-  | None -> Facts.bug "the constant `%s` has no MIR" (Path.show path));
+  | None -> Facts.raise_bug "the constant `%s` has no MIR" (Path.show path));
   make_outcome context
 
 let translate_theorem lookups source ~path = translate_function ~proof:true lookups source ~path

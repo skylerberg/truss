@@ -14,7 +14,7 @@ val allocate_block : t -> Lowered.block
 val start : t -> Lowered.block -> unit
 val emit : t -> Lowered.statement -> unit
 val finish : t -> Lowered.terminator -> unit
-val in_block : t -> Lowered.block -> (unit -> unit) -> unit
+val run_in_block : t -> Lowered.block -> (unit -> unit) -> unit
 val branch : t -> Lowered.operand -> yes:Lowered.block -> no:Lowered.block -> unit
 val emit_when : t -> Lowered.operand -> (unit -> unit) -> unit
 

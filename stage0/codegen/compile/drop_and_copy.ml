@@ -1,4 +1,4 @@
-let bug format = Compiler_bug.bug ~stage:"Drop_and_copy" format
+let raise_bug format = Compiler_bug.raise_bug ~stage:"Drop_and_copy" format
 
 module Type_map = Map.Make (struct
   type t = Ground.ty
@@ -186,7 +186,7 @@ let drop context ty =
               || List.exists (fun (_, member) -> needs_drop context member) variant_shape.fields
             then begin
               let block = Emit_c.Builder.allocate_block builder in
-              Emit_c.Builder.in_block builder block (fun () ->
+              Emit_c.Builder.run_in_block builder block (fun () ->
                   List.iter
                     (fun (field, member) ->
                       if needs_drop context member then
@@ -292,11 +292,11 @@ let copy context ty =
     match (result_pointer, result_local) with
     | Some pointer, _ -> { root = Local pointer; projections = [ Deref ] }
     | None, Some local -> Lowered.make_local_place local
-    | None, None -> bug "no place for the copy"
+    | None, None -> raise_bug "no place for the copy"
   in
   Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
   (match Representation.classify context.env ty with
-  | Handle -> bug "a copy of a handle, which is not Copyable"
+  | Handle -> raise_bug "a copy of a handle, which is not Copyable"
   | Any ->
       let copied = Emit_c.Builder.allocate_local builder (Raw (Pointer Opaque)) in
       Emit_c.Builder.emit builder
@@ -326,7 +326,7 @@ let copy context ty =
                      ("vtable", Copy (Lowered.project self (Field "vtable")));
                    ];
                } ))
-  | Shape (Scalar _) -> bug "a copy of the scalar %s, which is trivial" (Ground.to_string ty)
+  | Shape (Scalar _) -> raise_bug "a copy of the scalar %s, which is trivial" (Ground.to_string ty)
   | Shared _ ->
       Emit_c.Builder.emit builder
         (Call
@@ -431,7 +431,7 @@ let copy context ty =
         List.map
           (fun (variant_shape : Memory_layout.variant_shape) ->
             let block = Emit_c.Builder.allocate_block builder in
-            Emit_c.Builder.in_block builder block (fun () ->
+            Emit_c.Builder.run_in_block builder block (fun () ->
                 let fields =
                   List.map
                     (fun (name, member) ->

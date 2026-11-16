@@ -1,4 +1,4 @@
-let bug format = Compiler_bug.bug ~stage:"Lower" format
+let raise_bug format = Compiler_bug.raise_bug ~stage:"Lower" format
 
 type context = {
   lookups : Lookups.t;
@@ -69,17 +69,17 @@ let bind = Monomorphic.make_substitution
 let read_impl_interface context impl =
   match Interface.Definition.read_impl_interface context.lookups.interface impl with
   | Some position -> position
-  | None -> bug "no interface for %s" (Path.show impl)
+  | None -> raise_bug "no interface for %s" (Path.show impl)
 
 let make_trait_substitution context impl =
   match Interface.Impls.make_impl_substitution context.lookups.interface impl with
   | Some substitution -> substitution
-  | None -> bug "no trait for %s" (Path.show impl)
+  | None -> raise_bug "no trait for %s" (Path.show impl)
 
 let read_signature context (path : Path.t) =
   match Interface.Impls.read_signature context.lookups.interface path with
   | Some signature -> signature
-  | None -> bug "no signature for %s" (Path.show path)
+  | None -> raise_bug "no signature for %s" (Path.show path)
 
 let make_code context (path : Path.t) type_arguments : code =
   let function_code ~enclosing_impl (key : Resolve.Names.key) ~(interface : Types.signature)
@@ -113,7 +113,7 @@ let make_code context (path : Path.t) type_arguments : code =
                     (uses :> Types.capability list)
               | None -> []);
           }
-      | _ -> bug "%s is not a test" (Path.show path))
+      | _ -> raise_bug "%s is not a test" (Path.show path))
   | Top _ | Method _ -> (
       let interface = read_signature context path in
       let substitution = bind interface.generics type_arguments in
@@ -148,10 +148,11 @@ let make_code context (path : Path.t) type_arguments : code =
           let own = List.drop count type_arguments in
           function_code ~enclosing_impl provided ~interface:trait_signature
             ~substitution:(of_trait @ bind own_generics own @ substitution)
-      | Some (Inherited _, _), _ -> bug "%s inherits a method outside an impl" (Path.show path)
-      | None, _ -> bug "%s is not a function" (Path.show path))
+      | Some (Inherited _, _), _ ->
+          raise_bug "%s inherits a method outside an impl" (Path.show path)
+      | None, _ -> raise_bug "%s is not a function" (Path.show path))
   | Member_constant _ | Impl _ | Derived _ | Law_proof _ | Unresolved _ ->
-      bug "%s is not code" (Path.show path)
+      raise_bug "%s is not code" (Path.show path)
 
 let panic_path = Monomorphic.panic_capability
 let list_evidence context = Monomorphic.list_evidence context.monomorphic
@@ -205,9 +206,9 @@ let list_template_clauses context from_template clauses =
           | Some ({ clause; is_executable = true; _ } : Mir.requirement) ->
               Mir.expand_formula clause
           | Some { is_executable = false; _ } | None ->
-              bug "clause %d of %s cannot be run" position (Path.show from_template))
+              raise_bug "clause %d of %s cannot be run" position (Path.show from_template))
         clauses
-  | None -> bug "%s is not a function" (Path.show from_template)
+  | None -> raise_bug "%s is not a function" (Path.show from_template)
 
 let has_defaults (signature : Types.signature) =
   List.exists (fun (parameter : Types.parameter_info) -> parameter.has_default) signature.parameters

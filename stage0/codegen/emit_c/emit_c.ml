@@ -51,7 +51,7 @@ let walk ~lookup ~follows_only_called_entries roots =
     match List.nth_opt table.references slot with
     | Some entry -> Queue.add (entry, chain) queue
     | None ->
-        Compiler_bug.bug ~stage:"Emit_c" "a call of method %d of %s" slot
+        Compiler_bug.raise_bug ~stage:"Emit_c" "a call of method %d of %s" slot
           (Instance.to_string table.key)
   in
   while not (Queue.is_empty queue) do

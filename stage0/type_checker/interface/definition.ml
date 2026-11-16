@@ -88,7 +88,8 @@ let read_method_signature lookups ~owner (method_ : Types.trait_method) =
   in
   match read_declared_signature lookups path with
   | Some signature -> signature
-  | None -> Compiler_bug.bug ~stage:"Interface" "the method `%s` has no signature" (Path.show path)
+  | None ->
+      Compiler_bug.raise_bug ~stage:"Interface" "the method `%s` has no signature" (Path.show path)
 
 let is_specification = function
   | Environment.Function_interface signature | Theorem_interface signature ->

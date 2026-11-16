@@ -1,4 +1,4 @@
-let bug format = Compiler_bug.bug ~stage:"Memory_layout" format
+let raise_bug format = Compiler_bug.raise_bug ~stage:"Memory_layout" format
 
 type integer = Int8 | Int16 | Int32 | Int64 | UInt8 | UInt16 | UInt32 | UInt64
 
@@ -263,9 +263,9 @@ let lay_out_block env ty name =
   | Sum variants -> (
       match List.find_opt (fun (variant : variant_shape) -> variant.name = name) variants with
       | Some { indirect = true; fields = fields'; _ } -> lay_out_fields env fields'
-      | Some _ -> bug "variant %s is not indirect" name
-      | None -> bug "no variant %s" name)
-  | _ -> bug "a block of a type that is not a sum type"
+      | Some _ -> raise_bug "variant %s is not indirect" name
+      | None -> raise_bug "no variant %s" name)
+  | _ -> raise_bug "a block of a type that is not a sum type"
 
 type tag = { at : step list; integer : integer }
 
@@ -287,7 +287,9 @@ let list_tagged_values tag variants =
     List.map (fun (variant : variant) -> (variant.name, Z.of_int variant.index)) variants )
 
 let find_tag_value values name =
-  match List.assoc_opt name values with Some value -> value | None -> bug "no variant %s" name
+  match List.assoc_opt name values with
+  | Some value -> value
+  | None -> raise_bug "no variant %s" name
 
 let compute_discriminant layout name =
   let tag_value (tag, values) = Tag_value { tag; value = find_tag_value values name } in
@@ -296,15 +298,15 @@ let compute_discriminant layout name =
   | Tag_only { tag; variants } -> tag_value (list_tag_only_values tag variants)
   | Tagged { tag; variants; _ } -> tag_value (list_tagged_values tag variants)
   | Niche_encoded { dataful; dataless = None } ->
-      if dataful.name = name then Only else bug "no variant %s" name
+      if dataful.name = name then Only else raise_bug "no variant %s" name
   | Niche_encoded { dataful; dataless = Some { niche; niche_values } } -> (
       if dataful.name = name then
         Not_niche { niche; stop = Z.add niche.start (Z.of_int (List.length niche_values)) }
       else
         match List.assoc_opt name niche_values with
         | Some value -> Niche_value { niche; value }
-        | None -> bug "no variant %s" name)
-  | Scalar _ | Struct _ | Array _ -> bug "a discriminant of a type that is not a sum type"
+        | None -> raise_bug "no variant %s" name)
+  | Scalar _ | Struct _ | Array _ -> raise_bug "a discriminant of a type that is not a sum type"
 
 let dispatch layout cases =
   let switch (tag, values) =

@@ -69,7 +69,7 @@ let make_package_database_key ~hash ~visible =
               visible);
        ])
 
-let exclusively name work =
+let run_exclusively name work =
   let lock =
     Unix.openfile
       (Filename.concat (Cache.directory (open_cache ())) name)
@@ -95,7 +95,7 @@ let load_package_database (package : Project.package) ~hash ~visible =
         match stored () with
         | Some package_database -> package_database
         | None ->
-            exclusively "package-states.lock" (fun () ->
+            run_exclusively "package-states.lock" (fun () ->
                 match stored () with
                 | Some package_database -> package_database
                 | None ->
@@ -144,7 +144,7 @@ let load_standard_package () =
           Standard_library.files
       in
       if rendered <> [] then
-        Compiler_bug.bug ~stage:"Workspace" "the standard library has diagnostics:\n%s"
+        Compiler_bug.raise_bug ~stage:"Workspace" "the standard library has diagnostics:\n%s"
           (String.concat "" rendered);
       checked_standard_package := Some standard;
       standard
@@ -288,12 +288,12 @@ let read_source snapshot (file : Path.file) =
         List.assoc_opt file package.files)
   with
   | Some text -> Source.create ~path:(Path.show_file file) text
-  | None -> Compiler_bug.bug ~stage:"Workspace" "%s is not a file" (Path.show_file file)
+  | None -> Compiler_bug.raise_bug ~stage:"Workspace" "%s is not a file" (Path.show_file file)
 
 let locate_root snapshot =
   match snapshot.kind with
   | Worktree root | Trial { root; _ } -> root
-  | Published -> Compiler_bug.bug ~stage:"Workspace" "only a worktree's snapshot has a root"
+  | Published -> Compiler_bug.raise_bug ~stage:"Workspace" "only a worktree's snapshot has a root"
 
 let list_registry_packages snapshot =
   List.map
@@ -327,7 +327,8 @@ let load_package_databases snapshot =
                 ~visible:
                   (standard
                   :: List.map load_named (List.sort_uniq Path.compare_package (visible name)))
-          | None -> Compiler_bug.bug ~stage:"Workspace" "%s has no files" (Path.show_package name)
+          | None ->
+              Compiler_bug.raise_bug ~stage:"Workspace" "%s has no files" (Path.show_package name)
         in
         Package_table.replace loaded_by_name name loaded;
         loaded
@@ -810,5 +811,5 @@ module For_testing = struct
           ~header:(make_header worktree.loaded)
           (Database.list_unsaved worktree.database);
         close worktree
-    | None -> Compiler_bug.bug ~stage:"Workspace" "%s has no open database" root
+    | None -> Compiler_bug.raise_bug ~stage:"Workspace" "%s has no open database" root
 end

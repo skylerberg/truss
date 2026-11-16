@@ -1005,7 +1005,7 @@ let of_namespaces ~(namespace : Path.package -> namespace) ~module_exists ~split
   let read_declared key =
     match declared key with
     | Some declared -> declared
-    | None -> Compiler_bug.bug ~stage:"Names" "%s is not declared" (show_key key)
+    | None -> Compiler_bug.raise_bug ~stage:"Names" "%s is not declared" (show_key key)
   in
   let members owner name =
     Option.value ~default:[]
