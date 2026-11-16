@@ -105,11 +105,11 @@ let () =
   test "a variant's discriminant is its tag value or its niche value" (fun () ->
       let layout = layout (option bool) in
       (match discriminant layout "None" with
-      | Niche_value value when Z.equal value (Z.of_int 2) -> ()
+      | Niche_value { value; _ } when Z.equal value (Z.of_int 2) -> ()
       | _ -> fail "None is not stored as 2");
       match discriminant layout "Some" with
-      | Not_niche -> ()
-      | _ -> fail "Some is not the dataful variant")
+      | Not_niche { stop; _ } when Z.equal stop (Z.of_int 3) -> ()
+      | _ -> fail "Some is not the dataful variant, outside the niche values below 3")
 
 let () =
   let int64 = Ground.builtin Int64 in

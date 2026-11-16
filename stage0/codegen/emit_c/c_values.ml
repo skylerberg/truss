@@ -233,47 +233,37 @@ let unary_c context (op : Lowered.unary) (operand_text, a_ty) =
   | Not -> "((uint8_t)!" ^ operand_text ^ ")"
   | Complement -> Printf.sprintf "((%s)~%s)" c_type operand_text
 
-let niche_c text (niche : Memory_layout.niche) =
+let path_c text (path : Memory_layout.step list) =
   List.fold_left
     (fun text (step : Memory_layout.step) ->
       match step with Field name -> text ^ ".f_" ^ name | Tag -> text ^ ".tag")
-    text niche.path
+    text path
 
 let niche_value context (niche : Memory_layout.niche) value =
   match niche.scalar with
   | Pointer _ -> "((void *)0)"
   | scalar -> Printf.sprintf "((%s)%sULL)" (scalar_c context scalar) (Z.to_string value)
 
-let is_variant_c context text sum variant =
-  let layout = layout context sum in
-  match Memory_layout.discriminant layout variant with
+let discriminant_test_c context text (discriminant : Memory_layout.discriminant) =
+  match discriminant with
   | Only -> "((uint8_t)1)"
-  | Tag_value value -> (
-      let literal = Printf.sprintf "%sULL" (Z.to_string value) in
-      match layout.form with
-      | Tagged { tag; _ } ->
-          Printf.sprintf "((uint8_t)(%s.tag == (%s)%s))" text (integer_c tag) literal
-      | Tag_only { tag; _ } ->
-          Printf.sprintf "((uint8_t)(%s == (%s)%s))" text (integer_c tag) literal
-      | _ -> bug "a tag in a type without one")
-  | Niche_value value -> (
-      match layout.form with
-      | Niche_encoded { encoding = Some niche; _ } ->
-          Printf.sprintf "((uint8_t)(%s == %s))" (niche_c text niche)
-            (niche_value context niche value)
-      | _ -> bug "a niche in a type without one")
-  | Not_niche -> (
-      match layout.form with
-      | Niche_encoded { encoding = Some niche; others; _ } -> (
-          let at = niche_c text niche in
-          match niche.scalar with
-          | Pointer _ -> Printf.sprintf "((uint8_t)(%s != ((void *)0)))" at
-          | scalar ->
-              let c_type = scalar_c context scalar in
-              let stop = Z.add niche.start (Z.of_int (List.length others)) in
-              Printf.sprintf "((uint8_t)!(%s >= (%s)%sULL && %s < (%s)%sULL))" at c_type
-                (Z.to_string niche.start) at c_type (Z.to_string stop))
-      | _ -> bug "a niche in a type without one")
+  | Tag_value { tag; value } ->
+      Printf.sprintf "((uint8_t)(%s == (%s)%sULL))" (path_c text tag.at) (integer_c tag.integer)
+        (Z.to_string value)
+  | Niche_value { niche; value } ->
+      Printf.sprintf "((uint8_t)(%s == %s))" (path_c text niche.path)
+        (niche_value context niche value)
+  | Not_niche { niche; stop } -> (
+      let at = path_c text niche.path in
+      match niche.scalar with
+      | Pointer _ -> Printf.sprintf "((uint8_t)(%s != ((void *)0)))" at
+      | scalar ->
+          let c_type = scalar_c context scalar in
+          Printf.sprintf "((uint8_t)!(%s >= (%s)%sULL && %s < (%s)%sULL))" at c_type
+            (Z.to_string niche.start) at c_type (Z.to_string stop))
+
+let is_variant_c context text sum variant =
+  discriminant_test_c context text (Memory_layout.discriminant (layout context sum) variant)
 
 let initializers context fc prefix (fields : Memory_layout.field list)
     (values : (string * Lowered.operand) list) =
@@ -367,7 +357,7 @@ let build_laid_out_c context fc ty variant (values : (string * Lowered.operand) 
                            candidate.index name pointer);
                    })
           | _ -> bug "a payload"))
-  | Some name, Niche_encoded { dataful; others; encoding } ->
+  | Some name, Niche_encoded { dataful; dataless } ->
       if dataful.name = name then
         match dataful.payload.form with
         | Struct fields ->
@@ -379,20 +369,19 @@ let build_laid_out_c context fc ty variant (values : (string * Lowered.operand) 
             Some (Allocating { block; fill; value = (fun pointer -> pointer) })
         | _ -> bug "a payload"
       else
-        begin match (List.assoc_opt name others, encoding) with
-        | Some value, Some niche -> (
-            let stored = niche_value context niche value in
-            match niche.path with
-            | [] -> Some (Expression (Printf.sprintf "((%s)%s)" c_type stored))
-            | path ->
-                let designator =
-                  String.concat ""
-                    (List.map
-                       (function Memory_layout.Field name -> ".f_" ^ name | Tag -> ".tag")
-                       path)
-                in
-                Some (Expression (Printf.sprintf "((%s){ %s = %s })" c_type designator stored)))
-        | _ -> bug "no variant %s" name
+        begin match dataless with
+        | Some { niche; niche_values } -> (
+            match List.assoc_opt name niche_values with
+            | None -> bug "no variant %s" name
+            | Some value -> (
+                let stored = niche_value context niche value in
+                match niche.path with
+                | [] -> Some (Expression (Printf.sprintf "((%s)%s)" c_type stored))
+                | path ->
+                    Some
+                      (Expression
+                         (Printf.sprintf "((%s){ %s = %s })" c_type (path_c "" path) stored))))
+        | None -> bug "no variant %s" name
         end
   | _ -> bug "building %s" (Ground.to_string ty)
 

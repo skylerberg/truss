@@ -36,10 +36,11 @@ and form =
   | Array of { element : Ground.ty; element_layout : t; count : int }
   | Tag_only of { tag : integer; variants : string list }
   | Tagged of { tag : integer; payload_offset : int; variants : variant list }
-  | Niche_encoded of { dataful : variant; others : (string * Z.t) list; encoding : niche option }
+  | Niche_encoded of { dataful : variant; dataless : dataless option }
 
 and field = { name : string; member : member; layout : t; offset : int }
 and variant = { name : string; index : int; payload : t }
+and dataless = { niche : niche; niche_values : (string * Z.t) list }
 and niche = { path : step list; scalar : scalar; start : Z.t; count : Z.t }
 and step = Field of string | Tag
 
@@ -179,12 +180,13 @@ and of_sum layout_of ty shapes =
     when match only.payload.niche with
          | Some niche -> Z.geq niche.count (Z.of_int (List.length dataless))
          | None -> dataless = [] ->
-      let encoding, others, niche =
-        match only.payload.niche with
-        | None -> (None, [], None)
-        | Some niche ->
+      let encoded, niche =
+        match (only.payload.niche, dataless) with
+        | None, _ -> (None, None)
+        | Some niche, [] -> (None, Some niche)
+        | Some niche, _ :: _ ->
             let used = List.length dataless in
-            let others =
+            let niche_values =
               List.mapi
                 (fun position (variant : variant) ->
                   (variant.name, Z.add niche.start (Z.of_int position)))
@@ -195,12 +197,12 @@ and of_sum layout_of ty shapes =
               if Z.equal remaining Z.zero then None
               else Some { niche with start = Z.add niche.start (Z.of_int used); count = remaining }
             in
-            (Some niche, others, rest)
+            (Some { niche; niche_values }, rest)
       in
       {
         size = only.payload.size;
         alignment = only.payload.alignment;
-        form = Niche_encoded { dataful = only; others; encoding };
+        form = Niche_encoded { dataful = only; dataless = encoded };
         niche;
       }
   | _ ->
@@ -230,25 +232,56 @@ let block env ty name =
       | None -> bug "no variant %s" name)
   | _ -> bug "a block of a type that is not a sum type"
 
-type discriminant = Only | Tag_value of Z.t | Niche_value of Z.t | Not_niche
+type tag = { at : step list; integer : integer }
+
+type discriminant =
+  | Only
+  | Tag_value of { tag : tag; value : Z.t }
+  | Niche_value of { niche : niche; value : Z.t }
+  | Not_niche of { niche : niche; stop : Z.t }
+
+type 'case dispatch =
+  | Switch of { tag : tag; cases : (Z.t * 'case) list }
+  | Tests of (discriminant * 'case) list
+
+let find_tag_only_value variants name =
+  match List.find_index (String.equal name) variants with
+  | Some index -> Z.of_int index
+  | None -> bug "no variant %s" name
+
+let find_tagged_value variants name =
+  match List.find_opt (fun (variant : variant) -> variant.name = name) variants with
+  | Some variant -> Z.of_int variant.index
+  | None -> bug "no variant %s" name
 
 let discriminant layout name =
-  let missing () = bug "no variant %s" name in
   match layout.form with
   | Zero_size -> Only
-  | Tag_only { variants; _ } -> (
-      match List.find_index (String.equal name) variants with
-      | Some index -> Tag_value (Z.of_int index)
-      | None -> missing ())
-  | Tagged { variants; _ } -> (
-      match List.find_opt (fun (variant : variant) -> variant.name = name) variants with
-      | Some variant -> Tag_value (Z.of_int variant.index)
-      | None -> missing ())
-  | Niche_encoded { dataful; others; _ } -> (
-      if dataful.name = name then if others = [] then Only else Not_niche
+  | Tag_only { tag; variants } ->
+      Tag_value { tag = { at = []; integer = tag }; value = find_tag_only_value variants name }
+  | Tagged { tag; variants; _ } ->
+      Tag_value { tag = { at = [ Tag ]; integer = tag }; value = find_tagged_value variants name }
+  | Niche_encoded { dataful; dataless = None } ->
+      if dataful.name = name then Only else bug "no variant %s" name
+  | Niche_encoded { dataful; dataless = Some { niche; niche_values } } -> (
+      if dataful.name = name then
+        Not_niche { niche; stop = Z.add niche.start (Z.of_int (List.length niche_values)) }
       else
-        match List.assoc_opt name others with Some value -> Niche_value value | None -> missing ())
+        match List.assoc_opt name niche_values with
+        | Some value -> Niche_value { niche; value }
+        | None -> bug "no variant %s" name)
   | Scalar _ | Struct _ | Array _ -> bug "a discriminant of a type that is not a sum type"
+
+let dispatch layout cases =
+  let switch tag find_value =
+    Switch { tag; cases = List.map (fun (name, case) -> (find_value name, case)) cases }
+  in
+  match layout.form with
+  | Tag_only { tag; variants } -> switch { at = []; integer = tag } (find_tag_only_value variants)
+  | Tagged { tag; variants; _ } ->
+      switch { at = [ Tag ]; integer = tag } (find_tagged_value variants)
+  | Zero_size | Niche_encoded _ | Scalar _ | Struct _ | Array _ ->
+      Tests (List.map (fun (name, case) -> (discriminant layout name, case)) cases)
 
 let integer_to_string = function
   | Int8 -> "Int8"
@@ -296,11 +329,13 @@ let rec to_string layout =
     | Tagged { tag; payload_offset; variants } ->
         Printf.sprintf "tagged(%s, payload@%d: %s)" (integer_to_string tag) payload_offset
           (String.concat " " (List.map (fun (variant : variant) -> variant.name) variants))
-    | Niche_encoded { dataful; others; encoding } ->
+    | Niche_encoded { dataful; dataless = None } ->
+        Printf.sprintf "niche-encoded(%s;  at nothing)" dataful.name
+    | Niche_encoded { dataful; dataless = Some { niche; niche_values } } ->
         Printf.sprintf "niche-encoded(%s; %s at %s)" dataful.name
           (String.concat " "
-             (List.map (fun (name, value) -> name ^ "=" ^ Z.to_string value) others))
-          (match encoding with None -> "nothing" | Some { path; _ } -> path_to_string path)
+             (List.map (fun (name, value) -> name ^ "=" ^ Z.to_string value) niche_values))
+          (path_to_string niche.path)
   in
   Printf.sprintf "%d/%d %s%s" layout.size layout.alignment form
     (match layout.niche with None -> "" | Some niche -> " " ^ niche_to_string niche)
