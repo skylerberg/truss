@@ -9,3 +9,7 @@ let find ?(occurrence = 1) text part =
   search 0 0
 
 let contains text part = find text part <> None
+
+module For_testing = struct
+  let find = find
+end

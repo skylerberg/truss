@@ -20,16 +20,19 @@ val pattern_children : visit -> Core.pattern -> unit
 val deep : visit -> visit
 val expression : visit -> Core.expression -> unit
 val definition : visit -> Core.definition -> unit
-val local_names : Core.definition -> (Core.local, string) Hashtbl.t
-
-val expression_exists :
-  ?expression:(Core.expression -> bool) ->
-  ?statement:(Core.statement -> bool) ->
-  Core.expression ->
-  bool
 
 type tasks_use = Uses_tasks | Through_parameter | No_tasks
 
 val tasks_use : ?solved:(int -> Types.capability_set) -> Core.block -> tasks_use
 val can_use_tasks : ?solved:(int -> Types.capability_set) -> Core.block -> bool
 val traverse_indirect : ('a -> 'b option) -> 'a Core.target -> 'b Core.target option
+
+module For_testing : sig
+  val local_names : Core.definition -> (Core.local, string) Hashtbl.t
+
+  val expression_exists :
+    ?expression:(Core.expression -> bool) ->
+    ?statement:(Core.statement -> bool) ->
+    Core.expression ->
+    bool
+end

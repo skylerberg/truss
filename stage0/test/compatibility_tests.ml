@@ -162,13 +162,13 @@ let () =
       let gains = show (changes (feed "") (feed "  capability Uses = Clock\n")) in
       (match gains with
       | [ actual ]
-        when Substring.find actual "breaks:" = Some 0
+        when Substring.For_testing.find actual "breaks:" = Some 0
              && Substring.contains actual "added `Clock` to its `Uses`" ->
           ()
       | actual -> fail "found [%s]" (String.concat "; " actual));
       (match show (changes (feed "  capability Uses = Clock\n") (feed "")) with
       | [ actual ]
-        when Substring.find actual "grows:" = Some 0
+        when Substring.For_testing.find actual "grows:" = Some 0
              && Substring.contains actual "removed capabilities from its `Uses`" ->
           ()
       | actual -> fail "found [%s]" (String.concat "; " actual));

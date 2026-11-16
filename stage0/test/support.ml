@@ -177,7 +177,7 @@ let proof_states pipeline file = Pipeline.states (verdicts pipeline file) file
 let proofs pipeline file =
   let proofs = proven pipeline file in
   fun key ->
-    match Pipeline.proof proofs key with
+    match Pipeline.For_testing.proof proofs key with
     | Some (Value proof) -> proof
     | Some (Failed _ | Blocked) ->
         failwith ("the proof of " ^ Resolve.Names.show_key key ^ " is blocked")
