@@ -171,7 +171,7 @@ let load_project files =
   in
   let rec settle () =
     let project =
-      Project.of_files
+      Project.lay_out_project
         {
           find_tree = (fun root -> Option.map fst (find_indexed_files root));
           find_text =

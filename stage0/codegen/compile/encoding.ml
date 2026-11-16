@@ -150,7 +150,7 @@ let decode env ty encoded : Lowered.static_value =
         | Raw _ -> raise_bug "a raw field computed while compiling")
       members
   and make_empty ty : Lowered.static_value =
-    match Memory_layout.shape env ty with
+    match Memory_layout.compute_shape env ty with
     | Record members ->
         Static_record (List.map (fun (name, member) -> (name, make_empty_member member)) members)
     | Sum [ variant ] ->

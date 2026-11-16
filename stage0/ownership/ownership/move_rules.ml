@@ -114,7 +114,7 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
   in
   let reported_use_after_move = Place_table.create 8 in
   let check_use_after_move state (place : Mir.place) origin =
-    match Moves.path_of_place place with
+    match Moves.find_place_path place with
     | None -> ()
     | Some path -> (
         match Moves.find_possibly_empty moves state path with

@@ -6,8 +6,7 @@ let make_view_type element = make_named View element
 
 let match_element builtin (ty : Ground.ty) =
   match ty with
-  | Named { path; arguments = [ Type element ] } when Intrinsic.builtin_of_path path = Some builtin
-    ->
+  | Named { path; arguments = [ Type element ] } when Intrinsic.find_builtin path = Some builtin ->
       Some element
   | _ -> None
 

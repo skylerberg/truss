@@ -203,7 +203,7 @@ let find_parameter_name (context : State.context) symbol =
 let collect_printed printed =
   if List.mem None printed then None else Some (List.filter_map Fun.id printed)
 
-let truss_of_value context term =
+let show_truss_value context term =
   let parenthesize level inner text = if inner < level then "(" ^ text ^ ")" else text in
   let rec show_arithmetic level = function
     | Logic.Operation ((("+" | "*") as operator), (_ :: _ :: _ as parts)) ->
@@ -227,8 +227,8 @@ let truss_of_value context term =
   in
   show_arithmetic 0 term
 
-let truss_of_goal context term =
-  let show_value = truss_of_value context in
+let show_truss_goal context term =
+  let show_value = show_truss_value context in
   let rec print = function
     | Logic.Operation ((("<" | "<=" | ">" | ">=" | "=") as operator), [ left; right ]) -> (
         match (show_value left, show_value right) with
@@ -264,7 +264,7 @@ let add_requires context (frame : State.frame) (required : State.message) =
   match frame.condition with
   | Logic.Boolean true -> make_requires_fix context required
   | condition -> (
-      match truss_of_goal context condition with
+      match show_truss_goal context condition with
       | Some premise ->
           make_requires_fix context
             ((State.Text ("(" ^ premise ^ ") ==> (") :: required) @ [ State.Text ")" ])
@@ -340,7 +340,7 @@ let record_obligation ?template_clause ?cited ~fixes ~panic_clause context (fram
       let fixes =
         match fixes with
         | [] when frame.source.key = Some context.home && frame.makes_obligations -> (
-            match truss_of_goal context goal with
+            match show_truss_goal context goal with
             | Some required -> add_requires context frame [ Text required ]
             | None -> [])
         | fixes -> fixes

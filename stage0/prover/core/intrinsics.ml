@@ -122,7 +122,7 @@ let declare_libc_number context frame (number : Libc.number) =
   let term = Logic.Symbol symbol in
   Facts.assume context frame
     (Facts.make_in_range
-       (Types.make_builtin (Intrinsic.builtin_of_libc (Libc.classify_number number)))
+       (Types.make_builtin (Intrinsic.convert_libc_scalar (Libc.classify_number number)))
        term);
   term
 
@@ -184,7 +184,7 @@ let call_libc context frame ~(site : Invocation.site) (function_ : Libc.function
       ]
       condition
   in
-  let make_element_type scalar = Types.make_builtin (Intrinsic.builtin_of_libc scalar) in
+  let make_element_type scalar = Types.make_builtin (Intrinsic.convert_libc_scalar scalar) in
   let length element sequence = Models.make_sequence_length context element sequence in
   List.iteri
     (fun position (_, passes) ->

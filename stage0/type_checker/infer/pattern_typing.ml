@@ -393,7 +393,7 @@ and find_character_tag state (literal : Syntax.string_literal) =
   | Some tag -> (
       match State.find_target state tag.last with
       | Some (Definition (Type, path)) -> (
-          match Intrinsic.builtin_of_path path with
+          match Intrinsic.find_builtin path with
           | Some ((Character | UInt8) as builtin) -> Some builtin
           | _ -> None)
       | _ -> None)

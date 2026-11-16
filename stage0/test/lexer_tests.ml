@@ -126,7 +126,7 @@ let () =
       in
       expect_equal_lists Fun.id "positions" [ "1:1"; "1:2"; "2:1" ]
         (List.map show_offset [ 3; 4; 6 ]);
-      if Source.line_start source 4 <> 3 then Harness.fail "the first line starts at 3";
+      if Source.compute_line_start source 4 <> 3 then Harness.fail "the first line starts at 3";
       if not (Source.starts_line source 3) then Harness.fail "offset 3 starts its line");
   Harness.test "a diagnostic after a byte order mark shows its line without it" (fun () ->
       let text = "\xEF\xBB\xBFlet x = 1;" in

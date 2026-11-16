@@ -23,7 +23,7 @@ type kind =
 
 type named = Function | Type | Trait | Capability | Constant | Theorem
 
-let kind_of_named : named -> kind = function
+let convert_named : named -> kind = function
   | Function -> Function
   | Type -> Type
   | Trait -> Trait
@@ -221,7 +221,7 @@ let list_generic_kinds (generics : Syntax.generic_parameter list) =
     generics
 
 let find_generics lookups (path : Path.t) =
-  match Intrinsic.builtin_of_path path with
+  match Intrinsic.find_builtin path with
   | Some Array -> Some [ ("Element", Type_kind); ("count", Value_kind) ]
   | Some (Storage | View) -> Some [ ("Element", Type_kind) ]
   | Some Shared -> Some [ ("Value", Type_kind) ]
@@ -244,7 +244,7 @@ let find_kind lookups (path : Path.t) =
       Option.map (fun (entry : entry) -> entry.kind) (lookups.find module_ name)
   | _ -> None
 
-let named_of_intended : Syntax.intended_kind -> named = function
+let convert_intended : Syntax.intended_kind -> named = function
   | Intended_function -> Function
   | Intended_constant -> Constant
   | Intended_type -> Type
@@ -268,7 +268,7 @@ let list_file_entries (top_levels : Syntax.top_level list) =
       | Constant { name = Plain_name name; _ } -> make_plain_entries name.text Constant false
       | Theorem { name; generics; _ } -> make_plain_entries name.text Theorem (generics <> [])
       | Definition_error { name = Some (Plain_name name); intended = Some intended } ->
-          make_plain_entries name.text (named_of_intended intended) false
+          make_plain_entries name.text (convert_intended intended) false
       | Function _ | Method_declaration _ | Constant _ | Impl _ | Test _ | Law_proof _
       | Definition_error _ ->
           [])
@@ -485,7 +485,7 @@ let list_file_declarations lookups (file : Path.file) ~imports ~text
         let trait, for_type = resolve_local_header trait_ type_ in
         declare (Law_proof { module_; trait; law = law.text; for_type }) Law_proof false
     | Definition_error { name = Some (Plain_name name); intended = Some intended } ->
-        declare (make_top_path module_ name.text) (kind_of_named (named_of_intended intended)) false
+        declare (make_top_path module_ name.text) (convert_named (convert_intended intended)) false
     | Definition_error { name = Some (Member_name (head, name)); intended } ->
         let owner = resolve_owner head in
         if intended = Some Intended_constant then
@@ -623,7 +623,7 @@ let is_derivable (trait : Path.t) =
 let is_head_kind lookups (path : Path.t) ~(kinds : named list) =
   match find_kind lookups path with
   | Some kind when List.mem kind kinds -> (
-      match Intrinsic.builtin_of_path path with Some (Never | Integer) -> false | _ -> true)
+      match Intrinsic.find_builtin path with Some (Never | Integer) -> false | _ -> true)
   | _ -> false
 
 let resolve_head lookups ~from ~imports (path : Syntax.path) ~kinds =

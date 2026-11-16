@@ -25,8 +25,8 @@ type builtin =
 val builtins : builtin list
 val show_builtin : builtin -> string
 val make_builtin_path : builtin -> Path.t
-val builtin_of_path : Path.t -> builtin option
-val builtin_of_libc : Libc.scalar -> builtin
+val find_builtin : Path.t -> builtin option
+val convert_libc_scalar : Libc.scalar -> builtin
 
 type scalar =
   | Add
@@ -125,5 +125,5 @@ type operation = Scalar of scalar | Buffer of buffer | Lend of lend | Runtime of
 val operations : operation list
 val show_operation : operation -> string
 val make_operation_path : operation -> Path.t
-val operation_of_path : Path.t -> operation option
+val find_operation : Path.t -> operation option
 val list_uses : operation -> Path.t list

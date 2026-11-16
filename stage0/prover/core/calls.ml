@@ -32,7 +32,7 @@ let list_required_fixes (context : State.context) (frame : State.frame) (part : 
           (fun (passed : State.passed) ->
             Option.map
               (fun text -> (parameter.local, if is_simple text then text else "(" ^ text ^ ")"))
-              (Facts.truss_of_value context passed.term)))
+              (Facts.show_truss_value context passed.term)))
       (List.mapi (fun index parameter -> (index, parameter)) part.parameters)
   in
   match part.callee.key with

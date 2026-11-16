@@ -82,9 +82,9 @@ let make_named path arguments =
   Named { path; arguments = List.map (fun type_ -> Type type_) arguments }
 
 let find_builtin = function
-  | Named { path; arguments = [] } -> Intrinsic.builtin_of_path path
+  | Named { path; arguments = [] } -> Intrinsic.find_builtin path
   | Named { path; _ } -> (
-      match Intrinsic.builtin_of_path path with
+      match Intrinsic.find_builtin path with
       | Some (Array | Storage | View | Shared) as builtin -> builtin
       | _ -> None)
   | _ -> None

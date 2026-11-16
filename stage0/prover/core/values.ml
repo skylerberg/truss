@@ -76,7 +76,7 @@ let make_sequence context frame (ty : Types.ty) ~element values =
   let sequence =
     match ty with
     | Types.Named { path; _ } when Path.equal path Models.sequence_path -> Some literal
-    | Types.Named { path; _ } when Intrinsic.builtin_of_path path = Some Array ->
+    | Types.Named { path; _ } when Intrinsic.find_builtin path = Some Array ->
         Models.find_model context ty literal ~element
     | _ -> None
   in
@@ -318,7 +318,7 @@ let make_text_value context frame (ty : Types.ty) text =
       Option.iter assume_holds (Models.find_model context ty literal ~element:byte);
       match Facts.find_constructors context ty with
       | Some [ (None, [ (field, Types.Named { path; arguments = [ Types.Type element ] }) ]) ]
-        when Intrinsic.builtin_of_path path = Some Storage && Types.equal element byte ->
+        when Intrinsic.find_builtin path = Some Storage && Types.equal element byte ->
           assume_holds
             (Intrinsics.make_buffer_model context Storage byte
                (Logic.Apply (Facts.make_selector_symbol ty None field, [ literal ])))

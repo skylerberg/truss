@@ -110,7 +110,7 @@ let list_variants (st : Lowering.state) (ty : Ground.ty) :
               (Ground.to_string ty))
       fields
   in
-  match Memory_layout.shape st.context.env ty with
+  match Memory_layout.compute_shape st.context.env ty with
   | Record fields -> [ (None, ground_fields fields) ]
   | Sum variants ->
       List.map
@@ -134,7 +134,9 @@ let make_body_frame (st : Lowering.state) ?owner ?returns_into ?lending
       | [] -> Some ty
       | projection :: rest -> (
           let member =
-            match (Memory_layout.shape st.context.env ty, (projection : Mir.projection)) with
+            match
+              (Memory_layout.compute_shape st.context.env ty, (projection : Mir.projection))
+            with
             | Record fields, Field name -> List.assoc_opt name fields
             | Sum variants, Variant_field { variant; field } ->
                 Option.bind
@@ -536,7 +538,9 @@ and drop_parts st (path : Moves.path) =
         if
           List.exists
             (fun (shape : Memory_layout.variant_shape) -> shape.name = variant && shape.indirect)
-            (match Memory_layout.shape st.context.env ty with Sum shapes -> shapes | _ -> [])
+            (match Memory_layout.compute_shape st.context.env ty with
+            | Sum shapes -> shapes
+            | _ -> [])
         then Emit_c.Builder.emit st.builder (Free_block { place; variant })
       in
       let is_certain variant =
@@ -590,7 +594,7 @@ let update_flags st ~before =
 let drop_parameters st = List.iter (drop_local st) (require_mir_frame st).body.parameters
 
 let drop_overwritten st (target : Mir.place) (destination : Lowered.place) ty =
-  match Moves.path_of_place target with
+  match Moves.find_place_path target with
   | Some path
     when Moves.find_status (require_mir_frame st).moves (require_mir_frame st).state
            { path with projections = [] }
@@ -1882,7 +1886,9 @@ and lend_part st ~(mode : Types.mode) (part : Mir.yielded) =
         let is_indirect variant =
           List.exists
             (fun (shape : Memory_layout.variant_shape) -> shape.name = variant && shape.indirect)
-            (match Memory_layout.shape st.context.env ty with Sum shapes -> shapes | _ -> [])
+            (match Memory_layout.compute_shape st.context.env ty with
+            | Sum shapes -> shapes
+            | _ -> [])
         in
         (match variant with
           | Some variant when is_indirect variant -> [ ([], Deferred_free variant) ]

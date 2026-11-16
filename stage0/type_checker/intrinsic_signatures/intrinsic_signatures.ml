@@ -7,7 +7,7 @@ let make_storage_type element =
 let make_view_type element =
   Types.Named { path = Intrinsic.make_builtin_path View; arguments = [ Types.Type element ] }
 
-let make_libc_scalar_type scalar = Types.make_builtin (Intrinsic.builtin_of_libc scalar)
+let make_libc_scalar_type scalar = Types.make_builtin (Intrinsic.convert_libc_scalar scalar)
 
 let make_sequence_type element =
   Types.Named { path = Well_known.make_path Sequence; arguments = [ Types.Type element ] }

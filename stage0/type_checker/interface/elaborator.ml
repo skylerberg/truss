@@ -314,7 +314,7 @@ and elaborate_path_type context (path : Syntax.path_type) : Types.ty =
       report_error_type context Not_a_type context.spans.(path.id)
         (Printf.sprintf "`%s` is a capability parameter, not a type." shown)
   | Some (Definition (Type, definition_path)) -> (
-      match Intrinsic.builtin_of_path definition_path with
+      match Intrinsic.find_builtin definition_path with
       | Some Never -> Types.Never
       | Some Integer -> Types.Integer
       | Some _ | None -> (
@@ -639,7 +639,7 @@ let elaborate_type_head context owner (head : Syntax.type_head) =
                     "generic parameters")
                  (List.length generics))
         | _ -> (
-            match Intrinsic.builtin_of_path type_path with
+            match Intrinsic.find_builtin type_path with
             | Some Never -> Types.Never
             | Some Integer -> Types.Integer
             | _ ->
@@ -651,7 +651,7 @@ let elaborate_type_head context owner (head : Syntax.type_head) =
         report_error_type context Not_a_type context.spans.(head.id)
           (Printf.sprintf "`%s` is %s, not a type, so it has no methods, constants, or `impl`s."
              (show_path head.path)
-             (Resolve.Names.show_kind (Resolve.Names.kind_of_named kind))) )
+             (Resolve.Names.show_kind (Resolve.Names.convert_named kind))) )
   | Some (Unknown report) -> (generics, Types.Error report)
   | _ -> raise_bug "the type head `%s` is not resolved" (show_path head.path)
 

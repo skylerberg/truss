@@ -47,4 +47,4 @@ type t = {
   problems : problem list;
 }
 
-val of_files : files -> t
+val lay_out_project : files -> t

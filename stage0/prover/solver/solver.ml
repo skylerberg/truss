@@ -45,14 +45,14 @@ let header =
      (set-option :rlimit %d)\n"
     steps
 
-let key_of_text text =
+let compute_key text =
   Logic.hash
     (Printf.sprintf "z3 %s\nentry format %d\ncardinality bounds %s\n%s%s" version
        entry_format_version
        (String.concat ", " (List.map string_of_int cardinality_bounds))
        header text)
 
-let hash_query query = key_of_text (Logic.show_query query)
+let hash_query query = compute_key (Logic.show_query query)
 
 type sexp = Atom of string | List of sexp list
 type answer = Proven | Counterexample of (Logic.symbol * sexp) list | Unknown
@@ -112,7 +112,7 @@ type status = Unsatisfiable | Satisfiable of { cardinality_bound : int option } 
 
 let run_locked solver work = Mutex.protect solver.lock work
 
-let request ?(symbols = []) ?(terms = []) query =
+let make_request ?(symbols = []) ?(terms = []) query =
   let rendering = Logic.render query in
   let named = Logic.list_symbols rendering in
   let requested_symbols =
@@ -131,7 +131,7 @@ let request ?(symbols = []) ?(terms = []) query =
   in
   let requested = List.map fst (requested_symbols @ requested_terms)
   and value_arguments = List.map snd (requested_symbols @ requested_terms) in
-  let text_key = key_of_text (Logic.rendered_text rendering) in
+  let text_key = compute_key (Logic.rendered_text rendering) in
   {
     text_key;
     values_key = text_key ^ "/" ^ String.concat "," value_arguments;
@@ -236,7 +236,7 @@ let search_model solver request query text =
 let solve solver (request, query) =
   let render_checked () =
     let text = Logic.show_query query in
-    if key_of_text text <> request.text_key then
+    if compute_key text <> request.text_key then
       raise_bug "the query is not the one its request was made from";
     text
   in

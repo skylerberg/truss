@@ -13,7 +13,7 @@ type kind =
 
 type named = Function | Type | Trait | Capability | Constant | Theorem
 
-val kind_of_named : named -> kind
+val convert_named : named -> kind
 val show_kind : kind -> string
 
 type declaration = {

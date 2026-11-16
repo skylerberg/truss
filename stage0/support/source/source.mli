@@ -26,7 +26,7 @@ type units = Bytes | Scalar_values | Utf_16_code_units
 
 val compute_location : units -> t -> int -> int * int
 val compute_offset : units -> t -> line:int -> column:int -> int
-val line_start : t -> int -> int
-val fragment_line_start : string -> int -> int
-val line_end : t -> int -> int
+val compute_line_start : t -> int -> int
+val compute_fragment_line_start : string -> int -> int
+val compute_line_end : t -> int -> int
 val starts_line : t -> int -> bool

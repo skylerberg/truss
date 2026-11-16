@@ -134,7 +134,7 @@ let rec find_static state (value : Syntax.expression) : static_ option =
 
 and check_named_type state (value : Syntax.expression) path type_arguments =
   let make_type arguments =
-    match Intrinsic.builtin_of_path path with
+    match Intrinsic.find_builtin path with
     | Some Never -> Types.Never
     | Some Integer -> Types.Integer
     | _ -> Types.Named { path; arguments }
@@ -222,7 +222,7 @@ let instantiate (state : State.state) (span : Source.Definition_span.t) ?(extra 
   }
 
 let find_intrinsic_signature path =
-  Option.map Intrinsic_signatures.make_signature (Intrinsic.operation_of_path path)
+  Option.map Intrinsic_signatures.make_signature (Intrinsic.find_operation path)
 
 let find_function_signature (state : State.state) (path : Path.t) =
   match find_intrinsic_signature path with

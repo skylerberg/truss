@@ -174,7 +174,7 @@ let rec compute_conditions lookups ~facts_of ~resolve ~compute_leaf ?(in_progres
       | View -> if requires [ Well_known.make_path Storable ] then Some [] else None
       | Holds_function -> None)
   | Types.Named { path; arguments } -> (
-      match (Intrinsic.builtin_of_path path, property) with
+      match (Intrinsic.find_builtin path, property) with
       | Some Storage, Plain | Some View, View | Some Handle, (Copyable | Plain) -> None
       | Some Shared, Copyable -> Some []
       | Some Shared, Plain -> None
@@ -226,7 +226,7 @@ let walk_contents lookups ~(facts_of : Path.t -> Environment.type_facts) ~resolv
         List.iter (step_inside Indirect)
           (list_type_arguments trait_arguments @ List.map snd associated)
     | Types.Named { path; arguments } -> (
-        match Intrinsic.builtin_of_path path with
+        match Intrinsic.find_builtin path with
         | Some Array -> List.iter (step_inside In_place) (list_type_arguments arguments)
         | Some _ -> List.iter (step_inside Indirect) (list_type_arguments arguments)
         | None -> (

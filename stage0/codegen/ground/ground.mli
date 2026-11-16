@@ -13,4 +13,4 @@ val compare : ty -> ty -> int
 val make_builtin : Intrinsic.builtin -> ty
 val show_path_name : Path.t -> string
 val to_string : ty -> string
-val argument_to_string : argument -> string
+val show_argument : argument -> string

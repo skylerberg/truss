@@ -799,7 +799,7 @@ let declare_type state scope (name : Syntax.name) target =
    else
      match find_module_item state name.text with
      | Some item when Names.is_type_kind item.kind ->
-         check_shadowing (Names.show_kind (Names.kind_of_named item.kind) ^ " of this module")
+         check_shadowing (Names.show_kind (Names.convert_named item.kind) ^ " of this module")
      | _ -> if List.mem name.text Prelude.names then check_shadowing "a name in the prelude");
   set_target state name Binding;
   { scope with types = String_map.add name.text target scope.types }

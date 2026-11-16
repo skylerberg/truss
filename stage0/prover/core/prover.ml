@@ -461,7 +461,7 @@ let list_definition_states (lookups : Lookups.t) (key : Resolve.Names.key) proof
             obligation.cited ))
         outcome.obligations answers
 
-let request (obligation : State.obligation) =
+let make_request (obligation : State.obligation) =
   let terms =
     List.map (fun (term, _) -> (Logic.Symbol.Named_term term, term)) obligation.locals
     @ List.concat
@@ -470,7 +470,7 @@ let request (obligation : State.obligation) =
              [ (Logic.Symbol.Reached index, reached); (Logic.Symbol.Condition index, condition) ])
            obligation.decisions)
   in
-  ( Solver.request ~symbols:(List.map fst obligation.values) ~terms obligation.query,
+  ( Solver.make_request ~symbols:(List.map fst obligation.values) ~terms obligation.query,
     obligation.query )
 
 type question = Decided of answer | Asked of (Solver.request * Logic.query)
@@ -489,7 +489,7 @@ let decide ~runs lookups solver proofs =
   let make_question (obligation : State.obligation) =
     match Option.bind obligation.template_clause (run_answer runs) with
     | Some answer -> Decided answer
-    | None -> Asked (request obligation)
+    | None -> Asked (make_request obligation)
   in
   let questions =
     List.map

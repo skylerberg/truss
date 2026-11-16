@@ -130,7 +130,9 @@ let check_block context (written : Syntax.block) =
         if Infer.statement_diverges context.tables first then begin
           let last = List.nth rest (List.length rest - 1) in
           let unreachable = context.spans.(next.id) in
-          let line_start = Source.fragment_line_start (Lazy.force context.text) unreachable.start in
+          let line_start =
+            Source.compute_fragment_line_start (Lazy.force context.text) unreachable.start
+          in
           let deletion_start = if line_start > 0 then line_start - 1 else line_start in
           report context Unreachable_code unreachable
             ~fixes:
