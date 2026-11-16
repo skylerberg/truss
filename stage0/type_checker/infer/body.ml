@@ -175,7 +175,7 @@ let core_contract state (clauses : clause list) : Core.contract =
       List.filter_map
         (fun (clause : clause) ->
           match clause.kind with
-          | Cost cost -> Some (Form.cost state ~origin:clause.id cost)
+          | Cost cost -> Some (Form.build_cost state ~origin:clause.id cost)
           | _ -> None)
         clauses;
   }
@@ -417,7 +417,7 @@ let check_definition state (lowered : Environment.lowered_interface) ~checks_bod
                                           local = Named name.id;
                                           name = name.text;
                                           mode = Read;
-                                          type_ = Form.local_type state name.id;
+                                          type_ = Form.read_local_type state name.id;
                                           default = None;
                                           callback_contract = None;
                                         }

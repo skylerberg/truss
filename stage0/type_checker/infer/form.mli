@@ -1,21 +1,21 @@
 module Impls = Interface.Impls
 module Properties = Interface.Properties
 
-val operand : Types.mode -> Core.expression -> Core.operand
-val evidence : Tables.evidence -> Core.evidence
+val build_operand : Types.mode -> Core.expression -> Core.operand
+val convert_evidence : Tables.evidence -> Core.evidence
 val register_call : ?function_value:Syntax.expression -> State.state -> Syntax.expression -> unit
 val register_index : State.state -> Syntax.expression -> unit
-val numeric_literal : State.state -> Syntax.id -> Core.kind
-val type_of : State.state -> Syntax.expression -> Types.ty
-val function_value : State.state -> Syntax.expression -> Core.kind
-val variant_value : State.state -> Syntax.expression -> Path.t -> string -> Core.kind
-val local_type : State.state -> Syntax.id -> Types.ty
-val local_use : State.state -> origin:Core.origin -> Syntax.id -> Core.kind
-val self_type : State.state -> State.env -> Types.ty
-val self_local : State.state -> State.env -> origin:Core.origin -> Core.place
-val constant_place : State.state -> origin:Core.origin -> Path.t -> Core.place
+val build_numeric_literal : State.state -> Syntax.id -> Core.kind
+val read_type : State.state -> Syntax.expression -> Types.ty
+val build_function_value : State.state -> Syntax.expression -> Core.kind
+val build_variant_value : State.state -> Syntax.expression -> Path.t -> string -> Core.kind
+val read_local_type : State.state -> Syntax.id -> Types.ty
+val build_local_use : State.state -> origin:Core.origin -> Syntax.id -> Core.kind
+val read_self_type : State.state -> State.env -> Types.ty
+val build_self_local : State.state -> State.env -> origin:Core.origin -> Core.place
+val build_constant_place : State.state -> origin:Core.origin -> Path.t -> Core.place
 
-val range_record :
+val build_range_record :
   State.state ->
   Syntax.expression ->
   Syntax.expression option ->
@@ -23,11 +23,11 @@ val range_record :
   inclusive:bool ->
   Core.kind
 
-val capability_impls : State.state -> Types.ty -> (Core.provided * Types.impl_interface) list
-val provide : State.state -> Syntax.expression list -> Syntax.block -> Core.kind
-val untagged_string : State.state -> origin:Core.origin -> Syntax.string_literal -> Core.kind
+val find_capability_impls : State.state -> Types.ty -> (Core.provided * Types.impl_interface) list
+val build_provide : State.state -> Syntax.expression list -> Syntax.block -> Core.kind
+val build_untagged_string : State.state -> origin:Core.origin -> Syntax.string_literal -> Core.kind
 
-val tagged_string :
+val build_tagged_string :
   State.state -> Syntax.expression -> Syntax.string_literal -> part:Types.ty -> Core.kind
 
 val build_constant_pattern : State.state -> Syntax.id -> Core.pattern_constant -> Core.pattern_kind
@@ -35,18 +35,18 @@ val build_named_constant : State.state -> Syntax.id -> Core.pattern_constant
 val build_literal_constant : State.state -> Syntax.id -> Syntax.literal -> Core.pattern_constant
 val build_range_bound : State.state -> Syntax.range_end -> Core.range_bound
 
-val pattern_fields :
+val build_pattern_fields :
   State.state -> Types.field list -> (string * Syntax.pattern) list -> (string * Core.pattern) list
 
-val operation_of : Syntax.binary -> Intrinsic.operation
+val convert_to_operation : Syntax.binary -> Intrinsic.operation
 
-val operator :
+val build_operator :
   State.state -> Syntax.expression -> Intrinsic.operation -> Syntax.expression list -> Core.kind
 
-val built_in_comparison :
+val build_built_in_comparison :
   State.state -> Syntax.binary -> Syntax.expression -> Syntax.expression -> Core.kind
 
-val comparison :
+val build_comparison :
   State.state ->
   Syntax.expression ->
   Syntax.binary ->
@@ -57,7 +57,7 @@ val comparison :
 val is_executable : State.state -> Core.expression -> bool
 val binds_lent_part : State.state -> Core.expression -> bool
 
-val compound_assign :
+val build_compound_assign :
   State.state ->
   Syntax.statement ->
   Syntax.expression ->
@@ -68,7 +68,7 @@ val compound_assign :
 val lend_statements : State.state -> Types.mode -> Core.expression -> Core.statement list
 val lend_block : State.state -> Types.mode -> Core.block -> Core.block
 
-val over_elements :
+val quantify_over_elements :
   State.state ->
   Syntax.expression ->
   count:Tables.call ->
@@ -78,7 +78,7 @@ val over_elements :
   (Core.elements -> Core.kind) ->
   Core.kind
 
-val for_loop :
+val build_for_loop :
   State.state ->
   Syntax.statement ->
   Syntax.expression ->
@@ -88,10 +88,13 @@ val for_loop :
   mode:Core.loop_mode ->
   Core.statement_kind
 
-val cost : State.state -> origin:Core.origin -> Syntax.cost -> Core.cost
-val loop_clause : State.state -> Syntax.loop_clause -> Core.loop_clause
-val try_ : State.state -> Syntax.expression -> Syntax.expression -> output:Types.ty -> Core.kind
-val collection_literal : State.state -> Syntax.expression -> Core.expression list -> Core.kind
+val build_cost : State.state -> origin:Core.origin -> Syntax.cost -> Core.cost
+val build_loop_clause : State.state -> Syntax.loop_clause -> Core.loop_clause
 
-val map_literal :
+val build_try :
+  State.state -> Syntax.expression -> Syntax.expression -> output:Types.ty -> Core.kind
+
+val build_collection_literal : State.state -> Syntax.expression -> Core.expression list -> Core.kind
+
+val build_map_literal :
   State.state -> Syntax.expression -> (Core.expression * Core.expression) list -> Core.kind
