@@ -16,7 +16,7 @@ val check : t -> Path.package list -> unit
 val file_diagnostics : t -> Path.file -> Diagnostic.t list
 val manifest_problems : t -> Path.package -> Package_checks.manifest_problem list
 val code_packages : t -> Path.package -> Path.package list option
-val tables : t -> Resolve.Names.key -> Infer.tables option
+val read_checked_body : t -> Resolve.Names.key -> Infer.checked option
 val parsed : t -> Path.file -> Parsed.t
 val names : t -> Path.package list -> Resolve.Names.lookups
 val resolved : t -> Resolve.Names.key -> Resolve.resolved option
@@ -59,7 +59,6 @@ module For_testing : sig
   type stage = Resolve | Interface | Infer | Patterns | Usage | Ownership | Package_checks
 
   val diagnostics : stage list -> t -> Path.file -> Diagnostic.t list
-  val checked_body : t -> Resolve.Names.key -> Infer.checked option
   val derived : t -> Path.t -> Core.t option
   val core_of_path : t -> Path.t -> (Core.t * Types.substitution) option
   val proof_lookups : t -> Prover.Lookups.t

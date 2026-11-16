@@ -78,7 +78,7 @@ type core_nodes = {
 }
 
 let core_nodes database (key : Resolve.Names.key) : core_nodes =
-  match Pipeline.For_testing.checked_body (pipeline database) key with
+  match Pipeline.read_checked_body (pipeline database) key with
   | None -> failwith (Printf.sprintf "%s has no core form" (Resolve.Names.show_key key))
   | Some { form; _ } ->
       let expressions = ref [] and statements = ref [] and patterns = ref [] in
@@ -126,7 +126,7 @@ let no_diagnostics ~check files =
            ~core:(fun key ->
              Option.map
                (fun (checked : Infer.checked) -> checked.form)
-               (Pipeline.For_testing.checked_body pipeline key))
+               (Pipeline.read_checked_body pipeline key))
            (file_of name)))
     files
 

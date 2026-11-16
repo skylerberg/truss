@@ -2345,10 +2345,10 @@ let stage_diagnostics pipeline (file : Path.file) stage =
 let stages = [ Resolve; Interface; Infer; Patterns; Usage; Ownership; Package_checks ]
 let check pipeline packages = drain pipeline ~through:Package_checks packages
 
-let tables pipeline (key : Names.key) =
+let read_checked_body pipeline (key : Names.key) =
   drain pipeline ~through:Checked_bodies [ key.module_.package ];
   match Hashtbl.find_opt (owner pipeline key.module_.package).checked_bodies key with
-  | Some (Value checked) -> Some checked.tables
+  | Some (Value checked) -> Some checked
   | Some (Failed _ | Blocked) | None -> None
 
 let file_diagnostics pipeline (file : Path.file) =
@@ -2632,12 +2632,6 @@ module For_testing = struct
     drain pipeline ~through [ file.module_.package ];
     List.concat_map (stage_diagnostics pipeline file) stages
 
-  let checked_body pipeline (key : Names.key) =
-    drain pipeline ~through:Checked_bodies [ key.module_.package ];
-    match Hashtbl.find_opt (owner pipeline key.module_.package).checked_bodies key with
-    | Some (Value checked) -> Some checked
-    | Some (Failed _ | Blocked) | None -> None
-
   let derived pipeline path =
     drain pipeline ~through:Derived_forms [ Path.package path ];
     match Path_table.find_opt (owner pipeline (Path.package path)).derived_forms path with
@@ -2651,7 +2645,9 @@ module For_testing = struct
           (fun form -> (form, substitution))
           (match origin with
           | Infer.Written key | Inherited key ->
-              Option.map (fun (checked : Infer.checked) -> checked.form) (checked_body pipeline key)
+              Option.map
+                (fun (checked : Infer.checked) -> checked.form)
+                (read_checked_body pipeline key)
           | Generated -> derived pipeline path))
 
   let proof_lookups pipeline = proof_lookups pipeline ignore

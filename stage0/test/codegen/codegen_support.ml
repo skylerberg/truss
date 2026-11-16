@@ -244,7 +244,7 @@ let load_files ?results ?(roots = []) files =
                ~core:(fun key ->
                  Option.map
                    (fun (checked : Infer.checked) -> checked.form)
-                   (Pipeline.For_testing.checked_body pipeline key))
+                   (Pipeline.read_checked_body pipeline key))
                file)
       | diagnostics ->
           fail "the source has diagnostics:\n%s"
