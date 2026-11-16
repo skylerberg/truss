@@ -119,99 +119,92 @@ let () =
       | [ "types.mismatch" ] -> ()
       | reported -> Harness.fail "reported [%s]" (String.concat "; " reported));
   Harness.test "a literal takes the type of the other operand" (fun () ->
-      has_type Fixtures.Infer.literal_takes_the_type_of_the_other_operand "1" "UInt8");
+      has_type Fixtures.Infer.uint8_plus_a_literal "1" "UInt8");
   Harness.test "a literal nothing decides is an Int64" (fun () ->
-      has_type Fixtures.Infer.literal_nothing_decides_is_an_int64 "0" "Int64");
+      has_type Fixtures.Infer.var_of_a_literal "0" "Int64");
   Harness.test "a literal takes the expected type" (fun () ->
-      has_type Fixtures.Infer.literal_takes_the_expected_type "3" "UInt8");
+      has_type Fixtures.Infer.uint8_let_of_a_literal "3" "UInt8");
   Harness.test "a literal multiplied by a type that is not an integer is an Int64" (fun () ->
-      fine Fixtures.Infer.literal_multiplied_by_a_type_that_is_not_an);
+      fine Fixtures.Infer.literal_times_a_duration);
   Harness.test "an expression of literals waits for the same decision" (fun () ->
-      has_type Fixtures.Infer.expression_of_literals_waits_for_the_same_decision "60" "UInt16");
+      has_type Fixtures.Infer.uint16_plus_a_product_of_literals "60" "UInt16");
   Harness.test "a literal that does not fit its type is an error" (fun () ->
-      one_diagnostic Fixtures.Infer.literal_that_does_not_fit_its_type_is_an_error
-        "types.literal_out_of_range");
+      one_diagnostic Fixtures.Infer.uint8_let_of_300 "types.literal_out_of_range");
   Harness.test "a literal of a type an integer trait bounds is an integer of that type" (fun () ->
-      fine Fixtures.Infer.literal_of_a_type_an_integer_trait_bounds_is_an);
+      fine Fixtures.Infer.signed_integer_compared_with_minus_one);
   Harness.test "a literal of a type an integer trait bounds must fit every type that implements it"
     (fun () ->
-      one_diagnostic Fixtures.Infer.literal_of_a_type_an_integer_trait_bounds_must_fit
-        "types.literal_out_of_range";
-      one_diagnostic Fixtures.Infer.literal_of_a_type_an_integer_trait_bounds_must_fit_2
+      one_diagnostic Fixtures.Infer.signed_integer_compared_with_200 "types.literal_out_of_range";
+      one_diagnostic Fixtures.Infer.fixed_width_integer_compared_with_128
         "types.literal_out_of_range");
   Harness.test "a literal of a type UnsignedInteger bounds cannot be negated" (fun () ->
-      one_diagnostic Fixtures.Infer.literal_of_a_type_unsignedinteger_bounds_cannot_be
+      one_diagnostic Fixtures.Infer.unsigned_integer_compared_with_minus_one
         "types.negated_unsigned");
   Harness.test "a negated literal is checked after the negation" (fun () ->
-      fine Fixtures.Infer.negated_literal_is_checked_after_the_negation);
+      fine Fixtures.Infer.int8_let_of_minus_128);
   Harness.test "an integer literal where a float is expected is an error with a fix" (fun () ->
-      one_diagnostic Fixtures.Infer.integer_literal_where_a_float_is_expected_is_an
-        "types.integer_for_float"
-        ~fixed:Fixtures.Infer.integer_literal_where_a_float_is_expected_is_an_fixed);
+      one_diagnostic Fixtures.Infer.integer_literal_as_a_float "types.integer_for_float"
+        ~fixed:Fixtures.Infer.integer_literal_as_a_float_fixed);
   Harness.test "a literal shift amount is a UInt64" (fun () ->
-      has_type Fixtures.Infer.literal_shift_amount_is_a_uint64 "3" ~occurrence:3 "UInt64");
+      has_type Fixtures.Infer.shift_by_a_literal "3" ~occurrence:3 "UInt64");
   Harness.test "a loop variable's literal type is decided by the loop's body" (fun () ->
-      has_type Fixtures.Infer.loop_variables_literal_type_is_decided_by_the "0" "UInt8");
+      has_type Fixtures.Infer.range_loop_index_bound_to_a_uint8 "0" "UInt8");
   Harness.test "a local's literal type is decided by a later statement" (fun () ->
-      let text = Fixtures.Infer.locals_literal_type_is_decided_by_a_later in
+      let text = Fixtures.Infer.literal_decided_by_a_later_comparison in
       has_type text "10" "UInt8";
       has_type text "2" "UInt8";
       has_type text "0.5" "Float32";
       fine text);
   Harness.test "the literal type a local leaves undecided ends with the local's scope" (fun () ->
-      let text = Fixtures.Infer.literal_type_a_local_leaves_undecided_ends_with in
+      let text = Fixtures.Infer.range_loop_bound_to_a_uint8 in
       has_type text "0" "UInt8";
       has_type text "5" "UInt64");
   Harness.test "a specification converts a local whose literal type is undecided to Integer"
     (fun () ->
-      let text = Fixtures.Infer.specification_converts_a_local_whose_literal_type in
+      let text = Fixtures.Infer.requires_of_an_undecided_local in
       has_type text "0" "UInt8";
       fine text);
   Harness.test "a pattern of a local's undecided literal type is checked once it is decided"
     (fun () ->
-      let text = Fixtures.Infer.pattern_of_a_locals_undecided_literal_type_is in
+      let text = Fixtures.Infer.match_on_an_undecided_literal in
       has_type text "3" "UInt8";
       fine text);
   Harness.test "a local in a block is decided after the block" (fun () ->
-      has_type Fixtures.Infer.local_in_a_block_is_decided_after_the_block "5" "UInt16");
+      has_type Fixtures.Infer.literal_decided_after_its_block "5" "UInt16");
   Harness.test "a local whose literal does not fit the type a later statement decides is an error"
     (fun () ->
-      one_diagnostic Fixtures.Infer.local_whose_literal_does_not_fit_the_type_a
-        "types.literal_out_of_range");
+      one_diagnostic Fixtures.Infer.local_of_300_bound_to_a_uint8 "types.literal_out_of_range");
   Harness.test "a loop's annotation decides the literals of its range" (fun () ->
-      let text = Fixtures.Infer.loop_annotation_decides_the_literals_of_its_range in
+      let text = Fixtures.Infer.range_loop_annotated_uint8 in
       has_type text "10" "UInt8";
       fine text);
   Harness.test "a loop's annotation is the type of a destructured element" (fun () ->
-      fine Fixtures.Infer.loop_annotation_of_a_destructured_element);
+      fine Fixtures.Infer.loop_annotating_a_destructured_element);
   Harness.test "a loop's annotation must be its element type" (fun () ->
-      one_diagnostic Fixtures.Infer.loop_annotation_must_be_the_element_type "types.mismatch"
+      one_diagnostic Fixtures.Infer.loop_over_uint16s_annotated_uint8 "types.mismatch"
         ~says:"The elements of this loop are `UInt16`, not `UInt8`.");
   Harness.test
     "a loop variable given its default type by a method call has a fix that annotates the loop"
     (fun () ->
-      one_diagnostic Fixtures.Infer.loop_variable_given_its_default_type_by_a_method
-        "types.mismatch"
-        ~fixed:Fixtures.Infer.loop_variable_given_its_default_type_by_a_method_fixed);
+      one_diagnostic Fixtures.Infer.range_loop_wrapping_added_then_bound_to_a_uint8 "types.mismatch"
+        ~fixed:Fixtures.Infer.range_loop_wrapping_added_then_bound_to_a_uint8_fixed);
   Harness.test "a local used as two types is one error, at the second use" (fun () ->
-      one_diagnostic Fixtures.Infer.local_used_as_two_types_is_one_error "types.mismatch"
+      one_diagnostic Fixtures.Infer.local_bound_to_two_types "types.mismatch"
         ~says:"An earlier statement decided that the type of `base` is `UInt8`.");
   Harness.test "a local given its default type by a method call is one error, with a fix" (fun () ->
-      one_diagnostic Fixtures.Infer.local_given_its_default_type_by_a_method_call "types.mismatch"
+      one_diagnostic Fixtures.Infer.local_wrapping_added_then_bound_to_a_uint8 "types.mismatch"
         ~says:"`base` took its default type, `Int64`, at an earlier method call."
-        ~fixed:Fixtures.Infer.local_given_its_default_type_by_a_method_call_fixed)
+        ~fixed:Fixtures.Infer.local_wrapping_added_then_bound_to_a_uint8_fixed)
 
 let () =
   Harness.test "comparing integer types that differ is an error with a fix that converts" (fun () ->
-      one_diagnostic Fixtures.Infer.comparing_integer_types_that_differ_is_an_error
-        "types.mismatched_integers"
-        ~fixed:Fixtures.Infer.comparing_integer_types_that_differ_is_an_error_fixed);
+      one_diagnostic Fixtures.Infer.comparison_of_uint64_and_uint32 "types.mismatched_integers"
+        ~fixed:Fixtures.Infer.comparison_of_uint64_and_uint32_fixed);
   Harness.test "+ on strings is an error with a fix to interpolation" (fun () ->
-      one_diagnostic Fixtures.Infer.on_strings_is_an_error_with_a_fix_to_interpolation
-        "types.string_addition"
-        ~fixed:Fixtures.Infer.on_strings_is_an_error_with_a_fix_to_interpolation_fixed);
+      one_diagnostic Fixtures.Infer.string_plus_a_string "types.string_addition"
+        ~fixed:Fixtures.Infer.string_plus_a_string_fixed);
   Harness.test "an operator chooses the impl by both operands" (fun () ->
-      let text = Fixtures.Infer.operator_chooses_the_impl_by_both_operands in
+      let text = Fixtures.Infer.additions_of_meters_and_integers in
       match core_call_at text "length + extra" 1 with
       | { callee = Trait_method { evidence = Impl { impl; _ }; name = "add"; _ }; _ }, _ -> (
           match impl with
@@ -221,7 +214,7 @@ let () =
           | _ -> Harness.fail "the impl chosen is %s" (Path.show impl))
       | _ -> Harness.fail "no impl recorded");
   Harness.test "an ordering on Self in a trait's law is its compare" (fun () ->
-      let text = Fixtures.Infer.ordering_on_self_in_a_traits_law_is_its_compare in
+      let text = Fixtures.Infer.law_ordering_self_values in
       List.iter
         (fun written ->
           match core_call_at text written 1 with
@@ -231,55 +224,54 @@ let () =
           | _ -> Harness.fail "`%s` is another call" written)
         [ "first < second"; "second < third"; "first < third" ]);
   Harness.test "an operand can be the result of an operator's method" (fun () ->
-      fine Fixtures.Infer.operand_can_be_the_result_of_an_operators_method);
+      fine Fixtures.Infer.sum_with_a_multiply_call);
   Harness.test "a type without the operator's trait is an error" (fun () ->
-      one_diagnostic Fixtures.Infer.type_without_the_operators_trait_is_an_error "types.no_impl")
+      one_diagnostic Fixtures.Infer.sum_of_points "types.no_impl")
 
 let () =
   Harness.test "a call to a function whose signature fails a check reports nothing" (fun () ->
-      one_diagnostic Fixtures.Infer.call_to_a_function_whose_signature_fails_a_check_reports_nothing
+      one_diagnostic Fixtures.Infer.call_of_a_public_function_taking_a_private_type
         "types.private_in_public");
   Harness.test "a call to a function whose parameter type is unknown reports nothing" (fun () ->
-      one_diagnostic
-        Fixtures.Infer.call_to_a_function_whose_parameter_type_is_unknown_reports_nothing
+      one_diagnostic Fixtures.Infer.call_of_a_function_with_a_misspelled_parameter_type
         "resolve.unknown_name")
 
 let () =
   let functions = "fn copy_file(source: Int64, destination: Int64) {}\n\n" in
   Harness.test "an argument after the first needs a label, with a fix that adds it" (fun () ->
       one_diagnostic
-        (functions ^ Fixtures.Infer.argument_after_the_first_needs_a_label_with_a_fix)
+        (functions ^ Fixtures.Infer.copy_file_with_an_unlabeled_second_argument)
         "types.missing_label"
-        ~fixed:(functions ^ Fixtures.Infer.argument_after_the_first_needs_a_label_with_a_fix_2));
+        ~fixed:(functions ^ Fixtures.Infer.copy_file_with_a_labeled_destination));
   Harness.test "a variable with the parameter's name needs no label" (fun () ->
-      fine (functions ^ Fixtures.Infer.variable_with_the_parameters_name_needs_no_label));
+      fine (functions ^ Fixtures.Infer.copy_file_with_arguments_named_like_parameters));
   Harness.test "arguments out of order are an error with a fix that reorders them" (fun () ->
       one_diagnostic
-        (functions ^ Fixtures.Infer.arguments_out_of_order_are_an_error_with_a_fix)
+        (functions ^ Fixtures.Infer.copy_file_with_swapped_arguments)
         "types.out_of_order"
-        ~fixed:(functions ^ Fixtures.Infer.arguments_out_of_order_are_an_error_with_a_fix_2));
+        ~fixed:(functions ^ Fixtures.Infer.copy_file_with_arguments_named_like_parameters));
   Harness.test "a missing argument is an error" (fun () ->
       one_diagnostic
-        (functions ^ Fixtures.Infer.missing_argument_is_an_error)
+        (functions ^ Fixtures.Infer.copy_file_with_one_argument)
         "types.missing_argument");
   Harness.test "an argument for a parameter with a default can be omitted" (fun () ->
-      let text = Fixtures.Infer.argument_for_a_parameter_with_a_default_can_be in
+      let text = Fixtures.Infer.connect_without_its_port in
       match core_call_at text "connect(1)" 1 with
       | { arguments = [ Passed _; Default ]; _ }, _ -> ()
       | _ -> Harness.fail "the omitted default is not recorded");
   Harness.test "a String passed where a StringSlice is expected is viewed" (fun () ->
-      let text = Fixtures.Infer.string_passed_where_a_stringslice_is_expected_is in
+      let text = Fixtures.Infer.greet_of_a_string in
       match core_call_at text "greet(name)" 1 with
       | { arguments = [ argument ]; _ }, _ when is_view argument -> ()
       | _ -> Harness.fail "no conversion recorded");
   Harness.test "a capability's method views a String argument too" (fun () ->
-      let text = Fixtures.Infer.capabilitys_method_views_a_string_argument_too in
+      let text = Fixtures.Infer.print_line_of_a_string in
       match core_call_at text "Console.print_line(name)" 1 with
       | { arguments = [ argument ]; _ }, _ when is_view argument -> ()
       | _ -> Harness.fail "no conversion recorded");
   Harness.test "a string literal is a StringSlice where one is expected, and a String elsewhere"
     (fun () ->
-      let text = Fixtures.Infer.string_literal_is_a_string_slice_where_one_is in
+      let text = Fixtures.Infer.string_literals_kept_and_printed in
       has_type text "\"kept\"" "String";
       has_type text "\"hello\"" "StringSlice";
       match core_call_at text "Console.print_line(\"hello\")" 1 with
@@ -287,234 +279,206 @@ let () =
       | _ -> Harness.fail "the literal is converted to a view");
   Harness.test "an unknown label is an error with a fix to the closest" (fun () ->
       one_diagnostic
-        (functions ^ Fixtures.Infer.unknown_label_is_an_error_with_a_fix_to_the)
+        (functions ^ Fixtures.Infer.misspelled_label)
         "types.unknown_label"
-        ~fixed:(functions ^ Fixtures.Infer.unknown_label_is_an_error_with_a_fix_to_the_2));
+        ~fixed:(functions ^ Fixtures.Infer.copy_file_with_a_destination_label));
   Harness.test "a record is built with labels in any order" (fun () ->
-      fine Fixtures.Infer.record_is_built_with_labels_in_any_order);
+      fine Fixtures.Infer.point_built_with_labels_reversed);
   Harness.test "a record with one field takes a bare value" (fun () ->
-      fine Fixtures.Infer.record_with_one_field_takes_a_bare_value);
+      fine Fixtures.Infer.user_id_of_a_bare_value);
   Harness.test "a generic function's type arguments are solved from its arguments" (fun () ->
-      has_type Fixtures.Infer.generic_functions_type_arguments_are_solved_from "wrap(5)"
-        "Option[Int64]")
+      has_type Fixtures.Infer.wrap_of_an_integer "wrap(5)" "Option[Int64]")
 
 let () =
   Harness.test "a mut parameter needs mut at the call, with a fix that adds it" (fun () ->
-      one_diagnostic Fixtures.Infer.mut_parameter_needs_mut_at_the_call_with_a_fix
-        "types.missing_mode"
-        ~fixed:Fixtures.Infer.mut_parameter_needs_mut_at_the_call_with_a_fix_fixed);
+      one_diagnostic Fixtures.Infer.bump_without_mut "types.missing_mode"
+        ~fixed:Fixtures.Infer.bump_without_mut_fixed);
   Harness.test "an own parameter needs own for a place that does not copy implicitly" (fun () ->
-      one_diagnostic Fixtures.Infer.own_parameter_needs_own_for_a_place_that_does_not
-        "types.missing_mode"
-        ~fixed:Fixtures.Infer.own_parameter_needs_own_for_a_place_that_does_not_fixed);
+      one_diagnostic Fixtures.Infer.own_list_passed_without_own "types.missing_mode"
+        ~fixed:Fixtures.Infer.own_list_passed_without_own_fixed);
   Harness.test "own on a place that copies implicitly is redundant" (fun () ->
-      one_diagnostic Fixtures.Infer.own_on_a_place_that_copies_implicitly_is_redundant
-        "types.redundant_mode"
-        ~fixed:Fixtures.Infer.own_on_a_place_that_copies_implicitly_is_redundant_fixed);
+      one_diagnostic Fixtures.Infer.own_before_an_integer "types.redundant_mode"
+        ~fixed:Fixtures.Infer.own_before_an_integer_fixed);
   Harness.test "a mut receiver chooses the method's mut overload" (fun () ->
-      fine Fixtures.Infer.mut_receiver_chooses_the_methods_mut_overload);
+      fine Fixtures.Infer.mut_push_onto_a_var_list);
   Harness.test
     "a place calling a method that takes mut self needs the mode keyword, with a fix that adds it"
     (fun () ->
-      one_diagnostic Fixtures.Infer.place_calling_a_method_that_takes_mut_self_needs
-        "types.missing_mode"
-        ~fixed:Fixtures.Infer.place_calling_a_method_that_takes_mut_self_needs_fixed)
+      one_diagnostic Fixtures.Infer.push_without_mut "types.missing_mode"
+        ~fixed:Fixtures.Infer.push_without_mut_fixed)
 
 let () =
   Harness.test "a statement's value must be used, with a fix that discards it" (fun () ->
-      one_diagnostic Fixtures.Infer.statements_value_must_be_used_with_a_fix_that
-        "types.unused_value"
-        ~fixed:Fixtures.Infer.statements_value_must_be_used_with_a_fix_that_fixed);
+      one_diagnostic Fixtures.Infer.unused_length "types.unused_value"
+        ~fixed:Fixtures.Infer.unused_length_fixed);
   Harness.test "the default of a parameter of a view type can be an owned value" (fun () ->
-      fine Fixtures.Infer.default_of_a_parameter_of_a_view_type_can_be_an);
+      fine Fixtures.Infer.view_parameters_with_owned_defaults);
   Harness.test "`time` of a method that no bound of the type parameter declares is an error"
     (fun () ->
-      one_diagnostic Fixtures.Infer.time_of_a_method_that_no_bound_of_the_type
-        "types.unknown_member");
+      one_diagnostic Fixtures.Infer.cost_naming_time_of_an_undeclared_method "types.unknown_member");
   Harness.test "a let cannot be assigned" (fun () ->
-      one_diagnostic Fixtures.Infer.let_cannot_be_assigned "types.not_assignable");
+      one_diagnostic Fixtures.Infer.assignment_to_a_let "types.not_assignable");
   List.iter
     (fun (construct, text) ->
       Harness.test (construct ^ " cannot be passed `mut`") (fun () ->
           one_diagnostic text "types.wrong_mode"))
     [
-      ("a read-only parameter", Fixtures.Infer.read_only_parameter);
-      ("an `own` parameter", Fixtures.Infer.own_parameter);
-      ("a `let`", Fixtures.Infer.let_);
-      ("a field of a `let`", Fixtures.Infer.field_of_a_let);
-      ("an element of a read-only parameter", Fixtures.Infer.element_of_a_read_only_parameter);
-      ("a constant", Fixtures.Infer.constant);
-      ("a read-only argument", Fixtures.Infer.read_only_argument);
+      ("a read-only parameter", Fixtures.Infer.push_onto_a_read_only_parameter);
+      ("an `own` parameter", Fixtures.Infer.push_onto_an_own_parameter);
+      ("a `let`", Fixtures.Infer.push_onto_a_let_list);
+      ("a field of a `let`", Fixtures.Infer.push_onto_a_field_of_a_let);
+      ( "an element of a read-only parameter",
+        Fixtures.Infer.push_onto_an_element_of_a_read_only_parameter );
+      ("a constant", Fixtures.Infer.constant_list_pushed_to);
+      ("a read-only argument", Fixtures.Infer.read_only_list_passed_mut);
       ( "the collection of a `for` loop that is a read-only parameter",
-        Fixtures.Infer.collection_of_a_for_loop_that_is_a_read_only );
+        Fixtures.Infer.mut_loop_over_a_read_only_list );
       ( "`self` in a method that takes `self` read-only",
-        Fixtures.Infer.self_in_a_method_that_takes_self_read_only );
-      ("`self` inside a lambda", Fixtures.Infer.self_inside_a_lambda);
-      ("a local that a lambda captures", Fixtures.Infer.local_that_a_lambda_captures);
+        Fixtures.Infer.push_onto_a_field_of_read_only_self );
+      ("`self` inside a lambda", Fixtures.Infer.lambda_pushing_onto_self);
+      ("a local that a lambda captures", Fixtures.Infer.lambda_pushing_onto_a_captured_list);
     ];
   Harness.test
     "a `var`, a `mut` parameter, `mut self`, and a `mut` loop variable can be passed `mut`"
-    (fun () -> fine Fixtures.Infer.var_a_mut_parameter_mut_self_and_a_mut_loop);
+    (fun () -> fine Fixtures.Infer.mut_arguments_of_every_kind);
   Harness.test "the variable of a loop over elements lent `mut` can be passed `mut`" (fun () ->
-      fine Fixtures.Infer.variable_of_a_loop_over_elements_lent_mut_can);
-  Harness.test "a var can be assigned" (fun () -> fine Fixtures.Infer.var_can_be_assigned);
+      fine Fixtures.Infer.mut_loop_over_rows);
+  Harness.test "a var can be assigned" (fun () -> fine Fixtures.Infer.assignment_to_a_var);
   Harness.test "an empty list with nothing to decide its elements is an error" (fun () ->
-      one_diagnostic Fixtures.Infer.empty_list_with_nothing_to_decide_its_elements_is
-        "types.cannot_infer");
+      one_diagnostic Fixtures.Infer.empty_list_without_a_type "types.cannot_infer");
   Harness.test "an empty list takes its elements' type from the annotation" (fun () ->
-      fine Fixtures.Infer.empty_list_takes_its_elements_type_from_the);
+      fine Fixtures.Infer.empty_list_of_strings);
   Harness.test "a body's value must have the result type" (fun () ->
-      one_diagnostic Fixtures.Infer.bodys_value_must_have_the_result_type "types.mismatch");
+      one_diagnostic Fixtures.Infer.body_returning_bool_as_int64 "types.mismatch");
   Harness.test "a body may end with a let whose value never finishes" (fun () ->
-      fine Fixtures.Infer.body_may_end_with_a_let_whose_value_never_finishes);
+      fine Fixtures.Infer.let_of_a_returning_if_at_the_end);
   Harness.test "an arm of type Never does not contribute to the type of the match" (fun () ->
-      fine Fixtures.Infer.arm_of_type_never_does_not_contribute_to_the_type);
+      fine Fixtures.Infer.match_with_a_returning_arm);
   Harness.test "? needs the function's error type" (fun () ->
-      one_diagnostic Fixtures.Infer.needs_the_functions_error_type "types.wrong_try");
+      one_diagnostic Fixtures.Infer.question_mark_on_a_result_of_another_error "types.wrong_try");
   Harness.test "? on a matching Result gives its value" (fun () ->
-      has_type Fixtures.Infer.on_a_matching_result_gives_its_value "parse()?" "Int64");
+      has_type Fixtures.Infer.question_mark_on_a_result_of_the_same_error "parse()?" "Int64");
   Harness.test "if without else has type Unit" (fun () ->
-      has_type Fixtures.Infer.if_without_else_has_type_unit "if ready { }" "Unit")
+      has_type Fixtures.Infer.let_of_an_if_without_else "if ready { }" "Unit")
 
 let () =
   Harness.test "an unknown field is an error with a fix to the closest" (fun () ->
-      one_diagnostic Fixtures.Infer.unknown_field_is_an_error_with_a_fix_to_the
-        "types.unknown_member");
+      one_diagnostic Fixtures.Infer.misspelled_field "types.unknown_member");
   Harness.test "a method from a trait needs no import" (fun () ->
-      fine Fixtures.Infer.method_from_a_trait_needs_no_import);
+      fine Fixtures.Infer.copy_of_a_list);
   Harness.test "a law's proof names the law's parameters, which have the proof's type for Self"
-    (fun () -> fine Fixtures.Infer.laws_proof_names_the_laws_parameters_which_have);
+    (fun () -> fine Fixtures.Infer.law_proof_reading_its_parameters);
   Harness.test "a law's proof for a generic impl is checked under its own generic parameters"
-    (fun () -> fine Fixtures.Infer.laws_proof_for_a_generic_impl_is_checked_under_its);
+    (fun () -> fine Fixtures.Infer.law_proof_for_a_generic_box);
   Harness.test "a law's proof names no parameter of another law" (fun () ->
-      one_diagnostic Fixtures.Infer.laws_proof_names_no_parameter_of_another_law
-        "resolve.unknown_name");
+      one_diagnostic Fixtures.Infer.law_proof_naming_another_laws_parameter "resolve.unknown_name");
   Harness.test "a law's proof cannot assign to a parameter of the law" (fun () ->
-      one_diagnostic Fixtures.Infer.laws_proof_cannot_assign_to_a_parameter_of_the_law
-        "types.not_in_specification");
+      one_diagnostic Fixtures.Infer.law_proof_assigning_a_parameter "types.not_in_specification");
   Harness.test "a variant with one field is a function" (fun () ->
-      fine Fixtures.Infer.variant_with_one_field_is_a_function);
+      fine Fixtures.Infer.circle_as_a_function);
   Harness.test "a variant with several fields is not a function, because fields have no order"
-    (fun () ->
-      one_diagnostic Fixtures.Infer.variant_with_several_fields_is_not_a_function
-        "types.not_a_value");
+    (fun () -> one_diagnostic Fixtures.Infer.rectangle_as_a_function "types.not_a_value");
   Harness.test "a lending method is not a function value, because a function type cannot lend"
     (fun () ->
-      one_diagnostic Fixtures.Infer.lending_method_is_not_a_function_value "types.not_a_value"
+      one_diagnostic Fixtures.Infer.lending_method_as_a_value "types.not_a_value"
         ~says:"a function value cannot lend");
   Harness.test "a variant is looked up under its type" (fun () ->
-      fine Fixtures.Infer.variant_is_looked_up_under_its_type);
+      fine Fixtures.Infer.shape_variants_built);
   Harness.test "a constant under a type is read by name" (fun () ->
-      has_type Fixtures.Infer.constant_under_a_type_is_read_by_name "UInt8.maximum" "UInt8");
+      has_type Fixtures.Infer.uint8_maximum "UInt8.maximum" "UInt8");
   Harness.test "a trait method through a type chooses the impl by the argument" (fun () ->
-      fine Fixtures.Infer.trait_method_through_a_type_chooses_the_impl_by)
+      fine Fixtures.Infer.int64_from_an_int32)
 
 let () =
   Harness.test "an unknown variant in a pattern is an error" (fun () ->
-      one_diagnostic Fixtures.Infer.unknown_variant_in_a_pattern_is_an_error "types.unknown_variant");
+      one_diagnostic Fixtures.Infer.misspelled_variant_arm "types.unknown_variant");
   Harness.test "a bare name in a record pattern binds the field it names" (fun () ->
-      fine Fixtures.Infer.bare_name_in_a_record_pattern_binds_the_field_it);
+      fine Fixtures.Infer.let_binding_both_fields_of_a_pair);
   Harness.test "a bare name that names no field of a record with several is an error" (fun () ->
-      one_diagnostic Fixtures.Infer.bare_name_that_names_no_field_of_a_record_with
-        "types.unknown_member")
+      one_diagnostic Fixtures.Infer.record_pattern_with_a_name_of_no_field "types.unknown_member")
 
 let () =
   Harness.test "a lambda with nothing to give its parameter types is an error" (fun () ->
-      one_diagnostic Fixtures.Infer.lambda_with_nothing_to_give_its_parameter_types_is
-        "types.lambda_needs_type");
+      one_diagnostic Fixtures.Infer.lambda_bound_without_a_type "types.lambda_needs_type");
   Harness.test "a lambda takes its parameter types from the function type it is passed as"
-    (fun () ->
-      has_type Fixtures.Infer.lambda_takes_its_parameter_types_from_the_function "item + 1" "Int64");
+    (fun () -> has_type Fixtures.Infer.lambda_incrementing_items "item + 1" "Int64");
   Harness.test "concurrent code needs `Tasks`, in a block and in a loop" (fun () ->
-      one_diagnostic Fixtures.Infer.concurrent_code_needs_tasks_in_a_block_and_in_a
-        "capabilities.not_available";
-      one_diagnostic Fixtures.Infer.concurrent_code_needs_tasks_in_a_block_and_in_a_2
-        "capabilities.not_available");
+      one_diagnostic Fixtures.Infer.concurrent_block_without_tasks "capabilities.not_available";
+      one_diagnostic Fixtures.Infer.concurrent_loop_without_tasks "capabilities.not_available");
   Harness.test "a branch of a concurrent block uses the capabilities around the block" (fun () ->
-      fine Fixtures.Infer.branch_of_a_concurrent_block_uses_the_capabilities);
+      fine Fixtures.Infer.concurrent_branch_calling_tick);
   (let sessions = Fixtures.Infer.sessions in
    Harness.test
      "a capability implemented by a monitor has no method with a callback that uses a capability"
      (fun () ->
        one_diagnostic
-         (sessions ^ Fixtures.Infer.capability_implemented_by_a_monitor_has_no_method)
+         (sessions ^ Fixtures.Infer.monitor_table_with_a_callback)
          "capabilities.callback_may_deadlock");
    Harness.test "an implementation is not a monitor if the body of its `provide` cannot use `Tasks`"
-     (fun () -> fine (sessions ^ Fixtures.Infer.implementation_is_not_a_monitor_if_the_body_of_its));
+     (fun () -> fine (sessions ^ Fixtures.Infer.table_provided_without_tasks));
    let tally = Fixtures.Infer.tally in
    Harness.test "a monitor needs `Tasks` at its `provide`, not only in a nested one" (fun () ->
        one_diagnostic
-         (tally ^ Fixtures.Infer.monitor_needs_tasks_at_its_provide_not_only_in_a)
+         (tally ^ Fixtures.Infer.tally_provided_without_tasks)
          "capabilities.monitor_needs_tasks");
    Harness.test
      "a monitor can lock through `Tasks` of its `provide`, an enclosing one, or a capability \
-      parameter" (fun () ->
-       fine (tally ^ Fixtures.Infer.monitor_can_lock_through_tasks_of_its_provide_an)));
+      parameter" (fun () -> fine (tally ^ Fixtures.Infer.monitors_provided_with_and_without_tasks)));
   Harness.test "an assignment through an index of a map takes the key as an owned value" (fun () ->
-      fine Fixtures.Infer.assignment_through_an_index_of_a_map_takes_the_key;
-      one_diagnostic Fixtures.Infer.assignment_through_an_index_of_a_map_takes_the_key_2
-        "types.missing_mode";
-      one_diagnostic Fixtures.Infer.assignment_through_an_index_of_a_map_takes_the_key_3
-        "types.not_assignable");
+      fine Fixtures.Infer.map_assignments_with_owned_keys;
+      one_diagnostic Fixtures.Infer.map_assignment_with_a_viewed_key "types.missing_mode";
+      one_diagnostic Fixtures.Infer.map_assignment_to_a_read_only_map "types.not_assignable");
   Harness.test "`final(result)` is a lending method's part as the caller left it" (fun () ->
-      fine Fixtures.Infer.final_of_result_is_the_part_as_the_caller_left_it;
-      one_diagnostic ~says:"`final(result)`" Fixtures.Infer.final_takes_the_lent_part
+      fine Fixtures.Infer.lending_part_ensuring_final_of_result;
+      one_diagnostic ~says:"`final(result)`" Fixtures.Infer.lending_part_ensuring_final_of_a_field
         "types.not_callable");
   Harness.test "`final` and `visited` are names only where they have a meaning" (fun () ->
-      one_diagnostic Fixtures.Infer.final_is_not_named_outside_a_lending_methods_ensures
-        "resolve.unknown_name";
-      one_diagnostic Fixtures.Infer.visited_is_not_named_outside_a_for_loops_clauses
-        "resolve.unknown_name");
+      one_diagnostic Fixtures.Infer.ensures_naming_final_outside_a_lend "resolve.unknown_name";
+      one_diagnostic Fixtures.Infer.while_invariant_naming_visited "resolve.unknown_name");
   (let readings = Fixtures.Infer.readings in
    let assign = Fixtures.Infer.readings_assign in
    Harness.test "an element of a type that implements `Index` alone is read" (fun () ->
-       fine (readings ^ Fixtures.Infer.element_of_a_type_that_implements_index_alone_is_read));
+       fine (readings ^ Fixtures.Infer.elements_of_readings_read));
    Harness.test "an element of a type that implements `Index` alone is not assigned" (fun () ->
        one_diagnostic ~says:"and not `IndexMut`"
-         (readings ^ Fixtures.Infer.element_of_a_type_that_implements_index_alone_is_not_assigned)
+         (readings ^ Fixtures.Infer.assignment_through_an_index_of_readings)
          "types.not_assignable");
    Harness.test "an element of a type that implements `Index` alone is not passed `mut`" (fun () ->
        one_diagnostic ~says:"and not `IndexMut`"
-         (readings ^ Fixtures.Infer.element_of_a_type_that_implements_index_alone_is_not_passed_mut)
+         (readings ^ Fixtures.Infer.element_of_readings_passed_mut)
          "types.wrong_mode");
    Harness.test "an assignment through an index calls `assign` without `IndexMut`" (fun () ->
-       fine
-         (readings ^ assign
-        ^ Fixtures.Infer.assignment_through_an_index_calls_assign_without_index_mut));
+       fine (readings ^ assign ^ Fixtures.Infer.assignment_through_an_index_of_readings));
    Harness.test "a compound assignment through an index needs `IndexMut`" (fun () ->
        one_diagnostic ~says:"Assign the whole element with `=`."
-         (readings ^ assign ^ Fixtures.Infer.compound_assignment_through_an_index_needs_index_mut)
+         (readings ^ assign ^ Fixtures.Infer.compound_assignment_through_an_index_of_readings)
          "types.not_assignable"));
   (let keep = Fixtures.Infer.keep in
    Harness.test "a type that holds no view is Storable" (fun () ->
-       fine (keep ^ Fixtures.Infer.type_that_holds_no_view_is_storable));
+       fine (keep ^ Fixtures.Infer.values_without_views_kept));
    Harness.test "an any type is Storable when its trait requires Storable" (fun () ->
-       fine (keep ^ Fixtures.Infer.any_type_is_storable_when_its_trait_requires));
+       fine (keep ^ Fixtures.Infer.any_job_kept));
    Harness.test "a trait that requires Storable cannot be implemented for a view type" (fun () ->
-       one_diagnostic
-         (keep ^ Fixtures.Infer.trait_that_requires_storable_cannot_be_implemented)
-         "types.missing_required_impl");
+       one_diagnostic (keep ^ Fixtures.Infer.job_impl_for_labeled) "types.missing_required_impl");
    List.iter
      (fun (name, body) ->
        Harness.test name (fun () -> one_diagnostic (keep ^ body) "types.unsatisfied_bound"))
      [
-       ("a slice is not Storable", Fixtures.Infer.slice_is_not_storable);
-       ( "a record that holds a slice is not Storable",
-         Fixtures.Infer.record_that_holds_a_slice_is_not_storable );
-       ( "a generic type is not Storable where its argument is not",
-         Fixtures.Infer.generic_type_is_not_storable_where_its_argument_is );
-       ("a function type is not Storable", Fixtures.Infer.function_type_is_not_storable);
+       ("a slice is not Storable", Fixtures.Infer.slice_kept);
+       ("a record that holds a slice is not Storable", Fixtures.Infer.labeled_slice_kept);
+       ("a generic type is not Storable where its argument is not", Fixtures.Infer.boxed_slice_kept);
+       ("a function type is not Storable", Fixtures.Infer.function_kept);
        ( "an any type is not Storable when its trait does not require it",
-         Fixtures.Infer.any_type_is_not_storable_when_its_trait_does_not );
+         Fixtures.Infer.any_task_kept );
        ( "a type parameter is Storable only when it is bounded",
-         Fixtures.Infer.type_parameter_is_storable_only_when_it_is_bounded );
+         Fixtures.Infer.unbounded_element_kept );
      ];
    Harness.test "no impl of Storable can be written" (fun () ->
        one_diagnostic (keep ^ "impl Storable for Labeled {}\n") "types.implements_built_in"));
   Harness.test "the body of a concurrent block gets its types" (fun () ->
-      has_type Fixtures.Infer.body_of_a_concurrent_block_gets_its_types "2" "UInt16");
+      has_type Fixtures.Infer.concurrent_block_calling_g "2" "UInt16");
   Harness.test "a lambda's captures are the outer locals it reads" (fun () ->
-      let text = Fixtures.Infer.lambdas_captures_are_the_outer_locals_it_reads in
+      let text = Fixtures.Infer.lambda_adding_a_captured_step in
       match
         List.filter_map
           (fun (node : Core.expression) ->
@@ -527,28 +491,28 @@ let () =
 
 let () =
   Harness.test "an interpolated value must implement Display" (fun () ->
-      one_diagnostic Fixtures.Infer.interpolated_value_must_implement_display "types.no_impl");
+      one_diagnostic Fixtures.Infer.interpolation_of_a_point "types.no_impl");
   Harness.test "an array literal must have its type's length" (fun () ->
-      one_diagnostic Fixtures.Infer.array_literal_must_have_its_types_length "types.mismatch");
+      one_diagnostic Fixtures.Infer.array_literal_of_the_wrong_length "types.mismatch");
   Harness.test "a list literal is a set where a set is expected" (fun () ->
-      fine Fixtures.Infer.list_literal_is_a_set_where_a_set_is_expected)
+      fine Fixtures.Infer.list_literal_as_a_set)
 
 let () =
   Harness.test "deriving Deserialize needs every invariant clause to run" (fun () ->
-      one_diagnostic Fixtures.Infer.deriving_deserialize_needs_an_invariant_that_runs
+      one_diagnostic Fixtures.Infer.deserialize_of_scores_with_a_quantified_invariant
         "types.cannot_derive");
   Harness.test "deriving Deserialize accepts an invariant that runs" (fun () ->
-      fine Fixtures.Infer.deriving_deserialize_accepts_an_invariant_that_runs);
+      fine Fixtures.Infer.deserialize_of_bounds_with_an_invariant);
   Harness.test "integer arithmetic in a specification is exact" (fun () ->
-      has_type Fixtures.Infer.integer_arithmetic_in_a_specification_is_exact "a + b" "Integer");
+      has_type Fixtures.Infer.ensures_of_a_sum "a + b" "Integer");
   Harness.test "comparisons in a specification may mix integer types" (fun () ->
-      fine Fixtures.Infer.comparisons_in_a_specification_may_mix_integer);
+      fine Fixtures.Infer.requires_comparing_uint32_and_uint64);
   Harness.test "a lambda in a specification may give a built-in integer for an Integer" (fun () ->
-      fine Fixtures.Infer.lambda_in_a_specification_may_give_a_built_in)
+      fine Fixtures.Infer.requires_summing_lengths_with_a_lambda)
 
 let () =
   Harness.test "a for loop over a range of integers is a counted loop" (fun () ->
-      let text = Fixtures.Infer.for_loop_over_a_range_of_integers_is_a_counted in
+      let text = Fixtures.Infer.range_loop_to_a_count in
       if
         not
           (List.exists
@@ -557,11 +521,11 @@ let () =
              (Support.first_core_nodes text).statements)
       then Harness.fail "no counted loop");
   Harness.test "a for loop over a list visits its positions" (fun () ->
-      fine Fixtures.Infer.for_loop_over_a_list_visits_its_positions)
+      fine Fixtures.Infer.loop_summing_a_list)
 
 let () =
   Harness.test "checking twice gives the same result" (fun () ->
-      let text = Fixtures.Infer.checking_twice_gives_the_same_result in
+      let text = Fixtures.Infer.loop_summing_a_list in
       let type_check_result () =
         let packages = Support.setup [ ("app::main", text) ] in
         let key =
@@ -601,14 +565,9 @@ let point = "type Point(x: Int64)\n\n"
 
 let () =
   Harness.test "a call's type arguments must meet their bounds" (fun () ->
-      one_diagnostic
-        (point ^ Fixtures.Infer.calls_type_arguments_must_meet_their_bounds)
-        "types.unsatisfied_bound");
+      one_diagnostic (point ^ Fixtures.Infer.need_of_an_unordered_point) "types.unsatisfied_bound");
   Harness.test "a type written in a body must meet its bounds" (fun () ->
-      let packages =
-        Support.setup
-          [ ("app::main", point ^ Fixtures.Infer.type_written_in_a_body_must_meet_its_bounds) ]
-      in
+      let packages = Support.setup [ ("app::main", point ^ Fixtures.Infer.set_of_points) ] in
       match Support.codes (check packages (Support.file_of "app::main")) with
       | [ "types.unsatisfied_bound"; "types.unsatisfied_bound" ] -> ()
       | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
@@ -630,23 +589,19 @@ let () =
         ~check:(fun packages ->
           Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ]
             (Database.create packages))
-        Fixtures.Infer.storage_lengthen_rejects_an_element_type_with_a_drop
-        "types.unsatisfied_bound");
+        Fixtures.Infer.storage_lengthen_of_storages "types.unsatisfied_bound");
   Harness.test "a type written in a body that is not a type is an error" (fun () ->
-      one_diagnostic Fixtures.Infer.type_written_in_a_body_that_is_not_a_type_is_an
-        "types.not_a_type");
+      one_diagnostic Fixtures.Infer.let_of_type_display "types.not_a_type");
   Harness.test "an operator's result must be the type expected of it" (fun () ->
-      one_diagnostic Fixtures.Infer.operators_result_must_be_the_type_expected_of_it
-        "types.mismatch");
+      one_diagnostic Fixtures.Infer.product_of_a_span "types.mismatch");
   Harness.test "an array length nothing decides is an error" (fun () ->
-      one_diagnostic Fixtures.Infer.array_length_nothing_decides_is_an_error "types.cannot_infer");
+      one_diagnostic Fixtures.Infer.zeros_without_a_length "types.cannot_infer");
   Harness.test "a qualified constant in a pattern must have the matched type" (fun () ->
-      one_diagnostic Fixtures.Infer.qualified_constant_in_a_pattern_must_have_the "types.mismatch");
+      one_diagnostic Fixtures.Infer.exit_code_constant_arm_on_an_integer "types.mismatch");
   Harness.test "the alternatives of a pattern bind each name with one type" (fun () ->
-      one_diagnostic Fixtures.Infer.alternatives_of_a_pattern_bind_each_name_with_one
-        "types.mismatch");
+      one_diagnostic Fixtures.Infer.or_pattern_binding_value_of_two_types "types.mismatch");
   Harness.test "a pattern must match every field or write .." (fun () ->
-      one_diagnostic Fixtures.Infer.pattern_must_match_every_field_or_write "types.missing_argument");
+      one_diagnostic Fixtures.Infer.record_pattern_missing_a_field "types.missing_argument");
   (let comparison depth =
      "type Box[Value](value: Value)\n  derives Equal\n\nfn same(value: "
      ^ String.concat "" (List.init depth (fun _ -> "Box["))
@@ -659,67 +614,53 @@ let () =
        one_diagnostic (comparison 70) "types.recursion_limit"
          ~says:"needs more than 64 nested impls"));
   Harness.test "an associated type that grows a type reaches the recursion limit" (fun () ->
-      one_diagnostic Fixtures.Infer.associated_type_that_grows_a_type_reaches_the_recursion_limit
-        "types.recursion_limit" ~says:"needs more than 64 nested types");
+      one_diagnostic Fixtures.Infer.associated_type_that_grows_its_type "types.recursion_limit"
+        ~says:"needs more than 64 nested types");
   Harness.test "an opaque type cannot be matched outside its package" (fun () ->
-      one_diagnostic Fixtures.Infer.opaque_type_cannot_be_matched_outside_its_package
-        "types.private_field");
+      one_diagnostic Fixtures.Infer.record_pattern_on_a_list "types.private_field");
   Harness.test "a bitwise compound assignment works on integers only" (fun () ->
-      one_diagnostic Fixtures.Infer.bitwise_compound_assignment_works_on_integers_only
-        "types.no_impl");
+      one_diagnostic Fixtures.Infer.bitwise_assignment_to_a_string "types.no_impl");
   Harness.test "a method written in full takes its receiver's mode" (fun () ->
-      one_diagnostic Fixtures.Infer.method_written_in_full_takes_its_receivers_mode
-        "types.wrong_receiver");
+      one_diagnostic Fixtures.Infer.push_written_in_full "types.wrong_receiver");
   Harness.test "a for loop takes the `element` overload from the type or from a trait" (fun () ->
-      fine Fixtures.Infer.for_loop_takes_element_version_from_the_type_or_from);
+      fine Fixtures.Infer.loop_over_a_bag_with_an_element_overload);
   Harness.test "a call picks an overload among a type's own and its family of traits'" (fun () ->
-      fine Fixtures.Infer.call_picks_an_overload_among_a_types_own_and_its);
+      fine Fixtures.Infer.overloads_of_label_across_traits);
   Harness.test "two traits that give one overload of a name are ambiguous at the call" (fun () ->
-      one_diagnostic Fixtures.Infer.two_traits_that_give_one_overload_of_a_name_are
-        "types.ambiguous_method"
-        ~fixed:Fixtures.Infer.two_traits_that_give_one_overload_of_a_name_are_fixed);
+      one_diagnostic Fixtures.Infer.traits_giving_one_label "types.ambiguous_method"
+        ~fixed:Fixtures.Infer.traits_giving_one_label_fixed);
   Harness.test "two unrelated traits that share a name are ambiguous however each takes self"
     (fun () ->
-      one_diagnostic Fixtures.Infer.two_unrelated_traits_that_share_a_name_are
-        "types.ambiguous_method");
+      one_diagnostic Fixtures.Infer.unrelated_traits_sharing_label "types.ambiguous_method");
   Harness.test "two bounds that give one overload of a name are ambiguous through the type"
-    (fun () ->
-      one_diagnostic Fixtures.Infer.two_bounds_that_give_one_overload_of_a_name_are
-        "types.ambiguous_method");
+    (fun () -> one_diagnostic Fixtures.Infer.bounds_giving_one_make "types.ambiguous_method");
   Harness.test "two unrelated bounds that share a name are ambiguous however each takes self"
     (fun () ->
-      one_diagnostic Fixtures.Infer.two_unrelated_bounds_that_share_a_name_are
-        "types.ambiguous_method");
+      one_diagnostic Fixtures.Infer.unrelated_bounds_sharing_label "types.ambiguous_method");
   Harness.test "a bound's method is picked from its family by how the call takes self" (fun () ->
-      fine Fixtures.Infer.bounds_method_is_picked_from_its_family_by_how_the);
+      fine Fixtures.Infer.bound_with_overloads_by_receiver);
   Harness.test "a trait's method written in full has no overload for a mode it lacks" (fun () ->
-      one_diagnostic Fixtures.Infer.traits_method_written_in_full_has_no_version_for_a
-        "types.wrong_receiver");
+      one_diagnostic Fixtures.Infer.label_written_in_full_with_mut_self "types.wrong_receiver");
   Harness.test "an associated type of an argument is normalized" (fun () ->
-      fine Fixtures.Infer.associated_type_of_an_argument_is_normalized);
+      fine Fixtures.Infer.has_key_of_a_list);
   Harness.test "a literal receiver has its default type" (fun () ->
-      has_type Fixtures.Infer.literal_receiver_has_its_default_type "5.wrapping_add(3)" "Int64");
+      has_type Fixtures.Infer.wrapping_add_on_a_literal "5.wrapping_add(3)" "Int64");
   Harness.test "a for loop over characters counts" (fun () ->
-      fine Fixtures.Infer.for_loop_over_characters_counts);
-  Harness.test "an operation on a hole is a hole" (fun () ->
-      fine Fixtures.Infer.operation_on_a_hole_is_a_hole);
+      fine Fixtures.Infer.range_loop_over_characters);
+  Harness.test "an operation on a hole is a hole" (fun () -> fine Fixtures.Infer.addition_to_a_todo);
   Harness.test "a mistake is not reported again as a type that cannot be inferred" (fun () ->
-      let packages =
-        Support.setup [ ("app::main", Fixtures.Infer.mistake_is_not_reported_again_as_a_type_that) ]
-      in
+      let packages = Support.setup [ ("app::main", Fixtures.Infer.map_of_an_undefined_name) ] in
       if
         List.mem "types.cannot_infer" (Support.codes (check packages (Support.file_of "app::main")))
       then Harness.fail "cascaded");
   Harness.test "a Float32 literal too large is an error" (fun () ->
-      one_diagnostic Fixtures.Infer.float32_literal_too_large_is_an_error
-        "types.literal_out_of_range");
+      one_diagnostic Fixtures.Infer.float32_literal_too_large "types.literal_out_of_range");
   Harness.test "a Float32 literal is rounded once, from its decimal" (fun () ->
       match
         List.filter_map
           (fun (node : Core.expression) ->
             match node.kind with Float rounded -> Some rounded | _ -> None)
-          (Support.first_core_nodes Fixtures.Infer.float32_literal_is_rounded_once_from_its_decimal)
-            .expressions
+          (Support.first_core_nodes Fixtures.Infer.float32_literal_needing_rounding).expressions
       with
       | [ rounded ] ->
           if rounded <> Float.of_string "0x1.000002p+0" then Harness.fail "rounded to %h" rounded
@@ -732,220 +673,185 @@ let () =
             | Range { start = Integer_bound low; stop = Integer_bound high; _ } ->
                 Some (Z.to_int low, Z.to_int high)
             | _ -> None)
-          (Support.first_core_nodes Fixtures.Infer.range_pattern_has_the_values_of_its_two_bounds)
-            .patterns
+          (Support.first_core_nodes Fixtures.Infer.integer_range_arm).patterns
       with
       | [ (1, 5) ] -> ()
       | _ -> Harness.fail "the range pattern does not have the bounds 1 and 5");
   Harness.test "a range pattern on a type that is not an integer or Character is an error"
-    (fun () ->
-      one_diagnostic Fixtures.Infer.range_pattern_on_a_type_that_is_not_an_integer_or
-        "types.mismatch");
+    (fun () -> one_diagnostic Fixtures.Infer.bool_range_arm "types.mismatch");
   Harness.test "an integer range on a type that is not ordered is one error" (fun () ->
-      one_diagnostic Fixtures.Infer.integer_range_on_a_type_that_is_not_ordered_is_one
-        "types.mismatch");
+      one_diagnostic Fixtures.Infer.integer_range_arm_on_a_bool "types.mismatch");
   Harness.test "a range pattern whose bounds infer its type as Bool is an error" (fun () ->
-      one_diagnostic Fixtures.Infer.range_pattern_whose_bounds_infer_its_type_as_bool
-        "types.mismatch" ~says:"not `Bool`");
+      one_diagnostic Fixtures.Infer.bool_range_lambda_parameter "types.mismatch" ~says:"not `Bool`");
   Harness.test "a range pattern on Character is fine" (fun () ->
-      fine Fixtures.Infer.range_pattern_on_character_is_fine);
+      fine Fixtures.Infer.character_range_arm);
   Harness.test "a Character literal is a tagged string holding its scalar value" (fun () ->
-      has_type Fixtures.Infer.character_literal_is_a_tagged_string_holding_its "Character\"é\""
-        "Character";
-      if not (has_integer Fixtures.Infer.character_literal_is_a_tagged_string_holding_its 0xE9) then
+      has_type Fixtures.Infer.accented_character_literal "Character\"é\"" "Character";
+      if not (has_integer Fixtures.Infer.accented_character_literal 0xE9) then
         Harness.fail "no value");
   Harness.test "a UInt8 literal holds its ASCII character's value" (fun () ->
-      if not (has_integer Fixtures.Infer.uint8_literal_holds_its_ascii_characters_value 10) then
-        Harness.fail "no value");
+      if not (has_integer Fixtures.Infer.uint8_newline_literal 10) then Harness.fail "no value");
   Harness.test "a Character literal of two scalar values is an error" (fun () ->
-      one_diagnostic Fixtures.Infer.character_literal_of_two_scalar_values_is_an_error
-        "types.character_scalar_count");
+      one_diagnostic Fixtures.Infer.character_literal_of_two_letters "types.character_scalar_count");
   Harness.test "a UInt8 literal of a character that is not ASCII is an error" (fun () ->
-      one_diagnostic Fixtures.Infer.uint8_literal_of_a_character_that_is_not_ascii_is
-        "types.character_scalar_count");
+      one_diagnostic Fixtures.Infer.uint8_accented_literal "types.character_scalar_count");
   Harness.test "a negated literal of an unsigned type is one error" (fun () ->
-      one_diagnostic Fixtures.Infer.negated_literal_of_an_unsigned_type_is_one_error
-        "types.negated_unsigned");
+      one_diagnostic Fixtures.Infer.uint8_let_of_minus_one "types.negated_unsigned");
   Harness.test "explicit type arguments give exactly the function's own" (fun () ->
-      one_diagnostic Fixtures.Infer.explicit_type_arguments_give_exactly_the_functions "types.arity");
+      one_diagnostic Fixtures.Infer.pick_with_one_type_argument "types.arity");
   Harness.test "a missing label has no fix when which one is meant is not known" (fun () ->
       let packages =
-        Support.setup
-          [ ("app::main", Fixtures.Infer.missing_label_has_no_fix_when_which_one_is_meant) ]
+        Support.setup [ ("app::main", Fixtures.Infer.call_with_three_unlabeled_arguments) ]
       in
       List.iter
         (fun (diagnostic : Diagnostic.t) ->
           if diagnostic.fixes <> [] then Harness.fail "offered a fix")
         (check packages (Support.file_of "app::main")));
   Harness.test "the string + fix keeps escapes" (fun () ->
-      one_diagnostic Fixtures.Infer.string_fix_keeps_escapes "types.string_addition"
-        ~fixed:Fixtures.Infer.string_fix_keeps_escapes_fixed);
+      one_diagnostic Fixtures.Infer.escaped_string_plus_a_string "types.string_addition"
+        ~fixed:Fixtures.Infer.escaped_string_plus_a_string_fixed);
   Harness.test "a lambda cannot mutate a captured variable" (fun () ->
-      one_diagnostic Fixtures.Infer.lambda_cannot_mutate_a_captured_variable "types.not_assignable")
+      one_diagnostic Fixtures.Infer.lambda_assigning_a_captured_var "types.not_assignable")
 
 let () =
   Harness.test "a function-typed parameter's requires is a Bool over its inputs" (fun () ->
-      fine Fixtures.Infer.function_typed_parameters_requires_is_a_bool_over);
+      fine Fixtures.Infer.function_parameter_requiring_its_index_below_a_limit);
   Harness.test "a function-typed parameter's requires must be a Bool" (fun () ->
-      one_diagnostic Fixtures.Infer.function_typed_parameters_requires_must_be_a_bool
-        "types.mismatch");
+      one_diagnostic Fixtures.Infer.function_parameter_requiring_an_integer "types.mismatch");
   Harness.test "a trait method without a body has its clauses checked" (fun () ->
-      one_diagnostic Fixtures.Infer.trait_method_without_a_body_has_its_clauses "types.no_impl");
+      one_diagnostic Fixtures.Infer.trait_method_ensuring_a_sum_with_true "types.no_impl");
   Harness.test "==> in a compiled body" (fun () ->
-      one_diagnostic Fixtures.Infer.in_a_compiled_body "types.specification_only");
+      one_diagnostic Fixtures.Infer.implication_in_a_body "types.specification_only");
   Harness.test "a quantifier over a type in a compiled body" (fun () ->
-      one_diagnostic Fixtures.Infer.quantifier_over_a_type_in_a_compiled_body
-        "types.specification_only");
+      one_diagnostic Fixtures.Infer.quantifier_over_int64_in_a_body "types.specification_only");
   Harness.test "a local of type Integer in a compiled body" (fun () ->
-      one_diagnostic Fixtures.Infer.local_of_type_integer_in_a_compiled_body
-        "types.specification_only" ~says:"`big` has the type `Integer`");
+      one_diagnostic Fixtures.Infer.integer_local_in_a_body "types.specification_only"
+        ~says:"`big` has the type `Integer`");
   Harness.test "a local whose type holds Integer in a compiled body" (fun () ->
-      one_diagnostic Fixtures.Infer.local_holding_integer_in_a_compiled_body
-        "types.specification_only" ~says:"which holds `Integer`");
+      one_diagnostic Fixtures.Infer.list_of_integers_in_a_body "types.specification_only"
+        ~says:"which holds `Integer`");
   Harness.test "a model in a compiled body" (fun () ->
-      one_diagnostic Fixtures.Infer.model_in_a_compiled_body "types.specification_only"
+      one_diagnostic Fixtures.Infer.model_of_a_list_in_a_body "types.specification_only"
         ~says:"`Sequence[Int64]`");
   Harness.test "a field of type Integer" (fun () ->
-      one_diagnostic Fixtures.Infer.field_of_type_integer "types.specification_only");
+      one_diagnostic Fixtures.Infer.box_of_an_integer "types.specification_only");
   Harness.test "a variant's field of type Sequence" (fun () ->
-      one_diagnostic Fixtures.Infer.variant_field_of_type_sequence "types.specification_only");
+      one_diagnostic Fixtures.Infer.variant_holding_a_sequence "types.specification_only");
   Harness.test "a constant of type Integer is read in specifications" (fun () ->
-      fine Fixtures.Infer.constant_of_type_integer_is_read_in_specifications);
+      fine Fixtures.Infer.integer_constant_read_in_requires);
   Harness.test "a constant of type Integer in a compiled body" (fun () ->
-      one_diagnostic Fixtures.Infer.constant_of_type_integer_in_a_compiled_body
-        "types.specification_only");
+      one_diagnostic Fixtures.Infer.integer_constant_read_in_a_body "types.specification_only");
   Harness.test "a default of a function for specifications only is a specification" (fun () ->
-      fine Fixtures.Infer.default_of_a_function_for_specifications_only);
+      fine Fixtures.Infer.specification_function_with_a_default);
   Harness.test "a loop clause of a compiled body reads a Sequence" (fun () ->
-      fine Fixtures.Infer.loop_clause_of_a_compiled_body_reads_a_sequence);
+      fine Fixtures.Infer.loop_invariant_reading_visited);
   Harness.test "a function for specifications only has a specification for a body" (fun () ->
-      fine Fixtures.Infer.function_for_specifications_only_has_a);
+      fine Fixtures.Infer.specification_function_with_a_quantifier);
   Harness.test "a function for specifications only cannot hold a var" (fun () ->
-      one_diagnostic Fixtures.Infer.function_for_specifications_only_cannot_hold_a_var
-        "types.not_in_specification");
+      one_diagnostic Fixtures.Infer.specification_function_with_a_var "types.not_in_specification");
   Harness.test "a theorem is not a value" (fun () ->
-      one_diagnostic Fixtures.Infer.theorem_is_not_a_value "types.not_a_value"
+      one_diagnostic Fixtures.Infer.theorem_as_a_value "types.not_a_value"
         ~says:"is a theorem, so it is not a value");
   Harness.test "a theorem call in a compiled body" (fun () ->
-      one_diagnostic Fixtures.Infer.theorem_call_in_a_compiled_body "types.specification_only"
+      one_diagnostic Fixtures.Infer.body_calling_a_theorem "types.specification_only"
         ~says:"is a theorem");
   Harness.test "a theorem is called in a theorem and in a proof block" (fun () ->
-      fine Fixtures.Infer.theorem_call_in_a_proof);
+      fine Fixtures.Infer.theorem_called_by_a_theorem_and_a_proof_block);
   Harness.test "a call of a function for specifications only in a compiled body is reported once"
     (fun () ->
-      one_diagnostic Fixtures.Infer.call_of_a_function_for_specifications_only_in_a_compiled_body
-        "types.specification_only" ~says:"`scaled` mentions `Integer`");
+      one_diagnostic Fixtures.Infer.body_calling_a_specification_function "types.specification_only"
+        ~says:"`scaled` mentions `Integer`");
   Harness.test "a theorem cannot hold a loop" (fun () ->
-      one_diagnostic Fixtures.Infer.theorem_cannot_hold_a_loop "types.not_in_specification");
+      one_diagnostic Fixtures.Infer.theorem_with_a_loop "types.not_in_specification");
   Harness.test "a proof block cannot hold a loop" (fun () ->
-      one_diagnostic Fixtures.Infer.proof_block_cannot_hold_a_loop "types.not_in_specification");
+      one_diagnostic Fixtures.Infer.proof_block_with_a_loop "types.not_in_specification");
   Harness.test "a proof block cannot assign to a variable of the program" (fun () ->
-      one_diagnostic Fixtures.Infer.proof_block_cannot_assign_to_a_variable_of_the_program
-        "types.not_in_specification");
+      one_diagnostic Fixtures.Infer.proof_block_assigning_a_var "types.not_in_specification");
   Harness.test "a proof block cannot return" (fun () ->
-      one_diagnostic Fixtures.Infer.proof_block_cannot_return "types.not_in_specification");
+      one_diagnostic Fixtures.Infer.proof_block_returning "types.not_in_specification");
   Harness.test "a quantifier's body in code cannot return" (fun () ->
-      one_diagnostic Fixtures.Infer.quantifiers_body_in_code_cannot_return
-        "types.not_in_specification");
+      one_diagnostic Fixtures.Infer.quantifier_returning_in_a_body "types.not_in_specification");
   Harness.test "a quantifier's body cannot pass an argument mut" (fun () ->
-      one_diagnostic Fixtures.Infer.quantifiers_body_cannot_pass_an_argument_mut
-        "types.not_in_specification");
+      one_diagnostic Fixtures.Infer.quantifier_calling_grow "types.not_in_specification");
   Harness.test "a contract cannot pass an argument mut" (fun () ->
-      one_diagnostic Fixtures.Infer.contract_cannot_pass_an_argument_mut
-        "types.not_in_specification");
+      one_diagnostic Fixtures.Infer.requires_calling_bump "types.not_in_specification");
   Harness.test "a constant in a pattern needs structural equality" (fun () ->
-      one_diagnostic Fixtures.Infer.constant_in_a_pattern_needs_structural_equality
-        "types.not_structural");
+      one_diagnostic Fixtures.Infer.float_point_constant_arm "types.not_structural");
   Harness.test "a constant of a derived type of integers in a pattern" (fun () ->
-      fine Fixtures.Infer.constant_of_a_derived_type_of_integers_in_a);
+      fine Fixtures.Infer.integer_point_constant_arm);
   Harness.test "a loop's cost bound is checked" (fun () ->
-      one_diagnostic Fixtures.Infer.loops_cost_bound_is_checked "resolve.unknown_name")
+      one_diagnostic Fixtures.Infer.loop_cost_naming_a_missing_name "resolve.unknown_name")
 
 let identity = Fixtures.Infer.identity
 
 let () =
   Harness.test "type arguments after a parenthesized name are read as after the name" (fun () ->
-      fine (identity ^ Fixtures.Infer.type_arguments_after_a_parenthesized_name_are_read);
+      fine (identity ^ Fixtures.Infer.parenthesized_identity_called_with_a_type_argument);
       one_diagnostic
-        (identity ^ Fixtures.Infer.type_arguments_after_a_parenthesized_name_are_read_2)
+        (identity ^ Fixtures.Infer.parenthesized_identity_of_an_integer_as_a_string)
         "types.mismatch");
   Harness.test "a parenthesized name with type arguments is a value of that function" (fun () ->
-      fine (identity ^ Fixtures.Infer.parenthesized_name_with_type_arguments_is_a_value));
+      fine (identity ^ Fixtures.Infer.parenthesized_identity_with_a_type_argument));
   Harness.test "a trait's written arguments are the ones its call uses" (fun () ->
       let packages =
-        Support.setup
-          [ ("app::main", Fixtures.Infer.traits_written_arguments_are_the_ones_its_call) ]
+        Support.setup [ ("app::main", Fixtures.Infer.add_of_strings_given_integers) ]
       in
       if
         not
           (List.mem "types.no_impl" (Support.codes (check packages (Support.file_of "app::main"))))
       then Harness.fail "the written argument was ignored");
   Harness.test "a literal is the receiver of a trait method written in full" (fun () ->
-      fine Fixtures.Infer.literal_is_the_receiver_of_a_trait_method_written);
+      fine Fixtures.Infer.add_of_two_literals_written_in_full);
   Harness.test "a generic parameter takes no type arguments" (fun () ->
-      one_diagnostic Fixtures.Infer.generic_parameter_takes_no_type_arguments "types.arity");
+      one_diagnostic Fixtures.Infer.generic_parameter_given_type_arguments "types.arity");
   Harness.test "a member of a generic parameter that it does not have is an error" (fun () ->
-      one_diagnostic Fixtures.Infer.member_of_a_generic_parameter_that_it_does_not
-        "types.unknown_member");
+      one_diagnostic Fixtures.Infer.member_of_an_unbounded_generic "types.unknown_member");
   Harness.test "a type with no fields is not its own value" (fun () ->
-      one_diagnostic Fixtures.Infer.type_with_no_fields_is_not_its_own_value "types.not_a_value");
+      one_diagnostic Fixtures.Infer.marker_without_parentheses "types.not_a_value");
   Harness.test "`self` outside a method is an error" (fun () ->
-      one_diagnostic Fixtures.Infer.self_outside_a_method_is_an_error "types.not_a_value");
+      one_diagnostic Fixtures.Infer.self_in_a_function "types.not_a_value");
   Harness.test "`old` without its operand is an error" (fun () ->
-      one_diagnostic Fixtures.Infer.old_without_its_operand_is_an_error "types.not_a_value");
+      one_diagnostic Fixtures.Infer.ensures_comparing_old_alone "types.not_a_value");
   Harness.test "a type argument that nothing decides is an error at its call" (fun () ->
-      one_diagnostic Fixtures.Infer.type_argument_that_nothing_decides_is_an_error_at
-        "types.cannot_infer");
+      one_diagnostic Fixtures.Infer.make_without_a_type_argument "types.cannot_infer");
   Harness.test "a trait is not called" (fun () ->
-      one_diagnostic Fixtures.Infer.trait_is_not_called "types.not_callable");
+      one_diagnostic Fixtures.Infer.trait_called "types.not_callable");
   Harness.test "a generic function given type arguments, as a value, must meet its bounds"
     (fun () ->
-      one_diagnostic
-        (point ^ Fixtures.Infer.generic_function_given_type_arguments_as_a_value)
-        "types.unsatisfied_bound");
+      one_diagnostic (point ^ Fixtures.Infer.need_of_a_point_as_a_value) "types.unsatisfied_bound");
   Harness.test "the scrutinee of an `is` is inferred before its pattern is checked" (fun () ->
-      fine Fixtures.Infer.scrutinee_of_an_is_is_inferred_before_its_pattern);
+      fine Fixtures.Infer.is_on_a_span_division);
   Harness.test "a `for` over a cursor binds the values of its `next`" (fun () ->
-      fine Fixtures.Infer.for_over_a_cursor_binds_the_values_of_its_next);
+      fine Fixtures.Infer.loop_over_a_cursor);
   Harness.test "`Self` in the body of a method without `self` is the method's type" (fun () ->
-      fine Fixtures.Infer.self_in_the_body_of_a_method_without_self_is_the);
+      fine Fixtures.Infer.self_type_in_a_static_method);
   Harness.test "a pattern that does not fit its type still gives its bindings a type" (fun () ->
-      one_diagnostic Fixtures.Infer.pattern_that_does_not_fit_its_type_still_gives_its
-        "types.unknown_variant");
+      one_diagnostic Fixtures.Infer.some_pattern_on_an_integer "types.unknown_variant");
   Harness.test "a `todo` that nothing decides keeps the hole type in the tables" (fun () ->
-      has_type Fixtures.Infer.todo_that_nothing_decides_keeps_the_hole_type_in "todo"
-        "an undecided type")
+      has_type Fixtures.Infer.let_of_todo "todo" "an undecided type")
 
 let shape = Fixtures.Infer.shape
 let source = Fixtures.Infer.source
 
 let () =
   Harness.test "a value built of a generic type must meet the type's bounds" (fun () ->
-      one_diagnostic
-        (shape ^ Fixtures.Infer.value_built_of_a_generic_type_must_meet_the_types)
-        "types.unsatisfied_bound");
+      one_diagnostic (shape ^ Fixtures.Infer.holder_of_an_integer) "types.unsatisfied_bound");
   Harness.test "a value built of a generic type that meets its bounds is fine" (fun () ->
-      fine (shape ^ Fixtures.Infer.value_built_of_a_generic_type_that_meets_its));
+      fine (shape ^ Fixtures.Infer.holder_of_a_square));
   Harness.test "a value built inside another must meet its type's bounds" (fun () ->
       one_diagnostic
-        (shape ^ Fixtures.Infer.value_built_inside_another_must_meet_its_types)
+        (shape ^ Fixtures.Infer.some_of_a_holder_of_an_integer)
         "types.unsatisfied_bound");
   Harness.test "a variant built of a generic type must meet the type's bounds" (fun () ->
       one_diagnostic
-        (shape ^ Fixtures.Infer.variant_built_of_a_generic_type_must_meet_the)
+        (shape ^ Fixtures.Infer.full_slot_of_a_type_without_shape)
         "types.unsatisfied_bound");
   Harness.test "a generic type named in an expression must meet its bounds" (fun () ->
-      one_diagnostic
-        (shape ^ Fixtures.Infer.generic_type_named_in_an_expression_must_meet_its)
-        "types.unsatisfied_bound");
+      one_diagnostic (shape ^ Fixtures.Infer.slot_of_a_type_without_shape) "types.unsatisfied_bound");
   Harness.test "a statement reports a bound once, however many of its parts need it" (fun () ->
-      one_diagnostic
-        (shape ^ Fixtures.Infer.statement_reports_a_bound_once_however_many_of_its)
-        "types.unsatisfied_bound");
+      one_diagnostic (shape ^ Fixtures.Infer.area_of_a_holder_of_integers) "types.unsatisfied_bound");
   Harness.test "a method used as a value must meet its bounds" (fun () ->
-      one_diagnostic
-        (shape ^ Fixtures.Infer.method_used_as_a_value_must_meet_its_bounds)
-        "types.unsatisfied_bound");
+      one_diagnostic (shape ^ Fixtures.Infer.fits_of_a_point_as_a_value) "types.unsatisfied_bound");
   Harness.test "function types that count the calls of different capabilities are different types"
     (fun () ->
       let lists counted =
@@ -958,8 +864,7 @@ let () =
       one_diagnostic (lists "Console.print_line") "types.mismatch");
   Harness.test "the target of `calls` in a function type is a capability or one of its methods"
     (fun () ->
-      one_diagnostic Fixtures.Infer.target_of_calls_in_a_function_type_is_a_capability
-        "types.not_a_capability";
+      one_diagnostic Fixtures.Infer.calls_cost_of_a_type "types.not_a_capability";
       one_diagnostic "fn f(run: (fn() uses Clock cost calls(Clock.later) <= 1)) {}\n"
         "types.unknown_member";
       one_diagnostic "fn f(visit: fn(), run: (fn() cost calls(visit) <= 1)) {}\n"
@@ -980,82 +885,72 @@ let () =
       one_diagnostic (clause "Point") "types.not_a_capability";
       one_diagnostic (clause "Clock.later") "types.unknown_member");
   Harness.test "a method with generic parameters is not object-safe" (fun () ->
-      one_diagnostic Fixtures.Infer.method_with_generic_parameters_is_not_object_safe
-        "types.not_callable");
+      one_diagnostic Fixtures.Infer.generic_visit_through_any "types.not_callable");
   Harness.test "a method that takes or returns Self cannot be called through any" (fun () ->
-      one_diagnostic Fixtures.Infer.method_that_takes_or_returns_self_cannot_be_called
-        "types.not_callable");
+      one_diagnostic Fixtures.Infer.join_through_any "types.not_callable");
   Harness.test "a method whose result holds Self cannot be called through any" (fun () ->
-      one_diagnostic Fixtures.Infer.method_whose_result_holds_self_cannot_be_called
-        "types.not_callable");
+      one_diagnostic Fixtures.Infer.skip_through_any_cursor "types.not_callable");
   Harness.test "a cursor's own step and its counting can be called through any" (fun () ->
-      fine Fixtures.Infer.cursors_own_step_and_its_counting_can_be_called);
+      fine Fixtures.Infer.any_cursor_stepped_and_counted);
   Harness.test "a method that names an associated type can be called through any" (fun () ->
-      fine (source ^ Fixtures.Infer.method_that_names_an_associated_type_can_be_called));
+      fine (source ^ Fixtures.Infer.any_source_of_numbers));
   Harness.test "`any value` must give the associated types its type fixes" (fun () ->
-      one_diagnostic
-        (source ^ Fixtures.Infer.any_value_must_give_the_associated_types_its_type)
-        "types.no_impl");
+      one_diagnostic (source ^ Fixtures.Infer.any_source_of_numbers_as_strings) "types.no_impl");
   Harness.test "`any value` that gives the associated types its type fixes is fine" (fun () ->
-      fine (source ^ Fixtures.Infer.any_value_that_gives_the_associated_types_its_type));
+      fine (source ^ Fixtures.Infer.any_source_of_numbers));
   Harness.test "`any value` of a generic parameter needs a bound that fixes the associated types"
     (fun () ->
-      one_diagnostic
-        (source ^ Fixtures.Infer.any_value_of_a_generic_parameter_needs_a_bound)
-        "types.no_impl");
+      one_diagnostic (source ^ Fixtures.Infer.any_source_of_an_unfixed_input) "types.no_impl");
   Harness.test "`any value` of a generic parameter whose bound fixes the associated types is fine"
-    (fun () -> fine (source ^ Fixtures.Infer.any_value_of_a_generic_parameter_whose_bound_fixes));
+    (fun () -> fine (source ^ Fixtures.Infer.any_source_of_a_fixed_input));
   Harness.test "an associated type a bound fixes infers a type argument" (fun () ->
-      fine (source ^ Fixtures.Infer.associated_type_a_bound_fixes_infers_a_type));
+      fine (source ^ Fixtures.Infer.first_of_a_source_with_a_fixed_item));
   Harness.test "an associated type a bound fixes must be the one the impl gives" (fun () ->
       one_diagnostic
-        (source ^ Fixtures.Infer.associated_type_a_bound_fixes_must_be_the_one_the)
+        (source ^ Fixtures.Infer.text_of_a_source_of_integers)
         "types.unsatisfied_bound")
 
 let point = "type Point(x: Int64, y: Int64)\n\n"
 
 let () =
   Harness.test "a constant is built from literals, operators on numbers, and other constants"
-    (fun () -> fine Fixtures.Infer.constant_is_built_from_literals_operators_on);
+    (fun () -> fine Fixtures.Infer.constants_of_literals_and_operators);
   Harness.test "a constant builds records, variants, and collections of constants" (fun () ->
-      fine (point ^ Fixtures.Infer.constant_builds_records_variants_and_collections));
+      fine (point ^ Fixtures.Infer.constants_of_records_variants_and_collections));
   Harness.test "a constant cannot call a function" (fun () ->
-      one_diagnostic Fixtures.Infer.constant_cannot_call_a_function "types.not_constant");
+      one_diagnostic Fixtures.Infer.constant_calling_a_function "types.not_constant");
   Harness.test "a constant cannot call a capability" (fun () ->
       one_diagnostic "let started: Instant = Clock.now()\n" "types.not_constant");
   Harness.test "a constant cannot call a method" (fun () ->
       one_diagnostic "let length: UInt64 = \"four\".length()\n" "types.not_constant");
   Harness.test "a constant cannot index a collection" (fun () ->
-      one_diagnostic Fixtures.Infer.constant_cannot_index_a_collection "types.not_constant");
+      one_diagnostic Fixtures.Infer.constant_indexing_a_list "types.not_constant");
   Harness.test "a constant cannot branch" (fun () ->
       one_diagnostic "let chosen: Int64 = if true { 1 } else { 2 }\n" "types.not_constant");
   Harness.test "a constant cannot use an operator that a type defines" (fun () ->
-      one_diagnostic Fixtures.Infer.constant_cannot_use_an_operator_that_a_type "types.not_constant");
+      one_diagnostic Fixtures.Infer.constant_comparing_strings "types.not_constant");
   Harness.test "a constant's arithmetic must stay within its type" (fun () ->
       one_diagnostic "let size: UInt64 = 0 - 1\n" "types.constant_overflow");
   Harness.test "each step of a constant's arithmetic must stay within its type" (fun () ->
       one_diagnostic "let small: UInt8 = 200 + 100 - 100\n" "types.constant_overflow");
   Harness.test "a constant's arithmetic through another constant must stay within its type"
     (fun () ->
-      one_diagnostic Fixtures.Infer.constants_arithmetic_through_another_constant_must
-        "types.constant_overflow");
+      one_diagnostic Fixtures.Infer.constant_overflowing_through_another "types.constant_overflow");
   Harness.test "negating a constant's least value overflows" (fun () ->
       one_diagnostic "let flipped: Int8 = -(-128)\n" "types.constant_overflow");
   Harness.test "a constant cannot divide by zero" (fun () ->
       one_diagnostic "let nothing: Int64 = 5 / 0\n" "types.constant_overflow");
   Harness.test "a default must be a constant expression" (fun () ->
-      one_diagnostic Fixtures.Infer.default_must_be_a_constant_expression
-        "types.default_not_constant");
+      one_diagnostic Fixtures.Infer.default_calling_a_function "types.default_not_constant");
   Harness.test "a default cannot name a parameter" (fun () ->
       one_diagnostic "fn f(count: Int64, twice: Int64 = count * 2) {}\n"
         "types.default_not_constant");
   Harness.test "a method's default must be a constant expression" (fun () ->
       one_diagnostic
-        (point ^ Fixtures.Infer.methods_default_must_be_a_constant_expression)
+        (point ^ Fixtures.Infer.method_default_calling_a_function)
         "types.default_not_constant");
   Harness.test "a field's default must be a constant expression" (fun () ->
-      one_diagnostic Fixtures.Infer.fields_default_must_be_a_constant_expression
-        "types.default_not_constant");
+      one_diagnostic Fixtures.Infer.field_default_calling_a_function "types.default_not_constant");
   Harness.test "a field's default's arithmetic must stay within its type" (fun () ->
       one_diagnostic "type Settings(retries: UInt8 = 250 + 10)\n" "types.constant_overflow")
 
@@ -1110,9 +1005,9 @@ let () =
   Harness.test "a public trait's method names only public functions in its requires" (fun () ->
       let helper = Fixtures.Infer.helper in
       one_diagnostic
-        (helper ^ Fixtures.Infer.contract_of_a_public_traits_method_and_of_its)
+        (helper ^ Fixtures.Infer.requires_naming_a_private_function)
         "types.private_in_public";
-      fine (helper ^ Fixtures.Infer.contract_of_a_public_traits_method_and_of_its_2);
+      fine (helper ^ Fixtures.Infer.ensures_naming_a_private_function);
       let implemented visibility =
         helper
         ^ Printf.sprintf
@@ -1132,9 +1027,8 @@ let () =
       fine (implemented "public ");
       fine (implemented "internal "));
   Harness.test "a function's body can call a function that other packages cannot" (fun () ->
-      fine (helper "internal " ^ Fixtures.Infer.functions_body_can_call_a_function_that_other))
+      fine (helper "internal " ^ Fixtures.Infer.public_function_calling_a_private_one))
 
 let () =
   Harness.test "a bit-vector assertion names only integers and booleans" (fun () ->
-      one_diagnostic Fixtures.Infer.bit_vector_assertion_names_only_integers_and_booleans
-        "types.not_bit_vector")
+      one_diagnostic Fixtures.Infer.bit_vector_assertion_naming_a_list "types.not_bit_vector")

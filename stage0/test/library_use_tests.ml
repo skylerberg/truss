@@ -8,31 +8,31 @@ let proven text = Support.no_diagnostics ~check [ ("app::main", text) ]
 
 let () =
   Harness.test "a map that was inserted into holds the key" (fun () ->
-      proven Fixtures.Library_use.map_that_was_inserted_into_holds_the_key);
+      proven Fixtures.Library_use.maps_built_by_insert);
   Harness.test "a password is hashed with the default cost and with a cost that meets its limits"
-    (fun () -> proven Fixtures.Library_use.password_is_hashed_with_the_default_cost_and_with);
+    (fun () -> proven Fixtures.Library_use.password_hashes_with_default_and_given_costs);
   Harness.test "a map literal has its keys and its length" (fun () ->
-      proven Fixtures.Library_use.map_literal_has_its_keys_and_its_length);
+      proven Fixtures.Library_use.map_literal_with_two_entries);
   Harness.test "a key that a map contains can be indexed" (fun () ->
-      proven Fixtures.Library_use.key_that_a_map_contains_can_be_indexed);
+      proven Fixtures.Library_use.map_indexed_after_contains);
   Harness.test "replace leaves the key in the map" (fun () ->
-      proven Fixtures.Library_use.replace_leaves_the_key_in_the_map);
+      proven Fixtures.Library_use.map_replace);
   Harness.test "take and clear leave a map without the key" (fun () ->
-      proven Fixtures.Library_use.take_and_clear_leave_a_map_without_the_key);
+      proven Fixtures.Library_use.map_take_and_clear);
   Harness.test "maps and sets are compared" (fun () ->
-      proven Fixtures.Library_use.maps_and_sets_are_compared);
+      proven Fixtures.Library_use.map_and_set_comparisons);
   Harness.test "a set holds inserted elements and not removed ones" (fun () ->
-      proven Fixtures.Library_use.set_holds_inserted_elements_and_not_removed_ones);
+      proven Fixtures.Library_use.set_insert_and_remove);
   Harness.test "a set literal contains its listed elements and nothing else" (fun () ->
-      proven Fixtures.Library_use.set_literal_contains_its_listed_elements_and)
+      proven Fixtures.Library_use.set_literal_with_two_elements)
 
 let () =
   Harness.test "a display that ends is proven, and a function with a time clause calls it"
-    (fun () -> proven Fixtures.Library_use.display_that_ends_is_proven_and_a_function_with_a);
+    (fun () -> proven Fixtures.Library_use.point_display_called_by_a_timed_function);
   Harness.test "a display that may not end is rejected" (fun () ->
-      Support.one_diagnostic ~check Fixtures.Library_use.display_that_may_not_end_is_rejected
+      Support.one_diagnostic ~check Fixtures.Library_use.display_with_an_endless_loop
         "prover.termination")
 
 let () =
   Harness.test "two strings with the same text are equal" (fun () ->
-      proven Fixtures.Library_use.two_strings_with_the_same_text_are_equal)
+      proven Fixtures.Library_use.two_equal_string_literals)

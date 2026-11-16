@@ -1,7 +1,7 @@
 let () =
   Codegen_support.test "a test calls a function that uses the standard library's arithmetic"
     (fun () ->
-      Codegen_support.expect_output Fixtures.Source.test_calls_a_function_that_uses_the_standard
+      Codegen_support.expect_output Fixtures.Source.square_test
         "test 0 passed\n\
          test 1 failed\n\
          message 51\n\
@@ -9,56 +9,49 @@ let () =
         \  at example/main.truss:10:3\n")
 
 let () =
-  Codegen_support.passes "loops, variables, and comparisons run"
-    Fixtures.Source.loops_variables_and_comparisons_run;
-  Codegen_support.passes "a counted for loop runs once per value"
-    Fixtures.Source.counted_for_loop_runs_once_per_value;
+  Codegen_support.passes "loops, variables, and comparisons run" Fixtures.Source.sum_to;
+  Codegen_support.passes "a counted for loop runs once per value" Fixtures.Source.sum_below;
   Codegen_support.passes "records are built and read, and sums matched"
-    Fixtures.Source.records_are_built_and_read_and_sums_matched;
-  Codegen_support.passes "an if is a value, and a return leaves early"
-    Fixtures.Source.if_is_a_value_and_a_return_leaves_early;
-  Codegen_support.passes "the standard library's Option methods run"
-    Fixtures.Source.standard_librarys_option_methods_run
+    Fixtures.Source.records_and_sums;
+  Codegen_support.passes "an if is a value, and a return leaves early" Fixtures.Source.sign;
+  Codegen_support.passes "the standard library's Option methods run" Fixtures.Source.option_methods
 
 let () =
   Codegen_support.passes "lists are built, pushed onto, indexed, and looped over"
-    Fixtures.Source.lists_are_built_pushed_onto_indexed_and_looped;
+    Fixtures.Source.list_operations;
   Codegen_support.passes "a question mark returns an error early"
-    Fixtures.Source.question_mark_returns_an_error_early
+    Fixtures.Source.check_with_a_question_mark
 
 let () =
-  Codegen_support.passes "a string interpolates its parts"
-    Fixtures.Source.string_interpolates_its_parts;
-  Codegen_support.passes "a record is updated with with" Fixtures.Source.record_is_updated_with_with;
-  Codegen_support.passes "a lambda reads its caller's locals"
-    Fixtures.Source.lambda_reads_its_callers_locals
+  Codegen_support.passes "a string interpolates its parts" Fixtures.Source.string_interpolation_test;
+  Codegen_support.passes "a record is updated with with" Fixtures.Source.point_updated_with_with;
+  Codegen_support.passes "a lambda reads its caller's locals" Fixtures.Source.lambda_reading_a_local
 
 let () =
   Codegen_support.passes "integers display in decimal, negative ones too"
-    Fixtures.Source.integers_display_in_decimal_negative_ones_too;
-  Codegen_support.passes "strings compare, order, and trim"
-    Fixtures.Source.strings_compare_order_and_trim
+    Fixtures.Source.integer_display_test;
+  Codegen_support.passes "strings compare, order, and trim" Fixtures.Source.string_comparisons_test
 
 let () =
   Codegen_support.passes "constants are static data, computed exactly"
-    Fixtures.Source.constants_are_static_data_computed_exactly
+    Fixtures.Source.constants_of_seconds_and_points
 
 let () =
   Codegen_support.passes "a named function is passed as a function value"
-    Fixtures.Source.named_function_is_passed_as_a_function_value;
+    Fixtures.Source.double_as_a_function_value;
   Codegen_support.passes "a field left out takes its default"
-    Fixtures.Source.field_left_out_takes_its_default;
+    Fixtures.Source.request_with_field_defaults;
   Codegen_support.passes "a parameter left out takes its default"
-    Fixtures.Source.parameter_left_out_takes_its_default;
+    Fixtures.Source.connect_with_parameter_defaults;
   Codegen_support.passes "an any value calls its implementation's method"
-    Fixtures.Source.any_value_calls_its_implementations_method
+    Fixtures.Source.shape_area_through_any
 
 let () =
   Codegen_support.passes "a constant that compares constants is folded"
-    Fixtures.Source.constant_that_compares_constants_is_folded;
+    Fixtures.Source.constant_comparing_constants;
   Codegen_support.passes
     "a constant made of one that is computed by running is computed by running too"
-    Fixtures.Source.constant_made_of_one_that_is_computed_by_running;
+    Fixtures.Source.constant_list_of_a_map_constant;
   Codegen_support.test
     "a constant whose sum does not fit its type is an error before any code is run" (fun () ->
       let packages =
@@ -175,5 +168,5 @@ let () =
 let () =
   Codegen_support.test "negating the least value of a signed type panics, where the checks are on"
     (fun () ->
-      Codegen_support.expect_output Fixtures.Source.negating_the_least_value_of_a_signed_type_panics
+      Codegen_support.expect_output Fixtures.Source.flip_of_an_int8
         "test 0 panicked\nmessage 47\narithmetic overflow\n  at example/main.truss:2:3\n")

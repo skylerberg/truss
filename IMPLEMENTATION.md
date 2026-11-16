@@ -257,11 +257,11 @@ Every stage of stage0 is tested the same way:
   text a test checks lives in `fixtures/<suite>/<name>.truss` beside the
   suite, where it can be read, edited, and renamed as Truss.
   `embed_fixtures` compiles each directory of fixtures into the module
-  `Fixtures`, so the test names one as `Fixtures.Prover.overflow`, and a
-  fixture that is missing fails to compile. A fixture is named after its
-  test. Text that is not a whole module stays in OCaml: a template with a
-  hole that the test fills, a line given to the lexer or the parser, and a
-  snippet of one or two lines.
+  `Fixtures`, so the test names one as
+  `Fixtures.Prover.addition_that_can_overflow`, and a fixture that is
+  missing fails to compile. Text that is not a whole module stays in OCaml:
+  a template with a hole that the test fills, a line given to the lexer or
+  the parser, and a snippet of one or two lines.
 - **Checks against the documents are tests,** as long as each one states a
   single property, such as "SPECIFICATION.md's keyword list matches the lexer's",
   or "every example in the documents lexes cleanly".

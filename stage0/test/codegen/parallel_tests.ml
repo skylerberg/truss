@@ -13,34 +13,33 @@ let () =
   Codegen_support.test
     "branches give results through lets, mutate their own parts, and call a lambda" (fun () ->
       same_with_any_workers ~expected:"2500050000 2500000000 2 n100000 300000\n"
-        Fixtures.Parallel.branches_give_results_through_lets_change_their);
+        Fixtures.Parallel.parallel_branches_with_totals);
   Codegen_support.test "a branch forks again at every depth of a recursion" (fun () ->
-      same_with_any_workers ~expected:"832040\n"
-        Fixtures.Parallel.branch_forks_again_at_every_depth_of_a_recursion);
+      same_with_any_workers ~expected:"832040\n" Fixtures.Parallel.parallel_fib);
   Codegen_support.test
     "one branch moves a field out and another changes a second field, and the first is \
      reinitialized after" (fun () ->
       same_with_any_workers ~expected:"first taken second!\n"
-        Fixtures.Parallel.one_branch_moves_a_field_out_and_another_changes_a)
+        Fixtures.Parallel.parallel_branches_moving_and_changing_a_pair)
 
 let board = Fixtures.Parallel.board
 
 let () =
   Codegen_support.test "a parallel for over a list mutates each element once" (fun () ->
       same_with_any_workers ~expected:"7905322 same\n"
-        (board ^ Fixtures.Parallel.parallel_for_over_a_list_mutates_each_element_once));
+        (board ^ Fixtures.Parallel.parallel_for_mutating_a_list));
   Codegen_support.test "a region reads a parameter that the function is passed by pointer"
     (fun () ->
       same_with_any_workers ~expected:"2 4 6 8\n"
-        Fixtures.Parallel.region_reads_a_parameter_that_the_function_is);
+        Fixtures.Parallel.doubled_through_a_pointer_parameter);
   Codegen_support.test "a parallel for over a list leaves each element at its position" (fun () ->
       same_with_any_workers ~expected:"5050\n"
-        Fixtures.Parallel.parallel_for_over_a_list_leaves_each_element_at_its);
+        Fixtures.Parallel.parallel_for_over_a_list_by_position);
   Codegen_support.test "a panic in an iteration of a parallel for over a range ends the program"
     (fun () ->
       Unix.putenv "TRUSS_WORKERS" "8";
       let status, _, errors =
-        Codegen_support.run_main Fixtures.Parallel.panic_in_an_iteration_of_a_parallel_for_over_a
+        Codegen_support.run_main Fixtures.Parallel.parallel_for_with_a_panic
       in
       Codegen_support.expect_int ~expected:101 status;
       if not (Codegen_support.contains errors "the last one ran") then
@@ -49,8 +48,7 @@ let () =
     (fun () ->
       Unix.putenv "TRUSS_WORKERS" "8";
       let status, _, errors =
-        Codegen_support.run_main
-          Fixtures.Parallel.empty_range_and_a_range_of_one_run_their_bodies_no
+        Codegen_support.run_main Fixtures.Parallel.parallel_for_over_empty_and_single_ranges
       in
       Codegen_support.expect_int ~expected:101 status;
       if not (Codegen_support.contains errors "minus three ran") then
@@ -62,7 +60,7 @@ let () =
       Unix.putenv "TRUSS_WORKERS" "8";
       let status, _, errors =
         Codegen_support.run_main
-          Fixtures.Parallel.parallel_for_over_a_range_of_characters_steps_over
+          Fixtures.Parallel.parallel_for_over_characters_around_the_surrogates
       in
       Codegen_support.expect_int ~expected:101 status;
       if not (Codegen_support.contains errors "the last character ran") then
@@ -71,7 +69,7 @@ let () =
 let () =
   Codegen_support.passes
     "a test runs the branches of a parallel block and of a parallel for, in order"
-    (board ^ Fixtures.Parallel.test_runs_the_branches_of_a_parallel_block_and_of)
+    (board ^ Fixtures.Parallel.parallel_board_test)
 
 let () =
   Codegen_support.test

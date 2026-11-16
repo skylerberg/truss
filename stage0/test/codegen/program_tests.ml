@@ -17,14 +17,14 @@ let () =
         | Error message -> failwith message
       in
       let stored_count () = Hashtbl.length table in
-      let source = Fixtures.Program.passing_tests_result_is_kept_by_its_key_and_only_a in
+      let source = Fixtures.Program.passing_tests in
       let first = run source in
       Codegen_support.expect_int ~expected:1 (stored_count ());
       let second = run source in
       if first <> second then
         Codegen_support.fail "the report changed when kept:\n%s\n%s" (snd first) (snd second);
       Codegen_support.expect_int ~expected:1 (fst second);
-      let _ = run Fixtures.Program.passing_tests_result_is_kept_by_its_key_and_only_a_2 in
+      let _ = run Fixtures.Program.passing_test_of_two_plus_two in
       Codegen_support.expect_int ~expected:2 (stored_count ()))
 
 let () =
@@ -35,8 +35,7 @@ let () =
         { find = Hashtbl.find_opt table; add = (fun key value -> Hashtbl.replace table key value) }
       in
       let database, compile =
-        Codegen_support.load ~results
-          Fixtures.Program.external_test_gets_the_real_capabilities_it_uses
+        Codegen_support.load ~results Fixtures.Program.test_reading_the_clock
       in
       let run () =
         match Compile.run_tests compile ~time_limit_ms:2000 (Codegen_support.tests_of database) with
@@ -53,9 +52,7 @@ let () =
   Codegen_support.test
     "a build checks each primitive operation that could fail, and evaluates no requires clause"
     (fun () ->
-      let output =
-        Codegen_support.run_source Fixtures.Program.build_checks_each_primitive_operation_that_could
-      in
+      let output = Codegen_support.run_source Fixtures.Program.pick_and_primitive_operations in
       let contains text =
         let text_length = String.length text and output_length = String.length output in
         let rec occurs_at position =
@@ -85,8 +82,7 @@ let () =
   Codegen_support.test "a program prints through the real console and exits with its code"
     (fun () ->
       let status, output, _ =
-        Codegen_support.run_main ~arguments:[ "one"; "two" ]
-          Fixtures.Program.program_prints_through_the_real_console_and_exits
+        Codegen_support.run_main ~arguments:[ "one"; "two" ] Fixtures.Program.hello
       in
       Codegen_support.expect_int ~expected:3 status;
       Codegen_support.expect_string ~expected:"hello\n3 arguments, then one\n" output)
@@ -96,8 +92,7 @@ let () =
     (fun () ->
       let path = Filename.concat (Lazy.force Codegen_support.scratch) "written.txt" in
       let status, output, _ =
-        Codegen_support.run_main ~arguments:[ path ]
-          Fixtures.Program.program_writes_a_file_reads_it_back_and_reports_a
+        Codegen_support.run_main ~arguments:[ path ] Fixtures.Program.file_written_and_read_back
       in
       Codegen_support.expect_int ~expected:0 status;
       Codegen_support.expect_string
@@ -108,8 +103,7 @@ let () =
     "a program opens a file to update it, writes and reads at offsets, and closes it" (fun () ->
       let path = Filename.concat (Lazy.force Codegen_support.scratch) "updated.bin" in
       let status, output, _ =
-        Codegen_support.run_main ~arguments:[ path ]
-          Fixtures.Program.program_opens_a_file_to_update_it_writes_and_reads
+        Codegen_support.run_main ~arguments:[ path ] Fixtures.Program.file_updated_at_offsets
       in
       Codegen_support.expect_int ~expected:0 status;
       Codegen_support.expect_string
@@ -135,8 +129,7 @@ let () =
       let directory = Lazy.force Codegen_support.scratch in
       let path = Filename.concat directory "measured.txt" in
       let status, output, _ =
-        Codegen_support.run_main ~arguments:[ directory; path ]
-          Fixtures.Program.program_reads_the_metadata_of_a_file_of_a
+        Codegen_support.run_main ~arguments:[ directory; path ] Fixtures.Program.file_metadata
       in
       Codegen_support.expect_int ~expected:0 status;
       Codegen_support.expect_string
@@ -157,7 +150,7 @@ let () =
       let status, output, _ =
         Codegen_support.run_main
           ~arguments:[ Lazy.force Codegen_support.scratch ]
-          Fixtures.Program.program_makes_a_directory_renames_links_sets
+          Fixtures.Program.directory_and_file_operations
       in
       Codegen_support.expect_int ~expected:0 status;
       Codegen_support.expect_string
@@ -186,9 +179,7 @@ let () =
       Unix.putenv "TMPDIR" "";
       Unix.putenv "XDG_CACHE_HOME" "/caches";
       Unix.putenv "TZ" ":Europe/Paris";
-      let status, output, _ =
-        Codegen_support.run_main Fixtures.Program.program_reads_its_variables_directory_platform
-      in
+      let status, output, _ = Codegen_support.run_main Fixtures.Program.environment_report in
       Codegen_support.expect_int ~expected:0 status;
       Codegen_support.expect_string
         ~expected:
@@ -214,9 +205,7 @@ let () =
 
 let () =
   Codegen_support.test "a program's log records go to standard error, one line each" (fun () ->
-      let status, output, errors =
-        Codegen_support.run_main Fixtures.Program.programs_log_records_go_to_standard_error_one_line
-      in
+      let status, output, errors = Codegen_support.run_main Fixtures.Program.log_records in
       Codegen_support.expect_int ~expected:0 status;
       Codegen_support.expect_string ~expected:"" output;
       Codegen_support.expect_string
@@ -233,9 +222,7 @@ let () =
   Codegen_support.test
     "a program runs others: their status, output, variables, directory, pipes, and a signal"
     (fun () ->
-      let status, output, _ =
-        Codegen_support.run_main Fixtures.Program.program_runs_others_their_status_output_variables
-      in
+      let status, output, _ = Codegen_support.run_main Fixtures.Program.process_operations in
       Codegen_support.expect_int ~expected:0 status;
       Codegen_support.expect_string
         ~expected:
@@ -263,7 +250,7 @@ let () =
       let status, output, _ =
         Codegen_support.run_main
           ~arguments:[ Lazy.force Codegen_support.scratch ]
-          Fixtures.Program.program_lists_a_directory_its_files_directories
+          Fixtures.Program.directory_listing
       in
       Codegen_support.expect_int ~expected:0 status;
       Codegen_support.expect_string
@@ -289,9 +276,7 @@ let () =
     "a program finds its terminal, makes it raw, and restores it, or finds it has none" (fun () ->
       let directory = Lazy.force Codegen_support.scratch in
       let program = Filename.concat directory "terminal-program" in
-      let _, compile =
-        Codegen_support.load Fixtures.Program.program_finds_its_terminal_makes_it_raw_and
-      in
+      let _, compile = Codegen_support.load Fixtures.Program.raw_terminal in
       (match
          Compile.build_program compile
            ~main:(Top { module_ = Codegen_support.example; name = "main" })
@@ -352,8 +337,7 @@ let () =
       let status, output, _ =
         Fun.protect
           ~finally:(fun () -> ignore (Unix.sigprocmask SIG_SETMASK before))
-          (fun () ->
-            Codegen_support.run_main Fixtures.Program.program_waits_for_the_signals_it_is_sent)
+          (fun () -> Codegen_support.run_main Fixtures.Program.signal_wait)
       in
       Codegen_support.expect_int ~expected:0 status;
       Codegen_support.expect_string
@@ -363,7 +347,7 @@ let () =
   Codegen_support.test
     "a program listens, connects, accepts, and sends datagrams, on the loopback address" (fun () ->
       let status, output, _ =
-        Codegen_support.run_main Fixtures.Program.program_listens_connects_accepts_and_sends
+        Codegen_support.run_main Fixtures.Program.loopback_sockets_and_datagrams
       in
       Codegen_support.expect_int ~expected:0 status;
       Codegen_support.expect_string
@@ -459,16 +443,14 @@ fn main(arguments: List[String]) -> ExitCode
 let () =
   Codegen_support.test "every connection to a port that nothing listens on is refused" (fun () ->
       let status, output, _ =
-        Codegen_support.run_main Fixtures.Program.every_connection_to_a_port_that_nothing_listens_on
+        Codegen_support.run_main Fixtures.Program.connections_to_an_unused_port
       in
       Codegen_support.expect_int ~expected:0 status;
       Codegen_support.expect_string ~expected:"refused 2000 of 2000\n" output)
 
 let () =
   Codegen_support.test "a program finds a host's addresses by its name" (fun () ->
-      let status, output, _ =
-        Codegen_support.run_main Fixtures.Program.program_finds_a_hosts_addresses_by_its_name
-      in
+      let status, output, _ = Codegen_support.run_main Fixtures.Program.host_address_lookup in
       Codegen_support.expect_int ~expected:0 status;
       Codegen_support.expect_string
         ~expected:
@@ -489,17 +471,14 @@ let () =
       let path = Filename.concat (Lazy.force Codegen_support.scratch) "before-zero.txt" in
       Out_channel.with_open_text path (fun channel -> output_string channel "found");
       let status, output, _ =
-        Codegen_support.run_main ~arguments:[ path ]
-          Fixtures.Program.path_that_holds_a_zero_byte_opens_nothing_where_c
+        Codegen_support.run_main ~arguments:[ path ] Fixtures.Program.file_read_of_an_argument_path
       in
       Codegen_support.expect_int ~expected:0 status;
       Codegen_support.expect_string ~expected:"found\nrefused\n" output)
 
 let () =
   Codegen_support.test "a program runs other programs and reads their exit status" (fun () ->
-      let status, output, _ =
-        Codegen_support.run_main Fixtures.Program.program_runs_other_programs_and_reads_their_exit
-      in
+      let status, output, _ = Codegen_support.run_main Fixtures.Program.process_exit_statuses in
       Codegen_support.expect_int ~expected:0 status;
       Codegen_support.expect_string ~expected:"exited 7\nmissing\n" output)
 
@@ -507,45 +486,38 @@ let () =
   Codegen_support.test "a program run with an argument that holds a zero byte is not started"
     (fun () ->
       let status, output, _ =
-        Codegen_support.run_main Fixtures.Program.program_run_with_an_argument_that_holds_a_zero
+        Codegen_support.run_main Fixtures.Program.process_run_with_an_argument
       in
       Codegen_support.expect_int ~expected:0 status;
       Codegen_support.expect_string ~expected:"refused\n" output);
   Codegen_support.test "a program that a signal ends is told which signal" (fun () ->
-      let status, output, _ =
-        Codegen_support.run_main Fixtures.Program.program_that_a_signal_ends_is_told_which_signal
-      in
+      let status, output, _ = Codegen_support.run_main Fixtures.Program.process_ended_by_a_signal in
       Codegen_support.expect_int ~expected:0 status;
       Codegen_support.expect_string ~expected:"ended by a kill\n" output);
   Codegen_support.test "a program is given its arguments, with bytes that are not UTF-8 replaced"
     (fun () ->
       let _, output, _ =
-        Codegen_support.run_main ~arguments:[ "caf\xff"; "" ]
-          Fixtures.Program.program_is_given_its_arguments_with_bytes_that_are
+        Codegen_support.run_main ~arguments:[ "caf\xff"; "" ] Fixtures.Program.arguments_printed
       in
       Codegen_support.expect_string ~expected:"3 [caf\xef\xbf\xbd] []\n" output);
   Codegen_support.test "a variable that is set to nothing is told from one that is not set"
     (fun () ->
       Unix.putenv "TRUSS_TEST_EMPTY" "";
       let _, output, _ =
-        Codegen_support.run_main Fixtures.Program.variable_that_is_set_to_nothing_is_told_from_one
+        Codegen_support.run_main Fixtures.Program.empty_environment_variable_read
       in
       Codegen_support.expect_string ~expected:"set to []\nno such name\n" output)
 
 let () =
   Codegen_support.test "a program reads environment variables" (fun () ->
       Unix.putenv "TRUSS_TEST_VARIABLE" "caf\xc3\xa9";
-      let status, output, _ =
-        Codegen_support.run_main Fixtures.Program.program_reads_environment_variables
-      in
+      let status, output, _ = Codegen_support.run_main Fixtures.Program.environment_variable_read in
       Codegen_support.expect_int ~expected:0 status;
       Codegen_support.expect_string ~expected:"caf\xc3\xa9\nunset\n" output)
 
 let () =
   Codegen_support.test "a program reads the real clock and random numbers" (fun () ->
-      let status, output, _ =
-        Codegen_support.run_main Fixtures.Program.program_reads_the_real_clock_and_random_numbers
-      in
+      let status, output, _ = Codegen_support.run_main Fixtures.Program.clock_and_random_numbers in
       Codegen_support.expect_int ~expected:0 status;
       Codegen_support.expect_string ~expected:"true true\n" output)
 
@@ -554,7 +526,7 @@ let () =
     (fun () ->
       let status, output, _ =
         Codegen_support.run_main ~input:"first\nsecond \xff line\nlast"
-          Fixtures.Program.program_reads_its_input_a_line_at_a_time_with_bad
+          Fixtures.Program.input_lines_counted
       in
       Codegen_support.expect_int ~expected:3 status;
       Codegen_support.expect_string ~expected:"0: first\n1: second \xef\xbf\xbd line\n2: last\n"
@@ -565,17 +537,13 @@ let () =
     (fun () ->
       let long = String.make 150_000 'x' in
       let status, output, _ =
-        Codegen_support.run_main
-          ~input:(long ^ "\nshort\n" ^ long)
-          Fixtures.Program.line_longer_than_a_block_is_read_whole_and_the
+        Codegen_support.run_main ~input:(long ^ "\nshort\n" ^ long) Fixtures.Program.line_echo
       in
       Codegen_support.expect_int ~expected:0 status;
       Codegen_support.expect_string ~expected:"150000\n5\n150000\n" output);
   Codegen_support.test "the console a program is given is a value its start owns and drops"
     (fun () ->
-      let _, compile =
-        Codegen_support.load Fixtures.Program.console_a_program_is_given_is_a_value_its_start
-      in
+      let _, compile = Codegen_support.load Fixtures.Program.main_using_the_console in
       let fragment =
         Compile.For_testing.compiled compile
           (Generated (Program_main (Top { module_ = Codegen_support.example; name = "main" })))
@@ -592,7 +560,7 @@ let () =
     "a capability parameter stands for the capabilities its argument uses, wherever its type goes"
     (fun () ->
       let status, output, errors =
-        Codegen_support.run_main Fixtures.Program.capability_parameter_stands_for_the_capabilities
+        Codegen_support.run_main Fixtures.Program.apply_with_a_capability_parameter
       in
       if status <> 0 then Codegen_support.fail "status %d: %s" status errors;
       Codegen_support.expect_string ~expected:"inside\nnamed\nkept\n" output)
@@ -649,7 +617,7 @@ let () =
 let () =
   Codegen_support.test "a function value whose type uses Panic is called without evidence for Panic"
     (fun () ->
-      let source = Fixtures.Program.function_value_whose_type_uses_panic_is_called in
+      let source = Fixtures.Program.function_value_using_panic in
       (match Codegen_support.run_main source with
       | 0, output, _ -> Codegen_support.expect_string ~expected:"counted 1\ndone 3\n" output
       | status, _, errors -> Codegen_support.fail "ended with status %d: %s" status errors);
@@ -663,9 +631,7 @@ let () =
 let () =
   Codegen_support.test "a main that uses a capability with no real implementation is not built"
     (fun () ->
-      let _, compile =
-        Codegen_support.load Fixtures.Program.main_that_uses_a_capability_with_no_real
-      in
+      let _, compile = Codegen_support.load Fixtures.Program.main_using_a_greeter in
       match
         Compile.For_testing.run_program compile
           ~main:(Top { module_ = Codegen_support.example; name = "main" })

@@ -8,9 +8,8 @@ let fine text = Support.no_diagnostics ~check [ ("app::main", text) ]
 
 let () =
   Harness.test "a variable nothing reads is an error with a fix that renames it _" (fun () ->
-      one_diagnostic Fixtures.Usage.variable_nothing_reads_is_an_error_with_a_fix_that
-        "usage.unused_variable" ~says:"`count` is never used. Replace it with `_`."
-        ~fixed:Fixtures.Usage.variable_nothing_reads_is_an_error_with_a_fix_that_fixed);
+      one_diagnostic Fixtures.Usage.unused_let "usage.unused_variable"
+        ~says:"`count` is never used. Replace it with `_`." ~fixed:Fixtures.Usage.unused_let_fixed);
   Harness.test "an unused var is replaced with _" (fun () ->
       one_diagnostic Fixtures.Usage.unused_var "usage.unused_variable"
         ~fixed:Fixtures.Usage.unused_var_fixed);
@@ -29,13 +28,13 @@ let () =
       one_diagnostic Fixtures.Usage.unused_quantified_variable "usage.unused_variable"
         ~fixed:Fixtures.Usage.unused_quantified_variable_fixed);
   Harness.test "an unused field of a record pattern is fixed by name" (fun () ->
-      one_diagnostic Fixtures.Usage.unused_field_of_a_record_pattern_is_fixed_by_name
-        "usage.unused_variable" ~says:"`second` is never used. Match its field with `second: _`."
-        ~fixed:Fixtures.Usage.unused_field_of_a_record_pattern_is_fixed_by_name_fixed);
+      one_diagnostic Fixtures.Usage.record_pattern_with_unused_field "usage.unused_variable"
+        ~says:"`second` is never used. Match its field with `second: _`."
+        ~fixed:Fixtures.Usage.record_pattern_with_unused_field_fixed);
   Harness.test "a binding of the only field of a variant is replaced with _" (fun () ->
-      one_diagnostic Fixtures.Usage.binding_in_a_match_arm_must_be_used "usage.unused_variable"
+      one_diagnostic Fixtures.Usage.match_arm_with_unused_binding "usage.unused_variable"
         ~says:"`value` is never used. Replace it with `_`."
-        ~fixed:Fixtures.Usage.binding_in_a_match_arm_must_be_used_fixed);
+        ~fixed:Fixtures.Usage.match_arm_with_unused_binding_fixed);
   Harness.test "an unused field beside .. is deleted" (fun () ->
       one_diagnostic Fixtures.Usage.unused_field_beside_rest "usage.unused_variable"
         ~says:"`second` is never used. Delete it, since `..` matches its field."
@@ -53,18 +52,17 @@ let () =
   Harness.test "a binding of an or-pattern that its arm reads is not an error" (fun () ->
       fine Fixtures.Usage.or_pattern_binding_read_by_its_arm);
   Harness.test "code after a return is unreachable, with a fix that deletes it" (fun () ->
-      one_diagnostic Fixtures.Usage.code_after_a_return_is_unreachable_with_a_fix_that
-        "usage.unreachable_code"
-        ~fixed:Fixtures.Usage.code_after_a_return_is_unreachable_with_a_fix_that_fixed);
+      one_diagnostic Fixtures.Usage.statement_after_return "usage.unreachable_code"
+        ~fixed:Fixtures.Usage.statement_after_return_fixed);
   Harness.test "code after a loop that is never left is unreachable" (fun () ->
-      one_diagnostic Fixtures.Usage.code_after_a_loop_that_is_never_left_is "usage.unreachable_code");
+      one_diagnostic Fixtures.Usage.statement_after_endless_loop "usage.unreachable_code");
   Harness.test "code after a loop that breaks is reachable" (fun () ->
-      fine Fixtures.Usage.code_after_a_loop_that_breaks_is_reachable);
+      fine Fixtures.Usage.statement_after_loop_that_breaks);
   Harness.test "code after todo is not unreachable" (fun () ->
-      fine Fixtures.Usage.code_after_todo_is_not_unreachable);
-  Harness.test "if false is not reported" (fun () -> fine Fixtures.Usage.if_false_is_not_reported);
+      fine Fixtures.Usage.statement_after_todo);
+  Harness.test "if false is not reported" (fun () -> fine Fixtures.Usage.return_under_if_false);
   Harness.test "a branch after one that returns still runs" (fun () ->
-      fine Fixtures.Usage.branch_after_one_that_returns_still_runs);
+      fine Fixtures.Usage.concurrent_branches_that_both_return);
   Harness.test "code after a block whose branch never finishes is unreachable" (fun () ->
-      one_diagnostic Fixtures.Usage.code_after_a_block_whose_branch_never_finishes_is
+      one_diagnostic Fixtures.Usage.statement_after_concurrent_branches_that_return
         "usage.unreachable_code")

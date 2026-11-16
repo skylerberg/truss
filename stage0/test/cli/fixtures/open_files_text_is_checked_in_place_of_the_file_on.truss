@@ -1,3 +1,0 @@
-fn main(arguments: List[String]) -> ExitCode {
-  ExitCode.success
-}

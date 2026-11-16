@@ -23,18 +23,16 @@ let area body = Printf.sprintf "public fn area(side: Int64) -> Int64\n%s{\n  sid
 
 let () =
   Harness.test "a body that changes is no change" (fun () ->
-      expect Fixtures.Compatibility.body_that_changes_is_no_change
-        Fixtures.Compatibility.body_that_changes_is_no_change_2 []);
+      expect Fixtures.Compatibility.sides Fixtures.Compatibility.sides_returning_two_plus_two []);
   Harness.test "a private or internal definition that changes is no change" (fun () ->
-      expect Fixtures.Compatibility.private_or_internal_definition_that_changes_is_no
-        Fixtures.Compatibility.private_or_internal_definition_that_changes_is_no_2 []);
+      expect Fixtures.Compatibility.private_sides_and_internal_corners
+        Fixtures.Compatibility.private_sides_taking_a_count []);
   Harness.test "a public definition that is added grows the package" (fun () ->
-      expect "" Fixtures.Compatibility.public_definition_that_is_added_grows_the_package
-        [ "grows: lib::shapes::sides is new" ]);
+      expect "" Fixtures.Compatibility.sides [ "grows: lib::shapes::sides is new" ]);
   Harness.test "a public definition that is removed, or made private, breaks" (fun () ->
       let sides = Fixtures.Compatibility.sides in
       expect sides "" [ "breaks: lib::shapes::sides was removed or is no longer public" ];
-      expect sides Fixtures.Compatibility.public_definition_that_is_taken_away_or_made
+      expect sides Fixtures.Compatibility.private_sides
         [ "breaks: lib::shapes::sides was removed or is no longer public" ]);
   Harness.test "a changed parameter type, parameter name, or result breaks" (fun () ->
       let was = area "" in
@@ -42,19 +40,19 @@ let () =
         (fun now ->
           expect was now [ "breaks: lib::shapes::area changed its parameters or its result" ])
         [
-          Fixtures.Compatibility.another_parameter_type_parameter_name_or_result;
-          Fixtures.Compatibility.another_parameter_type_parameter_name_or_result_2;
-          Fixtures.Compatibility.another_parameter_type_parameter_name_or_result_3;
-          Fixtures.Compatibility.another_parameter_type_parameter_name_or_result_4;
+          Fixtures.Compatibility.area_taking_an_int32_side;
+          Fixtures.Compatibility.area_taking_an_edge;
+          Fixtures.Compatibility.area_returning_int32;
+          Fixtures.Compatibility.area_taking_a_side_and_a_depth;
         ]);
   Harness.test "a parameter that gains a default grows, and one that loses it breaks" (fun () ->
-      let with_default = Fixtures.Compatibility.with_default in
+      let with_default = Fixtures.Compatibility.area_with_a_default_side in
       expect (area "") with_default [ "grows: lib::shapes::area gained a default" ];
       expect with_default (area "")
         [ "breaks: lib::shapes::area changed its parameters or its result" ]);
   Harness.test "an added capability in uses breaks, and a removed one grows" (fun () ->
-      let pure = Fixtures.Compatibility.pure
-      and timed = Fixtures.Compatibility.capability_more_in_uses_breaks_and_one_fewer_grows in
+      let pure = Fixtures.Compatibility.stamp_using_nothing
+      and timed = Fixtures.Compatibility.stamp_using_clock in
       expect pure timed [ "breaks: lib::shapes::stamp now uses `standard::capabilities::Clock`" ];
       expect timed pure [ "grows: lib::shapes::stamp uses fewer capabilities" ]);
   Harness.test "a requires that is added breaks, and one that is dropped grows" (fun () ->
@@ -107,23 +105,23 @@ let () =
       expect equal plain [ "breaks: lib::shapes::Square no longer derives a trait" ];
       expect plain equal [ "grows: lib::shapes::Square derives another trait" ]);
   Harness.test "a trait gains only methods that have bodies" (fun () ->
-      let was = Fixtures.Compatibility.was in
-      expect was Fixtures.Compatibility.trait_gains_only_methods_that_have_bodies
+      let was = Fixtures.Compatibility.sided_trait_with_only_sides in
+      expect was Fixtures.Compatibility.sided_trait_with_default_corners
         [ "grows: lib::shapes::Sided gained the method `corners`" ];
-      expect was Fixtures.Compatibility.trait_gains_only_methods_that_have_bodies_2
+      expect was Fixtures.Compatibility.sided_trait_with_required_sides_and_corners
         [
           "breaks: lib::shapes::Sided gained the method `corners` without a default body, which \
            every `impl` must then define";
         ];
-      expect was Fixtures.Compatibility.trait_gains_only_methods_that_have_bodies_3
+      expect was Fixtures.Compatibility.sided_trait_with_only_corners
         [
           "breaks: lib::shapes::Sided no longer has the method `sides`";
           "breaks: lib::shapes::Sided gained the method `corners` without a default body, which \
            every `impl` must then define";
         ]);
   Harness.test "a capability's method that changes breaks" (fun () ->
-      expect Fixtures.Compatibility.capabilitys_method_that_changes_breaks
-        Fixtures.Compatibility.capabilitys_method_that_changes_breaks_2
+      expect Fixtures.Compatibility.ledger_recording_int64
+        Fixtures.Compatibility.ledger_recording_int32
         [ "breaks: lib::shapes::Ledger its method `record` changed its parameters or its result" ]);
   Harness.test "a constant keeps its type and its value" (fun () ->
       let sides = "public let sides: Int64 = 4\n" in
@@ -133,9 +131,7 @@ let () =
       expect sides "public let sides: Int64 = 2 + 2\n" []);
   Harness.test "an impl that is removed breaks, and one that is added grows" (fun () ->
       let square = "public type Square(side: Int64)\n" in
-      let with_impl =
-        square ^ Fixtures.Compatibility.impl_that_is_taken_away_breaks_and_one_that_is
-      in
+      let with_impl = square ^ Fixtures.Compatibility.default_impl_for_square in
       (match show (changes with_impl square) with
       | [ actual ] when Substring.contains actual "was removed: the `impl` of" -> ()
       | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
@@ -245,9 +241,7 @@ let () =
              ~before:
                (state
                   [
-                    ( "lib::shapes",
-                      square ^ Fixtures.Compatibility.impl_that_is_taken_away_breaks_and_one_that_is
-                    );
+                    ("lib::shapes", square ^ Fixtures.Compatibility.default_impl_for_square);
                     ("lib::extra", "");
                   ])
              ~after:(state [ ("lib::shapes", square); ("lib::extra", moved) ])

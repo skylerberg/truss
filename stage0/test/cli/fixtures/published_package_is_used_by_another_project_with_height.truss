@@ -1,5 +1,0 @@
-use acme::geometry::vector
-
-public fn height() -> Int64 {
-  vector::length()
-}

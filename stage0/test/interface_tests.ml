@@ -42,8 +42,7 @@ let () =
       | _ -> Harness.fail "no signature");
   Harness.test "a method's receiver has its type's generic parameters" (fun () ->
       let packages =
-        Support.setup
-          [ ("app::main", Fixtures.Interface.methods_receiver_has_its_types_generic_parameters) ]
+        Support.setup [ ("app::main", Fixtures.Interface.method_head_with_generics) ]
       in
       let path : Path.t = Method { owner = app "Box"; name = "get"; receiver = Read } in
       match Interface.Definition.read_declared_signature (interface packages) path with
@@ -55,24 +54,22 @@ let () =
   Harness.test "a trait in a type position is an error" (fun () ->
       one_diagnostic "fn f(value: Equal) {}\n" "types.not_a_type");
   Harness.test "a type argument must meet the type's bounds" (fun () ->
-      one_diagnostic Fixtures.Interface.type_argument_must_meet_the_types_bounds
-        "types.unsatisfied_bound");
+      one_diagnostic Fixtures.Interface.sorted_of_an_unordered_point "types.unsatisfied_bound");
   Harness.test "a generic parameter's bound meets a bound the type needs" (fun () ->
-      no_diagnostics
-        [ ("app::main", Fixtures.Interface.generic_parameters_bound_meets_a_bound_the_type) ]);
+      no_diagnostics [ ("app::main", Fixtures.Interface.sorted_of_an_ordered_item) ]);
   Harness.test "a public signature cannot mention a private type" (fun () ->
-      one_diagnostic Fixtures.Interface.public_signature_cannot_mention_a_private_type
+      one_diagnostic Fixtures.Interface.public_function_taking_a_private_type
         "types.private_in_public");
   Harness.test "a method must be in its type's package" (fun () ->
       one_diagnostic "fn Int64.double(self) -> Int64 { todo }\n" "types.method_outside_package");
   Harness.test "main must have its fixed signature" (fun () ->
       one_diagnostic ~file:"app" "fn main() -> ExitCode { todo }\n" "types.main_signature");
   Harness.test "main with its fixed signature is accepted" (fun () ->
-      no_diagnostics [ ("app", Fixtures.Interface.main_with_its_fixed_signature_is_accepted) ]);
+      no_diagnostics [ ("app", Fixtures.Interface.main_with_arguments_and_exit_code) ]);
   Harness.test "a main outside the root module may have any signature" (fun () ->
       no_diagnostics [ ("app::menu", "fn main() -> ExitCode { todo }\n") ]);
   Harness.test "a default may build a record from constants" (fun () ->
-      no_diagnostics [ ("app::main", Fixtures.Interface.default_may_build_a_record_from_constants) ]);
+      no_diagnostics [ ("app::main", Fixtures.Interface.record_default_argument) ]);
   Harness.test "an associated type no bound declares is an error" (fun () ->
       one_diagnostic "fn f[Items: Iterable](items: Items) -> Items.Key { todo }\n"
         "types.unknown_associated_type");
@@ -94,10 +91,9 @@ let () =
   Harness.test "two fields with one name are an error" (fun () ->
       one_diagnostic "type Point(x: Int64, x: Int64)\n" "types.duplicate_field");
   Harness.test "deriving needs every field to implement the trait" (fun () ->
-      one_diagnostic Fixtures.Interface.deriving_needs_every_field_to_implement_the_trait
-        "types.cannot_derive");
+      one_diagnostic Fixtures.Interface.equal_derived_over_an_opaque_field "types.cannot_derive");
   Harness.test "only a record derives Default" (fun () ->
-      one_diagnostic Fixtures.Interface.only_a_record_derives_default "types.cannot_derive";
+      one_diagnostic Fixtures.Interface.variant_type_deriving_default "types.cannot_derive";
       no_diagnostics [ ("app::main", "type Point(x: Int64, y: Int64)\n  derives Default\n") ]);
   Harness.test "a field with a default needs no Default of its type to derive Default" (fun () ->
       no_diagnostics
@@ -108,10 +104,8 @@ let () =
             \  derives Default\n" );
         ]);
   Harness.test "deriving Serialize needs every field to implement it" (fun () ->
-      one_diagnostic Fixtures.Interface.deriving_serialize_needs_every_field_to_implement
-        "types.cannot_derive";
-      no_diagnostics
-        [ ("app::main", Fixtures.Interface.deriving_serialize_needs_every_field_to_implement_2) ]);
+      one_diagnostic Fixtures.Interface.serialize_derived_over_an_opaque_field "types.cannot_derive";
+      no_diagnostics [ ("app::main", Fixtures.Interface.serialize_derived_over_a_defaulted_list) ]);
   Harness.test "deriving Ordered needs Equal derived too" (fun () ->
       one_diagnostic "type Point(x: Int64)\n  derives Ordered\n" "types.cannot_derive");
   Harness.test "a generic type derives under conditions on its parameters" (fun () ->
@@ -141,41 +135,33 @@ let () =
       no_diagnostics
         [ ("app::main", "public opaque type Box[Value](inner: Value)\n  derives Copyable\n") ]);
   Harness.test "an impl must give every method without a body" (fun () ->
-      one_diagnostic Fixtures.Interface.impl_must_give_every_method_without_a_body
-        "types.missing_member");
+      one_diagnostic Fixtures.Interface.empty_equal_impl "types.missing_member");
   Harness.test "an impl may leave out a method with a body" (fun () ->
-      no_diagnostics [ ("app::main", Fixtures.Interface.impl_may_leave_out_a_method_with_a_body) ]);
+      no_diagnostics [ ("app::main", Fixtures.Interface.equal_impl_giving_only_equal) ]);
   Harness.test "an impl's method must have the trait's signature" (fun () ->
-      one_diagnostic Fixtures.Interface.impls_method_must_have_the_traits_signature
+      one_diagnostic Fixtures.Interface.equal_impl_with_a_renamed_parameter
         "types.signature_mismatch");
   Harness.test "an impl cannot give a method its trait does not declare" (fun () ->
-      one_diagnostic Fixtures.Interface.impl_cannot_give_a_method_its_trait_does_not
-        "types.extra_member");
+      one_diagnostic Fixtures.Interface.equal_impl_with_an_extra_method "types.extra_member");
   Harness.test "an impl must give every associated type" (fun () ->
-      one_diagnostic Fixtures.Interface.impl_must_give_every_associated_type "types.missing_member");
+      one_diagnostic Fixtures.Interface.add_impl_without_output "types.missing_member");
   Harness.test "the traits a trait requires must be implemented" (fun () ->
-      one_diagnostic Fixtures.Interface.traits_a_trait_requires_must_be_implemented
-        "types.missing_required_impl");
+      one_diagnostic Fixtures.Interface.ordered_impl_without_equal "types.missing_required_impl");
   Harness.test "nothing can implement Panic" (fun () ->
-      one_diagnostic Fixtures.Interface.nothing_can_implement_panic "types.implements_panic");
+      one_diagnostic Fixtures.Interface.panic_impl "types.implements_panic");
   Harness.test "a trait's impl cannot have uses" (fun () ->
-      one_diagnostic Fixtures.Interface.traits_impl_cannot_have_uses "types.impl_uses");
+      one_diagnostic Fixtures.Interface.equal_impl_with_uses "types.impl_uses");
   Harness.test "a capability's impl takes a receiver and may have uses" (fun () ->
-      no_diagnostics
-        [ ("app::main", Fixtures.Interface.capabilitys_impl_takes_a_receiver_and_may_have) ]);
+      no_diagnostics [ ("app::main", Fixtures.Interface.clock_impl_using_random) ]);
   Harness.test "a capability's impl method may repeat its impl's uses" (fun () ->
-      no_diagnostics
-        [ ("app::main", Fixtures.Interface.capabilitys_impl_method_may_repeat_its_impls_uses) ]);
+      no_diagnostics [ ("app::main", Fixtures.Interface.clock_impl_method_repeating_uses) ]);
   Harness.test "a method of a capability's impl cannot declare `uses`" (fun () ->
-      one_diagnostic Fixtures.Interface.method_of_a_capabilitys_impl_cannot_declare_uses
-        "types.impl_uses");
+      one_diagnostic Fixtures.Interface.clock_impl_method_declaring_uses "types.impl_uses");
   Harness.test "an impl's method can rename its generic parameters" (fun () ->
-      no_diagnostics
-        [ ("app::main", Fixtures.Interface.impls_method_can_rename_its_generic_parameters) ]);
+      no_diagnostics [ ("app::main", Fixtures.Interface.impl_renaming_method_generics) ]);
   Harness.test "traits cannot require each other in a cycle" (fun () ->
       let packages =
-        Support.setup
-          [ ("app::main", Fixtures.Interface.traits_cannot_require_each_other_in_a_cycle) ]
+        Support.setup [ ("app::main", Fixtures.Interface.traits_requiring_each_other) ]
       in
       match Support.codes (check packages (Support.file_of "app::main")) with
       | [ "types.trait_cycle"; "types.trait_cycle" ] -> ()
@@ -215,11 +201,9 @@ let () =
              }\n" );
         ]);
   Harness.test "a trait cannot redeclare a method of a trait it requires" (fun () ->
-      one_diagnostic Fixtures.Interface.trait_cannot_redeclare_a_method_of_a_trait_it
-        "types.redeclared_method");
+      one_diagnostic Fixtures.Interface.subtrait_redeclaring_compare "types.redeclared_method");
   Harness.test "a trait may add an overload of a method of a trait it requires" (fun () ->
-      no_diagnostics
-        [ ("app::main", Fixtures.Interface.trait_may_add_an_overload_of_a_method_of_a_trait_it) ])
+      no_diagnostics [ ("app::main", Fixtures.Interface.subtrait_overloading_element) ])
 
 let property name expected text type_ check =
   Harness.test name (fun () ->
@@ -259,11 +243,10 @@ let () =
     (fun _ -> Types.make_named (app "Point") [])
     Interface.Impls.is_plain;
   property "a variant held indirectly is not Plain" false
-    Fixtures.Interface.variant_held_indirectly_is_not_plain
+    Fixtures.Interface.tree_of_leaves_and_nodes
     (fun _ -> Types.make_named (app "Tree") [])
     Interface.Impls.is_plain;
-  property "a recursive type is still Copyable" true
-    Fixtures.Interface.recursive_type_is_still_copyable
+  property "a recursive type is still Copyable" true Fixtures.Interface.tree_of_leaves_and_nodes
     (fun _ -> Types.make_named (app "Tree") [])
     Interface.Impls.is_copyable;
   property "an opaque type is not Copyable unless it says so" false
@@ -317,15 +300,15 @@ let () =
     (fun _ -> Types.make_named (app "Chain") [ int64 ])
     Interface.Impls.is_view;
   property "a type that contains itself around a Slice is a view" true
-    Fixtures.Interface.type_that_contains_itself_around_a_slice_is_a_view
+    Fixtures.Interface.nest_of_growing_slices
     (fun _ -> Types.make_named (app "Nest") [ int64 ])
     Interface.Impls.is_view;
   property "types that hold each other are Copyable when nothing in them says otherwise" true
-    Fixtures.Interface.types_that_hold_each_other_are_copyable_when
+    Fixtures.Interface.even_and_odd_of_copyable_fields
     (fun _ -> Types.make_named (app "Even") [])
     Interface.Impls.is_copyable;
   property "types that hold each other are not Copyable when one holds a type that is not" false
-    Fixtures.Interface.types_that_hold_each_other_are_not_copyable_when
+    Fixtures.Interface.even_and_odd_holding_an_opaque_token
     (fun _ -> Types.make_named (app "Even") [])
     Interface.Impls.is_copyable;
   property "a type that holds an associated type is a view when that type is one" true
@@ -344,7 +327,7 @@ let () =
     (projection_holder ^ "\ntype Outer(held: Kept[Numbers])\n")
     (fun _ -> Types.make_named (app "Outer") [])
     Interface.Impls.is_view;
-  let through_itself = projection_holder ^ Fixtures.Interface.through_itself in
+  let through_itself = projection_holder ^ Fixtures.Interface.tree_through_an_associated_type in
   property "a type that contains itself through an associated type is Copyable" true through_itself
     (fun _ -> Types.make_named (app "Tree") [])
     Interface.Impls.is_copyable;
@@ -484,36 +467,27 @@ let () =
 let () =
   Harness.test "a type that contains itself with growing arguments does not hang" (fun () ->
       let packages =
-        Support.setup
-          [ ("app::main", Fixtures.Interface.type_that_contains_itself_with_growing_arguments) ]
+        Support.setup [ ("app::main", Fixtures.Interface.nested_type_with_growing_arguments) ]
       in
       ignore
         (Interface.Impls.is_copyable (interface packages)
            ~bounds:(fun _ -> [])
            (Types.make_named (app "Nested") [ int64 ])));
   Harness.test "an impl's method may have the trait method's own generic parameters" (fun () ->
-      no_diagnostics
-        [ ("app::main", Fixtures.Interface.impls_method_may_have_the_trait_methods_own) ]);
+      no_diagnostics [ ("app::main", Fixtures.Interface.impl_method_with_its_own_generic) ]);
   Harness.test "associated types inside function types are substituted in an impl" (fun () ->
-      no_diagnostics
-        [ ("app::main", Fixtures.Interface.associated_types_inside_function_types_are) ]);
+      no_diagnostics [ ("app::main", Fixtures.Interface.impl_visiting_with_an_associated_element) ]);
   Harness.test "an associated type of a required trait is checked in an impl" (fun () ->
-      one_diagnostic Fixtures.Interface.associated_type_of_a_required_trait_is_checked_in
+      one_diagnostic Fixtures.Interface.impl_of_a_subtrait_naming_a_base_key
         "types.signature_mismatch");
   Harness.test "an impl's associated type must meet the trait's bound on it" (fun () ->
-      one_diagnostic Fixtures.Interface.impls_associated_type_must_meet_the_traits_bound
-        "types.unsatisfied_bound");
+      one_diagnostic Fixtures.Interface.keyed_impl_with_an_unhashable_key "types.unsatisfied_bound");
   Harness.test "an associated type's declared bound holds where it is used" (fun () ->
-      no_diagnostics
-        [ ("app::main", Fixtures.Interface.associated_types_declared_bound_holds_where_it_is) ]);
+      no_diagnostics [ ("app::main", Fixtures.Interface.keyed_trait_with_a_bounded_key) ]);
   Harness.test "Self in a required trait is substituted by the bounded type" (fun () ->
-      no_diagnostics
-        [ ("app::main", Fixtures.Interface.self_in_a_required_trait_is_substituted_by_the) ]);
+      no_diagnostics [ ("app::main", Fixtures.Interface.trait_requiring_add_of_self) ]);
   Harness.test "a trait whose header did not parse satisfies every bound that names it" (fun () ->
-      let packages =
-        Support.setup
-          [ ("app::main", Fixtures.Interface.trait_whose_header_did_not_parse_satisfies_every) ]
-      in
+      let packages = Support.setup [ ("app::main", Fixtures.Interface.bound_on_a_broken_trait) ] in
       match
         Database.For_testing.list_diagnostics [ Interface ] (Support.database packages)
           (Support.file_of "app::main")
@@ -534,20 +508,16 @@ let () =
   Harness.test "only some traits can be derived" (fun () ->
       one_diagnostic "type P()\n  derives Iterable\n" "types.not_derivable");
   Harness.test "a capability's impl must give every method" (fun () ->
-      one_diagnostic Fixtures.Interface.capabilitys_impl_must_give_every_method
-        "types.missing_member");
+      one_diagnostic Fixtures.Interface.journal_impl_missing_a_method "types.missing_member");
   Harness.test "a capability's impl takes self or mut self" (fun () ->
-      one_diagnostic Fixtures.Interface.capabilitys_impl_takes_self_or_mut_self
-        "types.wrong_receiver");
+      one_diagnostic Fixtures.Interface.clock_impl_taking_own_self "types.wrong_receiver");
   Harness.test "a method's head names every generic parameter of its type" (fun () ->
-      one_diagnostic Fixtures.Interface.methods_head_names_every_generic_parameter_of_its
-        "types.arity");
+      one_diagnostic Fixtures.Interface.method_head_without_generics "types.arity");
   Harness.test "a type argument must be of its parameter's kind" (fun () ->
       one_diagnostic "fn f(items: List[3]) {}\n" "types.argument_kind");
   Harness.test "a constant in a type argument must have a value" (fun () ->
       let packages =
-        Support.setup
-          [ ("app::main", Fixtures.Interface.constant_in_a_type_argument_must_have_a_value) ]
+        Support.setup [ ("app::main", Fixtures.Interface.array_length_from_circular_constants) ]
       in
       if
         not
@@ -559,13 +529,11 @@ let () =
   Harness.test "any must fix every associated type" (fun () ->
       one_diagnostic "fn f(items: any Iterable) {}\n" "types.associated_type_not_fixed");
   Harness.test "nothing can implement Copyable" (fun () ->
-      one_diagnostic Fixtures.Interface.nothing_can_implement_copyable "types.implements_built_in");
+      one_diagnostic Fixtures.Interface.copyable_impl "types.implements_built_in");
   Harness.test "a public constant cannot have a private type" (fun () ->
-      one_diagnostic Fixtures.Interface.public_constant_cannot_have_a_private_type
-        "types.private_in_public");
+      one_diagnostic Fixtures.Interface.public_constant_of_a_private_type "types.private_in_public");
   Harness.test "uses names a capability parameter, not a type parameter" (fun () ->
-      one_diagnostic Fixtures.Interface.uses_names_a_capability_parameter_not_a_type
-        "types.not_a_capability");
+      one_diagnostic Fixtures.Interface.uses_naming_a_type_parameter "types.not_a_capability");
   Harness.test "Never implements no trait" (fun () ->
       let packages = Support.setup [] in
       if
@@ -587,21 +555,20 @@ let () =
 
 let () =
   Harness.test "`Self.Item` outside a trait and an impl of one is an error" (fun () ->
-      one_diagnostic Fixtures.Interface.self_item_outside_a_trait_and_an_impl_of_one_is_an
-        "types.unknown_associated_type");
+      one_diagnostic Fixtures.Interface.method_returning_self_item "types.unknown_associated_type");
   Harness.test "a generic parameter is not a bound" (fun () ->
-      one_diagnostic Fixtures.Interface.generic_parameter_is_not_a_bound "types.not_a_trait");
+      one_diagnostic Fixtures.Interface.generic_bounded_by_another_generic "types.not_a_trait");
   Harness.test "`Self` in a capability is an error" (fun () ->
-      one_diagnostic Fixtures.Interface.self_in_a_capability_is_an_error "types.misplaced_self_type");
+      one_diagnostic Fixtures.Interface.capability_method_taking_self_type
+        "types.misplaced_self_type");
   Harness.test "`Self` in a function that is not a method is an error" (fun () ->
       one_diagnostic "fn f(value: Self) {}\n" "types.misplaced_self_type");
   Harness.test "a trait is not the head of a method" (fun () ->
-      one_diagnostic Fixtures.Interface.trait_is_not_the_head_of_a_method "types.not_a_type");
+      one_diagnostic Fixtures.Interface.method_headed_by_a_trait "types.not_a_type");
   Harness.test "a capability parameter is not a type" (fun () ->
       one_diagnostic "fn f[capability Granted](value: Granted) {}\n" "types.not_a_type");
   Harness.test "a method of an unknown type keeps its head's generic parameters" (fun () ->
-      one_diagnostic Fixtures.Interface.method_of_an_unknown_type_keeps_its_heads_generic
-        "resolve.unknown_name")
+      one_diagnostic Fixtures.Interface.method_of_an_unknown_generic_type "resolve.unknown_name")
 
 let () =
   Harness.test "every definition the compiler names is in the standard library" (fun () ->

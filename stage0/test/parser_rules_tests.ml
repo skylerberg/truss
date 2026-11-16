@@ -23,7 +23,7 @@ let () =
       if Parse_support.codes diagnostics <> [ "parser.cost_word"; "parser.cost_word" ] then
         Harness.fail "got [%s]" (String.concat "; " (Parse_support.codes diagnostics)));
   Harness.test "a trait's body on the next line" (fun () ->
-      Parse_support.definition Fixtures.Parser_rules.traits_body_on_the_next_line
+      Parse_support.definition Fixtures.Parser_rules.trait_with_its_body_on_the_next_line
         "(trait T (type K))");
   Harness.test "a misspelled cost word has a fix" (fun () ->
       Parse_support.error "fn f() cost allocation == 0 {}" ~code:Cost_word ~at:"allocation"
@@ -72,17 +72,16 @@ let () =
   Harness.test "an associated capability set" (fun () ->
       Parse_support.definition Fixtures.Parser_rules.associated_capability_set
         "(trait Feed (capability Uses) (fn pull (mut self) -> Int64 (uses Self.Uses)))";
-      Parse_support.definition Fixtures.Parser_rules.associated_capability_set_2
+      Parse_support.definition Fixtures.Parser_rules.associated_capability_set_in_an_impl
         "(impl Feed for Zip[First: Feed, Second: Feed] (capability Uses = First.Uses Second.Uses \
          Clock))";
-      Parse_support.definition Fixtures.Parser_rules.associated_capability_set_3
+      Parse_support.definition Fixtures.Parser_rules.associated_capability_set_in_uses
         "(fn drain[Source: Feed] ((source: mut Source)) (uses Source.Uses Clock) (block))";
       Parse_support.definition "fn run(step: (fn() uses Self.Uses)) {}"
         "(fn run ((step: (fn () (uses Self.Uses)))) (block))");
   Harness.test "an associated capability set is named after a dot" (fun () ->
-      Parse_support.error Fixtures.Parser_rules.associated_capability_set_is_named_after_a_dot
-        ~code:Unexpected_token ~at:"\n{";
-      Parse_support.error Fixtures.Parser_rules.associated_capability_set_is_named_after_a_dot_2
+      Parse_support.error Fixtures.Parser_rules.uses_self ~code:Unexpected_token ~at:"\n{";
+      Parse_support.error Fixtures.Parser_rules.impl_declaring_a_capability_set_without_a_value
         ~code:Unexpected_token ~at:"}";
       Parse_support.error "type Point(x: Int64)\n  derives Self.Uses" ~code:Unexpected_token
         ~at:"Self");
@@ -90,19 +89,19 @@ let () =
       Parse_support.definition Fixtures.Parser_rules.capability
         "(capability Clock (fn now () -> Instant) (fn sleep ((duration: Duration))))");
   Harness.test "a capability's methods take no self" (fun () ->
-      Parse_support.error Fixtures.Parser_rules.capabilitys_methods_take_no_self
-        ~code:Misplaced_self ~at:"self");
+      Parse_support.error Fixtures.Parser_rules.capability_method_taking_self ~code:Misplaced_self
+        ~at:"self");
   Harness.test "an impl's methods need bodies" (fun () ->
-      Parse_support.error Fixtures.Parser_rules.impls_methods_need_bodies ~code:Missing_body
-        ~at:"\n}" ~fixed:Fixtures.Parser_rules.impls_methods_need_bodies_fixed);
+      Parse_support.error Fixtures.Parser_rules.impl_method_without_a_body ~code:Missing_body
+        ~at:"\n}" ~fixed:Fixtures.Parser_rules.impl_method_without_a_body_fixed);
   Harness.test "constants" (fun () ->
       Parse_support.definition "public let UInt8.maximum: UInt8 = 255"
         "(public (let UInt8.maximum : UInt8 255))";
       Parse_support.definition "let pi: Float64 = 3.14" "(let pi : Float64 314e-2)");
   Harness.test "a test, a theorem, and a law's proof" (fun () ->
-      Parse_support.definition Fixtures.Parser_rules.test_a_theorem_and_a_laws_proof
+      Parse_support.definition Fixtures.Parser_rules.test_using_file_write
         "(test \"writes\" (uses FileWrite) (block (assert true)))";
-      Parse_support.definition Fixtures.Parser_rules.test_a_theorem_and_a_laws_proof_2
+      Parse_support.definition Fixtures.Parser_rules.public_theorem
         "(public (theorem keeps[Element] ((items: List[Element])) (ensures true) (block)))";
       Parse_support.definition "proof Monoid.associative for Int64 {\n  lemma()\n}"
         "(proof Monoid.associative for Int64 (block (call lemma)))");
@@ -249,16 +248,16 @@ let () =
       Parse_support.error Fixtures.Parser_rules.quantifier_over_a_type_in_a_test
         ~code:Specification_only ~at:"forall");
   Harness.test "==> in a test" (fun () ->
-      Parse_support.error Fixtures.Parser_rules.in_a_test ~code:Specification_only ~at:"==>");
+      Parse_support.error Fixtures.Parser_rules.implication_in_a_test ~code:Specification_only
+        ~at:"==>");
   Harness.test "==> in a constant" (fun () ->
       Parse_support.error "let x: Bool = a ==> b" ~code:Specification_only ~at:"==>");
   Harness.test "==> and a quantifier over a type in a function's body are left to the type checker"
     (fun () ->
-      Parse_support.definition
-        Fixtures.Parser_rules.and_a_quantifier_over_a_type_in_a_functions_body
+      Parse_support.definition Fixtures.Parser_rules.implication_and_quantifier_in_a_function_body
         "(fn f () -> Bool (block (==> a (forall value: Int64 (== value value)))))");
   Harness.test "a lending method's parameter cannot be named final" (fun () ->
-      Parse_support.error Fixtures.Parser_rules.lending_methods_parameter_cannot_be_named_final
+      Parse_support.error Fixtures.Parser_rules.lending_method_with_a_parameter_named_final
         ~code:Reserved_specification_name ~at:"final";
       Parse_support.definition "fn f(final: Bool) {}" "(fn f ((final: Bool)) (block))");
   Harness.test "a loop's cost clause" (fun () ->
@@ -281,8 +280,8 @@ let () =
       Parse_support.error Fixtures.Parser_rules.assert_in_a_lambda_in_a_test ~code:Misplaced_assert
         ~at:"assert");
   Harness.test "a proof block outside a function's body" (fun () ->
-      Parse_support.error Fixtures.Parser_rules.proof_block_outside_a_functions_body
-        ~code:Misplaced_proof ~at:"proof");
+      Parse_support.error Fixtures.Parser_rules.proof_block_in_a_test ~code:Misplaced_proof
+        ~at:"proof");
   Harness.test "a method that lends" (fun () ->
       Parse_support.definition Fixtures.Parser_rules.method_that_lends
         "(fn Grid.cell (mut self (position: Position)) lends mut Cell (block (mut ([] (. self \
@@ -334,7 +333,7 @@ let () =
       Parse_support.error "fn f(x: Int64) requires echo x > 0 {}" ~code:Echo_in_specification
         ~at:"echo");
   Harness.test "a statement rule applies in every block" (fun () ->
-      Parse_support.body_error Fixtures.Parser_rules.statement_rule_applies_in_every_block
+      Parse_support.body_error Fixtures.Parser_rules.assert_in_a_provide_block
         ~code:Misplaced_assert ~at:"assert");
   Harness.test "echo in a proof" (fun () ->
       Parse_support.body_error "proof {\n  echo x\n}" ~code:Echo_in_specification ~at:"echo")
@@ -350,19 +349,17 @@ let () =
         [ "(call f error x error (call g error))"; "(let y 2)" ]);
   Harness.test "an error in a clause leaves the body parsed" (fun () ->
       Parse_support.recovered_definitions ~codes:[ "parser.unexpected_token" ]
-        Fixtures.Parser_rules.error_in_a_clause_leaves_the_body_parsed
+        Fixtures.Parser_rules.broken_requires_clause
         [ "(fn f () error (ensures true) (block x))" ]);
   Harness.test "an error in a member leaves the next member parsed" (fun () ->
       let file, diagnostics =
-        Parse_support.parse Fixtures.Parser_rules.error_in_a_member_leaves_the_next_member_parsed
+        Parse_support.parse Fixtures.Parser_rules.trait_with_an_unclosed_member
       in
       ignore file;
       if List.length diagnostics > 2 then
         Harness.fail "got [%s]" (String.concat "; " (Parse_support.codes diagnostics)));
   Harness.test "nothing is reported before a closer the lexer inserted" (fun () ->
-      let _, diagnostics =
-        Parse_support.parse Fixtures.Parser_rules.nothing_is_reported_before_a_closer_the_lexer
-      in
+      let _, diagnostics = Parse_support.parse Fixtures.Parser_rules.unclosed_parenthesis in
       if Parse_support.codes diagnostics <> [ "lexer.unclosed_bracket" ] then
         Harness.fail "got [%s]" (String.concat "; " (Parse_support.codes diagnostics)));
   Harness.test "a reserved word is reported as reserved" (fun () ->
@@ -415,8 +412,8 @@ let () =
       Parse_support.body_error "let f = items.map(|item| { item })" ~code:Closure_bars ~at:"|"
         ~fixed:"let f = items.map(fn(item) { item })");
   Harness.test "|x| before let ... else" (fun () ->
-      Parse_support.body_error Fixtures.Parser_rules.x_before_let_else ~code:Closure_bars ~at:"||"
-        ~fixed:Fixtures.Parser_rules.x_before_let_else_fixed);
+      Parse_support.body_error Fixtures.Parser_rules.closure_before_let_else ~code:Closure_bars
+        ~at:"||" ~fixed:Fixtures.Parser_rules.closure_before_let_else_fixed);
   Harness.test "|| x" (fun () ->
       Parse_support.body_error "let f = run(|| 1)" ~code:Closure_bars ~at:"||"
         ~fixed:"let f = run(fn() { 1 })");
@@ -456,9 +453,9 @@ let () =
       Parse_support.recovered_statements "let shape = geometry::Shape::Circle"
         [ "(let shape (. geometry::Shape Circle))" ]);
   Harness.test "a variant with its type in a pattern" (fun () ->
-      Parse_support.body_error Fixtures.Parser_rules.variant_with_its_type_in_a_pattern
+      Parse_support.body_error Fixtures.Parser_rules.match_on_a_type_qualified_variant
         ~code:Qualified_variant ~at:"Shape."
-        ~fixed:Fixtures.Parser_rules.variant_with_its_type_in_a_pattern_fixed;
+        ~fixed:Fixtures.Parser_rules.match_on_a_type_qualified_variant_fixed;
       Parse_support.body_error "let empty = shape is geometry::Shape::Empty" ~code:Qualified_variant
         ~at:"geometry::Shape::" ~fixed:"let empty = shape is Empty");
   Harness.test "a variant with its module in a pattern" (fun () ->
@@ -524,10 +521,7 @@ let () =
         ~fixed:"let off = !(flags.ready is true)"
         ~alternatives:[ "let off = (!flags.ready) is true" ]);
   Harness.test "a negation that is not the whole left operand of is needs none" (fun () ->
-      let _, diagnostics =
-        Parse_support.body_of
-          Fixtures.Parser_rules.negation_that_is_not_the_whole_left_operand_of_is
-      in
+      let _, diagnostics = Parse_support.body_of Fixtures.Parser_rules.negations_around_is in
       if Parse_support.codes diagnostics <> [] then
         Harness.fail "got [%s]" (String.concat "; " (Parse_support.codes diagnostics)));
   Harness.test "a ?? b" (fun () ->
@@ -539,7 +533,7 @@ let () =
         ~fixed:"let total = (a + b).unwrap_or(0)");
   Harness.test "a ? after a call is still a try" (fun () ->
       let _, diagnostics =
-        Parse_support.body_of Fixtures.Parser_rules.after_a_call_is_still_a_try
+        Parse_support.body_of Fixtures.Parser_rules.question_marks_after_calls_and_names
       in
       if Parse_support.codes diagnostics <> [] then
         Harness.fail "got [%s]" (String.concat "; " (Parse_support.codes diagnostics)));

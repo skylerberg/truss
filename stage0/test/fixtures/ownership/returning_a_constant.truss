@@ -1,3 +1,0 @@
-fn f() -> List[Int64] {
-  names
-}
