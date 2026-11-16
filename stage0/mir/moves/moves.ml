@@ -1,28 +1,19 @@
-type step = Field of string | Variant of { variant : string; field : string }
-type path = { local : Mir.local; steps : step list }
+type path = { local : Mir.local; projections : Mir.projection list }
 
 let path_of_place (place : Mir.place) =
   match place.root with
   | Constant _ -> None
-  | Local local ->
-      Some
-        {
-          local;
-          steps =
-            List.map
-              (function
-                | Mir.Field field -> Field field
-                | Variant_field { variant; field } -> Variant { variant; field })
-              place.projections;
-        }
+  | Local local -> Some { local; projections = place.projections }
 
-let rec is_prefix prefix steps =
-  match (prefix, steps) with
+let rec is_prefix prefix projections =
+  match (prefix, projections) with
   | [], _ -> true
-  | step :: prefix, other :: steps -> step = other && is_prefix prefix steps
+  | projection :: prefix, other :: projections -> projection = other && is_prefix prefix projections
   | _ :: _, [] -> false
 
-let is_inside ~outer inner = outer.local = inner.local && is_prefix outer.steps inner.steps
+let is_inside ~outer inner =
+  outer.local = inner.local && is_prefix outer.projections inner.projections
+
 let overlaps first second = is_inside ~outer:first second || is_inside ~outer:second first
 
 type use = {
@@ -217,7 +208,7 @@ let may_be_empty analysis state (path : path) =
       overlaps tracked path && state.maybe_empty.(Hashtbl.find analysis.positions tracked))
     (List.sort
        (fun (left : path) (right : path) ->
-         compare (List.length left.steps) (List.length right.steps))
+         compare (List.length left.projections) (List.length right.projections))
        (List.map
           (fun position -> analysis.paths.(position))
           (Option.value (Hashtbl.find_opt analysis.of_local path.local) ~default:[])))
@@ -250,15 +241,15 @@ let inside analysis path =
         analysis.inside.(position)
 
 let children analysis position =
-  let within = List.filter (fun inner -> inner <> position) analysis.inside.(position) in
+  let descendants = List.filter (fun inner -> inner <> position) analysis.inside.(position) in
   List.filter
     (fun inner ->
       not
         (List.exists
            (fun other ->
              other <> inner && is_inside ~outer:analysis.paths.(other) analysis.paths.(inner))
-           within))
-    within
+           descendants))
+    descendants
 
 let rec need_flags analysis state position =
   if state.maybe_holds.(position) then begin
@@ -350,11 +341,11 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.Gra
   let consider (place : Mir.place) =
     match path_of_place place with
     | Some path when tracks path.local ->
-        let rec ancestors steps =
-          add { path with steps };
-          match List.rev steps with [] -> () | _ :: rest -> ancestors (List.rev rest)
+        let rec ancestors projections =
+          add { path with projections };
+          match List.rev projections with [] -> () | _ :: rest -> ancestors (List.rev rest)
         in
-        ancestors path.steps
+        ancestors path.projections
     | _ -> ()
   in
   let consider_local local = consider { root = Local local; projections = [] } in
@@ -499,7 +490,8 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.Gra
           if owns local then
             List.iter
               (fun position ->
-                if analysis.paths.(position).steps = [] then need_flags analysis state position)
+                if analysis.paths.(position).projections = [] then
+                  need_flags analysis state position)
               (affected_local analysis local)
         in
         List.iter
@@ -524,7 +516,7 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.Gra
         | Yield _ ->
             Array.iteri
               (fun position path ->
-                if path.steps = [] && owns path.local then need_flags analysis state position)
+                if path.projections = [] && owns path.local then need_flags analysis state position)
               analysis.paths
         | _ -> ()
       end)

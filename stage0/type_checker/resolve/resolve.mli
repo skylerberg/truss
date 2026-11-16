@@ -40,6 +40,7 @@ type resolved = {
 }
 
 val sections : section list
+val merge : resolved list -> resolved
 
 val whole :
   ?sections:section list ->

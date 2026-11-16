@@ -1094,7 +1094,7 @@ let moves_of_g text =
   let mir = mir_of_g text in
   let body = mir.body in
   let needs_drop (path : Moves.path) =
-    path.steps <> []
+    path.projections <> []
     ||
     match body.locals.(path.local).type_ with
     | Named { path = Path.Top { name = "Int64" | "Bool" | "UInt64"; _ }; _ } -> false
@@ -1147,7 +1147,8 @@ let () =
         moves_of_g (moves_program ^ "fn g() {\n  let kept = text()\n  take(own kept)\n}\n")
       in
       expect_string ~expected:"empty"
-        (show_status (status_where_ended body moves { local = named body "kept"; steps = [] })));
+        (show_status
+           (status_where_ended body moves { local = named body "kept"; projections = [] })));
   test "a value moved out on one path may hold a value where its local ends, under a flag"
     (fun () ->
       let body, moves =
@@ -1155,7 +1156,7 @@ let () =
           (moves_program
          ^ "fn g(moved: Bool) {\n  let kept = text()\n  if moved {\n    take(own kept)\n  }\n}\n")
       in
-      let path : Moves.path = { local = named body "kept"; steps = [] } in
+      let path : Moves.path = { local = named body "kept"; projections = [] } in
       expect_string ~expected:"maybe" (show_status (status_where_ended body moves path));
       if not (List.mem path (Moves.flagged moves)) then fail "the local has no flag");
   test "a record a field of which was moved out still holds its other fields" (fun () ->
@@ -1164,9 +1165,10 @@ let () =
       in
       let both = named body "both" in
       expect_string ~expected:"holds"
-        (show_status (status_where_ended body moves { local = both; steps = [] }));
+        (show_status (status_where_ended body moves { local = both; projections = [] }));
       expect_string ~expected:"empty"
-        (show_status (status_where_ended body moves { local = both; steps = [ Field "first" ] })));
+        (show_status
+           (status_where_ended body moves { local = both; projections = [ Field "first" ] })));
   test "a field given a value again holds one" (fun () ->
       let body, moves =
         moves_of_g
@@ -1175,4 +1177,5 @@ let () =
       in
       expect_string ~expected:"holds"
         (show_status
-           (status_where_ended body moves { local = named body "both"; steps = [ Field "first" ] })))
+           (status_where_ended body moves
+              { local = named body "both"; projections = [ Field "first" ] })))

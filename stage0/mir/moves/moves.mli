@@ -1,5 +1,4 @@
-type step = Field of string | Variant of { variant : string; field : string }
-type path = { local : Mir.local; steps : step list }
+type path = { local : Mir.local; projections : Mir.projection list }
 
 val path_of_place : Mir.place -> path option
 val is_inside : outer:path -> path -> bool
