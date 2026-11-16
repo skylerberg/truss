@@ -1913,6 +1913,11 @@ trait Ordered: Equal {
   parameters, as in `impl Display for List[Element: Display]`.
 - An `impl` lives in the package of the trait, of the implementing type, or
   of the outermost type of one of the trait's arguments.
+- The trait's arguments in an `impl` or a law proof hold no function type
+  and no associated type, such as `Items.Element` or `Self.Output`. An
+  associated type may stand for any type, so an `impl` with one would overlap
+  every other `impl` of the trait for its type. A record that holds a
+  function can be the argument instead of the function's type.
 - An `impl` applies wherever its trait and the types it names are visible.
 - With a trait that takes type parameters, the `impl` is chosen by the types
   of the arguments, inferred first without looking at which `impl`s exist,

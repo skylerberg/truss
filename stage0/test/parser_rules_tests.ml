@@ -113,6 +113,30 @@ let () =
         ~fixed:"impl A for B {}");
   test "an impl's trait arguments declare no generic parameter, as the recursive type check assumes"
     (fun () -> error "impl Selected[Carried: Shown] for Marker {}" ~code:Unexpected_token ~at:":");
+  test "an impl's trait arguments hold no function type, at any depth" (fun () ->
+      error "impl From[fn(Int64) -> Int64] for Handler {}" ~code:Misplaced_function_type ~at:"fn(";
+      error "impl From[List[fn() -> Int64]] for Handler {}" ~code:Misplaced_function_type ~at:"fn(";
+      error "impl From[any Source[Item = fn() -> Int64]] for Handler {}"
+        ~code:Misplaced_function_type ~at:"fn(");
+  test "an impl's trait arguments hold no associated type, so the impl overlaps no other" (fun () ->
+      error "impl Multiply[Dimension.Scalar] for Quantity[Dimension: Measure] {}"
+        ~code:Misplaced_associated_type ~at:"Dimension.Scalar";
+      error "impl Add[Self.Output] for Meters {}" ~code:Misplaced_associated_type ~at:"Self.Output");
+  test "a law's proof holds no trait argument that an impl cannot hold" (fun () ->
+      error "proof From[fn() -> Int64].round_trips for Handler {}" ~code:Misplaced_function_type
+        ~at:"fn(";
+      error "proof Add[Self.Output].associative for Meters {}" ~code:Misplaced_associated_type
+        ~at:"Self.Output");
+  test "an impl's trait arguments may be types, its generic parameters, Self, any, and counts"
+    (fun () ->
+      definition "impl Add[Element] for Vector[Element] {}"
+        "(impl Add[Element] for Vector[Element])";
+      definition "impl From[List[map::Entry[Key, Value]]] for Table[Key, Value] {}"
+        "(impl From[List[map::Entry[Key, Value]]] for Table[Key, Value])";
+      definition "impl Add[Self] for Meters {}" "(impl Add[Self] for Meters)";
+      definition "impl From[any Display] for Report {}" "(impl From[(any Display)] for Report)";
+      definition "impl From[Array[UInt8, 32]] for Digest {}"
+        "(impl From[Array[UInt8, 32]] for Digest)");
   test "a test takes no visibility" (fun () ->
       error "internal test \"a\" {}" ~code:Misplaced_visibility ~at:"internal"
         ~fixed:"test \"a\" {}");
