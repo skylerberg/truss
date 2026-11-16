@@ -215,7 +215,7 @@ let of_path (lookups : lookups) path =
   List.sort_uniq Path.compare
     (List.concat_map (edges lookups ~package:(Path.package path)) (code @ defaults))
 
-let implementations (lookups : lookups) ~visible (path : Path.t) =
+let list_implementations (lookups : lookups) ~viewer (path : Path.t) =
   match path with
   | Method { owner; name; receiver } -> (
       match Interface.Definition.interface lookups.interface owner with
@@ -227,6 +227,6 @@ let implementations (lookups : lookups) ~visible (path : Path.t) =
                   let method_ = Path.Method { owner = impl; name; receiver } in
                   if writes lookups impl method_ then Some method_ else None)
                 (Interface.Impls.impls_of lookups.interface ~trait:owner package))
-            visible
+            (viewer :: Names.list_transitive_dependencies lookups.interface.names viewer)
       | _ -> [])
   | _ -> []

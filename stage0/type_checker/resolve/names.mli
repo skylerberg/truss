@@ -80,6 +80,8 @@ type module_lookup =
   | No_module of string
 
 val used_module : lookups -> from:Path.module_ -> Syntax.path -> Path.module_
+val list_visible_packages : lookups -> Path.package -> Path.package list
+val list_transitive_dependencies : lookups -> Path.package -> Path.package list
 val is_visible_module : lookups -> from:Path.module_ -> Path.module_ -> bool
 
 val lookup_module :

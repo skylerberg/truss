@@ -19,7 +19,7 @@ type t =
   | Call_edges
   | Body_checks
   | Package_checks
-  | Successors
+  | Callees
   | Recursion_groups
   | Proofs
   | Folded_constants
