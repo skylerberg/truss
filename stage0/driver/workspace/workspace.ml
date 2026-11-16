@@ -572,13 +572,16 @@ let refresh worktree =
           true)
 
 let open_worktree root =
-  match Segments.open_ (Filename.concat root database_directory) with
+  let directory = Filename.concat root database_directory in
+  match
+    Segments.open_ directory ~stop_holder:(fun () -> Server.stop_servers ~key:root ~wait:false ())
+  with
   | Error `Open_elsewhere ->
       Error
         (Printf.sprintf
-           "The database in %s is open in another process. Wait for that process, or stop the \
-            background process with `truss stop`."
-           (Filename.concat root database_directory))
+           "The database in %s is open in another process, such as a command run with --no-server. \
+            Wait for that process to end."
+           directory)
   | Ok segments -> (
       let watcher =
         if !is_serving then
@@ -794,8 +797,7 @@ let serve ~key ~handle =
 
 let call = Server.call
 let list_servers = Server.list_servers
-let stop = Server.stop
-let wait_until_ended = Server.wait_until_ended
+let stop_servers () = Server.stop_servers ~wait:true ()
 
 module For_testing = struct
   let load_standard_package_database () = (load_standard_package ()).package_database

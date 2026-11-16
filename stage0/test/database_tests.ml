@@ -237,7 +237,6 @@ let () =
           match
             Workspace.serve ~key ~handle:(fun ~report_progress request ->
                 report_progress "working";
-                if request = "stop" then Workspace.stop ();
                 String.length request)
           with
           | () -> Unix._exit 0
@@ -261,7 +260,7 @@ let () =
                     Harness.fail "%s" message;
                     -1
               in
-              let lengths = List.map measure_served [ "one"; "three"; "stop" ] in
+              let lengths = List.map measure_served [ "one"; "three"; "four" ] in
               if lengths <> [ 3; 5; 4 ] then
                 Harness.fail "answered %s" (String.concat ", " (List.map string_of_int lengths));
               if not !progressed then Harness.fail "sent no progress"))
