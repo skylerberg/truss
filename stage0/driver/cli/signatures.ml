@@ -55,27 +55,22 @@ let cut text spans =
   |> String.concat "\n"
 
 let text (names : Resolve.Names.lookups) ~body ~opaque (key : Resolve.Names.key) =
-  match (names.text key, names.definition key, names.spans key) with
-  | Some text, Some definition, Some spans ->
-      let contained =
-        match names.place key with
-        | Some { base; _ } ->
-            List.concat_map
-              (fun member ->
-                match (names.place member, names.definition member, names.spans member) with
-                | Some { base = member_base; _ }, Some written, Some member_spans ->
-                    List.map
-                      (fun (span : Source.Definition_span.t) ->
-                        Source.Definition_span.of_file ~base
-                          (Source.Definition_span.to_file ~base:member_base span))
-                      (bodies ~opaque:false member_spans written)
-                | _ -> [])
-              (names.contained key)
-        | None -> []
-      in
-      Some
-        (if body then String.trim text else cut text (bodies ~opaque spans definition @ contained))
-  | _ -> None
+  let text = names.text key in
+  if body then String.trim text
+  else
+    let base = (names.place key).base in
+    let contained =
+      List.concat_map
+        (fun member ->
+          let member_base = (names.place member).base in
+          List.map
+            (fun (span : Source.Definition_span.t) ->
+              Source.Definition_span.of_file ~base
+                (Source.Definition_span.to_file ~base:member_base span))
+            (bodies ~opaque:false (names.spans member) (names.definition member)))
+        (names.contained key)
+    in
+    cut text (bodies ~opaque (names.spans key) (names.definition key) @ contained)
 
 let kind_word : Resolve.Names.kind -> string = function
   | Function -> "function"
@@ -91,7 +86,7 @@ let kind_word : Resolve.Names.kind -> string = function
   | Law_proof -> "law proof"
 
 let of_path (names : Resolve.Names.lookups) path =
-  match names.key path with Some key -> text names ~body:false ~opaque:false key | None -> None
+  Option.map (text names ~body:false ~opaque:false) (names.key path)
 
 let labeled label signature =
   let indent = String.make (String.length label) ' ' in

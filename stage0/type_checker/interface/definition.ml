@@ -216,12 +216,14 @@ let lower_container (context : Lower.context) (path : Path.t) (definition : defi
   | _ -> (Capability_parts, context)
 
 let header (lookups : Lookups.t) (key : Names.key) =
-  match (lookups.names.definition key, lookups.names.spans key, lookups.resolved Interface key) with
-  | Some definition, Some spans, Some resolved -> (
+  match lookups.resolved Interface key with
+  | Some resolved -> (
       if Names.is_broken lookups.names key Header then Some (Error [])
       else
         match
-          lower_container (Lower.create lookups resolved ~spans empty_scope) key.path definition
+          lower_container
+            (Lower.create lookups resolved ~spans:(lookups.names.spans key) empty_scope)
+            key.path (lookups.names.definition key)
         with
         | _, context when !(context.diagnostics) <> [] ->
             Some (Error (List.rev !(context.diagnostics)))
@@ -233,7 +235,7 @@ let header (lookups : Lookups.t) (key : Names.key) =
               | _ -> ([], Types.no_capabilities)
             in
             Some (Ok { container_scope = Lower.scope context; header_generics; header_uses }))
-  | _ -> None
+  | None -> None
 
 let lower_definition (lookups : Lookups.t) (key : Names.key) (definition : definition) ~spans
     (resolved : Resolve.resolved) =
@@ -243,9 +245,9 @@ let lower_definition (lookups : Lookups.t) (key : Names.key) (definition : defin
     List.filter_map
       (fun (member : Names.key) ->
         match (member.path, lookups.names.definition member) with
-        | Method { name; receiver; _ }, Some { kind = Function _; _ } ->
+        | Method { name; receiver; _ }, { kind = Function _; _ } ->
             Some { Types.method_name = name; method_receiver = receiver; provided = true }
-        | Method { name; receiver; _ }, Some { kind = Method_declaration _; _ } ->
+        | Method { name; receiver; _ }, { kind = Method_declaration _; _ } ->
             Some { Types.method_name = name; method_receiver = receiver; provided = false }
         | _ -> None)
       (lookups.names.contained key)
@@ -274,9 +276,8 @@ let lower_definition (lookups : Lookups.t) (key : Names.key) (definition : defin
               match (path, container.container_scope.self_trait) with
               | Method { name; receiver; _ }, Some (implements : Types.trait_reference) -> (
                   match
-                    Option.bind
+                    Option.map lookups.names.definition
                       (lookups.names.key (Method { owner = implements.trait; name; receiver }))
-                      lookups.names.definition
                   with
                   | Some { kind = Function { signature; _ } | Method_declaration signature; _ } ->
                       Lower.terminates signature.clauses
@@ -424,11 +425,13 @@ let lower_definition (lookups : Lookups.t) (key : Names.key) (definition : defin
   }
 
 let lower (lookups : Lookups.t) key =
-  match (lookups.names.definition key, lookups.names.spans key, lookups.resolved Interface key) with
-  | Some definition, Some spans, Some resolved ->
+  match lookups.resolved Interface key with
+  | Some resolved ->
       Compiler_bug.while_doing ~stage:"Interface" (Names.show_key key) (fun () ->
-          Some (lower_definition lookups key definition ~spans resolved))
-  | _ -> None
+          Some
+            (lower_definition lookups key (lookups.names.definition key)
+               ~spans:(lookups.names.spans key) resolved))
+  | None -> None
 
 let interface (lookups : Lookups.t) path =
   Option.bind (lookups.names.key path) (fun key ->
@@ -445,7 +448,7 @@ let declared_fields (lookups : Lookups.t) path =
         | Field_error -> None)
       written
   in
-  match Option.bind (lookups.names.key path) lookups.names.definition with
+  match Option.map lookups.names.definition (lookups.names.key path) with
   | Some { kind = Type_definition { body = Fields written; _ }; _ } -> [ (None, names written) ]
   | Some { kind = Type_definition { body = Variants variants; _ }; _ } ->
       List.map

@@ -565,7 +565,12 @@ let check_definition context (definition : Core.definition) =
 
 let check (lookups : Lookups.t) key =
   let context =
-    { lookups; spans = lazy (lookups.spans key); text = lazy (lookups.text key); diagnostics = [] }
+    {
+      lookups;
+      spans = lazy (lookups.interface.names.spans key);
+      text = lazy (lookups.interface.names.text key);
+      diagnostics = [];
+    }
   in
   check_definition context (lookups.core key).definition;
   List.sort

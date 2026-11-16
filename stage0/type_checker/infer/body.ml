@@ -663,17 +663,17 @@ let integer_literal_range (bounds : Types.trait_reference list) =
 
 let check (lookups : Lookups.t) (key : Names.key) ~checks_body =
   match
-    ( lookups.interface.names.definition key,
-      lookups.interface.names.spans key,
-      Resolve.whole
+    ( Resolve.whole
         ~sections:(if checks_body then Resolve.sections else [ Interface; Contract ])
         lookups.interface.resolved key,
       lookups.interface.lowered_interface key )
   with
-  | Some definition, Some spans, Some resolved, Some lowered ->
+  | Some resolved, Some lowered ->
       let module_ = key.module_ in
+      let definition = lookups.interface.names.definition key in
+      let spans = lookups.interface.names.spans key in
       let context = Interface.Lower.create lookups.interface resolved ~spans lowered.scope in
-      let text = lazy (Option.value ~default:"" (lookups.interface.names.text key)) in
+      let text = lazy (lookups.interface.names.text key) in
       let state : state =
         {
           lookups;

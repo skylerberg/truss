@@ -178,13 +178,13 @@ let check_unreachable context (definition : definition) =
   Syntax_walk.definition ~statement expression definition
 
 let check (lookups : Lookups.t) key =
-  let definition = lookups.definition key in
+  let definition = lookups.names.definition key in
   let context =
     {
       resolved = lookups.resolved key;
       tables = lookups.tables key;
-      spans = lookups.spans key;
-      text = lazy (lookups.text key);
+      spans = lookups.names.spans key;
+      text = lazy (lookups.names.text key);
       diagnostics = [];
     }
   in

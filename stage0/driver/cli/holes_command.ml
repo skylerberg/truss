@@ -13,10 +13,9 @@ type hole = {
 let of_declaration snapshot packages database (names : Names.lookups)
     (declaration : Names.declaration) =
   let key = Names.key_of declaration in
-  match
-    (names.definition key, names.spans key, names.place key, Database.read_resolved database key)
-  with
-  | Some definition, Some spans, Some { file; base }, Some resolved ->
+  match Database.read_resolved database key with
+  | Some resolved ->
+      let ({ file; base } : Names.place) = names.place key in
       let source = Command_packages.source snapshot packages file in
       List.map
         (fun (hole : Inspect.hole) ->
@@ -30,11 +29,11 @@ let of_declaration snapshot packages database (names : Names.lookups)
             in_scope = hole.scope;
             blocks = [];
           })
-        (Inspect.holes spans definition resolved
+        (Inspect.holes (names.spans key) (names.definition key) resolved
            (Option.map
               (fun (checked : Infer.checked) -> checked.tables)
               (Database.read_checked_body database key)))
-  | _ -> []
+  | None -> []
 
 let gather snapshot packages database paths =
   let names = Database.make_name_lookups database packages in

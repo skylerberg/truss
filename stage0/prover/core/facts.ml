@@ -145,7 +145,7 @@ let span_of (source : source) origin =
 let add_requires context frame required =
   let text = Lazy.force frame.source.text in
   let brace =
-    match Option.bind frame.source.key context.lookups.interface.names.definition with
+    match Option.map context.lookups.interface.names.definition frame.source.key with
     | Some { kind = Function { body; _ }; _ } ->
         let start = (span_of frame.source body.id).start in
         if start < String.length text then Some start else None

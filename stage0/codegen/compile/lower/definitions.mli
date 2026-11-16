@@ -39,7 +39,6 @@ val unwritten :
   definition_key:Names.key -> substitution:Types.substitution -> result:Types.result -> code
 
 val key_of : context -> Path.t -> Resolve.Names.key
-val text_of : context -> Names.key -> string
 val bind : Types.generic list -> Ground.argument list -> Types.substitution
 val impl_interface : context -> Path.t -> Types.impl_interface
 val signature_of : context -> Path.t -> Types.signature

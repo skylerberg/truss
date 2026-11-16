@@ -139,7 +139,7 @@ let derived_default (lookups : Lookups.t) (key : Names.key) (source : State.sour
 let proof (lookups : Lookups.t) (key : Names.key) =
   match (lookups.interface.names.declaration key, Contracts.home_source lookups key) with
   | _ when is_specification_module key -> Not_proven_here
-  | Some declaration, source -> (
+  | declaration, source -> (
       lookups.patterns key;
       try
         match declaration.kind with
@@ -210,7 +210,6 @@ let proof (lookups : Lookups.t) (key : Names.key) =
       with
       | Facts.Unsupported (span, message) -> Unsupported (span, message)
       | Facts.Foreign_unsupported message -> Unsupported (Source.Definition_span.make 0 0, message))
-  | None, _ -> Not_proven_here
 
 let float_text bits =
   let shortest ~most ~same value =
@@ -361,14 +360,13 @@ let counterexample members (obligation : State.obligation) answer_values =
 let diagnostic code span message = Diagnostic.make ~code:(Diagnostic.Code.Prover code) span message
 
 let clamp_to_definition (lookups : Lookups.t) (key : Names.key) (span : Source.Definition_span.t) =
-  match lookups.interface.names.text key with
-  | Some text when span.stop <= String.length text -> span
-  | _ -> Source.Definition_span.make 0 0
+  if span.stop <= String.length (lookups.interface.names.text key) then span
+  else Source.Definition_span.make 0 0
 
 let node_span (lookups : Lookups.t) (key : Names.key) origin =
-  match (lookups.interface.names.text key, lookups.interface.names.spans key) with
-  | Some text, Some spans when origin >= 0 && origin < Array.length spans -> Some (text, spans)
-  | _ -> None
+  let spans = lookups.interface.names.spans key in
+  if origin >= 0 && origin < Array.length spans then Some (lookups.interface.names.text key, spans)
+  else None
 
 let substituted text spans clause replacements =
   let clause_span = spans.(clause) in
@@ -418,13 +416,14 @@ let rendered_fix lookups ({ title; edits } : State.fix) =
        edits)
 
 let cited_place (lookups : Lookups.t) ((key : Names.key), origin) =
-  match (lookups.interface.names.place key, lookups.interface.names.spans key) with
-  | Some place, Some spans when origin >= 0 && origin < Array.length spans ->
-      Some
-        ( place,
-          Source.Definition_span.to_file ~base:place.base
-            (clamp_to_definition lookups key spans.(origin)) )
-  | _ -> None
+  let spans = lookups.interface.names.spans key in
+  if origin >= 0 && origin < Array.length spans then
+    let place = lookups.interface.names.place key in
+    Some
+      ( place,
+        Source.Definition_span.to_file ~base:place.base
+          (clamp_to_definition lookups key spans.(origin)) )
+  else None
 
 type answer = Solved of Solver.answer | Ran of bool | Run_failed of string
 
@@ -621,49 +620,46 @@ let decide ~runs lookups solver proofs =
 
 let file_states { lookups; verdicts } file =
   let verdict key = Option.value (Hashtbl.find_opt verdicts key) ~default:[] in
-  List.filter_map
+  List.map
     (fun declaration ->
       let key = Names.key_of declaration in
-      match lookups.interface.names.place key with
-      | Some { base; _ } ->
-          Some
-            (List.map
-               (fun (state, cited) ->
-                 let cited = Option.bind cited (cited_place lookups) in
-                 let note =
-                   match cited with
-                   | Some ((place : Names.place), span) when place.file = file ->
-                       Some (span, "This is the clause that must hold.")
-                   | _ -> None
-                 in
-                 let elsewhere =
-                   match cited with
-                   | Some ((place : Names.place), span) when place.file <> file -> (
-                       match lookups.source place.file with
-                       | source ->
-                           let line, _ = Source.position source span.start in
-                           Printf.sprintf " The clause that must hold is at `%s:%d`."
-                             (Source.path source) line
-                       | exception Not_found -> "")
-                   | _ -> ""
-                 in
-                 {
-                   state with
-                   span = Source.Definition_span.to_file ~base state.span;
-                   failure =
-                     Option.map
-                       (fun failure ->
-                         let failure =
-                           Diagnostic.map_spans (Source.Definition_span.to_file ~base) failure
-                         in
-                         let failure = { failure with message = failure.message ^ elsewhere } in
-                         match note with
-                         | Some note -> { failure with notes = failure.notes @ [ note ] }
-                         | None -> failure)
-                       state.failure;
-                 })
-               (verdict key))
-      | None -> None)
+      let ({ base; _ } : Names.place) = lookups.interface.names.place key in
+      List.map
+        (fun (state, cited) ->
+          let cited = Option.bind cited (cited_place lookups) in
+          let note =
+            match cited with
+            | Some ((place : Names.place), span) when place.file = file ->
+                Some (span, "This is the clause that must hold.")
+            | _ -> None
+          in
+          let elsewhere =
+            match cited with
+            | Some ((place : Names.place), span) when place.file <> file -> (
+                match lookups.source place.file with
+                | source ->
+                    let line, _ = Source.position source span.start in
+                    Printf.sprintf " The clause that must hold is at `%s:%d`." (Source.path source)
+                      line
+                | exception Not_found -> "")
+            | _ -> ""
+          in
+          {
+            state with
+            span = Source.Definition_span.to_file ~base state.span;
+            failure =
+              Option.map
+                (fun failure ->
+                  let failure =
+                    Diagnostic.map_spans (Source.Definition_span.to_file ~base) failure
+                  in
+                  let failure = { failure with message = failure.message ^ elsewhere } in
+                  match note with
+                  | Some note -> { failure with notes = failure.notes @ [ note ] }
+                  | None -> failure)
+                state.failure;
+          })
+        (verdict key))
     (lookups.interface.names.declarations_in file)
 
 let sorted_diagnostics list =

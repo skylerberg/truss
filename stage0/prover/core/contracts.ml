@@ -11,8 +11,8 @@ let source_at_key (lookups : Lookups.t) key =
 let home_source (lookups : Lookups.t) key =
   {
     (source_at_key lookups key) with
-    spans = lazy (Option.value (lookups.interface.names.spans key) ~default:[||]);
-    text = lazy (Option.value (lookups.interface.names.text key) ~default:"");
+    spans = lazy (lookups.interface.names.spans key);
+    text = lazy (lookups.interface.names.text key);
   }
 
 let source_at (lookups : Lookups.t) (path : Path.t) =
@@ -196,7 +196,7 @@ let resource_of (cost : Mir.cost) ~locals : Costs.resource option =
 let is_updating_helper (lookups : Lookups.t) (path : Path.t) =
   match path with
   | Method { receiver = Mut; _ } -> (
-      match Option.bind (lookups.interface.names.key path) lookups.interface.names.definition with
+      match Option.map lookups.interface.names.definition (lookups.interface.names.key path) with
       | Some
           {
             visibility = Private;
