@@ -2,6 +2,7 @@ type input =
   | Source of Path.file
   | Packages
   | Modules of Path.package
+  | Files of Path.package
   | Dependencies of Path.package
 
 type name =
@@ -24,38 +25,71 @@ type name =
   | Impls_of_trait of Path.package * Path.t
   | Law_proofs of Path.package * Resolve.Names.law_proof_name
 
-type lowering = Lowered of Instance.key | Test_key of Instance.key
+type parsed = { tree : Syntax.file; diagnostics : Diagnostic.t list; text : string }
 
-type computed =
-  | Parsed of Path.file
-  | Namespace of Path.package
-  | Resolved of Resolve.Names.key * Resolve.section
-  | Trait_header of Resolve.Names.key
-  | Constant_value of Path.t
-  | Header of Resolve.Names.key
-  | Interface of Resolve.Names.key
-  | Derived_interface of { type_ : Path.t; trait : Path.t }
-  | Type_facts of Path.t
-  | Grant of Path.package * Path.package
-  | Signature_check of Resolve.Names.key
-  | Contract of Resolve.Names.key
-  | Checked_body of Resolve.Names.key
-  | Derived_form of Path.t
-  | Body_mir of Resolve.Names.key
-  | Contract_mir of Resolve.Names.key
-  | Generated_mir of Path.t
-  | Mir_call_edges of Path.t
-  | Patterns of Resolve.Names.key
-  | Usage of Resolve.Names.key
-  | Ownership of Resolve.Names.key
-  | Import_check of Path.file
-  | Package_check of Path.package * Package_checks.check
-  | Call_edges of Path.t * Path.package
-  | Proof of Resolve.Names.key
-  | Lowering of lowering
+type _ stored =
+  | Parsed : Path.file -> parsed stored
+  | Namespace : Path.package -> Resolve.Names.namespace stored
+  | Resolved : Resolve.Names.key * Resolve.section -> Resolve.resolved stored
+  | Trait_header : Resolve.Names.key -> Resolve.trait_header stored
+  | Constant_value : Path.t -> Z.t option stored
+  | Header : Resolve.Names.key -> Interface.Environment.header stored
+  | Interface : Resolve.Names.key -> Interface.Environment.elaborated_interface stored
+  | Derived_interface : { type_ : Path.t; trait : Path.t } -> Types.impl_interface stored
+  | Type_facts : Path.t -> Interface.Environment.type_facts stored
+  | Grant : Path.package * Path.package -> Interface.Environment.grant stored
+  | Signature_check : Resolve.Names.key -> unit stored
+  | Contract : Resolve.Names.key -> Core.t stored
+  | Checked_body : Resolve.Names.key -> Infer.checked stored
+  | Body_mir : Resolve.Names.key -> Mir.body_part stored
+  | Contract_mir : Resolve.Names.key -> Mir.contract_part stored
+  | Generated_mir : Path.t -> (Mir.body_part * Mir.contract_part) stored
+  | Mir_call_edges : Path.t -> Path.t list stored
+  | Patterns : Resolve.Names.key -> unit stored
+  | Usage : Resolve.Names.key -> unit stored
+  | Ownership : Resolve.Names.key -> (Core.origin * Core.origin) list stored
+  | Import_check : Path.file -> Diagnostic.t list stored
+  | Package_check : Path.package * Package_checks.check -> Package_checks.outcome stored
+  | Call_edges : Path.t * Path.package -> Path.t list stored
+  | Recursion_group : Path.t -> Path.t list stored
+  | Proof : Resolve.Names.key -> Prover.proof stored
+  | Lowered : Instance.key -> (Compile.lowered, Compile.unsupported) result stored
+  | Test_key : Instance.key -> (string, Compile.unsupported) result stored
 
-type stored = Computed of computed | Recursion_group of Path.t
-type t = Input of input | Name of name | Stored of stored
+type any = Any : 'a stored -> any [@@unboxed]
+type t = Input of input | Name of name | Stored of any
+
+let find_type_equality : type a b. a stored -> b stored -> (a, b) Type.eq option =
+ fun left right ->
+  match (left, right) with
+  | Parsed _, Parsed _ -> Some Equal
+  | Namespace _, Namespace _ -> Some Equal
+  | Resolved _, Resolved _ -> Some Equal
+  | Trait_header _, Trait_header _ -> Some Equal
+  | Constant_value _, Constant_value _ -> Some Equal
+  | Header _, Header _ -> Some Equal
+  | Interface _, Interface _ -> Some Equal
+  | Derived_interface _, Derived_interface _ -> Some Equal
+  | Type_facts _, Type_facts _ -> Some Equal
+  | Grant _, Grant _ -> Some Equal
+  | Signature_check _, Signature_check _ -> Some Equal
+  | Contract _, Contract _ -> Some Equal
+  | Checked_body _, Checked_body _ -> Some Equal
+  | Body_mir _, Body_mir _ -> Some Equal
+  | Contract_mir _, Contract_mir _ -> Some Equal
+  | Generated_mir _, Generated_mir _ -> Some Equal
+  | Mir_call_edges _, Mir_call_edges _ -> Some Equal
+  | Patterns _, Patterns _ -> Some Equal
+  | Usage _, Usage _ -> Some Equal
+  | Ownership _, Ownership _ -> Some Equal
+  | Import_check _, Import_check _ -> Some Equal
+  | Package_check _, Package_check _ -> Some Equal
+  | Call_edges _, Call_edges _ -> Some Equal
+  | Recursion_group _, Recursion_group _ -> Some Equal
+  | Proof _, Proof _ -> Some Equal
+  | Lowered _, Lowered _ -> Some Equal
+  | Test_key _, Test_key _ -> Some Equal
+  | _ -> None
 
 let locate_type_package : Ground.ty -> Path.package = function
   | Named { path; _ } -> Path.locate_package path
@@ -76,7 +110,7 @@ let locate_instance_package : Instance.key -> Path.package = function
   | Generated (Entry impl_method | Any_entry impl_method) ->
       Path.locate_package (Instance.make_method_path impl_method)
 
-let locate_package : computed -> Path.package = function
+let locate_stored_package : type a. a stored -> Path.package = function
   | Parsed file | Import_check file -> file.module_.package
   | Namespace package | Grant (package, _) | Package_check (package, _) | Call_edges (_, package) ->
       package
@@ -96,12 +130,14 @@ let locate_package : computed -> Path.package = function
       key.module_.package
   | Constant_value path
   | Type_facts path
-  | Derived_form path
   | Generated_mir path
   | Mir_call_edges path
+  | Recursion_group path
   | Derived_interface { type_ = path; _ } ->
       Path.locate_package path
-  | Lowering (Lowered key | Test_key key) -> locate_instance_package key
+  | Lowered key | Test_key key -> locate_instance_package key
+
+let locate_package (Any part) = locate_stored_package part
 
 let locate_name_package : name -> Path.package = function
   | File_declarations file -> file.module_.package
@@ -124,6 +160,7 @@ let show_input = function
   | Source file -> "source " ^ Path.show_file file
   | Packages -> "packages"
   | Modules package -> "modules " ^ Path.show_package package
+  | Files package -> "files " ^ Path.show_package package
   | Dependencies package -> "dependencies " ^ Path.show_package package
 
 let show_name = function
@@ -151,7 +188,8 @@ let show_name = function
       Printf.sprintf "law proofs %s %s.%s for %s" (Path.show_package package) (Path.show trait) law
         (Path.show type_head)
 
-let show_computed part =
+let show_stored : type a. a stored -> string =
+ fun part ->
   let show_section : Resolve.section -> string = function
     | Interface -> "interface"
     | Contract -> "contract"
@@ -174,7 +212,6 @@ let show_computed part =
   | Signature_check declared -> "signature check " ^ show_key declared
   | Contract declared -> "contract " ^ show_key declared
   | Checked_body declared -> "checked body " ^ show_key declared
-  | Derived_form path -> "derived form " ^ Path.show path
   | Body_mir declared -> "body mir " ^ show_key declared
   | Contract_mir declared -> "contract mir " ^ show_key declared
   | Generated_mir path -> "generated mir " ^ Path.show path
@@ -195,15 +232,15 @@ let show_computed part =
         | Dependencies -> "dependencies")
   | Call_edges (path, package) ->
       Printf.sprintf "call edges %s %s" (Path.show_package package) (Path.show path)
+  | Recursion_group path -> "recursion group " ^ Path.show path
   | Proof declared -> "proof " ^ show_key declared
-  | Lowering (Lowered instance) -> "lowered " ^ Instance.to_string instance
-  | Lowering (Test_key instance) -> "test key " ^ Instance.to_string instance
+  | Lowered instance -> "lowered " ^ Instance.to_string instance
+  | Test_key instance -> "test key " ^ Instance.to_string instance
 
 let show = function
   | Input part -> show_input part
   | Name part -> show_name part
-  | Stored (Computed part) -> show_computed part
-  | Stored (Recursion_group path) -> "recursion group " ^ Path.show path
+  | Stored (Any part) -> show_stored part
 
 let find_type_definition : Ground.ty -> Path.t option = function
   | Named { path; _ } -> Some path
@@ -238,7 +275,7 @@ let find_name_definition = function
   | Law_proofs (_, { trait = path; _ }) ->
       Some path
 
-let find_computed_definition = function
+let find_stored_definition : type a. a stored -> Path.t option = function
   | Parsed _ | Namespace _ | Grant _ | Import_check _
   | Package_check (_, (Instantiations | Tests | Dependencies)) ->
       None
@@ -259,19 +296,18 @@ let find_computed_definition = function
       Some key.path
   | Constant_value path
   | Type_facts path
-  | Derived_form path
   | Generated_mir path
   | Mir_call_edges path
-  | Call_edges (path, _) ->
+  | Call_edges (path, _)
+  | Recursion_group path ->
       Some path
   | Derived_interface { type_; trait } -> Some (Derived { type_; trait })
-  | Lowering (Lowered key | Test_key key) -> find_instance_definition key
+  | Lowered key | Test_key key -> find_instance_definition key
 
 let find_definition = function
   | Input _ -> None
   | Name part -> find_name_definition part
-  | Stored (Computed part) -> find_computed_definition part
-  | Stored (Recursion_group path) -> Some path
+  | Stored (Any part) -> find_stored_definition part
 
 let show_name_kind = function
   | Entry _ -> "namespace entry"
@@ -294,7 +330,7 @@ let show_name_kind = function
   | Law_proofs (_, { law; type_head; _ }) ->
       Printf.sprintf "proofs of the law %s for %s" law (Path.show type_head)
 
-let show_computed_kind = function
+let show_stored_kind : type a. a stored -> string = function
   | Parsed _ -> "parsed file"
   | Namespace _ -> "namespace"
   | Resolved (_, Interface) -> "resolved names of the interface"
@@ -303,13 +339,15 @@ let show_computed_kind = function
   | Trait_header _ -> "trait header"
   | Constant_value _ -> "value"
   | Header _ -> "header"
-  | Interface _ | Derived_interface _ -> "interface"
+  | Interface _ -> "interface"
+  | Derived_interface _ -> "derived interface"
   | Type_facts _ -> "type facts"
   | Grant _ -> "grant"
   | Signature_check _ -> "signature check"
   | Contract _ -> "contract"
-  | Checked_body _ | Derived_form _ -> "checked body"
-  | Body_mir _ | Generated_mir _ -> "MIR of the body"
+  | Checked_body _ -> "checked body"
+  | Body_mir _ -> "MIR of the body"
+  | Generated_mir _ -> "generated MIR"
   | Contract_mir _ -> "MIR of the contract"
   | Mir_call_edges _ -> "MIR call edges"
   | Patterns _ -> "pattern check"
@@ -318,15 +356,16 @@ let show_computed_kind = function
   | Import_check _ -> "import check"
   | Package_check _ -> "package check"
   | Call_edges _ -> "call edges"
+  | Recursion_group _ -> "recursion group"
   | Proof _ -> "proof"
-  | Lowering (Lowered _) -> "lowered code"
-  | Lowering (Test_key _) -> "test key"
+  | Lowered _ -> "lowered code"
+  | Test_key _ -> "test key"
 
 let show_kind = function
   | Input (Source _) -> "source"
   | Input Packages -> "packages"
   | Input (Modules _) -> "modules"
+  | Input (Files _) -> "files"
   | Input (Dependencies _) -> "dependencies"
   | Name part -> show_name_kind part
-  | Stored (Computed part) -> show_computed_kind part
-  | Stored (Recursion_group _) -> "recursion group"
+  | Stored (Any part) -> show_stored_kind part

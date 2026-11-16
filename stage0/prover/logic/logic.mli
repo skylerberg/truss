@@ -32,12 +32,12 @@ module Symbol : sig
         self_type : Types.ty;
       }
     | Opaque_operation of {
-        operation : Intrinsic.operation;
+        operation : Intrinsic.scalar;
         type_ : Types.ty;
         integer : (int * bool) option;
       }
-    | Bit_count of { count : Intrinsic.operation; width : int }
-    | System of Intrinsic.operation
+    | Bit_count of { count : Intrinsic.scalar; width : int }
+    | System of Intrinsic.runtime
     | Libc_number of Libc.number
     | Handle_descriptor
     | Compare_bytes_order

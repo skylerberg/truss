@@ -1,9 +1,15 @@
 val make_variable : ?numbers:int list -> string -> 'a Logic.Symbol.t
 
-exception Unsupported of State.location * string
-exception Foreign_unsupported of string
+type unsupported = {
+  location : State.location;
+  construct : string;
+  foreign_definition : string option;
+}
+
+exception Unsupported of unsupported
 
 val raise_unsupported : State.location -> ('a, unit, string, 'b) format4 -> 'a
+val run_in_source : State.context -> State.source -> (unit -> 'a) -> 'a
 val raise_bug : ('a, unit, string, 'b) format4 -> 'a
 val is_in_recursion_group : State.context -> Path.t -> bool
 val has_method_in_recursion_group : State.context -> Path.t -> bool
@@ -85,6 +91,10 @@ val is_structural : State.context -> ?seen:Types.ty list -> Types.ty -> bool
 val make_in_range : Types.ty -> Logic.term -> Logic.term
 val run_once : State.context -> State.stated -> (unit -> unit) -> unit
 val arrive : State.context -> State.frame -> string -> Types.ty -> Logic.term
+
+val read_or_arrive :
+  State.context -> State.frame -> string -> Types.ty -> (State.frame -> Logic.term) -> Logic.term
+
 val bind : State.frame -> Locals.key -> Types.ty -> Logic.term -> State.frame
 val substitute_type : State.context -> State.frame -> Types.ty -> Types.ty
 val find_local_type : State.context -> State.frame -> Locals.key -> Types.ty option

@@ -26,7 +26,7 @@ type action =
   | Store of { place : Place.t; views : view list; replaces_root : bool }
   | Return_view of view list
   | Drop of dropped_owner list
-  | Bind_lent_part of { lent_part : Core.origin; type_ : Types.ty }
+  | Bind_lent_part of { scrutinee : Core.origin; lent_part_type : Types.ty }
   | Pass_owned_function of view list
   | Start_loan of { loan : int; loans : loan list }
   | End_loans of int list
@@ -78,7 +78,12 @@ let nothing =
     is_loop_part = false;
   }
 
-type lent_part_binding = { binding : Mir.local; part : Mir.local; origin : Core.origin }
+type lent_part_binding = {
+  binding : Mir.local;
+  part : Mir.local;
+  origin : Core.origin;
+  scrutinee : Core.origin;
+}
 
 type builder = {
   context : Context.context;
@@ -452,14 +457,15 @@ let emit_bound_value builder (local : Mir.local) (core : Core.local) (value : Mi
   in
   (match value with
   | Operand
-      (Borrow { place = { root = Local part; _ } as place; type_ = part_type; origin = at; _ })
+      (Borrow
+         { place = { root = Local part; _ } as place; type_ = part_type; origin = scrutinee; _ })
     when (not is_var)
          && is_untracked_lent_part builder place
          && (not (is_loop_part place))
          && ((not (Context.is_plain builder.context part_type))
             || Context.is_view builder.context part_type) ->
       builder.lent_part_bindings <-
-        { binding = local; part; origin = at } :: builder.lent_part_bindings
+        { binding = local; part; origin; scrutinee } :: builder.lent_part_bindings
   | _ -> ());
   let views =
     match value with
@@ -546,9 +552,12 @@ let emit_statement builder (statement : Mir.Graph.statement) =
       List.iter
         (fun (bound : lent_part_binding) ->
           if List.mem bound.part locals && not (List.mem bound.binding locals) then
-            let lent = lookup_local_info builder bound.part in
             emit builder
-              (Bind_lent_part { lent_part = lent.origin; type_ = lent.type_ })
+              (Bind_lent_part
+                 {
+                   scrutinee = bound.scrutinee;
+                   lent_part_type = (lookup_local_info builder bound.part).type_;
+                 })
               bound.origin)
         builder.lent_part_bindings;
       let dropped =

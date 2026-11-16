@@ -101,10 +101,10 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
               Identical (first, State.build_expression state second.value));
           Types.bool
       | _ ->
-          State.report state
-            (if List.length arguments < 2 then Missing_argument else Too_many_arguments)
-            (State.read_span state value.id) "`identical` takes two values of one type.";
-          Calls.check_arguments_alone state env arguments Types.bool)
+          Calls.check_arguments_alone state env arguments
+            (State.make_error_type state
+               (if List.length arguments < 2 then Missing_argument else Too_many_arguments)
+               (State.read_span state value.id) "`identical` takes two values of one type."))
   | Specification_function function_ -> (
       let bound_method =
         match (function_, arguments) with
@@ -132,7 +132,11 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
                         State.build_expression state argument.value)
                       arguments;
                 });
-          Calls.check_arguments_alone state env arguments Types.Integer)
+          List.iter
+            (fun (argument : Syntax.argument) ->
+              ignore (Hooks.check_expression state env argument.value))
+            arguments;
+          Types.Integer)
   | Definition (Type, path) -> (
       match Instantiation.check_named_type state callee path type_arguments with
       | Types.Named { arguments = type_arguments; _ } ->
@@ -249,7 +253,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
       with
       | Some method_path -> (
           match Instantiation.find_function_signature state method_path with
-          | Some signature ->
+          | Some signature -> (
               let instance =
                 Instantiation.instantiate state (State.read_span state value.id) signature
               in
@@ -265,16 +269,16 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
               (match (expected, instance.signature.output) with
               | Some expected, Returns output -> State.unify_as_hint state output expected
               | _ -> ());
-              let matched, left_out =
-                Calls.match_arguments state value instance.signature.parameters arguments
-                  ~record:false
-              in
-              let checked =
-                Calls.check_arguments state env instance.signature.parameters matched ~offset:0
-              in
-              Name_lookup.finish_call state env value method_path
-                (Tables.Function { path = method_path; type_arguments = instance.type_arguments })
-                instance checked left_out
+              match
+                Calls.check_arguments state env value instance.signature.parameters arguments
+                  ~has_receiver:false
+              with
+              | Error error -> error
+              | Ok (checked, left_out) ->
+                  Name_lookup.finish_call state env value method_path
+                    (Tables.Function
+                       { path = method_path; type_arguments = instance.type_arguments })
+                    instance checked left_out)
           | None -> State.raise_bug "the method `%s` has no signature" (Path.show method_path))
       | None -> (
           match Name_lookup.list_trait_static_methods state path member.text Static with
@@ -290,7 +294,9 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                   | receiver :: rest, Some (Type_overload method_path) ->
                       let inner =
                         match receiver.value.kind with
-                        | Mode (_, inner) -> inner
+                        | Mode (mode, inner) ->
+                            State.note_mode_keyword state receiver.value mode inner;
+                            inner
                         | _ -> receiver.value
                       in
                       let receiver_type = Hooks.check_expression state env inner in
@@ -364,7 +370,7 @@ and check_trait_method_through_type state env ?expected:_ ?trait_arguments
     (value : Syntax.expression) self_type (trait : Types.trait_reference)
     (method_ : Types.trait_method) arguments =
   let trait_generics =
-    match Interface.Definition.read_trait_interface state.lookups.interface trait.trait with
+    match Interface.Definition.find_trait_interface state.lookups.interface trait.trait with
     | Some interface -> interface.trait_generics
     | None -> []
   in
@@ -372,11 +378,9 @@ and check_trait_method_through_type state env ?expected:_ ?trait_arguments
   | Some written when List.length written <> List.length trait_generics ->
       Calls.check_arguments_alone state env arguments
         (State.make_error_type state Arity (State.read_span state value.id)
-           (Printf.sprintf "`%s` takes %d type %s, and %d %s given." (Types.show_trait trait)
-              (List.length trait_generics)
-              (if List.length trait_generics = 1 then "argument" else "arguments")
-              (List.length written)
-              (if List.length written = 1 then "is" else "are")))
+           (Printf.sprintf "`%s` takes %s, and %s given." (Types.show_trait trait)
+              (Diagnostic.show_count (List.length trait_generics) "type argument" "type arguments")
+              (Diagnostic.show_count (List.length written) "is" "are")))
   | Some trait_arguments ->
       check_trait_method_call state env value self_type trait method_ arguments ~trait_generics
         ~trait_arguments
@@ -395,8 +399,7 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
   let instance =
     Instantiation.instantiate state (State.read_span state value.id) ~extra signature
   in
-  let parameters = instance.signature.parameters in
-  let receiver_argument, receiver_offset, parameters, arguments =
+  let receiver_argument, arguments =
     match instance.signature.receiver with
     | Some (receiver, receiver_type) -> (
         match arguments with
@@ -408,49 +411,41 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
             let mode = Calls.check_argument state env first.value parameter in
             ignore
               (State.decide_default_literal state ~at:(State.read_span state value.id) self_type);
-            ( [
+            ([ { Tables.expression = first.value.id; core_argument_index = 0; mode } ], rest)
+        | [] -> ([], []))
+    | None -> ([], arguments)
+  in
+  match
+    Calls.check_arguments state env value instance.signature.parameters arguments
+      ~has_receiver:(Option.is_some instance.signature.receiver)
+  with
+  | Error error -> error
+  | Ok (checked, left_out) ->
+      let reference = { trait with trait_arguments } in
+      let result = Types.extract_result_type instance.signature.output in
+      Modes.note_lending state value instance.signature.output;
+      let own_arguments = List.take (List.length signature.generics) instance.type_arguments in
+      state.tables.calls.(value.id) <-
+        Some
+          {
+            callee =
+              Trait_method
                 {
-                  Tables.expression = first.value.id;
-                  core_argument_index = 0;
-                  mode;
-                  mode_keyword = None;
+                  trait = reference;
+                  name = method_.method_name;
+                  receiver = method_.method_receiver;
+                  self_type;
+                  type_arguments = own_arguments;
+                  evidence = Built_in;
                 };
-              ],
-              1,
-              parameters,
-              rest )
-        | [] -> ([], 1, parameters, []))
-    | None -> ([], 0, parameters, arguments)
-  in
-  let matched, left_out = Calls.match_arguments state value parameters arguments ~record:false in
-  let checked =
-    receiver_argument @ Calls.check_arguments state env parameters matched ~offset:receiver_offset
-  in
-  let reference = { trait with trait_arguments } in
-  let result = Types.extract_result_type instance.signature.output in
-  Modes.note_lending state value instance.signature.output;
-  let own_arguments = List.take (List.length signature.generics) instance.type_arguments in
-  state.tables.calls.(value.id) <-
-    Some
-      {
-        callee =
-          Trait_method
-            {
-              trait = reference;
-              name = method_.method_name;
-              receiver = method_.method_receiver;
-              self_type;
-              type_arguments = own_arguments;
-              evidence = Built_in;
-            };
-        arguments = checked;
-        omitted_defaults = left_out;
-        uses = instance.signature.uses;
-        callee_result = result;
-      };
-  Form.register_call state value;
-  Name_lookup.resolve_evidence state value self_type reference;
-  State.normalize state result
+            arguments = receiver_argument @ checked;
+            omitted_defaults = left_out;
+            uses = instance.signature.uses;
+            callee_result = result;
+          };
+      Form.register_call state value;
+      Name_lookup.resolve_evidence state value self_type reference;
+      State.normalize state result
 
 and check_trait_call_in_full state env (value : Syntax.expression) trait ~trait_arguments
     (member : Syntax.name) arguments =
@@ -481,29 +476,29 @@ and check_trait_call_in_full state env (value : Syntax.expression) trait ~trait_
 and check_capability_call state env (value : Syntax.expression) capability (member : Syntax.name)
     arguments =
   match Members.find_trait_method state.lookups capability member.text Static with
-  | Some method_ ->
+  | Some method_ -> (
       let instance =
         Instantiation.instantiate state (State.read_span state value.id)
           (Members.read_method_signature state.lookups capability method_)
       in
-      let matched, left_out =
-        Calls.match_arguments state value instance.signature.parameters arguments ~record:false
-      in
-      let checked =
-        Calls.check_arguments state env instance.signature.parameters matched ~offset:0
-      in
-      let result = Types.extract_result_type instance.signature.output in
-      state.tables.calls.(value.id) <-
-        Some
-          {
-            callee = Capability_method { capability; name = member.text };
-            arguments = checked;
-            omitted_defaults = left_out;
-            uses = Types.make_capability_set [ Types.Capability capability ];
-            callee_result = result;
-          };
-      Form.register_call state value;
-      result
+      match
+        Calls.check_arguments state env value instance.signature.parameters arguments
+          ~has_receiver:false
+      with
+      | Error error -> error
+      | Ok (checked, left_out) ->
+          let result = Types.extract_result_type instance.signature.output in
+          state.tables.calls.(value.id) <-
+            Some
+              {
+                callee = Capability_method { capability; name = member.text };
+                arguments = checked;
+                omitted_defaults = left_out;
+                uses = Types.make_capability_set [ Types.Capability capability ];
+                callee_result = result;
+              };
+          Form.register_call state value;
+          result)
   | None ->
       Calls.check_arguments_alone state env arguments
         (State.make_error_type state Unknown_member (State.read_span state member.id)
@@ -533,9 +528,12 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
       when (not has_mode_keyword)
            && ((not place)
               || State.decide_property state Interface.Properties.Plain receiver_type
-                 <> Interface.Properties.Fails) -> (
+                 <> Interface.Properties.Fails
+              || not (List.mem_assoc Path.Mut overloads)) -> (
         match List.assoc_opt Path.Own overloads with
-        | Some method_path -> Some (Path.Own, method_path)
+        | Some method_path ->
+            if State.is_place state base then Modes.note_place_without_own state env base;
+            Some (Path.Own, method_path)
         | None -> None)
     | None -> None
   in
@@ -559,19 +557,14 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
   in
   let report_missing_receiver_mode : 'a. (Path.receiver * 'a) list -> Types.ty =
    fun overloads ->
-    let has receiver = List.exists (fun (overload, _) -> overload = receiver) overloads in
-    if (not has_mode_keyword) && place && (has Path.Mut || has Path.Own) then begin
-      let keyword = if has Path.Mut then "mut" else "own" in
+    if (not has_mode_keyword) && place && List.mem_assoc Path.Mut overloads then
       State.make_error_type state Missing_mode (State.read_span state base.id)
         ~fixes:
           [
-            State.fix
-              (Printf.sprintf "Pass it `%s`." keyword)
-              [ State.insert (State.read_span state base.id).start (keyword ^ " ") ];
+            State.fix "Pass it `mut`." [ State.insert (State.read_span state base.id).start "mut " ];
           ]
-        (Printf.sprintf "`%s` takes `%s self`, so the call site passes its receiver `%s`."
-           member.text keyword keyword)
-    end
+        (Printf.sprintf "`%s` takes `mut self`, so the call site passes its receiver `mut`."
+           member.text)
     else report_wrong_receiver (List.map (fun (receiver, _) -> (receiver, ())) overloads)
   in
   match receiver_type with
@@ -663,7 +656,7 @@ and check_method_with_receiver state env ?expected ?(type_arguments = [])
           state value instance type_arguments
       with
       | Error error -> Calls.check_arguments_alone state env arguments error
-      | Ok () ->
+      | Ok () -> (
           (match instance.signature.receiver with
           | Some (_, self_type) ->
               if not (State.unify state self_type receiver_type) then
@@ -674,33 +667,32 @@ and check_method_with_receiver state env ?expected ?(type_arguments = [])
           (match (expected, instance.signature.output) with
           | Some expected, Returns output -> State.unify_as_hint state output expected
           | _ -> ());
-          let matched, left_out =
-            Calls.match_arguments state value instance.signature.parameters arguments ~record:false
-          in
-          let checked =
-            Calls.check_arguments state env instance.signature.parameters matched ~offset:1
-          in
-          let receiver_argument =
-            {
-              Tables.expression = receiver.id;
-              core_argument_index = 0;
-              mode =
-                (match signature.receiver with
-                | Some (Mut, _) -> Mut
-                | Some (Own, _) -> Own
-                | _ -> Read);
-              mode_keyword = None;
-            }
-          in
-          Name_lookup.finish_call state env value method_path
-            (Tables.Function { path = method_path; type_arguments = instance.type_arguments })
-            instance (receiver_argument :: checked) left_out)
+          match
+            Calls.check_arguments state env value instance.signature.parameters arguments
+              ~has_receiver:true
+          with
+          | Error error -> error
+          | Ok (checked, left_out) ->
+              let receiver_argument =
+                {
+                  Tables.expression = receiver.id;
+                  core_argument_index = 0;
+                  mode =
+                    (match signature.receiver with
+                    | Some (Mut, _) -> Mut
+                    | Some (Own, _) -> Own
+                    | _ -> Read);
+                }
+              in
+              Name_lookup.finish_call state env value method_path
+                (Tables.Function { path = method_path; type_arguments = instance.type_arguments })
+                instance (receiver_argument :: checked) left_out))
 
 and check_trait_method_with_receiver state env (value : Syntax.expression)
     ~(receiver : Syntax.expression) ~receiver_type (trait : Types.trait_reference)
     (method_ : Types.trait_method) ~type_arguments arguments =
   let trait_generics =
-    match Interface.Definition.read_trait_interface state.lookups.interface trait.trait with
+    match Interface.Definition.find_trait_interface state.lookups.interface trait.trait with
     | Some interface -> interface.trait_generics
     | None -> []
   in
@@ -741,44 +733,43 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
       in
       match Name_lookup.check_explicit_type_arguments state value instance type_arguments with
       | Error error -> Calls.check_arguments_alone state env arguments error
-      | Ok () ->
-          let matched, left_out =
-            Calls.match_arguments state value instance.signature.parameters arguments ~record:false
-          in
-          let checked =
-            Calls.check_arguments state env instance.signature.parameters matched ~offset:1
-          in
-          let result = Types.extract_result_type instance.signature.output in
-          Modes.note_lending state value instance.signature.output;
-          let receiver_argument =
-            {
-              Tables.expression = receiver.id;
-              core_argument_index = 0;
-              mode = (match method_.method_receiver with Mut -> Mut | Own -> Own | _ -> Read);
-              mode_keyword = None;
-            }
-          in
-          let evidence =
-            match receiver_type with Types.Any _ -> Tables.Dynamic | _ -> Tables.Built_in
-          in
-          state.tables.calls.(value.id) <-
-            Some
-              {
-                callee =
-                  Trait_method
-                    {
-                      trait;
-                      name = method_.method_name;
-                      receiver = method_.method_receiver;
-                      self_type = receiver_type;
-                      type_arguments = instance.type_arguments;
-                      evidence;
-                    };
-                arguments = receiver_argument :: checked;
-                omitted_defaults = left_out;
-                uses = instance.signature.uses;
-                callee_result = result;
-              };
-          Form.register_call state value;
-          Name_lookup.resolve_evidence state value receiver_type trait;
-          State.normalize state result)
+      | Ok () -> (
+          match
+            Calls.check_arguments state env value instance.signature.parameters arguments
+              ~has_receiver:true
+          with
+          | Error error -> error
+          | Ok (checked, left_out) ->
+              let result = Types.extract_result_type instance.signature.output in
+              Modes.note_lending state value instance.signature.output;
+              let receiver_argument =
+                {
+                  Tables.expression = receiver.id;
+                  core_argument_index = 0;
+                  mode = (match method_.method_receiver with Mut -> Mut | Own -> Own | _ -> Read);
+                }
+              in
+              let evidence =
+                match receiver_type with Types.Any _ -> Tables.Dynamic | _ -> Tables.Built_in
+              in
+              state.tables.calls.(value.id) <-
+                Some
+                  {
+                    callee =
+                      Trait_method
+                        {
+                          trait;
+                          name = method_.method_name;
+                          receiver = method_.method_receiver;
+                          self_type = receiver_type;
+                          type_arguments = instance.type_arguments;
+                          evidence;
+                        };
+                    arguments = receiver_argument :: checked;
+                    omitted_defaults = left_out;
+                    uses = instance.signature.uses;
+                    callee_result = result;
+                  };
+              Form.register_call state value;
+              Name_lookup.resolve_evidence state value receiver_type trait;
+              State.normalize state result))

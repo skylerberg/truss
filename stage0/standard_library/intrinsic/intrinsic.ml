@@ -84,7 +84,7 @@ let builtin_of_libc : Libc.scalar -> builtin = function
   | Float32 -> Float32
   | Float64 -> Float64
 
-type operation =
+type scalar =
   | Add
   | Subtract
   | Multiply
@@ -125,6 +125,8 @@ type operation =
   | Rotate_left
   | Rotate_right
   | Multiply_high
+
+type buffer =
   | Compare_bytes
   | Storage_empty
   | Storage_with_capacity
@@ -141,19 +143,18 @@ type operation =
   | Storage_from_array
   | Array_from_storage
   | Array_view
-  | Array_at_mut
-  | Storage_at
-  | Storage_at_mut
   | Storage_view
   | View_length
-  | View_at
-  | View_at_mut
   | View_swap
   | View_slice
   | Storage_model
   | View_model
   | Array_model
   | View_address
+
+type lend = Storage_at | Storage_at_mut | View_at | View_at_mut | Array_at_mut
+
+type runtime =
   | Crash
   | Handle_from
   | Handle_descriptor
@@ -175,17 +176,9 @@ type operation =
   | Libc of Libc.function_
   | Libc_number of Libc.number
 
-let is_primitive = function
-  | Add | Subtract | Multiply | Divide | Remainder | Negate | Wrapping_add | Wrapping_subtract
-  | Wrapping_multiply | Add_overflows | Subtract_overflows | Multiply_overflows | Equal | Less
-  | Ieee_equal | Ieee_less | Bit_and | Bit_or | Bit_xor | Complement | Shift_left | Shift_right
-  | Convert | Fits | Square_root | Fused_multiply_add | Floor | Ceiling | Truncate | Round_to_even
-  | To_bits | From_bits | Is_nan | Leading_zeros | Trailing_zeros | Count_ones | Swap_bytes
-  | Rotate_left | Rotate_right | Multiply_high ->
-      true
-  | _ -> false
+type operation = Scalar of scalar | Buffer of buffer | Lend of lend | Runtime of runtime
 
-let operations =
+let list_scalar_operations =
   [
     Add;
     Subtract;
@@ -227,6 +220,10 @@ let operations =
     Rotate_left;
     Rotate_right;
     Multiply_high;
+  ]
+
+let list_buffer_operations =
+  [
     Compare_bytes;
     Storage_empty;
     Storage_with_capacity;
@@ -243,19 +240,20 @@ let operations =
     Storage_from_array;
     Array_from_storage;
     Array_view;
-    Array_at_mut;
-    Storage_at;
-    Storage_at_mut;
     Storage_view;
     View_length;
-    View_at;
-    View_at_mut;
     View_swap;
     View_slice;
     Storage_model;
     View_model;
     Array_model;
     View_address;
+  ]
+
+let list_lend_operations = [ Storage_at; Storage_at_mut; View_at; View_at_mut; Array_at_mut ]
+
+let list_runtime_operations =
+  [
     Crash;
     Handle_from;
     Handle_descriptor;
@@ -270,15 +268,21 @@ let operations =
     Tasks_spawn;
     Shared_new;
     Shared_update;
-    Shared_key;
     Holds_invariant;
+    Shared_key;
   ]
   @ List.map (fun os -> System_is_os os) Libc.oses
   @ List.map (fun architecture -> System_is_architecture architecture) Libc.architectures
   @ List.map (fun function_ -> Libc function_) Libc.functions
   @ List.map (fun number -> Libc_number number) Libc.numbers
 
-let show_operation = function
+let operations =
+  List.map (fun operation -> Scalar operation) list_scalar_operations
+  @ List.map (fun operation -> Buffer operation) list_buffer_operations
+  @ List.map (fun operation -> Lend operation) list_lend_operations
+  @ List.map (fun operation -> Runtime operation) list_runtime_operations
+
+let show_scalar : scalar -> string = function
   | Add -> "add"
   | Subtract -> "subtract"
   | Multiply -> "multiply"
@@ -319,6 +323,8 @@ let show_operation = function
   | Rotate_left -> "rotate_left"
   | Rotate_right -> "rotate_right"
   | Multiply_high -> "multiply_high"
+
+let show_buffer : buffer -> string = function
   | Compare_bytes -> "compare_bytes"
   | Storage_empty -> "storage_empty"
   | Storage_with_capacity -> "storage_with_capacity"
@@ -335,19 +341,23 @@ let show_operation = function
   | Storage_from_array -> "storage_from_array"
   | Array_from_storage -> "array_from_storage"
   | Array_view -> "array_view"
-  | Array_at_mut -> "array_at_mut"
-  | Storage_at -> "storage_at"
-  | Storage_at_mut -> "storage_at_mut"
   | Storage_view -> "storage_view"
   | View_length -> "view_length"
-  | View_at -> "view_at"
-  | View_at_mut -> "view_at_mut"
   | View_swap -> "view_swap"
   | View_slice -> "view_slice"
   | Storage_model -> "storage_model"
-  | Array_model -> "array_model"
   | View_model -> "view_model"
+  | Array_model -> "array_model"
   | View_address -> "view_address"
+
+let show_lend : lend -> string = function
+  | Storage_at -> "storage_at"
+  | Storage_at_mut -> "storage_at_mut"
+  | View_at -> "view_at"
+  | View_at_mut -> "view_at_mut"
+  | Array_at_mut -> "array_at_mut"
+
+let show_runtime : runtime -> string = function
   | Crash -> "crash"
   | Handle_from -> "handle_from"
   | Handle_descriptor -> "handle_descriptor"
@@ -362,8 +372,8 @@ let show_operation = function
   | Tasks_spawn -> "tasks_spawn"
   | Shared_new -> "shared_new"
   | Shared_update -> "shared_update"
-  | Shared_key -> "shared_key"
   | Holds_invariant -> "holds_invariant"
+  | Shared_key -> "shared_key"
   | System_is_os Linux -> "system_is_linux"
   | System_is_os Macos -> "system_is_macos"
   | System_is_architecture X86_64 -> "system_is_x86_64"
@@ -378,11 +388,17 @@ let show_operation = function
       in
       "libc_" ^ String.lowercase_ascii unprefixed
 
+let show_operation = function
+  | Scalar operation -> show_scalar operation
+  | Buffer operation -> show_buffer operation
+  | Lend operation -> show_lend operation
+  | Runtime operation -> show_runtime operation
+
 let make_operation_path operation = Path.Top { module_; name = show_operation operation }
 
 let list_uses : operation -> Path.t list = function
-  | Shared_update | Shared_key -> [ Well_known.make_path Tasks ]
-  | _ -> []
+  | Runtime (Shared_update | Shared_key) -> [ Well_known.make_path Tasks ]
+  | Scalar _ | Buffer _ | Lend _ | Runtime _ -> []
 
 let operation_of_path = function
   | Path.Top { module_ = path_module; name } when path_module = module_ ->

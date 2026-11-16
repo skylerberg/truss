@@ -1,0 +1,7 @@
+fn f(names: Map[Int64, String], id: Int64) -> UInt64 {
+  if names.get(id) is Some(name) {
+    name.length()
+  } else {
+    0
+  }
+}

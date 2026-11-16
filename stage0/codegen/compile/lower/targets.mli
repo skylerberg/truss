@@ -18,6 +18,7 @@ val make_trait_method_key :
   Instance.key
 
 val pass : Lowering.state -> Types.mode -> Ground.ty -> Lowered.place -> Lowered.operand option
+val raise_lending_capability_method : Path.t -> string -> 'a
 val lookup_capability_method : Definitions.context -> Path.t -> string -> int * Types.signature
 
 val make_entry_signature :

@@ -1,4 +1,10 @@
-type checked = { form : Core.t; tables : Tables.published; used_packages : Path.package list }
+type checked = {
+  form : Core.t;
+  tables : Tables.published;
+  used_packages : Path.package list;
+  places_without_own : Core.origin list;
+  mode_keywords : Core.mode_keyword list;
+}
 
 let no_output : State.env =
   {
@@ -514,7 +520,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                 });
         if not (is_broken Body) then check_body state env written
     | Law_proof { body = written; _ }, Law_proof_interface { trait; law; for_type; _ } ->
-        (match Interface.Definition.read_trait_interface state.lookups.interface trait.trait with
+        (match Interface.Definition.find_trait_interface state.lookups.interface trait.trait with
         | Some interface ->
             let substitution =
               Interface.Properties.make_trait_substitution interface ~self:for_type trait
@@ -728,6 +734,8 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       frames = [];
       locals_read = [];
       receiver_modes = [];
+      places_without_own = [];
+      mode_keywords = [];
       yielded = Hashtbl.create 4;
       lent_tails = Hashtbl.create 4;
       lambdas = [];
@@ -814,6 +822,8 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
           tables = Tables.publish state.tables;
           used_packages =
             list_used_packages resolved ~evidence_packages:state.evidence_packages form;
+          places_without_own = state.places_without_own;
+          mode_keywords = state.mode_keywords;
         }
   | _ ->
       Error

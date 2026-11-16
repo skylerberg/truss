@@ -34,6 +34,7 @@ val expect_one_diagnostic :
   ?others:(string * string) list ->
   ?fixed:string ->
   ?says:string ->
+  ?at:string * int ->
   string ->
   string ->
   unit

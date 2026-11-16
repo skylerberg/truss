@@ -29,7 +29,7 @@ let list_impls_of_trait (lookups : Lookups.t) ~trait package =
 
 let derive_interface lookups ~type_ ~trait =
   match
-    (Definition.read_type_interface lookups type_, Definition.read_trait_interface lookups trait)
+    (Definition.find_type_interface lookups type_, Definition.find_trait_interface lookups trait)
   with
   | Some type_interface, Some trait_interface ->
       let trait_reference : Types.trait_reference =
@@ -63,12 +63,12 @@ let derive_interface lookups ~type_ ~trait =
   | _ -> None
 
 let make_impl_substitution lookups (impl : Path.t) =
-  Option.bind (Definition.read_impl_interface lookups impl)
+  Option.bind (Definition.find_impl_interface lookups impl)
     (fun (interface : Types.impl_interface) ->
       Option.map
         (fun trait ->
           Properties.make_trait_substitution trait ~self:interface.for_type interface.implements)
-        (Definition.read_trait_interface lookups interface.implements.trait))
+        (Definition.find_trait_interface lookups interface.implements.trait))
 
 let is_open_value = function
   | Types.Value_variable _ -> true
@@ -166,7 +166,7 @@ let find_built_in_evidence : Properties.decision -> evidence option = function
 let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_conditions = true)
     (type_ : Types.ty) (wanted : Types.trait_reference) : evidence option =
   let broken_trait =
-    match Definition.read_interface lookups wanted.trait with
+    match Definition.find_interface lookups wanted.trait with
     | Some (Error_interface report) -> Some report
     | _ -> None
   in
@@ -221,7 +221,7 @@ let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_cond
         in
         List.find_map
           (fun impl_path ->
-            match Definition.read_impl_interface lookups impl_path with
+            match Definition.find_impl_interface lookups impl_path with
             | None -> None
             | Some impl -> (
                 let variables =
@@ -325,7 +325,7 @@ and project_declared_type lookups ~list_bounds ?defining type_ (trait : Types.tr
   | None -> (
       match find_evidence lookups ~list_bounds ~checks_conditions:false type_ trait with
       | Some (From_impl { impl; substitution }) -> (
-          match Definition.read_impl_interface lookups impl with
+          match Definition.find_impl_interface lookups impl with
           | Some interface ->
               Option.iter (fun defining -> defining := impl :: !defining) defining;
               Option.map (Types.substitute substitution)
@@ -370,7 +370,7 @@ and project_capability_set lookups ~list_bounds ?(depth = 0) type_ (trait : Type
   else
     match find_evidence lookups ~list_bounds ~checks_conditions:false type_ trait with
     | Some (From_impl { impl; substitution }) -> (
-        match Definition.read_impl_interface lookups impl with
+        match Definition.find_impl_interface lookups impl with
         | Some interface ->
             normalize_capabilities lookups ~list_bounds ~depth:(depth + 1)
               (Types.substitute_capabilities substitution
@@ -419,11 +419,11 @@ and normalize lookups ~list_bounds ?defining (type_ : Types.ty) : Types.ty =
     type_
 
 let read_signature lookups (path : Path.t) =
-  match (Definition.read_declared_signature lookups path, path) with
+  match (Definition.find_declared_signature lookups path, path) with
   | Some signature, _ -> Some signature
   | None, Method { owner = (Impl _ | Derived _) as owner; name; receiver } -> (
       match
-        (Definition.read_impl_interface lookups owner, make_impl_substitution lookups owner)
+        (Definition.find_impl_interface lookups owner, make_impl_substitution lookups owner)
       with
       | Some impl, Some substitution ->
           Option.map
@@ -435,7 +435,7 @@ let read_signature lookups (path : Path.t) =
               in
               let list_bounds = Types.list_bounds signature.generics in
               { signature with uses = normalize_capabilities lookups ~list_bounds signature.uses })
-            (Definition.read_declared_signature lookups
+            (Definition.find_declared_signature lookups
                (Method { owner = impl.implements.trait; name; receiver }))
       | _ -> None)
   | None, _ -> None

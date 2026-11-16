@@ -691,7 +691,7 @@ let () =
                     (fun (declaration : Resolve.Names.declaration) ->
                       match
                         ( declaration.path,
-                          Interface.Definition.read_declared_signature interface declaration.path )
+                          Interface.Definition.find_declared_signature interface declaration.path )
                       with
                       | Top _, Some { generics = []; specification_only = false; _ } ->
                           Some (Instance.Code { path = declaration.path; type_arguments = [] })

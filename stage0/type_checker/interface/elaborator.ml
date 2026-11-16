@@ -270,10 +270,9 @@ and check_arity context (path : Syntax.path_type) shown expected :
       if argument_count <> List.length expected then
         Error
           (record_diagnostic context.diagnostics Arity context.spans.(path.id)
-             (Printf.sprintf "`%s` takes %d %s, and %d %s given." shown (List.length expected)
-                (if List.length expected = 1 then "argument" else "arguments")
-                argument_count
-                (if argument_count = 1 then "is" else "are")))
+             (Printf.sprintf "`%s` takes %s, and %s given." shown
+                (Diagnostic.show_count (List.length expected) "argument" "arguments")
+                (Diagnostic.show_count argument_count "is" "are")))
       else
         let errors =
           List.concat
@@ -635,9 +634,9 @@ let elaborate_type_head context owner (head : Syntax.type_head) =
         match Resolve.Names.find_generics context.lookups.names type_path with
         | Some expected when List.length expected <> List.length generics ->
             report_error_type context Arity context.spans.(head.id)
-              (Printf.sprintf "`%s` takes %d generic %s, and this head names %d."
-                 (show_path head.path) (List.length expected)
-                 (if List.length expected = 1 then "parameter" else "parameters")
+              (Printf.sprintf "`%s` takes %s, and this head names %d." (show_path head.path)
+                 (Diagnostic.show_count (List.length expected) "generic parameter"
+                    "generic parameters")
                  (List.length generics))
         | _ -> (
             match Intrinsic.builtin_of_path type_path with

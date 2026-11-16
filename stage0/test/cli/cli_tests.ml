@@ -1054,6 +1054,12 @@ let () =
                (List.map
                   (fun (name, outcome, message) -> String.concat " " [ name; outcome; message ])
                   outcomes)));
+  test "truss test shows the echo output of a passing test" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.passing_test_reaching_an_echo) ] in
+      let status, output = run_truss [ "test"; "-C"; root ] in
+      if status <> 0 then fail "status %d: %s" status output;
+      if not (String.includes ~affix:"\"triples\": passed\n    main.truss:2:3: 6\n\n" output) then
+        fail "%s" output);
   test "truss test shows a failed test's output, and --json gives each test's output" (fun () ->
       let root = make_package [ ("main.truss", Fixtures.tests_printing_to_the_console) ] in
       let status, output = run_truss [ "test"; "-C"; root ] in

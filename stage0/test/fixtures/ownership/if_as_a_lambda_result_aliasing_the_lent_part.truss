@@ -1,0 +1,13 @@
+fn measure(length_of: fn(Int64) -> UInt64) -> UInt64 {
+  length_of(0)
+}
+
+fn f(names: Map[Int64, String]) -> UInt64 {
+  measure(fn(id) {
+    if names.get(id) is Some(name) {
+      name.length()
+    } else {
+      0
+    }
+  })
+}

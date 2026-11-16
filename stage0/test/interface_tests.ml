@@ -35,7 +35,7 @@ let () =
           ]
       in
       match
-        Interface.Definition.read_declared_signature (make_interface packages) (app "count")
+        Interface.Definition.find_declared_signature (make_interface packages) (app "count")
       with
       | Some { parameters = [ items; limit ]; output = Returns output; _ } ->
           if Types.show items.type_ <> "List[Int64]" then
@@ -48,7 +48,7 @@ let () =
         Support.setup [ ("app::main", Fixtures.Interface.method_head_with_generics) ]
       in
       let path : Path.t = Method { owner = app "Box"; name = "get"; receiver = Read } in
-      match Interface.Definition.read_declared_signature (make_interface packages) path with
+      match Interface.Definition.find_declared_signature (make_interface packages) path with
       | Some { receiver = Some (Read, self); _ } ->
           if Types.show self <> "Box[Value]" then Harness.fail "self: %s" (Types.show self)
       | _ -> Harness.fail "no receiver");
@@ -91,7 +91,7 @@ let () =
           ]
       in
       match
-        Interface.Definition.read_declared_signature (make_interface packages) (app "first")
+        Interface.Definition.find_declared_signature (make_interface packages) (app "first")
       with
       | Some { output = Returns output; _ } ->
           if Types.show output <> "Option[Items.Element]" then

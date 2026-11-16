@@ -10,14 +10,14 @@ let show_callee : Core.callee -> string = function
   | Indirect _ -> "a function value"
 
 let find_method_signature interface owner name receiver =
-  Interface.Definition.read_declared_signature interface (Method { owner; name; receiver })
+  Interface.Definition.find_declared_signature interface (Method { owner; name; receiver })
 
 let find_declared_fields interface path arguments =
-  Option.bind (Interface.Definition.read_type_interface interface path) (fun type_interface ->
+  Option.bind (Interface.Definition.find_type_interface interface path) (fun type_interface ->
       Types.instantiate_fields type_interface arguments)
 
 let find_declared_variants interface path arguments =
-  Option.bind (Interface.Definition.read_type_interface interface path) (fun type_interface ->
+  Option.bind (Interface.Definition.find_type_interface interface path) (fun type_interface ->
       Types.instantiate_variants type_interface arguments)
 
 type context = {
@@ -97,7 +97,7 @@ let instantiate context (callee : Core.callee) =
   | Trait_method { trait = reference; name; receiver; self_type; type_arguments; _ } -> (
       match
         ( find_method_signature context.interface reference.trait name receiver,
-          Interface.Definition.read_trait_interface context.interface reference.trait )
+          Interface.Definition.find_trait_interface context.interface reference.trait )
       with
       | Some signature, Some interface ->
           of_signature
@@ -159,8 +159,7 @@ let is_built_in context (ty : Types.ty) =
   | Projection { trait; _ } -> is_integer_trait trait.trait
   | _ -> Option.is_some (Types.find_builtin ty)
 
-let check_operator_types context (node : Core.expression) (operation : Intrinsic.operation)
-    arguments =
+let check_operator_types context (node : Core.expression) (operation : Intrinsic.scalar) arguments =
   if not (is_built_in context node.type_) then
     context.wrong "an operator has the type `%s`, which is not built in" (Types.show node.type_);
   let operands =
@@ -177,7 +176,7 @@ let check_operator_types context (node : Core.expression) (operation : Intrinsic
     (fun (operand : Core.expression) ->
       if not (fits context ~expected:node.type_ ~found:operand.type_) then
         context.wrong "an operand of `%s` has the type `%s`, and the operator `%s`"
-          (Intrinsic.show_operation operation)
+          (Intrinsic.show_operation (Scalar operation))
           (Types.show operand.type_) (Types.show node.type_))
     operands
 
@@ -300,62 +299,7 @@ let is_executable context (condition : Core.expression) =
          | _ -> false)
        condition)
 
-let collect_specification_expressions (definition : Core.definition) =
-  let ids = Hashtbl.create 64 in
-  let mark =
-    Core_walk.make_deep_visitor
-      {
-        Core_walk.ignore_all with
-        expression = (fun (node : Core.expression) -> Hashtbl.replace ids node.id ());
-      }
-  in
-  let check_cost (spent : Core.cost) =
-    match spent.bound with
-    | Finite -> ()
-    | Order_of bound | At_most bound | Exactly bound -> mark.expression bound
-  in
-  (match definition with
-  | Function { parameters; contract; _ } ->
-      List.iter
-        (fun (parameter : Core.parameter) ->
-          Option.iter
-            (fun (contract : Core.callback_contract) -> List.iter mark.expression contract.requires)
-            parameter.callback_contract)
-        parameters;
-      List.iter
-        (fun (condition : Core.condition) -> mark.expression condition.value)
-        contract.requires;
-      List.iter mark.expression contract.ensures;
-      List.iter mark.expression contract.decreases;
-      List.iter check_cost contract.costs
-  | Type { invariants; potential; _ } ->
-      List.iter (fun (invariant : Core.condition) -> mark.expression invariant.value) invariants;
-      Option.iter mark.expression potential
-  | Trait laws ->
-      List.iter
-        (fun (law : Core.law) ->
-          List.iter mark.expression law.requires;
-          Core_walk.walk_block mark law.body)
-        laws
-  | Constant _ | Test _ | Law_proof _ | Empty -> ());
-  Core_walk.walk_definition
-    {
-      Core_walk.ignore_all with
-      statement =
-        (fun (node : Core.statement) ->
-          match node.kind with
-          | Proof body -> Core_walk.walk_block mark body
-          | Assert { condition; _ } -> (
-              match definition with Test _ -> () | _ -> mark.expression condition.value)
-          | For { clauses; _ } | While { clauses; _ } ->
-              List.iter (Core_walk.walk_loop_clause mark) clauses
-          | _ -> ());
-    }
-    definition;
-  ids
-
 let check_semantics context (form : Core.t) =
-  let in_specification = collect_specification_expressions form.definition in
   let check_executable subject (condition : Core.condition) =
     if condition.executable <> is_executable context condition.value then
       context.wrong "%s is marked %sexecutable" subject
@@ -409,12 +353,6 @@ let check_semantics context (form : Core.t) =
                      "a lambda captures %d locals, and its body reads %d of the enclosing \
                       function's"
                      (List.length captures) (List.length free)
-             | Quantified { binder = Over_elements _; _ } when Hashtbl.mem in_specification node.id
-               ->
-                 context.wrong "a quantifier in a specification runs as a loop (`Over_elements`)"
-             | Quantified { binder = Over_collection _; _ }
-               when not (Hashtbl.mem in_specification node.id) ->
-                 context.wrong "a quantifier in executable code is over a mathematical collection"
              | Slice { callee; bounds; _ } ->
                  let name = show_callee callee in
                  let ends suffix =
@@ -467,7 +405,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
   let own =
     let of_generics = List.map (fun (generic : Types.generic) -> generic.generic) in
     let list_declared path =
-      match Interface.Definition.read_interface interface path with
+      match Interface.Definition.find_interface interface path with
       | Some (Function_interface signature | Theorem_interface signature) ->
           of_generics signature.generics
       | Some (Type_interface interface) -> of_generics interface.type_generics
@@ -740,8 +678,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                  check_arguments_fit
                    {
                      callee = sliced;
-                     arguments =
-                       Passed { mode = Read; value = Place base; mode_keyword = None } :: bounds;
+                     arguments = Passed { mode = Read; value = Place base } :: bounds;
                      lends = None;
                      uses = Types.no_capabilities;
                    }
