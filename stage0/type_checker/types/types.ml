@@ -589,4 +589,13 @@ type impl_interface = {
   impl_methods : (string * Path.receiver) list;
 }
 
+let is_implemented_by (trait : trait_interface) (declared : trait_method) ~name ~receiver =
+  declared.method_name = name && (trait.is_capability || declared.method_receiver = receiver)
+
+let find_implementing_receiver trait (impl : impl_interface) declared =
+  Option.map snd
+    (List.find_opt
+       (fun (name, receiver) -> is_implemented_by trait declared ~name ~receiver)
+       impl.impl_methods)
+
 type constant_interface = { constant_type : ty }

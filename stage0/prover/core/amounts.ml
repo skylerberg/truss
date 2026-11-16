@@ -292,7 +292,7 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
                   ~substitution:[]
               in
               callee_amount context frame
-                ~path:(Path.Method { owner = capability; name; receiver = Static })
+                ~path:(Path.make_capability_method capability name)
                 ~parts:[ part ]
                 ~bound_frame:(fun _ -> inside)
                 ~uses:(invocation.uses :> Types.capability list)

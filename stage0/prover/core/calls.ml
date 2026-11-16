@@ -846,8 +846,7 @@ let apply_call ?lent_final context (frame : State.frame) (site : Invocation.site
       | Trait_method { trait; name; receiver; _ } ->
           Laws.signature_terminates context (Path.Method { owner = trait.trait; name; receiver })
       | Capability_method { capability; name } ->
-          Laws.signature_terminates context
-            (Path.Method { owner = capability; name; receiver = Static })
+          Laws.signature_terminates context (Path.make_capability_method capability name)
       | Indirect () -> (
           match through with
           | Some (Types.Function function_type, _, _) -> Types.terminates function_type
@@ -1002,7 +1001,7 @@ let apply_call ?lent_final context (frame : State.frame) (site : Invocation.site
       Some (frame, result)
   | Capability_method { capability; name } ->
       with_contract
-        (Path.Method { owner = capability; name; receiver = Static })
+        (Path.make_capability_method capability name)
         (Contracts.find_capability_contract context.lookups capability name)
   | Intrinsic { operation; type_arguments } ->
       let frame =

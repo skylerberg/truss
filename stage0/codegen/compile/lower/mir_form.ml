@@ -1570,7 +1570,7 @@ and lower_call_into ?failure st (call : Mir.call) destination ~origin =
              });
         if not c_signature.returns then Lowering.emit_unreachable_block st
       end
-  | None, Trait_method { trait; name; self_type; _ } -> (
+  | None, Trait_method { trait; name; receiver; self_type; _ } -> (
       let any_type =
         match Types.substitute st.frame.code.substitution self_type with
         | Types.Any reference -> reference
@@ -1578,8 +1578,8 @@ and lower_call_into ?failure st (call : Mir.call) destination ~origin =
       in
       match List.map (lower_argument_place st) call.arguments with
       | (_, _, any) :: arguments ->
-          Targets.lower_call_through_any st ~any_type ~trait:trait.trait ~name ~any ~arguments
-            destination
+          Targets.lower_call_through_any st ~any_type ~trait:trait.trait ~name ~receiver ~any
+            ~arguments destination
       | [] -> Definitions.raise_bug "a call through any with no receiver")
   | None, Indirect function_value ->
       let function_type =
@@ -1599,20 +1599,8 @@ and lower_call_into ?failure st (call : Mir.call) destination ~origin =
 
 and lower_capability_defaults st ~capability ~name (arguments : Mir.argument list) evaluated =
   if List.mem Mir.Default arguments then begin
-    let receiver =
-      match Interface.Definition.read_trait_interface st.context.lookups.interface capability with
-      | Some interface -> (
-          match
-            List.find_opt
-              (fun (trait_method : Types.trait_method) -> trait_method.method_name = name)
-              interface.methods
-          with
-          | Some declared -> declared.method_receiver
-          | None -> Definitions.raise_bug "%s has no method %s" (Path.show capability) name)
-      | None -> Definitions.raise_bug "no interface for %s" (Path.show capability)
-    in
     let defaults =
-      read_parameter_defaults st.context (Method { owner = capability; name; receiver })
+      read_parameter_defaults st.context (Path.make_capability_method capability name)
     in
     let caller = st.frame in
     st.frame <-
@@ -1790,20 +1778,20 @@ and lend ?(forwards = 0) st part (call : Mir.call) ~origin =
                 Targets.lower_instance_call st
                   (Code { path; type_arguments })
                   ~signature ~substitution ~arguments ~mask ~lending ~destination ())
-        | None, Trait_method { trait; name; self_type; _ } -> (
+        | None, Trait_method { trait; name; receiver; self_type; _ } -> (
             let any_type =
               match Types.substitute st.frame.code.substitution self_type with
               | Types.Any reference -> reference
               | receiver -> Definitions.raise_bug "a call through any on %s" (Types.show receiver)
             in
-            let _, signature = Targets.lookup_dynamic_method st.context trait.trait name in
+            let _, signature = Targets.lookup_dynamic_method st.context trait.trait name receiver in
             match List.map (lower_argument_place st) call.arguments with
             | (_, _, any) :: arguments ->
                 lent_place signature.output
                   (Targets.make_any_substitution st.context ~any:any_type trait.trait)
                   (fun ~lending destination ->
-                    Targets.lower_call_through_any st ~any_type ~trait:trait.trait ~name ~any
-                      ~arguments ~lending destination)
+                    Targets.lower_call_through_any st ~any_type ~trait:trait.trait ~name ~receiver
+                      ~any ~arguments ~lending destination)
             | [] -> Definitions.raise_bug "a call through any with no receiver")
         | None, Capability_method _ ->
             Lowering.raise_unsupported ~at:(locate_site st origin)

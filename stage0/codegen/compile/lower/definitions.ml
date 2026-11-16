@@ -71,6 +71,11 @@ let read_impl_interface context impl =
   | Some position -> position
   | None -> raise_bug "no interface for %s" (Path.show impl)
 
+let read_trait_interface context trait =
+  match Interface.Definition.read_trait_interface context.lookups.interface trait with
+  | Some interface -> interface
+  | None -> raise_bug "no interface for %s" (Path.show trait)
+
 let make_trait_substitution context impl =
   match Interface.Impls.make_impl_substitution context.lookups.interface impl with
   | Some substitution -> substitution

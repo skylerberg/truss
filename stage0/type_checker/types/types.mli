@@ -175,4 +175,10 @@ type impl_interface = {
   impl_methods : (string * Path.receiver) list;
 }
 
+val is_implemented_by :
+  trait_interface -> trait_method -> name:string -> receiver:Path.receiver -> bool
+
+val find_implementing_receiver :
+  trait_interface -> impl_interface -> trait_method -> Path.receiver option
+
 type constant_interface = { constant_type : ty }

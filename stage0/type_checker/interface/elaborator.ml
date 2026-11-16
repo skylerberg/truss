@@ -944,16 +944,14 @@ let elaborate_member (lookups : Lookups.t) ~path ~spans resolved (definition : S
       let inherits_termination =
         match (path, header.container_scope.self_trait) with
         | Method { name; receiver; _ }, Some (implements : Types.trait_reference) -> (
-            let declared_receiver =
+            let implemented =
               match Option.bind (lookups.names.find_key implements.trait) lookups.find_header with
-              | Some { container = Capability_parts; _ } -> Path.Static
-              | Some { container = Trait_parts _ | Impl_parts _; _ } | None -> receiver
+              | Some { container = Capability_parts; _ } ->
+                  Path.make_capability_method implements.trait name
+              | Some { container = Trait_parts _ | Impl_parts _; _ } | None ->
+                  Method { owner = implements.trait; name; receiver }
             in
-            match
-              Option.map lookups.names.read_definition
-                (lookups.names.find_key
-                   (Method { owner = implements.trait; name; receiver = declared_receiver }))
-            with
+            match Option.map lookups.names.read_definition (lookups.names.find_key implemented) with
             | Some { kind = Function { signature = declared; _ } | Method_declaration declared; _ }
               ->
                 terminates declared.clauses

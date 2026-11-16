@@ -28,22 +28,20 @@ let list_written_methods (names : Resolve.Names.lookups) impl =
   | None -> []
 
 let list_impl_methods (interface : Interface.Lookups.t) impl =
-  let written = list_written_methods interface.names impl in
-  match
-    Option.bind (Interface.Definition.read_impl_interface interface impl)
-      (fun (implemented : Types.impl_interface) ->
-        interface.names.find_key implemented.implements.trait)
-  with
-  | Some trait_key ->
-      List.filter_map
-        (fun (member : Resolve.Names.key) ->
-          match member.path with
-          | Method { name; receiver; _ } as trait_method ->
-              let own = Path.Method { owner = impl; name; receiver } in
-              Some (if List.exists (Path.equal own) written then own else trait_method)
-          | _ -> None)
-        (interface.names.list_contained trait_key)
-  | None -> written
+  match Interface.Definition.read_impl_interface interface impl with
+  | Some implementation -> (
+      let trait = implementation.implements.trait in
+      match Interface.Definition.read_trait_interface interface trait with
+      | Some trait_interface ->
+          List.map
+            (fun (declared : Types.trait_method) ->
+              let name = declared.method_name in
+              match Types.find_implementing_receiver trait_interface implementation declared with
+              | Some receiver -> Path.Method { owner = impl; name; receiver }
+              | None -> Path.Method { owner = trait; name; receiver = declared.method_receiver })
+            trait_interface.methods
+      | None -> list_written_methods interface.names impl)
+  | None -> list_written_methods interface.names impl
 
 let writes (lookups : lookups) impl method_ =
   List.exists (Path.equal method_) (list_written_methods lookups.interface.names impl)
