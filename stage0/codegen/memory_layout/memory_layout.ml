@@ -181,23 +181,22 @@ and of_sum layout_of ty shapes =
          | Some niche -> Z.geq niche.count (Z.of_int (List.length dataless))
          | None -> dataless = [] ->
       let encoded, niche =
-        match (only.payload.niche, dataless) with
-        | None, _ -> (None, None)
-        | Some niche, [] -> (None, Some niche)
-        | Some niche, _ :: _ ->
+        match only.payload.niche with
+        | None -> (None, None)
+        | Some niche ->
             let used = List.length dataless in
+            let remaining = Z.sub niche.count (Z.of_int used) in
+            let rest =
+              if Z.equal remaining Z.zero then None
+              else Some { niche with start = Z.add niche.start (Z.of_int used); count = remaining }
+            in
             let niche_values =
               List.mapi
                 (fun position (variant : variant) ->
                   (variant.name, Z.add niche.start (Z.of_int position)))
                 dataless
             in
-            let remaining = Z.sub niche.count (Z.of_int used) in
-            let rest =
-              if Z.equal remaining Z.zero then None
-              else Some { niche with start = Z.add niche.start (Z.of_int used); count = remaining }
-            in
-            (Some { niche; niche_values }, rest)
+            ((if niche_values = [] then None else Some { niche; niche_values }), rest)
       in
       {
         size = only.payload.size;
@@ -244,23 +243,22 @@ type 'case dispatch =
   | Switch of { tag : tag; cases : (Z.t * 'case) list }
   | Tests of (discriminant * 'case) list
 
-let find_tag_only_value variants name =
-  match List.find_index (String.equal name) variants with
-  | Some index -> Z.of_int index
-  | None -> bug "no variant %s" name
+let list_tag_only_values tag variants =
+  ({ at = []; integer = tag }, List.mapi (fun index name -> (name, Z.of_int index)) variants)
 
-let find_tagged_value variants name =
-  match List.find_opt (fun (variant : variant) -> variant.name = name) variants with
-  | Some variant -> Z.of_int variant.index
-  | None -> bug "no variant %s" name
+let list_tagged_values tag variants =
+  ( { at = [ Tag ]; integer = tag },
+    List.map (fun (variant : variant) -> (variant.name, Z.of_int variant.index)) variants )
+
+let find_tag_value values name =
+  match List.assoc_opt name values with Some value -> value | None -> bug "no variant %s" name
 
 let discriminant layout name =
+  let tag_value (tag, values) = Tag_value { tag; value = find_tag_value values name } in
   match layout.form with
   | Zero_size -> Only
-  | Tag_only { tag; variants } ->
-      Tag_value { tag = { at = []; integer = tag }; value = find_tag_only_value variants name }
-  | Tagged { tag; variants; _ } ->
-      Tag_value { tag = { at = [ Tag ]; integer = tag }; value = find_tagged_value variants name }
+  | Tag_only { tag; variants } -> tag_value (list_tag_only_values tag variants)
+  | Tagged { tag; variants; _ } -> tag_value (list_tagged_values tag variants)
   | Niche_encoded { dataful; dataless = None } ->
       if dataful.name = name then Only else bug "no variant %s" name
   | Niche_encoded { dataful; dataless = Some { niche; niche_values } } -> (
@@ -273,13 +271,12 @@ let discriminant layout name =
   | Scalar _ | Struct _ | Array _ -> bug "a discriminant of a type that is not a sum type"
 
 let dispatch layout cases =
-  let switch tag find_value =
-    Switch { tag; cases = List.map (fun (name, case) -> (find_value name, case)) cases }
+  let switch (tag, values) =
+    Switch { tag; cases = List.map (fun (name, case) -> (find_tag_value values name, case)) cases }
   in
   match layout.form with
-  | Tag_only { tag; variants } -> switch { at = []; integer = tag } (find_tag_only_value variants)
-  | Tagged { tag; variants; _ } ->
-      switch { at = [ Tag ]; integer = tag } (find_tagged_value variants)
+  | Tag_only { tag; variants } -> switch (list_tag_only_values tag variants)
+  | Tagged { tag; variants; _ } -> switch (list_tagged_values tag variants)
   | Zero_size | Niche_encoded _ | Scalar _ | Struct _ | Array _ ->
       Tests (List.map (fun (name, case) -> (discriminant layout name, case)) cases)
 

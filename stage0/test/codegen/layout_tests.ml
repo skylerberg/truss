@@ -32,6 +32,13 @@ let () =
       in
       expect_string ~expected:"1/1 tag(UInt8: Less Equal Greater) niche . 3+253"
         (describe ~extra (named "Ordering")));
+  test "a sum type with one variant offers no niche when its field's niche is full" (fun () ->
+      let full = Sum (List.init 256 (fun index -> variant (Printf.sprintf "V%d" index) [])) in
+      let extra =
+        [ ("Full", full); ("Wrapper", Sum [ variant "Only" [ field "full" (named "Full") ] ]) ]
+      in
+      expect_string ~expected:"1/1 niche-encoded(Only;  at nothing)"
+        (describe ~extra (named "Wrapper")));
   test "a tag is the smallest unsigned integer that numbers every variant" (fun () ->
       let many = Sum (List.init 300 (fun index -> variant (Printf.sprintf "V%d" index) [])) in
       expect_int ~expected:2 (layout ~extra:[ ("Many", many) ] (named "Many")).size);
