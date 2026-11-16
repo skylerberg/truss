@@ -70,7 +70,10 @@ let drain watcher =
       relatives;
   (relatives, is_overflowed)
 
-let read_changes watcher =
+let is_cookie_path watcher relative =
+  String.starts_with ~prefix:(watcher.cookie_directory ^ "/") relative
+
+let synchronize watcher ~pending_paths ~is_overflowed =
   watcher.cookies <- watcher.cookies + 1;
   let cookie =
     Printf.sprintf "%s/sync-%d-%d" watcher.cookie_directory (Unix.getpid ()) watcher.cookies
@@ -87,11 +90,7 @@ let read_changes watcher =
           let relatives, overflowed = drain watcher in
           let is_overflowed = is_overflowed || overflowed in
           let paths =
-            List.filter
-              (fun relative ->
-                not (String.starts_with ~prefix:(watcher.cookie_directory ^ "/") relative))
-              relatives
-            @ paths
+            List.filter (fun relative -> not (is_cookie_path watcher relative)) relatives @ paths
           in
           if List.mem cookie relatives then
             if is_overflowed then Overflow else Changed (List.sort_uniq compare paths)
@@ -101,8 +100,18 @@ let read_changes watcher =
   | exception Unix.Unix_error (ENOENT, _, _) -> Removed
   | descriptor ->
       Unix.close descriptor;
-      let changes = wait ~deadline:(Unix.gettimeofday () +. synchronization_limit) [] false in
+      let changes =
+        wait ~deadline:(Unix.gettimeofday () +. synchronization_limit) pending_paths is_overflowed
+      in
       (try Sys.remove cookie_path with Sys_error _ -> ());
       changes
+
+let read_changes watcher = synchronize watcher ~pending_paths:[] ~is_overflowed:false
+
+let read_pending_changes watcher =
+  let relatives, is_overflowed = drain watcher in
+  match List.filter (fun relative -> not (is_skipped watcher relative)) relatives with
+  | [] when not is_overflowed -> Changed []
+  | pending_paths -> synchronize watcher ~pending_paths ~is_overflowed
 
 let stop watcher = close watcher.handle
