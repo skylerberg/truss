@@ -129,10 +129,10 @@ fn failure(kind: PatternErrorKind, offset: UInt64) -> Option[ParseError]
 }
 
 fn word_of(count: UInt64) -> UInt32
-  ensures result == (if count > 4294967295 { 4294967295 } else { intrinsic::convert(count) })
+  ensures result == (if count > UInt32.maximum { UInt32.maximum } else { intrinsic::convert(count) })
   cost time O(1)
 {
-  if count > 4294967295 { 4294967295 } else { intrinsic::convert(count) }
+  if intrinsic::fits[UInt64, UInt32](count) { intrinsic::convert(count) } else { UInt32.maximum }
 }
 
 fn Builder.here(self) -> UInt64
@@ -1059,7 +1059,7 @@ fn Regex.word(self, at: UInt64) -> UInt32
 }
 
 fn Regex.instructions(self) -> UInt64
-  ensures result <= 4294967295
+  ensures result <= UInt32.maximum
   cost time O(1)
 {
   intrinsic::convert(self.word(0))

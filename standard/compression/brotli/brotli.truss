@@ -66,7 +66,7 @@ let block_count_omitted: UInt64 = 16777216
 let longest_code: UInt64 = 15
 
 fn byte_at(bytes: Slice[UInt8], at: UInt64) -> UInt64
-  ensures result <= 255
+  ensures result <= UInt8.maximum
 {
   if at < bytes.length() { intrinsic::convert(bytes[at]) } else { 0 }
 }

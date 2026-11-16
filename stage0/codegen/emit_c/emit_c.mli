@@ -13,9 +13,12 @@ type fragment
 val fragment : Memory_layout.env -> compiled -> fragment
 val key : fragment -> Instance.key
 val references : fragment -> Instance.key list
-val calls : fragment -> (Path.t * int) list
 val called : fragment -> Instance.key list
-val table : fragment -> Path.t option option
+val list_linked : lookup:(Instance.key -> fragment) -> Instance.key list -> fragment list
+
+val trace_reachable :
+  lookup:(Instance.key -> fragment) -> Instance.key list -> (fragment * Instance.key list) list
+
 val is_small : fragment -> bool
 val failures : fragment -> (failure * Lowered.site) list
 val text : fragment -> string

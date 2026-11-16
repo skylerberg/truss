@@ -20,7 +20,7 @@ public fn Duration.nanoseconds(count: Int64) -> Duration
 }
 
 public fn Duration.microseconds(count: Int64) -> Duration
-  requires -9223372036854775 <= count && count <= 9223372036854775
+  requires Int64.minimum <= count * 1000 && count * 1000 <= Int64.maximum
   ensures result.total_nanoseconds() == count * 1000
   cost time O(1)
 {
@@ -28,7 +28,7 @@ public fn Duration.microseconds(count: Int64) -> Duration
 }
 
 public fn Duration.milliseconds(count: Int64) -> Duration
-  requires -9223372036854 <= count && count <= 9223372036854
+  requires Int64.minimum <= count * 1000000 && count * 1000000 <= Int64.maximum
   ensures result.total_nanoseconds() == count * 1000000
   cost time O(1)
 {
@@ -36,7 +36,7 @@ public fn Duration.milliseconds(count: Int64) -> Duration
 }
 
 public fn Duration.seconds(count: Int64) -> Duration
-  requires -9223372036 <= count && count <= 9223372036
+  requires Int64.minimum <= count * 1000000000 && count * 1000000000 <= Int64.maximum
   ensures result.total_nanoseconds() == count * 1000000000
   cost time O(1)
 {
@@ -44,7 +44,7 @@ public fn Duration.seconds(count: Int64) -> Duration
 }
 
 public fn Duration.minutes(count: Int64) -> Duration
-  requires -153722867 <= count && count <= 153722867
+  requires Int64.minimum <= count * 60000000000 && count * 60000000000 <= Int64.maximum
   ensures result.total_nanoseconds() == count * 60000000000
   cost time O(1)
 {
@@ -52,7 +52,7 @@ public fn Duration.minutes(count: Int64) -> Duration
 }
 
 public fn Duration.hours(count: Int64) -> Duration
-  requires -2562047 <= count && count <= 2562047
+  requires Int64.minimum <= count * 3600000000000 && count * 3600000000000 <= Int64.maximum
   ensures result.total_nanoseconds() == count * 3600000000000
   cost time O(1)
 {
@@ -60,7 +60,7 @@ public fn Duration.hours(count: Int64) -> Duration
 }
 
 public fn Duration.days(count: Int64) -> Duration
-  requires -106751 <= count && count <= 106751
+  requires Int64.minimum <= count * 86400000000000 && count * 86400000000000 <= Int64.maximum
   ensures result.total_nanoseconds() == count * 86400000000000
   cost time O(1)
 {
@@ -1249,7 +1249,7 @@ internal fn min_of(first: Int64, second: Int64) -> Int64
 }
 
 internal fn civil_from_days(days: Int64) -> Civil
-  requires -2147483648 <= days && days <= 2147483647
+  requires Int32.minimum <= days && days <= Int32.maximum
   ensures 1 <= result.month && result.month <= 12
   ensures 1 <= result.day && result.day <= 31
   ensures -5900000 < result.year && result.year < 5900000
@@ -1295,7 +1295,7 @@ internal fn checked_date(year: Int64, month: Int64, day: Int64) -> Option[Date]
   cost time O(1)
 {
   let days = days_from_civil(year, month: month, day: day)
-  if days < -2147483648 || days > 2147483647 {
+  if !intrinsic::fits[Int64, Int32](days) {
     None
   } else {
     Some(Date(days_since_epoch: intrinsic::convert(days)))
@@ -1406,7 +1406,7 @@ public fn Date.from_day_of_year(year: Int32, day_of_year: UInt16) -> Option[Date
     return None
   }
   let days = days_from_civil(wide_year, month: 1, day: 1) + ordinal - 1
-  if days < -2147483648 || days > 2147483647 {
+  if !intrinsic::fits[Int64, Int32](days) {
     None
   } else {
     Some(Date(days_since_epoch: intrinsic::convert(days)))
@@ -1788,7 +1788,7 @@ fn transitions_at_or_before(transitions: Slice[Int64], seconds: Int64) -> UInt64
 
 fn TimeZone.offset_seconds(self, seconds: Int64) -> Int64
   requires -100000000000 < seconds && seconds < 100000000000
-  ensures -2147483649 < result && result < 2147483648
+  ensures Int32.minimum <= result && result <= Int32.maximum
   cost time O(log(self.transitions.length()))
 {
   let passed = transitions_at_or_before(self.transitions.slice(), seconds: seconds)
@@ -1872,7 +1872,7 @@ fn big_endian(bytes: Slice[UInt8], at: UInt64, width: UInt64) -> Option[UInt64]
 }
 
 fn count_at(bytes: Slice[UInt8], at: UInt64) -> Option[UInt64]
-  ensures !(result is Some(count) && count > 4294967295)
+  ensures !(result is Some(count) && count > UInt32.maximum)
   cost time O(1)
 {
   let value = big_endian(bytes, at: at, width: 4)?
@@ -1882,7 +1882,7 @@ fn count_at(bytes: Slice[UInt8], at: UInt64) -> Option[UInt64]
 fn read_header(bytes: Slice[UInt8], at: UInt64, time_width: UInt64) -> Option[ZoneHeader]
   requires at <= 1099511627776
   requires time_width == 4 || time_width == 8
-  ensures !(result is Some(header) && (header.time_count > 4294967295 || header.type_count > 4294967295
+  ensures !(result is Some(header) && (header.time_count > UInt32.maximum || header.type_count > UInt32.maximum
     || header.block > 1000000000000))
   cost time O(1)
 {

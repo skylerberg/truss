@@ -786,7 +786,7 @@ fn is_fresh(returned: Instant, now: Instant, seconds: Int64) -> Bool {
   if seconds <= 0 {
     return true
   }
-  match returned.checked_add(Duration.seconds(if seconds > 9223372036 { 9223372036 } else { seconds })) {
+  match returned.checked_add(Duration.seconds(1) * seconds) {
     Some(expires) => now < expires
     None => true
   }

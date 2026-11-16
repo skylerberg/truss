@@ -1771,14 +1771,14 @@ internal fn push_little_endian_32(output: mut List[UInt8], value: UInt32)
 internal fn push_length_32(output: mut List[UInt8], length: UInt64)
   cost time finite
 {
-  if length > 4294967295 {
+  if !intrinsic::fits[UInt64, UInt32](length) {
     intrinsic::crash("a password cannot hold that many bytes".slice())
   }
   push_little_endian_32(mut output, value: intrinsic::convert(length))
 }
 
 internal fn argon2_long_hash(input: Slice[UInt8], length: UInt64) -> List[UInt8]
-  requires 1 <= length && length <= 4294967295
+  requires 1 <= length && length <= UInt32.maximum
   cost time finite
 {
   var prefixed: List[UInt8] = []

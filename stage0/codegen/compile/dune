@@ -15,7 +15,6 @@
   memory_layout
   libc
   lowered
-  reachable
   moves
   emit_c
   cbor
