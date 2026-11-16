@@ -122,7 +122,7 @@ let expand_body (body : Tree.body) : Graph.body =
             | None -> ());
             close (expand_block targets (failing, []) failed) (Goto after) origin;
             emit_rest after
-        | For { loop; iteration; part; lent; binding_count; body } ->
+        | For { loop; iteration; part; lent; body; _ } ->
             let index, emitted =
               match lent with
               | Some lent -> expand_block targets (emit_decided ()) lent.count.statements
@@ -139,11 +139,27 @@ let expand_body (body : Tree.body) : Graph.body =
               }
             in
             (match emit in_loop (inside, []) [] body.statements with
-            | Some (current, undecided) ->
-                close
-                  (with_values in_loop current undecided)
-                  (Iteration_end { loop = index })
-                  origin
+            | Some (current, undecided) -> (
+                let ended = with_values in_loop current undecided in
+                match loop.quantified with
+                | None -> close ended (Iteration_end { loop = index }) origin
+                | Some { quantifier; decides } ->
+                    let next_iteration = take_fresh_number () in
+                    close (next_iteration, []) (Iteration_end { loop = index }) origin;
+                    let decision =
+                      Tree.Use
+                        {
+                          place = { root = Local decides; projections = [] };
+                          type_ = Types.bool;
+                          origin;
+                        }
+                    in
+                    let yes, no =
+                      match quantifier with
+                      | Exists -> (after, next_iteration)
+                      | Forall -> (next_iteration, after)
+                    in
+                    branch_on ended decision ~yes ~no origin)
             | None -> ());
             close (index, emitted)
               (For
@@ -156,7 +172,6 @@ let expand_body (body : Tree.body) : Graph.body =
                          { lent with count = { lent.count with statements = [] } })
                        lent;
                    body = inside;
-                   binding_count;
                    blocks = inside :: list_blocks_since first;
                    after;
                    loop;

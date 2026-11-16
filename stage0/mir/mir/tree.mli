@@ -149,14 +149,7 @@ and formula = {
 and bound = Finite | Order_of of formula | At_most of formula | Exactly of formula
 and cost = { origin : Core.origin; amortized : bool; resource : Core.resource; bound : bound }
 and loop_clause = Invariant of formula | Decreases of formula list | Cost of cost
-
-and quantified = {
-  quantifier : Core.quantifier;
-  binding_count : int;
-  decision : int;
-  holds : operand;
-  decides : local;
-}
+and quantified = { quantifier : Core.quantifier; decides : local }
 
 and loop = {
   clauses : loop_clause list;

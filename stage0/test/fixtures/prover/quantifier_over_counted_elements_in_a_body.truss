@@ -1,0 +1,37 @@
+type Ones(size: UInt64)
+
+impl Iterable for Ones {
+  type Element = Int64
+
+  fn count(self) -> UInt64
+    ensures result == self.size
+  {
+    self.size
+  }
+
+  fn element(self, position: UInt64) lends Int64
+    requires position < self.count()
+    ensures result == 1
+  {
+    1
+  }
+}
+
+fn has_one(ones: Ones) -> Bool
+  requires ones.size > 0
+  ensures result
+{
+  exists one in ones => one == 1
+}
+
+fn all_one(ones: Ones) -> Bool
+  ensures result
+{
+  forall one in ones => one == 1
+}
+
+fn has_two(ones: Ones) -> Bool
+  ensures !result
+{
+  exists one in ones => one == 2
+}

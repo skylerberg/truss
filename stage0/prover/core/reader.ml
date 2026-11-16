@@ -94,6 +94,12 @@ let expand_place frame run (place : Mir.place) =
   | _ ->
       raise (Facts.Foreign_unsupported "a name that the alternatives of a pattern bind `mut`, here")
 
+let describe_local : Mir.local_kind -> string = function
+  | Source { name = Some name; _ } -> Printf.sprintf "`%s`" name
+  | Source { name = None; _ } -> "an unnamed local"
+  | Temporary -> "a temporary"
+  | Lent _ -> "a lent part"
+
 let read_root context frame run (root : Mir.root) =
   match root with
   | Constant path -> Values.evaluate_constant context frame path
@@ -110,17 +116,13 @@ let read_root context frame run (root : Mir.root) =
           | Core_local core when frame.makes_obligations && not context.reading_callback ->
               Validity.check_escaping_callback context frame core
           | Core_local _ | Mir_local _ -> ());
-          match Locals.find_opt key frame.locals with
-          | Some term -> term
-          | None
-            when run.in_formula
-                 &&
-                 match run.infos.(local).kind with
-                 | Source _ -> false
-                 | Temporary | Lent _ -> true ->
-              Facts.raise_bug "a temporary of a formula of `%s` is read before it is assigned"
-                frame.source.name
-          | None -> raise (Facts.Foreign_unsupported "a local the prover did not bind")))
+          match (Locals.find_opt key frame.locals, run.infos.(local).kind) with
+          | Some term, _ -> term
+          | None, Source _ when run.in_formula ->
+              raise (Facts.Foreign_unsupported "a local the prover did not bind")
+          | None, kind ->
+              Facts.raise_bug "`%s` reads %s before the prover binds it" frame.source.name
+                (describe_local kind)))
 
 let read_resolved context frame run (place : Mir.place) =
   let _, term =
@@ -1093,66 +1095,39 @@ and read_statement context frame run (statement : Mir.statement) =
                     (read_operand context after run left, read_operand context after run right) ))
               compared;
         }
-  | For
-      {
-        loop = { quantified = Some { quantifier; binding_count; decision; holds; decides }; _ };
-        iteration;
-        part;
-        lent;
-        body;
-        _;
-      } ->
-      let bindings = List.take binding_count body.statements in
-      let range, parameter, bindings =
-        match (lent, iteration) with
-        | Some { element; collection; _ }, _ ->
-            let pattern_bindings =
-              match
-                List.find_index
-                  (fun (statement : Mir.statement) ->
-                    match statement.kind with
-                    | Basic (Lend { part; _ }) -> part = element
-                    | _ -> false)
-                  bindings
-              with
-              | Some lend_index -> List.drop (lend_index + 1) bindings
-              | None -> Facts.raise_bug "a quantifier over elements that no statement lends"
-            in
-            ( Models.Range_of_collection
-                {
-                  collection_type = compute_place_type context frame run collection;
-                  collected = read_place context frame run collection;
-                  element = Facts.substitute_type context frame run.infos.(element).type_;
-                  location;
-                },
-              element,
-              pattern_bindings )
-        | None, Range { start; stop; inclusive } ->
-            ( Range_of_integers
-                {
-                  low = read_operand context frame run start;
-                  high = read_operand context frame run stop;
-                  inclusive;
-                  type_ = compute_operand_type context frame start;
-                },
-              part,
-              bindings )
-        | None, Pull _ ->
-            Facts.raise_unsupported location "a quantifier over the values of a cursor"
+  | For { loop = { quantified = Some { quantifier; decides }; _ }; iteration; part; lent; body; _ }
+    ->
+      let frame =
+        match lent with Some lent -> fst (read_value context frame run lent.count) | None -> frame
+      in
+      let range : Models.quantified_range =
+        match iteration with
+        | Range { start; stop; inclusive } ->
+            Range_of_integers
+              {
+                low = read_operand context frame run start;
+                high = read_operand context frame run stop;
+                inclusive;
+                type_ = compute_operand_type context frame start;
+              }
+        | Pull _ -> Facts.raise_bug "a quantifier loop that pulls from a cursor"
+      in
+      let decision : Mir.operand =
+        Use
+          {
+            place = { root = Local decides; projections = [] };
+            type_ = Types.bool;
+            origin = statement.origin;
+          }
       in
       let after, term =
-        translate_quantifier_value context frame run ~location quantifier range ~parameter
+        translate_quantifier_value context frame run ~location quantifier range ~parameter:part
           ~matches:
             {
-              statements = bindings;
+              statements = [];
               value = Some (Constant { value = Boolean true; type_ = Types.bool });
             }
-          ~body:
-            {
-              statements =
-                List.take (decision - binding_count) (List.drop binding_count body.statements);
-              value = Some holds;
-            }
+          ~body:{ body with value = Some decision }
       in
       Some (write_place context after run { root = Local decides; projections = [] } term)
   | For { loop; iteration; part; lent; binding_count; body } ->

@@ -1404,11 +1404,11 @@ and lower_cursor_loop builder ~origin ~pattern ~cursor ~next ~loop ~each =
 and lower_quantifier_loop builder (node : Core.expression) (quantifier : Core.quantifier)
     (body : Core.expression) run =
   let origin = node.origin in
-  let result = Emitter.allocate_temporary builder Types.bool origin in
+  let decides = Emitter.allocate_temporary builder Types.bool origin in
   let quantified = ref None in
-  let deciding = quantifier = Exists in
-  Emitter.assign builder (Emitter.make_local_place result)
-    (Operand (Constant { value = Boolean (not deciding); type_ = Types.bool }))
+  Emitter.assign builder
+    (Emitter.make_local_place decides)
+    (Operand (Constant { value = Boolean (quantifier = Forall); type_ = Types.bool }))
     origin;
   let make_loop () =
     { Tree.clauses = []; schedule = Sequential; origin; quantified = !quantified }
@@ -1416,37 +1416,12 @@ and lower_quantifier_loop builder (node : Core.expression) (quantifier : Core.qu
   run ~loop:make_loop ~each:(fun bind_part ->
       Emitter.run_in_scope builder origin (fun () ->
           bind_part ();
-          let binding_count = List.length (Emitter.emitted builder) in
           Option.iter
             (fun holds ->
-              quantified :=
-                Some
-                  {
-                    quantifier;
-                    binding_count;
-                    decision = List.length (Emitter.emitted builder);
-                    holds;
-                    decides = result;
-                  };
-              let decided =
-                Emitter.build_block builder (fun () ->
-                    Emitter.assign builder (Emitter.make_local_place result)
-                      (Operand (Constant { value = Boolean deciding; type_ = Types.bool }))
-                      origin;
-                    Emitter.break_ builder origin;
-                    None)
-              and undecided = Emitter.build_block builder (fun () -> Some Emitter.unit_value) in
-              ignore
-                (Emitter.hold_choice builder Types.unit origin
-                   (Conditional
-                      {
-                        condition = holds;
-                        then_ = (if deciding then decided else undecided);
-                        else_ = (if deciding then undecided else decided);
-                        if_condition = None;
-                      })))
+              quantified := Some { Tree.quantifier; decides };
+              Emitter.assign builder (Emitter.make_local_place decides) (Operand holds) origin)
             (lower_expression builder body)));
-  Some (Use { place = Emitter.make_local_place result; type_ = Types.bool; origin })
+  Some (Use { place = Emitter.make_local_place decides; type_ = Types.bool; origin })
 
 and lower_quantified builder (node : Core.expression) (quantifier : Core.quantifier)
     (binder : Core.binder) (body : Core.expression) =

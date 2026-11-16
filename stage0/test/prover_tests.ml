@@ -744,7 +744,9 @@ let () =
       expect_proven Fixtures.Prover.quantifier_over_span_fields_in_a_body);
   Harness.test "a quantifier over a list in a body may be false" (fun () ->
       expect_not_proven Fixtures.Prover.quantifier_over_items_in_a_body_ensured_true
-        "prover.ensures")
+        "prover.ensures");
+  Harness.test "a quantifier in a body reads the collection's `count` and `element`" (fun () ->
+      expect_proven Fixtures.Prover.quantifier_over_counted_elements_in_a_body)
 
 let swap = Fixtures.Prover.exchange
 
