@@ -730,3 +730,19 @@ let () =
           if not (String.includes ~affix:"many arguments" errors) then
             Codegen_support.fail "panicked with %S" errors
       | status, _, errors -> Codegen_support.fail "ended with status %d: %s" status errors)
+
+let () =
+  Codegen_support.test "a program whose capability method lends is not built yet" (fun () ->
+      let _, compile = Codegen_support.load Fixtures.Program.store_lending_its_value in
+      match
+        Compile.For_testing.run_program compile
+          ~main:(Top { module_ = Codegen_support.example; name = "main" })
+          ~arguments:[]
+      with
+      | Ok _ -> Codegen_support.fail "the program ran"
+      | Error message ->
+          if
+            not
+              (String.includes ~affix:"Stage0 cannot build this yet" message
+              && String.includes ~affix:"a capability method that lends" message)
+          then Codegen_support.fail "failed with: %s" message)

@@ -73,7 +73,9 @@ let build_entry context (key : Instance.key) (impl_method : Instance.impl_method
   let result_ty =
     match capability_signature.output with
     | Returns ty -> Monomorphic.ground context.monomorphic [] ty
-    | _ -> Definitions.raise_bug "a capability method that lends"
+    | Lends _ ->
+        Lowering.raise_unsupported "`%s.%s`, a capability method that lends" (Path.show capability)
+          name
   in
   Targets.lower_instance_call st
     (Code { path; type_arguments })
@@ -160,7 +162,9 @@ let build_locked_entry context (key : Instance.key) ~capability ~name : Emit_c.B
   let result_ty =
     match capability_signature.output with
     | Returns ty -> Monomorphic.ground context.monomorphic [] ty
-    | _ -> Definitions.raise_bug "a capability method that lends"
+    | Lends _ ->
+        Lowering.raise_unsupported "`%s.%s`, a capability method that lends" (Path.show capability)
+          name
   in
   call_tasks "lock";
   Emit_c.Builder.emit builder
