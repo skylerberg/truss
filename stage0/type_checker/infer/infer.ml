@@ -30,13 +30,13 @@ let check lookups (key : Resolve.Names.key) ~checks_body =
               message;
           ])
 
-let contract lookups key = check lookups key ~checks_body:false
+let check_contract lookups key = check lookups key ~checks_body:false
 
-let body (lookups : Lookups.t) key =
+let check_body (lookups : Lookups.t) key =
   ignore (lookups.contract key);
   check lookups key ~checks_body:true
 
-let derived = Derived.form
+let derive_form = Derived.derive_form
 let show_resolution = Tables.show_resolution
 
 let statement_diverges (tables : tables) =
@@ -48,7 +48,7 @@ type form_origin =
   | Derived of Resolve.Names.key
   | Inherited of Resolve.Names.key
 
-let form_origin (interface : Interface.Lookups.t) ~is_derived (path : Path.t) =
+let find_form_origin (interface : Interface.Lookups.t) ~is_derived (path : Path.t) =
   match (interface.names.key path, path) with
   | Some key, _ -> Some (Written key, [])
   | None, Method { owner = Derived { type_; _ }; _ } when is_derived path ->

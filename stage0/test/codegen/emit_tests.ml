@@ -1140,7 +1140,7 @@ let () =
       in
       Codegen_support.expect_status (2 + 8 + Char.code 'b') (shortened ~to_:2);
       Codegen_support.expect_status 101 (shortened ~to_:6);
-      match (Intrinsic_signatures.signature Storage_shorten).generics with
+      match (Intrinsic_signatures.make_signature Storage_shorten).generics with
       | [ { kind = Type_generic [ { trait = Top { name = "Plain"; _ }; _ } ]; _ } ] -> ()
       | _ -> Codegen_support.fail "storage_shorten takes elements that are not known to be Plain");
   Codegen_support.test

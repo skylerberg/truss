@@ -43,7 +43,7 @@ let name_at packages name text occurrence =
   let located =
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
-        let key = Resolve.Names.key_of declaration in
+        let key = Resolve.Names.make_key declaration in
         match
           ( (Support.names packages key.module_.package).definition key,
             (Support.names packages key.module_.package).spans key,
@@ -252,7 +252,7 @@ let bracket_of text written occurrence =
   let declarations = Support.declarations packages (Support.module_of "app::main") in
   List.find_map
     (fun (declaration : Resolve.Names.declaration) ->
-      let key = Resolve.Names.key_of declaration in
+      let key = Resolve.Names.make_key declaration in
       match
         ( (Support.names packages key.module_.package).definition key,
           (Support.names packages key.module_.package).spans key,

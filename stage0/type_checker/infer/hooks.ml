@@ -7,5 +7,5 @@ let expression_hook :
 let check_hook : (State.state -> State.env -> Syntax.expression -> Types.ty -> unit) ref =
   ref (fun _ _ _ -> not_set "check")
 
-let expression state env ?expected value = !expression_hook state env ?expected value
+let check_expression state env ?expected value = !expression_hook state env ?expected value
 let check state env value expected = !check_hook state env value expected

@@ -378,7 +378,7 @@ let rec show context type_ (pattern : space) =
 let show_row context types row = String.concat ", " (List.map2 (show context) types row)
 
 let read_operand_type : Core.operand -> Types.ty = function
-  | Place core_place -> Core_walk.place_type core_place
+  | Place core_place -> Core_walk.compute_place_type core_place
   | Value value -> value.type_
 
 let has_error context type_ =
@@ -545,7 +545,7 @@ let check_irrefutable context (written : Core.pattern) =
     | None -> ()
 
 let check_definition context (definition : Core.definition) =
-  Core_walk.definition
+  Core_walk.walk_definition
     {
       Core_walk.ignore_all with
       expression =

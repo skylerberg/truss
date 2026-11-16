@@ -752,7 +752,7 @@ let disjoint_obligations text =
   Database.check database [ file.module_.package ];
   List.fold_left
     (fun total declaration ->
-      match Database.For_testing.read_ownership database (Resolve.Names.key_of declaration) with
+      match Database.For_testing.read_ownership database (Resolve.Names.make_key declaration) with
       | Value must_be_disjoint -> total + List.length must_be_disjoint
       | Failed _ | Blocked -> total)
     0

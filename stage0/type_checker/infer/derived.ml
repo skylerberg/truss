@@ -11,7 +11,7 @@ let gives (trait : Path.t) name =
       true
   | _ -> false
 
-let with_single_spaces text =
+let collapse_spaces text =
   let is_space = function ' ' | '\t' | '\n' | '\r' -> true | _ -> false in
   let buffer = Buffer.create (String.length text) in
   String.iteri
@@ -21,7 +21,7 @@ let with_single_spaces text =
     text;
   Buffer.contents buffer
 
-let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
+let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
   match path with
   | Method { owner = Derived { type_; trait } as impl; name; receiver = _ } when gives trait name
     -> (
@@ -633,7 +633,7 @@ let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                           let spans = lookups.interface.names.spans key in
                           let text = lookups.interface.names.text key in
                           let quoted (origin : Core.origin) =
-                            with_single_spaces
+                            collapse_spaces
                               (Source.Definition_span.quote text
                                  (Source.Definition_span.locate spans origin))
                           in

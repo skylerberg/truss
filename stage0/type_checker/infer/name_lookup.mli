@@ -2,7 +2,7 @@ type overload =
   | Type_overload of Path.t
   | Trait_overload of Types.trait_reference * Types.trait_method
 
-val marked_receiver : Syntax.expression -> Path.receiver
+val classify_receiver : Syntax.expression -> Path.receiver
 
 val coerce :
   State.state ->
@@ -13,12 +13,12 @@ val coerce :
   expected:Types.ty ->
   unit
 
-val literal_type : State.state -> expected:Types.ty option -> Types.literal_kind -> Types.ty
-val named : State.state -> State.env -> Syntax.expression -> Resolve.head -> Types.ty
-val field : State.state -> Syntax.expression -> Types.ty -> Syntax.name -> Types.ty
-val static_member : State.state -> Syntax.expression -> Types.ty -> Syntax.name -> Types.ty
+val infer_literal_type : State.state -> expected:Types.ty option -> Types.literal_kind -> Types.ty
+val check_name : State.state -> State.env -> Syntax.expression -> Resolve.head -> Types.ty
+val check_field : State.state -> Syntax.expression -> Types.ty -> Syntax.name -> Types.ty
+val check_static_member : State.state -> Syntax.expression -> Types.ty -> Syntax.name -> Types.ty
 
-val explicit_type_arguments :
+val check_explicit_type_arguments :
   ?head:int ->
   State.state ->
   Syntax.expression ->
@@ -37,7 +37,7 @@ val finish_call :
   string list ->
   Types.ty
 
-val trait_static_method :
+val list_trait_static_methods :
   State.state ->
   Path.t ->
   Resolve.Names.String_map.key ->
@@ -46,20 +46,20 @@ val trait_static_method :
 
 val resolve_evidence : State.state -> Syntax.expression -> Types.ty -> Types.trait_reference -> unit
 
-val overloads :
+val resolve_overloads :
   State.state ->
   Types.ty ->
   Resolve.Names.String_map.key ->
   ((Path.receiver * overload) list, Types.trait_reference list) Result.t
 
-val elements_calls :
+val find_elements_calls :
   State.state ->
   Source.Definition_span.t ->
   Types.ty ->
   Types.mode ->
   (Tables.loop * Types.ty * Types.mode) option
 
-val consuming_cursor :
+val find_consuming_cursor :
   State.state -> Source.Definition_span.t -> Types.ty -> (Tables.loop * Types.ty) option
 
-val remaining_call : State.state -> Source.Definition_span.t -> Types.ty -> Tables.call option
+val find_remaining_call : State.state -> Source.Definition_span.t -> Types.ty -> Tables.call option

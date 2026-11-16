@@ -416,7 +416,7 @@ let () =
         (fun () ->
           List.iter
             (fun (declaration : Resolve.Names.declaration) ->
-              let key = Resolve.Names.key_of declaration in
+              let key = Resolve.Names.make_key declaration in
               let definition = Resolve.Names.show_key key in
               match
                 try graph_of (Lazy.force parts) key
@@ -439,7 +439,7 @@ let both_of_g text =
   match
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
-        let key = Resolve.Names.key_of declaration in
+        let key = Resolve.Names.make_key declaration in
         if key.path = Path.Top { module_ = Support.module_of "app::main"; name = "g" } then Some key
         else None)
       (Support.declarations packages (Support.module_of "app::main"))

@@ -1,6 +1,6 @@
-val arguments_alone : State.state -> State.env -> Syntax.argument list -> Types.ty -> Types.ty
+val check_arguments_alone : State.state -> State.env -> Syntax.argument list -> Types.ty -> Types.ty
 
-val function_value_call :
+val check_function_value_call :
   State.state ->
   State.env ->
   Syntax.expression ->
@@ -27,7 +27,7 @@ val check_arguments :
   offset:int ->
   Tables.argument list
 
-val named_call :
+val check_named_call :
   State.state ->
   State.env ->
   ?expected:Types.ty ->
