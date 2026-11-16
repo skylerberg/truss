@@ -90,13 +90,9 @@ let occurrences database snapshot packages =
       List.concat_map
         (fun declaration ->
           let key = Names.key_of declaration in
-          match
-            ( names.place key,
-              names.definition key,
-              names.spans key,
-              Database.read_resolved database key )
-          with
-          | Some { file; base }, Some definition, Some spans, Some resolved ->
+          match Database.read_resolved database key with
+          | Some resolved ->
+              let ({ file; base } : Names.place) = names.place key in
               let tables =
                 Option.map
                   (fun (checked : Infer.checked) -> checked.tables)
@@ -105,8 +101,9 @@ let occurrences database snapshot packages =
               List.map
                 (fun ({ span; target } : References.occurrence) ->
                   (file, Source.Definition_span.to_file ~base span, target))
-                (References.occurrences ~path:key.path spans definition resolved tables)
-          | _ -> [])
+                (References.occurrences ~path:key.path (names.spans key) (names.definition key)
+                   resolved tables)
+          | None -> [])
         (names.declarations_in file))
     (Command_packages.files snapshot packages)
 

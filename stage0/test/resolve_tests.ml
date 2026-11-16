@@ -52,7 +52,7 @@ let name_at packages name text occurrence =
             (Support.names packages key.module_.package).place key,
             Database.read_resolved (Support.database packages) key )
         with
-        | Some definition, Some spans, Some { base; _ }, Some resolved ->
+        | definition, spans, { base; _ }, Some resolved ->
             Option.map
               (fun (name : Syntax.name) -> (name, spans, base, resolved))
               (List.find_opt
@@ -267,7 +267,7 @@ let bracket_of text written occurrence =
           (Support.names packages key.module_.package).place key,
           Database.read_resolved (Support.database packages) key )
       with
-      | Some definition, Some spans, Some { base; _ }, Some resolved ->
+      | definition, spans, { base; _ }, Some resolved ->
           let bracket = ref None in
           Syntax_walk.definition
             (let rec visit (value : Syntax.expression) =

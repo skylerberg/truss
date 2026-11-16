@@ -51,7 +51,7 @@ type computed =
   | Used_packages of Resolve.Names.key
   | Import_check of Path.file
   | Package_check of Path.package * Package_checks.check
-  | Successors of Path.t * Path.package
+  | Callees of Path.t * Path.package
   | Proof of Resolve.Names.key
   | Lowering of lowering
 

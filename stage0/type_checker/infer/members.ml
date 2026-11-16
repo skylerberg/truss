@@ -1,7 +1,3 @@
-let visible_packages (lookups : Lookups.t) (package : Path.package) =
-  List.sort_uniq compare
-    (Path.standard_package :: package :: lookups.interface.names.dependency_names package)
-
 let own_methods (lookups : Lookups.t) owner name =
   List.filter_map
     (fun (key : Resolve.Names.key) ->

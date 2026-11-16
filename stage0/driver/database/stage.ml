@@ -18,7 +18,7 @@ type t =
   | Call_edges
   | Body_checks
   | Package_checks
-  | Successors
+  | Callees
   | Recursion_groups
   | Proofs
   | Folded_constants
@@ -46,7 +46,7 @@ let all =
     Call_edges;
     Body_checks;
     Package_checks;
-    Successors;
+    Callees;
     Recursion_groups;
     Proofs;
     Folded_constants;
@@ -65,14 +65,14 @@ let is_lowering = function
   | Folded_constants | Lowered_code | Test_keys -> true
   | Parse | Namespaces | Resolution | Import_checks | Trait_headers | Constant_values | Headers
   | Interfaces | Derived_interfaces | Type_facts | Grants | Signature_checks | Contracts
-  | Checked_bodies | Derived_forms | Mir | Call_edges | Body_checks | Package_checks | Successors
+  | Checked_bodies | Derived_forms | Mir | Call_edges | Body_checks | Package_checks | Callees
   | Recursion_groups | Proofs ->
       false
 
 let drains ~through stage =
   precedes stage through
   && ((not (is_lowering through))
-     || is_lowering stage || precedes stage Call_edges || stage = Successors)
+     || is_lowering stage || precedes stage Call_edges || stage = Callees)
 
 let of_part : Part.computed -> t = function
   | Parsed _ -> Parse
@@ -94,7 +94,7 @@ let of_part : Part.computed -> t = function
   | Call_edges _ -> Call_edges
   | Patterns _ | Usage _ | Ownership _ | Used_packages _ -> Body_checks
   | Package_check _ -> Package_checks
-  | Successors _ -> Successors
+  | Callees _ -> Callees
   | Proof _ -> Proofs
   | Lowering (Folded_constants _) -> Folded_constants
   | Lowering (Lowered _) -> Lowered_code

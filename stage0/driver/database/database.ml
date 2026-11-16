@@ -454,20 +454,6 @@ let source database (file : Path.file) =
   | Some source -> source
   | None -> Compiler_bug.bug ~stage:"Database" "%s is not a file of the build" (Path.show_file file)
 
-let visible_packages database note package =
-  let seen = Hashtbl.create 8 in
-  let rec visit package =
-    if not (Hashtbl.mem seen package) then begin
-      Hashtbl.replace seen package ();
-      note (Part.Input (Dependencies package));
-      List.iter visit (dependency_names database package)
-    end
-  in
-  visit package;
-  visit Path.standard_package;
-  List.sort Path.compare_package
-    (Hashtbl.fold (fun package () packages -> package :: packages) seen [])
-
 let in_dependency_order database packages =
   let seen = Hashtbl.create 8 in
   let order = ref [] in
@@ -657,24 +643,19 @@ let type_interface lookups path =
   | Value interface -> interface
   | Failed _ | Blocked -> None
 
-let impl_methods (names : Names.lookups) package =
+let list_derived_methods (names : Names.lookups) package =
   List.concat_map
     (fun (((trait : Path.t), _), (impl : Path.t)) ->
-      match names.key trait with
-      | Some trait_key ->
+      match (impl, names.key trait) with
+      | Derived _, Some trait_key ->
           List.filter_map
             (fun (member : Names.key) ->
               match member.path with
               | Method { name; receiver; _ } -> Some (Path.Method { owner = impl; name; receiver })
               | _ -> None)
             (names.contained trait_key)
-      | None -> [])
+      | _ -> [])
     (names.impls package)
-
-let derived_paths names package =
-  List.filter
-    (function Path.Method { owner = Derived _; _ } -> true | _ -> false)
-    (impl_methods names package)
 
 let package_parts database (names : Names.lookups) package : Part.computed list =
   let package_database = owner database package in
@@ -714,11 +695,10 @@ let package_parts database (names : Names.lookups) package : Part.computed list 
       (names.impls package)
   @ List.concat_map
       (fun path -> [ Part.Derived_form path; Generated_mir path ])
-      (derived_paths names package)
-  @ List.map
-      (fun path -> Part.Call_edges path)
-      (List.sort_uniq Path.compare (paths @ impl_methods names package))
-  @ List.map (fun path -> Part.Successors (path, package)) (List.sort_uniq Path.compare paths)
+      (list_derived_methods names package)
+  @ List.concat_map
+      (fun path -> [ Part.Call_edges path; Callees (path, package) ])
+      (List.sort_uniq Path.compare paths)
   @ List.map
       (fun dependency -> Part.Grant (package, dependency))
       (List.sort_uniq Path.compare_package (names.dependency_names package))
@@ -772,34 +752,21 @@ let mir_lookups database note : Mir.lookups =
 let call_edge_lookups database note : Mir.Call_edges.lookups =
   { interface = interface_lookups database note ~is_checked:true; mir = mir_lookups database note }
 
-let call_edge_part database note path =
+let read_call_edges database note path =
   read database note (Call_edges path);
   match Path_table.find_opt (owner database (Path.package path)).call_edges path with
   | Some part -> part
-  | None -> Value []
-
-let read_declared read part_of key =
-  match read key with
-  | Some value -> value
-  | None ->
-      Compiler_bug.bug ~stage:"Database" "%s is not in the namespace"
-        (Part.show (Name (part_of key)))
+  | None -> Blocked
 
 let patterns_lookups database note : Patterns.Lookups.t =
-  let interface = interface_lookups database note ~is_checked:true in
   {
     core = checked_core database note;
-    spans = read_declared interface.names.spans (fun key -> Part.Tree key);
-    text = read_declared interface.names.text (fun key -> Part.Text key);
-    interface;
+    interface = interface_lookups database note ~is_checked:true;
   }
 
 let usage_lookups database note : Usage.Lookups.t =
-  let names = recording_names database note in
   {
-    definition = read_declared names.definition (fun key -> Part.Tree key);
-    spans = read_declared names.spans (fun key -> Part.Tree key);
-    text = read_declared names.text (fun key -> Part.Text key);
+    names = recording_names database note;
     resolved = read_whole_resolution database note;
     tables = (fun key -> (checked_body database note key).tables);
   }
@@ -846,16 +813,12 @@ let import_diagnostics database note (file : Path.file) =
     ~text:(Source.text (source database file))
     ~used:(used_imports database note file)
 
-let successors database note ~viewer path =
-  match call_edge_part database note path with
+let list_callees database note ~viewer path =
+  match read_call_edges database note path with
   | Failed _ | Blocked -> None
-  | Value callees -> (
-      match
-        Mir.Call_edges.implementations (call_edge_lookups database note)
-          ~visible:(visible_packages database note viewer)
-          path
-      with
-      | implementations -> Some (List.sort_uniq Path.compare (callees @ implementations))
+  | Value call_edges -> (
+      match Mir.Call_edges.list_implementations (call_edge_lookups database note) ~viewer path with
+      | implementations -> Some (List.sort_uniq Path.compare (call_edges @ implementations))
       | exception Reads_failed_part -> None)
 
 let recursion_group database note path =
@@ -1076,16 +1039,16 @@ let stored database (part : Part.stored) =
           keyed ~is_failed:failed (fun package_database -> package_database.used_packages) key
       | Package_check (_, check) ->
           keyed ~is_failed:failed (fun package_database -> package_database.package_checks) check
-      | Successors (path, viewer) ->
-          let successors database =
+      | Callees (path, viewer) ->
+          let callees database =
             Option.bind (Hashtbl.find_opt database.graphs viewer) (fun graph ->
                 Call_graph.successors graph path)
           in
           {
             is_failed = false;
             remove = (fun () -> Call_graph.remove_successors (call_graph database viewer) path);
-            is_equal_in = (fun other -> successors other = successors database);
-            saved = (fun () -> Option.map marshalled (successors database));
+            is_equal_in = (fun other -> callees other = callees database);
+            saved = (fun () -> Option.map marshalled (callees database));
             restore =
               (fun bytes ->
                 ignore
@@ -1362,13 +1325,13 @@ let compute_namespace database (package_database : package_database) =
   let graph = call_graph database package in
   List.iter
     (function
-      | Part.Successors (root, _) as part when not (is_implied part) ->
+      | Part.Callees (root, _) as part when not (is_implied part) ->
           Call_graph.remove_root graph root
       | _ -> ())
     implied_before;
   List.iter
     (function
-      | Part.Successors (root, _) as part when not (was_implied part) ->
+      | Part.Callees (root, _) as part when not (was_implied part) ->
           ignore (Call_graph.add_root graph root)
       | _ -> ())
     implied;
@@ -1441,11 +1404,11 @@ let compute_part database (part : Part.computed) =
                ( (recording_names database note).definition key,
                  resolved_part database note Interface key )
              with
-            | Some definition, Value resolved -> (
+            | definition, Value resolved -> (
                 match Resolve.trait_header definition resolved with
                 | Some header -> Value header
                 | None -> Blocked)
-            | _ -> Blocked))
+            | _, (Failed _ | Blocked) -> Blocked))
   | Constant_value path ->
       into (at_path package_database.constant_values path) (fun note ->
           Some
@@ -1603,19 +1566,19 @@ let compute_part database (part : Part.computed) =
   | Package_check (package, check) ->
       into (keyed package_database.package_checks check) (fun note ->
           Some (computed (Package_checks.run (package_checks_lookups database note) package) check))
-  | Successors (path, viewer) ->
+  | Callees (path, viewer) ->
       let graph = call_graph database viewer in
       into
         {
           stored = Call_graph.successors graph path;
           replace =
-            (fun successors ->
+            (fun callees ->
               List.iter
-                (fun node -> mark_stale database (Successors (node, viewer)))
-                (Call_graph.set_successors graph path successors));
+                (fun node -> mark_stale database (Callees (node, viewer)))
+                (Call_graph.set_successors graph path callees));
           remove = (fun () -> Call_graph.remove_successors graph path);
         }
-        (fun note -> Some (successors database note ~viewer path))
+        (fun note -> Some (list_callees database note ~viewer path))
   | Proof key ->
       into (keyed package_database.proofs key) (fun note ->
           Some (computed (Prover.proof (proof_lookups database note)) key));
@@ -1720,7 +1683,7 @@ let update_groups database package =
       let { Call_graph.touched; removed } = Call_graph.update graph in
       List.iter
         (fun node ->
-          let part = Part.Successors (node, package) in
+          let part = Part.Callees (node, package) in
           mark_unsaved database (Value (Computed part));
           discard database part)
         removed;
@@ -2223,8 +2186,7 @@ let restore_namespaces database =
         in
         let graph = call_graph database name in
         List.iter
-          (function
-            | Part.Successors (root, _) -> ignore (Call_graph.add_root graph root) | _ -> ())
+          (function Part.Callees (root, _) -> ignore (Call_graph.add_root graph root) | _ -> ())
           implied
       end)
     (in_dependency_order database database.project)
@@ -2310,10 +2272,10 @@ let list_checker_diagnostics database (file : Path.file) checker =
   let names = names_lookups database in
   let package_database = owner database file.module_.package in
   let placed key diagnostics =
-    match names.place key with
-    | Some { file = home; base } when home = file ->
-        List.map (Diagnostic.map_spans (Source.Definition_span.to_file ~base)) diagnostics
-    | Some _ | None -> []
+    let ({ file = home; base } : Names.place) = names.place key in
+    if home = file then
+      List.map (Diagnostic.map_spans (Source.Definition_span.to_file ~base)) diagnostics
+    else []
   in
   let of_definitions () =
     List.concat_map
@@ -2406,13 +2368,7 @@ let prove database files =
       (List.map (fun (file : Path.file) -> file.module_.package) files)
   in
   drain database ~through:Recursion_groups packages;
-  let names = names_lookups database in
-  let keys =
-    List.concat_map
-      (fun file ->
-        List.filter (fun key -> Option.is_some (names.place key)) (file_keys database file))
-      files
-  in
+  let keys = List.concat_map (file_keys database) files in
   List.iter
     (fun (key : Names.key) ->
       let part = Part.Proof key in
@@ -2432,12 +2388,10 @@ let list_holes proofs path =
   let names = names_lookups proofs.database in
   match Option.bind (names.key path) (read_proof proofs) with
   | Some (Value (Obligations { holes; _ })) ->
-      List.filter_map
+      List.map
         (fun ((home : Names.key), (span : Source.Definition_span.t)) ->
-          Option.map
-            (fun ({ file; base } : Names.place) ->
-              (file, (Source.Definition_span.to_file ~base span).start))
-            (names.place home))
+          let ({ file; base } : Names.place) = names.place home in
+          (file, (Source.Definition_span.to_file ~base span).start))
         holes
   | Some (Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked) | None -> []
 
@@ -2516,7 +2470,7 @@ let check_calls database interface viewers key = function
           Option.iter
             (fun graph ->
               Compile.check_calls interface
-                ~successors:(fun path -> Option.join (Call_graph.successors graph path))
+                ~list_callees:(fun path -> Option.join (Call_graph.successors graph path))
                 key lowered)
             (Hashtbl.find_opt database.graphs viewer))
         viewers

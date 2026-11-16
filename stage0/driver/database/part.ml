@@ -51,7 +51,7 @@ type computed =
   | Used_packages of Resolve.Names.key
   | Import_check of Path.file
   | Package_check of Path.package * Package_checks.check
-  | Successors of Path.t * Path.package
+  | Callees of Path.t * Path.package
   | Proof of Resolve.Names.key
   | Lowering of lowering
 
@@ -79,7 +79,7 @@ let instance_package : Instance.key -> Path.package = function
 
 let package : computed -> Path.package = function
   | Parsed file | Import_check file -> file.module_.package
-  | Namespace package | Grant (package, _) | Package_check (package, _) | Successors (_, package) ->
+  | Namespace package | Grant (package, _) | Package_check (package, _) | Callees (_, package) ->
       package
   | Resolved (key, _)
   | Trait_header key
@@ -195,8 +195,8 @@ let show_computed part =
         | Instantiations -> "instantiations"
         | Tests -> "tests"
         | Dependencies -> "dependencies")
-  | Successors (path, package) ->
-      Printf.sprintf "successors %s %s" (Path.show_package package) (Path.show path)
+  | Callees (path, package) ->
+      Printf.sprintf "callees %s %s" (Path.show_package package) (Path.show path)
   | Proof declared -> "proof " ^ key declared
   | Lowering (Folded_constants path) -> "folded constants " ^ Path.show path
   | Lowering (Lowered instance) -> "lowered " ^ Instance.to_string instance
@@ -266,7 +266,7 @@ let computed_definition = function
   | Derived_form path
   | Generated_mir path
   | Call_edges path
-  | Successors (path, _)
+  | Callees (path, _)
   | Lowering (Folded_constants path) ->
       Some path
   | Derived_interface { type_; trait } -> Some (Derived { type_; trait })
@@ -323,7 +323,7 @@ let computed_kind_name = function
   | Used_packages _ -> "used packages"
   | Import_check _ -> "import check"
   | Package_check _ -> "package check"
-  | Successors _ -> "successors"
+  | Callees _ -> "callees"
   | Proof _ -> "proof"
   | Lowering (Folded_constants _) -> "folded constants"
   | Lowering (Lowered _) -> "lowered code"

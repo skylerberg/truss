@@ -21,10 +21,7 @@ let parameter_of (body : Mir.Graph.body) local =
   | { kind = Source { mode; name; _ }; type_; _ } -> (mode, Option.value name ~default:"_", type_)
   | _ -> bug "a parameter that is no source local"
 
-let spans st =
-  match st.context.lookups.interface.names.spans st.frame.code.definition_key with
-  | Some spans -> spans
-  | None -> bug "no spans for %s" (Path.show st.frame.code.definition_key.path)
+let spans st = st.context.lookups.interface.names.spans st.frame.code.definition_key
 
 let site_of st (origin : Core.origin) =
   let spans = spans st in
@@ -1478,7 +1475,7 @@ and capability_defaults st ~capability ~name (arguments : Mir.argument list) eva
             caller.code with
             definition_key = key;
             enclosing_impl = None;
-            text = text_of st.context key;
+            text = st.context.lookups.interface.names.text key;
             substitution = [];
           };
         self_place = None;

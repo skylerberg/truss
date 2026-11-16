@@ -193,6 +193,9 @@ let () =
         ~fixes:[ "(a && b) || c"; "a && (b || c)" ]);
   test "comparisons do not chain" (fun () ->
       combination "a < b < c" ~at:"< c" ~code:Needs_parentheses ~fixes:[ "a < b && b < c" ]);
+  test "comparisons joined under || get parentheses" (fun () ->
+      combination "a || b <= c < d" ~at:"< d" ~code:Needs_parentheses
+        ~fixes:[ "a || (b <= c && c < d)" ]);
   test "a chained comparison without a simple middle has no fix" (fun () ->
       combination "a < f(b) < c" ~at:"< c" ~code:Needs_parentheses ~fixes:[]);
   test "is does not chain" (fun () ->

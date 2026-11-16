@@ -94,7 +94,7 @@ val references : lowered -> Instance.key list
 
 val check_calls :
   Interface.Lookups.t ->
-  successors:(Path.t -> Path.t list option) ->
+  list_callees:(Path.t -> Path.t list option) ->
   Instance.key ->
   lowered ->
   unit

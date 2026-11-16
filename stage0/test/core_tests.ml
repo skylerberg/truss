@@ -290,7 +290,7 @@ let () =
               (Support.names packages key.module_.package).spans key,
               (Support.names packages key.module_.package).text key )
           with
-          | Some form, Some spans, Some written ->
+          | Some form, spans, written ->
               let actual = ref [] in
               Core_walk.definition
                 {
@@ -395,8 +395,8 @@ let () =
               (Support.names packages key.module_.package).text key )
           with
           | ( Some { definition = Function { contract = { costs = [ cost ]; _ }; _ }; _ },
-              Some spans,
-              Some written ) ->
+              spans,
+              written ) ->
               let span = spans.(cost.origin) in
               let quoted = String.sub written span.start (span.stop - span.start) in
               if quoted <> "cost time O(items.length())" then fail "found `%s`" quoted
@@ -471,11 +471,7 @@ let () =
                 (fun (name, receiver) ->
                   let path : Path.t = Method { owner = impl; name; receiver } in
                   match Database.For_testing.read_derived_form (database packages) path with
-                  | Some form -> (
-                      match impl with
-                      | Derived { type_ = Top { module_; _ }; _ } ->
-                          Core_lint.check interface { module_; path; ordinal = 0 } form
-                      | _ -> fail "`%s` is not derived for a top-level type" (Path.show impl))
+                  | Some form -> Core_lint.check_derived interface path form
                   | None ->
                       if not (List.mem name provided) then
                         fail "`%s` has no core form for `%s`" (Path.show impl) name

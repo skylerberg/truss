@@ -91,15 +91,13 @@ let runnable database =
     (lookups.interface.names.declarations example)
 
 let proven (names : Resolve.Names.lookups) key states =
-  match (names.place key, names.text key) with
-  | Some { base; _ }, Some text ->
-      List.for_all
-        (fun (state : Source.span Prover.state) ->
-          state.span.stop <= base
-          || state.span.start >= base + String.length text
-          || state.failure = None)
-        states
-  | _ -> false
+  let base = (names.place key).base and text = names.text key in
+  List.for_all
+    (fun (state : Source.span Prover.state) ->
+      state.span.stop <= base
+      || state.span.start >= base + String.length text
+      || state.failure = None)
+    states
 
 let admitting index candidate =
   Printf.sprintf "\nfn fuzz_requires_%d(%s) -> Bool {\n  %s\n}\n" index

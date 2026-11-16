@@ -520,6 +520,17 @@ let () =
       error "a\u{00A0}b" ~code:Confusable_character ~at:"\u{00A0}" ~fixed:"a b";
       error "\u{2200} x" ~code:Confusable_character ~at:"\u{2200}" ~fixed:"forall x";
       equal_lists Fun.id "tokens" [ "a"; "<="; "b"; "NL" ] (tokens_of "a \u{2264} b"));
+  test "a string fix right after a string is withheld" (fun () ->
+      List.iter
+        (fun (text, code) -> equal_lists Fun.id ("fixed " ^ text) [] (fixed_texts text ~code))
+        [
+          ("x = \"\"$\"\"", Diagnostic.Code.String_prefix);
+          ("x = \"\"f\"a\"", String_prefix);
+          ("x = \"\"@\"a\"", String_prefix);
+          ("x = \"\"r#\"a\"#", String_prefix);
+          ("x = \"\"`a`", String_delimiter);
+          ("x = \"\"\u{201C}a\u{201D}", Confusable_character);
+        ]);
   test "a fix whose code would join a neighbor is withheld" (fun () ->
       error "p\u{2200}x" ~code:Confusable_character ~at:"\u{2200}";
       error "a\u{2013}>b" ~code:Confusable_character ~at:"\u{2013}";

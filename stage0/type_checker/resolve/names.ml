@@ -99,15 +99,15 @@ type lookups = {
   split_module : string list -> Path.module_ option;
   dependency_names : Path.package -> Path.package list;
   key : Path.t -> key option;
-  declaration : key -> declaration option;
+  declaration : key -> declaration;
   declarations : Path.module_ -> declaration list;
   declarations_in : Path.file -> declaration list;
   package_declarations : Path.package -> declaration list;
-  definition : key -> definition option;
-  text : key -> string option;
-  spans : key -> Source.Definition_span.t array option;
-  recovered : key -> Source.Definition_span.t list option;
-  place : key -> place option;
+  definition : key -> definition;
+  text : key -> string;
+  spans : key -> Source.Definition_span.t array;
+  recovered : key -> Source.Definition_span.t list;
+  place : key -> place;
   container : key -> key option;
   contained : key -> key list;
   members : Path.t -> string -> key list;
@@ -118,12 +118,20 @@ type lookups = {
   law_proofs : Path.package -> law_proof_name -> key list;
 }
 
-let packages lookups (module_ : Path.module_) =
-  List.sort_uniq compare
-    (module_.package :: Path.standard_package :: lookups.dependency_names module_.package)
+let list_visible_packages lookups package =
+  List.sort_uniq compare (package :: Path.standard_package :: lookups.dependency_names package)
+
+let list_transitive_dependencies lookups package =
+  let rec close seen = function
+    | [] -> seen
+    | name :: rest when List.mem name seen -> close seen rest
+    | name :: rest -> close (name :: seen) (lookups.dependency_names name @ rest)
+  in
+  let standard = if package = Path.standard_package then [] else [ Path.standard_package ] in
+  List.filter (fun name -> name <> package) (close [] (standard @ lookups.dependency_names package))
 
 let full_module lookups ~(from : Path.module_) (names : string list) : Path.module_ =
-  let known = packages lookups from in
+  let known = list_visible_packages lookups from.package in
   match Path.split_module ~is_package:(fun package -> List.mem package known) names with
   | Some module_ -> module_
   | None -> (
@@ -135,9 +143,10 @@ let used_module lookups ~from (path : path) =
   full_module lookups ~from
     (List.map (fun (name : name) -> name.text) path.modules @ [ path.last.text ])
 
-let is_visible_module lookups ~from (module_ : Path.module_) =
+let is_visible_module lookups ~(from : Path.module_) (module_ : Path.module_) =
   module_ = Intrinsic.module_
-  || (List.mem module_.package (packages lookups from) && lookups.module_exists module_)
+  || List.mem module_.package (list_visible_packages lookups from.package)
+     && lookups.module_exists module_
 
 type module_lookup =
   | Found_module of Path.module_ * [ `Import of string | `Package ]
@@ -166,16 +175,13 @@ let lookup_module lookups ~(from : Path.module_) ~imports (names : string list) 
 let top module_ name : Path.t = Top { module_; name }
 
 let recovery_report (lookups : lookups) key part =
-  match (lookups.definition key, lookups.spans key, lookups.recovered key) with
-  | Some definition, Some spans, Some recovered -> Parts.reported ~spans ~recovered definition part
-  | _ -> None
+  Parts.reported ~spans:(lookups.spans key) ~recovered:(lookups.recovered key)
+    (lookups.definition key) part
 
 let is_broken lookups key part = Option.is_some (recovery_report lookups key part)
 
 let definition_of_path lookups path =
-  match lookups.key path with
-  | Some key -> Option.map (fun tree -> (key, tree)) (lookups.definition key)
-  | None -> None
+  Option.map (fun key -> (key, lookups.definition key)) (lookups.key path)
 
 let law_parameters lookups (trait : Path.t) law =
   match definition_of_path lookups trait with
@@ -983,6 +989,11 @@ let of_namespaces ~(namespace : Path.package -> namespace) ~module_exists ~split
   in
   let of_file (file : Path.file) = File_map.find_opt file (namespace file.module_.package).files in
   let declared (key : key) = Key_map.find_opt key (namespace key.module_.package).declared in
+  let read_declared key =
+    match declared key with
+    | Some declared -> declared
+    | None -> Compiler_bug.bug ~stage:"Names" "%s is not declared" (show_key key)
+  in
   let members owner name =
     Option.value ~default:[]
       (Member_map.find_opt (owner, name) (namespace (Path.package owner)).members)
@@ -993,7 +1004,7 @@ let of_namespaces ~(namespace : Path.package -> namespace) ~module_exists ~split
         Option.bind (of_module module_) (fun names -> String_map.find_opt name names.index));
     entries =
       (fun module_ -> match of_module module_ with Some names -> names.entries | None -> []);
-    imports = (fun key -> match declared key with Some declared -> declared.imports | None -> []);
+    imports = (fun key -> (read_declared key).imports);
     module_exists;
     split_module;
     dependency_names;
@@ -1010,24 +1021,19 @@ let of_namespaces ~(namespace : Path.package -> namespace) ~module_exists ~split
         | Method { owner; name; _ } | Member_constant { owner; name } ->
             List.find_opt (fun (key : key) -> Path.equal key.path path) (members owner name)
         | Derived _ | Unresolved _ -> None);
-    declaration = (fun key -> Option.map (fun declared -> declared.declaration) (declared key));
+    declaration = (fun key -> (read_declared key).declaration);
     declarations =
       (fun module_ ->
         match of_module module_ with Some names -> names.module_declarations | None -> []);
     declarations_in = (fun file -> Option.value ~default:[] (of_file file));
     package_declarations = (fun package -> (namespace package).declarations);
-    definition = (fun key -> Option.map (fun declared -> declared.item.value) (declared key));
-    text = (fun key -> Option.map (fun (declared : declared) -> declared.text) (declared key));
-    spans =
-      (fun key ->
-        Option.map (fun (declared : declared) -> declared.item.positions.spans) (declared key));
-    recovered =
-      (fun key ->
-        Option.map (fun (declared : declared) -> declared.item.positions.recovered) (declared key));
-    place = (fun key -> Option.map (fun declared -> declared.place) (declared key));
-    container = (fun key -> Option.bind (declared key) (fun declared -> declared.container));
-    contained =
-      (fun key -> match declared key with Some declared -> declared.contained | None -> []);
+    definition = (fun key -> (read_declared key).item.value);
+    text = (fun key -> (read_declared key).text);
+    spans = (fun key -> (read_declared key).item.positions.spans);
+    recovered = (fun key -> (read_declared key).item.positions.recovered);
+    place = (fun key -> (read_declared key).place);
+    container = (fun key -> (read_declared key).container);
+    contained = (fun key -> (read_declared key).contained);
     members;
     traits_declaring =
       (fun package name ->

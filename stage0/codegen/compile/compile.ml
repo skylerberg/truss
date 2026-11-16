@@ -126,19 +126,19 @@ let bound_methods (interface : Interface.Lookups.t) path type_arguments =
         (pairs signature.generics type_arguments)
   | None -> []
 
-let check_calls (interface : Interface.Lookups.t) ~successors (key : Instance.key) lowered =
+let check_calls (interface : Interface.Lookups.t) ~list_callees (key : Instance.key) lowered =
   match (key, lowered) with
   | Code { path = caller; type_arguments }, Compiled fragment -> (
       match caller with
       | Method { owner = Derived _; _ } -> ()
       | _ -> (
-          match successors (call_node interface caller) with
+          match list_callees (call_node interface caller) with
           | None -> ()
           | Some callees ->
               let allowed =
                 callees
                 @ List.concat_map
-                    (fun callee -> Option.value (successors callee) ~default:[])
+                    (fun callee -> Option.value (list_callees callee) ~default:[])
                     callees
                 @ bound_methods interface caller type_arguments
               in
@@ -150,7 +150,7 @@ let check_calls (interface : Interface.Lookups.t) ~successors (key : Instance.ke
                            (is_runtime_call callee
                            || List.exists (Path.equal callee) allowed
                            || List.exists (Path.equal (call_node interface callee)) allowed) ->
-                      bug "%s calls %s, which is not among its call edges" (Instance.to_string key)
+                      bug "%s calls %s, which is not among its callees" (Instance.to_string key)
                         (Instance.to_string called)
                   | _ -> ())
                 (Emit_c.called fragment)))
@@ -220,7 +220,7 @@ let test_key compiler test = result_key compiler (Lower.test_key test)
 
 let position compiler (definition : Path.t) offset : Emit_c.position =
   let names = compiler.requests.interface.names in
-  match Option.bind (names.key definition) names.place with
+  match Option.map names.place (names.key definition) with
   | Some { file; base } ->
       let line, column = Source.position (compiler.requests.source file) (base + offset) in
       { file = compiler.file_name file; line; column }
@@ -234,7 +234,7 @@ let show_position (position : Emit_c.position) =
 let todo_type_position compiler (path : Path.t) =
   let names = compiler.requests.interface.names in
   match Option.map (fun key -> (names.definition key, names.spans key)) (names.key path) with
-  | Some (Some { kind = Type_definition { name; _ }; _ }, Some spans) ->
+  | Some ({ kind = Type_definition { name; _ }; _ }, spans) ->
       position compiler path spans.(name.id).start
   | Some _ | None ->
       bug "%s is reached as a type defined as todo, and has no definition" (Path.show path)

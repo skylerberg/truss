@@ -39,30 +39,29 @@ let requires_fix context frame (part : part) (requirement : Mir.requirement) ter
   let written () =
     List.filter_map
       (fun (index, (parameter : Mir.parameter)) ->
-        match List.find_opt (fun (passed : passed) -> passed.position = index) values with
-        | Some { origin = Some origin; _ } ->
-            let text = text_of frame.source origin in
-            Some (parameter.local, if simple text then text else "(" ^ text ^ ")")
-        | Some { origin = None; _ } | None -> None)
+        Option.bind
+          (List.find_opt (fun (passed : passed) -> passed.position = index) values)
+          (fun (passed : passed) ->
+            Option.map
+              (fun text -> (parameter.local, if simple text then text else "(" ^ text ^ ")"))
+              (truss_of_value context passed.term)))
       (List.mapi (fun index parameter -> (index, parameter)) part.parameters)
   in
   match part.callee.key with
   | Some key
     when frame.source.key = Some context.home && List.for_all fixed (Logic.free_constants term) ->
       let written = written () in
-      if written <> [] || part.parameters = [] then
+      let replacements =
+        List.map
+          (fun (local, origin) ->
+            Option.map (fun text -> (origin, text)) (List.assoc_opt local written))
+          requirement.names
+      in
+      if List.for_all Option.is_some replacements then
         add_requires context frame
           [
             Substituted
-              {
-                key;
-                clause = clause.origin;
-                replacements =
-                  List.filter_map
-                    (fun (local, origin) ->
-                      Option.map (fun text -> (origin, text)) (List.assoc_opt local written))
-                    requirement.names;
-              };
+              { key; clause = clause.origin; replacements = List.filter_map Fun.id replacements };
           ]
       else []
   | Some _ | None -> []

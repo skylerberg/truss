@@ -55,15 +55,15 @@ type lookups = {
   split_module : string list -> Path.module_ option;
   dependency_names : Path.package -> Path.package list;
   key : Path.t -> key option;
-  declaration : key -> declaration option;
+  declaration : key -> declaration;
   declarations : Path.module_ -> declaration list;
   declarations_in : Path.file -> declaration list;
   package_declarations : Path.package -> declaration list;
-  definition : key -> Syntax.definition option;
-  text : key -> string option;
-  spans : key -> Source.Definition_span.t array option;
-  recovered : key -> Source.Definition_span.t list option;
-  place : key -> place option;
+  definition : key -> Syntax.definition;
+  text : key -> string;
+  spans : key -> Source.Definition_span.t array;
+  recovered : key -> Source.Definition_span.t list;
+  place : key -> place;
   container : key -> key option;
   contained : key -> key list;
   members : Path.t -> string -> key list;
@@ -80,6 +80,8 @@ type module_lookup =
   | No_module of string
 
 val used_module : lookups -> from:Path.module_ -> Syntax.path -> Path.module_
+val list_visible_packages : lookups -> Path.package -> Path.package list
+val list_transitive_dependencies : lookups -> Path.package -> Path.package list
 val is_visible_module : lookups -> from:Path.module_ -> Path.module_ -> bool
 
 val lookup_module :

@@ -32,22 +32,20 @@ let run ~position =
         List.find_map
           (fun (declaration : Names.declaration) ->
             let key = Names.key_of declaration in
-            match (names.place key, names.text key) with
-            | Some { base; _ }, Some text when base <= offset && offset <= base + String.length text
-              -> (
-                match
-                  (names.definition key, names.spans key, Database.read_resolved database key)
-                with
-                | Some definition, Some spans, Some resolved ->
-                    let tables =
-                      Option.map
-                        (fun (checked : Infer.checked) -> checked.tables)
-                        (Database.read_checked_body database key)
-                    in
-                    Inspect.explain_at ~path:key.path spans definition resolved tables ~text
-                      (offset - base)
-                | _ -> None)
-            | _ -> None)
+            let ({ base; _ } : Names.place) = names.place key in
+            let text = names.text key in
+            if base <= offset && offset <= base + String.length text then
+              match Database.read_resolved database key with
+              | Some resolved ->
+                  let tables =
+                    Option.map
+                      (fun (checked : Infer.checked) -> checked.tables)
+                      (Database.read_checked_body database key)
+                  in
+                  Inspect.explain_at ~path:key.path (names.spans key) (names.definition key)
+                    resolved tables ~text (offset - base)
+              | None -> None
+            else None)
           (names.declarations_in written)
       in
       match symbol_at with
@@ -56,12 +54,7 @@ let run ~position =
           else Output.print_line "Nothing there.";
           0
       | Some explanation ->
-          let signature =
-            Option.bind explanation.refers_to (fun path ->
-                match names.key path with
-                | Some key -> Signatures.text names ~body:false ~opaque:false key
-                | None -> None)
-          in
+          let signature = Option.bind explanation.refers_to (Signatures.of_path names) in
           if json then
             Json.print
               (Json.document ~diagnostics:[]
