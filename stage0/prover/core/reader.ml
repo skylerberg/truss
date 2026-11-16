@@ -231,6 +231,14 @@ let write_place context frame run (place : Mir.place) new_value =
                   | _ -> written)))
         frame alternatives
 
+let list_mut_provided_places (provided : Mir.provided list) =
+  List.filter_map
+    (fun (implementation : Mir.provided) ->
+      match (implementation.mode, implementation.value) with
+      | Types.Mut, Borrow { place; _ } -> Some place
+      | Mut, (Use _ | Take _ | Constant _) | (Read | Own), _ -> None)
+    provided
+
 let compute_changes ?(also = []) run (frame : State.frame) (blocks : Mir.block list) : State.changed
     =
   let locals = ref [] and self = ref false and reassigned = ref [] in
@@ -282,13 +290,21 @@ let compute_changes ?(also = []) run (frame : State.frame) (blocks : Mir.block l
         | Basic (Slice { destination; call; _ } | Template { destination; call; _ }) ->
             assigned destination;
             passed call
+        | Basic (Provide { provided; _ }) -> List.iter note (list_mut_provided_places provided)
         | For { iteration = Pull { cursor; _ }; _ } -> note cursor
         | Yield { mode = Types.Mut; part } -> lent part
         | Jump (Cancel { winner; returned; _ }) ->
             note { root = Local winner; projections = [] };
             Option.iter (fun (_, local) -> note { root = Local local; projections = [] }) returned
-        | _ -> ());
-        List.iter visit (Mir.nested_blocks statement))
+        | Basic
+            ( Live _ | Dead _ | Assert _ | Echo _ | Provide_end | Loan_start _ | Loan_end _
+            | Ghost_assert _ | Matched _ | Proof _ )
+        | Assert_by_bit_vector _ | While _ | Fork _ | Resume _
+        | For { iteration = Range _; _ }
+        | Yield { mode = Read | Own; _ }
+        | Jump (Return _ | Break | Continue | Unreachable | Written_unreachable | Todo) ->
+            ());
+        List.iter visit (Mir.list_nested_blocks statement))
       block.statements
   in
   List.iter visit blocks;
@@ -330,7 +346,7 @@ let read_operand context frame run (operand : Mir.operand) =
       | Boolean truth -> Logic.Boolean truth)
 
 let compute_operand_type context frame operand =
-  Facts.substitute_type context frame (Mir.operand_type operand)
+  Facts.substitute_type context frame (Mir.extract_operand_type operand)
 
 let operand_origin : Mir.operand -> Core.origin option = function
   | Use { origin; _ } | Borrow { origin; _ } | Take { origin; _ } -> Some origin
@@ -398,7 +414,7 @@ let find_argument_place context (frame : State.frame) run (mode : Types.mode) (v
                     ~owner_type:(fun frame -> compute_place_type context frame run slice.collection)
                     ~low:slice.start ~high:slice.stop ))
               slices))
-  | Types.Mut, Some Unknown_slice when Types.is_well_known Slice (Mir.operand_type value) ->
+  | Types.Mut, Some Unknown_slice when Types.is_well_known Slice (Mir.extract_operand_type value) ->
       Facts.unsupported
         (Facts.locate context frame.source
            (match operand_origin value with
@@ -1043,7 +1059,7 @@ and read_statement context frame run (statement : Mir.statement) =
         {
           while_at = loop.origin;
           while_clauses = loop.clauses;
-          changed = compute_changes run frame (Mir.nested_blocks statement);
+          changed = compute_changes run frame (Mir.list_nested_blocks statement);
           bind_parts = (fun frame -> bind_parts context frame run);
           test = (fun head -> read_block context head run condition);
           run_body =
@@ -1360,8 +1376,14 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
       in
       let base_type = Facts.substitute_type context frame base_type in
       let collection = read_place context frame run base in
+      let is_checked =
+        match call.callee with
+        | Function { path; _ } -> Mir.list_checked_requires context.lookups.mir path <> []
+        | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _ -> false
+      in
       let frame, viewed, low, high =
         Intrinsics.apply_slice context frame site ~base_type ~collection ~low ~high:(argument 2)
+          ~is_checked
       in
       let collection = expand_place frame run base in
       let written = write_place context frame run destination viewed in
@@ -1391,6 +1413,23 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
           Some (write_place context frame run destination tagged)
       | _ -> Facts.unsupported location "a tagged template whose tag the prover cannot read")
   | Provide { provided; _ } ->
+      if context.terminates && frame.makes_obligations then
+        List.iter
+          (fun (implementation : Mir.provided) ->
+            List.iter
+              (fun (provided : Core.provided) ->
+                if Facts.has_method_in_recursion_group context provided.impl then
+                  Facts.oblige context frame Termination location
+                    [
+                      State.Text
+                        (Printf.sprintf
+                           "This `provide` gives `%s`, whose methods call back here, so the prover \
+                            cannot show that the recursion ends."
+                           (Path.show provided.impl));
+                    ]
+                    (Logic.Boolean false))
+              implementation.provides)
+          provided;
       Hashtbl.replace run.provides statement.origin provided;
       Some frame
   | Provide_end -> (
@@ -1398,15 +1437,13 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
       | Some provided ->
           Some
             (List.fold_left
-               (fun frame (implementation : Mir.provided) ->
-                 match (implementation.mode, implementation.value) with
-                 | Types.Mut, Borrow { place; _ } ->
-                     let root = { (expand_place frame run place) with Mir.projections = [] } in
-                     refresh_place context frame
-                       (compute_place_type context frame run root)
-                       (make_passed_place context run root)
-                 | _ -> frame)
-               frame provided)
+               (fun frame place ->
+                 let root = { (expand_place frame run place) with Mir.projections = [] } in
+                 refresh_place context frame
+                   (compute_place_type context frame run root)
+                   (make_passed_place context run root))
+               frame
+               (list_mut_provided_places provided))
       | None -> Some frame)
 
 and write_assignment context run (target : Mir.place) ~(copied : Mir.operand list) read =
@@ -1456,6 +1493,7 @@ let read_formula context (frame : State.frame) (formula : Mir.formula) ~argument
       aliases = Locals.empty;
       slices = Locals.empty;
       lends = Locals.empty;
+      panic = Undeclarable;
     }
   in
   let inside =
@@ -1487,7 +1525,7 @@ let read_body context start ~(lambdas : Mir.body array) (body : Mir.body) =
           | Resume { exits; _ } ->
               List.filter_map (fun (exit : Mir.early_exit) -> exit.returned) exits
           | _ -> [])
-        @ List.concat_map returned_locals (Mir.nested_blocks statement))
+        @ List.concat_map returned_locals (Mir.list_nested_blocks statement))
       block.statements
   in
   let start =

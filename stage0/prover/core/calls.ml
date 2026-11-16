@@ -47,7 +47,7 @@ let requires_fix (context : State.context) (frame : State.frame) (part : State.p
           requirement.names
       in
       if List.for_all Option.is_some replacements then
-        Facts.add_requires context
+        Facts.add_requires context frame
           [
             Substituted
               { key; clause = clause.origin; replacements = List.filter_map Fun.id replacements };
@@ -73,7 +73,7 @@ let name_term context ty term =
 let evaluate_default_value (context : State.context) frame (part : State.part) position =
   match
     Option.bind part.callee.key (fun (key : Resolve.Names.key) ->
-        Mir.defaults_of_path context.lookups.mir key.path)
+        Mir.read_defaults context.lookups.mir key.path)
   with
   | Some { form = Parameter_defaults defaults; _ } -> (
       match (List.assoc_opt position defaults, List.nth_opt part.parameters position) with
@@ -184,7 +184,7 @@ let contract_call context (frame : State.frame) (site : Invocation.site) (invoca
   if
     context.terminates && frame.makes_obligations
     && (match invocation.callee with
-      | Trait_method _ -> Mir.Call_edges.dispatched invocation.callee
+      | Trait_method _ -> Mir.Call_edges.is_dispatched invocation.callee
       | _ -> true)
     && Facts.is_in_recursion_group context path
   then
@@ -257,6 +257,9 @@ let contract_call context (frame : State.frame) (site : Invocation.site) (invoca
     | own :: others -> if own.requires <> [] || others = [] then [ own ] else others
     | [] -> []
   in
+  let is_checked =
+    Mir.is_index_call invocation.callee && Mir.list_checked_requires context.lookups.mir path <> []
+  in
   let required =
     List.concat_map
       (fun (part : State.part) ->
@@ -265,15 +268,18 @@ let contract_call context (frame : State.frame) (site : Invocation.site) (invoca
           (fun (requirement : Mir.requirement) ->
             let clause = requirement.clause in
             let _, term = Validity.read_specification context entry clause in
-            Facts.oblige context frame Requires location
-              ?cited:(Option.map (fun key -> (key, clause.origin)) part.callee.key)
-              ~fixes:(requires_fix context frame part requirement term values)
+            let cited = Option.map (fun key -> (key, clause.origin)) part.callee.key in
+            let fixes = requires_fix context frame part requirement term values in
+            let message : State.message =
               [
                 Text "`";
                 Facts.quote part.callee clause.origin;
                 Text (Printf.sprintf "` may not hold for this call to `%s`." (Path.show path));
               ]
-              term;
+            in
+            if is_checked then
+              Facts.oblige_safe_operation context frame Requires location ?cited ~fixes message term
+            else Facts.oblige context frame Requires location ?cited ~fixes message term;
             term)
           part.requires)
       requiring
@@ -856,12 +862,7 @@ let apply_call ?lent_final context (frame : State.frame) (site : Invocation.site
         (Logic.Boolean false);
     List.iter
       (fun impl ->
-        let reaches_here =
-          List.exists
-            (Facts.is_in_recursion_group context)
-            (Mir.Call_edges.written_methods context.lookups.interface.names impl)
-        in
-        if reaches_here then
+        if Facts.has_method_in_recursion_group context impl then
           Facts.oblige context frame Termination location
             [
               Text
@@ -872,7 +873,8 @@ let apply_call ?lent_final context (frame : State.frame) (site : Invocation.site
                    (Path.show impl));
             ]
             (Logic.Boolean false))
-      (Mir.Call_edges.impls_used context.lookups.interface (Path.package context.current)
+      (Mir.Call_edges.list_impls_used context.lookups.interface
+         (Path.locate_package context.current)
          invocation.callee)
   end;
   let with_contract ?(substitution_of = fun _ -> []) ?(instance = []) path = function

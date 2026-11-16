@@ -1,6 +1,6 @@
 type package = { owner : string option; name : string }
 
-val package_parts : package -> string list
+val list_package_parts : package -> string list
 val show_package : package -> string
 val compare_package : package -> package -> int
 val parse_names : string -> string list option
@@ -9,12 +9,12 @@ val parse_package : string -> package option
 type module_ = { package : package; modules : string list }
 
 val split_module : is_package:(package -> bool) -> string list -> module_ option
-val module_parts : module_ -> string list
+val list_module_parts : module_ -> string list
 val show_module : module_ -> string
 
 type file = { module_ : module_; name : string }
 
-val file_names : file -> string list
+val list_file_names : file -> string list
 val show_file : file -> string
 
 type receiver = Static | Read | Mut | Own
@@ -41,9 +41,9 @@ and argument =
   | Constant of t
 
 val standard_package : package
-val standard_module : string list -> module_
-val standard : string list -> string -> t
-val package : t -> package
+val make_standard_module : string list -> module_
+val make_standard_path : string list -> string -> t
+val locate_package : t -> package
 val show : t -> string
 val compare : t -> t -> int
 val equal : t -> t -> bool

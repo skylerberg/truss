@@ -8,9 +8,9 @@ exception Malformed of { line : int; message : string }
 
 val parse : string -> t
 val has_project_table : string -> bool
-val with_dependency : string -> Path.package -> string
-val without_dependency : string -> Path.package -> string
-val valid_name : string -> bool
+val add_dependency : string -> Path.package -> string
+val remove_dependency : string -> Path.package -> string
+val is_valid_name : string -> bool
 val parse_name : string -> Path.package option
 val truss_version : string
 val toolchain_builds : string -> bool

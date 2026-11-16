@@ -16,7 +16,7 @@ type jump_targets = {
   task_ends : (Tree.task * Graph.block) list;
 }
 
-let expanded_body (body : Tree.body) : Graph.body =
+let expand_body (body : Tree.body) : Graph.body =
   let blocks : Graph.basic_block Dynarray.t = Dynarray.create () in
   let fresh () =
     Dynarray.add_last blocks { statements = []; terminator = Unreachable; terminator_origin = 0 };
@@ -325,14 +325,14 @@ let expanded_body (body : Tree.body) : Graph.body =
     parameters = body.parameters;
     captures = body.captures;
     locals = body.locals;
-    blocks = Graph.canonical (Dynarray.to_array blocks);
+    blocks = Graph.canonicalize (Dynarray.to_array blocks);
   }
 
-let expanded (code : Tree.t) : Graph.t =
-  { body = expanded_body code.body; lambdas = Array.map expanded_body code.lambdas }
+let expand (code : Tree.t) : Graph.t =
+  { body = expand_body code.body; lambdas = Array.map expand_body code.lambdas }
 
-let code_of_formula (formula : Tree.formula) : Graph.t =
-  expanded
+let expand_formula (formula : Tree.formula) : Graph.t =
+  expand
     {
       body =
         {

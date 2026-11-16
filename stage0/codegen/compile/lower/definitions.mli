@@ -10,8 +10,8 @@ type context = {
   checks : bool;
 }
 
-val monomorphic : Interface.Lookups.t -> Monomorphic.context
-val context : Lookups.settings -> env:Memory_layout.env -> Lookups.t -> context
+val make_monomorphic_context : Interface.Lookups.t -> Monomorphic.context
+val make_context : Lookups.settings -> env:Memory_layout.env -> Lookups.t -> context
 
 type written = { spans : Source.Definition_span.t array; text : string }
 
@@ -26,19 +26,21 @@ type code = {
   has_defaults : bool;
 }
 
-val unwritten : definition:Path.t -> substitution:Types.substitution -> result:Types.result -> code
+val make_unwritten_code :
+  definition:Path.t -> substitution:Types.substitution -> result:Types.result -> code
+
 val read_written : context -> Resolve.Names.key -> written
 val bind : Types.generic list -> Ground.argument list -> Types.substitution
-val impl_interface : context -> Path.t -> Types.impl_interface
-val signature_of : context -> Path.t -> Types.signature
-val code_of : context -> Path.t -> Ground.argument list -> code
-val template_clauses : context -> Path.t -> int list -> Mir.Graph.t list
+val read_impl_interface : context -> Path.t -> Types.impl_interface
+val read_signature : context -> Path.t -> Types.signature
+val make_code : context -> Path.t -> Ground.argument list -> code
+val list_template_clauses : context -> Path.t -> int list -> Mir.Graph.t list
 val panic_path : Path.t
-val evidence_for : context -> Types.substitution -> Types.capability_set -> Path.t list
-val result_of : context -> Types.substitution -> Types.result -> Convention.result * bool
-val lending_parameters : context -> Types.substitution -> Types.result -> Lowered.ty list
+val list_evidence : context -> Types.substitution -> Types.capability_set -> Path.t list
+val classify_result : context -> Types.substitution -> Types.result -> Convention.result * bool
+val list_lending_parameters : context -> Types.substitution -> Types.result -> Lowered.ty list
 
-val c_signature :
+val make_c_signature :
   context ->
   Types.substitution ->
   parameters:(Types.mode * Types.ty) list ->
@@ -48,4 +50,4 @@ val c_signature :
   Lowered.signature * Convention.result
 
 val has_defaults : Types.signature -> bool
-val interface_parameters : Types.signature -> (Types.mode * Types.ty) list
+val list_interface_parameters : Types.signature -> (Types.mode * Types.ty) list

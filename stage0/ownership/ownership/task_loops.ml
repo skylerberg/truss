@@ -1,4 +1,4 @@
-let collection_type (body : Mir.Graph.body) ~(inside : Mir.Graph.block) (element : Mir.local) =
+let find_collection_type (body : Mir.Graph.body) ~(inside : Mir.Graph.block) (element : Mir.local) =
   List.find_map
     (fun (statement : Mir.Graph.statement) ->
       match statement.kind with
@@ -26,10 +26,11 @@ let check context (mir : Mir.Graph.t) =
               let keyword = if schedule = Parallel_loop then "parallel" else "concurrent" in
               (match lent with
               | Some { element; _ } when body.locals.(element).kind = Lent Mut -> (
-                  match collection_type body ~inside element with
+                  match find_collection_type body ~inside element with
                   | Some collection when Place.is_storage_type collection -> ()
                   | collection ->
-                      Context.report context Data_race (Context.span context origin)
+                      Context.report context Data_race
+                        (Context.locate_origin context origin)
                         (Printf.sprintf
                            "Data race: the iterations of a `%s for` run at the same time, and each \
                             is lent an element of %s to mutate. Only a `List`, a `Slice`, or an \
@@ -44,7 +45,7 @@ let check context (mir : Mir.Graph.t) =
               match (schedule, iteration) with
               | Concurrent_loop, Pull _ when Context.is_view context body.locals.(part).type_ ->
                   Context.report context Task_outlives_view
-                    (Context.span context block.terminator_origin)
+                    (Context.locate_origin context block.terminator_origin)
                     (Printf.sprintf
                        "Each iteration of a `concurrent for` runs as a task that outlives the pull \
                         that started it. The element type `%s` is a view, and the next pull could \

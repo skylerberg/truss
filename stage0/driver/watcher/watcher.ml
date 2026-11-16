@@ -44,9 +44,9 @@ let start ~skipped ~cookie_directory root =
   end;
   watcher
 
-let descriptor watcher = handle_descriptor watcher.handle
+let extract_descriptor watcher = handle_descriptor watcher.handle
 
-let relative watcher path =
+let find_relative_path watcher path =
   if path = watcher.root then Some ""
   else
     let prefix = watcher.root ^ "/" in
@@ -58,7 +58,7 @@ let is_skipped watcher relative = List.exists watcher.skipped (String.split_on_c
 
 let drain watcher =
   let paths, is_overflowed = take watcher.handle in
-  let relatives = List.filter_map (relative watcher) paths in
+  let relatives = List.filter_map (find_relative_path watcher) paths in
   if not (is_recursive ()) then
     List.iter
       (fun relative ->
@@ -68,7 +68,7 @@ let drain watcher =
       relatives;
   (relatives, is_overflowed)
 
-let changes watcher =
+let read_changes watcher =
   watcher.cookies <- watcher.cookies + 1;
   let cookie =
     Printf.sprintf "%s/sync-%d-%d" watcher.cookie_directory (Unix.getpid ()) watcher.cookies
@@ -80,7 +80,7 @@ let changes watcher =
     let remaining = deadline -. Unix.gettimeofday () in
     if remaining <= 0. then Overflow
     else
-      match Unix.select [ descriptor watcher ] [] [] remaining with
+      match Unix.select [ extract_descriptor watcher ] [] [] remaining with
       | exception Unix.Unix_error (EINTR, _, _) -> wait paths is_overflowed
       | [], _, _ -> Overflow
       | _ ->

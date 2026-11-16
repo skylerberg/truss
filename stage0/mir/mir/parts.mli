@@ -18,14 +18,16 @@ type lookups = {
 
 type 'form sourced = { source : Resolve.Names.key; form : 'form }
 
-val code : body_part -> Tree.t option
-val graph : body_part -> Graph.t option
-val body_part_of_path : lookups -> Path.t -> body_part sourced option
-val code_of_path : lookups -> Path.t -> Tree.t sourced option
-val graph_of_path : lookups -> Path.t -> Graph.t sourced option
-val initializer_of_path : lookups -> Path.t -> Tree.t sourced option
-val initializer_graph_of_path : lookups -> Path.t -> Graph.t sourced option
-val contract_of_path : lookups -> Path.t -> Tree.contract sourced option
-val defaults_of_path : lookups -> Path.t -> Tree.t Tree.defaults sourced option
-val default_graphs_of_path : lookups -> Path.t -> Graph.t Tree.defaults sourced option
-val type_clauses_of_path : lookups -> Path.t -> Tree.type_clauses sourced option
+val find_code : body_part -> Tree.t option
+val find_graph : body_part -> Graph.t option
+val read_body_part : lookups -> Path.t -> body_part sourced option
+val read_code : lookups -> Path.t -> Tree.t sourced option
+val read_graph : lookups -> Path.t -> Graph.t sourced option
+val read_initializer : lookups -> Path.t -> Tree.t sourced option
+val read_initializer_graph : lookups -> Path.t -> Graph.t sourced option
+val read_contract : lookups -> Path.t -> Tree.contract sourced option
+val read_defaults : lookups -> Path.t -> Tree.t Tree.defaults sourced option
+val read_default_graphs : lookups -> Path.t -> Graph.t Tree.defaults sourced option
+val read_type_clauses : lookups -> Path.t -> Tree.type_clauses sourced option
+val is_index_call : _ Core.target -> bool
+val list_checked_requires : lookups -> Path.t -> Tree.requirement list

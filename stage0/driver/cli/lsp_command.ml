@@ -1,18 +1,22 @@
 type encoding = Utf_8 | Utf_16
 
-let encoding_name = function Utf_8 -> "utf-8" | Utf_16 -> "utf-16"
-let units = function Utf_8 -> Source.Bytes | Utf_16 -> Source.Utf_16_code_units
-let position encoding source offset = Source.location (units encoding) source offset
-let offset encoding source ~line ~column = Source.offset (units encoding) source ~line ~column
+let show_encoding = function Utf_8 -> "utf-8" | Utf_16 -> "utf-16"
+let classify_units = function Utf_8 -> Source.Bytes | Utf_16 -> Source.Utf_16_code_units
 
-let range encoding source (span : Source.span) =
+let locate_position encoding source offset =
+  Source.compute_location (classify_units encoding) source offset
+
+let locate_offset encoding source ~line ~column =
+  Source.compute_offset (classify_units encoding) source ~line ~column
+
+let encode_range encoding source (span : Source.span) =
   let point offset =
-    let line, character = position encoding source offset in
+    let line, character = locate_position encoding source offset in
     Json.Object [ ("line", Json.Int line); ("character", Json.Int character) ]
   in
   Json.Object [ ("start", point span.start); ("end", point span.stop) ]
 
-let hex_digit character =
+let parse_hex_digit character =
   match character with
   | '0' .. '9' -> Some (Char.code character - Char.code '0')
   | 'a' .. 'f' -> Some (Char.code character - Char.code 'a' + 10)
@@ -31,7 +35,7 @@ let path_of_uri uri =
       if at < String.length encoded then
         match encoded.[at] with
         | '%' when at + 2 < String.length encoded -> (
-            match (hex_digit encoded.[at + 1], hex_digit encoded.[at + 2]) with
+            match (parse_hex_digit encoded.[at + 1], parse_hex_digit encoded.[at + 2]) with
             | Some high, Some low ->
                 Buffer.add_char buffer (Char.chr ((high * 16) + low));
                 decode (at + 3)
@@ -45,10 +49,10 @@ let path_of_uri uri =
     decode 0;
     Some (Buffer.contents buffer)
 
-let lsp_diagnostic encoding ~uri source (diagnostic : Diagnostic.t) =
+let encode_diagnostic encoding ~uri source (diagnostic : Diagnostic.t) =
   Json.Object
     [
-      ("range", range encoding source diagnostic.span);
+      ("range", encode_range encoding source diagnostic.span);
       ("severity", Json.Int 1);
       ("code", Json.String (Diagnostic.Code.name diagnostic.code));
       ("source", Json.String "truss");
@@ -60,17 +64,17 @@ let lsp_diagnostic encoding ~uri source (diagnostic : Diagnostic.t) =
                Json.Object
                  [
                    ( "location",
-                     Json.Object [ ("uri", Json.String uri); ("range", range encoding source span) ]
-                   );
+                     Json.Object
+                       [ ("uri", Json.String uri); ("range", encode_range encoding source span) ] );
                    ("message", Json.String message);
                  ])
              diagnostic.notes) );
     ]
 
-let lsp_state encoding source (state : Source.span Prover.state) =
+let encode_state encoding source (state : Source.span Prover.state) =
   Json.Object
     [
-      ("range", range encoding source state.span);
+      ("range", encode_range encoding source state.span);
       ("code", Json.String (Diagnostic.Code.name (Prover state.code)));
       ("shows", Json.String state.shows);
       ("proven", Json.Bool (state.failure = None));
@@ -84,16 +88,18 @@ let check ~root encoding (buffers : (string * string) list) =
       buffers
   in
   let snapshot, _ = Command_packages.load root in
-  let base = Workspace.root snapshot in
+  let base = Workspace.locate_root snapshot in
   let trial =
     Workspace.make_trial snapshot
-      (List.map (fun (_, path, text) -> (Shown_path.relative ~from:base path, Some text)) buffers)
+      (List.map
+         (fun (_, path, text) -> (Shown_path.make_relative ~from:base path, Some text))
+         buffers)
   in
-  let packages = List.map snd (Workspace.packages trial) in
+  let packages = List.map snd (Workspace.list_packages trial) in
   let file_of path =
     List.find_opt
-      (fun file -> Shown_path.normalize (Command_packages.path trial file) = path)
-      (Command_packages.files trial packages)
+      (fun file -> Shown_path.normalize (Command_packages.locate_file trial file) = path)
+      (Command_packages.list_files trial packages)
   in
   let opened =
     List.map
@@ -115,7 +121,7 @@ let check ~root encoding (buffers : (string * string) list) =
                let diagnostics, states =
                  match file with
                  | Some file ->
-                     ( Diagnostic.shown
+                     ( Diagnostic.select_shown
                          (Database.list_file_diagnostics database file
                          @ Proofs.list_diagnostics proofs file),
                        Proofs.list_states proofs file )
@@ -125,8 +131,8 @@ let check ~root encoding (buffers : (string * string) list) =
                  [
                    ("uri", Json.String uri);
                    ( "diagnostics",
-                     Json.List (List.map (lsp_diagnostic encoding ~uri source) diagnostics) );
-                   ("states", Json.List (List.map (lsp_state encoding source) states));
+                     Json.List (List.map (encode_diagnostic encoding ~uri source) diagnostics) );
+                   ("states", Json.List (List.map (encode_state encoding source) states));
                  ])
              opened) );
     ]
@@ -203,40 +209,43 @@ let refresh server =
         match Json.parse text with
         | exception Json.Malformed -> log server "The check gave no answer."
         | answer -> (
-            match Json.field "files" answer with
+            match Json.lookup_field "files" answer with
             | Json.List files ->
                 List.iter
                   (fun file ->
-                    match Json.field "uri" file with
+                    match Json.lookup_field "uri" file with
                     | Json.String uri ->
-                        publish server uri (Json.field "diagnostics" file);
+                        publish server uri (Json.lookup_field "diagnostics" file);
                         notify server "truss/proofStates"
                           (Json.Object
-                             [ ("uri", Json.String uri); ("states", Json.field "states" file) ])
+                             [
+                               ("uri", Json.String uri); ("states", Json.lookup_field "states" file);
+                             ])
                     | _ -> ())
                   files
             | _ -> log server "The check gave no answer."))
 
-let client_encoding params =
+let choose_client_encoding params =
   match
-    Json.field "positionEncodings" (Json.field "general" (Json.field "capabilities" params))
+    Json.lookup_field "positionEncodings"
+      (Json.lookup_field "general" (Json.lookup_field "capabilities" params))
   with
   | Json.List encodings when List.mem (Json.String "utf-8") encodings -> Utf_8
   | _ -> Utf_16
 
-let root_of params =
-  match (Json.field "rootUri" params, Json.field "rootPath" params) with
+let extract_root params =
+  match (Json.lookup_field "rootUri" params, Json.lookup_field "rootPath" params) with
   | Json.String uri, _ when path_of_uri uri <> None -> Option.get (path_of_uri uri)
   | _, Json.String path -> path
   | _ -> Sys.getcwd ()
 
-let capabilities server =
+let encode_capabilities server =
   Json.Object
     [
       ( "capabilities",
         Json.Object
           [
-            ("positionEncoding", Json.String (encoding_name server.encoding));
+            ("positionEncoding", Json.String (show_encoding server.encoding));
             ( "textDocumentSync",
               Json.Object
                 [
@@ -248,19 +257,19 @@ let capabilities server =
       ("serverInfo", Json.Object [ ("name", Json.String "truss") ]);
     ]
 
-let changed encoding text changes =
+let apply_changes encoding text changes =
   List.fold_left
     (fun text change ->
-      match (Json.field "range" change, Json.field "text" change) with
+      match (Json.lookup_field "range" change, Json.lookup_field "text" change) with
       | Json.Null, Json.String whole -> whole
       | range, Json.String replacement ->
           let source = Source.create ~path:"" text in
           let point name =
             match
-              ( Json.field "line" (Json.field name range),
-                Json.field "character" (Json.field name range) )
+              ( Json.lookup_field "line" (Json.lookup_field name range),
+                Json.lookup_field "character" (Json.lookup_field name range) )
             with
-            | Json.Int line, Json.Int column -> offset encoding source ~line ~column
+            | Json.Int line, Json.Int column -> locate_offset encoding source ~line ~column
             | _ -> 0
           in
           let start = point "start" and stop = point "end" in
@@ -271,14 +280,14 @@ let changed encoding text changes =
 type step = Continue | Recheck | Stop of int
 
 let handle server message =
-  let id = Json.field "id" message and params = Json.field "params" message in
-  let document = Json.field "textDocument" params in
-  let uri = match Json.field "uri" document with Json.String uri -> Some uri | _ -> None in
-  match Json.field "method" message with
+  let id = Json.lookup_field "id" message and params = Json.lookup_field "params" message in
+  let document = Json.lookup_field "textDocument" params in
+  let uri = match Json.lookup_field "uri" document with Json.String uri -> Some uri | _ -> None in
+  match Json.lookup_field "method" message with
   | Json.String "initialize" ->
-      server.root <- root_of params;
-      server.encoding <- client_encoding params;
-      respond server id (capabilities server);
+      server.root <- extract_root params;
+      server.encoding <- choose_client_encoding params;
+      respond server id (encode_capabilities server);
       Continue
   | Json.String "shutdown" ->
       server.shut_down <- true;
@@ -286,19 +295,19 @@ let handle server message =
       Continue
   | Json.String "exit" -> Stop (if server.shut_down then 0 else 1)
   | Json.String "textDocument/didOpen" -> (
-      match (uri, Json.field "text" document) with
+      match (uri, Json.lookup_field "text" document) with
       | Some uri, Json.String text when path_of_uri uri <> None ->
           server.buffers <- (uri, text) :: List.remove_assoc uri server.buffers;
           Recheck
       | _ -> Continue)
   | Json.String "textDocument/didChange" -> (
-      match (uri, Json.field "contentChanges" params) with
+      match (uri, Json.lookup_field "contentChanges" params) with
       | Some uri, Json.List changes when List.mem_assoc uri server.buffers ->
           let text = List.assoc uri server.buffers in
           server.buffers <-
             List.map
               (fun (open_uri, open_text) ->
-                if open_uri = uri then (uri, changed server.encoding text changes)
+                if open_uri = uri then (uri, apply_changes server.encoding text changes)
                 else (open_uri, open_text))
               server.buffers;
           Recheck
@@ -363,12 +372,12 @@ let check_buffers = function
   | _ -> 2
 
 let check_arguments ~root encoding buffers =
-  "__check-buffers" :: root :: encoding_name encoding
+  "__check-buffers" :: root :: show_encoding encoding
   :: List.concat_map (fun (uri, text) -> [ uri; text ]) buffers
 
 module For_testing = struct
-  let position = position
-  let offset = offset
+  let position = locate_position
+  let offset = locate_offset
 
   type nonrec server = server
 

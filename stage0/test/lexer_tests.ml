@@ -15,8 +15,8 @@ let show (token : Token.t) =
   match token.kind with
   | Upper name | Lower name -> name
   | Underscore -> "_"
-  | Keyword keyword -> Token.keyword_spelling keyword
-  | Reserved reserved -> "reserved " ^ Token.reserved_spelling reserved
+  | Keyword keyword -> Token.spell_keyword keyword
+  | Reserved reserved -> "reserved " ^ Token.spell_reserved reserved
   | Integer value -> Z.to_string value
   | Float { significand; exponent } ->
       Printf.sprintf "%se%s" (Z.to_string significand) (Z.to_string exponent)
@@ -27,11 +27,10 @@ let show (token : Token.t) =
           (String.concat "${}"
              (List.map
                 (fun (text : Token.text) -> text.value)
-                (Array.to_list (Token.texts literal))))
+                (Array.to_list (Token.list_texts literal))))
   | Punctuation punctuation ->
-      (if token.span.start = token.span.stop then "+" else "")
-      ^ Token.punctuation_spelling punctuation
-  | Foreign foreign -> Token.foreign_spelling foreign
+      (if token.span.start = token.span.stop then "+" else "") ^ Token.spell_punctuation punctuation
+  | Foreign foreign -> Token.spell_foreign foreign
   | Newline -> "NL"
   | End_of_file -> "EOF"
 
@@ -60,10 +59,8 @@ let interpolation_tokens text index =
         match token.kind with String literal -> Some literal | _ -> None)
   in
   match first_string with
-  | Some literal -> shown (Token.interpolations literal).(index).tokens
+  | Some literal -> shown (Token.list_interpolations literal).(index).tokens
   | None -> []
-
-let find text part ~occurrence = Option.get (Substring.For_testing.find ~occurrence text part)
 
 let error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
   match snd (lex text) with
@@ -72,7 +69,7 @@ let error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
         Harness.fail "expected %s, got %s"
           (Diagnostic.Code.name (Lexer code))
           (Diagnostic.Code.name diagnostic.code);
-      let expected = find text at ~occurrence in
+      let expected = Support.find_occurrence ~sub:at ~occurrence text in
       if diagnostic.span.start <> expected then
         Harness.fail "expected the error at %d (%S), got %d" expected at diagnostic.span.start;
       let results = List.map (Diagnostic.apply_fix text) diagnostic.fixes in
@@ -112,7 +109,7 @@ let machine_fixed text =
     (List.concat_map
        (fun (diagnostic : Diagnostic.t) ->
          match diagnostic.fixes with [ fix ] -> fix.edits | _ -> [])
-       (Diagnostic.machine_applicable (snd (lex text))))
+       (Diagnostic.list_machine_applicable (snd (lex text))))
 
 let () =
   Harness.test "two sources of the same text are equal" (fun () ->
@@ -125,7 +122,7 @@ let () =
   Harness.test "the first line starts after a byte order mark" (fun () ->
       let source = Source.create ~path:"test.truss" "\xEF\xBB\xBFab\ncd" in
       let shown offset =
-        let line, column = Source.position source offset in
+        let line, column = Source.compute_position source offset in
         Printf.sprintf "%d:%d" line column
       in
       equal_lists Fun.id "positions" [ "1:1"; "1:2"; "2:1" ] (List.map shown [ 3; 4; 6 ]);
@@ -414,7 +411,7 @@ let () =
       let text = lines [ "fn f() {"; {|  let s = """|}; "    text"; "}"; "fn g() {}" ] in
       error text ~code:Unterminated_string ~at:{|"""|};
       match snd (lex text) with
-      | [ { notes = [ (span, _) ]; _ } ] when span.start = find text "}" ~occurrence:1 -> ()
+      | [ { notes = [ (span, _) ]; _ } ] when span.start = String.index text '}' -> ()
       | _ -> Harness.fail "expected a note at the line where the string seems to end")
 
 let () =
@@ -703,9 +700,9 @@ let () =
 let () =
   Harness.test "at most 200 diagnostics are shown, then a count" (fun () ->
       let diagnostic offset =
-        Diagnostic.make ~code:(Lexer Semicolon) (Source.span offset (offset + 1)) "x"
+        Diagnostic.make ~code:(Lexer Semicolon) (Source.make_span offset (offset + 1)) "x"
       in
-      let shown = Diagnostic.shown (List.init 250 diagnostic) in
+      let shown = Diagnostic.select_shown (List.init 250 diagnostic) in
       if List.length shown <> Diagnostic.For_testing.limit + 1 then
         Harness.fail "%d shown" (List.length shown);
       match List.rev shown with
@@ -721,7 +718,7 @@ let () =
   Harness.test "overlapping edits are refused" (fun () ->
       let fix =
         Diagnostic.fix "x"
-          [ Diagnostic.delete (Source.span 0 2); Diagnostic.delete (Source.span 1 3) ]
+          [ Diagnostic.delete (Source.make_span 0 2); Diagnostic.delete (Source.make_span 1 3) ]
       in
       match Diagnostic.apply_fix "abc" fix with
       | _ -> Harness.fail "expected Invalid_argument"
@@ -757,9 +754,9 @@ let block_after = Documents.block_after
 let words = Documents.words
 
 let between text first second =
-  let start = Option.get (Substring.For_testing.find text first) + String.length first in
-  let rest = String.sub text start (String.length text - start) in
-  String.sub rest 0 (Option.get (Substring.For_testing.find rest second))
+  let start = Option.get (String.find_first ~sub:first text) + String.length first in
+  let stop = Option.get (String.find_first ~sub:second ~start text) in
+  String.sub text start (stop - start)
   |> String.split_on_char '\n' |> List.map String.trim |> String.concat " "
 
 let backticked text =
@@ -781,7 +778,7 @@ let () =
         (words (block_after specification "### Punctuation")));
   Harness.test "SPECIFICATION.md's line-break lists match Layout" (fun () ->
       let kind_of spelling =
-        match Token.word spelling with
+        match Token.find_word spelling with
         | Some kind -> Some kind
         | None ->
             if spelling = "_" then Some Underscore
@@ -796,8 +793,8 @@ let () =
       let can_end = listed "**can end a statement**:" "- the first token after it" in
       let can_begin = listed "**can begin a statement**:" "3. Several line feeds" in
       let spelling = function
-        | Token.Keyword keyword -> Token.keyword_spelling keyword
-        | Punctuation punctuation -> Token.punctuation_spelling punctuation
+        | Token.Keyword keyword -> Token.spell_keyword keyword
+        | Punctuation punctuation -> Token.spell_punctuation punctuation
         | _ -> "_"
       in
       List.iter

@@ -126,7 +126,9 @@ let run_lambda_body ?(entering = Fun.id) (context : State.context) (frame : Stat
   Fun.protect
     ~finally:(fun () -> context.returns <- saved_returns)
     (fun () ->
-      let inside = entering { frame with locals = remove_temporaries frame.locals } in
+      let inside =
+        entering { frame with locals = remove_temporaries frame.locals; panic = Undeclarable }
+      in
       (try context.run_body inside ~lambdas body
        with Facts.Unsupported (_, message) when is_foreign ->
          raise (Facts.Foreign_unsupported (Printf.sprintf "%s, in `%s`" message frame.source.name)));
@@ -140,8 +142,8 @@ let compute_returned_type context frame (body : Mir.body) =
       (fun (statement : Mir.statement) ->
         match statement.kind with
         | Jump (Return (Some value)) ->
-            Some (Facts.substitute_type context frame (Mir.operand_type value))
-        | _ -> List.find_map returned (Mir.nested_blocks statement))
+            Some (Facts.substitute_type context frame (Mir.extract_operand_type value))
+        | _ -> List.find_map returned (Mir.list_nested_blocks statement))
       block.statements
   in
   Option.value ~default:Types.unit (returned body.code)
@@ -303,8 +305,10 @@ let list_loop_counters locals (body : Mir.body) =
   let rec visit (block : Mir.block) =
     List.iter
       (fun (statement : Mir.statement) ->
-        (match statement.kind with While { loop; _ } | For { loop; _ } -> note loop | _ -> ());
-        List.iter visit (Mir.nested_blocks statement))
+        (match statement.kind with
+        | While { loop; _ } | For { loop; _ } -> note loop
+        | Basic _ | Choose _ | Assert_by_bit_vector _ | Fork _ | Resume _ | Yield _ | Jump _ -> ());
+        List.iter visit (Mir.list_nested_blocks statement))
       block.statements
   in
   visit body.code;
@@ -401,7 +405,9 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
         context.counters <- saved_counters)
       (fun () ->
         let finished =
-          let inside = { inside with locals = remove_temporaries inside.locals } in
+          let inside =
+            { inside with locals = remove_temporaries inside.locals; panic = Undeclarable }
+          in
           let inside =
             List.fold_left2
               (fun inside parameter argument ->

@@ -26,6 +26,7 @@ type obligation = {
   locals : (Logic.symbol * string) list;
   template_clause : template_clause option;
   decisions : (string * string option * Logic.term * Logic.term) list;
+  may_stop_with_panic : bool;
 }
 
 type outcome = { obligations : obligation list; holes : (Resolve.Names.key * location) list }
@@ -52,6 +53,7 @@ type slice = {
 }
 
 type held_slice = Slices of (Logic.term * slice) list | Unknown_slice
+type panic = Declared | Undeclared | Undeclarable
 
 type frame = {
   source : source;
@@ -63,6 +65,7 @@ type frame = {
   result : Logic.term option;
   condition : Logic.term;
   makes_obligations : bool;
+  panic : panic;
   bound : Logic.symbol list;
   binders : (Logic.symbol * Logic.sort * Logic.term) list;
   substitution : Types.substitution;

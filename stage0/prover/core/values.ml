@@ -11,7 +11,7 @@ let run_ghost_code (context : State.context) frame (code : Mir.t) =
         (Lambdas.run_lambda_body context frame ~lambdas:code.lambdas code.body ~type_:Types.unit);
       Logic.disjunction context.unfinished)
 
-let finite_map_path : Path.t = Well_known.path Finite_map
+let finite_map_path : Path.t = Well_known.make_path Finite_map
 
 let assume_extensional context frame (ty : Types.ty) left right =
   match ty with
@@ -486,7 +486,7 @@ let compute_constant_type (context : State.context) path =
 
 let evaluate_constant (context : State.context) frame path =
   match
-    (Contracts.find_source context.lookups path, Mir.initializer_of_path context.lookups.mir path)
+    (Contracts.find_source context.lookups path, Mir.read_initializer context.lookups.mir path)
   with
   | Some (constant_source, _, _), Some { form = code; _ } ->
       let symbol = Logic.Symbol.Constant path in
@@ -516,7 +516,7 @@ let evaluate_constant (context : State.context) frame path =
 let evaluate_field_default context frame (site : Invocation.site) ty variant field =
   match (ty, Validity.find_type_source context ty) with
   | Types.Named { path; _ }, Some source -> (
-      match Mir.defaults_of_path context.lookups.mir path with
+      match Mir.read_defaults context.lookups.mir path with
       | Some { form = Field_defaults defaults; _ } -> (
           match
             List.find_opt
@@ -709,7 +709,7 @@ let copy_value ?literal (context : State.context) frame ty term =
               | None ->
                   Amounts.declare_trait_method_time context frame
                     (Path.Method
-                       { owner = Well_known.path Copyable; name = "copy"; receiver = Read })
+                       { owner = Well_known.make_path Copyable; name = "copy"; receiver = Read })
                     ~trait_arguments:[] ty
             in
             let copy_potential =

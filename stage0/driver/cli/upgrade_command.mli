@@ -1,4 +1,4 @@
-val wanted : string -> Path.package * Registry.Version.t option
+val parse_wanted : string -> Path.package * Registry.Version.t option
 
 type change =
   | Entered of Registry.Lock.entry

@@ -1,0 +1,6 @@
+fn next(count: UInt8) -> UInt8 {
+  if count / 2 > 3 {
+    return count + 1
+  }
+  0
+}

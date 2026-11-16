@@ -90,7 +90,7 @@ type state = {
 let add_diagnostic state ?notes ?(fixes = []) code (span : Source.Definition_span.t) message =
   let diagnostic = Diagnostic.make ?notes ~fixes ~code:(Types code) span message in
   state.diagnostics <- diagnostic :: state.diagnostics;
-  Diagnostic.reported diagnostic
+  Diagnostic.make_reported diagnostic
 
 let report state ?fixes code span message = ignore (add_diagnostic state ?fixes code span message)
 let is_formula env = env.specification || env.in_quantifier
@@ -103,7 +103,7 @@ let reject_in_formula state env span what =
           the prover reads as formulas: they are built from `let`, `if`, `match`, and calls."
          what)
 
-let read_span state id = state.context.spans.(id)
+let read_span state id = Interface.Elaborator.read_span state.context id
 let bug format = Compiler_bug.bug ~stage:"Infer" format
 
 let make_error_type state ?fixes code span message =
@@ -145,7 +145,7 @@ let rec list_operands state (value : Syntax.expression) : Syntax.expression list
   | If _ | Parenthesized _ | Mode _ -> []
   | _ ->
       let checked_parts = ref [] in
-      Syntax_walk.expression_parts ~statement:ignore value ~expression:(fun part ->
+      Syntax_walk.visit_expression_parts ~statement:ignore value ~expression:(fun part ->
           checked_parts := checked part :: !checked_parts);
       List.concat (List.rev !checked_parts)
 
@@ -370,9 +370,7 @@ let is_signed_type state (type_ : Types.ty) =
       match state.unifier.integer_range type_ with Some (low, _) -> Z.sign low < 0 | None -> false)
   | _ -> false
 
-let lookup_bounds state parameter =
-  Option.value ~default:[]
-    (Interface.Elaborator.Parameter_table.find_opt state.context.bounds parameter)
+let lookup_bounds state parameter = Interface.Elaborator.list_bounds state.context parameter
 
 let normalize state type_ =
   Interface.Impls.normalize state.lookups.interface ~bounds:(lookup_bounds state) (zonk state type_)
@@ -485,10 +483,10 @@ let convert_evidence = function
   | Interface.Impls.From_any -> Tables.Dynamic
   | Interface.Impls.Built_in | Interface.Impls.Accepted _ -> Tables.Built_in
 
-let make_trait_reference ?(arguments = []) trait : Types.trait_reference =
+let make_trait_reference ~arguments trait : Types.trait_reference =
   { trait; trait_arguments = arguments; associated = [] }
 
-let string_type = Types.Named { path = Well_known.path String; arguments = [] }
+let string_type = Types.Named { path = Well_known.make_path String; arguments = [] }
 
 let make_undecided_type (undecided : undecided_literal) =
   Types.Literal (undecided.kind, undecided.index)
@@ -997,8 +995,8 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
               (fun (owned, view) ->
                 Path.equal actual_named.path owned && Path.equal wanted_named.path view)
               [
-                (Well_known.path List, Well_known.path Slice);
-                (Well_known.path String, Well_known.path String_slice);
+                (Well_known.make_path List, Well_known.make_path Slice);
+                (Well_known.make_path String, Well_known.make_path String_slice);
               ] ->
       if not (Unify.unify_arguments state.unifier wanted_named.arguments actual_named.arguments)
       then report_mismatch state span ~expected ~actual;

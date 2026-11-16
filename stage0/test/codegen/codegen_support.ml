@@ -6,7 +6,6 @@ let diagnostics database (file : Path.file) =
 
 let fail = Harness.fail
 let expect_string = Harness.expect_string
-let contains = Substring.contains
 
 let expect_int ~expected actual =
   if expected <> actual then fail "expected %d, got %d" expected actual
@@ -76,7 +75,7 @@ let shapes extra (ty : Ground.ty) : Memory_layout.shape =
           ("length", Typed (named "UInt64"));
           ("capacity", Typed (named "UInt64"));
         ]
-  | Function function_type -> Convention.function_value_shape function_type
+  | Function function_type -> Convention.make_function_value_shape function_type
   | _ -> (
       match List.assoc_opt (Ground.to_string ty) extra with
       | Some shape -> shape
@@ -118,9 +117,10 @@ let key name = Instance.Code { path = definition name; type_arguments = [] }
 
 let write builder (function_ : function_) =
   List.iter
-    (fun (info : local_info) -> ignore (Emit_c.Builder.local builder ?name:info.name info.ty))
+    (fun (info : local_info) ->
+      ignore (Emit_c.Builder.allocate_local builder ?name:info.name info.ty))
     function_.locals;
-  List.iter (fun _ -> ignore (Emit_c.Builder.block builder)) function_.blocks;
+  List.iter (fun _ -> ignore (Emit_c.Builder.allocate_block builder)) function_.blocks;
   List.iteri
     (fun index (block : block) ->
       Emit_c.Builder.start builder index;
@@ -173,13 +173,13 @@ let strict =
       "-Wno-unused-parameter";
       "-Wno-unused-but-set-variable";
       "-Wno-array-parameter";
-      (if Substring.contains (Lazy.force compiler).identity "clang" then
+      (if String.includes ~affix:"clang" (Lazy.force compiler).identity then
          "-Wno-sometimes-uninitialized"
        else "-Wno-maybe-uninitialized");
     ]
 
 let counter = ref 0
-let cache = lazy (Build.cache (Cache.make_objects_directory (Workspace.open_cache ())))
+let cache = lazy (Build.make_cache (Cache.make_objects_directory (Workspace.open_cache ())))
 
 let added_flags =
   Toolchain.split_flags (Option.value (Sys.getenv_opt Toolchain.added_flags_variable) ~default:"")
@@ -198,15 +198,17 @@ let run_program ?(extra = []) ?env ?input (instances : instance list) =
   incr counter;
   let output = Filename.concat (Lazy.force scratch) (Printf.sprintf "program%d" !counter) in
   let env = match env with Some env -> env | None -> shape_env ~extra () in
-  let fragments = List.map (fun instance -> Emit_c.fragment env (Code (instance env))) instances in
+  let fragments =
+    List.map (fun instance -> Emit_c.make_fragment env (Code (instance env))) instances
+  in
   let sources =
     [
-      ("main", Startup.For_testing.main_calling (Instance.symbol (key "entry")));
-      ("sites", Emit_c.sites_file ~position:test_position fragments);
+      ("main", Startup.For_testing.main_calling (Instance.make_symbol (key "entry")));
+      ("sites", Emit_c.render_sites_file ~position:test_position fragments);
     ]
   in
   match
-    Build.program (Lazy.force compiler) (Lazy.force cache) env (Lazy.force settings)
+    Build.build_program (Lazy.force compiler) (Lazy.force cache) env (Lazy.force settings)
       ~files:[ fragments ] ~sources ~output
   with
   | Ok () -> Process.run ?input output []
@@ -219,7 +221,9 @@ let expect_status ?extra expected instances =
 let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [] }
 let example_file : Path.file = { module_ = example; name = "main" }
 let standard_package_database = lazy (Workspace.For_testing.load_standard_package_database ())
-let database packages = Database.create ~loaded:[ Lazy.force standard_package_database ] packages
+
+let database ?checks packages =
+  Database.create ?checks ~loaded:[ Lazy.force standard_package_database ] packages
 
 let example_package files : Project.package list =
   [ { name = { owner = None; name = "example" }; dependencies = []; files } ]
@@ -229,9 +233,9 @@ let compile ?results ?evaluation_time_limit_ms database =
     (Database.make_lowering_requests database [ example.package ])
     (Lazy.force compiler) (Lazy.force cache) (Lazy.force settings)
 
-let load_files ?results ?(roots = []) files =
+let load_files ?results ?(roots = []) ?checks files =
   let packages = example_package files in
-  let database = database packages in
+  let database = database ?checks packages in
   List.iter (Database.For_testing.root database) roots;
   List.iter
     (fun ((file : Path.file), text) ->
@@ -252,7 +256,7 @@ let load_files ?results ?(roots = []) files =
     files;
   (database, compile ?results database)
 
-let load ?results ?roots text = load_files ?results ?roots [ (example_file, text) ]
+let load ?results ?roots ?checks text = load_files ?results ?roots ?checks [ (example_file, text) ]
 
 let tests_in database (module_ : Path.module_) =
   List.filter_map
@@ -271,8 +275,8 @@ let run_source text =
 let expect_output text expected = expect_string ~expected (run_source text)
 let passes name source = test name (fun () -> expect_output source "test 0 passed\n")
 
-let run_main ?(arguments = []) ?input text =
-  let _, compile = load text in
+let run_main ?(arguments = []) ?input ?checks text =
+  let _, compile = load ?checks text in
   match
     Compile.For_testing.run_program ?input compile
       ~main:(Top { module_ = example; name = "main" })
@@ -306,10 +310,10 @@ let standard_context : Monomorphic.context =
   }
 
 let standard module_ name ?(arguments = []) () =
-  Ground.Named { path = Path.standard [ module_ ] name; arguments }
+  Ground.Named { path = Path.make_standard_path [ module_ ] name; arguments }
 
 let standard_layout ty =
   Memory_layout.For_testing.to_string
     (Memory_layout.of_type
-       (Memory_layout.create host ~shape_of:(Monomorphic.shape standard_context))
+       (Memory_layout.create host ~shape_of:(Monomorphic.compute_shape standard_context))
        ty)

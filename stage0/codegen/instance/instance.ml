@@ -50,17 +50,17 @@ end)
 let compare = Key.compare
 let equal = Key.equal
 let hash = Key.hash
-let marker word = "_" ^ word ^ "_"
+let render_marker word = "_" ^ word ^ "_"
 
-let module_path (module_ : Path.module_) =
+let mangle_module_path (module_ : Path.module_) =
   let package =
     match module_.package.owner with
-    | Some owner -> owner ^ marker "Owns" ^ module_.package.name
+    | Some owner -> owner ^ render_marker "Owns" ^ module_.package.name
     | None -> module_.package.name
   in
   String.concat "__" (package :: module_.modules)
 
-let text value =
+let mangle_text value =
   String.concat ""
     (List.map
        (fun order ->
@@ -69,130 +69,154 @@ let text value =
          | order -> Printf.sprintf "_C%02X_" (Char.code order))
        (List.of_seq (String.to_seq value)))
 
-let receiver : Path.receiver -> string = function
-  | Static -> marker "Static"
+let mangle_receiver : Path.receiver -> string = function
+  | Static -> render_marker "Static"
   | Read -> ""
-  | Mut -> marker "Mut"
-  | Own -> marker "Own"
+  | Mut -> render_marker "Mut"
+  | Own -> render_marker "Own"
 
-let rec path : Path.t -> string = function
-  | Top { module_; name } -> module_path module_ ^ "__" ^ name
+let rec mangle_path : Path.t -> string = function
+  | Top { module_; name } -> mangle_module_path module_ ^ "__" ^ name
   | Method { owner; name; receiver = method_receiver } ->
-      path owner ^ "_" ^ name ^ receiver method_receiver
-  | Member_constant { owner; name } -> path owner ^ marker "Member" ^ name
+      mangle_path owner ^ "_" ^ name ^ mangle_receiver method_receiver
+  | Member_constant { owner; name } -> mangle_path owner ^ render_marker "Member" ^ name
   | Impl { module_; trait; for_type } ->
-      module_path module_ ^ marker "Impl" ^ reference trait ^ marker "For" ^ path for_type
-      ^ marker "End"
+      mangle_module_path module_ ^ render_marker "Impl" ^ mangle_reference trait
+      ^ render_marker "For" ^ mangle_path for_type ^ render_marker "End"
   | Derived { type_; trait } ->
-      marker "Derived" ^ path trait ^ marker "For" ^ path type_ ^ marker "End"
-  | Test { module_; name } -> module_path module_ ^ marker "Test" ^ text name ^ marker "End"
+      render_marker "Derived" ^ mangle_path trait ^ render_marker "For" ^ mangle_path type_
+      ^ render_marker "End"
+  | Test { module_; name } ->
+      mangle_module_path module_ ^ render_marker "Test" ^ mangle_text name ^ render_marker "End"
   | Law_proof { module_; trait; law; for_type } ->
-      module_path module_ ^ marker "Proof" ^ reference trait ^ marker "Law" ^ text law
-      ^ marker "For" ^ path for_type ^ marker "End"
+      mangle_module_path module_ ^ render_marker "Proof" ^ mangle_reference trait
+      ^ render_marker "Law" ^ mangle_text law ^ render_marker "For" ^ mangle_path for_type
+      ^ render_marker "End"
   | Unresolved { names; _ } ->
-      marker "Unresolved" ^ String.concat (marker "In") (List.map text names) ^ marker "End"
+      render_marker "Unresolved"
+      ^ String.concat (render_marker "In") (List.map mangle_text names)
+      ^ render_marker "End"
 
-and reference ({ path = trait; arguments; associated } : Path.reference) =
+and mangle_reference ({ path = trait; arguments; associated } : Path.reference) =
   match (arguments, associated) with
-  | [], [] -> path trait
+  | [], [] -> mangle_path trait
   | _ ->
-      path trait
-      ^ String.concat "" (List.map (fun argument -> marker "Of" ^ path_argument argument) arguments)
+      mangle_path trait
+      ^ String.concat ""
+          (List.map (fun argument -> render_marker "Of" ^ mangle_path_argument argument) arguments)
       ^ String.concat ""
           (List.map
              (fun (name, argument) ->
-               marker "Where" ^ text name ^ marker "Is" ^ path_argument argument)
+               render_marker "Where" ^ mangle_text name ^ render_marker "Is"
+               ^ mangle_path_argument argument)
              associated)
-      ^ marker "Done"
+      ^ render_marker "Done"
 
-and path_argument : Path.argument -> string = function
-  | Named named -> reference named
-  | Parameter name -> marker "Parameter" ^ text name
-  | Any trait -> marker "Any" ^ reference trait
-  | Count value -> marker "Count" ^ text (Z.to_string value)
-  | Constant constant -> marker "Constant" ^ path constant
+and mangle_path_argument : Path.argument -> string = function
+  | Named named -> mangle_reference named
+  | Parameter name -> render_marker "Parameter" ^ mangle_text name
+  | Any trait -> render_marker "Any" ^ mangle_reference trait
+  | Count value -> render_marker "Count" ^ mangle_text (Z.to_string value)
+  | Constant constant -> render_marker "Constant" ^ mangle_path constant
 
-let mode : Ground.mode -> string = function Read -> "" | Mut -> marker "Mut" | Own -> marker "Own"
+let mangle_mode : Ground.mode -> string = function
+  | Read -> ""
+  | Mut -> render_marker "Mut"
+  | Own -> render_marker "Own"
 
 let rec mangle_ty (ty : Ground.ty) =
   match ty with
-  | Named { path = instance_path; arguments } -> path instance_path ^ mangle_arguments arguments
+  | Named { path = instance_path; arguments } ->
+      mangle_path instance_path ^ mangle_arguments arguments
   | Function { parameters; result; uses } ->
-      marker "Fn"
-      ^ String.concat ""
-          (List.map (fun (module_, ty) -> mode module_ ^ mangle_ty ty ^ marker "And") parameters)
-      ^ marker "Returns" ^ mangle_ty result
-      ^ (match uses with
-        | [] -> ""
-        | uses -> marker "Uses" ^ String.concat (marker "And") (List.map path uses))
-      ^ marker "End"
-  | Any { trait; arguments; associated } ->
-      marker "Any" ^ path trait ^ mangle_arguments arguments
+      render_marker "Fn"
       ^ String.concat ""
           (List.map
-             (fun (name, ty) -> marker "Assoc" ^ name ^ marker "Is" ^ mangle_ty ty)
+             (fun (module_, ty) -> mangle_mode module_ ^ mangle_ty ty ^ render_marker "And")
+             parameters)
+      ^ render_marker "Returns" ^ mangle_ty result
+      ^ (match uses with
+        | [] -> ""
+        | uses ->
+            render_marker "Uses" ^ String.concat (render_marker "And") (List.map mangle_path uses))
+      ^ render_marker "End"
+  | Any { trait; arguments; associated } ->
+      render_marker "Any" ^ mangle_path trait ^ mangle_arguments arguments
+      ^ String.concat ""
+          (List.map
+             (fun (name, ty) -> render_marker "Assoc" ^ name ^ render_marker "Is" ^ mangle_ty ty)
              associated)
-      ^ marker "End"
-  | Never -> marker "Never"
+      ^ render_marker "End"
+  | Never -> render_marker "Never"
 
 and mangle_argument = function
   | Ground.Type ty -> mangle_ty ty
-  | Value value -> marker "Value" ^ Z.to_string value
+  | Value value -> render_marker "Value" ^ Z.to_string value
   | Capabilities set ->
-      marker "Granted" ^ String.concat (marker "And") (List.map path set) ^ marker "End"
+      render_marker "Granted"
+      ^ String.concat (render_marker "And") (List.map mangle_path set)
+      ^ render_marker "End"
 
 and mangle_arguments = function
   | [] -> ""
   | arguments ->
-      marker "Of" ^ String.concat (marker "And") (List.map mangle_argument arguments) ^ marker "End"
+      render_marker "Of"
+      ^ String.concat (render_marker "And") (List.map mangle_argument arguments)
+      ^ render_marker "End"
 
 let rec mangle = function
   | Code { path = instance_path; type_arguments } ->
-      path instance_path ^ mangle_arguments type_arguments
-  | Constant instance_path -> marker "Constant" ^ path instance_path
-  | Drop ty -> marker "Drop" ^ mangle_ty ty
-  | Copy ty -> marker "Copy" ^ mangle_ty ty
-  | Debug ty -> marker "Debug" ^ mangle_ty ty
-  | Encode ty -> marker "Encode" ^ mangle_ty ty
-  | Any_drop ty -> marker "AnyDrop" ^ mangle_ty ty
-  | Any_copy ty -> marker "AnyCopy" ^ mangle_ty ty
-  | Evaluator instance_path -> marker "Evaluator" ^ path instance_path
+      mangle_path instance_path ^ mangle_arguments type_arguments
+  | Constant instance_path -> render_marker "Constant" ^ mangle_path instance_path
+  | Drop ty -> render_marker "Drop" ^ mangle_ty ty
+  | Copy ty -> render_marker "Copy" ^ mangle_ty ty
+  | Debug ty -> render_marker "Debug" ^ mangle_ty ty
+  | Encode ty -> render_marker "Encode" ^ mangle_ty ty
+  | Any_drop ty -> render_marker "AnyDrop" ^ mangle_ty ty
+  | Any_copy ty -> render_marker "AnyCopy" ^ mangle_ty ty
+  | Evaluator instance_path -> render_marker "Evaluator" ^ mangle_path instance_path
   | Template_check { from_template; literals; clauses } ->
-      marker "Check" ^ path from_template
+      render_marker "Check" ^ mangle_path from_template
       ^ String.concat ""
-          (List.map (fun literal -> marker "Text" ^ text literal ^ marker "End") literals)
-      ^ String.concat "" (List.map (fun clause -> marker "Clause" ^ string_of_int clause) clauses)
-      ^ marker "End"
+          (List.map
+             (fun literal -> render_marker "Text" ^ mangle_text literal ^ render_marker "End")
+             literals)
+      ^ String.concat ""
+          (List.map (fun clause -> render_marker "Clause" ^ string_of_int clause) clauses)
+      ^ render_marker "End"
   | Call_evaluation { function_; arguments } ->
-      marker "Evaluate" ^ path function_
+      render_marker "Evaluate" ^ mangle_path function_
       ^ String.concat ""
-          (List.map (fun number -> marker "Value" ^ text (Z.to_string number)) arguments)
-      ^ marker "End"
+          (List.map
+             (fun number -> render_marker "Value" ^ mangle_text (Z.to_string number))
+             arguments)
+      ^ render_marker "End"
   | Generated (Adapter { function_; type_arguments; ty }) ->
-      marker "Adapter"
+      render_marker "Adapter"
       ^ mangle (Code { path = function_; type_arguments })
-      ^ marker "As" ^ mangle_ty (Function ty)
-  | Generated (Any_entry impl_method) -> marker "Dynamic" ^ mangle (make_method_code impl_method)
+      ^ render_marker "As" ^ mangle_ty (Function ty)
+  | Generated (Any_entry impl_method) ->
+      render_marker "Dynamic" ^ mangle (make_method_code impl_method)
   | Generated (Locked_entry { capability; name }) ->
-      marker "LockedEntry" ^ path capability ^ marker "Method" ^ text name
-  | Generated (Entry impl_method) -> marker "Entry" ^ mangle (make_method_code impl_method)
-  | Generated (Program_main main) -> marker "Program" ^ path main
+      render_marker "LockedEntry" ^ mangle_path capability ^ render_marker "Method"
+      ^ mangle_text name
+  | Generated (Entry impl_method) -> render_marker "Entry" ^ mangle (make_method_code impl_method)
+  | Generated (Program_main main) -> render_marker "Program" ^ mangle_path main
   | Table (Any_table { impl; type_arguments }) ->
-      marker "Vtable" ^ path impl ^ mangle_arguments type_arguments
-  | Table (Locked_table capability) -> marker "LockedTable" ^ path capability
+      render_marker "Vtable" ^ mangle_path impl ^ mangle_arguments type_arguments
+  | Table (Locked_table capability) -> render_marker "LockedTable" ^ mangle_path capability
   | Table (Impl_table { impl; type_arguments }) ->
-      marker "Table" ^ path impl ^ mangle_arguments type_arguments
+      render_marker "Table" ^ mangle_path impl ^ mangle_arguments type_arguments
 
 let limit = 200
 let prefix_length = 180
 
 let shorten name =
   if String.length name <= limit then name
-  else String.sub name 0 prefix_length ^ "_Hash_" ^ Blake3.hex_digest ~digits:32 name
+  else String.sub name 0 prefix_length ^ "_Hash_" ^ Blake3.hash_to_hex ~digits:32 name
 
-let path_symbol = path
-let symbol key = shorten ("t_" ^ mangle key)
-let type_symbol ty = shorten ("t_" ^ mangle_ty ty)
+let make_symbol key = shorten ("t_" ^ mangle key)
+let make_type_symbol ty = shorten ("t_" ^ mangle_ty ty)
 
 let rec to_string = function
   | Code { path; type_arguments; _ } -> Path.show path ^ arguments_to_string type_arguments

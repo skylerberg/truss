@@ -45,9 +45,9 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
           ignore (Hooks.check_expression state env argument.value);
           let part = State.normalize state part in
           let parts : Types.ty =
-            Named { path = Well_known.path Sequence; arguments = [ Types.Type part ] }
+            Named { path = Well_known.make_path Sequence; arguments = [ Types.Type part ] }
           in
-          let index = State.make_trait_reference (Well_known.path Index) in
+          let index = State.make_trait_reference ~arguments:[] (Well_known.make_path Index) in
           let evidence =
             match State.implements state parts index with
             | Some evidence -> Form.convert_evidence (State.convert_evidence evidence)
@@ -383,10 +383,7 @@ and check_trait_method_through_type state env ?expected:_ ?trait_arguments
         ~trait_arguments
   | None ->
       check_trait_method_call state env value self_type trait method_ arguments ~trait_generics
-        ~trait_arguments:
-          (List.map
-             (fun (_ : Types.generic) -> Types.Type (State.make_fresh_type state))
-             trait_generics)
+        ~trait_arguments:(Instantiation.make_fresh_generic_arguments state trait_generics)
 
 and check_trait_method_call state env (value : Syntax.expression) self_type
     (trait : Types.trait_reference) (method_ : Types.trait_method) arguments ~trait_generics
@@ -469,7 +466,7 @@ and check_trait_call_in_full state env (value : Syntax.expression) trait ~trait_
   match match overload Static with None -> overload wanted | trait_method -> trait_method with
   | Some method_ ->
       check_trait_method_through_type state env ?trait_arguments value (State.make_fresh_type state)
-        (State.make_trait_reference trait)
+        (Instantiation.make_fresh_trait_reference state trait)
         method_ arguments
   | None when Members.list_trait_methods state.lookups trait member.text <> [] ->
       Calls.check_arguments_alone state env arguments
@@ -595,7 +592,7 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
           Calls.check_arguments_alone state env arguments
             (State.make_error_type state Unknown_member (State.read_span state member.id)
                ~fixes:
-                 (match Diagnostic.closest member.text candidates with
+                 (match Diagnostic.find_closest member.text candidates with
                  | Some candidate ->
                      [
                        State.fix
@@ -704,14 +701,9 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
     | Some interface -> interface.trait_generics
     | None -> []
   in
-  let trait_arguments =
-    if List.length trait.trait_arguments = List.length trait_generics then trait.trait_arguments
-    else
-      List.map (fun (_ : Types.generic) -> Types.Type (State.make_fresh_type state)) trait_generics
-  in
   let extra =
     (Types.make_self_parameter trait.trait, Types.Type receiver_type)
-    :: Types.make_substitution trait_generics trait_arguments
+    :: Types.make_substitution trait_generics trait.trait_arguments
   in
   let not_callable =
     match receiver_type with
@@ -753,7 +745,6 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
           let checked =
             Calls.check_arguments state env instance.signature.parameters matched ~offset:1
           in
-          let reference = { trait with trait_arguments } in
           let result = Types.extract_result_type instance.signature.output in
           Modes.note_lending state value instance.signature.output;
           let receiver_argument =
@@ -773,7 +764,7 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
                 callee =
                   Trait_method
                     {
-                      trait = reference;
+                      trait;
                       name = method_.method_name;
                       receiver = method_.method_receiver;
                       self_type = receiver_type;
@@ -788,5 +779,5 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
           Form.register_call state value;
           (match receiver_type with
           | Types.Any _ -> ()
-          | _ -> Name_lookup.resolve_evidence state value receiver_type reference);
+          | _ -> Name_lookup.resolve_evidence state value receiver_type trait);
           State.normalize state result)

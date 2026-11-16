@@ -77,6 +77,7 @@ let make_empty_frame source =
     result = None;
     condition = Logic.Boolean true;
     makes_obligations = true;
+    panic = Undeclarable;
     bound = [];
     binders = [];
     substitution = [];
@@ -162,7 +163,7 @@ let keep_promise context (frame : State.frame) (promise : promise) ~(at : State.
 let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
     ?(substitution = []) (lookups : Lookups.t) (source : State.source) ~path =
   let contract =
-    match Mir.contract_of_path lookups.mir path with
+    match Mir.read_contract lookups.mir path with
     | Some { form; _ } -> form
     | None -> Facts.bug "`%s` has no MIR of its contract" source.name
   in
@@ -217,7 +218,14 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
             | _ -> ());
             Validity.assume_valid context frame ty term;
             Facts.bind frame (Core_local local) ty term)
-      { (make_empty_frame source) with substitution }
+      {
+        (make_empty_frame source) with
+        substitution;
+        panic =
+          (match signature with
+          | Some { uses; _ } when not proof -> if Types.may_panic uses then Declared else Undeclared
+          | Some _ | None -> Undeclarable);
+      }
       parameters
   in
   let start = { start with old_locals = start.locals; old_self = start.self } in
@@ -297,7 +305,7 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
     | None -> Logic.Boolean true
   in
   let mir =
-    match Mir.code_of_path lookups.mir path with
+    match Mir.read_code lookups.mir path with
     | Some { form; _ } -> form
     | None -> Facts.bug "`%s` has a body and no MIR" source.name
   in
@@ -536,7 +544,8 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
             (fun (start : State.frame) ((proof_source : State.source), renaming) ->
               let proof =
                 match
-                  Option.bind proof_source.key (fun key -> Mir.code (lookups.mir.body_part key))
+                  Option.bind proof_source.key (fun key ->
+                      Mir.find_code (lookups.mir.body_part key))
                 with
                 | Some proof -> proof
                 | None -> Facts.bug "the proof `%s` has no MIR" proof_source.name
@@ -590,7 +599,7 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
 let translate_type (lookups : Lookups.t) (source : State.source) ~path =
   let home = require_home source in
   let context = make_context lookups ~home ~current:path ~terminates:false ~measures:[] in
-  (match Mir.type_clauses_of_path lookups.mir path with
+  (match Mir.read_type_clauses lookups.mir path with
   | Some { form = { invariants; potential }; _ } ->
       let ty =
         match Interface.Definition.read_interface lookups.interface path with
@@ -599,7 +608,7 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
         | _ -> Types.Named { path; arguments = [] }
       in
       let start = { (make_empty_frame source) with self_type = Some ty } in
-      (match Mir.defaults_of_path lookups.mir path with
+      (match Mir.read_defaults lookups.mir path with
       | Some { form = Field_defaults defaults; _ } ->
           List.iter
             (fun (default : Mir.t Mir.field_default) ->
@@ -636,7 +645,7 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
 let test (lookups : Lookups.t) (source : State.source) ~path =
   let home = require_home source in
   let context = make_context lookups ~home ~current:path ~terminates:false ~measures:[] in
-  (match Mir.code (lookups.mir.body_part home) with
+  (match Mir.find_code (lookups.mir.body_part home) with
   | Some (mir : Mir.t) ->
       Reader.read_body context (make_empty_frame source) ~lambdas:mir.lambdas mir.body
   | None -> Facts.bug "the test `%s` has no MIR" source.name);
@@ -645,7 +654,7 @@ let test (lookups : Lookups.t) (source : State.source) ~path =
 let translate_constant (lookups : Lookups.t) (source : State.source) ~path =
   let home = require_home source in
   let context = make_context lookups ~home ~current:path ~terminates:false ~measures:[] in
-  (match Mir.initializer_of_path lookups.mir path with
+  (match Mir.read_initializer lookups.mir path with
   | Some { form = code; _ } ->
       ignore
         (Amounts.run_code context (make_empty_frame source) code

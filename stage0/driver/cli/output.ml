@@ -6,7 +6,7 @@ type t = {
   mutable json : bool;
 }
 
-let local () =
+let make_output () =
   {
     out = print_string;
     err =
@@ -18,7 +18,7 @@ let local () =
     json = false;
   }
 
-let current = ref (local ())
+let current = ref (make_output ())
 
 let with_ output work =
   let previous = !current in
@@ -36,7 +36,7 @@ let columns () = !current.columns
 let json () = !current.json
 let set_json json = !current.json <- json
 
-let listed = function
+let show_list = function
   | [] -> ""
   | [ only ] -> only
   | [ first; second ] -> first ^ " and " ^ second

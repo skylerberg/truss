@@ -50,5 +50,5 @@ let find_recovered_report ~spans ~recovered definition part =
   match List.assoc_opt part all with
   | None -> None
   | Some span ->
-      Option.map Diagnostic.recovered
+      Option.map Diagnostic.make_recovered
         (List.find_opt (fun recovered -> lies_in all recovered span) recovered)

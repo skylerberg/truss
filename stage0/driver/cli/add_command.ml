@@ -1,9 +1,9 @@
 let run ~names =
-  let snapshot, packages = Command_packages.current () in
-  let package = Command_packages.one packages in
-  let wanted = List.map Upgrade_command.wanted names in
+  let snapshot, packages = Command_packages.load_current () in
+  let package = Command_packages.require_one packages in
+  let wanted = List.map Upgrade_command.parse_wanted names in
   let registry =
-    match Registry.Index.current () with
+    match Registry.Index.find_current_registry () with
     | Some registry -> registry
     | None ->
         Outcome.cannot_run "No registry is set. Set `%s` to the registry's directory."
@@ -13,7 +13,7 @@ let run ~names =
     (fun (name, version) ->
       match version with
       | None ->
-          if Registry.Index.newest registry name = None then
+          if Registry.Index.find_newest registry name = None then
             Outcome.cannot_run "The registry has no package `%s`." (Path.show_package name)
       | Some version ->
           if Registry.Index.hash_of registry name version = None then
@@ -21,13 +21,15 @@ let run ~names =
               (Registry.Version.show version))
     wanted;
   let manifest =
-    Filename.concat (Command_packages.directory snapshot package) Command_packages.manifest_name
+    Filename.concat
+      (Command_packages.locate_directory snapshot package)
+      Command_packages.manifest_name
   in
   let written = In_channel.with_open_bin manifest In_channel.input_all in
   let with_entries =
-    try List.fold_left (fun text (name, _) -> Manifest.with_dependency text name) written wanted
+    try List.fold_left (fun text (name, _) -> Manifest.add_dependency text name) written wanted
     with Manifest.Malformed { line; message } ->
-      Outcome.cannot_run "%s:%d: %s" (Shown_path.shown manifest) line message
+      Outcome.cannot_run "%s:%d: %s" (Shown_path.show_path manifest) line message
   in
   if with_entries <> written then Command_packages.write_file manifest with_entries;
   match Workspace.plan_lock (Command_packages.retake snapshot) ~set:wanted ~all:false with

@@ -1,14 +1,14 @@
-let main_of snapshot database packages (package : Path.package) =
-  if List.mem { Path.package; modules = [] } (Command_packages.modules snapshot packages) then
+let find_main snapshot database packages (package : Path.package) =
+  if List.mem { Path.package; modules = [] } (Command_packages.list_modules snapshot packages) then
     Database.find_main database package
   else None
 
-let mains snapshot packages =
-  List.filter_map (main_of snapshot (Workspace.open_database snapshot) packages) packages
+let list_mains snapshot packages =
+  List.filter_map (find_main snapshot (Workspace.open_database snapshot) packages) packages
 
-let main snapshot database packages =
-  let package = Command_packages.one packages in
-  match main_of snapshot database packages package with
+let require_main snapshot database packages =
+  let package = Command_packages.require_one packages in
+  match find_main snapshot database packages package with
   | Some main -> main
   | None ->
       Outcome.cannot_run
@@ -20,7 +20,7 @@ let refuse_unshippable snapshot packages compile main proofs =
   let in_code =
     List.map
       (fun ({ failure; file; line; column; way } : Compile.unshippable) ->
-        ( Command_packages.shown_workspace_path snapshot packages file,
+        ( Command_packages.show_workspace_path snapshot packages file,
           line,
           column,
           (failure :> [ `Todo | `Echo | `Proof_hole ]),
@@ -46,7 +46,7 @@ let refuse_unshippable snapshot packages compile main proofs =
       in
       if Output.json () then
         Json.print
-          (Json.document ~diagnostics:[]
+          (Json.make_document ~diagnostics:[]
              [
                ( "unshippable",
                  Json.List
@@ -78,25 +78,26 @@ let build_program ?output snapshot packages (build : Compiler.build) =
   let database = Workspace.open_database ~checks:(not is_release) snapshot in
   let report = Report.gather ~proofs:is_release database snapshot packages in
   if not (Report.clean report) then raise (Report.Errors report);
-  let main = main snapshot database packages in
+  let main = require_main snapshot database packages in
   let compile = Compiler.create database snapshot packages build in
-  Option.iter (refuse_unshippable snapshot packages compile main) (Report.proofs report);
-  let output = Option.value output ~default:(Compile.fresh_program compile) in
+  Option.iter (refuse_unshippable snapshot packages compile main) (Report.force_proofs report);
+  let output = Option.value output ~default:(Compile.make_program_path compile) in
   match Compile.build_program compile ~main ~output with
   | Error message -> Outcome.cannot_run "%s" message
   | Ok () -> output
 
 let run ~release ~arguments =
-  let snapshot, packages = Command_packages.current () in
+  let snapshot, packages = Command_packages.load_current () in
   let program = build_program snapshot packages (if release then Release else Development) in
   Outcome.Run_program { program; arguments }
 
 let build ~output =
-  let snapshot, packages = Command_packages.current () in
-  let package = Command_packages.one packages in
+  let snapshot, packages = Command_packages.load_current () in
+  let package = Command_packages.require_one packages in
   let output = Shown_path.normalize (Option.value output ~default:(Path.show_package package)) in
   ignore (build_program snapshot packages Release ~output);
   if Output.json () then
-    Json.print (Json.document ~diagnostics:[] [ ("output", Json.String (Shown_path.shown output)) ])
-  else Output.printf "Built %s.\n" (Shown_path.shown output);
+    Json.print
+      (Json.make_document ~diagnostics:[] [ ("output", Json.String (Shown_path.show_path output)) ])
+  else Output.printf "Built %s.\n" (Shown_path.show_path output);
   Outcome.Exit 0

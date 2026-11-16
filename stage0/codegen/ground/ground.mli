@@ -10,7 +10,7 @@ and argument = Type of ty | Value of Z.t | Capabilities of Path.t list
 and function_type = { parameters : (mode * ty) list; result : ty; uses : Path.t list }
 
 val compare : ty -> ty -> int
-val builtin : Intrinsic.builtin -> ty
-val path_name : Path.t -> string
+val make_builtin : Intrinsic.builtin -> ty
+val show_path_name : Path.t -> string
 val to_string : ty -> string
 val argument_to_string : argument -> string

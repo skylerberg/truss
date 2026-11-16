@@ -39,6 +39,15 @@ let create lookups resolved ~spans (scope : Environment.scope) =
     spans;
   }
 
+let read_span context id = context.spans.(id)
+
+let list_bounds context parameter =
+  Option.value ~default:[] (Parameter_table.find_opt context.bounds parameter)
+
+let find_self_type context = context.self_type
+let list_diagnostics context = !(context.diagnostics)
+let list_named_types context = !(context.named)
+
 let make_scope context : Environment.scope =
   {
     self_type = context.self_type;
@@ -83,7 +92,7 @@ let list_trait_closure (lookups : Lookups.t) path =
 let record_diagnostic diagnostics ?fixes code (span : Source.Definition_span.t) message =
   let diagnostic = Diagnostic.make ?fixes ~code:(Types code) span message in
   diagnostics := diagnostic :: !diagnostics;
-  Diagnostic.reported diagnostic
+  Diagnostic.make_reported diagnostic
 
 let report_error_type context code span message =
   Types.Error (record_diagnostic context.diagnostics code span message)
@@ -117,7 +126,7 @@ let is_uint64 (lookups : Lookups.t) path =
   match Resolve.Names.find_definition lookups.names path with
   | Some (key, { kind = Constant { type_ = { kind = Path_type written; _ }; _ }; _ }) ->
       (lookups.resolved Interface key).names.(written.path.last.id)
-      = Some (Definition (Type, Intrinsic.builtin_path UInt64))
+      = Some (Definition (Type, Intrinsic.make_builtin_path UInt64))
   | _ -> false
 
 let rec elaborate_type context (written : Syntax.type_expression) : Types.ty =
@@ -158,7 +167,7 @@ let rec elaborate_type context (written : Syntax.type_expression) : Types.ty =
       match elaborate_function_type context function_type with
       | Ok function_type -> Types.Function function_type
       | Error report -> Types.Error report)
-  | Type_error -> Types.Error (Diagnostic.recovered context.spans.(written.id))
+  | Type_error -> Types.Error (Diagnostic.make_recovered context.spans.(written.id))
 
 and elaborate_self context (span : Source.Definition_span.t) =
   match context.self_type with
@@ -200,7 +209,7 @@ and find_declaring_trait ?(capability = false) context trait name =
     (list_trait_closure context.lookups trait)
 
 and elaborate_associated context base parameter (key : Syntax.name) =
-  let bounds = Option.value ~default:[] (Parameter_table.find_opt context.bounds parameter) in
+  let bounds = list_bounds context parameter in
   let associated_type =
     List.find_map
       (fun (bound : Types.trait_reference) ->
@@ -421,9 +430,7 @@ and elaborate_capability context (written : Syntax.capability_reference) : Types
       match find_parameter context base with
       | Error report -> [ Types.Capability_error report ]
       | Ok parameter -> (
-          let bounds =
-            Option.value ~default:[] (Parameter_table.find_opt context.bounds parameter)
-          in
+          let bounds = list_bounds context parameter in
           match find_capability_projection context (Types.Parameter parameter) bounds key with
           | Some projection -> [ projection ]
           | None ->
@@ -936,9 +943,15 @@ let elaborate_member (lookups : Lookups.t) ~path ~spans resolved (definition : S
       let inherits_termination =
         match (path, header.container_scope.self_trait) with
         | Method { name; receiver; _ }, Some (implements : Types.trait_reference) -> (
+            let declared_receiver =
+              match Option.bind (lookups.names.key implements.trait) lookups.header with
+              | Some { container = Capability_parts; _ } -> Path.Static
+              | Some { container = Trait_parts _ | Impl_parts _; _ } | None -> receiver
+            in
             match
               Option.map lookups.names.definition
-                (lookups.names.key (Method { owner = implements.trait; name; receiver }))
+                (lookups.names.key
+                   (Method { owner = implements.trait; name; receiver = declared_receiver }))
             with
             | Some { kind = Function { signature = declared; _ } | Method_declaration declared; _ }
               ->
@@ -951,7 +964,7 @@ let elaborate_member (lookups : Lookups.t) ~path ~spans resolved (definition : S
            { elaborated with terminates = elaborated.terminates || inherits_termination })
   | _ ->
       make_elaborated_interface context
-        (Error_interface (Diagnostic.recovered spans.(definition.id)))
+        (Error_interface (Diagnostic.make_recovered spans.(definition.id)))
 
 let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
   let resolved = lookups.resolved Interface key in
@@ -962,7 +975,7 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
       let context = create lookups resolved ~spans empty_scope in
       let recovered () =
         make_elaborated_interface context
-          (Error_interface (Diagnostic.recovered spans.(definition.id)))
+          (Error_interface (Diagnostic.make_recovered spans.(definition.id)))
       in
       match
         ( Resolve.Names.find_recovery_report lookups.names key Header,

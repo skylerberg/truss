@@ -8,10 +8,10 @@ type context = {
   normalize_capabilities : Types.capability_set -> Types.capability_set;
 }
 
-let mode : Types.mode -> Ground.mode = function Read -> Read | Mut -> Mut | Own -> Own
-let panic_capability = Well_known.path Panic
+let ground_mode : Types.mode -> Ground.mode = function Read -> Read | Mut -> Mut | Own -> Own
+let panic_capability = Well_known.make_path Panic
 
-let capabilities context substitution (set : Types.capability_set) : Path.t list =
+let list_capabilities context substitution (set : Types.capability_set) : Path.t list =
   List.sort_uniq Path.compare
     (List.map
        (function
@@ -26,10 +26,10 @@ let capabilities context substitution (set : Types.capability_set) : Path.t list
        (context.normalize_capabilities (Types.substitute_capabilities substitution set)
          :> Types.capability list))
 
-let evidence_for context substitution uses =
+let list_evidence context substitution uses =
   List.filter
     (fun path -> not (Path.equal path panic_capability))
-    (capabilities context substitution uses)
+    (list_capabilities context substitution uses)
 
 let rec ground context substitution (ty : Types.ty) : Ground.ty =
   match context.normalize (Types.substitute substitution ty) with
@@ -60,7 +60,7 @@ and ground_argument context substitution (argument : Types.argument) : Ground.ar
   | Value (Value_parameter parameter) ->
       bug "the value parameter %s is not substituted" parameter.name
   | Value (Value_variable _) -> bug "a value the checker left undecided"
-  | Capabilities set -> Capabilities (capabilities context [] set)
+  | Capabilities set -> Capabilities (list_capabilities context [] set)
 
 and ground_function context substitution (function_type : Types.function_type) :
     Ground.function_type =
@@ -68,26 +68,26 @@ and ground_function context substitution (function_type : Types.function_type) :
   {
     parameters =
       List.map
-        (fun (yield_mode, ty) -> (mode yield_mode, ground context [] ty))
+        (fun (yield_mode, ty) -> (ground_mode yield_mode, ground context [] ty))
         function_type.inputs;
     result = ground context [] function_type.output;
-    uses = evidence_for context [] function_type.uses;
+    uses = list_evidence context [] function_type.uses;
   }
 
-let uint64 = Ground.builtin UInt64
-let types_mode : Ground.mode -> Types.mode = function Read -> Read | Mut -> Mut | Own -> Own
+let uint64 = Ground.make_builtin UInt64
+let mode_of_ground : Ground.mode -> Types.mode = function Read -> Read | Mut -> Mut | Own -> Own
 
-let rec back : Ground.ty -> Types.ty = function
-  | Named { path; arguments } -> Named { path; arguments = List.map back_argument arguments }
+let rec ty_of_ground : Ground.ty -> Types.ty = function
+  | Named { path; arguments } -> Named { path; arguments = List.map argument_of_ground arguments }
   | Never -> Never
   | Function function_type ->
       Function
         {
           inputs =
             List.map
-              (fun (yield_mode, ty) -> (types_mode yield_mode, back ty))
+              (fun (yield_mode, ty) -> (mode_of_ground yield_mode, ty_of_ground ty))
               function_type.parameters;
-          output = back function_type.result;
+          output = ty_of_ground function_type.result;
           uses =
             Types.make_capability_set
               (List.map (fun path -> Types.Capability path) function_type.uses);
@@ -97,33 +97,33 @@ let rec back : Ground.ty -> Types.ty = function
       Any
         {
           trait;
-          trait_arguments = List.map back_argument arguments;
-          associated = List.map (fun (name, ty) -> (name, back ty)) associated;
+          trait_arguments = List.map argument_of_ground arguments;
+          associated = List.map (fun (name, ty) -> (name, ty_of_ground ty)) associated;
         }
 
-and back_argument : Ground.argument -> Types.argument = function
-  | Type ty -> Type (back ty)
+and argument_of_ground : Ground.argument -> Types.argument = function
+  | Type ty -> Type (ty_of_ground ty)
   | Value value -> Value (Known value)
   | Capabilities set ->
       Capabilities (Types.make_capability_set (List.map (fun path -> Types.Capability path) set))
 
-let substitution (generics : Types.generic list) arguments =
+let make_substitution (generics : Types.generic list) arguments =
   if List.length generics <> List.length arguments then
     bug "%d generic parameters for %d arguments" (List.length generics) (List.length arguments);
   List.map2
-    (fun (generic : Types.generic) argument -> (generic.generic, back_argument argument))
+    (fun (generic : Types.generic) argument -> (generic.generic, argument_of_ground argument))
     generics arguments
 
-let fields context substitution (fields : Types.field list) =
+let ground_fields context substitution (fields : Types.field list) =
   List.map
     (fun (field : Types.field) ->
       (field.field_name, Memory_layout.Typed (ground context substitution field.field_type)))
     fields
 
-let shape context (ty : Ground.ty) : Memory_layout.shape =
+let compute_shape context (ty : Ground.ty) : Memory_layout.shape =
   match ty with
   | Never -> Sum []
-  | Function function_type -> Convention.function_value_shape function_type
+  | Function function_type -> Convention.make_function_value_shape function_type
   | Any _ -> Record [ ("value", Raw (Pointer Opaque)); ("vtable", Raw (Pointer Opaque)) ]
   | Named { path; arguments } -> (
       match (Intrinsic.builtin_of_path path, arguments) with
@@ -152,9 +152,9 @@ let shape context (ty : Ground.ty) : Memory_layout.shape =
           match context.type_interface path with
           | None -> bug "%s is not a type" (Path.show path)
           | Some interface -> (
-              let substitution = substitution interface.type_generics arguments in
+              let substitution = make_substitution interface.type_generics arguments in
               match interface.shape with
-              | Record record -> Record (fields context substitution record)
+              | Record record -> Record (ground_fields context substitution record)
               | Sum variants ->
                   Sum
                     (List.map
@@ -163,7 +163,8 @@ let shape context (ty : Ground.ty) : Memory_layout.shape =
                            Memory_layout.name = value.variant_name;
                            indirect = value.indirect;
                            fields =
-                             fields context substitution (Option.value value.fields ~default:[]);
+                             ground_fields context substitution
+                               (Option.value value.fields ~default:[]);
                          })
                        variants)
               | Builtin_type _ -> bug "a built-in type under a path that is not built in"

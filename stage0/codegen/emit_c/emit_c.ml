@@ -124,7 +124,7 @@ let iter_identifiers text ~identifier ~other =
   in
   scan 0
 
-let text fragment =
+let render_fragment fragment =
   let names = Hashtbl.create 64 in
   let number prefix list =
     List.iteri
@@ -133,15 +133,15 @@ let text fragment =
           Hashtbl.replace names name (Printf.sprintf "%s%d" prefix position))
       list
   in
-  let self = Instance.symbol fragment.key in
-  number "@instance_" (List.map Instance.symbol fragment.references);
+  let self = Instance.make_symbol fragment.key in
+  number "@instance_" (List.map Instance.make_symbol fragment.references);
   number "@type_"
-    (List.map C_types.key_name
+    (List.map C_types.render_key_name
        (fragment.types
        @ List.concat_map
            (fun (_, (defined : C_types.defined)) -> defined.references)
            fragment.environments));
-  number "@site_" (List.map C_runtime.site_symbol fragment.sites);
+  number "@site_" (List.map C_runtime.render_site_symbol fragment.sites);
   let rename identifier =
     if String.starts_with ~prefix:self identifier then
       "@self"
@@ -154,7 +154,7 @@ let text fragment =
       @ [ fragment.definition ]
       @ List.map
           (fun (key, (defined : C_types.defined)) ->
-            C_types.key_name key
+            C_types.render_key_name key
             ^
             match defined.definition with
             | Struct { body; _ } -> body
@@ -170,7 +170,7 @@ let text fragment =
 
 module Builder = Builder
 
-let bytes_definition (text, name) =
+let render_bytes_definition (text, name) =
   let bytes =
     List.init (String.length text) (fun index -> string_of_int (Char.code text.[index]))
   in
@@ -178,7 +178,7 @@ let bytes_definition (text, name) =
     (max 1 (String.length text))
     (if bytes = [] then "0" else String.concat ", " bytes)
 
-let named_bytes context ~texts =
+let name_bytes context ~texts =
   let named = Hashtbl.create 64 in
   List.iter
     (fun text ->
@@ -189,17 +189,18 @@ let named_bytes context ~texts =
   Hashtbl.fold (fun text index entries -> (index, text) :: entries) context.bytes []
   |> List.sort compare
   |> List.filter_map (fun (index, text) ->
-      let name = C_values.bytes_symbol context index in
-      if Hashtbl.mem named name then Some (bytes_definition (text, name)) else None)
+      let name = C_values.render_bytes_symbol context index in
+      if Hashtbl.mem named name then Some (render_bytes_definition (text, name)) else None)
 
 type compiled = Code of Builder.instance | Data of Lowered.data | Table of Lowered.table
 
-let fragment env (compiled : compiled) =
+let make_fragment env (compiled : compiled) =
   let key, context =
     match compiled with
     | Code code -> (code.C_instance.key, code.context)
-    | Data data -> (data.data_key, C_types.new_context env (Instance.symbol data.data_key))
-    | Table table -> (table.table_key, C_types.new_context env (Instance.symbol table.table_key))
+    | Data data -> (data.data_key, C_types.make_context env (Instance.make_symbol data.data_key))
+    | Table table ->
+        (table.table_key, C_types.make_context env (Instance.make_symbol table.table_key))
   in
   let functions, definition, kind =
     match compiled with
@@ -208,8 +209,8 @@ let fragment env (compiled : compiled) =
         ( List.map snd nested @ [ code.own ],
           "",
           Functions { nested = List.length nested; weight = code.weight } )
-    | Data data -> ([], C_data.data_c context data, Static_data)
-    | Table table -> ([], C_data.table_c context table, Table_entries table.capability)
+    | Data data -> ([], C_data.render_data context data, Static_data)
+    | Table table -> ([], C_data.render_table context table, Table_entries table.capability)
   in
   let types = List.rev context.order in
   let environments =
@@ -227,7 +228,7 @@ let fragment env (compiled : compiled) =
     environments;
     prototypes = List.rev context.prototypes;
     statics =
-      named_bytes context ~texts:(definition :: List.map snd functions) @ List.rev context.statics;
+      name_bytes context ~texts:(definition :: List.map snd functions) @ List.rev context.statics;
     sites = List.sort_uniq compare context.sites;
     helpers = context.helpers_used;
     references =
@@ -240,8 +241,8 @@ let fragment env (compiled : compiled) =
     failures = List.rev context.failures;
   }
 
-let file env build (fragments : (fragment * linkage) list) =
-  let context = C_types.new_context env "" in
+let render_file env build (fragments : (fragment * linkage) list) =
+  let context = C_types.make_context env "" in
   let local_types = Key_table.create 16 in
   List.iter
     (fun ((fragment : fragment), _) ->
@@ -327,7 +328,8 @@ let file env build (fragments : (fragment * linkage) list) =
       match (defined key).definition with
       | Struct _ ->
           Buffer.add_string buffer
-            (Printf.sprintf "typedef struct %s %s;\n" (C_types.key_name key) (C_types.key_name key))
+            (Printf.sprintf "typedef struct %s %s;\n" (C_types.render_key_name key)
+               (C_types.render_key_name key))
       | Typedef _ | Code_typedef _ -> ())
     keys;
   let emitted = ref C_types.Keys.empty in
@@ -340,7 +342,8 @@ let file env build (fragments : (fragment * linkage) list) =
           List.iter emit_typedef (defined key).references;
           Buffer.add_string buffer
             (match definition with
-            | Typedef c_type -> Printf.sprintf "typedef %s %s;\n" c_type (C_types.key_name key)
+            | Typedef c_type ->
+                Printf.sprintf "typedef %s %s;\n" c_type (C_types.render_key_name key)
             | Code_typedef text -> text
             | Struct _ -> "")
   in
@@ -352,7 +355,7 @@ let file env build (fragments : (fragment * linkage) list) =
       | Struct { body; holds } ->
           List.iter emit holds;
           Buffer.add_string buffer
-            (Printf.sprintf "struct %s {\n%s};\n" (C_types.key_name key) body)
+            (Printf.sprintf "struct %s {\n%s};\n" (C_types.render_key_name key) body)
       | Typedef _ | Code_typedef _ -> ()
     end
   in
@@ -362,20 +365,21 @@ let file env build (fragments : (fragment * linkage) list) =
       let layout =
         match key with
         | C_types.Type ty -> Some (Memory_layout.of_type env ty)
-        | Block (ty, variant) -> Some (Memory_layout.block env ty variant)
+        | Block (ty, variant) -> Some (Memory_layout.lay_out_block env ty variant)
         | Code _ | Environment _ | Evidence _ -> None
       in
       Option.iter
         (fun (layout : Memory_layout.t) ->
           Buffer.add_string buffer
             (Printf.sprintf "_Static_assert(sizeof(%s) == %d && _Alignof(%s) == %d, \"layout\");\n"
-               (C_types.key_name key) layout.size (C_types.key_name key) layout.alignment))
+               (C_types.render_key_name key) layout.size (C_types.render_key_name key)
+               layout.alignment))
         layout)
     keys;
   List.iter
     (fun site ->
       Buffer.add_string buffer
-        (Printf.sprintf "extern const struct t_site %s;\n" (C_runtime.site_symbol site)))
+        (Printf.sprintf "extern const struct t_site %s;\n" (C_runtime.render_site_symbol site)))
     (List.sort_uniq compare
        (List.concat_map (fun ((fragment : fragment), _) -> fragment.sites) fragments));
   Buffer.add_buffer buffer declarations;
@@ -390,7 +394,7 @@ let file env build (fragments : (fragment * linkage) list) =
 
 type position = { file : string; line : int; column : int }
 
-let sites_file ~position:resolve fragments =
+let render_sites_file ~position:resolve fragments =
   let positions =
     List.map
       (fun site -> (site, resolve site))
@@ -403,11 +407,11 @@ let sites_file ~position:resolve fragments =
          (List.map (fun (_, (position : position)) -> position.file) positions))
   in
   String.concat ""
-    ((C_runtime.runtime_declarations :: List.map bytes_definition file_symbols)
+    ((C_runtime.runtime_declarations :: List.map render_bytes_definition file_symbols)
     @ List.map
         (fun (site, (position : position)) ->
           Printf.sprintf "const struct t_site %s = { %s, %d, %d, %d };\n"
-            (C_runtime.site_symbol site)
+            (C_runtime.render_site_symbol site)
             (List.assoc position.file file_symbols)
             (String.length position.file) position.line position.column)
         positions)

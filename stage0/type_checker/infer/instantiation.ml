@@ -4,7 +4,7 @@ let check_evidence_grants (state : State.state) (span : Source.Definition_span.t
       evidence
   in
   state.evidence_packages <-
-    List.map (fun (impl, _, _) -> Path.package impl) impls @ state.evidence_packages;
+    List.map (fun (impl, _, _) -> Path.locate_package impl) impls @ state.evidence_packages;
   List.iter
     (fun message ->
       state.diagnostics <-
@@ -73,18 +73,27 @@ let require_bounds state (span : Source.Definition_span.t) ?of_type generics sub
                     (State.show state associated_type))))
     (Interface.Impls.list_required_bounds generics substitution)
 
+let make_fresh_generic_arguments (state : State.state) (generics : Types.generic list) =
+  List.map
+    (fun (generic : Types.generic) ->
+      match generic.kind with
+      | Value_generic -> Types.Value (Unify.make_fresh_value state.unifier)
+      | Type_generic _ -> Types.Type (State.make_fresh_type state)
+      | Capability_generic ->
+          Types.Capabilities (Unify.make_fresh_capability_variable state.unifier))
+    generics
+
 let make_fresh_arguments (state : State.state) (path : Path.t) =
   match Interface.Definition.read_type_interface state.lookups.interface path with
-  | Some interface ->
-      List.map
-        (fun (generic : Types.generic) ->
-          match generic.kind with
-          | Value_generic -> Types.Value (Unify.make_fresh_value state.unifier)
-          | Type_generic _ -> Types.Type (State.make_fresh_type state)
-          | Capability_generic ->
-              Types.Capabilities (Unify.make_fresh_capability_variable state.unifier))
-        interface.type_generics
+  | Some interface -> make_fresh_generic_arguments state interface.type_generics
   | None -> []
+
+let make_fresh_trait_reference (state : State.state) (trait : Path.t) =
+  State.make_trait_reference trait
+    ~arguments:
+      (match Interface.Definition.read_trait_interface state.lookups.interface trait with
+      | Some interface -> make_fresh_generic_arguments state interface.trait_generics
+      | None -> [])
 
 let require_type_bounds (state : State.state) span path arguments =
   match Interface.Definition.read_type_interface state.lookups.interface path with
@@ -102,7 +111,8 @@ let instantiate_type state span path =
 
 let rec find_static state (value : Syntax.expression) : static_ option =
   match (value.kind, State.find_head state value) with
-  | Self_type_value, _ -> Option.map (fun self -> Static_type self) state.context.self_type
+  | Self_type_value, _ ->
+      Option.map (fun self -> Static_type self) (Interface.Elaborator.find_self_type state.context)
   | _, Some { target = Definition (Type, path); type_arguments; _ } ->
       Some (Static_type (check_named_type state value path type_arguments))
   | _, Some { target = Type_parameter parameter; name; type_arguments } -> (
@@ -199,15 +209,8 @@ type instance = {
 let instantiate (state : State.state) (span : Source.Definition_span.t) ?(extra = [])
     (signature : Types.signature) =
   let substitution =
-    List.map
-      (fun (generic : Types.generic) ->
-        ( generic.generic,
-          match generic.kind with
-          | Value_generic -> Types.Value (Unify.make_fresh_value state.unifier)
-          | Type_generic _ -> Types.Type (State.make_fresh_type state)
-          | Capability_generic ->
-              Types.Capabilities (Unify.make_fresh_capability_variable state.unifier) ))
-      signature.generics
+    Types.make_substitution signature.generics
+      (make_fresh_generic_arguments state signature.generics)
     @ extra
   in
   require_bounds state span signature.generics substitution;

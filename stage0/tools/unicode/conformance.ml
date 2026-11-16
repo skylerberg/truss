@@ -68,7 +68,7 @@ let () =
       in
       if Unicode.is_forbidden value <> expected then
         fail "forbidden: U+%04X: expected %b" value expected;
-      if expected && control.(value) && Unicode.forbidden_name value = None then
+      if expected && control.(value) && Unicode.find_forbidden_name value = None then
         fail "forbidden control U+%04X has no name" value
     end
   done;

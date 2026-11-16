@@ -130,7 +130,7 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode 
                        (State.read_span state variant_name.id)
                        ~fixes:
                          (match
-                            Diagnostic.closest variant_name.text
+                            Diagnostic.find_closest variant_name.text
                               (List.map
                                  (fun (variant : Types.variant) -> variant.variant_name)
                                  variants)
@@ -243,7 +243,7 @@ and check_pattern_fields state env (written : Syntax.pattern) (fields : Types.fi
               @@ State.make_error_type state Unknown_member (State.read_span state name.id)
                    ~fixes:
                      (match
-                        Diagnostic.closest name.text
+                        Diagnostic.find_closest name.text
                           (List.map (fun (declared : Types.field) -> declared.field_name) fields)
                       with
                      | Some candidate ->
@@ -325,7 +325,7 @@ and is_structural ?(seen = []) state (type_ : Types.ty) =
     | Types.Named { path; arguments } -> (
         match Interface.Definition.read_interface state.lookups.interface path with
         | Some (Interface.Environment.Type_interface interface)
-          when (not interface.opaque) || Path.package path = state.package ->
+          when (not interface.opaque) || Path.locate_package path = state.package ->
             let derives_equal =
               List.exists (fun derived -> Well_known.is Equal derived) interface.derives
             in

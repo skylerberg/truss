@@ -1,16 +1,16 @@
 let make_parameter operation name : Types.parameter =
-  { owner = Intrinsic.operation_path operation; name }
+  { owner = Intrinsic.make_operation_path operation; name }
 
 let make_storage_type element =
-  Types.Named { path = Intrinsic.builtin_path Storage; arguments = [ Types.Type element ] }
+  Types.Named { path = Intrinsic.make_builtin_path Storage; arguments = [ Types.Type element ] }
 
 let make_view_type element =
-  Types.Named { path = Intrinsic.builtin_path View; arguments = [ Types.Type element ] }
+  Types.Named { path = Intrinsic.make_builtin_path View; arguments = [ Types.Type element ] }
 
-let make_libc_scalar_type scalar = Types.make_builtin (Intrinsic.libc_builtin scalar)
+let make_libc_scalar_type scalar = Types.make_builtin (Intrinsic.builtin_of_libc scalar)
 
 let make_sequence_type element =
-  Types.Named { path = Well_known.path Sequence; arguments = [ Types.Type element ] }
+  Types.Named { path = Well_known.make_path Sequence; arguments = [ Types.Type element ] }
 
 let make_signature (operation : Intrinsic.operation) : Types.signature =
   let generic name = { Types.generic = make_parameter operation name; kind = Type_generic [] } in
@@ -18,7 +18,8 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
     {
       Types.generic = make_parameter operation name;
       kind =
-        Type_generic [ { trait = Well_known.path known; trait_arguments = []; associated = [] } ];
+        Type_generic
+          [ { trait = Well_known.make_path known; trait_arguments = []; associated = [] } ];
     }
   in
   let parameter_type name = Types.Parameter (make_parameter operation name) in
@@ -46,7 +47,7 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
     let array =
       Types.Named
         {
-          path = Intrinsic.builtin_path Array;
+          path = Intrinsic.make_builtin_path Array;
           arguments = [ Types.Type element; Types.Value (Value_parameter count) ];
         }
     in
@@ -194,7 +195,9 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
         [ input "view" (make_view_type element) ]
   | Crash ->
       make ~output:(Returns Types.Never)
-        [ input "message" (Types.Named { path = Well_known.path String_slice; arguments = [] }) ]
+        [
+          input "message" (Types.Named { path = Well_known.make_path String_slice; arguments = [] });
+        ]
   | Handle_from ->
       make
         ~output:(Returns (Types.make_builtin Handle))
@@ -225,7 +228,7 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
         [ input "value" value; input "clause" uint64 ]
   | Shared_new | Shared_update | Shared_key -> (
       let shared =
-        Types.Named { path = Intrinsic.builtin_path Shared; arguments = [ Types.Type value ] }
+        Types.Named { path = Intrinsic.make_builtin_path Shared; arguments = [ Types.Type value ] }
       in
       match operation with
       | Shared_new ->
@@ -268,7 +271,7 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
         [ input "index" uint64; input ~mode:Mut "is_present" bool ]
   | System_is_os _ | System_is_architecture _ -> make ~output:(Returns bool) []
   | Libc function_ ->
-      let { Libc.parameters; result; _ } = Libc.signature function_ in
+      let { Libc.parameters; result; _ } = Libc.make_signature function_ in
       let presence = match result with Text -> [ input ~mode:Mut "is_present" bool ] | _ -> [] in
       make
         ~output:
@@ -291,7 +294,7 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
            parameters
         @ presence)
   | Libc_number number ->
-      make ~output:(Returns (make_libc_scalar_type (Libc.number_type number))) []
+      make ~output:(Returns (make_libc_scalar_type (Libc.classify_number number))) []
 
 type time = Constant_time | Linear_in of int | Unbounded_time
 type amount = Argument of int | Generic of string

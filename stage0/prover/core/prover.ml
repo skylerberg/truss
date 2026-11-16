@@ -42,7 +42,7 @@ let translate_impl_laws (lookups : Lookups.t) (key : Resolve.Names.key) source =
         Translate.translate_laws lookups source ~impl:key.path ~trait:interface.implements
           ~for_type:interface.for_type
           ~proofs:
-            (Contracts.list_law_proofs lookups (Path.package key.path) interface.implements
+            (Contracts.list_law_proofs lookups (Path.locate_package key.path) interface.implements
                interface.for_type)
           ~at:Whole_definition;
       ]
@@ -81,7 +81,7 @@ let list_integer_instances (lookups : Lookups.t) (path : Path.t) =
                   ( shown
                     @ [
                         Printf.sprintf "`%s` is `%s`" parameter.name
-                          (Intrinsic.builtin_name builtin);
+                          (Intrinsic.show_builtin builtin);
                       ],
                     (parameter, Types.Type (Types.make_builtin builtin)) :: substitution ))
                 builtins)
@@ -101,12 +101,12 @@ let translate_derived_default (lookups : Lookups.t) (key : Resolve.Names.key)
   let path =
     Path.Method
       {
-        owner = Derived { type_ = key.path; trait = Well_known.path Default };
+        owner = Derived { type_ = key.path; trait = Well_known.make_path Default };
         name = "default";
         receiver = Static;
       }
   in
-  if derives_default && Option.is_some (Mir.code_of_path lookups.mir path) then
+  if derives_default && Option.is_some (Mir.read_code lookups.mir path) then
     let outcome = Translate.translate_function lookups source ~path in
     List.map
       (fun (obligation : State.obligation) ->
@@ -131,7 +131,8 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
       lookups.patterns key;
       try
         match declaration.kind with
-        | (Function | Method) when Mir.code (lookups.mir.body_part key) = None -> Not_proven_here
+        | (Function | Method) when Mir.find_code (lookups.mir.body_part key) = None ->
+            Not_proven_here
         | Theorem -> Obligations (Translate.translate_theorem lookups source ~path:key.path)
         | Function | Method -> (
             let prove_with substitution =
@@ -180,11 +181,11 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
               }
         | Type -> (
             let has_defaults () =
-              match Mir.defaults_of_path lookups.mir key.path with
+              match Mir.read_defaults lookups.mir key.path with
               | Some { form = Field_defaults (_ :: _); _ } -> true
               | Some { form = Field_defaults [] | Parameter_defaults _; _ } | None -> false
             in
-            match Mir.type_clauses_of_path lookups.mir key.path with
+            match Mir.read_type_clauses lookups.mir key.path with
             | Some { form = { invariants = _ :: _; _ }; _ } ->
                 let outcome = Translate.translate_type lookups source ~path:key.path in
                 Obligations
@@ -444,11 +445,16 @@ let list_definition_states (lookups : Lookups.t) (key : Resolve.Names.key) proof
           let span = resolve obligation.location in
           let message = render lookups obligation.message in
           let others =
-            match obligation.code with
-            | Overflow | Division | Shift ->
+            match (obligation.code, obligation.may_stop_with_panic) with
+            | (Overflow | Division | Shift), true ->
                 " It can also be checked first with an `if`, done with the checked operation, or \
                  allowed to stop the program with `uses Panic`."
-            | _ -> ""
+            | (Overflow | Division | Shift), false ->
+                " It can also be checked first with an `if`, or done with the checked operation."
+            | _, true ->
+                " It can also be checked first with an `if`, or allowed to stop the program with \
+                 `uses Panic`."
+            | _, false -> ""
           in
           let failed explained =
             Some
@@ -621,7 +627,7 @@ let file_states { lookups; verdicts } file =
             | Some ((place : Resolve.Names.place), span) when place.file <> file -> (
                 match lookups.source place.file with
                 | source ->
-                    let line, _ = Source.position source span.start in
+                    let line, _ = Source.compute_position source span.start in
                     Printf.sprintf " The clause that must hold is at `%s:%d`." (Source.path source)
                       line
                 | exception Not_found -> "")

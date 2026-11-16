@@ -28,7 +28,7 @@ let fails_saying expected = function
   | [ (diagnostic : Diagnostic.t) ] ->
       if Diagnostic.Code.name diagnostic.code <> "prover.requires" then
         Codegen_support.fail "%s" (Diagnostic.Code.name diagnostic.code);
-      if not (Substring.contains diagnostic.message expected) then
+      if not (String.includes ~affix:expected diagnostic.message) then
         Codegen_support.fail "%s" diagnostic.message
   | actual -> Codegen_support.fail "%d diagnostics: %s" (List.length actual) (messages actual)
 
@@ -77,15 +77,8 @@ let () =
     (fun () ->
       let results = results () in
       let use = Fixtures.Evaluate.shout_of_capitals in
-      let refuses = "        quiet = false" in
       let accepts_all =
-        match Substring.For_testing.find shout refuses with
-        | Some at ->
-            String.sub shout 0 at ^ "        quiet = true"
-            ^ String.sub shout
-                (at + String.length refuses)
-                (String.length shout - at - String.length refuses)
-        | None -> failwith ("shout has no " ^ refuses)
+        String.replace_first ~sub:"        quiet = false" ~by:"        quiet = true" shout
       in
       fails_saying "gives `false`" (proven_with_running ~results (shout ^ use));
       proven (proven_with_running ~results (accepts_all ^ use)))

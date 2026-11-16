@@ -658,7 +658,7 @@ let list_used_packages (resolved : Resolve.resolved) ~evidence_packages (form : 
   let named =
     List.filter_map
       (function
-        | Some (Resolve.Definition (_, path) | Variant (path, _)) -> Some (Path.package path)
+        | Some (Resolve.Definition (_, path) | Variant (path, _)) -> Some (Path.locate_package path)
         | Some (Module module_) -> Some module_.package
         | _ -> None)
       (Array.to_list resolved.names)
@@ -668,8 +668,8 @@ let list_used_packages (resolved : Resolve.resolved) ~evidence_packages (form : 
     (Core_walk.make_callee_visitor (function
       | Trait_method { trait; evidence; _ } ->
           called :=
-            Path.package trait.trait
-            :: (match evidence with Impl { impl; _ } -> [ Path.package impl ] | _ -> [])
+            Path.locate_package trait.trait
+            :: (match evidence with Impl { impl; _ } -> [ Path.locate_package impl ] | _ -> [])
             @ !called
       | _ -> ()))
     form.definition;
@@ -733,10 +733,11 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
         (Interface.Properties.list_known_bounds lookups.interface
            ~bounds:(State.lookup_bounds state) type_));
   check_definition state elaborated ~checks_body;
-  state.diagnostics <- !(context.diagnostics) @ state.diagnostics;
+  state.diagnostics <- Interface.Elaborator.list_diagnostics context @ state.diagnostics;
   state.diagnostics <-
     Interface.Check.list_bound_diagnostics lookups.interface ~package:state.package
-      ~bounds:(State.lookup_bounds state) ~spans !(context.named)
+      ~bounds:(State.lookup_bounds state) ~spans
+      (Interface.Elaborator.list_named_types context)
     @ state.diagnostics;
   finalize state;
   Exported_parts.check state;

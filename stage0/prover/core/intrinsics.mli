@@ -6,6 +6,7 @@ val apply_slice :
   collection:Logic.term ->
   low:Logic.term ->
   high:Logic.term option ->
+  is_checked:bool ->
   State.frame * Logic.term * Logic.term * Logic.term
 
 val slice_place :

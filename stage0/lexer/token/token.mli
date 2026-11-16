@@ -153,18 +153,18 @@ and text = { value : string; span : Source.span }
 and interpolation = { tokens : t array; span : Source.span; is_closed : bool }
 
 val equal_punctuation : punctuation -> punctuation -> bool
-val texts : string_literal -> text array
-val interpolations : string_literal -> interpolation array
+val list_texts : string_literal -> text array
+val list_interpolations : string_literal -> interpolation array
 val keywords : (string * keyword) list
 val reserved_words : (string * reserved) list
 val punctuation : (string * punctuation) list
-val word : string -> kind option
-val keyword_spelling : keyword -> string
-val reserved_spelling : reserved -> string
-val punctuation_spelling : punctuation -> string
-val foreign_spelling : foreign -> string
+val find_word : string -> kind option
+val spell_keyword : keyword -> string
+val spell_reserved : reserved -> string
+val spell_punctuation : punctuation -> string
+val spell_foreign : foreign -> string
 val definition_keywords : keyword list
-val spelling : ?insertions:(int * string) list -> t array -> string option
+val spell_tokens : ?insertions:(int * string) list -> t array -> string option
 val joins : char -> char -> bool
 val can_end : kind -> bool
 val can_begin : kind -> bool

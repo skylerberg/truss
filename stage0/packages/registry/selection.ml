@@ -15,7 +15,7 @@ type problem =
   | Cannot_load of { name : Path.package; version : Version.t; reason : string }
   | Two_contents of { name : Path.package; version : Version.t; recorded_by : Path.package }
 
-let sentence problem =
+let describe_problem problem =
   let show = Path.show_package in
   match problem with
   | No_version { name; wanted_by } ->
@@ -32,7 +32,7 @@ let sentence problem =
          has one content, so one of the two is wrong."
         (show recorded_by) (show name) (Version.show version)
 
-let manifest_and_record ~read name =
+let read_manifest_and_record ~read name =
   match
     ( Option.map Manifest.parse (read "truss.toml"),
       Lock.parse (Option.value ~default:"" (read "truss.lock")) )
@@ -144,7 +144,7 @@ let lock ~project packages : Lock.t =
       })
     packages
 
-let differences ~(written : Lock.t) ~(current : Lock.t) =
+let list_differences ~(written : Lock.t) ~(current : Lock.t) =
   let capabilities = function [] -> "nothing" | held -> String.concat ", " held in
   List.filter_map
     (fun (entry : Lock.entry) ->

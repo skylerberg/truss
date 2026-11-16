@@ -3,11 +3,11 @@ let expect_bug ~saying work =
   | () -> Codegen_support.fail "expected a compiler bug saying %S" saying
   | exception Compiler_bug.Bug bug ->
       let text = Compiler_bug.to_string bug in
-      if not (Codegen_support.contains text saying) then
+      if not (String.includes ~affix:saying text) then
         Codegen_support.fail "expected %S in %S" saying text
 
 let env = Codegen_support.shape_env ()
-let emit env instance = ignore (Emit_c.fragment env (Code (instance env)))
+let emit env instance = ignore (Emit_c.make_fragment env (Code (instance env)))
 
 let caller arguments =
   Codegen_support.entry

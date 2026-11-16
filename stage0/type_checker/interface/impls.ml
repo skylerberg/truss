@@ -70,6 +70,10 @@ let make_impl_substitution lookups (impl : Path.t) =
 
 let is_open_type = function Types.Error _ | Types.Variable _ | Types.Hole -> true | _ -> false
 
+let is_open_value = function
+  | Types.Value_variable _ -> true
+  | Types.Known _ | Value_parameter _ -> false
+
 let rec match_type ~variables (substitution : Types.substitution) pattern type_ =
   match (pattern, type_) with
   | Types.Parameter parameter, _ when List.mem parameter variables -> (
@@ -164,7 +168,8 @@ let rec implements lookups ~(bounds : bounds) ?(depth = 0) ?(checks_conditions =
            | Types.Type wanted, Types.Type actual ->
                is_open_type wanted || is_open_type actual
                || Types.equal (normalize lookups ~bounds wanted) (normalize lookups ~bounds actual)
-           | Types.Value wanted, Types.Value actual -> wanted = actual
+           | Types.Value wanted, Types.Value actual ->
+               is_open_value wanted || is_open_value actual || wanted = actual
            | _ -> false)
          wanted.trait_arguments actual_arguments
   in
@@ -243,10 +248,11 @@ let rec implements lookups ~(bounds : bounds) ?(depth = 0) ?(checks_conditions =
     | Types.Named { path; _ } ->
         let packages =
           List.sort_uniq compare
-            (Path.package wanted.trait :: Path.package path
+            (Path.locate_package wanted.trait :: Path.locate_package path
             :: List.filter_map
                  (function
-                   | Types.Type (Types.Named { path; _ }) -> Some (Path.package path) | _ -> None)
+                   | Types.Type (Types.Named { path; _ }) -> Some (Path.locate_package path)
+                   | _ -> None)
                  wanted.trait_arguments)
         in
         let candidates =

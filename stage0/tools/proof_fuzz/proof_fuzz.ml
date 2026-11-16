@@ -18,7 +18,9 @@ let compiler =
   lazy
     (match Toolchain.find () with Ok toolchain -> toolchain | Error message -> failwith message)
 
-let cache = lazy (Build.cache (Filename.concat (Filename.get_temp_dir_name ()) "truss-proof-fuzz"))
+let cache =
+  lazy (Build.make_cache (Filename.concat (Filename.get_temp_dir_name ()) "truss-proof-fuzz"))
+
 let settings : Build.settings = { build = Development; optimization = O1; extra = [] }
 
 let load text =
@@ -63,7 +65,7 @@ let runnable database =
       let key = Resolve.Names.make_key declaration in
       match
         ( Interface.Definition.read_declared_signature interface declaration.path,
-          Mir.contract_of_path mir declaration.path )
+          Mir.read_contract mir declaration.path )
       with
       | ( Some ({ generics = []; receiver = None; uses; output = Returns output; _ } as signature),
           Some { form = { requires; _ }; _ } )
@@ -92,7 +94,7 @@ let runnable database =
           match List.filter_map Fun.id ranges with
           | ranges_written
             when List.length ranges_written = List.length ranges
-                 && not (List.exists (fun admit -> Substring.contains admit "==>") admits) ->
+                 && not (List.exists (fun admit -> String.includes ~affix:"==>" admit) admits) ->
               Some { path = declaration.path; key; signature; admits; ranges = ranges_written }
           | _ -> None)
       | _ -> None)
@@ -216,7 +218,7 @@ let mutants text =
             | _ -> None
           in
           match swapped with
-          | Some other -> [ replace token.span (Token.punctuation_spelling other) ]
+          | Some other -> [ replace token.span (Token.spell_punctuation other) ]
           | None -> [])
       | _ -> [])
 

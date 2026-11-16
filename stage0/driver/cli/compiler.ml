@@ -1,56 +1,56 @@
 type build = Development | Release
 
-let c_flags () =
+let read_c_flags () =
   Toolchain.split_flags (Option.value (Sys.getenv_opt Toolchain.added_flags_variable) ~default:"")
 
-let toolchain () =
+let require_toolchain () =
   match Toolchain.find () with
   | Ok toolchain -> toolchain
   | Error message -> Outcome.cannot_run "%s" message
 
-let requests database packages =
+let make_requests database packages =
   match Libc.host with
   | Some _ -> Database.make_lowering_requests database packages
   | None -> Outcome.cannot_run "Stage0 builds programs only for Linux and macOS."
 
-let results () : Compile.results =
+let make_results () : Compile.results =
   let cache = Workspace.open_cache () in
   {
     find = (fun key -> Cache.find_result cache ~kind:Test_result ~key);
     add = (fun key value -> Cache.add_result cache ~kind:Test_result ~key value);
   }
 
-let development_settings () : Build.settings =
-  { build = Development; optimization = O1; extra = c_flags () }
+let make_development_settings () : Build.settings =
+  { build = Development; optimization = O1; extra = read_c_flags () }
 
-let lowering_only database packages =
-  Compile.create ~results:(results ()) (requests database packages)
+let make_lowering_compiler database packages =
+  Compile.create ~results:(make_results ()) (make_requests database packages)
     { compiler = "cc"; identity = "lowering only" }
-    (Build.cache (Cache.make_objects_directory (Workspace.open_cache ())))
-    (development_settings ())
+    (Build.make_cache (Cache.make_objects_directory (Workspace.open_cache ())))
+    (make_development_settings ())
 
 let create database snapshot packages build =
-  let toolchain = toolchain () in
+  let toolchain = require_toolchain () in
   let settings : Build.settings =
     match build with
-    | Development -> development_settings ()
+    | Development -> make_development_settings ()
     | Release ->
         {
           build = Release;
           optimization = O2;
-          extra = Toolchain.link_time_optimization toolchain @ c_flags ();
+          extra = Toolchain.link_time_optimization toolchain @ read_c_flags ();
         }
   in
   let file_name (file : Path.file) =
     match build with
     | Development when List.mem file.module_.package packages ->
-        Shown_path.shown (Command_packages.path snapshot file)
+        Shown_path.show_path (Command_packages.locate_file snapshot file)
     | _ -> Path.show_file file
   in
-  let own = List.map snd (Workspace.packages snapshot) in
-  Compile.create ~file_name ~results:(results ())
+  let own = List.map snd (Workspace.list_packages snapshot) in
+  Compile.create ~file_name ~results:(make_results ())
     ~programs:(Cache.make_programs_directory (Workspace.open_cache ()))
     ~worked_on:(fun package -> List.mem package own)
-    (requests database packages) toolchain
-    (Build.cache (Cache.make_objects_directory (Workspace.open_cache ())))
+    (make_requests database packages) toolchain
+    (Build.make_cache (Cache.make_objects_directory (Workspace.open_cache ())))
     settings

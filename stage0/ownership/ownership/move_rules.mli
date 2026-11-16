@@ -3,7 +3,7 @@ type verdict =
   | Reads
   | Refused of (Context.context -> Source.Definition_span.t -> Types.ty -> unit)
 
-val verdict :
+val decide_move :
   Context.context -> Place.t -> type_:Types.ty -> is_returned:bool -> is_captured:bool -> verdict
 
 val copy_fix :

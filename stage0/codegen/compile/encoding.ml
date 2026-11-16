@@ -1,33 +1,37 @@
 let bug format = Compiler_bug.bug ~stage:"Encoding" format
 let variant_index : Memory_layout.integer = UInt32
-let signature env ty = Writing.signature env [ Writing.value_parameter ty ]
+let make_signature env ty = Writing.make_signature env [ Writing.make_value_parameter ty ]
 
 let encode_call env builder ~output ty (place : Lowered.place) =
   if not (Memory_layout.has_zero_size env ty) then
     Emit_c.Builder.emit builder
       (Call
          {
-           target = Direct { function_ = Instance (Encode ty); signature = signature env ty };
+           target = Direct { function_ = Instance (Encode ty); signature = make_signature env ty };
            arguments = [ Lowered.Address { place; writable = false }; output ];
            result = Discarded;
          })
 
 let encode env ty =
   let builder = Emit_c.Builder.create env ~key:(Encode ty) in
-  let parameter = Emit_c.Builder.local builder ~name:"value" (Writing.value_parameter ty) in
+  let parameter =
+    Emit_c.Builder.allocate_local builder ~name:"value" (Writing.make_value_parameter ty)
+  in
   let value : Lowered.place = { root = Local parameter; projections = [ Deref ] } in
-  let output_pointer = Emit_c.Builder.local builder ~name:"output" (Writing.output_parameter env) in
+  let output_pointer =
+    Emit_c.Builder.allocate_local builder ~name:"output" (Writing.make_output_parameter env)
+  in
   let output = Lowered.Copy (Lowered.make_local_place output_pointer) in
   let encode_call = encode_call env builder ~output in
-  Emit_c.Builder.start builder (Emit_c.Builder.block builder);
+  Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
   let append_bytes (place : Lowered.place) size =
-    let byte = Ground.builtin UInt8 in
-    let first = Emit_c.Builder.local builder (Raw (Pointer (Data byte))) in
+    let byte = Ground.make_builtin UInt8 in
+    let first = Emit_c.Builder.allocate_local builder (Raw (Pointer (Data byte))) in
     Emit_c.Builder.emit builder
       (Assign
          ( Lowered.make_local_place first,
            Convert (Address { place; writable = false }, Pointer (Data byte)) ));
-    Writing.call_with_bytes env builder ~output Writing_append
+    Writing.emit_write_bytes_call env builder ~output Writing_append
       ~elements:(Copy (Lowered.make_local_place first))
       ~length:(Lowered.make_uint64_constant size)
   in
@@ -48,32 +52,34 @@ let encode env ty =
   | Shared _ -> bug "a shared value cannot be computed while compiling"
   | Any -> bug "an any value cannot be computed while compiling"
   | Storage element ->
-      append_bytes (Storage.project_length value) (Memory_layout.integer_size UInt64);
-      Emit_c.Builder.loop builder
+      append_bytes (Storage.project_length value) (Memory_layout.compute_integer_size UInt64);
+      Emit_c.Builder.emit_loop builder
         ~count:(Copy (Storage.project_length value))
         (fun index ->
           encode_call element (Storage.index_element value (Copy (Lowered.make_local_place index))))
   | Shape (Scalar _) -> append_bytes value (Memory_layout.of_type env ty).size
   | Shape (Record members) -> fields value None members
   | Shape (Array (element, count)) ->
-      Emit_c.Builder.loop builder ~count:(Lowered.make_uint64_constant count) (fun index ->
+      Emit_c.Builder.emit_loop builder ~count:(Lowered.make_uint64_constant count) (fun index ->
           encode_call element
             (Lowered.project value (Index (Copy (Lowered.make_local_place index)))))
   | Shape (Sum variants) ->
-      let after = Emit_c.Builder.block builder in
+      let after = Emit_c.Builder.allocate_block builder in
       let cases =
         List.mapi
           (fun index (variant_shape : Memory_layout.variant_shape) ->
-            let case = Emit_c.Builder.block builder in
+            let case = Emit_c.Builder.allocate_block builder in
             Emit_c.Builder.in_block builder case (fun () ->
-                let encoded_index = Emit_c.Builder.local builder (Raw (Integer variant_index)) in
+                let encoded_index =
+                  Emit_c.Builder.allocate_local builder (Raw (Integer variant_index))
+                in
                 Emit_c.Builder.emit builder
                   (Assign
                      ( Lowered.make_local_place encoded_index,
                        Use (Constant (Integer (variant_index, Z.of_int index))) ));
                 append_bytes
                   (Lowered.make_local_place encoded_index)
-                  (Memory_layout.integer_size variant_index);
+                  (Memory_layout.compute_integer_size variant_index);
                 fields value (Some variant_shape.name) variant_shape.fields;
                 Emit_c.Builder.finish builder (Goto after));
             (variant_shape.name, case))
@@ -96,29 +102,29 @@ let take reader count =
   reader.offset <- reader.offset + count;
   part
 
-let unsigned bytes =
+let decode_unsigned bytes =
   let value = ref Z.zero in
   for index = String.length bytes - 1 downto 0 do
     value := Z.add (Z.shift_left !value 8) (Z.of_int (Char.code bytes.[index]))
   done;
   !value
 
-let integer reader (kind : Memory_layout.integer) =
-  let size = Memory_layout.integer_size kind in
-  let value = unsigned (take reader size) in
+let decode_integer reader (kind : Memory_layout.integer) =
+  let size = Memory_layout.compute_integer_size kind in
+  let value = decode_unsigned (take reader size) in
   match kind with
   | Int8 | Int16 | Int32 | Int64 ->
       if Z.testbit value ((8 * size) - 1) then Z.sub value (Z.shift_left Z.one (8 * size))
       else value
   | UInt8 | UInt16 | UInt32 | UInt64 -> value
 
-let scalar reader (kind : Memory_layout.scalar) : Lowered.constant =
+let decode_scalar reader (kind : Memory_layout.scalar) : Lowered.constant =
   match kind with
-  | Integer kind -> Integer (kind, integer reader kind)
-  | Float32 -> Float32 (Z.to_int32_unsigned (unsigned (take reader 4)))
-  | Float64 -> Float64 (Z.to_int64_unsigned (unsigned (take reader 8)))
-  | Bool -> Bool (unsigned (take reader 1) <> Z.zero)
-  | Character -> Character (Z.to_int (unsigned (take reader 4)))
+  | Integer kind -> Integer (kind, decode_integer reader kind)
+  | Float32 -> Float32 (Z.to_int32_unsigned (decode_unsigned (take reader 4)))
+  | Float64 -> Float64 (Z.to_int64_unsigned (decode_unsigned (take reader 8)))
+  | Bool -> Bool (decode_unsigned (take reader 1) <> Z.zero)
+  | Character -> Character (Z.to_int (decode_unsigned (take reader 4)))
   | Pointer _ | Nullable_pointer _ -> bug "a pointer computed while compiling"
 
 let decode env ty encoded : Lowered.static_value =
@@ -131,13 +137,13 @@ let decode env ty encoded : Lowered.static_value =
       | Shared _ -> bug "a shared value computed while compiling"
       | Any -> bug "an any value computed while compiling"
       | Storage element ->
-          let count = Z.to_int (integer reader UInt64) in
+          let count = Z.to_int (decode_integer reader UInt64) in
           Static_storage { element; elements = List.init count (fun _ -> value element) }
-      | Shape (Scalar kind) -> Static_scalar (scalar reader kind)
+      | Shape (Scalar kind) -> Static_scalar (decode_scalar reader kind)
       | Shape (Record members) -> Static_record (fields members)
       | Shape (Array (element, count)) -> Static_array (List.init count (fun _ -> value element))
       | Shape (Sum variants) ->
-          let variant = List.nth variants (Z.to_int (integer reader variant_index)) in
+          let variant = List.nth variants (Z.to_int (decode_integer reader variant_index)) in
           Static_variant (variant.name, fields variant.fields)
   and fields members =
     List.map
@@ -168,7 +174,7 @@ let decode_booleans encoded =
   let rec booleans () =
     if is_at_end reader then []
     else
-      match scalar reader Bool with
+      match decode_scalar reader Bool with
       | Bool holds -> holds :: booleans ()
       | _ -> bug "a Bool written out while compiling reads back as another scalar"
   in

@@ -1,5 +1,7 @@
-val text : Resolve.Names.lookups -> body:bool -> opaque:bool -> Resolve.Names.key -> string
-val kind_word : Resolve.Names.kind -> string
-val of_path : Resolve.Names.lookups -> Path.t -> string option
-val labeled : string -> string -> string
+val render_signature :
+  Resolve.Names.lookups -> body:bool -> opaque:bool -> Resolve.Names.key -> string
+
+val show_kind : Resolve.Names.kind -> string
+val find_signature : Resolve.Names.lookups -> Path.t -> string option
+val label_signature : string -> string -> string
 val is_signature : Database.Part.t -> bool

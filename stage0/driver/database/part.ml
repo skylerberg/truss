@@ -57,12 +57,12 @@ type computed =
 type stored = Computed of computed | Recursion_group of Path.t
 type t = Input of input | Name of name | Stored of stored
 
-let type_package : Ground.ty -> Path.package = function
-  | Named { path; _ } -> Path.package path
-  | Any { trait; _ } -> Path.package trait
+let locate_type_package : Ground.ty -> Path.package = function
+  | Named { path; _ } -> Path.locate_package path
+  | Any { trait; _ } -> Path.locate_package trait
   | Function _ | Never -> Path.standard_package
 
-let instance_package : Instance.key -> Path.package = function
+let locate_instance_package : Instance.key -> Path.package = function
   | Code { path; _ }
   | Constant path
   | Evaluator path
@@ -71,12 +71,12 @@ let instance_package : Instance.key -> Path.package = function
   | Generated
       (Locked_entry { capability = path; _ } | Adapter { function_ = path; _ } | Program_main path)
   | Table (Impl_table { impl = path; _ } | Any_table { impl = path; _ } | Locked_table path) ->
-      Path.package path
-  | Drop ty | Copy ty | Debug ty | Any_drop ty | Any_copy ty | Encode ty -> type_package ty
+      Path.locate_package path
+  | Drop ty | Copy ty | Debug ty | Any_drop ty | Any_copy ty | Encode ty -> locate_type_package ty
   | Generated (Entry impl_method | Any_entry impl_method) ->
-      Path.package (Instance.make_method_path impl_method)
+      Path.locate_package (Instance.make_method_path impl_method)
 
-let package : computed -> Path.package = function
+let locate_package : computed -> Path.package = function
   | Parsed file | Import_check file -> file.module_.package
   | Namespace package | Grant (package, _) | Package_check (package, _) | Call_edges (_, package) ->
       package
@@ -100,10 +100,10 @@ let package : computed -> Path.package = function
   | Generated_mir path
   | Mir_call_edges path
   | Derived_interface { type_ = path; _ } ->
-      Path.package path
-  | Lowering (Lowered key | Test_key key) -> instance_package key
+      Path.locate_package path
+  | Lowering (Lowered key | Test_key key) -> locate_instance_package key
 
-let name_package : name -> Path.package = function
+let locate_name_package : name -> Path.package = function
   | File_declarations file -> file.module_.package
   | Package_declarations package
   | Traits_declaring (package, _)
@@ -116,7 +116,7 @@ let name_package : name -> Path.package = function
   | Imports key | Declaration key | Tree key | Text key | Place key | Container key | Contained key
     ->
       key.module_.package
-  | Members (path, _) -> Path.package path
+  | Members (path, _) -> Path.locate_package path
 
 let show_key = Resolve.Names.show_key
 
@@ -204,12 +204,12 @@ let show = function
   | Stored (Computed part) -> show_computed part
   | Stored (Recursion_group path) -> "recursion group " ^ Path.show path
 
-let type_definition : Ground.ty -> Path.t option = function
+let find_type_definition : Ground.ty -> Path.t option = function
   | Named { path; _ } -> Some path
   | Any { trait; _ } -> Some trait
   | Function _ | Never -> None
 
-let instance_definition : Instance.key -> Path.t option = function
+let find_instance_definition : Instance.key -> Path.t option = function
   | Code { path; _ }
   | Constant path
   | Evaluator path
@@ -219,11 +219,11 @@ let instance_definition : Instance.key -> Path.t option = function
       (Locked_entry { capability = path; _ } | Adapter { function_ = path; _ } | Program_main path)
   | Table (Impl_table { impl = path; _ } | Any_table { impl = path; _ } | Locked_table path) ->
       Some path
-  | Drop ty | Copy ty | Debug ty | Any_drop ty | Any_copy ty | Encode ty -> type_definition ty
+  | Drop ty | Copy ty | Debug ty | Any_drop ty | Any_copy ty | Encode ty -> find_type_definition ty
   | Generated (Entry impl_method | Any_entry impl_method) ->
       Some (Instance.make_method_path impl_method)
 
-let name_definition = function
+let find_name_definition = function
   | Entries _ | Module_declarations _ | File_declarations _ | Package_declarations _
   | Traits_declaring _ | Impl_index _ ->
       None
@@ -237,7 +237,7 @@ let name_definition = function
   | Law_proofs (_, { trait = path; _ }) ->
       Some path
 
-let computed_definition = function
+let find_computed_definition = function
   | Parsed _ | Namespace _ | Grant _ | Import_check _
   | Package_check (_, (Instantiations | Tests | Dependencies)) ->
       None
@@ -264,15 +264,15 @@ let computed_definition = function
   | Call_edges (path, _) ->
       Some path
   | Derived_interface { type_; trait } -> Some (Derived { type_; trait })
-  | Lowering (Lowered key | Test_key key) -> instance_definition key
+  | Lowering (Lowered key | Test_key key) -> find_instance_definition key
 
-let definition = function
+let find_definition = function
   | Input _ -> None
-  | Name part -> name_definition part
-  | Stored (Computed part) -> computed_definition part
+  | Name part -> find_name_definition part
+  | Stored (Computed part) -> find_computed_definition part
   | Stored (Recursion_group path) -> Some path
 
-let name_kind_name = function
+let show_name_kind = function
   | Entry _ -> "namespace entry"
   | Entries _ -> "namespace entries of its module"
   | Imports _ -> "imports"
@@ -293,7 +293,7 @@ let name_kind_name = function
   | Law_proofs (_, { law; type_head; _ }) ->
       Printf.sprintf "proofs of the law %s for %s" law (Path.show type_head)
 
-let computed_kind_name = function
+let show_computed_kind = function
   | Parsed _ -> "parsed file"
   | Namespace _ -> "namespace"
   | Resolved (_, Interface) -> "resolved names of the interface"
@@ -321,11 +321,11 @@ let computed_kind_name = function
   | Lowering (Lowered _) -> "lowered code"
   | Lowering (Test_key _) -> "test key"
 
-let kind_name = function
+let show_kind = function
   | Input (Source _) -> "source"
   | Input Packages -> "packages"
   | Input (Modules _) -> "modules"
   | Input (Dependencies _) -> "dependencies"
-  | Name part -> name_kind_name part
-  | Stored (Computed part) -> computed_kind_name part
+  | Name part -> show_name_kind part
+  | Stored (Computed part) -> show_computed_kind part
   | Stored (Recursion_group _) -> "recursion group"

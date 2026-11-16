@@ -36,10 +36,11 @@ let locate_header (spans : Source.Definition_span.t array) (definition : Syntax.
   | _ -> spans.(definition.id)
 
 let list_outer_packages (impl : Types.impl_interface) =
-  Path.package impl.implements.trait
-  :: (match impl.for_type with Types.Named { path; _ } -> [ Path.package path ] | _ -> [])
+  Path.locate_package impl.implements.trait
+  :: (match impl.for_type with Types.Named { path; _ } -> [ Path.locate_package path ] | _ -> [])
   @ List.filter_map
-      (function Types.Type (Types.Named { path; _ }) -> Some (Path.package path) | _ -> None)
+      (function
+        | Types.Type (Types.Named { path; _ }) -> Some (Path.locate_package path) | _ -> None)
       impl.implements.trait_arguments
 
 let check_location (declaration : Resolve.Names.declaration) spans (definition : Syntax.definition)
@@ -162,7 +163,7 @@ let check_method_names (lookups : Lookups.t) (declaration : Resolve.Names.declar
                  (Types.show impl.for_type) method_.method_name
                  (Path.show_receiver method_.method_receiver)
                  (Types.show_trait impl.implements))
-          else if declaration.module_.package <> Path.package path then
+          else if declaration.module_.package <> Path.locate_package path then
             clash
               (Printf.sprintf
                  "`%s` has a `%s` of its own, so only an `impl` in its own package can give it \
@@ -240,7 +241,8 @@ let list_self_occurrences ~contained (start : Path.t) =
   let rec from path occurrence =
     if Path.equal path start then [ occurrence ]
     else if
-      Path.package path <> Path.package start || Occurrence_table.mem visited (path, occurrence)
+      Path.locate_package path <> Path.locate_package start
+      || Occurrence_table.mem visited (path, occurrence)
     then []
     else begin
       Occurrence_table.replace visited (path, occurrence) ();
@@ -472,7 +474,7 @@ let list_instantiation_edges (lookups : Lookups.t) (key : Resolve.Names.key) =
   Core_walk.walk_definition
     (Core_walk.make_callee_visitor (function
       | Function { path; type_arguments }
-        when Path.package path = key.module_.package && type_arguments <> [] ->
+        when Path.locate_package path = key.module_.package && type_arguments <> [] ->
           edges := (path, List.exists grows type_arguments) :: !edges
       | _ -> ()))
     form.definition;

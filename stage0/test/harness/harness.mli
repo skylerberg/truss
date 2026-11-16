@@ -2,7 +2,6 @@ val test : string -> (unit -> unit) -> unit
 val always : string -> (unit -> unit) -> unit
 val wanted : string -> bool
 val fail : ('a, unit, string, unit) format4 -> 'a
-val with_environment : (string * string) list -> (unit -> 'a) -> 'a
 val scratch : string -> string
 val write_files : string -> (string * string) list -> unit
 val expect_string : expected:string -> string -> unit

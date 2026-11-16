@@ -1,6 +1,6 @@
 type t
 
-val default_directory : unit -> (string, string) result
+val locate_default_directory : unit -> (string, string) result
 val make_root : string -> (string, string) result
 val open_ : string -> (t, string) result
 val close : t -> unit

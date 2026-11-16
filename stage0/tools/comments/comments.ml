@@ -14,14 +14,6 @@ let syntax path =
   | _, ".opam" -> Some Generated
   | _ -> None
 
-let contains line marker =
-  let marker_length = String.length marker in
-  let rec scan start =
-    start + marker_length <= String.length line
-    && (String.sub line start marker_length = marker || scan (start + 1))
-  in
-  scan 0
-
 let has_hash_at_word_start line =
   let rec scan start =
     match String.index_from_opt line start '#' with
@@ -50,7 +42,10 @@ let comment_lines path syntax =
   let text = In_channel.with_open_bin path In_channel.input_all in
   match syntax with
   | Ocaml -> ocaml_comment_lines text
-  | Markers markers -> matching_lines (fun _ line -> List.exists (contains line) markers) text
+  | Markers markers ->
+      matching_lines
+        (fun _ line -> List.exists (fun affix -> String.includes ~affix line) markers)
+        text
   | Hash_at_word_start ->
       matching_lines
         (fun index line -> has_hash_at_word_start line && not (is_shebang index line))

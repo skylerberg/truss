@@ -22,6 +22,19 @@ test "a token bucket allows its burst, refills over time, and says how long to w
   }
 }
 
+test "a policy keeps a large burst and a long window, and the integer limits overflow nothing" {
+  provide simulation::World.new() {
+    let large = http::RateLimiter.new(http::RateLimit(requests: 1, per_seconds: 60, burst: 2000000000))
+    assert large.take("a") == http::Decision.Allowed(remaining: 1999999999)
+    let yearly = http::RateLimiter.new(http::RateLimit(requests: 1, per_seconds: 63072000))
+    assert yearly.take("a") == http::Decision.Allowed(remaining: 0)
+    assert yearly.take("a") == http::Decision.Limited(retry_after_seconds: 63072000)
+    let unbounded = http::RateLimiter.new(http::RateLimit(requests: 18446744073709551615, per_seconds: 9223372036854775807))
+    assert unbounded.take("a") is Allowed(_)
+    assert unbounded.take("a") is Allowed(_)
+  }
+}
+
 test "a rate limiter forgets the least recently seen key when it holds too many" {
   provide simulation::World.new() {
     let limiter = http::RateLimiter.new(http::RateLimit(requests: 1, per_seconds: 60, keys: 2))

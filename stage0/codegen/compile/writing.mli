@@ -1,9 +1,9 @@
 val output_ty : Ground.ty
-val output_parameter : Memory_layout.env -> Lowered.ty
-val value_parameter : Ground.ty -> Lowered.ty
-val signature : Memory_layout.env -> Lowered.ty list -> Lowered.signature
+val make_output_parameter : Memory_layout.env -> Lowered.ty
+val make_value_parameter : Ground.ty -> Lowered.ty
+val make_signature : Memory_layout.env -> Lowered.ty list -> Lowered.signature
 
-val call :
+val emit_write_call :
   Memory_layout.env ->
   Emit_c.Builder.t ->
   output:Lowered.operand ->
@@ -12,7 +12,7 @@ val call :
   Lowered.place ->
   unit
 
-val call_with_bytes :
+val emit_write_bytes_call :
   Memory_layout.env ->
   Emit_c.Builder.t ->
   output:Lowered.operand ->

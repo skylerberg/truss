@@ -1,4 +1,4 @@
-val real_implementations :
+val list_real_implementations :
   Lowering.state -> user:string -> Path.t list -> (Path.t * Lowered.operand) list
 
 val lower : Definitions.context -> Instance.generated -> Emit_c.Builder.instance

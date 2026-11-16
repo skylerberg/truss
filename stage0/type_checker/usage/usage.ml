@@ -54,15 +54,15 @@ let collect_bindings context (definition : Syntax.definition) =
     | Match { arms; _ } -> List.iter (fun (arm : Syntax.arm) -> List.iter pattern arm.patterns) arms
     | Quantified { binder = Binder_in (written, _); _ } -> pattern written
     | _ -> ());
-    Syntax_walk.expression_parts ~expression ~statement value
+    Syntax_walk.visit_expression_parts ~expression ~statement value
   and statement (written : Syntax.statement) =
     (match written.kind with
     | Let { pattern = written_pattern; _ } | For { pattern = written_pattern; _ } ->
         pattern written_pattern
     | _ -> ());
-    Syntax_walk.statement_parts ~expression ~statement written
+    Syntax_walk.visit_statement_parts ~expression ~statement written
   in
-  Syntax_walk.definition ~statement expression definition;
+  Syntax_walk.visit_definition ~statement expression definition;
   List.rev !bindings
 
 let describe_removal (binding : binding) =
@@ -154,14 +154,14 @@ let check_unreachable context (definition : Syntax.definition) =
         check_block context then_;
         match else_ with Some (Else block) -> check_block context block | _ -> ())
     | _ -> ());
-    Syntax_walk.expression_parts ~expression ~statement value
+    Syntax_walk.visit_expression_parts ~expression ~statement value
   and statement (written : Syntax.statement) =
     (match written.kind with
     | For { body; _ } | While { body; _ } | Proof body -> check_block context body
     | Parallel _ | Concurrent _ -> ()
     | Let { else_ = Some block; _ } -> check_block context block
     | _ -> ());
-    Syntax_walk.statement_parts ~expression ~statement written
+    Syntax_walk.visit_statement_parts ~expression ~statement written
   in
   let bodies =
     match definition.kind with
@@ -175,7 +175,7 @@ let check_unreachable context (definition : Syntax.definition) =
     | _ -> []
   in
   List.iter (check_block context) bodies;
-  Syntax_walk.definition ~statement expression definition
+  Syntax_walk.visit_definition ~statement expression definition
 
 let check (lookups : Lookups.t) key =
   let definition = lookups.names.definition key in

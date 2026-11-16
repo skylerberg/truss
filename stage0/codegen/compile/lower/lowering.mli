@@ -78,15 +78,16 @@ type state = {
   mutable lend_record : Lowered.operand option;
 }
 
-val frame_of : Definitions.code -> frame
+val make_frame : Definitions.code -> frame
 val enter : Definitions.context -> ?nested:int ref -> builder:Emit_c.Builder.t -> frame -> state
 val may_fork : state -> bool
-val held : state -> ?name:string -> Lowered.ty -> Lowered.place
-val outlined : state -> parts:Lowered.local list -> (unit -> unit) -> int * Lowered.operand
+val checks_operations : state -> bool
+val allocate_local : state -> ?name:string -> Lowered.ty -> Lowered.place
+val outline : state -> parts:Lowered.local list -> (unit -> unit) -> int * Lowered.operand
 val ground : state -> Types.ty -> Ground.ty
 val is_trivial : state -> Ground.ty -> bool
 val is_zero_size : state -> Ground.ty -> bool
-val site : state -> Source.Definition_span.t -> Lowered.site
+val make_site : state -> Source.Definition_span.t -> Lowered.site
 
 type unsupported = { construct : string; at : Lowered.site option }
 
@@ -94,13 +95,13 @@ exception Unsupported of unsupported
 
 val unsupported : ?at:Lowered.site -> ('a, unit, string, 'b) format4 -> 'a
 val require_written : state -> Definitions.written
-val source : state -> Source.Definition_span.t -> string
-val innermost_scope : state -> scope
-val temporary : state -> Ground.ty -> Lowered.place
-val binding : state -> ?name:string -> Ground.ty -> Lowered.place
-val flagged_binding : state -> Ground.ty -> flag:Lowered.place -> Lowered.place
+val quote_span : state -> Source.Definition_span.t -> string
+val lookup_innermost_scope : state -> scope
+val allocate_temporary : state -> Ground.ty -> Lowered.place
+val allocate_binding : state -> ?name:string -> Ground.ty -> Lowered.place
+val allocate_flagged_binding : state -> Ground.ty -> flag:Lowered.place -> Lowered.place
 
-val parameter :
+val allocate_parameter :
   state ->
   ?in_scope:bool ->
   owned:bool ->
@@ -108,9 +109,9 @@ val parameter :
   Ground.ty ->
   Lowered.local option * Lowered.place
 
-val evidence_parameters : state -> Path.t list -> Lowered.local list
-val result_slot : state -> Convention.result -> unit
-val result_place : state -> Lowered.place option
+val list_evidence_parameters : state -> Path.t list -> Lowered.local list
+val set_result_slot : state -> Convention.result -> unit
+val find_result_place : state -> Lowered.place option
 val return_result : state -> Lowered.terminator
 val leave_to : state -> int -> unit
 val open_scope : state -> scope_kind -> scope
@@ -129,15 +130,15 @@ val finish_function :
 val finish_instance :
   state -> ?returns:bool -> rest:Lowered.local list -> unit -> Emit_c.Builder.instance
 
-val unreachable_block : state -> unit
-val moved : state -> Lowered.place -> Lowered.operand
-val owned : state -> Lowered.place -> Ground.ty -> Lowered.operand
+val emit_unreachable_block : state -> unit
+val move_place : state -> Lowered.place -> Lowered.operand
+val make_owned_operand : state -> Lowered.place -> Ground.ty -> Lowered.operand
 val take : state -> Lowered.place -> Ground.ty -> destination:Lowered.place -> unit
 val snapshot : state -> Lowered.place -> Lowered.place
 
 val looping :
   state -> continue_:Lowered.block -> break_:Lowered.block -> depth:int -> (unit -> unit) -> unit
 
-val place_type : state -> Lowered.place -> Lowered.ty option
-val constant_int : Memory_layout.integer -> Z.t -> Lowered.operand
-val scalar_of : state -> Ground.ty -> Memory_layout.scalar
+val find_place_type : state -> Lowered.place -> Lowered.ty option
+val make_int_constant : Memory_layout.integer -> Z.t -> Lowered.operand
+val classify_scalar : state -> Ground.ty -> Memory_layout.scalar

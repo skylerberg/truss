@@ -1,0 +1,6 @@
+fn halves(flag: Bool, total: UInt32, parts: UInt32) -> UInt32 {
+  if flag {
+    return total / parts
+  }
+  0
+}

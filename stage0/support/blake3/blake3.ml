@@ -26,7 +26,7 @@ let message_schedule =
   done;
   rounds
 
-let[@inline] word (block : int array) base place =
+let[@inline] read_word (block : int array) base place =
   Array.unsafe_get block (Array.unsafe_get message_schedule (base + place))
 
 let compress (chaining : int array) (block : int array) ~counter ~length ~flags =
@@ -48,67 +48,67 @@ let compress (chaining : int array) (block : int array) ~counter ~length ~flags 
   let v15 = ref flags in
   for round = 0 to 6 do
     let base = round * 16 in
-    v0 := (!v0 + !v4 + word block base 0) land mask;
+    v0 := (!v0 + !v4 + read_word block base 0) land mask;
     v12 := rotate_right (!v12 lxor !v0) 16;
     v8 := (!v8 + !v12) land mask;
     v4 := rotate_right (!v4 lxor !v8) 12;
-    v0 := (!v0 + !v4 + word block base 1) land mask;
+    v0 := (!v0 + !v4 + read_word block base 1) land mask;
     v12 := rotate_right (!v12 lxor !v0) 8;
     v8 := (!v8 + !v12) land mask;
     v4 := rotate_right (!v4 lxor !v8) 7;
-    v1 := (!v1 + !v5 + word block base 2) land mask;
+    v1 := (!v1 + !v5 + read_word block base 2) land mask;
     v13 := rotate_right (!v13 lxor !v1) 16;
     v9 := (!v9 + !v13) land mask;
     v5 := rotate_right (!v5 lxor !v9) 12;
-    v1 := (!v1 + !v5 + word block base 3) land mask;
+    v1 := (!v1 + !v5 + read_word block base 3) land mask;
     v13 := rotate_right (!v13 lxor !v1) 8;
     v9 := (!v9 + !v13) land mask;
     v5 := rotate_right (!v5 lxor !v9) 7;
-    v2 := (!v2 + !v6 + word block base 4) land mask;
+    v2 := (!v2 + !v6 + read_word block base 4) land mask;
     v14 := rotate_right (!v14 lxor !v2) 16;
     v10 := (!v10 + !v14) land mask;
     v6 := rotate_right (!v6 lxor !v10) 12;
-    v2 := (!v2 + !v6 + word block base 5) land mask;
+    v2 := (!v2 + !v6 + read_word block base 5) land mask;
     v14 := rotate_right (!v14 lxor !v2) 8;
     v10 := (!v10 + !v14) land mask;
     v6 := rotate_right (!v6 lxor !v10) 7;
-    v3 := (!v3 + !v7 + word block base 6) land mask;
+    v3 := (!v3 + !v7 + read_word block base 6) land mask;
     v15 := rotate_right (!v15 lxor !v3) 16;
     v11 := (!v11 + !v15) land mask;
     v7 := rotate_right (!v7 lxor !v11) 12;
-    v3 := (!v3 + !v7 + word block base 7) land mask;
+    v3 := (!v3 + !v7 + read_word block base 7) land mask;
     v15 := rotate_right (!v15 lxor !v3) 8;
     v11 := (!v11 + !v15) land mask;
     v7 := rotate_right (!v7 lxor !v11) 7;
-    v0 := (!v0 + !v5 + word block base 8) land mask;
+    v0 := (!v0 + !v5 + read_word block base 8) land mask;
     v15 := rotate_right (!v15 lxor !v0) 16;
     v10 := (!v10 + !v15) land mask;
     v5 := rotate_right (!v5 lxor !v10) 12;
-    v0 := (!v0 + !v5 + word block base 9) land mask;
+    v0 := (!v0 + !v5 + read_word block base 9) land mask;
     v15 := rotate_right (!v15 lxor !v0) 8;
     v10 := (!v10 + !v15) land mask;
     v5 := rotate_right (!v5 lxor !v10) 7;
-    v1 := (!v1 + !v6 + word block base 10) land mask;
+    v1 := (!v1 + !v6 + read_word block base 10) land mask;
     v12 := rotate_right (!v12 lxor !v1) 16;
     v11 := (!v11 + !v12) land mask;
     v6 := rotate_right (!v6 lxor !v11) 12;
-    v1 := (!v1 + !v6 + word block base 11) land mask;
+    v1 := (!v1 + !v6 + read_word block base 11) land mask;
     v12 := rotate_right (!v12 lxor !v1) 8;
     v11 := (!v11 + !v12) land mask;
     v6 := rotate_right (!v6 lxor !v11) 7;
-    v2 := (!v2 + !v7 + word block base 12) land mask;
+    v2 := (!v2 + !v7 + read_word block base 12) land mask;
     v13 := rotate_right (!v13 lxor !v2) 16;
     v8 := (!v8 + !v13) land mask;
     v7 := rotate_right (!v7 lxor !v8) 12;
-    v2 := (!v2 + !v7 + word block base 13) land mask;
+    v2 := (!v2 + !v7 + read_word block base 13) land mask;
     v13 := rotate_right (!v13 lxor !v2) 8;
     v8 := (!v8 + !v13) land mask;
     v7 := rotate_right (!v7 lxor !v8) 7;
-    v3 := (!v3 + !v4 + word block base 14) land mask;
+    v3 := (!v3 + !v4 + read_word block base 14) land mask;
     v14 := rotate_right (!v14 lxor !v3) 16;
     v9 := (!v9 + !v14) land mask;
     v4 := rotate_right (!v4 lxor !v9) 12;
-    v3 := (!v3 + !v4 + word block base 15) land mask;
+    v3 := (!v3 + !v4 + read_word block base 15) land mask;
     v14 := rotate_right (!v14 lxor !v3) 8;
     v9 := (!v9 + !v14) land mask;
     v4 := rotate_right (!v4 lxor !v9) 7
@@ -124,7 +124,7 @@ let compress (chaining : int array) (block : int array) ~counter ~length ~flags 
     !v7 lxor !v15;
   |]
 
-let block_words input offset length =
+let load_block_words input offset length =
   let block = Array.make 16 0 in
   let whole = length / 4 in
   for place = 0 to whole - 1 do
@@ -138,17 +138,17 @@ let block_words input offset length =
 
 type output = { chaining : int array; block : int array; counter : int; length : int; flags : int }
 
-let chaining_value ?(flags = 0) output =
+let compute_chaining_value ?(flags = 0) output =
   compress output.chaining output.block ~counter:output.counter ~length:output.length
     ~flags:(output.flags lor flags)
 
-let chunk_output ~key ~mode input ~offset ~length ~counter =
+let compute_chunk_output ~key ~mode input ~offset ~length ~counter =
   let chaining = ref key in
   let blocks = if length = 0 then 1 else (length + block_length - 1) / block_length in
   for index = 0 to blocks - 2 do
     chaining :=
       compress !chaining
-        (block_words input (offset + (index * block_length)) block_length)
+        (load_block_words input (offset + (index * block_length)) block_length)
         ~counter ~length:block_length
         ~flags:(mode lor if index = 0 then chunk_start else 0)
   done;
@@ -156,13 +156,13 @@ let chunk_output ~key ~mode input ~offset ~length ~counter =
   let last_length = length - last_offset in
   {
     chaining = !chaining;
-    block = block_words input (offset + last_offset) last_length;
+    block = load_block_words input (offset + last_offset) last_length;
     counter;
     length = last_length;
     flags = mode lor (if blocks = 1 then chunk_start else 0) lor chunk_end;
   }
 
-let parent_output ~key ~mode left right =
+let compute_parent_output ~key ~mode left right =
   {
     chaining = key;
     block = Array.append left right;
@@ -171,21 +171,21 @@ let parent_output ~key ~mode left right =
     flags = mode lor parent;
   }
 
-let root_words ~key ~mode input =
+let compute_root_words ~key ~mode input =
   let total = String.length input in
   let chunks = if total = 0 then 1 else (total + chunk_length - 1) / chunk_length in
   let chaining_value_stack = ref [] in
   for index = 0 to chunks - 2 do
     let output =
-      chunk_output ~key ~mode input ~offset:(index * chunk_length) ~length:chunk_length
+      compute_chunk_output ~key ~mode input ~offset:(index * chunk_length) ~length:chunk_length
         ~counter:index
     in
-    let value = ref (chaining_value output) in
+    let value = ref (compute_chaining_value output) in
     let finished = ref (index + 1) in
     while !finished land 1 = 0 do
       (match !chaining_value_stack with
       | left :: rest ->
-          value := chaining_value (parent_output ~key ~mode left !value);
+          value := compute_chaining_value (compute_parent_output ~key ~mode left !value);
           chaining_value_stack := rest
       | [] -> assert false);
       finished := !finished lsr 1
@@ -194,33 +194,33 @@ let root_words ~key ~mode input =
   done;
   let last_offset = (chunks - 1) * chunk_length in
   let last =
-    chunk_output ~key ~mode input ~offset:last_offset ~length:(total - last_offset)
+    compute_chunk_output ~key ~mode input ~offset:last_offset ~length:(total - last_offset)
       ~counter:(chunks - 1)
   in
   let output =
     List.fold_left
-      (fun right left -> parent_output ~key ~mode left (chaining_value right))
+      (fun right left -> compute_parent_output ~key ~mode left (compute_chaining_value right))
       last !chaining_value_stack
   in
-  chaining_value ~flags:root output
+  compute_chaining_value ~flags:root output
 
 let bytes_of_words words =
   let digest = Bytes.create 32 in
   Array.iteri (fun place word -> Bytes.set_int32_le digest (place * 4) (Int32.of_int word)) words;
   Bytes.unsafe_to_string digest
 
-let hash input = bytes_of_words (root_words ~key:initial ~mode:0 input)
+let hash input = bytes_of_words (compute_root_words ~key:initial ~mode:0 input)
 
 let derive_key ~context =
-  let key = root_words ~key:initial ~mode:derive_key_context context in
-  fun material -> bytes_of_words (root_words ~key ~mode:derive_key_material material)
+  let key = compute_root_words ~key:initial ~mode:derive_key_context context in
+  fun material -> bytes_of_words (compute_root_words ~key ~mode:derive_key_material material)
 
 let to_hex digest =
   String.concat ""
     (List.init (String.length digest) (fun index ->
          Printf.sprintf "%02x" (Char.code digest.[index])))
 
-let hex_digest ?digits text =
+let hash_to_hex ?digits text =
   let hex = to_hex (hash text) in
   match digits with Some digits -> String.sub hex 0 digits | None -> hex
 

@@ -2,7 +2,6 @@ val test : string -> (unit -> unit) -> unit
 val diagnostics : Database.t -> Path.file -> Diagnostic.t list
 val fail : ('a, unit, string, unit) format4 -> 'a
 val expect_string : expected:String.t -> String.t -> unit
-val contains : string -> string -> bool
 val expect_int : expected:int -> int -> unit
 val render_records : Compile.record list -> string
 val definition : string -> Path.t
@@ -83,23 +82,33 @@ val run_program :
 val expect_status : ?extra:(string * Memory_layout.shape) list -> int -> instance list -> unit
 val example : Path.module_
 val example_file : Path.file
-val database : Project.package list -> Database.t
+val database : ?checks:bool -> Project.package list -> Database.t
 val example_package : (Path.file * string) list -> Project.package list
 val compile : ?results:Compile.results -> ?evaluation_time_limit_ms:int -> Database.t -> Compile.t
 
 val load_files :
   ?results:Compile.results ->
   ?roots:Instance.key list ->
+  ?checks:bool ->
   (Path.file * string) list ->
   Database.t * Compile.t
 
-val load : ?results:Compile.results -> ?roots:Instance.key list -> string -> Database.t * Compile.t
+val load :
+  ?results:Compile.results ->
+  ?roots:Instance.key list ->
+  ?checks:bool ->
+  string ->
+  Database.t * Compile.t
+
 val tests_in : Database.t -> Path.module_ -> Path.t list
 val tests_of : Database.t -> Path.t list
 val run_source : string -> string
 val expect_output : string -> String.t -> unit
 val passes : string -> string -> unit
-val run_main : ?arguments:string list -> ?input:string -> string -> int * string * string
+
+val run_main :
+  ?arguments:string list -> ?input:string -> ?checks:bool -> string -> int * string * string
+
 val drop_shapes : (string * Memory_layout.shape) list
 val standard_context : Monomorphic.context
 val standard : string -> string -> ?arguments:Ground.argument list -> unit -> Ground.ty

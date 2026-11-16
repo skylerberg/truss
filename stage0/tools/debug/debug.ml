@@ -6,13 +6,13 @@ let rec describe kind =
   | Token.Upper name -> Printf.sprintf "Upper %s" name
   | Lower name -> Printf.sprintf "Lower %s" name
   | Underscore -> "_"
-  | Keyword keyword -> Printf.sprintf "Keyword %s" (Token.keyword_spelling keyword)
-  | Reserved reserved -> Printf.sprintf "Reserved %s" (Token.reserved_spelling reserved)
+  | Keyword keyword -> Printf.sprintf "Keyword %s" (Token.spell_keyword keyword)
+  | Reserved reserved -> Printf.sprintf "Reserved %s" (Token.spell_reserved reserved)
   | Integer value -> Printf.sprintf "Integer %s" (Z.to_string value)
   | Float { significand; exponent } -> "Float " ^ float_to_string significand exponent
   | String literal -> describe_string literal
-  | Punctuation punctuation -> Printf.sprintf "'%s'" (Token.punctuation_spelling punctuation)
-  | Foreign foreign -> Printf.sprintf "Foreign %s" (Token.foreign_spelling foreign)
+  | Punctuation punctuation -> Printf.sprintf "'%s'" (Token.spell_punctuation punctuation)
+  | Foreign foreign -> Printf.sprintf "Foreign %s" (Token.spell_foreign foreign)
   | Newline -> "Newline"
   | End_of_file -> "End_of_file"
 
@@ -30,14 +30,14 @@ and describe_string literal =
     (fun index (text : Token.text) ->
       if index > 0 then Buffer.add_string parts " ${...} ";
       Buffer.add_string parts (Diagnostic.quote text.value))
-    (Token.texts literal);
+    (Token.list_texts literal);
   Printf.sprintf "%s%s %s" tag form (Buffer.contents parts)
 
 let print_tokens source tokens =
   let rec print indent (tokens : Token.t array) =
     Array.iter
       (fun (token : Token.t) ->
-        let line, column = Source.position source token.span.start in
+        let line, column = Source.compute_position source token.span.start in
         let flags =
           (if token.line_break_before then " [line break]" else "")
           ^ if token.blank_line_before then " [blank line]" else ""
@@ -50,14 +50,14 @@ let print_tokens source tokens =
             Array.iter
               (fun (interpolation : Token.interpolation) ->
                 print (indent ^ "    ") interpolation.tokens)
-              (Token.interpolations literal)
+              (Token.list_interpolations literal)
         | _ -> ())
       tokens
   in
   print "" tokens
 
 let show_diagnostics ~json source diagnostics =
-  let shown = Diagnostic.shown diagnostics in
+  let shown = Diagnostic.select_shown diagnostics in
   if json then print_string (Diagnostic.to_json source shown)
   else List.iter (fun diagnostic -> prerr_string (Diagnostic.render source diagnostic)) shown;
   if diagnostics = [] then 0 else 1

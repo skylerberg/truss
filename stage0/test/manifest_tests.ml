@@ -4,8 +4,6 @@ let manifest_block () =
   let text = File_system.read (Harness.workspace_path "PACKAGES.md") in
   String.concat "\n" (Documents.block_after text "## Package manifest")
 
-let contains text part = Substring.contains text part
-
 let malformed_at line text =
   match Manifest.parse text with
   | exception Manifest.Malformed { line = actual; _ } when actual = line -> ()
@@ -71,10 +69,10 @@ let () =
       malformed_at 5 "[package]\nname = \"a\"\n\n[dependencies]\njson\n");
   Harness.test "a name is one lower_snake_case part or an owner and a name" (fun () ->
       List.iter
-        (fun name -> if not (Manifest.valid_name name) then Harness.fail "%s is refused" name)
+        (fun name -> if not (Manifest.is_valid_name name) then Harness.fail "%s is refused" name)
         [ "weather"; "weather_report"; "acme::geometry"; "acme::geometry_v2" ];
       List.iter
-        (fun name -> if Manifest.valid_name name then Harness.fail "%s is accepted" name)
+        (fun name -> if Manifest.is_valid_name name then Harness.fail "%s is accepted" name)
         [ ""; "Weather"; "a::b::c"; "a:b"; "::b"; "a::"; "a__b"; "9a"; "a-b" ]);
   Harness.test "a package's name that is not one is malformed, at its line" (fun () ->
       malformed_at 2 "[package]\nname = \"Weather\"\n");
@@ -84,13 +82,14 @@ let () =
     (fun () ->
       (match Manifest.parse "[package]\nname = \"a\"\nversion = \"1.0\"\n" with
       | exception Manifest.Malformed { line = 3; message } ->
-          if not (contains message "holds no version") then Harness.fail "said %s" message
+          if not (String.includes ~affix:"holds no version" message) then
+            Harness.fail "said %s" message
       | _ -> Harness.fail "accepted");
       (match
          Manifest.parse "[package]\nname = \"a\"\n[dependencies]\njson = { version = \"2.1\" }\n"
        with
       | exception Manifest.Malformed { line = 4; message } ->
-          if not (contains message "json = []") then Harness.fail "said %s" message
+          if not (String.includes ~affix:"json = []" message) then Harness.fail "said %s" message
       | _ -> Harness.fail "accepted");
       malformed_at 4 "[package]\nname = \"a\"\n[dependencies]\njson = \"2.1\"\n");
   Harness.test "a table or a key a manifest does not have is malformed" (fun () ->
@@ -163,14 +162,16 @@ let () =
      \"truss::toml\" = []\n"
   in
   Harness.test "a manifest without a dependency loses that entry's lines and no others" (fun () ->
-      let without = Manifest.without_dependency text { Path.owner = None; name = "http" } in
+      let without = Manifest.remove_dependency text { Path.owner = None; name = "http" } in
       if without <> "[package]\nname = \"a\"\n\n[dependencies]\njson = []\n\"truss::toml\" = []\n"
       then Harness.fail "wrote %S" without;
-      let without = Manifest.without_dependency text { Path.owner = Some "truss"; name = "toml" } in
-      if contains without "toml" || not (contains without "NetworkClient") then
-        Harness.fail "wrote %S" without);
+      let without = Manifest.remove_dependency text { Path.owner = Some "truss"; name = "toml" } in
+      if
+        String.includes ~affix:"toml" without
+        || not (String.includes ~affix:"NetworkClient" without)
+      then Harness.fail "wrote %S" without);
   Harness.test "a manifest without a dependency it does not list is unchanged" (fun () ->
-      if Manifest.without_dependency text { Path.owner = None; name = "yaml" } <> text then
+      if Manifest.remove_dependency text { Path.owner = None; name = "yaml" } <> text then
         Harness.fail "changed")
 
 let () =
@@ -185,7 +186,7 @@ let () =
          [test]\n\
          time_limit = 3\n"
       in
-      let added = Manifest.with_dependency text { Path.owner = Some "acme"; name = "geometry" } in
+      let added = Manifest.add_dependency text { Path.owner = Some "acme"; name = "geometry" } in
       if
         added
         <> "[package]\n\
@@ -216,11 +217,11 @@ let () =
   Harness.test "a dependency is added to a manifest with no dependencies, in a table of its own"
     (fun () ->
       let added =
-        Manifest.with_dependency "[package]\nname = \"a\"" { Path.owner = None; name = "json" }
+        Manifest.add_dependency "[package]\nname = \"a\"" { Path.owner = None; name = "json" }
       in
       if added <> "[package]\nname = \"a\"\n\n[dependencies]\njson = []\n" then
         Harness.fail "wrote %S" added);
   Harness.test "a dependency a manifest already lists is not added again" (fun () ->
       let text = "[package]\nname = \"a\"\n[dependencies]\njson = [\"Clock\"]\n" in
-      if Manifest.with_dependency text { Path.owner = None; name = "json" } <> text then
+      if Manifest.add_dependency text { Path.owner = None; name = "json" } <> text then
         Harness.fail "changed")

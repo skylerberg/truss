@@ -535,8 +535,8 @@ let make ?(notes = []) ?(fixes = []) ~code span message = { code; message; span;
 
 type reported = Reported
 
-let reported (_ : _ diagnostic) = Reported
-let recovered _ = Reported
+let make_reported (_ : _ diagnostic) = Reported
+let make_recovered _ = Reported
 let fix title edits = { title; edits }
 let replace span replacement = { span; replacement }
 let insert at replacement = { span = at; replacement }
@@ -570,7 +570,7 @@ let edit_distance left right =
   done;
   table.(rows - 1).(columns - 1)
 
-let closest text candidates =
+let find_closest text candidates =
   let limit = max 1 (String.length text / 3) in
   let best =
     List.fold_left
@@ -631,7 +631,7 @@ module Starts = Map.Make (Int)
 
 type accepted = { stop : int; has_insertion : bool }
 
-let machine_applicable (diagnostics : t list) =
+let list_machine_applicable (diagnostics : t list) =
   let accepted = ref Starts.empty in
   let overlaps (edit : Source.span edit) =
     let start = edit.span.start and stop = edit.span.stop in
@@ -683,20 +683,20 @@ module Collector = struct
       (Dynarray.to_list collector)
 end
 
-let shown diagnostics =
+let select_shown diagnostics =
   let rec take count last = function
     | [] -> []
     | rest when count = limit ->
         [
-          make ~code:Too_many_diagnostics (Source.zero_width last)
+          make ~code:Too_many_diagnostics (Source.make_zero_width last)
             (Printf.sprintf "%d more errors are not shown." (List.length rest));
         ]
     | (first : t) :: rest -> first :: take (count + 1) first.span.stop rest
   in
   take 0 0 diagnostics
 
-let location source offset =
-  let line, column = Source.position source offset in
+let show_location source offset =
+  let line, column = Source.compute_position source offset in
   Printf.sprintf "%s:%d:%d" (Source.path source) line column
 
 let iter_utf8 text ~valid ~invalid =
@@ -739,14 +739,14 @@ let render source (diagnostic : t) =
   let buffer = Buffer.create 256 in
   let text = Source.text source in
   Printf.bprintf buffer "%s: error[%s]: %s\n"
-    (location source diagnostic.span.start)
+    (show_location source diagnostic.span.start)
     (Code.name diagnostic.code) diagnostic.message;
   let start = diagnostic.span.start in
   let line_start = Source.line_start source start in
   let line_end = Source.line_end source start in
   let line = String.sub text line_start (line_end - line_start) in
-  let _, start_column = Source.position source start in
-  let _, stop_column = Source.position source (min diagnostic.span.stop line_end) in
+  let _, start_column = Source.compute_position source start in
+  let _, stop_column = Source.compute_position source (min diagnostic.span.stop line_end) in
   let is_printable =
     String.for_all (fun character -> character = '\t' || Char.code character >= 0x20) line
     &&
@@ -768,7 +768,7 @@ let render source (diagnostic : t) =
   end;
   List.iter
     (fun ((span : Source.span), note) ->
-      Printf.bprintf buffer "  note: %s: %s\n" (location source span.start) note)
+      Printf.bprintf buffer "  note: %s: %s\n" (show_location source span.start) note)
     diagnostic.notes;
   List.iter
     (fun fix ->
@@ -780,12 +780,12 @@ let render source (diagnostic : t) =
             (if edit.span.start = edit.span.stop then "insert " ^ quote edit.replacement
              else if edit.replacement = "" then "delete " ^ quote original
              else Printf.sprintf "replace %s with %s" (quote original) (quote edit.replacement))
-            (location source edit.span.start))
+            (show_location source edit.span.start))
         fix.edits)
     diagnostic.fixes;
   Buffer.contents buffer
 
-let json_string value =
+let encode_json_string value =
   let buffer = Buffer.create (String.length value + 2) in
   Buffer.add_char buffer '"';
   iter_utf8 value
@@ -805,18 +805,19 @@ let json_string value =
   Buffer.add_char buffer '"';
   Buffer.contents buffer
 
-let json_span source (span : Source.span) =
-  let line, column = Source.position source span.start in
-  let end_line, end_column = Source.position source span.stop in
+let encode_json_span source (span : Source.span) =
+  let line, column = Source.compute_position source span.start in
+  let end_line, end_column = Source.compute_position source span.stop in
   Printf.sprintf {|{"start":%d,"stop":%d,"line":%d,"column":%d,"end_line":%d,"end_column":%d}|}
     span.start span.stop line column end_line end_column
 
 let to_json_object source diagnostic =
-  let path = json_string (Source.path source) in
+  let path = encode_json_string (Source.path source) in
   let notes =
     List.map
       (fun (span, message) ->
-        Printf.sprintf {|{"span":%s,"message":%s}|} (json_span source span) (json_string message))
+        Printf.sprintf {|{"span":%s,"message":%s}|} (encode_json_span source span)
+          (encode_json_string message))
       diagnostic.notes
   in
   let fixes =
@@ -826,17 +827,18 @@ let to_json_object source diagnostic =
           List.map
             (fun (edit : Source.span edit) ->
               Printf.sprintf {|{"start":%d,"stop":%d,"replacement":%s}|} edit.span.start
-                edit.span.stop (json_string edit.replacement))
+                edit.span.stop
+                (encode_json_string edit.replacement))
             fix.edits
         in
-        Printf.sprintf {|{"title":%s,"edits":[%s]}|} (json_string fix.title)
+        Printf.sprintf {|{"title":%s,"edits":[%s]}|} (encode_json_string fix.title)
           (String.concat "," edits))
       diagnostic.fixes
   in
   Printf.sprintf {|{"path":%s,"code":%s,"message":%s,"span":%s,"notes":[%s],"fixes":[%s]}|} path
-    (json_string (Code.name diagnostic.code))
-    (json_string diagnostic.message)
-    (json_span source diagnostic.span)
+    (encode_json_string (Code.name diagnostic.code))
+    (encode_json_string diagnostic.message)
+    (encode_json_span source diagnostic.span)
     (String.concat "," notes) (String.concat "," fixes)
 
 let to_json source diagnostics =

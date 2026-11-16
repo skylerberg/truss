@@ -4,7 +4,7 @@ type system = { os : os; architecture : architecture }
 
 val oses : os list
 val architectures : architecture list
-val system_name : system -> string
+val show_system : system -> string
 val host : system option
 
 type scalar = UInt8 | Int32 | UInt32 | Int64 | UInt64 | Float32 | Float64
@@ -255,17 +255,17 @@ type function_ =
   | Tasks_yield
 
 val functions : function_ list
-val function_name : function_ -> string
+val show_function : function_ -> string
 val is_runtime_function : function_ -> bool
-val blocks : function_ -> bool
-val available : system -> function_ -> bool
-val signature : function_ -> signature
-val declaration : system -> function_ -> declaration
-val prototype : declaration -> string
+val is_blocking : function_ -> bool
+val is_available : system -> function_ -> bool
+val make_signature : function_ -> signature
+val make_declaration : system -> function_ -> declaration
+val render_prototype : declaration -> string
 val numbers : number list
-val number_name : number -> string
-val number_type : number -> scalar
-val value : system -> number -> int
+val show_number : number -> string
+val classify_number : number -> scalar
+val evaluate_number : system -> number -> int
 
 module For_testing : sig
   val check : system -> string
