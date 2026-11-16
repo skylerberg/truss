@@ -906,3 +906,38 @@ let () =
       in
       let checked_bodies = extract_counts counts "checked body" in
       if checked_bodies.computed <> 1 then Harness.fail "counted %s" (show_counts checked_bodies))
+
+let () =
+  Harness.test "a namespace whose names come out unchanged is counted as unchanged, not written"
+    (fun () ->
+      let before = [ ("app::main", callee_and_caller) ] in
+      let after = [ ("app::main", callee_and_caller ^ "\n") ] in
+      let namespaces =
+        extract_counts (count_propagation (build before) ~before ~after) "namespace"
+      in
+      if (namespaces.computed, namespaces.unchanged, namespaces.writes) <> (1, 1, 0) then
+        Harness.fail "counted %s" (show_counts namespaces));
+  Harness.test "a new version of a loaded package counts a write of each part that differs"
+    (fun () ->
+      let make_version second =
+        load_package
+          [
+            ( "lib::tools",
+              "public fn first() -> Int64 { 1 }\npublic fn second() -> " ^ second ^ " { 2 }\n" );
+          ]
+      in
+      let app =
+        Support.setup
+          ~dependencies:[ ("app", "lib") ]
+          [ ("app::main", "use lib::tools\nfn calls_second() { tools::second() }\n") ]
+      in
+      let hot = settle [ make_version "Int64" ] app in
+      let newer = make_version "Int32" in
+      let _, counts =
+        Database.count (fun () ->
+            Database.relayout hot ~loaded:[ Lazy.force standard; newer ] app;
+            Database.propagate hot)
+      in
+      let interfaces = extract_counts counts "interface" in
+      if (interfaces.computed, interfaces.writes) <> (0, 1) then
+        Harness.fail "counted %s" (show_counts interfaces))

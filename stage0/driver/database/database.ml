@@ -137,8 +137,8 @@ type t = {
 
 type observation =
   | Computation of { parts : Part.stored list; reads : int; distinct_reads : int }
-  | Store of { part : Part.stored; is_changed : bool }
-  | Removal of Part.computed
+  | Unchanged of Part.stored
+  | Write of { part : Part.stored; is_removal : bool }
 
 let observer : (observation -> unit) ref = ref ignore
 
@@ -192,6 +192,13 @@ let make_package_database name ~dependencies (texts : (Path.file * string) list)
   package_database
 
 let mark_unsaved database entry = Entry_table.replace database.unsaved entry ()
+
+let is_saved_part database (part : Part.stored) =
+  match part with
+  | Computed (Namespace _) -> false
+  | Computed (Lowering _) -> true
+  | Computed part -> List.mem (Part.locate_package part) database.project
+  | Recursion_group path -> List.mem (Path.locate_package path) database.project
 
 let mark_package_database_unsaved database (package_database : package_database) =
   mark_unsaved database (Package package_database.name);
@@ -402,18 +409,16 @@ let mark_readers ?(is_selected = fun _ -> true) database part =
     (Computed_table.iter (fun reader () -> if is_selected reader then mark_stale database reader))
     (Part_table.find_opt database.readers part)
 
+let mark_written database (part : Part.stored) ~is_removal =
+  !observer (Write { part; is_removal });
+  if is_saved_part database part then mark_unsaved database (Value part);
+  mark_readers database (Stored part)
+
 let store database part slot value =
-  let is_changed =
-    match (slot.stored, value) with
-    | Some stored, Some value -> stored <> value
-    | None, None -> false
-    | Some _, None | None, Some _ -> true
-  in
-  !observer (Store { part; is_changed });
-  if is_changed then begin
+  if slot.stored = value then !observer (Unchanged part)
+  else begin
     (match value with Some value -> slot.replace value | None -> slot.remove ());
-    mark_unsaved database (Value part);
-    mark_readers database (Stored part)
+    mark_written database part ~is_removal:(Option.is_none value)
   end
 
 let compute_into database part slot compute =
@@ -950,6 +955,7 @@ let compute_test_keys database keys =
     keys
 
 type stored = {
+  has_value : bool;
   is_failed : bool;
   remove : unit -> unit;
   is_equal_in : t -> bool;
@@ -971,6 +977,7 @@ let make_stored database (part : Part.stored) =
   let make_stored_in_owner ~is_failed ~select_owner access =
     let current = select_owner database in
     {
+      has_value = Option.is_some (access current).stored;
       is_failed = Option.fold ~none:false ~some:is_failed (access current).stored;
       remove = (fun () -> (access current).remove ());
       is_equal_in =
@@ -996,6 +1003,7 @@ let make_stored database (part : Part.stored) =
             (File_table.make_access (fun package_database -> package_database.parsed) file)
       | Namespace _ ->
           {
+            has_value = Option.is_some package_database.namespace;
             is_failed = false;
             remove = (fun () -> package_database.namespace <- None);
             is_equal_in =
@@ -1076,6 +1084,7 @@ let make_stored database (part : Part.stored) =
                 Call_graph.find_successors graph path)
           in
           {
+            has_value = Option.is_some (find_viewer_successors database);
             is_failed = false;
             remove =
               (fun () -> Call_graph.remove_successors (obtain_call_graph database viewer) path);
@@ -1098,7 +1107,6 @@ let make_stored database (part : Part.stored) =
           of_database (Instance_table.make_access (fun database -> database.test_keys) key))
 
 let discard database part =
-  if Computed_table.mem database.reads part then !observer (Removal part);
   unmark database part;
   record database [ part ] (Part_table.create 0);
   Computed_table.remove database.reads part;
@@ -1130,16 +1138,15 @@ let rec subtract_sorted compare left right =
       else subtract_sorted compare left others
 
 let rec forget database parts =
-  let removed = Computed_table.create 16 in
-  List.iter (fun part -> Computed_table.replace removed part ()) parts;
   List.iter
     (fun part ->
-      (make_stored database (Computed part)).remove ();
-      mark_unsaved database (Value (Computed part));
-      discard database part)
+      let stored = make_stored database (Computed part) in
+      if stored.has_value then begin
+        stored.remove ();
+        mark_written database (Computed part) ~is_removal:true
+      end)
     parts;
-  let is_kept reader = not (Computed_table.mem removed reader) in
-  List.iter (fun part -> mark_readers ~is_selected:is_kept database (Stored (Computed part))) parts;
+  List.iter (discard database) parts;
   List.iter
     (function
       | Part.Proof _ as owner -> own_roots database (Part.Stored (Computed owner)) [] | _ -> ())
@@ -1301,6 +1308,12 @@ let mark_change database package (change : Resolve.Names.change) =
   | Positions _ -> mark_readers ~is_selected:(holds_position database) database (Name part)
   | _ -> mark_readers database (Name part)
 
+let write_namespace_changes database package = function
+  | [] -> !observer (Unchanged (Computed (Namespace package)))
+  | changes ->
+      mark_written database (Computed (Namespace package)) ~is_removal:false;
+      List.iter (mark_change database package) changes
+
 let is_own_namespace_part package (part : Part.t) =
   match part with
   | Name part -> Part.locate_name_package part = package
@@ -1319,7 +1332,6 @@ let compute_namespace_and_implied database (package_database : package_database)
         in
         (own_namespace, list_package_parts database (add_recording names note) package))
   in
-  package_database.namespace <- Some namespace;
   Package_table.replace database.implied package implied;
   (namespace, implied)
 
@@ -1328,6 +1340,7 @@ let compute_namespace database (package_database : package_database) =
   let before = Option.value package_database.namespace ~default:Resolve.Names.empty_namespace in
   let implied_before = Option.value ~default:[] (Package_table.find_opt database.implied package) in
   let after, implied = compute_namespace_and_implied database package_database in
+  package_database.namespace <- Some after;
   let make_membership_test parts =
     let members = Computed_table.create 256 in
     List.iter (fun part -> Computed_table.replace members part ()) parts;
@@ -1348,9 +1361,7 @@ let compute_namespace database (package_database : package_database) =
           ignore (Call_graph.add_root graph root)
       | _ -> ())
     implied;
-  let changes = Resolve.Names.list_changes before after in
-  !observer (Store { part = Computed (Namespace package); is_changed = changes <> [] });
-  List.iter (mark_change database package) changes;
+  write_namespace_changes database package (Resolve.Names.list_changes before after);
   List.iter (fun part -> if not (was_implied part) then mark_stale database part) implied;
   forget database (List.filter (fun part -> not (is_implied part)) implied_before);
   own_lowering_roots database (make_stored_name_lookups database) package
@@ -1683,7 +1694,8 @@ let update_groups database package =
       List.iter
         (fun node ->
           let part = Part.Call_edges (node, package) in
-          mark_unsaved database (Value (Computed part));
+          if Computed_table.mem database.reads part then
+            mark_written database (Computed part) ~is_removal:true;
           discard database part)
         removed;
       let make_group_slot = Path_table.make_slot (obtain_owner database package).recursion_groups in
@@ -1978,7 +1990,7 @@ let mark_differences database name ~(before : package_database option)
   let read_package_namespace (package_database : package_database) =
     Option.value package_database.namespace ~default:Resolve.Names.empty_namespace
   in
-  List.iter (mark_change database name)
+  write_namespace_changes database name
     (Resolve.Names.list_changes (read_package_namespace before) (read_package_namespace after));
   let find_text (package_database : package_database) file =
     Option.map Source.text (File_table.find_opt package_database.sources file)
@@ -2003,7 +2015,7 @@ let mark_differences database name ~(before : package_database option)
   Stored_table.iter
     (fun part () ->
       if not ((make_stored (make_view before) part).is_equal_in (make_view after)) then
-        mark_readers database (Stored part))
+        mark_written database part ~is_removal:(not (make_stored (make_view after) part).has_value))
     parts
 
 let retire database (package_database : package_database) =
@@ -2105,13 +2117,6 @@ let relayout database ~(loaded : package_database list) (packages : Project.pack
 
 let fingerprint text = Digest.BLAKE128.to_hex (Digest.BLAKE128.string text)
 
-let is_saved_part database (part : Part.stored) =
-  match part with
-  | Computed (Namespace _) -> false
-  | Computed (Lowering _) -> true
-  | Computed part -> List.mem (Part.locate_package part) database.project
-  | Recursion_group path -> List.mem (Path.locate_package path) database.project
-
 let find_saved_value database (entry : Entry.t) =
   match entry with
   | Value part ->
@@ -2195,11 +2200,9 @@ let restore_namespaces database =
   List.iter
     (fun name ->
       if List.mem name database.project then begin
-        let _, implied =
-          compute_namespace_and_implied database
-            (Package_table.find database.package_databases name)
-        in
-        !observer (Store { part = Computed (Namespace name); is_changed = true });
+        let package_database = Package_table.find database.package_databases name in
+        let namespace, implied = compute_namespace_and_implied database package_database in
+        package_database.namespace <- Some namespace;
         let graph = obtain_call_graph database name in
         List.iter
           (function
@@ -2682,8 +2685,9 @@ module For_testing = struct
       (function
         | Computation { parts; _ } ->
             recomputed := List.map (fun part -> Part.show (Stored part)) parts @ !recomputed
-        | Removal (Lowering part) -> collected := Part.show_computed (Lowering part) :: !collected
-        | Store _ | Removal _ -> ())
+        | Write { part = Computed (Lowering part); is_removal = true } ->
+            collected := Part.show_computed (Lowering part) :: !collected
+        | Write _ | Unchanged _ -> ())
       run;
     {
       recomputed = List.sort_uniq compare !recomputed;
@@ -2739,12 +2743,9 @@ let count run =
                   reads = counts.reads + reads;
                   distinct_reads = counts.distinct_reads + distinct_reads;
                 })
-        | Store { part; is_changed = true } ->
-            add part (fun counts -> { counts with writes = counts.writes + 1 })
-        | Store { part; is_changed = false } ->
+        | Unchanged part ->
             add part (fun counts -> { counts with unchanged = counts.unchanged + 1 })
-        | Removal part ->
-            add (Computed part) (fun counts -> { counts with writes = counts.writes + 1 }))
+        | Write { part; _ } -> add part (fun counts -> { counts with writes = counts.writes + 1 }))
       run
   in
   ( result,
