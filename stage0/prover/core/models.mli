@@ -5,7 +5,7 @@ type quantified_range =
       collection_type : Types.ty;
       collected : Logic.term;
       element : Types.ty;
-      span : Source.Definition_span.t;
+      location : State.location;
     }
 
 val under_binder :

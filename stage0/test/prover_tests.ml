@@ -1222,6 +1222,17 @@ let () =
   test "a law's proof reads the specifications that its own body holds" (fun () ->
       proven Fixtures.Prover.laws_proof_reads_the_specifications_that_its_own)
 
+let () =
+  test "a failing bit-vector assertion in a law's proof is cited by its impl's diagnostic"
+    (fun () ->
+      let text = Fixtures.Prover.failing_bit_vector_assertion_in_a_laws_proof in
+      let packages = Support.setup [ ("app::main", text) ] in
+      match check packages (Support.file_of "app::main") with
+      | [ ({ notes = [ (cited, _) ]; _ } : Diagnostic.t) ] ->
+          let quoted = String.sub text cited.start (cited.stop - cited.start) in
+          if not (contains quoted "(bits & 15) < 8") then fail "cites %S" quoted
+      | actual -> fail "%s" (String.concat ", " (Support.codes actual)))
+
 let early_return ensures =
   "fn f(first: mut Int64, second: mut Int64) -> Int64\n  requires second < 100\n" ^ ensures
   ^ "  uses Tasks\n{\n  concurrent {\n    return 0\n    second += 1\n  }\n}\n"

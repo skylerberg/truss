@@ -34,18 +34,18 @@ let compared_terms ty (compared : comparison) left right =
     | Some symbol -> Logic.Operation (symbol, [ left; right ])
     | None -> Logic.not_ (Logic.equal left right)
 
-let check_widened span ~is_written actual expected =
+let check_widened location ~is_written actual expected =
   match (actual, expected) with
   | Types.Function actual, Types.Function expected
     when (not is_written)
          && not (List.for_all (fun cost -> List.mem cost actual.costs) expected.costs) ->
-      unsupported span "a function value's costs"
+      unsupported location "a function value's costs"
   | _ -> ()
 
 let from_integer context frame (site : Invocation.site) term =
   let ty = substituted context frame site.type_ in
   oblige context frame Out_of_range
-    (span_of frame.source site.origin)
+    (locate context frame.source site.origin)
     [
       Text "`";
       quote frame.source site.origin;
@@ -258,7 +258,7 @@ let overflow_fix context frame ty (operation : Intrinsic.operation) left right =
   | Some (low, high), Logic.Integer limit, Some text -> (
       let clause relation limit =
         if Z.leq low limit && Z.leq limit high then
-          add_requires context frame
+          add_requires context
             [ Text (Printf.sprintf "%s %s %s" text relation (Z.to_string limit)) ]
         else []
       in
@@ -274,7 +274,7 @@ let overflow_fix context frame ty (operation : Intrinsic.operation) left right =
 let arithmetic context frame (site : Invocation.site) ty (operation : Intrinsic.operation) left
     right =
   let source = frame.source in
-  let span = span_of frame.source site.origin in
+  let location = locate context frame.source site.origin in
   let exact =
     match operation with
     | Add -> Logic.Operation ("+", [ left; right ])
@@ -285,10 +285,10 @@ let arithmetic context frame (site : Invocation.site) ty (operation : Intrinsic.
   in
   (match operation with
   | Divide | Remainder ->
-      oblige context frame Division span
+      oblige context frame Division location
         ~fixes:
           (match parameter_spelling context frame right with
-          | Some text -> add_requires context frame [ Text (text ^ " != 0") ]
+          | Some text -> add_requires context [ Text (text ^ " != 0") ]
           | None -> [])
         [ Text "The divisor in `"; quote source site.origin; Text "` may be zero." ]
         (Logic.not_ (Logic.equal right (Logic.int 0)))
@@ -296,7 +296,7 @@ let arithmetic context frame (site : Invocation.site) ty (operation : Intrinsic.
   (match bounds ty with
   | Some (low, _) when operation = Divide || operation = Remainder ->
       if Z.sign low < 0 then
-        oblige context frame Overflow span
+        oblige context frame Overflow location
           [
             Text "`";
             quote source site.origin;
@@ -305,7 +305,7 @@ let arithmetic context frame (site : Invocation.site) ty (operation : Intrinsic.
           (Logic.not_ Logic.(equal left (Integer low) &&& equal right (int (-1))))
   | Some (low, high) ->
       let unsigned = Z.sign low = 0 && not (Types.is_builtin Character ty) in
-      oblige context frame Overflow span
+      oblige context frame Overflow location
         ~fixes:(overflow_fix context frame ty operation left right)
         [
           Text "`";
@@ -408,7 +408,7 @@ let power_of context frame base exponent =
 let primitive_operation context frame ~(site : Invocation.site) (operation : Intrinsic.operation)
     types operands ~(arguments : Core.origin option list) ~fallback =
   let source = frame.source in
-  let span = span_of frame.source site.origin in
+  let location = locate context frame.source site.origin in
   let argument index = Option.join (List.nth_opt arguments index) in
   let is_float = match types with ty :: _ -> float_format ty <> None | [] -> false in
   let exact operation left right =
@@ -430,14 +430,15 @@ let primitive_operation context frame ~(site : Invocation.site) (operation : Int
   | Negate, ty :: _, [ inner ] when not is_float ->
       let negated = Logic.Operation ("-", [ inner ]) in
       if bounds ty <> None then
-        oblige context frame Overflow span
+        oblige context frame Overflow location
           [
             Text "`";
             quote source site.origin;
             Text (Printf.sprintf "` may overflow `%s`." (Types.show ty));
           ]
           (in_range ty negated)
-      else if ty <> Types.Integer then unsupported span "negating a value of `%s`" (Types.show ty);
+      else if ty <> Types.Integer then
+        unsupported location "negating a value of `%s`" (Types.show ty);
       negated
   | Complement, ty :: _, [ inner ] -> opaque_operation context frame ty Complement [ inner ]
   | (Shift_left | Shift_right), ty :: _, [ left; right ] ->
@@ -446,19 +447,18 @@ let primitive_operation context frame ~(site : Invocation.site) (operation : Int
           let at_amount, text, fixes =
             match argument 1 with
             | Some amount ->
-                ( span_of frame.source amount,
+                ( locate context frame.source amount,
                   [ Text "The shift amount `"; quote source amount; Text "`" ],
                   match parameter_spelling context frame right with
-                  | Some text ->
-                      add_requires context frame [ Text (Printf.sprintf "%s < %d" text bits) ]
+                  | Some text -> add_requires context [ Text (Printf.sprintf "%s < %d" text bits) ]
                   | None -> [] )
             | None ->
-                (span, [ Text "The shift amount in `"; quote source site.origin; Text "`" ], [])
+                (location, [ Text "The shift amount in `"; quote source site.origin; Text "`" ], [])
           in
           oblige context frame Shift at_amount ~fixes
             (text @ [ Text (Printf.sprintf " may not be less than %d." bits) ])
             Logic.(Operation ("<", [ right; int bits ]))
-      | None -> unsupported span "a shift of `%s`" (Types.show ty));
+      | None -> unsupported location "a shift of `%s`" (Types.show ty));
       let shifted = opaque_operation context frame ty operation [ left; right ] in
       (match (bounds ty, width ty) with
       | Some (low, high), Some bits
@@ -655,7 +655,7 @@ let primitive_operation context frame ~(site : Invocation.site) (operation : Int
           match operands with
           | [ value ] ->
               oblige context frame Requires
-                (span_of frame.source site.origin)
+                (locate context frame.source site.origin)
                 [
                   Text "`";
                   quote frame.source site.origin;
@@ -679,7 +679,7 @@ let primitive_operation context frame ~(site : Invocation.site) (operation : Int
           match operands with
           | [ value ] ->
               oblige context frame Requires
-                (span_of frame.source site.origin)
+                (locate context frame.source site.origin)
                 [
                   Text "`";
                   quote frame.source site.origin;

@@ -2366,8 +2366,9 @@ let list_holes proofs path =
   match Option.bind (names.key path) (read_proof proofs) with
   | Some (Value (Obligations { holes; _ })) ->
       List.map
-        (fun ((home : Names.key), (span : Source.Definition_span.t)) ->
+        (fun ((home : Names.key), location) ->
           let ({ file; base } : Names.place) = names.place home in
+          let span = Prover.resolve_location names home location in
           (file, (Source.Definition_span.to_file ~base span).start))
         holes
   | Some (Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked) | None -> []

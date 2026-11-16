@@ -17,7 +17,7 @@ let check_callback_requires context frame (site : Invocation.site) through (valu
           List.iter
             (fun (clause : Mir.formula) ->
               oblige context frame Requires
-                (span_of frame.source site.origin)
+                (locate context frame.source site.origin)
                 [
                   Text "`";
                   quote frame.source clause.origin;
@@ -161,7 +161,7 @@ let keeps_cost context path (contract : contract) (asked : Types.cost) =
 
 let check_named_callback context frame (invocation : Invocation.t) (passed : passed) ~origin path
     (contract : contract) (values : passed list) =
-  let span = span_of frame.source origin in
+  let location = locate context frame.source origin in
   let own = List.hd contract.parts in
   match parameter_type context frame invocation passed.position with
   | Some (Types.Function expected) ->
@@ -179,7 +179,7 @@ let check_named_callback context frame (invocation : Invocation.t) (passed : pas
          in
          List.iter
            (fun (requirement : Mir.formula) ->
-             oblige context at_call Requires span
+             oblige context at_call Requires location
                [
                  Text
                    (Printf.sprintf
@@ -193,7 +193,7 @@ let check_named_callback context frame (invocation : Invocation.t) (passed : pas
       List.iter
         (fun (cost : Types.cost) ->
           if not (keeps_cost context path contract cost) then
-            oblige context frame Cost span
+            oblige context frame Cost location
               [
                 Text
                   (Printf.sprintf
@@ -206,4 +206,4 @@ let check_named_callback context frame (invocation : Invocation.t) (passed : pas
         expected.costs
   | _ ->
       if own.requires <> [] || own.costs <> [] then
-        unsupported span "a function passed for a parameter whose type the prover cannot read"
+        unsupported location "a function passed for a parameter whose type the prover cannot read"

@@ -16,12 +16,13 @@ type piece =
     }
 
 type message = piece list
+type location = Node of Core.origin | Whole_definition
 type edit = { at : Source.Definition_span.t; replacement : message }
 type fix = { title : message; edits : edit list }
 
 type obligation = {
   code : Code.prover;
-  span : Source.Definition_span.t;
+  location : location;
   message : message;
   cited : (Names.key * Core.origin) option;
   fixes : fix list;
@@ -32,17 +33,8 @@ type obligation = {
   decisions : (string * string option * Logic.term * Logic.term) list;
 }
 
-type outcome = {
-  obligations : obligation list;
-  holes : (Names.key * Source.Definition_span.t) list;
-}
-
-type source = {
-  key : Names.key option;
-  name : string;
-  spans : Source.Definition_span.t array Lazy.t;
-  text : string Lazy.t;
-}
+type outcome = { obligations : obligation list; holes : (Names.key * location) list }
+type source = { key : Names.key option; name : string }
 
 type part = {
   callee : source;
@@ -151,7 +143,7 @@ type context = {
   mutable open_axioms : open_axiom list;
   axioms_of : (Logic.symbol, open_axiom) Hashtbl.t;
   disjoint : (int * int) list;
-  mutable indexes : (int * (place_value * Source.Definition_span.t)) list;
+  mutable indexes : (int * place_value) list;
   mutable yielded_part : Types.ty option;
   mutable yield_ensures : (Mir.formula list * Mir.formula list) option;
   home : Names.key;
@@ -172,7 +164,7 @@ type context = {
   mutable decisions : (string * string option * Logic.term * Logic.term) list;
   mutable entry : Logic.symbol list;
   mutable proving : bool;
-  mutable holes : (Names.key * Source.Definition_span.t) list;
+  mutable holes : (Names.key * location) list;
   mutable unfinished : Logic.term list;
   mutable call_targets : (Logic.term * Core.local) list;
   mutable reading_callback : bool;

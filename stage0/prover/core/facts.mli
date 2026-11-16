@@ -2,10 +2,10 @@ open State
 
 val variable : ?numbers:int list -> string -> 'a Symbol.t
 
-exception Unsupported of Source.Definition_span.t * string
+exception Unsupported of location * string
 exception Foreign_unsupported of string
 
-val unsupported : Source.Definition_span.t -> ('a, unit, string, 'b) format4 -> 'a
+val unsupported : location -> ('a, unit, string, 'b) format4 -> 'a
 val bug : ('a, unit, string, 'b) format4 -> 'a
 val is_in_recursion_group : context -> Path.t -> bool
 val clauses : Mir.requirement list -> Mir.formula list
@@ -18,7 +18,7 @@ val mentions_fresh_after : context -> int -> Logic.term -> bool
 val closed_over_binders : frame -> Logic.term -> Logic.term option
 val fact : context -> frame -> Logic.term -> unit
 val assume : context -> frame -> Logic.term -> unit
-val add_requires : context -> frame -> message -> fix list
+val add_requires : context -> message -> fix list
 val truss_of_value : context -> Logic.term -> string option
 
 val oblige :
@@ -28,7 +28,7 @@ val oblige :
   context ->
   frame ->
   Code.prover ->
-  Source.Definition_span.t ->
+  location ->
   message ->
   Logic.term ->
   unit
@@ -38,7 +38,7 @@ val obligation_at :
   context ->
   frame ->
   Code.prover ->
-  Source.Definition_span.t ->
+  location ->
   message ->
   Logic.term ->
   obligation option
@@ -48,15 +48,15 @@ val make_obligation :
   context ->
   frame ->
   Code.prover ->
-  Source.Definition_span.t ->
+  location ->
   message ->
   Logic.term ->
   obligation
 
-val span_of : source -> int -> Source.Definition_span.t
+val locate : context -> source -> Core.origin -> location
 val quote : source -> int -> piece
 val quoted : string -> Source.Definition_span.t -> string
-val text_of : source -> int -> string
+val text_of : context -> frame -> Core.origin -> string
 val builtin : Types.ty -> Intrinsic.builtin option
 val bounds : Types.ty -> (Z.t * Z.t) option
 val float_format : Types.ty -> (int * int) option

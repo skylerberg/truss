@@ -10,7 +10,7 @@ type quantified_range =
       collection_type : Types.ty;
       collected : Logic.term;
       element : Types.ty;
-      span : Source.Definition_span.t;
+      location : location;
     }
 
 let under_binder :
@@ -231,7 +231,7 @@ let quantified_over context frame (quantifier : Core.quantifier) (range : quanti
         if inclusive then Costs.plus (Costs.minus high low) (Logic.int 1) else Costs.minus high low
       in
       make ~count symbol Int premise inner each
-  | Range_of_collection { collection_type; collected; element; span } -> (
+  | Range_of_collection { collection_type; collected; element; location } -> (
       let set_path = Well_known.path Set in
       match collection_type with
       | Types.Named { path; _ } when Path.equal path set_path || Path.equal path finite_set_path ->
@@ -243,7 +243,7 @@ let quantified_over context frame (quantifier : Core.quantifier) (range : quanti
           let model =
             match model with
             | Some model -> model
-            | None -> unsupported span "a quantifier over `%s`" (Types.show collection_type)
+            | None -> unsupported location "a quantifier over `%s`" (Types.show collection_type)
           in
           let matched, inner = bind inner each element in
           make symbol (sort_of context element)
@@ -271,8 +271,8 @@ let quantified_over context frame (quantifier : Core.quantifier) (range : quanti
                       &&& Operation ("<", [ each; length ])
                       &&& matched)
                     inner element_value
-              | None -> unsupported span "a quantifier over `%s`" (Types.show collection_type))
-          | None -> unsupported span "a quantifier over `%s`" (Types.show collection_type)))
+              | None -> unsupported location "a quantifier over `%s`" (Types.show collection_type))
+          | None -> unsupported location "a quantifier over `%s`" (Types.show collection_type)))
 
 let rec value_term context frame (value : Types.value) =
   match value with

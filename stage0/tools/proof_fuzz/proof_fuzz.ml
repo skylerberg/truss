@@ -59,11 +59,9 @@ let runnable database =
       let key = Resolve.Names.key_of declaration in
       match
         ( Interface.Definition.read_declared_signature interface declaration.path,
-          Prover.Contracts.home_source lookups key,
           Mir.contract_of_path mir declaration.path )
       with
       | ( Some ({ generics = []; receiver = None; uses; output = Returns output; _ } as signature),
-          source,
           Some { form = { requires; _ }; _ } )
         when uses = Types.no_capabilities
              && integer output <> None
@@ -78,7 +76,13 @@ let runnable database =
           let admits =
             List.map
               (fun (requirement : Mir.requirement) ->
-                "(" ^ Prover.Facts.text_of source requirement.clause.origin ^ ")")
+                "("
+                ^ Prover.Facts.quoted
+                    (lookups.interface.names.text key)
+                    (Source.Definition_span.locate
+                       (lookups.interface.names.spans key)
+                       requirement.clause.origin)
+                ^ ")")
               requires
           in
           match List.filter_map Fun.id ranges with

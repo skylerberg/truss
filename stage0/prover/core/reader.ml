@@ -401,7 +401,7 @@ let argument_place context (frame : frame) run (mode : Types.mode) (value : Mir.
               slices))
   | Types.Mut, Some Unknown_slice when Types.is_well_known Slice (Mir.operand_type value) ->
       unsupported
-        (span_of frame.source
+        (locate context frame.source
            (match operand_origin value with
            | Some origin -> origin
            | None -> bug "a constant is passed `mut`"))
@@ -460,7 +460,7 @@ let read_call context frame run (call : Mir.call) ~result_type =
       Some
         ( frame,
           text_matches context
-            (span_of frame.source call.origin)
+            (locate context frame.source call.origin)
             ty
             (read_operand context frame run tested)
             text )
@@ -485,7 +485,7 @@ let read_lend context frame run part (call : Mir.call) =
   let site : Invocation.site =
     { id = call.node; origin = call.origin; type_ = run.infos.(part).type_ }
   in
-  let span = span_of frame.source call.origin in
+  let location = locate context frame.source call.origin in
   let values = call_values context frame run invocation call.arguments in
   let lend ?lent_final frame =
     apply_call ?lent_final context frame site invocation ~through:None values
@@ -514,7 +514,7 @@ let read_lend context frame run part (call : Mir.call) =
                 ~receiver:(passed_place_of context run receiver)
                 ~receiver_type:(place_type context frame run receiver)
                 index final) )
-    | Some Types.Mut, Intrinsic _, _ -> unsupported span "this lend"
+    | Some Types.Mut, Intrinsic _, _ -> unsupported location "this lend"
     | Some Types.Mut, _, _ ->
         ( without_costs context (fun () -> lend frame),
           Some
@@ -606,7 +606,7 @@ let bind_parts context (frame : frame) run =
 
 let note_decision context frame origin test =
   if frame.makes_obligations && frame.source.key = Some context.home then begin
-    let text = text_of frame.source origin in
+    let text = text_of context frame origin in
     context.decisions <-
       ( Printf.sprintf "`%s` is true" text,
         Some (Printf.sprintf "`%s` is false" text),
@@ -621,19 +621,19 @@ let refreshed context frame ty (place : passed_place) =
   assume_valid context frame ty fresh_value;
   frame
 
-let todo_reached context frame span =
+let todo_reached context frame location =
   if context.proving then begin
-    context.holes <- (context.home, span) :: context.holes;
+    context.holes <- (context.home, location) :: context.holes;
     context.unfinished <- frame.condition :: context.unfinished
   end
 
-let unreachable_reached context frame span =
-  oblige context frame Unreachable span
+let unreachable_reached context frame location =
+  oblige context frame Unreachable location
     [ Text "This `unreachable` may be reached." ]
     (Logic.Boolean false)
 
 let lend_part context frame origin (mode : Types.mode) ~handed ~lends ~write_back =
-  let span = span_of frame.source origin in
+  let location = locate context frame.source origin in
   match (context.yielded_part, context.yield_ensures, frame.yielded_so_far) with
   | Some part_type, Some (each, _), Some before ->
       List.iter
@@ -644,7 +644,7 @@ let lend_part context frame origin (mode : Types.mode) ~handed ~lends ~write_bac
               clause
           in
           oblige context frame Ensures
-            (span_of frame.source clause.origin)
+            (locate context frame.source clause.origin)
             [
               Text "`";
               quote frame.source clause.origin;
@@ -652,7 +652,7 @@ let lend_part context frame origin (mode : Types.mode) ~handed ~lends ~write_bac
             ]
             term)
         each;
-      check_valid context frame span part_type handed ~deep:true ~when_:"for the part lent here";
+      check_valid context frame location part_type handed ~deep:true ~when_:"for the part lent here";
       let frame, part_after =
         if mode = Types.Mut && lends then (
           let part_after = arrive context frame "lent" part_type in
@@ -661,10 +661,10 @@ let lend_part context frame origin (mode : Types.mode) ~handed ~lends ~write_bac
         else (frame, handed)
       in
       Some { frame with yielded_so_far = Some (appended context frame part_type before part_after) }
-  | _ -> unsupported span "a lent part outside a lending method's body"
+  | _ -> unsupported location "a lent part outside a lending method's body"
 
 let rec read_rvalue context frame run (value : Mir.rvalue) ~(site : Invocation.site) =
-  let span = span_of frame.source site.origin in
+  let location = locate context frame.source site.origin in
   let ty = substituted context frame site.type_ in
   let operand = read_operand context frame run in
   match value with
@@ -677,7 +677,7 @@ let rec read_rvalue context frame run (value : Mir.rvalue) ~(site : Invocation.s
       let ty = place_type context frame run place in
       ignore (sort_of context ty);
       if constructors context ty = None then
-        unsupported span "a variant of `%s`, which the prover does not see" (Types.show ty);
+        unsupported location "a variant of `%s`, which the prover does not see" (Types.show ty);
       (frame, Logic.Is (constructor_name ty (Some variant), read_place context frame run place))
   | Copy copied_operand ->
       let ty = operand_type context frame copied_operand in
@@ -689,7 +689,7 @@ let rec read_rvalue context frame run (value : Mir.rvalue) ~(site : Invocation.s
       in
       (copied ?literal context frame ty term, term)
   | Convert { conversion = Widen; value; converts_function_expression } ->
-      check_widened span ~is_written:converts_function_expression
+      check_widened location ~is_written:converts_function_expression
         (operand_type context frame value)
         ty;
       (frame, operand value)
@@ -723,7 +723,7 @@ let rec read_rvalue context frame run (value : Mir.rvalue) ~(site : Invocation.s
   | Specification Result -> (
       match frame.result with
       | Some result -> (frame, result)
-      | None -> unsupported span "`result` here")
+      | None -> unsupported location "`result` here")
   | Specification (Entry local) -> (
       match local_key run local with
       | Self -> (
@@ -739,19 +739,19 @@ let rec read_rvalue context frame run (value : Mir.rvalue) ~(site : Invocation.s
       | Some yielded, _ -> (frame, yielded)
       | None, Some yielded_so_far when frame.source.key = Some context.home ->
           (frame, yielded_so_far)
-      | _ -> unsupported span "`yielded` here")
+      | _ -> unsupported location "`yielded` here")
   | Specification (Identical (first, second)) ->
       let first_value = operand first and second_value = operand second in
       extensional context frame (operand_type context frame first) first_value second_value;
       (frame, Logic.equal first_value second_value)
   | Specification (Applied { function_; arguments; unconverted }) ->
       let values = reading_callback context (fun () -> List.map operand arguments) in
-      apply_specification_function context frame ~span function_ values
+      apply_specification_function context frame ~location function_ values
         ~unconverted:(List.map (substituted context frame) unconverted)
         ~types:(List.map (operand_type context frame) arguments)
   | Specification (Method_time callee) -> (frame, method_time context frame (unit_callee callee))
   | Specification (Map entries) ->
-      apply_map_literal context frame ~ty ~span
+      apply_map_literal context frame ~ty ~location
         (List.map (fun (key, entry) -> (operand_origin key, operand key, operand entry)) entries)
   | Specification (Quantified { quantifier; range; parameter; matches; body }) ->
       let range =
@@ -771,12 +771,12 @@ let rec read_rvalue context frame run (value : Mir.rvalue) ~(site : Invocation.s
                 collection_type = operand_type context frame collection;
                 collected = operand collection;
                 element = substituted context frame run.infos.(parameter).type_;
-                span;
+                location;
               }
       in
-      quantifier_value context frame run ~span quantifier range ~parameter ~matches ~body
+      quantifier_value context frame run ~location quantifier range ~parameter ~matches ~body
 
-and quantifier_value context frame run ~span quantifier range ~parameter ~(matches : Mir.block)
+and quantifier_value context frame run ~location quantifier range ~parameter ~(matches : Mir.block)
     ~(body : Mir.block) =
   match
     quantified_over context frame quantifier range
@@ -790,7 +790,7 @@ and quantifier_value context frame run ~span quantifier range ~parameter ~(match
         ({ body_frame with spent = after.spent }, term))
   with
   | Some quantified -> quantified
-  | None -> unsupported span "a quantifier that gives no value"
+  | None -> unsupported location "a quantifier that gives no value"
 
 and read_statements context frame run (statements : Mir.statement list) =
   List.fold_left
@@ -898,9 +898,9 @@ and chosen_value context frame run (choice : Mir.choice) =
       | None -> Some (restrict frame (Logic.not_ reads_right), Logic.Boolean (connective <> And)))
 
 and read_statement context frame run (statement : Mir.statement) =
-  let span = span_of frame.source statement.origin in
+  let location = locate context frame.source statement.origin in
   match statement.kind with
-  | Basic basic -> read_basic context frame run statement ~span basic
+  | Basic basic -> read_basic context frame run statement ~location basic
   | Assert_by_bit_vector { condition; names; code } ->
       let named =
         List.map
@@ -970,8 +970,8 @@ and read_statement context frame run (statement : Mir.statement) =
               | Some exits -> exits.ends <- frame :: exits.ends
               | None -> bug "an early exit of an iteration that is not around it"))
       | Unreachable -> ()
-      | Written_unreachable -> unreachable_reached context frame span
-      | Todo -> todo_reached context frame span);
+      | Written_unreachable -> unreachable_reached context frame location
+      | Todo -> todo_reached context frame location);
       None
   | Fork { fork; branches; _ } ->
       List.fold_left
@@ -1057,7 +1057,7 @@ and read_statement context frame run (statement : Mir.statement) =
                   collection_type = place_type context frame run collection;
                   collected = read_place context frame run collection;
                   element = substituted context frame run.infos.(element).type_;
-                  span;
+                  location;
                 },
               element,
               List.filter
@@ -1074,10 +1074,10 @@ and read_statement context frame run (statement : Mir.statement) =
                 },
               part,
               from 0 bound )
-        | None, Pull _ -> unsupported span "a quantifier over the values of a cursor"
+        | None, Pull _ -> unsupported location "a quantifier over the values of a cursor"
       in
       let after, term =
-        quantifier_value context frame run ~span quantifier range ~parameter
+        quantifier_value context frame run ~location quantifier range ~parameter
           ~matches:
             {
               statements = binding;
@@ -1180,7 +1180,7 @@ and read_statement context frame run (statement : Mir.statement) =
       in
       for_ context frame for_loop
 
-and read_basic context frame run (statement : Mir.statement) ~span (basic : Mir.basic) =
+and read_basic context frame run (statement : Mir.statement) ~location (basic : Mir.basic) =
   match basic with
   | Assign
       {
@@ -1302,7 +1302,7 @@ and read_basic context frame run (statement : Mir.statement) ~span (basic : Mir.
       if frame.makes_obligations then
         context.decisions <-
           ( Printf.sprintf "the arm `%s` is taken"
-              (String.concat ", " (List.map (text_of frame.source) patterns)),
+              (String.concat ", " (List.map (text_of context frame) patterns)),
             None,
             frame.condition,
             Logic.Boolean true )
@@ -1354,7 +1354,7 @@ and read_basic context frame run (statement : Mir.statement) ~span (basic : Mir.
               (read_operand context frame run template)
           in
           Some (write_place context frame run destination tagged)
-      | _ -> unsupported span "a tagged template whose tag the prover cannot read")
+      | _ -> unsupported location "a tagged template whose tag the prover cannot read")
   | Provide { provided; _ } ->
       Hashtbl.replace run.provides statement.origin provided;
       Some frame

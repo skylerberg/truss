@@ -7,7 +7,7 @@ val parameters_of :
 val check_valid :
   State.context ->
   State.frame ->
-  Source.Definition_span.t ->
+  State.location ->
   Types.ty ->
   Logic.term ->
   deep:bool ->

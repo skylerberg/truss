@@ -7,16 +7,16 @@ open Lambdas
 
 let apply_slice context frame (site : Invocation.site) ~(base_type : Types.ty) ~collection ~low
     ~high =
-  let span = span_of frame.source site.origin in
+  let location = locate context frame.source site.origin in
   let element =
     match base_type with
     | Types.Named { arguments = Types.Type element :: _; _ } -> element
-    | _ -> unsupported span "a slice of `%s`" (Types.show base_type)
+    | _ -> unsupported location "a slice of `%s`" (Types.show base_type)
   in
   let model =
     match model_of context base_type collection ~element with
     | Some model -> model
-    | None -> unsupported span "a slice of `%s`" (Types.show base_type)
+    | None -> unsupported location "a slice of `%s`" (Types.show base_type)
   in
   let length = sequence_length context element model in
   let high =
@@ -26,7 +26,7 @@ let apply_slice context frame (site : Invocation.site) ~(base_type : Types.ty) ~
         assume context frame (Operation ("<=", [ Logic.int 0; length ]));
         length
   in
-  oblige context frame Requires span
+  oblige context frame Requires location
     [ Text "`"; quote frame.source site.origin; Text "` may not be within the collection." ]
     Logic.(
       Operation ("<=", [ int 0; low ])
@@ -173,7 +173,7 @@ let libc_call context frame ~(site : Invocation.site) (function_ : Libc.function
   in
   let needs requirement condition =
     oblige context frame Requires
-      (span_of frame.source site.origin)
+      (locate context frame.source site.origin)
       [
         Text "`"; quote frame.source site.origin; Text (Printf.sprintf "` may not %s." requirement);
       ]
@@ -349,7 +349,7 @@ let buffer_operation context frame ~(site : Invocation.site) (operation : Intrin
   in
   let needs ?(requirement = "have the room it writes into") condition =
     oblige context frame Requires
-      (span_of frame.source site.origin)
+      (locate context frame.source site.origin)
       [
         Text "`"; quote frame.source site.origin; Text (Printf.sprintf "` may not %s." requirement);
       ]

@@ -132,11 +132,11 @@ let set_of context frame (ty : Types.ty) ~element values =
 
 let apply_list_literal context frame (site : Invocation.site) values =
   let ty = substituted context frame site.type_ in
-  let span = span_of frame.source site.origin in
+  let location = locate context frame.source site.origin in
   let element =
     match ty with
     | Types.Named { arguments = Types.Type element :: _; _ } -> element
-    | _ -> unsupported span "a literal of `%s`" (Types.show ty)
+    | _ -> unsupported location "a literal of `%s`" (Types.show ty)
   in
   let literal =
     match sequence_of context frame ty ~element values with
@@ -144,7 +144,7 @@ let apply_list_literal context frame (site : Invocation.site) values =
     | None -> (
         match set_of context frame ty ~element values with
         | Some literal -> literal
-        | None -> unsupported span "a literal of `%s`" (Types.show ty))
+        | None -> unsupported location "a literal of `%s`" (Types.show ty))
   in
   (frame, literal)
 
@@ -166,7 +166,7 @@ let reads_only_literals (parameter : Core.local) (clause : Mir.formula) =
 
 let apply_template context frame (site : Invocation.site) ~trait ~name ~receiver ~evidence ~literals
     value_ =
-  let span = span_of frame.source site.origin in
+  let location = locate context frame.source site.origin in
   let tag_type = substituted context frame site.type_ in
   match evidence with
   | Impl { impl; _ } -> (
@@ -200,7 +200,7 @@ let apply_template context frame (site : Invocation.site) ~trait ~name ~receiver
                   Some { check = template_check; clause = index }
                 else None
               in
-              oblige ?template_clause context frame Requires span
+              oblige ?template_clause context frame Requires location
                 [
                   Text "This template may not meet `";
                   quote own.callee requirement.clause.origin;
@@ -226,14 +226,14 @@ let apply_template context frame (site : Invocation.site) ~trait ~name ~receiver
                  ~uses:[] ~values:[] ~change:None)
           in
           (frame, result)
-      | None -> unsupported span "a tagged template whose tag the prover cannot read")
-  | Bound | Dynamic -> unsupported span "a tagged template whose tag the prover cannot read"
+      | None -> unsupported location "a tagged template whose tag the prover cannot read")
+  | Bound | Dynamic -> unsupported location "a tagged template whose tag the prover cannot read"
 
-let apply_map_literal context frame ~(ty : Types.ty) ~span terms =
+let apply_map_literal context frame ~(ty : Types.ty) ~location terms =
   let key_type, value_type =
     match ty with
     | Types.Named { arguments = [ Types.Type key; Types.Type value_type ]; _ } -> (key, value_type)
-    | _ -> unsupported span "a literal of `%s`" (Types.show ty)
+    | _ -> unsupported location "a literal of `%s`" (Types.show ty)
   in
   List.iteri
     (fun index (_, key_term, _) ->
@@ -241,7 +241,9 @@ let apply_map_literal context frame ~(ty : Types.ty) ~span terms =
         (fun other (other_key, other_term, _) ->
           if other > index then
             oblige context frame Disjoint
-              (match other_key with Some origin -> span_of frame.source origin | None -> span)
+              (match other_key with
+              | Some origin -> locate context frame.source origin
+              | None -> location)
               [
                 Text "The key `";
                 (match other_key with
@@ -260,7 +262,7 @@ let apply_map_literal context frame ~(ty : Types.ty) ~span terms =
   let model =
     match ty with
     | Types.Named { path; _ } when Path.equal path finite_map_path -> literal
-    | _ -> unsupported span "a literal of `%s`" (Types.show ty)
+    | _ -> unsupported location "a literal of `%s`" (Types.show ty)
   in
   assume_valid context frame ty literal;
   let key_sort = sort_of context key_type in
@@ -379,7 +381,7 @@ let named_function context frame (site : Invocation.site) path type_arguments co
     =
   if context.terminates && frame.makes_obligations && is_in_recursion_group context path then
     oblige context frame Termination
-      (span_of frame.source site.origin)
+      (locate context frame.source site.origin)
       [
         Text
           (Printf.sprintf
@@ -403,7 +405,7 @@ let named_function context frame (site : Invocation.site) path type_arguments co
         List.iter
           (fun (requirement : Mir.formula) ->
             oblige context frame Requires
-              (span_of frame.source site.origin)
+              (locate context frame.source site.origin)
               [
                 Text
                   (Printf.sprintf
@@ -456,7 +458,7 @@ let global_value context frame (site : Invocation.site) path type_arguments ~is_
   | Some contract -> named_function context frame site path type_arguments contract ~is_argument
   | None ->
       unsupported
-        (span_of frame.source site.origin)
+        (locate context frame.source site.origin)
         "a function the prover cannot read, used as a value"
 
 let constant_type context path =
@@ -508,13 +510,15 @@ let field_default context frame (site : Invocation.site) ty variant field =
                 (code_value context inside default.value
                    ~type_:(substituted context inside default.type_))
           | None ->
-              unsupported (span_of frame.source site.origin) "a field left out without a default")
+              unsupported
+                (locate context frame.source site.origin)
+                "a field left out without a default")
       | Some { form = Parameter_defaults _; _ } | None -> bug "a type with no MIR of its defaults")
-  | _ -> unsupported (span_of frame.source site.origin) "a default of a type with errors"
+  | _ -> unsupported (locate context frame.source site.origin) "a default of a type with errors"
 
 let check_built context frame (site : Invocation.site) ty term =
   check_valid context frame
-    (span_of frame.source site.origin)
+    (locate context frame.source site.origin)
     ty term ~deep:false ~when_:"for the value built here"
 
 let indirect context (ty : Types.ty) variant =
@@ -565,14 +569,14 @@ let apply_construct context frame (site : Invocation.site) variant
         let field_value (name, _) =
           match List.assoc_opt name field_terms with
           | Some term -> term
-          | None -> unsupported (span_of frame.source site.origin) "a field left out"
+          | None -> unsupported (locate context frame.source site.origin) "a field left out"
         in
         let built = Logic.Apply (constructor_name ty variant, List.map field_value shaped) in
         check_built context frame site ty built;
         (frame, built)
     | None -> (frame, arrive context frame "built" ty)
 
-let text_matches context span ty term text =
+let text_matches context location ty term text =
   let byte = Types.make_builtin UInt8 in
   match model_of context ty term ~element:byte with
   | Some model ->
@@ -582,7 +586,7 @@ let text_matches context span ty term text =
             match sequence_at context byte model (Logic.int index) with
             | Some at -> Logic.equal at (Logic.int (Char.code text.[index]))
             | None -> Logic.Boolean false))
-  | None -> unsupported span "a string pattern on `%s`" (Types.show ty)
+  | None -> unsupported location "a string pattern on `%s`" (Types.show ty)
 
 let log_facts number ~halving =
   let log number = Logic.Apply (Symbol.Cost_log, [ number ]) in
@@ -636,7 +640,7 @@ let log_of context frame log_argument =
   | _ -> ());
   Logic.Apply (Symbol.Cost_log, [ log_argument ])
 
-let apply_specification_function context frame ~span (measure : specification_function) values
+let apply_specification_function context frame ~location (measure : specification_function) values
     ~unconverted ~types =
   match (measure, values, unconverted, types) with
   | Log, [ log_argument ], [ unconverted ], _ ->
@@ -652,7 +656,7 @@ let apply_specification_function context frame ~span (measure : specification_fu
   | Power, [ base; exponent ], _, _ -> (frame, power_of context frame base exponent)
   | Time, [ function_term ], _, [ function_type ] ->
       (frame, time_of context frame function_type function_term)
-  | _ -> unsupported span "this specification function"
+  | _ -> unsupported location "this specification function"
 
 let copied ?literal context frame ty term =
   if

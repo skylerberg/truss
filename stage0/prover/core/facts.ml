@@ -2,11 +2,11 @@ open State
 
 let variable ?(numbers = []) label = Symbol.Variable { label; numbers }
 
-exception Unsupported of Source.Definition_span.t * string
+exception Unsupported of location * string
 exception Foreign_unsupported of string
 
-let unsupported span format =
-  Printf.ksprintf (fun message -> raise (Unsupported (span, message))) format
+let unsupported location format =
+  Printf.ksprintf (fun message -> raise (Unsupported (location, message))) format
 
 let bug format = Compiler_bug.bug ~stage:"Prover" format
 
@@ -137,18 +137,16 @@ let assume context frame term =
         add_fact context guarded
       else in_scope context frame guarded
 
-let span_of (source : source) origin =
-  let spans = Lazy.force source.spans in
-  if origin >= 0 && origin < Array.length spans then spans.(origin)
-  else Source.Definition_span.make 0 0
+let locate context (source : source) origin =
+  if source.key = Some context.home then Node origin else Whole_definition
 
-let add_requires context frame required =
-  let text = Lazy.force frame.source.text in
+let add_requires context required =
+  let names = context.lookups.interface.names in
+  let text = names.text context.home in
   let brace =
-    match Option.map context.lookups.interface.names.definition frame.source.key with
-    | Some { kind = Function { body; _ }; _ } ->
-        let start = (span_of frame.source body.id).start in
-        if start < String.length text then Some start else None
+    match names.definition context.home with
+    | { kind = Function { body; _ }; _ } ->
+        Some (Source.Definition_span.locate (names.spans context.home) body.id).start
     | _ -> None
   in
   let edit at before =
@@ -231,9 +229,9 @@ let truss_of_goal context term =
     printed
   else None
 
-let rec oblige ?template_clause ?cited ?(fixes = []) context frame code span message goal =
+let rec oblige ?template_clause ?cited ?(fixes = []) context frame code location message goal =
   match
-    obligation_at ?template_clause context frame code span message
+    obligation_at ?template_clause context frame code location message
       (with_quantifier_facts
          ~binders:(List.map (fun (name, _, _) -> name) frame.binders)
          context goal)
@@ -248,7 +246,7 @@ let rec oblige ?template_clause ?cited ?(fixes = []) context frame code span mes
               | condition -> Logic.( ==> ) condition goal
             in
             match truss_of_goal context goal with
-            | Some required -> add_requires context frame [ Text required ]
+            | Some required -> add_requires context [ Text required ]
             | None -> [])
         | fixes -> fixes
       in
@@ -256,10 +254,10 @@ let rec oblige ?template_clause ?cited ?(fixes = []) context frame code span mes
       assume context frame goal
   | None -> ()
 
-and obligation_at ?template_clause context frame code span message goal =
+and obligation_at ?template_clause context frame code location message goal =
   if not frame.makes_obligations then None
   else if not (Logic.mentions frame.bound goal || Logic.mentions frame.bound frame.condition) then
-    Some (make_obligation ?template_clause context frame code span message goal)
+    Some (make_obligation ?template_clause context frame code location message goal)
   else
     let names = List.map (fun (name, _, _) -> name) frame.binders in
     let goal =
@@ -272,10 +270,10 @@ and obligation_at ?template_clause context frame code span message goal =
         Some
           (make_obligation ?template_clause context
              { frame with condition = Logic.Boolean true }
-             code span message closed)
+             code location message closed)
     | None -> None
 
-and make_obligation ?template_clause context frame code span message goal =
+and make_obligation ?template_clause context frame code location message goal =
   let query =
     Logic.prune
       {
@@ -286,7 +284,7 @@ and make_obligation ?template_clause context frame code span message goal =
   in
   {
     code;
-    span;
+    location;
     message;
     cited = None;
     fixes = [];
@@ -315,7 +313,12 @@ let quote source origin =
 let quoted text (span : Source.Definition_span.t) =
   if span.stop = span.start then "this expression" else Source.Definition_span.quote text span
 
-let text_of source origin = quoted (Lazy.force source.text) (span_of source origin)
+let text_of context frame origin =
+  if frame.source.key <> Some context.home then
+    bug "a quote of %s, outside the definition being proven" frame.source.name;
+  let names = context.lookups.interface.names in
+  quoted (names.text context.home) (Source.Definition_span.locate (names.spans context.home) origin)
+
 let builtin ty = Types.find_builtin ty
 
 let bounds (ty : Types.ty) =

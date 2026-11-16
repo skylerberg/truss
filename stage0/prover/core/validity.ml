@@ -8,7 +8,7 @@ let note_place context frame origin place =
     frame.source.key = Some context.home
     && List.exists (fun (first, second) -> first = origin || second = origin) context.disjoint
   then begin
-    context.indexes <- (origin, (place, span_of frame.source origin)) :: context.indexes;
+    context.indexes <- (origin, place) :: context.indexes;
     let outside index start stop =
       Logic.(Operation ("<", [ index; start ]) ||| Operation ("<=", [ stop; index ]))
     in
@@ -16,7 +16,7 @@ let note_place context frame origin place =
       (fun (first, second) ->
         if first = origin || second = origin then
           match (List.assoc_opt first context.indexes, List.assoc_opt second context.indexes) with
-          | Some (left, _), Some (right, _) ->
+          | Some left, Some right ->
               let apart =
                 match (left, right) with
                 | One left, One right -> Logic.not_ (Logic.equal left right)
@@ -31,7 +31,8 @@ let note_place context frame origin place =
                         Logic.Operation ("<=", [ other_stop; other_start ]);
                       ]
               in
-              oblige context frame Disjoint (span_of frame.source origin)
+              oblige context frame Disjoint
+                (locate context frame.source origin)
                 [
                   Text "`";
                   quote frame.source first;
@@ -175,11 +176,11 @@ let own_callback context local =
     (fun (parameter, name, callback) -> if parameter = local then Some (name, callback) else None)
     context.callbacks
 
-let check_callback_contract context frame span ~name inputs requires arguments ~promised ~why =
+let check_callback_contract context frame location ~name inputs requires arguments ~promised ~why =
   let inside = callback_contract_frame frame inputs arguments in
   List.iter
     (fun (clause : Mir.formula) ->
-      oblige context (restrict frame promised) Requires span
+      oblige context (restrict frame promised) Requires location
         [
           Text (Printf.sprintf "`%s` %s, so its `" name why);
           quote frame.source clause.origin;
@@ -195,7 +196,7 @@ let escaping_callback context frame local =
     when List.length inputs = List.length function_type.inputs ->
       let arguments = callback_arguments context frame function_type.inputs in
       check_callback_contract context frame
-        (span_of frame.source (List.hd requires).origin)
+        (locate context frame.source (List.hd requires).origin)
         ~name inputs requires arguments ~promised:(Logic.Boolean true)
         ~why:"is used as a value whose type promises nothing of its arguments"
   | _ -> ()
@@ -299,7 +300,7 @@ let check_forwarded_callback context frame (site : Invocation.site) (invocation 
           let arguments = callback_arguments context frame expected.inputs in
           let known = List.map (fun (passed : passed) -> (passed.position, passed.term)) values in
           check_callback_contract context frame
-            (span_of frame.source site.origin)
+            (locate context frame.source site.origin)
             ~name inputs requires arguments
             ~promised:
               (Logic.conjunction
