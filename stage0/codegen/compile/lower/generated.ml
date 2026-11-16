@@ -184,11 +184,7 @@ let build_locked_entry context (key : Instance.key) ~capability ~name : Emit_c.B
 
 let build_locked_table (context : Definitions.context) (key : Instance.key) ~capability :
     Lowered.table =
-  let interface =
-    match Interface.Definition.read_trait_interface context.lookups.interface capability with
-    | Some interface -> interface
-    | None -> Definitions.bug "no interface for %s" (Path.show capability)
-  in
+  let interface = Definitions.read_trait_interface context capability in
   {
     table_key = key;
     capability = Some capability;
@@ -205,19 +201,16 @@ let build_locked_table (context : Definitions.context) (key : Instance.key) ~cap
 
 let build_impl_table context (key : Instance.key) ~impl ~type_arguments : Lowered.table =
   let interface, capability, _ = read_impl_capability context impl in
-  let capability_interface =
-    match Interface.Definition.read_trait_interface context.lookups.interface capability with
-    | Some position -> position
-    | None -> Definitions.bug "no interface for %s" (Path.show capability)
-  in
+  let capability_interface = Definitions.read_trait_interface context capability in
   let entries =
     List.map
       (fun (trait_method : Types.trait_method) ->
         let receiver =
           match
-            List.find_opt (fun (name, _) -> name = trait_method.method_name) interface.impl_methods
+            Types.find_implementing_receiver ~is_capability:capability_interface.is_capability
+              interface trait_method
           with
-          | Some (_, receiver) -> receiver
+          | Some receiver -> receiver
           | None -> Definitions.bug "%s does not write %s" (Path.show impl) trait_method.method_name
         in
         ( Instance.Generated
@@ -403,7 +396,7 @@ let build_any_entry context (key : Instance.key) (impl_method : Instance.impl_me
   let path = Instance.make_method_path impl_method in
   let interface = Definitions.read_impl_interface context impl in
   let trait = interface.implements.trait in
-  let _, trait_signature = Targets.lookup_dynamic_method context trait name in
+  let _, trait_signature = Targets.lookup_dynamic_method context trait name receiver in
   let method_signature = Definitions.read_signature context path in
   let substitution = Definitions.bind method_signature.generics type_arguments in
   let any = Types.substitute_trait substitution interface.implements in
@@ -473,14 +466,16 @@ let build_any_table context (key : Instance.key) ~impl ~type_arguments : Lowered
   let substitution = Definitions.bind interface.impl_generics type_arguments in
   let self_ty = Monomorphic.ground context.monomorphic substitution interface.for_type in
   let any = Types.substitute_trait substitution interface.implements in
+  let trait_interface = Definitions.read_trait_interface context trait in
   let entries =
     List.map
       (fun (trait_method : Types.trait_method) ->
         let receiver =
           match
-            List.find_opt (fun (name, _) -> name = trait_method.method_name) interface.impl_methods
+            Types.find_implementing_receiver ~is_capability:trait_interface.is_capability interface
+              trait_method
           with
-          | Some (_, receiver) -> receiver
+          | Some receiver -> receiver
           | None -> trait_method.method_receiver
         in
         ( Instance.Generated

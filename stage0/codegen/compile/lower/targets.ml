@@ -71,27 +71,20 @@ let pass st (mode : Types.mode) ty place =
   convert_operand st mode ty place
     (Convention.classify_parameter st.context.env (Monomorphic.ground_mode mode) ty)
 
-let lookup_method_slot (context : Definitions.context) ~owner ~first ~missing
-    (methods : Types.trait_method list) name =
-  match
-    List.find_index
-      (fun (trait_method : Types.trait_method) -> trait_method.method_name = name)
-      methods
-  with
+let lookup_method_slot (context : Definitions.context) ~owner ~missing
+    (methods : Types.trait_method list) ~is_wanted =
+  match List.find_index is_wanted methods with
   | Some index ->
-      ( first + index,
+      ( index,
         Interface.Definition.read_method_signature context.lookups.interface ~owner
           (List.nth methods index) )
   | None -> missing ()
 
 let lookup_capability_method (context : Definitions.context) capability name =
-  let interface =
-    match Interface.Definition.read_trait_interface context.lookups.interface capability with
-    | Some position -> position
-    | None -> Definitions.bug "no interface for %s" (Path.show capability)
-  in
-  lookup_method_slot context ~owner:capability ~first:0 interface.methods name ~missing:(fun () ->
-      Definitions.bug "%s has no method %s" (Path.show capability) name)
+  lookup_method_slot context ~owner:capability
+    (Definitions.read_trait_interface context capability).methods
+    ~is_wanted:(fun (declared : Types.trait_method) -> declared.method_name = name)
+    ~missing:(fun () -> Definitions.bug "%s has no method %s" (Path.show capability) name)
 
 let make_entry_signature context (signature : Types.signature) =
   let entry, result =
@@ -107,12 +100,14 @@ let is_callable_through_any (context : Definitions.context) trait
   && Interface.Impls.classify_through_any context.lookups.interface ~trait trait_method = Callable
 
 let list_any_methods (context : Definitions.context) trait =
-  match Interface.Definition.read_trait_interface context.lookups.interface trait with
-  | Some position -> List.filter (is_callable_through_any context trait) position.methods
-  | None -> Definitions.bug "no interface for %s" (Path.show trait)
+  List.filter
+    (is_callable_through_any context trait)
+    (Definitions.read_trait_interface context trait).methods
 
-let lookup_dynamic_method context trait name =
-  lookup_method_slot context ~owner:trait ~first:0 (list_any_methods context trait) name
+let lookup_dynamic_method context trait name receiver =
+  lookup_method_slot context ~owner:trait (list_any_methods context trait)
+    ~is_wanted:(fun (declared : Types.trait_method) ->
+      declared.method_name = name && declared.method_receiver = receiver)
     ~missing:(fun () -> Definitions.bug "%s cannot be called through any" name)
 
 let is_copyable_any (context : Definitions.context) (any : Types.trait_reference) =
@@ -121,24 +116,22 @@ let is_copyable_any (context : Definitions.context) (any : Types.trait_reference
 
 let make_any_substitution (context : Definitions.context) ~(any : Types.trait_reference) trait :
     Types.substitution =
-  match Interface.Definition.read_trait_interface context.lookups.interface trait with
-  | Some interface ->
-      let reference =
-        if Path.equal trait any.trait then any
-        else
-          match
-            List.find_opt
-              (fun (bound : Types.trait_reference) -> Path.equal bound.trait trait)
-              (Interface.Properties.list_bound_closure context.lookups.interface
-                 ~self:(Types.Any any) any)
-          with
-          | Some bound -> bound
-          | None ->
-              Definitions.bug "%s is not a trait of %s" (Path.show trait)
-                (Types.show (Types.Any any))
-      in
-      Interface.Properties.make_trait_substitution interface ~self:(Types.Any any) reference
-  | None -> Definitions.bug "no interface for %s" (Path.show trait)
+  let reference =
+    if Path.equal trait any.trait then any
+    else
+      match
+        List.find_opt
+          (fun (bound : Types.trait_reference) -> Path.equal bound.trait trait)
+          (Interface.Properties.list_bound_closure context.lookups.interface ~self:(Types.Any any)
+             any)
+      with
+      | Some bound -> bound
+      | None ->
+          Definitions.bug "%s is not a trait of %s" (Path.show trait) (Types.show (Types.Any any))
+  in
+  Interface.Properties.make_trait_substitution
+    (Definitions.read_trait_interface context trait)
+    ~self:(Types.Any any) reference
 
 let make_any_entry_signature context ~any ~trait (signature : Types.signature) =
   let substitution = make_any_substitution context ~any trait in
@@ -320,9 +313,9 @@ let lower_indirect_call st ~(function_type : Ground.function_type) ~(value : Low
   if function_type.result = Never then Lowering.emit_unreachable_block st
 
 let lower_call_through_any (st : Lowering.state) ~(any_type : Types.trait_reference) ~trait ~name
-    ~(any : Lowered.place) ~(arguments : (Types.mode * Ground.ty * Lowered.place) list)
+    ~receiver ~(any : Lowered.place) ~(arguments : (Types.mode * Ground.ty * Lowered.place) list)
     ?(lending = []) destination =
-  let index, signature = lookup_dynamic_method st.context trait name in
+  let index, signature = lookup_dynamic_method st.context trait name receiver in
   let slot =
     Drop_and_copy.compute_first_method_slot ~is_copyable:(is_copyable_any st.context any_type)
     + index

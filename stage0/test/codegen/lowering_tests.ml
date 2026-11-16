@@ -71,7 +71,9 @@ let () =
   Codegen_support.passes "a capability method call, a provide, and a crash on a path not taken"
     Fixtures.Lowering.capability_call_provide_and_untaken_crash;
   Codegen_support.passes "a value converted to an any value, from an impl and from a bound"
-    Fixtures.Lowering.any_values_from_an_impl_and_a_bound
+    Fixtures.Lowering.any_values_from_an_impl_and_a_bound;
+  Codegen_support.passes "a call through any reaches the overload for its receiver's mode"
+    Fixtures.Lowering.any_counter_overloaded_by_receiver
 
 let () =
   Codegen_support.passes "an interpolated string, a tagged string, and a copy"

@@ -427,18 +427,15 @@ let list_file_declarations lookups (file : Path.file) ~imports ~text
         text = String.sub text item.base (item.stop - item.base);
       }
   in
-  let method_declaration index ~container ~owner:(owner, static)
+  let method_declaration index ~container ~owner:(owner, is_capability)
       (item : Syntax.definition Syntax.item) =
     let declare = written index ~container item in
     match item.value.kind with
     | Function { signature; _ } | Method_declaration signature ->
+        let name = (extract_signature_name signature).text in
         declare
-          (Method
-             {
-               owner;
-               name = (extract_signature_name signature).text;
-               receiver = (if static then Static else classify_receiver signature.parameters);
-             })
+          (if is_capability then Path.make_capability_method owner name
+           else Method { owner; name; receiver = classify_receiver signature.parameters })
           Method (signature.generics <> [])
     | Definition_error { name = Some (Plain_name name | Member_name (_, name)); _ } ->
         declare (Method { owner; name = name.text; receiver = Static }) Method false

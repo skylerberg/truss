@@ -62,6 +62,7 @@ and argument =
 let standard_package = { owner = None; name = "standard" }
 let make_standard_module modules = { package = standard_package; modules }
 let make_standard_path modules name = Top { module_ = make_standard_module modules; name }
+let make_capability_method capability name = Method { owner = capability; name; receiver = Static }
 
 let rec locate_package = function
   | Top { module_; _ } | Impl { module_; _ } | Test { module_; _ } | Law_proof { module_; _ } ->

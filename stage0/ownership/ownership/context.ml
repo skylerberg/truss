@@ -38,7 +38,7 @@ let list_callee_signatures context (callee : Mir.callee) : Types.signature list 
   | Trait_method { trait; name; receiver; _ } ->
       signature (Method { owner = trait.trait; name; receiver })
   | Capability_method { capability; name } ->
-      signature (Method { owner = capability; name; receiver = Static })
+      signature (Path.make_capability_method capability name)
   | Intrinsic _ | Indirect _ -> []
 
 let stores_function context (callee : Mir.callee) position =

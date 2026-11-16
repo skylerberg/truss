@@ -24,7 +24,10 @@ val make_entry_signature :
   Definitions.context -> Types.signature -> Lowered.signature * Convention.result
 
 val list_any_methods : Definitions.context -> Path.t -> Types.trait_method list
-val lookup_dynamic_method : Definitions.context -> Path.t -> string -> int * Types.signature
+
+val lookup_dynamic_method :
+  Definitions.context -> Path.t -> string -> Path.receiver -> int * Types.signature
+
 val is_copyable_any : Definitions.context -> Types.trait_reference -> bool
 
 val make_any_entry_signature :
@@ -69,6 +72,7 @@ val lower_call_through_any :
   any_type:Types.trait_reference ->
   trait:Path.t ->
   name:string ->
+  receiver:Path.receiver ->
   any:Lowered.place ->
   arguments:(Types.mode * Ground.ty * Lowered.place) list ->
   ?lending:Lowered.operand list ->

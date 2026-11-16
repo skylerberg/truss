@@ -176,8 +176,7 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
             let is_written =
               List.exists
                 (fun (name, receiver) ->
-                  name = method_.method_name
-                  && (trait.is_capability || receiver = method_.method_receiver))
+                  Types.is_implemented_by ~is_capability:trait.is_capability method_ ~name ~receiver)
                 written_methods
             in
             if (not is_written) && not method_.provided then
@@ -260,14 +259,10 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
   with
   | None -> ()
   | Some { trait; shown_trait; normalize; normalize_capabilities; _ } -> (
-      let declared =
-        List.find_opt
-          (fun (method_ : Types.trait_method) ->
-            method_.method_name = name.text
-            && (trait.is_capability || method_.method_receiver = receiver))
-          trait.methods
-      in
-      match declared with
+      match
+        Types.find_implemented_method ~is_capability:trait.is_capability trait.methods
+          ~name:name.text ~receiver
+      with
       | None ->
           Checking.report state Extra_member state.spans.(name.id)
             (Printf.sprintf "`%s` declares no method `%s` with this receiver." shown_trait name.text)

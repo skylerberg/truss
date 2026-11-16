@@ -126,14 +126,14 @@ let find_trait_part lookups (trait : Path.t) name receiver =
       find_part ~inherited:true lookups path callee)
 
 let find_capability_contract lookups (capability : Path.t) name =
-  let path = Path.Method { owner = capability; name; receiver = Static } in
+  let path = Path.make_capability_method capability name in
   Option.bind (find_source lookups path) (fun (callee, _, _) ->
       Option.map
         (fun own -> { (make_contract lookups path ~own ~others:[]) with is_logic_function = false })
         (find_part lookups path callee))
 
 let find_capability_part lookups (capability : Path.t) name =
-  let path = Path.Method { owner = capability; name; receiver = Static } in
+  let path = Path.make_capability_method capability name in
   Option.bind (find_source lookups path) (fun (callee, _, _) -> find_part lookups path callee)
 
 let method_contract lookups (trait : Types.trait_reference) name receiver (evidence : Core.evidence)
