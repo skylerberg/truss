@@ -805,7 +805,9 @@ let ownership_lookups database note : Ownership.Lookups.t =
 
 let used_packages database note (key : Names.key) =
   let { Infer.form; evidence_packages; _ } = checked_body database note key in
-  Package_checks.list_used_packages (read_whole_resolution database note key) ~evidence_packages form
+  Package_checks.list_used_packages
+    (read_whole_resolution database note key)
+    ~evidence_packages form
 
 let package_checks_lookups database note : Package_checks.Lookups.t =
   {
