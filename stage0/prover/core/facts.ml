@@ -240,33 +240,8 @@ let add_requires_under_condition context (frame : State.frame) conclusion =
       | Some premise -> add_requires context [ Text (show_implication premise conclusion) ]
       | None -> [])
 
-let rec oblige ?template_clause ?cited ?(fixes = []) context (frame : State.frame) code location
-    message goal =
-  match
-    make_closed_obligation ?template_clause context frame code location message
-      (add_quantifier_facts
-         ~binders:(List.map (fun (name, _, _) -> name) frame.binders)
-         context goal)
-  with
-  | Some obligation ->
-      let fixes =
-        match fixes with
-        | [] when frame.source.key = Some context.home && frame.makes_obligations -> (
-            let goal =
-              match frame.condition with
-              | Logic.Boolean true -> goal
-              | condition -> Logic.( ==> ) condition goal
-            in
-            match truss_of_goal context goal with
-            | Some required -> add_requires context [ Text required ]
-            | None -> [])
-        | fixes -> fixes
-      in
-      context.obligations <- { obligation with cited; fixes } :: context.obligations;
-      assume context frame goal
-  | None -> ()
-
-and make_closed_obligation ?template_clause context frame code location message goal =
+let rec make_closed_obligation ?template_clause context (frame : State.frame) code location message
+    goal =
   if not frame.makes_obligations then None
   else if not (Logic.mentions frame.bound goal || Logic.mentions frame.bound frame.condition) then
     Some (make_obligation ?template_clause context frame code location message goal)
@@ -285,7 +260,8 @@ and make_closed_obligation ?template_clause context frame code location message 
              code location message closed)
     | None -> None
 
-and make_obligation ?template_clause context frame code location message goal =
+and make_obligation ?template_clause (context : State.context) (frame : State.frame) code location
+    message goal : State.obligation =
   let query =
     Logic.prune
       {
@@ -317,7 +293,48 @@ and make_obligation ?template_clause context frame code location message goal =
             [ (symbol, "result") ]
         | _ -> []);
     template_clause;
+    may_stop_with_panic = false;
   }
+
+let record_obligation ?template_clause ?cited ~fixes ~may_stop_with_panic context
+    (frame : State.frame) code location message goal =
+  match
+    make_closed_obligation ?template_clause context frame code location message
+      (add_quantifier_facts
+         ~binders:(List.map (fun (name, _, _) -> name) frame.binders)
+         context goal)
+  with
+  | Some obligation ->
+      let fixes =
+        match fixes with
+        | [] when frame.source.key = Some context.home && frame.makes_obligations -> (
+            let goal =
+              match frame.condition with
+              | Logic.Boolean true -> goal
+              | condition -> Logic.( ==> ) condition goal
+            in
+            match truss_of_goal context goal with
+            | Some required -> add_requires context [ Text required ]
+            | None -> [])
+        | fixes -> fixes
+      in
+      context.obligations <-
+        { obligation with cited; fixes; may_stop_with_panic } :: context.obligations;
+      assume context frame goal
+  | None -> ()
+
+let oblige ?template_clause ?cited ?(fixes = []) context frame code location message goal =
+  record_obligation ?template_clause ?cited ~fixes ~may_stop_with_panic:false context frame code
+    location message goal
+
+let oblige_safe_operation ?cited ?(fixes = []) (context : State.context) (frame : State.frame) code
+    location message goal =
+  match frame.panic with
+  | Declared when frame.source.key = Some context.home ->
+      if frame.makes_obligations then assume context frame goal
+  | Declared | Undeclared | Undeclarable ->
+      record_obligation ?cited ~fixes ~may_stop_with_panic:(frame.panic = Undeclared) context frame
+        code location message goal
 
 let quote (source : State.source) origin =
   match source.key with Some key -> State.Quote (key, origin) | None -> Text "this expression"

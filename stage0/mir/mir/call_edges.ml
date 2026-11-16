@@ -1,4 +1,5 @@
-type entered = [ `Default of Path.t * string option * string | `Invariant of Path.t * Z.t ]
+type entered =
+  [ `Default of Path.t * string option * string | `Invariant of Path.t * Z.t | `Requires of Path.t ]
 
 module Entered_table = Hashtbl.Make (Structural_key.Make (struct
   type t = entered
@@ -97,7 +98,7 @@ let is_dispatched (called : _ Core.target) =
       true
   | _ -> false
 
-let list_edges (lookups : lookups) ~package (code : Tree.t) =
+let list_edges (lookups : lookups) ~package ~may_panic (code : Tree.t) =
   let callees = ref [] in
   let add paths = callees := List.rev_append paths !callees in
   let uses_impls impls = add (List.concat_map (list_impl_methods lookups.interface) impls) in
@@ -143,9 +144,21 @@ let list_edges (lookups : lookups) ~package (code : Tree.t) =
   in
   let rec statement (locals : Tree.local_info array) (statement : Tree.statement) =
     match statement.kind with
-    | Basic (Call { call; _ } | Lend { call; _ } | Slice { call; _ } | Template { call; _ }) ->
+    | Basic (Call { call; _ } | Template { call; _ }) ->
         callee call.callee;
         invariant_checked call
+    | Basic (Lend { call; _ }) -> (
+        callee call.callee;
+        invariant_checked call;
+        match call.callee with
+        | Trait_method { evidence = Impl { impl; _ }; name; receiver; _ }
+          when Parts.is_index_call call.callee ->
+            requires_checked (Path.Method { owner = impl; name; receiver })
+        | _ -> ())
+    | Basic (Slice { call; _ }) -> (
+        callee call.callee;
+        invariant_checked call;
+        match call.callee with Function { path; _ } -> requires_checked path | _ -> ())
     | For { iteration = Pull { next; _ }; _ } -> callee next
     | Basic (Assign { value = Function_value { path; _ }; _ }) -> add [ path ]
     | Basic (Assign { value = To_any { value; trait; _ }; _ }) ->
@@ -181,6 +194,12 @@ let list_edges (lookups : lookups) ~package (code : Tree.t) =
             then Walk.iter_code_with_locals statement default.value)
           defaults
     | Some { form = Parameter_defaults _; _ } | None -> ()
+  and requires_checked path =
+    if may_panic && enters (`Requires path) then
+      List.iter
+        (fun (requirement : Tree.requirement) ->
+          Walk.iter_formula_with_locals statement requirement.clause)
+        (Parts.list_checked_requires lookups.mir path)
   and invariant_checked (call : Tree.call) =
     match (call.callee, call.arguments) with
     | ( Intrinsic { operation = Holds_invariant; type_arguments = [ Type checked ] },
@@ -210,8 +229,13 @@ let list_path_edges (lookups : lookups) path =
     | Some { form = Body code | Initializer code; _ } -> [ code.tree ]
     | Some { form = No_code; _ } | None -> []
   in
+  let may_panic =
+    match Interface.Impls.read_signature lookups.interface path with
+    | Some (signature : Types.signature) -> Types.may_panic signature.uses
+    | None -> false
+  in
   List.sort_uniq Path.compare
-    (List.concat_map (list_edges lookups ~package:(Path.package path)) (code @ defaults))
+    (List.concat_map (list_edges lookups ~package:(Path.package path) ~may_panic) (code @ defaults))
 
 let list_implementations (lookups : lookups) ~viewer (path : Path.t) =
   match path with

@@ -346,7 +346,7 @@ let arithmetic context (frame : State.frame) (site : Invocation.site) ty
   in
   (match operation with
   | Divide | Remainder ->
-      Facts.oblige context frame Division location
+      Facts.oblige_safe_operation context frame Division location
         ~fixes:
           (match find_parameter_spelling context frame right with
           | Some text -> Facts.add_requires context [ Text (text ^ " != 0") ]
@@ -357,7 +357,7 @@ let arithmetic context (frame : State.frame) (site : Invocation.site) ty
   (match Facts.find_bounds ty with
   | Some (low, _) when operation = Divide || operation = Remainder ->
       if Z.sign low < 0 then
-        Facts.oblige context frame Overflow location
+        Facts.oblige_safe_operation context frame Overflow location
           ~fixes:(make_division_overflow_fix context frame ty left right)
           [
             Text "`";
@@ -367,7 +367,7 @@ let arithmetic context (frame : State.frame) (site : Invocation.site) ty
           (Logic.not_ Logic.(equal left (Integer low) &&& equal right (int (-1))))
   | Some (low, high) ->
       let unsigned = Z.sign low = 0 && not (Types.is_builtin Character ty) in
-      Facts.oblige context frame Overflow location
+      Facts.oblige_safe_operation context frame Overflow location
         ~fixes:(make_overflow_fix context frame ty operation left right exact)
         [
           Text "`";
@@ -496,7 +496,7 @@ let primitive_operation context (frame : State.frame) ~(site : Invocation.site)
   | Negate, ty :: _, [ inner ] when not is_float ->
       let negated = Logic.Operation ("-", [ inner ]) in
       if Facts.find_bounds ty <> None then
-        Facts.oblige context frame Overflow location
+        Facts.oblige_safe_operation context frame Overflow location
           ~fixes:(make_negation_fix context frame ty inner)
           [
             Text "`";
@@ -525,7 +525,7 @@ let primitive_operation context (frame : State.frame) ~(site : Invocation.site)
                   [ Text "The shift amount in `"; Facts.quote source site.origin; Text "`" ],
                   [] )
           in
-          Facts.oblige context frame Shift at_amount ~fixes
+          Facts.oblige_safe_operation context frame Shift at_amount ~fixes
             (text @ [ Text (Printf.sprintf " may not be less than %d." bits) ])
             Logic.(Operation ("<", [ right; int bits ]))
       | None -> Facts.unsupported location "a shift of `%s`" (Types.show ty));

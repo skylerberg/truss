@@ -66,7 +66,27 @@ let () =
   Harness.test "an unreachable that can be reached" (fun () ->
       not_proven Fixtures.Prover.unreachable_that_can_be_reached "prover.unreachable");
   Harness.test "an unreachable after a check" (fun () ->
-      proven Fixtures.Prover.unreachable_after_a_check)
+      proven Fixtures.Prover.unreachable_after_a_check);
+  Harness.test "an overflow names `uses Panic` as a way to stop the program" (fun () ->
+      let actual = message Fixtures.Prover.addition_that_can_overflow in
+      if not (contains actual "allowed to stop the program with `uses Panic`") then
+        Harness.fail "message %S" actual);
+  Harness.test "an index that may be out of bounds names `uses Panic` as a way to stop the program"
+    (fun () ->
+      let actual = message Fixtures.Prover.index_that_may_be_out_of_bounds in
+      if not (contains actual "allowed to stop the program with `uses Panic`") then
+        Harness.fail "message %S" actual);
+  Harness.test "a function that declares `uses Panic` stops at an operation that fails" (fun () ->
+      proven Fixtures.Prover.failing_operations_of_a_function_that_may_panic);
+  Harness.test "a lambda proves its operations, since it has no `uses` of its own" (fun () ->
+      let actual = message Fixtures.Prover.overflow_in_a_lambda_of_a_function_that_may_panic in
+      if (not (contains actual "may overflow `UInt8`")) || contains actual "uses Panic" then
+        Harness.fail "message %S" actual);
+  Harness.test "an index through a bound is proven, since its precondition cannot run" (fun () ->
+      not_proven Fixtures.Prover.index_through_a_bound_of_a_function_that_may_panic
+        "prover.requires");
+  Harness.test "an unreachable is proven in a function that declares `uses Panic`" (fun () ->
+      not_proven Fixtures.Prover.unreachable_of_a_function_that_may_panic "prover.unreachable")
 
 let () =
   Harness.test "a call must meet its callee's requires" (fun () ->

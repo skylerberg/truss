@@ -32,6 +32,17 @@ val oblige :
   Logic.term ->
   unit
 
+val oblige_safe_operation :
+  ?cited:Resolve.Names.key * Core.origin ->
+  ?fixes:State.fix list ->
+  State.context ->
+  State.frame ->
+  Diagnostic.Code.prover ->
+  State.location ->
+  State.message ->
+  Logic.term ->
+  unit
+
 val make_closed_obligation :
   ?template_clause:State.template_clause ->
   State.context ->

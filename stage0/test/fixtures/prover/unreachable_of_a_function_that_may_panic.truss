@@ -1,0 +1,5 @@
+fn one(flag: Bool) -> Int64
+  uses Panic
+{
+  if flag { 1 } else { unreachable }
+}

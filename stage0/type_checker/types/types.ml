@@ -277,6 +277,9 @@ let find_specification_only_type type_ =
 let has_capability_variable capabilities =
   List.exists (function Capability_variable _ -> true | _ -> false) capabilities
 
+let may_panic capabilities =
+  List.exists (function Capability path -> Well_known.is Panic path | _ -> false) capabilities
+
 let equal left right = left = right
 let is_error = function Error _ -> true | _ -> false
 

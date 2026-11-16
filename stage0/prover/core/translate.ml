@@ -77,6 +77,7 @@ let make_empty_frame source =
     result = None;
     condition = Logic.Boolean true;
     makes_obligations = true;
+    panic = Undeclarable;
     bound = [];
     binders = [];
     substitution = [];
@@ -217,7 +218,14 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
             | _ -> ());
             Validity.assume_valid context frame ty term;
             Facts.bind frame (Core_local local) ty term)
-      { (make_empty_frame source) with substitution }
+      {
+        (make_empty_frame source) with
+        substitution;
+        panic =
+          (match signature with
+          | Some { uses; _ } when not proof -> if Types.may_panic uses then Declared else Undeclared
+          | Some _ | None -> Undeclarable);
+      }
       parameters
   in
   let start = { start with old_locals = start.locals; old_self = start.self } in

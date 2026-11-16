@@ -1,0 +1,5 @@
+fn large(items: Slice[UInt8]) -> List[UInt8]
+  uses Panic
+{
+  items.filter(fn(item) { item + 1 > 3 })
+}

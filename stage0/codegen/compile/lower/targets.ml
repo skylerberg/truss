@@ -527,8 +527,8 @@ let list_of (st : Lowering.state) ty destination ~site fills =
   let storage_place = Lowered.project destination (Field field) in
   let lower operation arguments destination =
     ignore
-      (Intrinsics.lower ~checks:st.context.checks st.context.env st.builder st.context.types
-         operation ~type_arguments:[ element ] arguments ~destination ~site)
+      (Intrinsics.lower ~checks:(Lowering.checks_operations st) st.context.env st.builder
+         st.context.types operation ~type_arguments:[ element ] arguments ~destination ~site)
   in
   lower Storage_with_capacity
     [ Value (Lowered.make_uint64_constant (List.length fills)) ]

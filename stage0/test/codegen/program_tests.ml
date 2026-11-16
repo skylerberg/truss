@@ -88,6 +88,40 @@ let () =
       Codegen_support.expect_string ~expected:"hello\n3 arguments, then one\n" output)
 
 let () =
+  Codegen_support.test
+    "a release build stops a function that declares `uses Panic` at an operation that fails"
+    (fun () ->
+      let _, compile =
+        Codegen_support.load ~checks:false Fixtures.Program.operations_that_stop_the_program
+      in
+      let run operation =
+        match
+          Compile.For_testing.run_program compile
+            ~main:(Top { module_ = Codegen_support.example; name = "main" })
+            ~arguments:[ operation ]
+        with
+        | Ok result -> result
+        | Error message -> failwith message
+      in
+      List.iter
+        (fun (operation, failure) ->
+          let status, _, errors = run operation in
+          Codegen_support.expect_int ~expected:101 status;
+          if not (Codegen_support.contains errors ("panic: " ^ failure)) then
+            Codegen_support.fail "%s stopped with %S" operation errors)
+        [
+          ("overflow", "arithmetic overflow");
+          ("division", "division by zero");
+          ("shift", "shift amount out of range");
+          ("index", "index out of bounds");
+          ("slice", "slice out of bounds");
+          ("key", "index out of bounds");
+        ];
+      let status, output, _ = run "none" in
+      Codegen_support.expect_int ~expected:0 status;
+      Codegen_support.expect_string ~expected:"9223372036854775807 0 1\n" output)
+
+let () =
   Codegen_support.test "a program writes a file, reads it back, and reports a missing one"
     (fun () ->
       let path = Filename.concat (Lazy.force Codegen_support.scratch) "written.txt" in

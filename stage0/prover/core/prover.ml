@@ -445,11 +445,16 @@ let list_definition_states (lookups : Lookups.t) (key : Resolve.Names.key) proof
           let span = resolve obligation.location in
           let message = render lookups obligation.message in
           let others =
-            match obligation.code with
-            | Overflow | Division | Shift ->
+            match (obligation.code, obligation.may_stop_with_panic) with
+            | (Overflow | Division | Shift), true ->
                 " It can also be checked first with an `if`, done with the checked operation, or \
                  allowed to stop the program with `uses Panic`."
-            | _ -> ""
+            | (Overflow | Division | Shift), false ->
+                " It can also be checked first with an `if`, or done with the checked operation."
+            | _, true ->
+                " It can also be checked first with an `if`, or allowed to stop the program with \
+                 `uses Panic`."
+            | _, false -> ""
           in
           let failed explained =
             Some
