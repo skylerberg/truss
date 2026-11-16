@@ -9,7 +9,6 @@ type loop_exits = {
 type run = {
   infos : Mir.local_info array;
   lambdas : Mir.body array;
-  in_formula : bool;
   provides : (Core.origin, Mir.provided list) Hashtbl.t;
   mutable loops : loop_exits list;
   mutable cancelled : (Mir.task * State.frame list ref) list;
@@ -111,19 +110,17 @@ let read_root context frame run (root : Mir.root) =
       | Core_local Self -> (
           match frame.self with
           | Some self -> self
-          | None -> Facts.raise_unsupported Whole_definition "`self` outside a method")
+          | None -> Facts.raise_bug "`%s` reads `self` outside a method" frame.source.name)
       | key -> (
           (match key with
           | Core_local core when frame.makes_obligations && not context.reading_callback ->
               Validity.check_escaping_callback context frame core
           | Core_local _ | Mir_local _ -> ());
-          match (Locals.find_opt key frame.locals, run.infos.(local).kind) with
-          | Some term, _ -> term
-          | None, Source _ when run.in_formula ->
-              Facts.raise_unsupported Whole_definition "a local the prover did not bind"
-          | None, kind ->
+          match Locals.find_opt key frame.locals with
+          | Some term -> term
+          | None ->
               Facts.raise_bug "`%s` reads %s before the prover binds it" frame.source.name
-                (describe_local kind)))
+                (describe_local run.infos.(local).kind)))
 
 let read_resolved context frame run (place : Mir.place) =
   let _, term =
@@ -756,23 +753,26 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
   | Specification Result -> (
       match frame.result with
       | Some result -> (frame, result)
-      | None -> Facts.raise_unsupported location "`result` here")
+      | None -> Facts.raise_bug "`%s` reads `result` outside an `ensures`" frame.source.name)
   | Specification (Entry local) -> (
       match Locals.make_key run.infos local with
       | Core_local Self -> (
           match frame.old_self with
           | Some self -> (frame, self)
-          | None -> Facts.raise_unsupported Whole_definition "`self` outside a method")
+          | None -> Facts.raise_bug "`%s` reads `old(self)` outside a method" frame.source.name)
       | key -> (
           match Locals.find_opt key frame.old_locals with
           | Some term -> (frame, term)
-          | None -> Facts.raise_unsupported Whole_definition "a local the prover did not bind"))
+          | None ->
+              Facts.raise_bug "`%s` reads the entry value of %s, which the prover did not bind"
+                frame.source.name
+                (describe_local run.infos.(local).kind)))
   | Specification Yielded -> (
       match (frame.yielded, frame.yielded_so_far) with
       | Some yielded, _ -> (frame, yielded)
       | None, Some yielded_so_far when frame.source.key = Some context.home ->
           (frame, yielded_so_far)
-      | _ -> Facts.raise_unsupported location "`yielded` here")
+      | _ -> Facts.raise_bug "`%s` reads `yielded` outside a lending method" frame.source.name)
   | Specification (Identical (first, second)) ->
       let first_value = translate_operand first and second_value = translate_operand second in
       Values.assume_extensional context frame
@@ -1470,11 +1470,11 @@ and write_assignment context run (target : Mir.place) ~(copied : Mir.operand lis
         }
     | _ -> written)
 
-let make_run ~in_formula ~locals ~lambdas =
-  { infos = locals; lambdas; in_formula; provides = Hashtbl.create 2; loops = []; cancelled = [] }
+let make_run ~locals ~lambdas =
+  { infos = locals; lambdas; provides = Hashtbl.create 2; loops = []; cancelled = [] }
 
 let read_formula context (frame : State.frame) (formula : Mir.formula) ~arguments =
-  let run = make_run ~in_formula:true ~locals:formula.locals ~lambdas:formula.lambdas in
+  let run = make_run ~locals:formula.locals ~lambdas:formula.lambdas in
   let inside =
     {
       frame with
@@ -1501,7 +1501,7 @@ let read_formula context (frame : State.frame) (formula : Mir.formula) ~argument
       ({ frame with spent = after.spent }, term))
 
 let read_body context start ~(lambdas : Mir.body array) (body : Mir.body) =
-  let run = make_run ~in_formula:false ~locals:body.locals ~lambdas in
+  let run = make_run ~locals:body.locals ~lambdas in
   let start =
     { start with State.aliases = Locals.empty; slices = Locals.empty; lends = Locals.empty }
   in
