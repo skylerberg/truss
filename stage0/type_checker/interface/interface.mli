@@ -2,23 +2,16 @@ module Environment = Environment
 module Lookups = Lookups
 
 module Elaborator : sig
-  type t = Elaborator.t = {
-    lookups : Lookups.t;
-    resolved : Resolve.resolved;
-    bounds : (Types.parameter, Types.trait_reference list) Hashtbl.t;
-    broken_parameters : (Types.parameter, Diagnostic.reported) Hashtbl.t;
-    self_type : Types.ty option;
-    self_trait : Types.trait_reference option;
-    self_associated : (string * Types.ty) list;
-    self_capabilities : (string * Types.capability_set) list;
-    diagnostics : Diagnostic.in_definition list ref;
-    named : (Syntax.id * Types.ty) list ref;
-    spans : Source.Definition_span.t array;
-  }
+  type t = Elaborator.t
 
   val create :
     Lookups.t -> Resolve.resolved -> spans:Source.Definition_span.t array -> Environment.scope -> t
 
+  val read_span : t -> Syntax.id -> Source.Definition_span.t
+  val list_bounds : t -> Types.parameter -> Types.trait_reference list
+  val find_self_type : t -> Types.ty option
+  val list_diagnostics : t -> Diagnostic.in_definition list
+  val list_named_types : t -> (Syntax.id * Types.ty) list
   val show_path : Syntax.path -> string
   val elaborate_type : t -> Syntax.type_expression -> Types.ty
 

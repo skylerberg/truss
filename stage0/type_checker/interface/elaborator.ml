@@ -33,6 +33,15 @@ let create lookups resolved ~spans (scope : Environment.scope) =
     spans;
   }
 
+let read_span context id = context.spans.(id)
+
+let list_bounds context parameter =
+  Option.value ~default:[] (Hashtbl.find_opt context.bounds parameter)
+
+let find_self_type context = context.self_type
+let list_diagnostics context = !(context.diagnostics)
+let list_named_types context = !(context.named)
+
 let make_scope context : Environment.scope =
   {
     self_type = context.self_type;
@@ -194,7 +203,7 @@ and find_declaring_trait ?(capability = false) context trait name =
     (list_trait_closure context.lookups trait)
 
 and elaborate_associated context base parameter (key : Syntax.name) =
-  let bounds = Option.value ~default:[] (Hashtbl.find_opt context.bounds parameter) in
+  let bounds = list_bounds context parameter in
   let associated_type =
     List.find_map
       (fun (bound : Types.trait_reference) ->
@@ -415,7 +424,7 @@ and elaborate_capability context (written : Syntax.capability_reference) : Types
       match find_parameter context base with
       | Error report -> [ Types.Capability_error report ]
       | Ok parameter -> (
-          let bounds = Option.value ~default:[] (Hashtbl.find_opt context.bounds parameter) in
+          let bounds = list_bounds context parameter in
           match find_capability_projection context (Types.Parameter parameter) bounds key with
           | Some projection -> [ projection ]
           | None ->

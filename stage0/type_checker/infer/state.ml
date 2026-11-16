@@ -103,7 +103,7 @@ let reject_in_formula state env span what =
           the prover reads as formulas: they are built from `let`, `if`, `match`, and calls."
          what)
 
-let read_span state id = state.context.spans.(id)
+let read_span state id = Interface.Elaborator.read_span state.context id
 let bug format = Compiler_bug.bug ~stage:"Infer" format
 
 let make_error_type state ?fixes code span message =
@@ -370,8 +370,7 @@ let is_signed_type state (type_ : Types.ty) =
       match state.unifier.integer_range type_ with Some (low, _) -> Z.sign low < 0 | None -> false)
   | _ -> false
 
-let lookup_bounds state parameter =
-  Option.value ~default:[] (Hashtbl.find_opt state.context.bounds parameter)
+let lookup_bounds state parameter = Interface.Elaborator.list_bounds state.context parameter
 
 let normalize state type_ =
   Interface.Impls.normalize state.lookups.interface ~bounds:(lookup_bounds state) (zonk state type_)
