@@ -145,6 +145,8 @@ let () =
       equal_lists Fun.id "tokens" [ "a"; "NL"; "b"; "NL" ] (tokens_of "a\rb"));
   Harness.test "a forbidden character in code is deleted" (fun () ->
       error "let b\xE2\x80\x8B = 1" ~code:Forbidden_character ~at:"\xE2" ~fixed:"let b = 1");
+  Harness.test "a forbidden character at the end of the text is deleted" (fun () ->
+      error "let b = 1\xE2\x80\x8B" ~code:Forbidden_character ~at:"\xE2" ~fixed:"let b = 1");
   Harness.test "a forbidden character between names becomes a space" (fun () ->
       error "a\x01b" ~code:Forbidden_character ~at:"\x01" ~fixed:"a b");
   Harness.test "a forbidden character in a string becomes an escape" (fun () ->
@@ -159,13 +161,7 @@ let () =
   Harness.test "JSON output is valid UTF-8 when a message is about a bad byte" (fun () ->
       let source = Source.create ~path:"test.truss" "\"\\\xFF\"" in
       let json = Diagnostic.to_json source (snd (Lexer.lex source)) in
-      let rec valid index =
-        index >= String.length json
-        ||
-        let decoded = Unicode.decode json index in
-        Unicode.Decoded.is_valid decoded && valid (index + Unicode.Decoded.length decoded)
-      in
-      if not (valid 0) then Harness.fail "the JSON is not valid UTF-8: %S" json)
+      if not (String.is_valid_utf_8 json) then Harness.fail "the JSON is not valid UTF-8: %S" json)
 
 let () =
   Harness.test "keywords, reserved words, and contextual words" (fun () ->

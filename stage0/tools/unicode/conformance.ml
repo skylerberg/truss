@@ -25,7 +25,7 @@ let check_property ~file ~name ~listed property =
       | _ -> ())
     (records file);
   for value = 0 to 0x10FFFF do
-    if Uchar.is_valid value && property value <> expected.(value) then
+    if Uchar.is_valid value && property (Uchar.of_int value) <> expected.(value) then
       fail "%s: U+%04X: expected %b" name value expected.(value)
   done
 
@@ -59,9 +59,10 @@ let () =
         || (control.(value) && value <> 0x09 && value <> 0x0A && value <> 0x0D)
         || (ignorable.(value) && (not selector.(value)) && value <> 0x200C && value <> 0x200D)
       in
-      if Unicode.is_forbidden value <> expected then
+      let scalar_value = Uchar.of_int value in
+      if Unicode.is_forbidden scalar_value <> expected then
         fail "forbidden: U+%04X: expected %b" value expected;
-      if expected && control.(value) && Unicode.find_forbidden_name value = None then
+      if expected && control.(value) && Unicode.find_forbidden_name scalar_value = None then
         fail "forbidden control U+%04X has no name" value
     end
   done;

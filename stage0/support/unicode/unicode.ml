@@ -1,25 +1,5 @@
 let version = Unicode_tables.unicode_version
 
-module Decoded = struct
-  type t = Uchar.utf_decode
-
-  let is_valid = Uchar.utf_decode_is_valid
-  let code_point decoded = Uchar.to_int (Uchar.utf_decode_uchar decoded)
-  let length = Uchar.utf_decode_length
-end
-
-let past_end = Uchar.utf_decode_invalid 0
-
-let decode text offset =
-  if offset < String.length text then String.get_utf_8_uchar text offset else past_end
-
-let encode buffer value = Buffer.add_utf_8_uchar buffer (Uchar.of_int value)
-
-let of_code_points values =
-  let buffer = Buffer.create 16 in
-  List.iter (encode buffer) values;
-  Buffer.contents buffer
-
 let is_in_ranges ranges value =
   let rec search low high =
     low <= high
@@ -48,9 +28,10 @@ let make_property ranges =
   let ascii = Bytes.init 128 (fun value -> if is_in_ranges ranges value then '\001' else '\000') in
   { ascii; ranges }
 
-let has property value =
-  if value < 128 then Bytes.unsafe_get property.ascii value <> '\000'
-  else is_in_ranges property.ranges value
+let has property scalar_value =
+  let code_point = Uchar.to_int scalar_value in
+  if code_point < 128 then Bytes.unsafe_get property.ascii code_point <> '\000'
+  else is_in_ranges property.ranges code_point
 
 let xid_start = make_property Unicode_tables.xid_start
 let xid_continue = make_property Unicode_tables.xid_continue
@@ -58,10 +39,13 @@ let forbidden = make_property Unicode_tables.forbidden
 let is_xid_start = has xid_start
 let is_xid_continue = has xid_continue
 let is_forbidden = has forbidden
-let is_bidi_control = is_in_ranges Unicode_tables.bidi_control
-let is_control = is_in_ranges Unicode_tables.control
 
-let find_forbidden_name value =
+let is_bidi_control scalar_value =
+  is_in_ranges Unicode_tables.bidi_control (Uchar.to_int scalar_value)
+
+let is_control scalar_value = is_in_ranges Unicode_tables.control (Uchar.to_int scalar_value)
+
+let find_forbidden_name scalar_value =
   Option.map
     (Array.get Unicode_tables.forbidden_name_values)
-    (find_key Unicode_tables.forbidden_name_keys value)
+    (find_key Unicode_tables.forbidden_name_keys (Uchar.to_int scalar_value))

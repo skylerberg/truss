@@ -83,10 +83,10 @@ let find_case_problem name =
 let find_first_non_ascii name =
   Option.map
     (fun index ->
-      let decoded = Unicode.decode name index in
+      let decoded = String.get_utf_8_uchar name index in
       Printf.sprintf "`%s` (U+%04X)"
-        (String.sub name index (Unicode.Decoded.length decoded))
-        (Unicode.Decoded.code_point decoded))
+        (String.sub name index (Uchar.utf_decode_length decoded))
+        (Uchar.to_int (Uchar.utf_decode_uchar decoded)))
     (String.find_first_index (Fun.negate Char.Ascii.is_valid) name)
 
 let check name =

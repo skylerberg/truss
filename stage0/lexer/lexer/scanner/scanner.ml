@@ -147,21 +147,21 @@ and scan_item cursor ~inline ~nesting =
     else if Cursor.is_digit current then lex_number cursor ~inline ~nesting
     else if not (Cursor.is_ascii current) then begin
       let decoded = Cursor.decode cursor start in
-      if not (Unicode.Decoded.is_valid decoded) then begin
+      if not (Uchar.utf_decode_is_valid decoded) then begin
         Source_text.report_invalid_run cursor;
         again ()
       end
       else
-        let value = Unicode.Decoded.code_point decoded in
-        if Unicode.is_forbidden value then forbidden ()
-        else if Unicode.is_xid_start value then lex_name cursor ~inline ~nesting
+        let scalar_value = Uchar.utf_decode_uchar decoded in
+        if Unicode.is_forbidden scalar_value then forbidden ()
+        else if Unicode.is_xid_start scalar_value then lex_name cursor ~inline ~nesting
         else
-          let length = Unicode.Decoded.length decoded in
+          let length = Uchar.utf_decode_length decoded in
           let unused () =
             reject length
               (Printf.sprintf "%s is not used in Truss." (Cursor.show_character cursor start))
           in
-          match Habits.Confusables.scan cursor ~value ~length with
+          match Habits.Confusables.scan cursor ~scalar_value ~length with
           | Some (Lexed kind) -> token kind
           | Some Spaced -> again ()
           | None -> unused ()
@@ -277,10 +277,10 @@ and lex_name cursor ~inline ~nesting =
     else
       let decoded = Cursor.decode cursor position in
       if
-        Unicode.Decoded.is_valid decoded
-        && Unicode.is_xid_continue (Unicode.Decoded.code_point decoded)
+        Uchar.utf_decode_is_valid decoded
+        && Unicode.is_xid_continue (Uchar.utf_decode_uchar decoded)
       then begin
-        cursor.position <- position + Unicode.Decoded.length decoded;
+        cursor.position <- position + Uchar.utf_decode_length decoded;
         loop ()
       end
   in

@@ -52,7 +52,7 @@ val is_ascii_letter : char -> bool
 val is_ascii_name_byte : char -> bool
 val is_ascii : char -> bool
 val list_code_fixes : t -> Source.span -> string list -> Source.span Diagnostic.fix list
-val decode : t -> int -> Unicode.Decoded.t
+val decode : t -> int -> Uchar.utf_decode
 val run_length : t -> int -> char -> int
 val skip_spaces : t -> int -> int
 val compute_end_of_line : t -> int -> int
@@ -60,5 +60,5 @@ val measure_line_break : t -> int -> int
 val extract_indentation : t -> int -> string
 val count_spaces_before : t -> int -> int
 val has_only_spaces_before : t -> int -> bool
-val describe_code_point : int -> string
+val describe_code_point : Uchar.t -> string
 val show_character : t -> int -> string

@@ -85,7 +85,7 @@ let list_code_fixes cursor span codes =
       else Some (Diagnostic.fix ("Write `" ^ code ^ "`") [ Diagnostic.replace span code ]))
     codes
 
-let decode cursor index = Unicode.decode cursor.text index
+let decode cursor index = String.get_utf_8_uchar cursor.text index
 
 let run_length cursor index character =
   let rec loop position =
@@ -123,19 +123,20 @@ let count_spaces_before cursor offset =
 let has_only_spaces_before cursor offset =
   count_spaces_before cursor offset = Source.line_start cursor.source offset
 
-let describe_code_point value =
-  match Unicode.find_forbidden_name value with
-  | Some name -> Printf.sprintf "U+%04X %s" value name
-  | None -> Printf.sprintf "U+%04X" value
+let describe_code_point scalar_value =
+  let code_point = Uchar.to_int scalar_value in
+  match Unicode.find_forbidden_name scalar_value with
+  | Some name -> Printf.sprintf "U+%04X %s" code_point name
+  | None -> Printf.sprintf "U+%04X" code_point
 
 let show_character cursor index =
   let decoded = decode cursor index in
-  if not (Unicode.Decoded.is_valid decoded) then
+  if not (Uchar.utf_decode_is_valid decoded) then
     Printf.sprintf "the byte 0x%02X" (Char.code cursor.text.[index])
   else
-    let value = Unicode.Decoded.code_point decoded in
-    if value < 0x80 then Printf.sprintf "`%c`" (Char.chr value)
+    let code_point = Uchar.to_int (Uchar.utf_decode_uchar decoded) in
+    if code_point < 0x80 then Printf.sprintf "`%c`" (Char.chr code_point)
     else
       Printf.sprintf "`%s` (U+%04X)"
-        (String.sub cursor.text index (Unicode.Decoded.length decoded))
-        value
+        (String.sub cursor.text index (Uchar.utf_decode_length decoded))
+        code_point
