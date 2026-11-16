@@ -318,12 +318,11 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
         let* value = lower_expression builder value in
         hold (To_any { value; trait; evidence })
     | If { condition = tested; then_; else_; binds_lent_part } ->
-        let condition, on_true, on_false, held =
-          Emitter.run_in_condition_scope builder
-            ~lends:(if binds_lent_part then For_block else For_condition)
-            (fun () -> lower_expression builder tested)
+        let lowered =
+          Emitter.run_in_condition_scope builder ~binds_lent_part (fun () ->
+              lower_expression builder tested)
         in
-        let* condition = condition in
+        let* condition = lowered.value in
         let result = allocate_value_local builder node in
         let lower_arm ?held ended (body : Core.block option) =
           Emitter.build_block builder (fun () ->
@@ -338,8 +337,8 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
                   | Some None, _ -> None
                   | (Some (Some _) | None), _ -> Some Emitter.unit_value))
         in
-        let then_ = lower_arm ~held on_true (Some then_) in
-        let else_ = lower_arm on_false else_ in
+        let then_ = lower_arm ~held:lowered.held_if_true lowered.ended_if_true (Some then_) in
+        let else_ = lower_arm lowered.ended_if_false else_ in
         lower_choice builder node [ then_; else_ ]
           (Tree.Conditional { condition; then_; else_; if_condition = Some tested.origin })
     | Match { scrutinees; arms } -> match_ builder node scrutinees arms
@@ -821,25 +820,10 @@ and match_ builder (node : Core.expression) scrutinees (arms : Core.arm list) : 
                         Some (Emitter.start_loan builder value Read Operand_evaluation arm.origin))
                   evaluated
               in
-              let holds, ended, _, _ =
-                Emitter.run_in_condition_scope ~lends:For_statement builder (fun () ->
+              let holds =
+                Emitter.run_in_guard_scope builder guard.origin (fun () ->
                     lower_expression builder guard)
               in
-              let holds =
-                Option.map
-                  (fun value ->
-                    let local = Emitter.allocate_temporary builder Types.bool guard.origin in
-                    Emitter.assign builder (Emitter.make_local_place local) (Operand value)
-                      guard.origin;
-                    Tree.Use
-                      {
-                        place = Emitter.make_local_place local;
-                        type_ = Types.bool;
-                        origin = guard.origin;
-                      })
-                  holds
-              in
-              Emitter.end_scope builder ended guard.origin;
               Emitter.end_loans builder loans arm.origin;
               holds))
         arm.guard
@@ -1205,19 +1189,18 @@ and lower_statement builder (node : Core.statement) =
               quantified = None;
             }
           in
-          let ends = ref None in
+          let lowered_condition = ref None in
           let condition =
             Emitter.build_block builder (fun () ->
-                let value, on_true, on_false, held =
-                  Emitter.run_in_condition_scope builder
-                    ~lends:(if binds_lent_part then For_block else For_condition)
-                    (fun () -> lower_expression builder tested)
+                let lowered =
+                  Emitter.run_in_condition_scope builder ~binds_lent_part (fun () ->
+                      lower_expression builder tested)
                 in
-                ends := Some (on_true, on_false, held);
-                value)
+                lowered_condition := Some lowered;
+                lowered.value)
           in
-          begin match (condition.value, !ends) with
-          | Some _, Some (on_true, on_false, held) -> (
+          begin match (condition.value, !lowered_condition) with
+          | Some _, Some lowered -> (
               let compared =
                 match (tested.kind, List.rev condition.statements) with
                 | ( Compare { left; right; _ },
@@ -1235,16 +1218,16 @@ and lower_statement builder (node : Core.statement) =
               in
               let body =
                 Emitter.build_block builder (fun () ->
-                    Emitter.end_scope builder on_true tested.origin;
+                    Emitter.end_scope builder lowered.ended_if_true tested.origin;
                     Emitter.run_in_loop builder (fun () ->
                         ignore
-                          (Emitter.run_in_scope ~held builder origin (fun () ->
+                          (Emitter.run_in_scope ~held:lowered.held_if_true builder origin (fun () ->
                                lower_block builder body)));
                     if Emitter.reaches builder then Some Emitter.unit_value else None)
               in
               let failed =
                 Emitter.build_block builder (fun () ->
-                    Emitter.end_scope builder on_false tested.origin;
+                    Emitter.end_scope builder lowered.ended_if_false tested.origin;
                     Some Emitter.unit_value)
               in
               Emitter.emit builder
