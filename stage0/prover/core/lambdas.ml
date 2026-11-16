@@ -118,7 +118,6 @@ let remove_temporaries locals =
 
 let run_lambda_body ?(enter = Fun.id) (context : State.context) (frame : State.frame)
     ~(lambdas : Mir.body array) (body : Mir.body) ~type_ =
-  let is_foreign = frame.source.key <> Some context.home in
   let saved_returns = context.returns in
   context.returns <- [];
   Fun.protect
@@ -127,9 +126,7 @@ let run_lambda_body ?(enter = Fun.id) (context : State.context) (frame : State.f
       let inside =
         enter { frame with locals = remove_temporaries frame.locals; panic = Undeclarable }
       in
-      (try context.run_body inside ~lambdas body
-       with Facts.Unsupported (_, message) when is_foreign ->
-         raise (Facts.Foreign_unsupported (Printf.sprintf "%s, in `%s`" message frame.source.name)));
+      Facts.run_in_source context frame.source (fun () -> context.run_body inside ~lambdas body);
       match Facts.join context ~value_type:type_ (List.rev context.returns) with
       | Some (returned, Some term) -> Some ({ frame with spent = returned.spent }, term)
       | Some (_, None) | None -> None)
@@ -217,7 +214,7 @@ let find_lambda_definition context frame (function_type : Types.function_type)
               | Some (_, defined) when not (Facts.mentions_fresh_after context mark defined) ->
                   Some defined
               | Some _ | None -> None
-            with Facts.Unsupported _ | Facts.Foreign_unsupported _ -> None)
+            with Facts.Unsupported _ -> None)
       in
       let quantified = List.map (fun (name, _, _) -> name) frame.binders in
       let enclosing_parameters =
@@ -296,7 +293,7 @@ let list_loop_counters locals (body : Mir.body) =
                 counters :=
                   { Costs.resource; counting = classify_counting cost; amortized = false }
                   :: !counters
-            | None -> raise (Facts.Foreign_unsupported "this `calls` target"))
+            | None -> Facts.raise_unsupported Whole_definition "this `calls` target")
         | Invariant _ | Decreases _ -> ())
       loop.clauses
   in

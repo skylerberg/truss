@@ -200,9 +200,12 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
                 Obligations (Translate.translate_type lookups source ~path:key.path)
             | Some _ | None -> Not_proven_here)
         | Trait | Capability | Member_constant | Law_proof -> Not_proven_here
-      with
-      | Facts.Unsupported (span, message) -> Unsupported (span, message)
-      | Facts.Foreign_unsupported message -> Unsupported (Whole_definition, message))
+      with Facts.Unsupported { location; construct; foreign_definition } ->
+        Unsupported
+          ( location,
+            match foreign_definition with
+            | Some name -> Printf.sprintf "%s, in `%s`" construct name
+            | None -> construct ))
 
 let show_float bits =
   let spell_shortest ~most ~is_same value =
