@@ -43,7 +43,7 @@ let find_parameter_spelling (context : State.context) (frame : State.frame) term
     && (not (Logic.has_quantifier term))
     &&
     match Logic.list_free_constants term with
-    | _ :: _ as names -> List.for_all (fun name -> List.mem name context.report.entry) names
+    | _ :: _ as names -> List.for_all (fun name -> List.mem name context.entry.parameters) names
     | [] -> false
   then Facts.truss_of_value context term
   else None
@@ -88,11 +88,11 @@ let spend (context : State.context) (frame : State.frame) (amount_of : Costs.cou
     }
 
 let declare_unknown_amount (context : State.context) frame (counter : Costs.counter) =
-  let amount = Facts.declare_fresh context.query frame "spent" Logic.Int in
+  let amount = Facts.declare_fresh context.vocabulary frame "spent" Logic.Int in
   let least =
     match counter.resource with Time -> 1 | Allocations | Allocated_bytes | Calls _ -> 0
   in
-  Facts.assume context frame (Logic.Operation ("<=", [ Logic.int least; amount ]));
+  Facts.assume context.assertions frame (Logic.Operation ("<=", [ Logic.int least; amount ]));
   amount
 
 let convert_to_any context frame (site : Invocation.site) =
@@ -199,7 +199,7 @@ let find_written_equal context ty left right =
               }
           in
           let sort = Facts.declare_sort context ty in
-          Facts.declare context.query (Logic.Function (symbol, [ sort; sort ], Logic.Bool));
+          Facts.declare context.vocabulary (Logic.Function (symbol, [ sort; sort ], Logic.Bool));
           Some (Logic.Apply (symbol, [ left; right ]))
       | _ -> None)
   | _ -> None
@@ -207,14 +207,14 @@ let find_written_equal context ty left right =
 let make_derived_equal context (frame : State.frame) (ty : Types.ty) left right =
   let sort = Facts.declare_sort context ty in
   let symbol = Logic.Symbol.Equal ty in
-  Facts.declare context.query (Logic.Function (symbol, [ sort; sort ], Logic.Bool));
+  Facts.declare context.vocabulary (Logic.Function (symbol, [ sort; sort ], Logic.Bool));
   let equal = Logic.Apply (symbol, [ left; right ]) in
   (match (Facts.find_visible_type context ty, Facts.find_constructors context ty) with
   | Some (interface, _), Some shape
     when List.exists Facts.is_standard_equal interface.derives
-         && (not (List.mem equal context.query.equalities))
+         && (not (List.mem equal context.assertions.equalities))
          && not (Logic.mentions frame.bound equal) ->
-      context.query.equalities <- equal :: context.query.equalities;
+      context.assertions.equalities <- equal :: context.assertions.equalities;
       let fields_equal (variant, fields) =
         Logic.conjunction
           (List.map
@@ -229,7 +229,7 @@ let make_derived_equal context (frame : State.frame) (ty : Types.ty) left right 
                  | Some equal -> equal
                  | None ->
                      let symbol = Logic.Symbol.Equal field_type in
-                     Facts.declare context.query
+                     Facts.declare context.vocabulary
                        (Logic.Function
                           ( symbol,
                             [
@@ -253,7 +253,7 @@ let make_derived_equal context (frame : State.frame) (ty : Types.ty) left right 
                    Logic.(is_variant left &&& is_variant right &&& fields_equal one))
                  variants)
       in
-      Facts.add_frame_fact context frame (Logic.equal equal defined)
+      Facts.add_frame_fact context.assertions frame (Logic.equal equal defined)
   | _ -> ());
   equal
 
@@ -276,9 +276,9 @@ let declare_opaque_operation (context : State.context) frame ty operation argume
       (find_width ty)
   in
   let symbol = Logic.Symbol.Opaque_operation { operation; type_ = ty; integer } in
-  Facts.declare context.query (Logic.Function (symbol, sorts, Facts.declare_sort context ty));
+  Facts.declare context.vocabulary (Logic.Function (symbol, sorts, Facts.declare_sort context ty));
   let term = Logic.Apply (symbol, arguments) in
-  Facts.assume context frame (Facts.make_in_range ty term);
+  Facts.assume context.assertions frame (Facts.make_in_range ty term);
   term
 
 let make_overflow_fix context frame ty (operation : Intrinsic.scalar) left right exact =
@@ -401,22 +401,21 @@ let make_float_fits target value =
         &&& Operation ("<=", [ cut; Integer high ]))
   | None -> Logic.Boolean false
 
-let find_innermost_axiom (context : State.context) (frame : State.frame) term =
-  match context.open_axioms with
+let find_innermost_axiom (frame : State.frame) term =
+  match frame.open_axioms with
   | axiom :: _
     when let named = List.filter (fun name -> Logic.mentions [ name ] term) frame.bound in
          named <> [] && List.for_all (fun name -> List.mem name axiom.parameters) named ->
       Some axiom
   | _ -> None
 
-let rec map_each_value context (frame : State.frame) value make =
-  if not (Logic.mentions frame.bound value) then make context frame value
+let rec map_each_value (frame : State.frame) value make =
+  if not (Logic.mentions frame.bound value) then make frame value
   else
-    match find_innermost_axiom context frame value with
+    match find_innermost_axiom frame value with
     | Some axiom ->
         axiom.at_calls <-
-          (fun context frame substitute -> map_each_value context frame (substitute value) make)
-          :: axiom.at_calls
+          (fun frame substitute -> map_each_value frame (substitute value) make) :: axiom.at_calls
     | None -> ()
 
 let make_power_facts base exponent =
@@ -446,18 +445,18 @@ let make_power_order base left right =
         &&& (Operation ("<=", [ right; left ]) ==> Operation ("<=", [ power right; power left ]))))
 
 let declare_power (context : State.context) frame base exponent =
-  Facts.declare context.query
+  Facts.declare context.vocabulary
     (Logic.Function (Logic.Symbol.Cost_power, [ Logic.Int; Logic.Int ], Logic.Int));
   let add exponent =
-    if not (List.mem (base, exponent) context.query.powers) then begin
+    if not (List.mem (base, exponent) context.assertions.powers) then begin
       List.iter
         (fun (other_base, other) ->
           if other_base = base then
-            Facts.add_frame_fact context frame (make_power_order base exponent other))
-        context.query.powers;
-      context.query.powers <- (base, exponent) :: context.query.powers;
+            Facts.add_frame_fact context.assertions frame (make_power_order base exponent other))
+        context.assertions.powers;
+      context.assertions.powers <- (base, exponent) :: context.assertions.powers;
       let facts, step = make_power_facts base exponent in
-      List.iter (Facts.add_frame_fact context frame) facts;
+      List.iter (Facts.add_frame_fact context.assertions frame) facts;
       Some step
     end
     else None
@@ -465,13 +464,13 @@ let declare_power (context : State.context) frame base exponent =
   (if not (Logic.mentions frame.bound base || Logic.mentions frame.bound exponent) then
      match add exponent with
      | Some (step, previous) ->
-         Facts.add_frame_fact context frame step;
+         Facts.add_frame_fact context.assertions frame step;
          ignore (add previous)
      | None -> ());
   (match (base, exponent) with
   | Logic.Integer base_value, Logic.Integer exponent_value
     when Z.sign exponent_value >= 0 && Z.leq exponent_value (Z.of_int 256) ->
-      Facts.add_frame_fact context frame
+      Facts.add_frame_fact context.assertions frame
         (Logic.equal
            (Logic.Apply (Logic.Symbol.Cost_power, [ base; exponent ]))
            (Logic.Integer (Z.pow base_value (Z.to_int exponent_value))))
@@ -502,7 +501,7 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
   | (Add | Subtract | Multiply | Divide | Remainder), ty :: _, [ left; right ] when not is_float ->
       let result = translate_arithmetic context frame site ty operation left right in
       if Facts.find_bounds ty <> None then
-        Facts.assume context frame (Facts.make_in_range ty result);
+        Facts.assume context.assertions frame (Facts.make_in_range ty result);
       result
   | Negate, ty :: _, [ inner ] when not is_float ->
       let negated = Logic.Operation ("-", [ inner ]) in
@@ -545,13 +544,13 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
       | Some (low, high), Some bits
         when Z.equal low Z.zero && not (Logic.mentions frame.bound right) ->
           let scale = declare_power context frame (Logic.int 2) right in
-          Facts.assume context frame
+          Facts.assume context.assertions frame
             Logic.(
               Operation ("<=", [ int 0; right ])
               &&& Operation ("<", [ right; int bits ])
               ==> (Operation ("<=", [ int 1; scale ])
                   &&& Operation ("<=", [ scale; Integer (Z.shift_left Z.one (bits - 1)) ])));
-          Facts.assume context frame
+          Facts.assume context.assertions frame
             (match operation with
             | Shift_left ->
                 Logic.(
@@ -569,25 +568,25 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
               Operation ("<=", [ int 0; operand ])
               ==> (Operation ("<=", [ int 0; term ]) &&& Operation ("<=", [ term; operand ])))
           in
-          Facts.assume context frame Logic.(masked_by left &&& masked_by right)
+          Facts.assume context.assertions frame Logic.(masked_by left &&& masked_by right)
       | Some (low, _) when Z.equal low Z.zero -> (
           let at_most bound = Logic.Operation ("<=", [ term; bound ]) in
           match operation with
-          | Bit_and -> Facts.assume context frame Logic.(at_most left &&& at_most right)
+          | Bit_and -> Facts.assume context.assertions frame Logic.(at_most left &&& at_most right)
           | _ ->
               let sum = Logic.Operation ("+", [ left; right ]) in
               if operation = Bit_or then
-                Facts.assume context frame
+                Facts.assume context.assertions frame
                   Logic.(Operation ("<=", [ left; term ]) &&& Operation ("<=", [ right; term ]));
-              Facts.assume context frame (at_most sum);
-              Facts.declare context.query
+              Facts.assume context.assertions frame (at_most sum);
+              Facts.declare context.vocabulary
                 (Logic.Function (Logic.Symbol.Cost_power, [ Logic.Int; Logic.Int ], Logic.Int));
               let exponent = Logic.Symbol (Facts.make_variable "exponent") in
               let below value =
                 Logic.Operation
                   ("<", [ value; Logic.Apply (Logic.Symbol.Cost_power, [ Logic.int 2; exponent ]) ])
               in
-              Facts.assume context frame
+              Facts.assume context.assertions frame
                 (Logic.forall
                    ( [ (Facts.make_variable "exponent", Logic.Int) ],
                      Logic.(
@@ -639,14 +638,14 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
       | Some bits ->
           let count counted value =
             let symbol = Logic.Symbol.Bit_count { count = counted; width = bits } in
-            Facts.declare context.query (Logic.Function (symbol, [ Logic.Int ], Logic.Int));
+            Facts.declare context.vocabulary (Logic.Function (symbol, [ Logic.Int ], Logic.Int));
             Logic.Apply (symbol, [ value ])
           in
           let term = count operation value in
-          Facts.assume context frame
+          Facts.assume context.assertions frame
             Logic.(Operation ("<=", [ int 0; term ]) &&& Operation ("<=", [ term; int bits ]));
           (if Z.equal low Z.zero then
-             map_each_value context frame value @@ fun context frame value ->
+             map_each_value frame value @@ fun frame value ->
              let leading = count Leading_zeros value
              and trailing = count Trailing_zeros value
              and ones = count Count_ones value in
@@ -654,7 +653,8 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
              let width = Logic.int bits in
              let nonzero = Logic.not_ (Logic.equal value (Logic.int 0)) in
              let below_highest = Logic.Operation ("-", [ width; leading ]) in
-             List.iter (Facts.assume context frame)
+             List.iter
+               (Facts.assume context.assertions frame)
                Logic.
                  [
                    Operation ("<=", [ int 0; leading ])
@@ -717,7 +717,7 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
       | To_bits, [ source; bits ] when Facts.find_bounds bits <> None -> (
           match (operands, Facts.find_float_format source, find_width bits) with
           | [ value ], Some (exponent, significand), Some width ->
-              Facts.assume context frame
+              Facts.assume context.assertions frame
                 Logic.(
                   not_ (is_nan value)
                   ==> equal

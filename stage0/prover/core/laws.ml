@@ -68,11 +68,11 @@ let make_law_fact (context : State.context) (frame : State.frame) source ~substi
   let types = list_law_parameter_types ~substitution law in
   if List.exists (fun ty -> Types.is_error ty) types then None
   else begin
-    context.query.fresh <- context.query.fresh + 1;
+    context.vocabulary.fresh <- context.vocabulary.fresh + 1;
     let symbols =
       List.mapi
         (fun index _ ->
-          Logic.Symbol.Variable { label = "law"; numbers = [ context.query.fresh; index ] })
+          Logic.Symbol.Variable { label = "law"; numbers = [ context.vocabulary.fresh; index ] })
         types
     in
     let inside =
@@ -121,7 +121,7 @@ let assume_laws (context : State.context) frame ~at (trait : Types.trait_referen
                   ->
                     context.report.holes <- (context.definition.home, at) :: context.report.holes
                 | _ -> ());
-                Facts.add_frame_fact context frame fact_
+                Facts.add_frame_fact context.assertions frame fact_
             | None -> ())
           (list_laws context required.trait))
       (Interface.Properties.list_bound_closure context.definition.lookups.interface ~self:ty trait)

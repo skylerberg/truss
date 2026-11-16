@@ -8,7 +8,7 @@ val run_under_binder :
   Logic.symbol ->
   Logic.sort ->
   Logic.term ->
-  (State.context -> State.frame -> 'read) ->
+  (State.frame -> 'read) ->
   State.frame * 'read * (Logic.term -> Logic.term)
 
 val sequence_path : Path.t
@@ -40,7 +40,7 @@ val quantify_over :
   Core.quantifier ->
   quantified_range ->
   bind:(State.frame -> Logic.term -> Types.ty -> State.frame) ->
-  read:(State.context -> State.frame -> Logic.term -> State.frame * Logic.term) ->
+  read:(State.frame -> Logic.term -> State.frame * Logic.term) ->
   State.frame * Logic.term
 
 val make_value_term : State.context -> State.frame -> Types.value -> Logic.term

@@ -14,15 +14,19 @@ val raise_bug : ('a, unit, string, 'b) format4 -> 'a
 val is_in_recursion_group : State.context -> Path.t -> bool
 val has_method_in_recursion_group : State.context -> Path.t -> bool
 val list_clauses : Mir.requirement list -> Mir.formula list
-val declare : State.query -> Logic.declaration -> unit
-val add_fact : State.query -> Logic.term -> unit
-val declare_value_symbol : State.query -> State.frame -> Logic.symbol -> Logic.sort -> Logic.term
-val make_fresh_name : State.query -> string -> 'a Logic.Symbol.t
-val declare_fresh : State.query -> State.frame -> string -> Logic.sort -> Logic.term
-val mentions_fresh_after : State.query -> int -> Logic.term -> bool
+val declare : State.vocabulary -> Logic.declaration -> unit
+val make_assertions : unit -> State.assertions
+val add_fact : State.assertions -> Logic.term -> unit
+
+val declare_value_symbol :
+  State.vocabulary -> State.frame -> Logic.symbol -> Logic.sort -> Logic.term
+
+val make_fresh_name : State.vocabulary -> string -> 'a Logic.Symbol.t
+val declare_fresh : State.vocabulary -> State.frame -> string -> Logic.sort -> Logic.term
+val mentions_fresh_after : State.vocabulary -> int -> Logic.term -> bool
 val close_over_binders : State.frame -> Logic.term -> Logic.term option
-val add_frame_fact : State.context -> State.frame -> Logic.term -> unit
-val assume : State.context -> State.frame -> Logic.term -> unit
+val add_frame_fact : State.assertions -> State.frame -> Logic.term -> unit
+val assume : State.assertions -> State.frame -> Logic.term -> unit
 val add_requires : State.context -> State.frame -> State.message -> State.fix list
 val truss_of_value : State.context -> Logic.term -> string option
 
@@ -89,7 +93,7 @@ val find_constructors :
 val declare_sort : State.context -> Types.ty -> Logic.sort
 val is_structural : State.context -> ?seen:Types.ty list -> Types.ty -> bool
 val make_in_range : Types.ty -> Logic.term -> Logic.term
-val run_once : State.query -> State.stated -> (unit -> unit) -> unit
+val run_once : State.assertions -> State.stated -> (unit -> unit) -> unit
 val arrive : State.context -> State.frame -> string -> Types.ty -> Logic.term
 
 val read_or_arrive :

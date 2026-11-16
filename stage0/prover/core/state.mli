@@ -68,6 +68,8 @@ type frame = {
   panic : panic;
   bound : Logic.symbol list;
   binders : (Logic.symbol * Logic.sort * Logic.term) list;
+  scoped_facts : (Logic.symbol * Logic.term list ref) list;
+  open_axioms : open_axiom list;
   substitution : Types.substitution;
   self_type : Types.ty option;
   yielded : Logic.term option;
@@ -76,6 +78,12 @@ type frame = {
   aliases : (Logic.term * Mir.place) list Locals.t;
   slices : held_slice Locals.t;
   lends : (Logic.term * (frame -> Logic.term -> frame)) list Locals.t;
+}
+
+and open_axiom = {
+  parameters : Logic.symbol list;
+  mutable hypotheses : Logic.term list;
+  mutable at_calls : (frame -> (Logic.term -> Logic.term) -> unit) list;
 }
 
 type changed = {
@@ -131,37 +139,42 @@ type definition = {
   yield_ensures : (Mir.formula list * Mir.formula list) option;
 }
 
-type query = {
+type vocabulary = {
   mutable declarations : Logic.declaration list;
   declared : unit Tables.Symbol_table.t;
   definitions : unit Tables.Symbol_table.t;
   datatypes : unit Tables.Type_table.t;
-  stated : unit Tables.Stated_table.t;
-  mutable facts : Logic.term list;
   mutable fresh : int;
   fresh_order : int Tables.Symbol_table.t;
+  models : (Logic.term -> Logic.term) option Tables.Model_table.t;
+  lambda_definitions : Logic.term Tables.Symbol_table.t;
+}
+
+type assertions = {
+  mutable facts : Logic.term list;
+  stated : unit Tables.Stated_table.t;
+  mutable decisions : (string * string option * Logic.term * Logic.term) list;
   quantifier_facts : Logic.term list Tables.Term_table.t;
   mutable quantifier_symbols : Logic.symbol list;
   mutable equalities : Logic.term list;
   mutable logs : (Logic.term * bool) list;
   mutable powers : (Logic.term * Logic.term) list;
-  models : (Logic.term -> Logic.term) option Tables.Model_table.t;
-  lambda_definitions : Logic.term Tables.Symbol_table.t;
   mutable indexes : (int * place_value) list;
+}
+
+type axioms = {
+  axiom_clauses : unit Tables.Axiom_clause_table.t;
+  axioms_of : open_axiom Tables.Symbol_table.t;
+  mutable laws_assumed : (Types.trait_reference * Types.ty) list;
 }
 
 type report = {
   mutable obligations : obligation list;
   mutable holes : (Resolve.Names.key * location) list;
-  mutable decisions : (string * string option * Logic.term * Logic.term) list;
-  mutable values : (Logic.symbol * string) list;
-  mutable entry : Logic.symbol list;
   local_names : string Tables.Local_table.t;
 }
 
 type costs = {
-  mutable own_bounds : Costs.counter list;
-  mutable call_targets : (Logic.term * Core.local) list;
   mutable potentials : Logic.term list;
   holds_potential : bool Tables.Type_table.t;
   buffers : (Types.ty * (Logic.term -> Logic.term)) option Tables.Type_table.t;
@@ -170,41 +183,36 @@ type costs = {
   mutable lent_back : (Types.ty * Logic.term * Logic.term) list;
 }
 
-type body = { terminates : bool; mutable returns : (frame * Logic.term option) list }
+type entry = {
+  parameters : Logic.symbol list;
+  parameter_names : (Logic.symbol * string) list;
+  bounded_counters : Costs.counter list;
+  call_targets : (Logic.term * Core.local) list;
+}
+
 type ghost_run = { mutable unfinished : Logic.term list }
 type proving = Not_proving | Proving_theorem | Running_ghost_code of ghost_run
 
 type context = {
   definition : definition;
-  query : query;
+  vocabulary : vocabulary;
+  assertions : assertions;
   axioms : axioms;
   report : report;
   costs : costs;
-  body : body;
+  entry : entry;
+  terminates : bool;
+  counters : Costs.counter list;
   proving : proving;
   is_reading_callback : bool;
-  counters : Costs.counter list;
   validating : Types.ty list;
   instantiating : Path.t list;
   axiomatizing : Logic.symbol list;
-  scopes : (Logic.symbol * Logic.term list ref) list;
-  open_axioms : open_axiom list;
   reader : reader;
 }
 
-and axioms = {
-  axiom_clauses : unit Tables.Axiom_clause_table.t;
-  axioms_of : open_axiom Tables.Symbol_table.t;
-  mutable laws_assumed : (Types.trait_reference * Types.ty) list;
-}
-
 and reader = {
-  run_body : context -> frame -> lambdas:Mir.body array -> Mir.body -> unit;
+  run_body :
+    context -> frame -> lambdas:Mir.body array -> Mir.body -> (frame * Logic.term option) list;
   read_formula : context -> frame -> Mir.formula -> arguments:Logic.term list -> frame * Logic.term;
-}
-
-and open_axiom = {
-  parameters : Logic.symbol list;
-  mutable hypotheses : Logic.term list;
-  mutable at_calls : (context -> frame -> (Logic.term -> Logic.term) -> unit) list;
 }

@@ -12,6 +12,7 @@ type run = {
   provides : (Core.origin, Mir.provided list) Hashtbl.t;
   mutable loops : loop_exits list;
   mutable cancelled : (Mir.task * State.frame list ref) list;
+  mutable returns : (State.frame * Logic.term option) list;
 }
 
 let make_unit_callee : _ Core.target -> Invocation.callee = function
@@ -625,12 +626,12 @@ let bind_parts context (frame : State.frame) run =
 let note_decision (context : State.context) (frame : State.frame) origin test =
   if frame.makes_obligations && frame.source.key = Some context.definition.home then begin
     let text = Facts.quote_origin context frame origin in
-    context.report.decisions <-
+    context.assertions.decisions <-
       ( Printf.sprintf "`%s` is true" text,
         Some (Printf.sprintf "`%s` is false" text),
         frame.condition,
         test )
-      :: context.report.decisions
+      :: context.assertions.decisions
   end
 
 let refresh_place context frame ty (place : State.passed_place) =
@@ -822,7 +823,7 @@ and translate_quantifier_value context frame run quantifier range ~parameter ~(m
     ~(body : Mir.block) =
   Models.quantify_over context frame quantifier range
     ~bind:(fun inner value ty -> Facts.bind inner (Locals.make_key run.infos parameter) ty value)
-    ~read:(fun context body_frame _ ->
+    ~read:(fun body_frame _ ->
       let after_matches, matched = read_value context body_frame run matches in
       let after, holds = read_value context (Facts.restrict after_matches matched) run body in
       ( { body_frame with spent = after.spent },
@@ -957,7 +958,8 @@ and read_statement context frame run (statement : Mir.statement) =
       in
       let frame, term = read_value context frame run code in
       Assertions.check_assertion context frame ~origin:statement.origin
-        ~bit_vector:(Some (named, fun isolated -> snd (read_value context isolated run code)))
+        ~bit_vector:
+          (Some (named, fun context isolated -> snd (read_value context isolated run code)))
         term;
       Some frame
   | Choose { target; choice } ->
@@ -981,8 +983,8 @@ and read_statement context frame run (statement : Mir.statement) =
   | Jump jump ->
       (match jump with
       | Return returned ->
-          context.body.returns <-
-            (frame, Option.map (read_operand context frame run) returned) :: context.body.returns
+          run.returns <-
+            (frame, Option.map (read_operand context frame run) returned) :: run.returns
       | Break -> (
           match run.loops with
           | exits :: _ -> exits.breaks <- frame :: exits.breaks
@@ -1136,7 +1138,7 @@ and read_statement context frame run (statement : Mir.statement) =
       in
       let bindings = List.take binding_count body.statements
       and after_bindings = List.drop binding_count body.statements in
-      let bind_element context frame element =
+      let bind_element frame element =
         let frame =
           Facts.bind frame (Locals.make_key run.infos part)
             (Facts.substitute_type context frame run.infos.(part).type_)
@@ -1191,7 +1193,7 @@ and read_statement context frame run (statement : Mir.statement) =
                 | Lent Mut -> None
                 | _ ->
                     Some
-                      (fun context at ->
+                      (fun at ->
                         let rec lend context frame = function
                           | [] -> Facts.raise_bug "a loop over elements that no statement lends"
                           | (statement : Mir.statement) :: rest -> (
@@ -1328,7 +1330,7 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
           (if by_bit_vector then
              Some
                ( list_named (),
-                 fun isolated ->
+                 fun context isolated ->
                    snd (context.reader.read_formula context isolated condition ~arguments:[]) )
            else None)
         term;
@@ -1337,13 +1339,13 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
       Some (Facts.restrict frame (Logic.not_ (Values.run_ghost_code context frame code)))
   | Matched { patterns } ->
       if frame.makes_obligations then
-        context.report.decisions <-
+        context.assertions.decisions <-
           ( Printf.sprintf "the arm `%s` is taken"
               (String.concat ", " (List.map (Facts.quote_origin context frame) patterns)),
             None,
             frame.condition,
             Logic.Boolean true )
-          :: context.report.decisions;
+          :: context.assertions.decisions;
       Some frame
   | Slice { destination; base; base_type; call } ->
       let values =
@@ -1398,7 +1400,7 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
           Some (write_place context frame run destination tagged)
       | _ -> Facts.raise_unsupported location "a tagged template whose tag the prover cannot read")
   | Provide { provided; _ } ->
-      if context.body.terminates && frame.makes_obligations then
+      if context.terminates && frame.makes_obligations then
         List.iter
           (fun (implementation : Mir.provided) ->
             List.iter
@@ -1467,7 +1469,7 @@ and write_assignment context run (target : Mir.place) ~(copied : Mir.operand lis
     | _ -> written)
 
 let make_run ~locals ~lambdas =
-  { infos = locals; lambdas; provides = Hashtbl.create 2; loops = []; cancelled = [] }
+  { infos = locals; lambdas; provides = Hashtbl.create 2; loops = []; cancelled = []; returns = [] }
 
 let read_formula context (frame : State.frame) (formula : Mir.formula) ~arguments =
   let run = make_run ~locals:formula.locals ~lambdas:formula.lambdas in
@@ -1494,6 +1496,7 @@ let read_formula context (frame : State.frame) (formula : Mir.formula) ~argument
   in
   Facts.run_in_source context frame.source (fun () ->
       let after, term = read_value context inside run formula.value in
+      if run.returns <> [] then Facts.raise_bug "a formula of `%s` returns" frame.source.name;
       ({ frame with spent = after.spent }, term))
 
 let read_body context start ~(lambdas : Mir.body array) (body : Mir.body) =
@@ -1520,5 +1523,5 @@ let read_body context start ~(lambdas : Mir.body array) (body : Mir.body) =
       start (list_returned_locals body.code)
   in
   match read_statements context start run body.code.statements with
-  | None -> ()
+  | None -> List.rev run.returns
   | Some _ -> Facts.raise_bug "a body whose end control reaches"

@@ -11,7 +11,7 @@ let list_required_fixes (context : State.context) (frame : State.frame) (part : 
     (requirement : Mir.requirement) term (values : State.passed list) =
   let clause = requirement.clause in
   let is_fixed name =
-    List.mem name context.report.entry
+    List.mem name context.entry.parameters
     || match name with Logic.Symbol.Constant _ | Logic.Symbol.Text_literal _ -> true | _ -> false
   in
   let is_simple text =
@@ -65,9 +65,9 @@ let name_term (context : State.context) ty term =
   else
     let symbol = Logic.Symbol.Named_term term in
     let named = Logic.Symbol symbol in
-    Facts.run_once context.query (Value_of symbol) (fun () ->
-        Facts.declare context.query (Logic.Constant (symbol, Facts.declare_sort context ty));
-        Facts.add_fact context.query (Logic.equal named term));
+    Facts.run_once context.assertions (Value_of symbol) (fun () ->
+        Facts.declare context.vocabulary (Logic.Constant (symbol, Facts.declare_sort context ty));
+        Facts.add_fact context.assertions (Logic.equal named term));
     named
 
 let evaluate_default_value (context : State.context) frame (part : State.part) position =
@@ -183,7 +183,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   in
   let own = List.hd contract.parts in
   if
-    context.body.terminates && frame.makes_obligations
+    context.terminates && frame.makes_obligations
     && (match invocation.callee with
       | Trait_method _ -> Mir.Call_edges.is_dispatched invocation.callee
       | _ -> true)
@@ -300,8 +300,8 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   let after = havoc_mut frame in
   let in_quantifier = contract.is_logic_function && frame.binders <> [] in
   let state term =
-    if in_quantifier then Facts.add_frame_fact context after term
-    else Facts.assume context after term
+    if in_quantifier then Facts.add_frame_fact context.assertions after term
+    else Facts.assume context.assertions after term
   in
   let changed =
     List.filter_map
@@ -335,7 +335,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
           own_bound
       in
       let result_sort = Facts.declare_sort context result_type in
-      Facts.declare context.query (Logic.Function (function_symbol, sorts, result_sort));
+      Facts.declare context.vocabulary (Logic.Function (function_symbol, sorts, result_sort));
       (match (path, own_bound) with
       | Method { name = "model"; receiver = Read; _ }, [ (self, _) ] when self.local = Self ->
           Models.rank_model context
@@ -348,8 +348,8 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
         if List.mem function_symbol context.axiomatizing then begin
           is_limited_call := true;
           let limited = Logic.Symbol.Limited { callee = path; instance } in
-          Facts.declare context.query (Logic.Function (limited, sorts, result_sort));
-          Facts.run_once context.query (Limited_link function_symbol) (fun () ->
+          Facts.declare context.vocabulary (Logic.Function (limited, sorts, result_sort));
+          Facts.run_once context.assertions (Limited_link function_symbol) (fun () ->
               let parameters =
                 List.mapi
                   (fun index sort ->
@@ -358,7 +358,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
               in
               let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
               let applied = Logic.Apply (function_symbol, inputs) in
-              Facts.add_fact context.query
+              Facts.add_fact context.assertions
                 (Logic.forall ~trigger:[ applied ]
                    (parameters, Logic.equal applied (Logic.Apply (limited, inputs)))));
           limited
@@ -367,16 +367,16 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       in
       applied_as := Some (symbol, sorts);
       let term = Logic.Apply (symbol, own_arguments) in
-      Facts.assume context after (Facts.make_in_range result_type term);
+      Facts.assume context.assertions after (Facts.make_in_range result_type term);
       if Facts.find_bounds result_type <> None && is_on_bound_values then
-        Facts.run_once context.query (In_range symbol) (fun () ->
+        Facts.run_once context.assertions (In_range symbol) (fun () ->
             let parameters =
               List.mapi
                 (fun index sort ->
                   (Logic.Symbol.Variable { label = "ranged"; numbers = [ index ] }, sort))
                 sorts
             in
-            Facts.add_fact context.query
+            Facts.add_fact context.assertions
               (Logic.forall
                  ( parameters,
                    Facts.make_in_range result_type
@@ -410,7 +410,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
         match List.assoc_opt passed.position changed with
         | Some term ->
             let valid = Validity.make_validity context after ~assuming:true passed.type_ term in
-            Facts.assume context after
+            Facts.assume context.assertions after
               (match left_valid with Some (left, _) -> Logic.( ==> ) left valid | None -> valid)
         | None -> ())
     values;
@@ -425,15 +425,15 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       | _ -> None
     in
     let make_parameters label sorts =
-      context.query.fresh <- context.query.fresh + 1;
-      let axiom = context.query.fresh in
+      context.vocabulary.fresh <- context.vocabulary.fresh + 1;
+      let axiom = context.vocabulary.fresh in
       List.mapi
         (fun index sort -> (Logic.Symbol.Variable { label; numbers = [ axiom; index ] }, sort))
         sorts
     in
     let find_readable_clause context mark clause inside =
       match snd (Validity.read_specification context inside clause) with
-      | term when not (Facts.mentions_fresh_after context.query mark term) -> Some term
+      | term when not (Facts.mentions_fresh_after context.vocabulary mark term) -> Some term
       | _ -> None
       | exception Facts.Unsupported _ -> None
     in
@@ -446,22 +446,23 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                (Validity.make_validity context outside ~assuming:true ty input))
            own_bound inputs)
     in
-    let axiomatize symbol parameters make =
-      let mark = context.query.fresh in
+    let axiomatize symbol parameters (outside : State.frame) make =
+      let mark = context.vocabulary.fresh in
       let facts = ref [] in
       let axiom = { State.parameters = List.map fst parameters; hypotheses = []; at_calls = [] } in
       let stated =
         make
+          { context with axiomatizing = symbol :: context.axiomatizing }
           {
-            context with
-            axiomatizing = symbol :: context.axiomatizing;
-            scopes = List.map (fun (name, _) -> (name, facts)) parameters @ context.scopes;
-            open_axioms = axiom :: context.open_axioms;
+            outside with
+            scoped_facts =
+              List.map (fun (name, _) -> (name, facts)) parameters @ outside.scoped_facts;
+            open_axioms = axiom :: outside.open_axioms;
           }
       in
       let drop_fresh_terms terms =
         List.filter
-          (fun term -> not (Facts.mentions_fresh_after context.query mark term))
+          (fun term -> not (Facts.mentions_fresh_after context.vocabulary mark term))
           (List.rev terms)
       in
       axiom.hypotheses <- drop_fresh_terms axiom.hypotheses;
@@ -469,7 +470,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
     in
     let record_axiom symbol axiom = Tables.Symbol_table.add context.axioms.axioms_of symbol axiom in
     let add_contract_axiom ~is_triggered symbol sorts =
-      Facts.run_once context.query (Contract_of symbol) (fun () ->
+      Facts.run_once context.assertions (Contract_of symbol) (fun () ->
           let parameters = make_parameters "ensured" sorts in
           let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
           let arguments = List.mapi (fun index input -> (index, input)) inputs in
@@ -483,9 +484,9 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
               makes_obligations = false;
             }
           in
-          let mark = context.query.fresh in
+          let mark = context.vocabulary.fresh in
           let stated, facts, axiom =
-            axiomatize symbol parameters (fun context ->
+            axiomatize symbol parameters outside (fun context outside ->
                 let valid = make_parameters_valid context outside inputs in
                 let parts =
                   List.filter_map
@@ -518,7 +519,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                         | ensures -> Some (part, List.filter_map Fun.id required, ensures))
                     contract.parts
                 in
-                if parts = [] || Facts.mentions_fresh_after context.query mark valid then None
+                if parts = [] || Facts.mentions_fresh_after context.vocabulary mark valid then None
                 else Some (valid, parts))
           in
           match stated with
@@ -527,7 +528,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
               let has_quantifier_through_definitions body =
                 Logic.has_quantifier body
                 || Logic.mentions
-                     (List.of_seq (Tables.Symbol_table.to_seq_keys context.query.definitions))
+                     (List.of_seq (Tables.Symbol_table.to_seq_keys context.vocabulary.definitions))
                      body
               in
               let definition =
@@ -564,8 +565,9 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
               | Some (required, body) ->
                   let unspecified = Logic.Symbol.Unspecified symbol
                   and result_sort = Facts.declare_sort context result_type in
-                  Facts.declare context.query (Logic.Function (unspecified, sorts, result_sort));
-                  Facts.declare context.query
+                  Facts.declare context.vocabulary
+                    (Logic.Function (unspecified, sorts, result_sort));
+                  Facts.declare context.vocabulary
                     (Logic.Definition
                        {
                          symbol;
@@ -578,7 +580,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                              (Logic.Apply (unspecified, inputs));
                        })
               | None ->
-                  Facts.add_fact context.query
+                  Facts.add_fact context.assertions
                     (Logic.forall
                        ~trigger:(if is_triggered then [ applied ] else [])
                        ( parameters,
@@ -681,7 +683,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
           List.iter
             (fun hypothesis -> Amounts.assume_typed context after (substitute hypothesis))
             axiom.hypotheses;
-          List.iter (fun apply_hook -> apply_hook context after substitute) axiom.at_calls)
+          List.iter (fun apply_hook -> apply_hook after substitute) axiom.at_calls)
         (Tables.Symbol_table.find_all context.axioms.axioms_of symbol)
   | _ -> ());
   let compute_change () =
@@ -737,21 +739,22 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
 let make_time_term context frame (ty : Types.ty) term =
   let sort = Facts.declare_sort context ty in
   let symbol = Logic.Symbol.Time sort in
-  Facts.declare context.query (Logic.Function (symbol, [ sort ], Logic.Int));
+  Facts.declare context.vocabulary (Logic.Function (symbol, [ sort ], Logic.Int));
   let time = Logic.Apply (symbol, [ term ]) in
-  Facts.add_frame_fact context frame (Logic.Operation ("<=", [ Logic.int 1; time ]));
+  Facts.add_frame_fact context.assertions frame (Logic.Operation ("<=", [ Logic.int 1; time ]));
   (match ty with
   | Types.Function { costs; _ }
     when List.exists
            (fun (cost : Types.cost) -> cost.resource = Types.Time && cost.bound = Order_of)
            costs ->
-      Facts.add_frame_fact context frame (Logic.equal time (Logic.int 1))
+      Facts.add_frame_fact context.assertions frame (Logic.equal time (Logic.int 1))
   | _ -> ());
   (match List.assoc_opt term context.costs.lambda_times with
   | Some (bound, showing) ->
       context.costs.lambda_times <- List.remove_assoc term context.costs.lambda_times;
       context.report.obligations <- List.rev_append showing context.report.obligations;
-      Facts.add_frame_fact context frame (Logic.equal time (Costs.larger (Logic.int 1) bound))
+      Facts.add_frame_fact context.assertions frame
+        (Logic.equal time (Costs.larger (Logic.int 1) bound))
   | None -> ());
   time
 
@@ -859,7 +862,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
     in
     fixed @ pair_remaining parameters arguments
   in
-  if context.body.terminates && frame.makes_obligations then begin
+  if context.terminates && frame.makes_obligations then begin
     let ends =
       match invocation.callee with
       | Function { path; _ } -> Laws.signature_terminates context path
@@ -1032,7 +1035,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
               Lambdas.apply_function context function_type callee_term
                 (List.map (fun (passed : State.passed) -> passed.term) values)
             in
-            Facts.assume context frame (Facts.make_in_range result_type term);
+            Facts.assume context.assertions frame (Facts.make_in_range result_type term);
             term
         | _ -> Facts.arrive context frame "result" result_type
       in

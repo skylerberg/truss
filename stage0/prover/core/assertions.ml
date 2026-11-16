@@ -110,17 +110,16 @@ let add_bitwise_definitions (query : Logic.query) =
   { query with facts = query.facts @ List.filter_map find_defined (List.rev !bitwise_terms) }
 
 let assert_bit_vector (context : State.context) frame ~named ~origin
-    ~(read : State.frame -> Logic.term) =
-  let saved_facts = context.query.facts and saved_decisions = context.report.decisions in
-  let saved_stated = Tables.Stated_table.copy context.query.stated in
-  context.query.facts <- [];
-  context.report.decisions <- [];
+    ~(read : State.context -> State.frame -> Logic.term) =
+  let context = { context with assertions = Facts.make_assertions () } in
   let isolated =
     {
       frame with
       State.condition = Logic.Boolean true;
       bound = [];
       binders = [];
+      scoped_facts = [];
+      open_axioms = [];
       makes_obligations = false;
     }
   in
@@ -128,15 +127,15 @@ let assert_bit_vector (context : State.context) frame ~named ~origin
     List.fold_left
       (fun (inside : State.frame) (local, ty) ->
         let symbol =
-          Facts.declare_fresh context.query inside "asserted" (Facts.declare_sort context ty)
+          Facts.declare_fresh context.vocabulary inside "asserted" (Facts.declare_sort context ty)
         in
-        Facts.assume context inside (Facts.make_in_range ty symbol);
+        Facts.assume context.assertions inside (Facts.make_in_range ty symbol);
         match local with
         | Core.Self -> { inside with self = Some symbol }
         | _ -> { inside with locals = Locals.add (Core_local local) symbol inside.locals })
       isolated named
   in
-  let term = read isolated in
+  let term = read context isolated in
   let obligation =
     Facts.make_obligation context
       { isolated with makes_obligations = true }
@@ -156,18 +155,14 @@ let assert_bit_vector (context : State.context) frame ~named ~origin
   in
   context.report.obligations <-
     { obligation with query = add_bitwise_definitions obligation.query; cited }
-    :: context.report.obligations;
-  context.query.facts <- saved_facts;
-  context.report.decisions <- saved_decisions;
-  Tables.Stated_table.reset context.query.stated;
-  Tables.Stated_table.iter (Tables.Stated_table.replace context.query.stated) saved_stated
+    :: context.report.obligations
 
 let check_assertion context frame ~origin ~bit_vector term =
   (match bit_vector with
   | Some (named, read) when not (is_test context) ->
       assert_bit_vector context frame ~named ~origin ~read
   | _ -> ());
-  if is_test context || bit_vector <> None then Facts.assume context frame term
+  if is_test context || bit_vector <> None then Facts.assume context.assertions frame term
   else
     Facts.oblige context frame Assertion
       (Facts.locate context frame.source origin)

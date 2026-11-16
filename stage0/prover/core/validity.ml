@@ -5,7 +5,7 @@ let note_place (context : State.context) (frame : State.frame) origin place =
          (fun (first, second) -> first = origin || second = origin)
          context.definition.disjoint
   then begin
-    context.query.indexes <- (origin, place) :: context.query.indexes;
+    context.assertions.indexes <- (origin, place) :: context.assertions.indexes;
     let outside index start stop =
       Logic.(Operation ("<", [ index; start ]) ||| Operation ("<=", [ stop; index ]))
     in
@@ -13,7 +13,8 @@ let note_place (context : State.context) (frame : State.frame) origin place =
       (fun (first, second) ->
         if first = origin || second = origin then
           match
-            (List.assoc_opt first context.query.indexes, List.assoc_opt second context.query.indexes)
+            ( List.assoc_opt first context.assertions.indexes,
+              List.assoc_opt second context.assertions.indexes )
           with
           | Some left, Some right ->
               let apart =
@@ -116,7 +117,7 @@ let rec make_validity (context : State.context) frame ~assuming ?(deep = true) ?
       | _ when not own -> Logic.Boolean true
       | Some _ when Facts.find_constructors context ty = None ->
           let symbol = Logic.Symbol.Valid ty in
-          Facts.declare context.query
+          Facts.declare context.vocabulary
             (Logic.Function (symbol, [ Facts.declare_sort context ty ], Logic.Bool));
           Logic.Apply (symbol, [ term ])
       | Some (source, written) -> (
@@ -154,8 +155,8 @@ let rec make_validity (context : State.context) frame ~assuming ?(deep = true) ?
     in
     Logic.( &&& ) own fields
 
-let assume_valid context frame ty term =
-  Facts.assume context frame (make_validity context frame ~assuming:true ty term)
+let assume_valid (context : State.context) frame ty term =
+  Facts.assume context.assertions frame (make_validity context frame ~assuming:true ty term)
 
 let declare_callback_arguments context frame inputs =
   List.map
