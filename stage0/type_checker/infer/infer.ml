@@ -16,7 +16,12 @@ type tables = Tables.published = {
   callees : Path.t option array;
 }
 
-type checked = Body.checked = { form : Core.t; tables : tables; used_packages : Path.package list }
+type checked = Body.checked = {
+  form : Core.t;
+  tables : tables;
+  used_packages : Path.package list;
+  places_without_own : Core.origin list;
+}
 
 let check lookups (key : Resolve.Names.key) ~checks_body =
   Compiler_bug.run_while_doing ~stage:"Infer" (Resolve.Names.show_key key) (fun () ->

@@ -1,0 +1,7 @@
+fn Cell.into_name(own self) -> String {
+  self.name
+}
+
+fn f(grid: Grid) -> String {
+  grid.cell(0).into_name()
+}
