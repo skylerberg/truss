@@ -1,0 +1,10 @@
+let lower_a: Character = Character"a"
+let lower_z: Character = Character"z"
+
+fn f(letter: Character) -> Int64 {
+  match letter {
+    app::main::lower_a..=app::main::lower_z => 1
+    Character"m" => 2
+    _ => 3
+  }
+}

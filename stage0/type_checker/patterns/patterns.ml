@@ -77,16 +77,23 @@ let field_types context type_ constructor =
 
 let arity context type_ constructor = List.length (fields_of context type_ constructor)
 
+let show_range_bound : Core.range_bound -> string = function
+  | Integer_bound value -> Z.to_string value
+  | Constant_bound path -> Path.show path
+
+let show_range start stop ~inclusive =
+  show_range_bound start ^ (if inclusive then "..=" else "..") ^ show_range_bound stop
+
 let rec space ?replace context (written : Core.pattern) : space =
   match written.kind with
   | Wildcard | Bind _ -> Wild
   | Literal value | Equal_to { value; _ } -> evaluate_pattern_constant context value
   | Range { start; stop; inclusive } -> (
       match (evaluate_range_bound context start, evaluate_range_bound context stop) with
-      | Ok low, Ok high ->
+      | Some low, Some high ->
           let high = if inclusive then high else Z.pred high in
           if Z.gt low high then Alternatives [] else Constructed (Interval (low, high), [])
-      | Error shown, _ | _, Error shown -> Constructed (Opaque shown, []))
+      | _ -> Constructed (Opaque (show_range start stop ~inclusive), []))
   | Variant { variant; fields } -> fielded ?replace context written.type_ (Variant variant) fields
   | Record fields -> fielded ?replace context written.type_ Record fields
   | Alternatives alternatives ->
@@ -100,32 +107,31 @@ and evaluate_pattern_constant context (value : Core.pattern_constant) : space =
   | Boolean_constant value -> Constructed (Boolean value, [])
   | Integer_constant value -> Constructed (Interval (value, value), [])
   | String_constant text -> Constructed (Text text, [])
-  | Named_constant path -> constant context path
+  | Named_constant path ->
+      Option.value
+        (evaluate_named_constant context path)
+        ~default:(Constructed (Opaque (Path.show path), []))
 
-and constant ?(seen = []) context path =
-  let opaque = Constructed (Opaque (Path.show path), []) in
-  if List.exists (Path.equal path) seen then opaque
+and evaluate_named_constant ?(seen = []) context path : space option =
+  if List.exists (Path.equal path) seen then None
   else
     match context.lookups.interface.constant_value path with
-    | Some value -> Constructed (Interval (value, value), [])
+    | Some value -> Some (Constructed (Interval (value, value), []))
     | None -> (
         match Option.bind (context.lookups.interface.names.key path) context.lookups.core with
         | Some { definition = Constant (Some value); _ } ->
-            Option.value ~default:opaque (constant_value context (path :: seen) value)
-        | _ -> opaque)
+            evaluate_constant_expression context (path :: seen) value
+        | _ -> None)
 
-and constant_value context seen (value : Core.expression) : space option =
+and evaluate_constant_expression context seen (value : Core.expression) : space option =
   match value.kind with
-  | Use (Constant { path; _ }) -> (
-      match constant ~seen context path with
-      | Constructed (Opaque _, _) -> None
-      | space -> Some space)
+  | Use (Constant { path; _ }) -> evaluate_named_constant ~seen context path
   | Construct { variant; fields } ->
       let parts =
         List.map
           (fun (_, (field : Core.operand option)) ->
             match field with
-            | Some (Value field) -> constant_value context seen field
+            | Some (Value field) -> evaluate_constant_expression context seen field
             | Some (Place _) | None -> None)
           fields
       in
@@ -140,13 +146,13 @@ and constant_value context seen (value : Core.expression) : space option =
   | String text -> Some (Constructed (Text text, []))
   | _ -> None
 
-and evaluate_range_bound context (bound : Core.range_bound) =
+and evaluate_range_bound context (bound : Core.range_bound) : Z.t option =
   match bound with
-  | Integer_bound value -> Ok value
+  | Integer_bound value -> Some value
   | Constant_bound path -> (
-      match context.lookups.interface.constant_value path with
-      | Some value -> Ok value
-      | None -> Error (Path.show path))
+      match evaluate_named_constant context path with
+      | Some (Constructed (Interval (value, _), [])) -> Some value
+      | _ -> None)
 
 and fielded ?replace context type_ constructor (written : (string * Core.pattern) list) =
   Constructed

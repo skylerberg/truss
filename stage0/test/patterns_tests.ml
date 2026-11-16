@@ -80,7 +80,12 @@ let () =
   test "a variant constant covers its variant" (fun () ->
       expect Fixtures.Patterns.variant_constant_covers_its_variant []);
   test "a constant whose value is not evaluated at compile time covers only itself" (fun () ->
-      expect Fixtures.Patterns.constant_whose_value_is_not_evaluated_at_compile [])
+      expect Fixtures.Patterns.constant_whose_value_is_not_evaluated_at_compile []);
+  test "a range with Character constant ends covers their values" (fun () ->
+      expect Fixtures.Patterns.range_with_character_constant_ends_covers_their
+        [ "patterns.unreachable_arm" ]);
+  test "ranges that share an unevaluated end are distinct" (fun () ->
+      expect Fixtures.Patterns.ranges_that_share_an_unevaluated_end_are_distinct [])
 
 let () =
   let codes_of text = codes (check (setup [ ("app::main", text) ]) (file_of "app::main")) in
