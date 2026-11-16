@@ -1657,6 +1657,12 @@ int32_t t_runtime_close(int32_t descriptor) {
   return close(descriptor);
 }
 
+int32_t t_runtime_dup2(int32_t descriptor, int32_t target) {
+  if (target >= 0 && target < T_DESCRIPTORS)
+    atomic_store(&t_descriptor_registered[target], 0);
+  return dup2(descriptor, target);
+}
+
 static struct t_group *t_group_new(struct t_group *parent) {
   struct t_group *group = malloc(sizeof *group);
   if (group == NULL) t_out_of_memory();

@@ -1,0 +1,18 @@
+test "writes to standard output and standard error"
+  uses Console
+{
+  Console.print_line("to standard output")
+  Console.print_error("to standard error")
+}
+
+test "writes more than a pipe's capacity"
+  uses Console
+{
+  for index in 0..10000 {
+    Console.print_line("line ${index}")
+  }
+}
+
+test "writes nothing" {
+  assert 1 + 1 == 2
+}

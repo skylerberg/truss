@@ -20,7 +20,8 @@ let render_records records =
        (fun index (record : Compile.record) ->
          Printf.sprintf "test %d %s\n" index (Compile.show_outcome record.outcome)
          ^ render_block "message" record.message
-         ^ render_block "echo" record.echo)
+         ^ render_block "echo" record.echo
+         ^ render_block "output" record.output)
        records)
 
 let definition name : Path.t =

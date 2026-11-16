@@ -2087,6 +2087,8 @@ test "config loads with defaults" {
   real implementations of exactly those capabilities, and runs every time the
   suite runs. Any other test is deterministic, and its result is cached until
   its code changes.
+- A test's standard output and standard error are attached to its report
+  as one text, in the order written.
 - A failed test is never retried.
 - A failed `assert` ends the test as failed, and the rest of the test can
   rely on the asserted fact.

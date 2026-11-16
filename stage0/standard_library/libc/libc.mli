@@ -174,6 +174,7 @@ type function_ =
   | Read
   | Open
   | Close
+  | Dup2
   | Errno
   | Clock_gettime
   | Getentropy

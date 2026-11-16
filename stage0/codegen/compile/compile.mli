@@ -40,6 +40,7 @@ type record = {
   outcome : outcome;
   message : string option;
   echo : string option;
+  output : string option;
   microseconds : int;
   cached : bool;
 }

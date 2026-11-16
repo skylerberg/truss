@@ -456,6 +456,7 @@ type record = {
   outcome : outcome;
   message : string option;
   echo : string option;
+  output : string option;
   microseconds : int;
   cached : bool;
 }
@@ -464,12 +465,13 @@ type reader = {
   pending : Buffer.t;
   mutable message : string option;
   mutable echo : string option;
+  mutable output : string option;
   on_start : int -> unit;
   on_record : int -> record -> unit;
 }
 
 let make_reader ?(on_start = ignore) on_record =
-  { pending = Buffer.create 1024; message = None; echo = None; on_start; on_record }
+  { pending = Buffer.create 1024; message = None; echo = None; output = None; on_start; on_record }
 
 let raise_malformed_report text = raise_cannot_build "A test report cannot be read: %s" text
 
@@ -484,7 +486,7 @@ let rec drain reader =
         Buffer.add_string reader.pending (String.drop_first count text)
       in
       match String.split_on_char ' ' line with
-      | [ (("message" | "echo") as label); count ] ->
+      | [ (("message" | "echo" | "output") as label); count ] ->
           let count =
             match int_of_string_opt count with
             | Some parsed_count -> parsed_count
@@ -492,8 +494,10 @@ let rec drain reader =
           in
           if String.length text >= stop + 1 + count + 1 then begin
             let content = String.sub text (stop + 1) count in
-            if label = "message" then reader.message <- Some content
-            else reader.echo <- Some content;
+            (match label with
+            | "message" -> reader.message <- Some content
+            | "echo" -> reader.echo <- Some content
+            | _ -> reader.output <- Some content);
             consume (stop + 1 + count + 1);
             drain reader
           end
@@ -516,12 +520,14 @@ let rec drain reader =
                   outcome;
                   message = reader.message;
                   echo = reader.echo;
+                  output = reader.output;
                   microseconds;
                   cached = false;
                 }
               in
               reader.message <- None;
               reader.echo <- None;
+              reader.output <- None;
               consume (stop + 1);
               reader.on_record number record;
               drain reader
@@ -537,18 +543,21 @@ let parse_report text =
   let reader = make_reader (fun number record -> records := (number, record) :: !records) in
   match
     feed reader text;
-    if Buffer.length reader.pending > 0 || reader.message <> None || reader.echo <> None then
-      raise_malformed_report "it ends partway through a record"
+    if
+      Buffer.length reader.pending > 0
+      || reader.message <> None || reader.echo <> None || reader.output <> None
+    then raise_malformed_report "it ends partway through a record"
   with
   | () -> Ok (List.map snd (List.sort (fun (left, _) (right, _) -> compare left right) !records))
   | exception Cannot_build message -> Error message
 
-let is_cacheable record = record.outcome = Passed && record.message = None && record.echo = None
+let is_cacheable record =
+  record.outcome = Passed && record.message = None && record.echo = None && record.output = None
 
 let find_stored results key =
   Option.map
     (fun microseconds ->
-      { outcome = Passed; message = None; echo = None; microseconds; cached = true })
+      { outcome = Passed; message = None; echo = None; output = None; microseconds; cached = true })
     (Option.bind (results.find key) int_of_string_opt)
 
 let store results key record = results.add key (string_of_int record.microseconds)
@@ -577,6 +586,7 @@ let make_incomplete_record compiler todo_types =
                   (show_position (locate_todo_type compiler path)))
               todo_types));
     echo = None;
+    output = None;
     microseconds = 0;
     cached = false;
   }
