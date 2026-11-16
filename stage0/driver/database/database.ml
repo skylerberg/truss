@@ -2582,6 +2582,15 @@ module For_testing = struct
     | Some reads -> List.sort compare (List.map Part.show reads)
     | None -> Compiler_bug.bug ~stage:"Database" "%s is not computed" shown
 
+  let list_unread_parts database packages =
+    drain database ~through:Recursion_groups packages;
+    Computed_table.fold
+      (fun part _ unread ->
+        match Part_table.find_opt database.readers (Part.Stored (Computed part)) with
+        | Some readers when Computed_table.length readers > 0 -> unread
+        | Some _ | None -> part :: unread)
+      database.reads []
+
   let list_differences hot cold =
     let parts = Stored_table.create 1024 in
     List.iter
