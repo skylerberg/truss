@@ -398,9 +398,6 @@ let () =
         ~fixed:"fn first[Element: Ordered](items: List[Element]) -> Element { todo }";
       error "type Box<Item>(item: Item)" ~code:Angle_brackets ~at:"<"
         ~fixed:"type Box[Item](item: Item)");
-  test "List<String> is parsed as the brackets it means" (fun () ->
-      recovered_statements "let table: Map<String, List<Int64>> = [:]"
-        [ "(let table : Map[String, List[Int64]] (map))" ]);
   test "a comparison after a type is not angle brackets" (fun () ->
       let _, diagnostics = body_of "let small = count as Int64 < limit" in
       if codes diagnostics <> [ "parser.as_conversion" ] then
@@ -452,15 +449,13 @@ let () =
       recovered_statements "let y = a + x ** 2" [ "(let y (+ a error))" ]);
   test "name := value" (fun () ->
       body_error "count := 0" ~code:Short_declaration ~at:":=" ~fixed:"let count = 0";
-      body_error "point.x := 0" ~code:Short_declaration ~at:":=";
-      recovered_statements "count := 0" [ "(let count 0)" ]);
+      body_error "point.x := 0" ~code:Short_declaration ~at:":=");
   test "value |> function" (fun () ->
       body_error "let total = items |> sum" ~code:Pipe_operator ~at:"|>"
         ~fixed:"let total = sum(items)";
       body_error "let total = items\n  |> list::sum" ~code:Pipe_operator ~at:"|>"
         ~fixed:"let total = list::sum(items)";
-      body_error "let total = items |> take(3)" ~code:Pipe_operator ~at:"|>";
-      recovered_statements "let total = items |> sum" [ "(let total (call sum items))" ]);
+      body_error "let total = items |> take(3)" ~code:Pipe_operator ~at:"|>");
   test "a lambda with annotations" (fun () ->
       body_error "let double = fn(x: Int64) { x * 2 }" ~code:Lambda_annotation ~at:": Int64"
         ~fixed:"let double = fn(x) { x * 2 }";
@@ -468,9 +463,7 @@ let () =
         ~fixed:"let double = fn(x) { x * 2 }");
   test "List<String>.new() in an expression" (fun () ->
       body_error "let names = List<String>.new()" ~code:Angle_brackets ~at:"<"
-        ~fixed:"let names = List[String].new()";
-      recovered_statements "let names = List<String>.new()"
-        [ "(let names (call (. ([] List String) new)))" ]);
+        ~fixed:"let names = List[String].new()");
   test "a comparison of uppercase names is not angle brackets" (fun () ->
       let _, diagnostics = body_of "let between = Low < value && value > High" in
       if codes diagnostics <> [] then fail "got [%s]" (String.concat "; " (codes diagnostics)));
@@ -496,9 +489,7 @@ let () =
       body_error "let port = settings.port ?: 80" ~code:Null_coalescing ~at:"?"
         ~fixed:"let port = settings.port.unwrap_or(80)";
       body_error "let total = a + b ?? 0" ~code:Null_coalescing ~at:"?"
-        ~fixed:"let total = (a + b).unwrap_or(0)";
-      recovered_statements "let port = settings.port ?? 80"
-        [ "(let port (call (. (. settings port) unwrap_or) 80))" ]);
+        ~fixed:"let total = (a + b).unwrap_or(0)");
   test "a ? after a call is still a try" (fun () ->
       let _, diagnostics = body_of Fixtures.Parser_rules.after_a_call_is_still_a_try in
       if codes diagnostics <> [] then fail "got [%s]" (String.concat "; " (codes diagnostics)));
@@ -513,12 +504,6 @@ let () =
         ~fixed:"let x = entries.map(fn(entry) { entry.key })";
       body_error "let x = statuses.map { it.code }" ~code:Trailing_lambda ~at:"{ it"
         ~fixed:"let x = statuses.map(fn(element) { element.code })");
-  test "items.map { it.name } is parsed as the call its fix writes" (fun () ->
-      recovered_statements "let names = items.map { it.name }"
-        [ "(let names (call (. items map) (fn (item) (block (. item name)))))" ]);
-  test "parse::<List[Int64]> is parsed as the brackets it means" (fun () ->
-      recovered_statements "let n = parse::<List[Int64]>(text)"
-        [ "(let n (call ([] parse ([] List Int64)) text))" ]);
   test "x as Int64" (fun () ->
       body_error "let n = size as Int64" ~code:As_conversion ~at:"as"
         ~fixed:"let n = Int64.from(size)"

@@ -4,7 +4,6 @@ type piece = Split.piece = { first : int; stop : int }
 
 let split = Split.pieces
 let is_use (tokens : Token.t array) piece = tokens.(piece.first).kind = Keyword Use
-let recovers = Cursor.recovers
 
 let parse_piece (tokens : Token.t array) piece parse =
   let diagnostics = Diagnostic.Collector.create () in
@@ -20,12 +19,43 @@ let parse_piece (tokens : Token.t array) piece parse =
       : _ Syntax.item),
     Diagnostic.Collector.to_list diagnostics )
 
+let overlaps (tokens : Token.t array) piece (span : Source.span) =
+  let start = tokens.(piece.first).span.start and stop = tokens.(piece.stop - 1).span.stop in
+  if span.start = span.stop then start <= span.start && span.start <= stop
+  else span.start < stop && start < span.stop
+
+let with_lexer_recoveries tokens ~lexer_diagnostics ~nested piece (item : _ Syntax.item) =
+  let recovered =
+    List.filter_map
+      (fun ({ span; _ } : Diagnostic.t) ->
+        if
+          overlaps tokens piece span
+          && not (List.exists (fun inner -> overlaps tokens inner span) nested)
+        then
+          Some
+            (Source.Definition_span.of_file ~base:item.base
+               (Source.span (max span.start item.base) (min span.stop item.stop)))
+        else None)
+      lexer_diagnostics
+  in
+  match recovered with
+  | [] -> item
+  | _ ->
+      {
+        item with
+        positions =
+          {
+            item.positions with
+            recovered = List.sort_uniq compare (recovered @ item.positions.recovered);
+          };
+      }
+
 let checked cursor (definition : Syntax.definition) =
   Precedence.definition cursor definition;
   Check.definition cursor definition;
   definition
 
-let parse_methods tokens (container : Syntax.definition) pieces =
+let parse_methods tokens ~lexer_diagnostics (container : Syntax.definition) pieces =
   let kind : Parse_definition.container option =
     match container.kind with
     | Trait _ -> Some In_trait
@@ -37,21 +67,29 @@ let parse_methods tokens (container : Syntax.definition) pieces =
   | Some kind ->
       List.map
         (fun piece ->
-          parse_piece tokens piece (fun cursor ->
-              checked cursor
-                (Parse_definition.method_ cursor ~container:kind ~visibility:container.visibility)))
+          let method_, diagnostics =
+            parse_piece tokens piece (fun cursor ->
+                checked cursor
+                  (Parse_definition.method_ cursor ~container:kind ~visibility:container.visibility))
+          in
+          (with_lexer_recoveries tokens ~lexer_diagnostics ~nested:[] piece method_, diagnostics))
         pieces
   | None -> []
 
-let parse_definition tokens piece : Syntax.top_level * Diagnostic.t list =
+let parse_definition tokens ~lexer_diagnostics piece : Syntax.top_level * Diagnostic.t list =
   let parsed, diagnostics =
     parse_piece tokens piece (fun cursor ->
         let definition, methods = Parse_definition.definition cursor in
         (checked cursor definition, methods))
   in
   let definition, method_pieces = parsed.value in
-  let methods = parse_methods tokens definition method_pieces in
-  ( { definition = { parsed with value = definition }; methods = List.map fst methods },
+  let methods = parse_methods tokens ~lexer_diagnostics definition method_pieces in
+  ( {
+      definition =
+        with_lexer_recoveries tokens ~lexer_diagnostics ~nested:method_pieces piece
+          { parsed with value = definition };
+      methods = List.map fst methods;
+    },
     diagnostics @ List.concat_map snd methods )
 
 let use_path cursor : Syntax.path option =
@@ -92,7 +130,7 @@ let use_after_definition (tokens : Token.t array) piece (line : _ Syntax.item) ~
   Diagnostic.make ~code:(Parser Use_after_definition) (Source.span line.base line.stop)
     "`use` lines come before every definition in a file." ~fixes
 
-let parse tokens =
+let parse tokens ~lexer_diagnostics =
   let rec gather pieces ~uses ~definitions ~diagnostics ~destination =
     match pieces with
     | [] -> (List.rev uses, List.rev definitions, List.concat (List.rev diagnostics))
@@ -112,7 +150,7 @@ let parse tokens =
           ~diagnostics:((line_diagnostics @ moved) :: diagnostics)
           ~destination
     | piece :: rest ->
-        let top_level, definition_diagnostics = parse_definition tokens piece in
+        let top_level, definition_diagnostics = parse_definition tokens ~lexer_diagnostics piece in
         let destination =
           match (definitions, destination) with
           | [], None -> Some top_level.definition.base
@@ -137,7 +175,7 @@ module For_testing = struct
   let split = split
   let is_use = is_use
   let parse_use_line = parse_use_line
-  let parse_definition = parse_definition
+  let parse_definition tokens piece = parse_definition tokens ~lexer_diagnostics:[] piece
 
   let parse_example_definition tokens piece =
     let parsed, diagnostics =
@@ -153,7 +191,8 @@ module For_testing = struct
     let example, container = parsed.value in
     let method_diagnostics =
       match container with
-      | Some (container, pieces) -> List.concat_map snd (parse_methods tokens container pieces)
+      | Some (container, pieces) ->
+          List.concat_map snd (parse_methods tokens ~lexer_diagnostics:[] container pieces)
       | None -> []
     in
     (example, diagnostics @ method_diagnostics)

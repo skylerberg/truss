@@ -118,17 +118,9 @@ develop as well as make it easier to bootstrap the compiler in parts.
   exactly, and literals by value. A fix that would move code edits around
   it instead, as `x as T` becomes `T.from(x)` by inserting `T.from(` and
   replacing ` as T` with `)`.
-- **A file's tree is the tree of its fixed text.** A habit reports the form
-  of another language with its fix, and recovers with the nodes its own
-  tokens write, or with an error node. It never builds the tree its fix
-  writes: such a tree drifted from the fix's text and put nodes out of
-  source order. `Parsed` applies the fixes of the diagnostics where the
-  parser recovered, lexes the fixed text, maps the tokens back to the
-  file's offsets, and parses them again, and that tree is the file's.
-- **The parser's fixes are checked as the lexer's are,** in groups, by
-  `Fixes`. The fix of a diagnostic where the parser did not recover, such
-  as moving a misplaced `use` line, is checked but not applied: the tree is
-  already right, and code a fix moves maps to zero-width spans.
+- **A habit recovers with the nodes its own tokens write,** or with an
+  error node. It never builds the tree its fix writes: such a tree drifted
+  from the fix's text and put nodes out of source order.
 - **The tree holds no positions.** A node holds an id, and its item's span
   table holds the node's span at that index. The parser fills the table as
   it allocates ids, so the definition's id is the last. A definition that

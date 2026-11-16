@@ -85,7 +85,7 @@ let () =
               (In_channel.with_open_bin (workspace_path path) In_channel.input_all)
           in
           let tokens, lexer_diagnostics = Lexer.lex source in
-          let _, parser_diagnostics = Parser.parse tokens in
+          let _, parser_diagnostics = Parser.parse tokens ~lexer_diagnostics in
           if
             lexer_diagnostics = [] && parser_diagnostics = []
             && not (Reference_parser.accepts Reference_parser.file (Array.to_list tokens))
