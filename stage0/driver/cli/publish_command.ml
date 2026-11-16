@@ -2,8 +2,8 @@ module Names = Resolve.Names
 module Version = Registry.Version
 module Lock = Registry.Lock
 
-let unfinished snapshot pipeline packages =
-  let names = Pipeline.names pipeline packages in
+let unfinished snapshot database packages =
+  let names = Database.make_name_lookups database packages in
   List.concat_map
     (fun file ->
       let source = Command_packages.source snapshot packages file in
@@ -30,26 +30,26 @@ let files directory (record : Lock.t) =
   List.filter (fun (path, _) -> path <> "truss.lock") (Registry.Content.published_files directory)
   @ if record = [] then [] else [ ("truss.lock", Lock.print record) ]
 
-let record pipeline snapshot registry (package : Path.package) =
-  let root = Database.root snapshot in
-  let built = Database.registry_packages snapshot in
+let record database snapshot registry (package : Path.package) =
+  let root = Workspace.root snapshot in
+  let built = Workspace.registry_packages snapshot in
   let directory_of name =
     Option.map
       (fun (relative, _) -> if relative = "" then root else Filename.concat root relative)
-      (List.find_opt (fun (_, other) -> other = name) (Database.packages snapshot))
+      (List.find_opt (fun (_, other) -> other = name) (Workspace.packages snapshot))
   in
   let in_registry name = List.find_opt (fun (other, _, _) -> other = name) built in
   let dependencies ~code name =
     let used =
       if code then begin
-        Pipeline.check pipeline [ name ];
-        Option.value ~default:[] (Pipeline.code_packages pipeline name)
+        Database.check database [ name ];
+        Option.value ~default:[] (Database.list_code_packages database name)
       end
       else []
     in
     List.filter
       (fun dependency -> (not code) || List.mem dependency used)
-      (Database.dependency_names snapshot name)
+      (Workspace.dependency_names snapshot name)
   in
   let problems = ref [] in
   let rec closure name : Lock.t =
@@ -91,13 +91,13 @@ let record pipeline snapshot registry (package : Path.package) =
   let entries = closure package in
   (entries, List.sort_uniq compare !problems)
 
-let failed_tests pipeline snapshot packages =
-  let interface = Pipeline.interface_lookups pipeline packages in
+let failed_tests database snapshot packages =
+  let interface = Database.make_interface_lookups database packages in
   let tests =
     List.filter
       (fun (test : Test_command.test) ->
         Interface.Definition.test_uses interface test.path = Some Types.no_capabilities)
-      (Test_command.select snapshot pipeline packages ~paths:[] ~match_:None)
+      (Test_command.select snapshot database packages ~paths:[] ~match_:None)
   in
   List.concat
     (List.map2
@@ -108,7 +108,7 @@ let failed_tests pipeline snapshot packages =
              Printf.sprintf "%s: %s" (Test_command.label test) (Compile.show_outcome record.outcome);
            ])
        tests
-       (Test_command.run_tests pipeline snapshot packages tests))
+       (Test_command.run_tests database snapshot packages tests))
 
 let next_name (package : Path.package) =
   let major = Version.major_of_name package in
@@ -129,9 +129,9 @@ type outcome =
   | Unchanged of Version.t
   | Refused of string list
 
-let decide pipeline snapshot registry (package : Path.package) =
+let decide database snapshot registry (package : Path.package) =
   let name = package in
-  match record pipeline snapshot registry package with
+  match record database snapshot registry package with
   | _, (_ :: _ as problems) -> Refused problems
   | record, [] -> (
       let files = files (Command_packages.directory snapshot package) record in
@@ -140,13 +140,13 @@ let decide pipeline snapshot registry (package : Path.package) =
       | None -> Published { version = Version.first name; files; grows = [] }
       | Some (version, newest) when newest = hash -> Unchanged version
       | Some (((major, minor, patch) as version), _) -> (
-          match Database.published name version with
+          match Workspace.fetch_published name version with
           | Error message -> Refused [ message ]
           | Ok published ->
-              let published_pipeline = Database.pipeline published in
-              let changes = Compatibility.compare ~before:published_pipeline ~after:pipeline name in
-              let before = Pipeline.names published_pipeline [ name ]
-              and after = Pipeline.names pipeline [ name ] in
+              let published_database = Workspace.open_database published in
+              let changes = Compatibility.compare ~before:published_database ~after:database name in
+              let before = Database.make_name_lookups published_database [ name ]
+              and after = Database.make_name_lookups database [ name ] in
               let breaks =
                 List.map
                   (fun (path, description) ->
@@ -200,8 +200,8 @@ let run () =
         Outcome.cannot_run "No registry is set. Set `%s` to the registry's directory."
           Registry.Index.variable
   in
-  let pipeline = Database.pipeline snapshot in
-  let report = Report.gather ~proofs:true pipeline snapshot packages in
+  let database = Workspace.open_database snapshot in
+  let report = Report.gather ~proofs:true database snapshot packages in
   let refuse sentences =
     if json then
       Json.print
@@ -211,7 +211,7 @@ let run () =
     raise (Outcome.Stop 1)
   in
   if not (Report.clean report) then raise (Report.Errors report);
-  (match unfinished snapshot pipeline packages with
+  (match unfinished snapshot database packages with
   | [] -> ()
   | unfinished_code ->
       refuse
@@ -220,10 +220,10 @@ let run () =
              Printf.sprintf "%s:%d:%d: `%s` is not finished code." file line column keyword)
            unfinished_code
         @ [ "Cannot publish a package with a `todo` or an `echo`." ]));
-  (match failed_tests pipeline snapshot packages with
+  (match failed_tests database snapshot packages with
   | [] -> ()
   | failed -> refuse (failed @ [ "Cannot publish a package whose tests fail." ]));
-  match decide pipeline snapshot registry name with
+  match decide database snapshot registry name with
   | Refused sentences -> refuse sentences
   | Unchanged version ->
       if json then

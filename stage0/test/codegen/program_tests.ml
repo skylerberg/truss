@@ -8,8 +8,8 @@ let () =
         { find = Hashtbl.find_opt table; add = (fun key value -> Hashtbl.replace table key value) }
       in
       let run text =
-        let pipeline, compile = load ~results text in
-        match Compile.run_tests compile ~time_limit_ms:2000 (tests_of pipeline) with
+        let database, compile = load ~results text in
+        match Compile.run_tests compile ~time_limit_ms:2000 (tests_of database) with
         | Ok records ->
             ( (if List.for_all (fun (record : Compile.record) -> record.outcome = Passed) records
                then 0
@@ -34,11 +34,11 @@ let () =
       let results : Compile.results =
         { find = Hashtbl.find_opt table; add = (fun key value -> Hashtbl.replace table key value) }
       in
-      let pipeline, compile =
+      let database, compile =
         load ~results Fixtures.Program.external_test_gets_the_real_capabilities_it_uses
       in
       let run () =
-        match Compile.run_tests compile ~time_limit_ms:2000 (tests_of pipeline) with
+        match Compile.run_tests compile ~time_limit_ms:2000 (tests_of database) with
         | Ok records -> records
         | Error message -> failwith message
       in
@@ -574,14 +574,14 @@ let () =
   |> List.iter (fun name ->
       List.iteri
         (fun index text ->
-          let database = example_package [ (example_file, text) ] in
-          if diagnostics (pipeline database) example_file = [] then
+          let packages = example_package [ (example_file, text) ] in
+          if diagnostics (database packages) example_file = [] then
             test
               (Printf.sprintf "%s block %d lowers, and its tests pass" name (index + 1))
               (fun () ->
-                let checked = pipeline database in
+                let checked = database packages in
                 let interface =
-                  Pipeline.interface_lookups checked [ example_file.module_.package ]
+                  Database.make_interface_lookups checked [ example_file.module_.package ]
                 in
                 let functions =
                   List.filter_map
@@ -592,11 +592,11 @@ let () =
                       | Top _, Some { generics = []; specification_only = false; _ } ->
                           Some (Instance.Code { path = declaration.path; type_arguments = [] })
                       | _ -> None)
-                    ((Pipeline.names checked [ example.package ]).declarations example)
+                    ((Database.make_name_lookups checked [ example.package ]).declarations example)
                 in
-                let pipeline, compile = load ~roots:functions text in
+                let database, compile = load ~roots:functions text in
                 List.iter (fun key -> ignore (Compile.For_testing.compiled compile key)) functions;
-                match tests_of pipeline with
+                match tests_of database with
                 | [] -> ()
                 | tests ->
                     String.split_on_char '\n'

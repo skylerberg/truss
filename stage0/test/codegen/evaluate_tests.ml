@@ -3,17 +3,24 @@ open Codegen_support
 let solver =
   lazy (match Solver.find () with Ok solver -> solver | Error message -> failwith message)
 
-let verdicts compile pipeline =
-  let proofs = Pipeline.prove pipeline [ example_file ] in
-  Pipeline.decide
-    ~runs:(Pipeline.run_template_checks compile (Pipeline.template_checks proofs))
-    (Lazy.force solver) proofs
+let run_template_checks compile checks =
+  List.map
+    (fun ({ from_template; literals; clauses } as check : Prover.State.template_check) ->
+      (check, Compile.run_template_check compile ~from_template ~literals ~clauses))
+    checks
 
-let diagnostics compile pipeline = Pipeline.diagnostics (verdicts compile pipeline) example_file
+let verdicts compile database =
+  let proofs = Database.prove database [ example_file ] in
+  Prover.decide
+    ~runs:(run_template_checks compile (Database.list_template_checks proofs))
+    (Database.make_proof_lookups database)
+    (Lazy.force solver) (Database.list_proofs proofs)
+
+let diagnostics compile database = Prover.list_diagnostics (verdicts compile database) example_file
 
 let proven_with_running ?results text =
-  let pipeline, compile = load ?results text in
-  diagnostics compile pipeline
+  let database, compile = load ?results text in
+  diagnostics compile database
 
 let messages diagnostics =
   String.concat "; " (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) diagnostics)
@@ -46,22 +53,22 @@ let () =
       fails_saying "Running it on this template's text failed, so it is not known: todo reached"
         (proven_with_running Fixtures.Evaluate.template_check_that_reaches_a_todo_fails_saying));
   test "a check that reads a template's parts is not run" (fun () ->
-      let pipeline, compile =
+      let database, compile =
         load Fixtures.Evaluate.check_that_reads_a_templates_parts_is_not_run
       in
-      (match Pipeline.template_checks (Pipeline.prove pipeline [ example_file ]) with
+      (match Database.list_template_checks (Database.prove database [ example_file ]) with
       | [] -> ()
       | checks -> fail "%d template checks" (List.length checks));
-      proven (diagnostics compile pipeline));
+      proven (diagnostics compile database));
   test "a template check whose code has errors is not run" (fun () ->
-      let pipeline =
-        pipeline
+      let database =
+        database
           (example_package
              [ (example_file, Fixtures.Evaluate.template_check_whose_code_has_errors_is_not_run) ])
       in
-      let proofs = Pipeline.prove pipeline [ example_file ] in
-      match Pipeline.template_checks proofs with
-      | [] -> fails_saying "which its tag requires." (diagnostics (compile pipeline) pipeline)
+      let proofs = Database.prove database [ example_file ] in
+      match Database.list_template_checks proofs with
+      | [] -> fails_saying "which its tag requires." (diagnostics (compile database) database)
       | checks -> fail "%d template checks" (List.length checks))
 
 let () =
@@ -84,19 +91,19 @@ let () =
 let () =
   test "a template check that timed out is run again on the next check" (fun () ->
       let results = results () in
-      let pipeline, _ =
+      let database, _ =
         load (shout ^ Fixtures.Evaluate.template_check_that_timed_out_is_run_again_on_the)
       in
       fails_saying "failed, so it is not known: it ran past the time limit of 0 ms"
-        (diagnostics (compile ~results ~evaluation_time_limit_ms:0 pipeline) pipeline);
-      proven (diagnostics (compile ~results pipeline) pipeline))
+        (diagnostics (compile ~results ~evaluation_time_limit_ms:0 database) database);
+      proven (diagnostics (compile ~results database) database))
 
 let () =
   test "a state says whether its proof trusts compiled code" (fun () ->
-      let pipeline, compile =
+      let database, compile =
         load (shout ^ Fixtures.Evaluate.state_says_whether_its_proof_trusts_compiled_code)
       in
-      let states = Pipeline.states (verdicts compile pipeline) example_file in
+      let states = Prover.list_states (verdicts compile database) example_file in
       let with_code code =
         List.filter
           (fun (state : Source.span Prover.state) ->

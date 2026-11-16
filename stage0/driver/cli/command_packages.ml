@@ -3,11 +3,11 @@ let write_file = File_system.write_atomically ~durable:false
 
 let load directory =
   let directory = Shown_path.real directory in
-  match Database.take_snapshot directory with
+  match Workspace.take_snapshot directory with
   | Error message -> raise (Outcome.Cannot_run message)
   | Ok (snapshot, selected) ->
       let packages = List.map snd selected in
-      if packages = [] && Database.problems snapshot = [] then
+      if packages = [] && Workspace.problems snapshot = [] then
         Outcome.cannot_run "No package in %s or any directory below it."
           (Shown_path.shown directory);
       (snapshot, packages)
@@ -15,11 +15,11 @@ let load directory =
 let current () = load "."
 
 let retake snapshot =
-  match Database.retake snapshot with
+  match Workspace.retake snapshot with
   | Ok snapshot -> snapshot
   | Error message -> raise (Outcome.Cannot_run message)
 
-let worktree () = load (Database.root (fst (current ())))
+let worktree () = load (Workspace.root (fst (current ())))
 
 let one = function
   | [ package ] -> package
@@ -31,23 +31,25 @@ let one = function
         (String.concat ", " (List.map Path.show_package several))
 
 let directory snapshot name =
-  let root = Database.root snapshot in
-  match List.find_opt (fun (_, other) -> other = name) (Database.packages snapshot) with
+  let root = Workspace.root snapshot in
+  match List.find_opt (fun (_, other) -> other = name) (Workspace.packages snapshot) with
   | Some ("", _) -> root
   | Some (relative, _) -> Filename.concat root relative
   | None ->
       Compiler_bug.bug ~stage:"Command" "%s is not a package of the project"
         (Path.show_package name)
 
-let path snapshot file = Filename.concat (Database.root snapshot) (Database.file_path snapshot file)
-let files snapshot packages = List.concat_map (Database.package_files snapshot) packages
+let path snapshot file =
+  Filename.concat (Workspace.root snapshot) (Workspace.file_path snapshot file)
+
+let files snapshot packages = List.concat_map (Workspace.package_files snapshot) packages
 
 let modules snapshot packages =
   List.sort_uniq compare
     (List.map (fun (file : Path.file) -> file.module_) (files snapshot packages))
 
 let project_dependencies snapshot packages =
-  let project_packages = List.map snd (Database.packages snapshot) in
+  let project_packages = List.map snd (Workspace.packages snapshot) in
   let seen = Hashtbl.create 8 in
   let rec visit name =
     List.iter
@@ -56,22 +58,22 @@ let project_dependencies snapshot packages =
           Hashtbl.replace seen dependency ();
           visit dependency
         end)
-      (Database.dependency_names snapshot name)
+      (Workspace.dependency_names snapshot name)
   in
   List.iter visit packages;
   List.filter (fun name -> Hashtbl.mem seen name && not (List.mem name packages)) project_packages
 
 let program_packages snapshot packages = packages @ project_dependencies snapshot packages
 
-let manifest_problems snapshot pipeline packages =
+let manifest_problems snapshot database packages =
   List.concat_map
     (fun (directory, name) ->
       if List.mem name packages then
         List.map
           (fun problem -> (Project.manifest_file directory, name, problem))
-          (Pipeline.manifest_problems pipeline name)
+          (Database.list_manifest_problems database name)
       else [])
-    (Database.packages snapshot)
+    (Workspace.packages snapshot)
 
 let selected snapshot packages paths =
   match paths with
@@ -94,7 +96,7 @@ let selected snapshot packages paths =
         (files snapshot packages)
 
 let source snapshot packages (file : Path.file) =
-  let source = Database.source snapshot file in
+  let source = Workspace.source snapshot file in
   if List.mem file.module_.package packages then
     Source.create ~path:(Shown_path.shown (path snapshot file)) (Source.text source)
   else source

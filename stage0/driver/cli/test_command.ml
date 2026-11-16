@@ -1,7 +1,7 @@
 type test = { path : Path.t; module_ : Path.module_; name : string; file : string; line : int }
 
-let select snapshot pipeline packages ~paths ~match_ =
-  let names = Pipeline.names pipeline packages in
+let select snapshot database packages ~paths ~match_ =
+  let names = Database.make_name_lookups database packages in
   List.concat_map
     (fun (file : Path.file) ->
       let source = Command_packages.source snapshot packages file in
@@ -177,13 +177,13 @@ let on_progress progress ~build_ended (event : Compile.progress) =
       if record.outcome <> Passed then progress.not_passed <- progress.not_passed + 1;
       draw progress
 
-let run_tests ?rerun ?progress pipeline snapshot packages tests =
+let run_tests ?rerun ?progress database snapshot packages tests =
   if tests = [] then []
   else
     match
       Compile.run_tests ?rerun ?progress
-        (Compiler.create pipeline snapshot packages Development)
-        ~time_limit_ms:(Database.time_limit_ms snapshot)
+        (Compiler.create database snapshot packages Development)
+        ~time_limit_ms:(Workspace.time_limit_ms snapshot)
         (List.map (fun test -> test.path) tests)
     with
     | Ok records -> records
@@ -193,10 +193,10 @@ let run ~paths ~match_ ~timings:show_timings ~rerun =
   let json = Output.json () in
   let started = now_microseconds () in
   let snapshot, packages = Command_packages.current () in
-  let pipeline = Database.pipeline snapshot in
-  let report = Report.gather pipeline snapshot packages in
+  let database = Workspace.open_database snapshot in
+  let report = Report.gather database snapshot packages in
   let checked = now_microseconds () in
-  let tests = select snapshot pipeline packages ~paths ~match_ in
+  let tests = select snapshot database packages ~paths ~match_ in
   if not (Report.clean report) then raise (Report.Errors report);
   let progress =
     {
@@ -215,7 +215,7 @@ let run ~paths ~match_ ~timings:show_timings ~rerun =
       (fun () ->
         run_tests ~rerun
           ~progress:(on_progress progress ~build_ended)
-          pipeline snapshot packages tests)
+          database snapshot packages tests)
   in
   let ended = now_microseconds () in
   let build_end = Option.value !build_ended ~default:ended in

@@ -1,63 +1,62 @@
-type snapshot
+module Part = Part
 
-val take_snapshot : string -> (snapshot * (string * Path.package) list, string) result
-val retake : snapshot -> (snapshot, string) result
-val root : snapshot -> string
-val pipeline : ?checks:bool -> snapshot -> Pipeline.t
-val problems : snapshot -> Project.problem list
-val packages : snapshot -> (string * Path.package) list
-val time_limit_ms : snapshot -> int
-val registry_packages : snapshot -> (Path.package * Registry.Version.t * string) list
-val lock_fix : snapshot -> string option
-val package_files : snapshot -> Path.package -> Path.file list
-val dependency_names : snapshot -> Path.package -> Path.package list
-val source : snapshot -> Path.file -> Source.t
-val file_path : snapshot -> Path.file -> string
-val states : unit -> string list
-val trial : snapshot -> (string * string option) list -> snapshot
-val base_commit : snapshot -> string option -> string option
-val of_commit : snapshot -> string -> (snapshot, string) result
+type t
+type package_database
 
-type side = { base : snapshot; other : snapshot; merged : unit -> (snapshot, string) result }
+val create : ?loaded:package_database list -> ?checks:bool -> Project.package list -> t
+val copy : t -> t
+val read_package_database : t -> Path.package -> package_database
+val update : t -> (Path.file * string option) list -> unit
+val relayout : t -> loaded:package_database list -> Project.package list -> unit
+val propagate : ?on_bug:(Compiler_bug.t -> unit) -> t -> unit
+val list_unsaved : t -> (string * string option) list
+val mark_saved : t -> unit
 
-val branch : snapshot -> string -> (side, string) result
-val other_worktree : snapshot -> string -> (side, string) result
-val other_worktrees : snapshot -> string list
-val published : Path.package -> Registry.Version.t -> (snapshot, string) result
-val objects_directory : unit -> string
-val programs_directory : unit -> string
-val results : kind:Store.result_kind -> (string -> string option) * (string -> string -> unit)
-val flush : unit -> unit
-val store_directory : unit -> string
+val restore :
+  loaded:package_database list -> texts:(Path.file -> string option) -> (string * string) list -> t
 
-type lock_plan = { text : string; before : Registry.Lock.t; after : Registry.Lock.t }
+val check : t -> Path.package list -> unit
+val list_file_diagnostics : t -> Path.file -> Diagnostic.t list
+val list_manifest_problems : t -> Path.package -> Package_checks.manifest_problem list
+val list_code_packages : t -> Path.package -> Path.package list option
+val read_checked_body : t -> Resolve.Names.key -> Infer.checked option
+val read_parsed : t -> Path.file -> Parsed.t
+val make_name_lookups : t -> Path.package list -> Resolve.Names.lookups
+val read_resolved : t -> Resolve.Names.key -> Resolve.resolved option
+val make_interface_lookups : t -> Path.package list -> Interface.Lookups.t
+val make_lowering_requests : t -> Path.package list -> Compile.requests
+val find_main : t -> Path.package -> Path.t option
+val list_callers : t -> viewer:Path.package -> Path.t -> Path.t list
 
-val plan_lock :
-  snapshot ->
-  set:(Path.package * Registry.Version.t option) list ->
-  all:bool ->
-  (lock_plan, string) result
+type read = { dependent : Part.t; dependency : Part.t }
 
-val server_key : string -> string
-val serve : key:string -> handle:(progress:(string -> unit) -> 'request -> 'response) -> unit
+val list_dependencies : t -> Path.t list -> read list
+val list_dependents : t -> Path.t list -> read list
+val list_changes : t -> t -> Part.t list
 
-val call :
-  ?program:string ->
-  ?start_server:bool ->
-  ?key:string ->
-  progress:(string -> unit) ->
-  'request ->
-  ('response, string) result
+type 'a part = Value of 'a | Failed of Diagnostic.in_definition list | Blocked
+type proofs
 
-val servers : unit -> string list
-val stop : unit -> unit
-val wait_until_ended : key:string -> unit
-val reset : unit -> unit
+val prove : t -> Path.file list -> proofs
+val list_holes : proofs -> Path.t -> (Path.file * int) list
+val list_template_checks : proofs -> Prover.State.template_check list
+val list_proofs : proofs -> (Resolve.Names.key * Prover.proof) list
+val make_proof_lookups : t -> Prover.Lookups.t
 
 module For_testing : sig
-  val standard_state : unit -> Pipeline.state
-  val cold_pipeline : snapshot -> Pipeline.t
-  val collect_store : unit -> unit
-  val listen : key:string -> (Unix.file_descr, string) result
-  val interrupt_commit : string -> unit
+  type checker = Resolve | Interface | Infer | Patterns | Usage | Ownership | Package_checks
+
+  val list_diagnostics : checker list -> t -> Path.file -> Diagnostic.t list
+  val read_derived_form : t -> Path.t -> Core.t option
+  val read_core : t -> Path.t -> (Core.t * Types.substitution) option
+  val make_mir_lookups : t -> Path.package -> Mir.lookups
+  val read_ownership : t -> Resolve.Names.key -> (Core.origin * Core.origin) list part
+  val read_proof : proofs -> Resolve.Names.key -> Prover.proof part option
+  val list_reads : t -> string -> string list
+  val list_differences : t -> t -> string list
+
+  type observed = { recomputed : string list; collected : string list }
+
+  val observe : t -> (unit -> unit) -> observed
+  val root : t -> Instance.key -> unit
 end

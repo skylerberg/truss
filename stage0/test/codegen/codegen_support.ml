@@ -1,8 +1,8 @@
 let test = Harness.test
 
-let diagnostics pipeline (file : Path.file) =
-  Pipeline.check pipeline [ file.module_.package ];
-  Pipeline.file_diagnostics pipeline file
+let diagnostics database (file : Path.file) =
+  Database.check database [ file.module_.package ];
+  Database.list_file_diagnostics database file
 
 let fail = Harness.fail
 let expect_string = Harness.expect_string
@@ -182,7 +182,7 @@ let strict =
     ]
 
 let counter = ref 0
-let cache = lazy (Build.cache (Database.objects_directory ()))
+let cache = lazy (Build.cache (Cache.make_objects_directory (Workspace.open_cache ())))
 
 let added_flags =
   Toolchain.split_flags (Option.value (Sys.getenv_opt Toolchain.added_flags_variable) ~default:"")
@@ -218,53 +218,53 @@ let expect_status ?extra ?anchors expected instances =
 
 let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [] }
 let example_file : Path.file = { module_ = example; name = "main" }
-let standard_state = lazy (Database.For_testing.standard_state ())
-let pipeline database = Pipeline.create ~loaded:[ Lazy.force standard_state ] database
+let standard_package_database = lazy (Workspace.For_testing.load_standard_package_database ())
+let database packages = Database.create ~loaded:[ Lazy.force standard_package_database ] packages
 
 let example_package files : Project.package list =
   [ { name = { owner = None; name = "example" }; dependencies = []; files } ]
 
-let compile ?results ?evaluation_time_limit_ms pipeline =
+let compile ?results ?evaluation_time_limit_ms database =
   Compile.create ?results ?evaluation_time_limit_ms
-    (Pipeline.lowering_requests pipeline [ example.package ])
+    (Database.make_lowering_requests database [ example.package ])
     (Lazy.force compiler) (Lazy.force cache) (Lazy.force settings)
 
 let load_files ?results ?(roots = []) files =
-  let database = example_package files in
-  let pipeline = pipeline database in
-  List.iter (Pipeline.For_testing.root pipeline) roots;
+  let packages = example_package files in
+  let database = database packages in
+  List.iter (Database.For_testing.root database) roots;
   List.iter
     (fun ((file : Path.file), text) ->
       let source = Source.create ~path:(Path.show_file file) text in
-      match diagnostics pipeline file with
+      match diagnostics database file with
       | [] ->
           ignore
             (Core_lint.check_file
-               (Pipeline.interface_lookups pipeline [ file.module_.package ])
+               (Database.make_interface_lookups database [ file.module_.package ])
                ~core:(fun key ->
                  Option.map
                    (fun (checked : Infer.checked) -> checked.form)
-                   (Pipeline.read_checked_body pipeline key))
+                   (Database.read_checked_body database key))
                file)
       | diagnostics ->
           fail "the source has diagnostics:\n%s"
             (String.concat "" (List.map (Diagnostic.render source) diagnostics)))
     files;
-  (pipeline, compile ?results pipeline)
+  (database, compile ?results database)
 
 let load ?results ?roots text = load_files ?results ?roots [ (example_file, text) ]
 
-let tests_in pipeline (module_ : Path.module_) =
+let tests_in database (module_ : Path.module_) =
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
       match declaration.path with Test _ -> Some declaration.path | _ -> None)
-    ((Pipeline.names pipeline [ module_.package ]).declarations module_)
+    ((Database.make_name_lookups database [ module_.package ]).declarations module_)
 
-let tests_of pipeline = tests_in pipeline example
+let tests_of database = tests_in database example
 
 let run_source text =
-  let pipeline, compile = load text in
-  match Compile.run_tests compile ~time_limit_ms:2000 (tests_of pipeline) with
+  let database, compile = load text in
+  match Compile.run_tests compile ~time_limit_ms:2000 (tests_of database) with
   | Ok records -> render_records records
   | Error message -> failwith message
 
@@ -294,7 +294,8 @@ let drop_shapes =
     ("Counter", Record [ ("target", Raw (Pointer (Data int32))) ]);
   ]
 
-let standard_interface = lazy (Pipeline.interface_lookups (pipeline []) [ Path.standard_package ])
+let standard_interface =
+  lazy (Database.make_interface_lookups (database []) [ Path.standard_package ])
 
 let standard_context : Monomorphic.context =
   {

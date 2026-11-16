@@ -55,7 +55,8 @@
   positions
   reachable
   build
-  database
+  workspace
+  cache
   project
   standard_library
   interface
@@ -71,7 +72,7 @@
   diagnostic
   source
   compile
-  pipeline
+  database
   components
   prover
   solver

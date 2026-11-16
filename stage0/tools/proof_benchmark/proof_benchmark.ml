@@ -12,17 +12,20 @@ let () =
   let timed =
     List.filter_map
       (fun ((file : Path.file), _) ->
-        let pipeline = Pipeline.create [ standard ] in
-        Pipeline.check pipeline [ file.module_.package ];
-        match Pipeline.file_diagnostics pipeline file with
+        let database = Database.create [ standard ] in
+        Database.check database [ file.module_.package ];
+        match Database.list_file_diagnostics database file with
         | _ :: _ -> None
         | [] ->
             let runs_before = Solver.queries_run solver in
             let start = Unix.gettimeofday () in
             let failed =
               List.length
-                (Pipeline.diagnostics
-                   (Pipeline.decide ~runs:[] solver (Pipeline.prove pipeline [ file ]))
+                (Prover.list_diagnostics
+                   (Prover.decide ~runs:[]
+                      (Database.make_proof_lookups database)
+                      solver
+                      (Database.list_proofs (Database.prove database [ file ])))
                    file)
             in
             Some

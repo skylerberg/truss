@@ -7,7 +7,7 @@
   hashing_tests
   compiler_bug_tests
   process_tests
-  store_tests
+  cache_tests
   resolve_tests
   standard_library_tests
   interface_tests
@@ -51,8 +51,8 @@
   reference_parser
   cbor
   blake3
-  database
-  store
+  workspace
+  cache
   unix
   path
   well_known
@@ -63,7 +63,7 @@
   logic
   solver
   prover
-  pipeline
+  database
   types
   intrinsic
   interface

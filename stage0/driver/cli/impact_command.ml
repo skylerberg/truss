@@ -1,5 +1,5 @@
 module Names = Resolve.Names
-module Part = Pipeline.Part
+module Part = Database.Part
 
 type status = Added | Removed | Changed of string list
 
@@ -8,12 +8,12 @@ type change = {
   status : status;
   before : string option;
   after : string option;
-  read_by : Pipeline.read list;
+  read_by : Database.read list;
 }
 
-let declared snapshot pipeline =
-  let packages = List.map snd (Database.packages snapshot) in
-  let names = Pipeline.names pipeline packages in
+let declared snapshot database =
+  let packages = List.map snd (Workspace.packages snapshot) in
+  let names = Database.make_name_lookups database packages in
   Path.Set.of_list
     (List.concat_map
        (fun package ->
@@ -23,11 +23,13 @@ let declared snapshot pipeline =
            (names.package_declarations package))
        packages)
 
-let signature snapshot pipeline path =
-  Signatures.of_path (Pipeline.names pipeline (List.map snd (Database.packages snapshot))) path
+let signature snapshot database path =
+  Signatures.of_path
+    (Database.make_name_lookups database (List.map snd (Workspace.packages snapshot)))
+    path
 
-let changes ~snapshot ~pipeline ~base_snapshot ~base changed_parts =
-  let own = List.map snd (Database.packages snapshot) in
+let changes ~snapshot ~database ~base_snapshot ~base changed_parts =
+  let own = List.map snd (Workspace.packages snapshot) in
   let by_definition = Hashtbl.create 32 in
   List.iter
     (fun part ->
@@ -37,12 +39,12 @@ let changes ~snapshot ~pipeline ~base_snapshot ~base changed_parts =
             (part :: Option.value (Hashtbl.find_opt by_definition path) ~default:[])
       | Some _ | None -> ())
     changed_parts;
-  let now = declared snapshot pipeline and before = declared base_snapshot base in
+  let now = declared snapshot database and before = declared base_snapshot base in
   let signature_parts = List.filter Signatures.is_signature changed_parts in
   let signature_readers =
     List.filter
-      (fun ({ dependency; _ } : Pipeline.read) -> List.mem dependency signature_parts)
-      (Pipeline.dependents pipeline
+      (fun ({ dependency; _ } : Database.read) -> List.mem dependency signature_parts)
+      (Database.list_dependents database
          (List.sort_uniq Path.compare (List.filter_map Part.definition signature_parts)))
   in
   List.sort
@@ -55,7 +57,7 @@ let changes ~snapshot ~pipeline ~base_snapshot ~base changed_parts =
                path;
                status = Added;
                before = None;
-               after = signature snapshot pipeline path;
+               after = signature snapshot database path;
                read_by = [];
              }
            else if Path.Set.mem path before && not (Path.Set.mem path now) then
@@ -72,10 +74,10 @@ let changes ~snapshot ~pipeline ~base_snapshot ~base changed_parts =
                path;
                status = Changed (List.sort_uniq compare (List.map Part.kind_name parts));
                before = (if is_signature_changed then signature base_snapshot base path else None);
-               after = (if is_signature_changed then signature snapshot pipeline path else None);
+               after = (if is_signature_changed then signature snapshot database path else None);
                read_by =
                  List.filter
-                   (fun ({ dependency; _ } : Pipeline.read) ->
+                   (fun ({ dependency; _ } : Database.read) ->
                      Part.definition dependency = Some path)
                    signature_readers;
              }
@@ -83,10 +85,10 @@ let changes ~snapshot ~pipeline ~base_snapshot ~base changed_parts =
          change :: changes)
        by_definition [])
 
-let tests_changed ~snapshot ~pipeline ~base_snapshot ~base =
-  let own snapshot = List.map snd (Database.packages snapshot) in
+let tests_changed ~snapshot ~database ~base_snapshot ~base =
+  let own snapshot = List.map snd (Workspace.packages snapshot) in
   let before = declared base_snapshot base in
-  let compile = Compiler.lowering_only pipeline (own snapshot)
+  let compile = Compiler.lowering_only database (own snapshot)
   and base_compile = lazy (Compiler.lowering_only base (own base_snapshot)) in
   List.filter_map
     (fun (path : Path.t) ->
@@ -99,20 +101,20 @@ let tests_changed ~snapshot ~pipeline ~base_snapshot ~base =
           if Compile.result_key compile path = base_key then None
           else Some (path, Compile.is_cached compile path)
       | _ -> None)
-    (Path.Set.elements (declared snapshot pipeline))
+    (Path.Set.elements (declared snapshot database))
 
 let status_word = function Added -> "added" | Removed -> "removed" | Changed _ -> "changed"
 
 let reading_definitions (change : change) =
   List.sort_uniq Path.compare
     (List.filter_map
-       (fun ({ dependent; _ } : Pipeline.read) -> Part.definition dependent)
+       (fun ({ dependent; _ } : Database.read) -> Part.definition dependent)
        change.read_by)
 
 let read_by_json read_by =
   Json.List
     (List.filter_map
-       (fun ({ dependent; dependency } : Pipeline.read) ->
+       (fun ({ dependent; dependency } : Database.read) ->
          Option.map
            (fun reader ->
              Json.Object
@@ -169,22 +171,22 @@ let print ~commit changes tests =
 
 let run ~base =
   let snapshot, packages = Command_packages.current () in
-  let pipeline = Database.pipeline snapshot in
-  let report = Report.gather pipeline snapshot packages in
-  match Database.base_commit snapshot base with
+  let database = Workspace.open_database snapshot in
+  let report = Report.gather database snapshot packages in
+  match Workspace.find_base_commit snapshot base with
   | None ->
       Outcome.cannot_run
         "No base commit: name one with --base, or work in a git worktree with a default branch."
   | Some commit -> (
-      match Database.of_commit snapshot commit with
+      match Workspace.read_commit snapshot commit with
       | Error message -> Outcome.cannot_run "%s" message
       | Ok base_snapshot ->
-          let base = Database.pipeline base_snapshot in
+          let base = Workspace.open_database base_snapshot in
           let changes =
-            changes ~snapshot ~pipeline ~base_snapshot ~base (Pipeline.changes pipeline base)
+            changes ~snapshot ~database ~base_snapshot ~base (Database.list_changes database base)
           in
           let tests =
-            if Report.clean report then tests_changed ~snapshot ~pipeline ~base_snapshot ~base
+            if Report.clean report then tests_changed ~snapshot ~database ~base_snapshot ~base
             else []
           in
           if Output.json () then

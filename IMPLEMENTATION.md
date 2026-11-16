@@ -55,7 +55,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
   must not see its consumer's dependencies.** Code that one library alone uses
   is a module of that library, so that nothing else can come to depend on
   it. It stays a library of its own when its short dependency list
-  keeps it independent of a layer, as `store` knows no compiler stage and the
+  keeps it independent of a layer, as `cache` knows no compiler stage and the
   move analysis, `moves`, knows nothing of code generation.
 - **Each library belongs to one area of stage0,** a directory under
   `stage0`. The dependencies between areas form no cycle.
@@ -239,18 +239,18 @@ Every stage of stage0 is tested the same way:
   `stage0/tools/` and are run by hand. Each problem a fuzzer finds becomes a
   focused test of its own.
 - **Tests share one checked standard library.** A test that needs the
-  standard library creates its pipeline over the standard library's stored
-  state, which a test executable loads once from the user's store.
-  A test must not give a new pipeline the library's sources: that parses
+  standard library creates its database over the standard library's stored
+  package database, which a test executable loads once from the user's cache.
+  A test must not give a new database the library's sources: that parses
   and checks the whole library again, so every such test gets slower each
   time the library grows.
 - **A test run reuses the previous run's results.** Two results are
   keyed by their inputs alone, so they hold for every compiler and are
-  kept between runs in the user's store, as the `truss` command
+  kept between runs in the user's cache, as the `truss` command
   keeps them: the solver's answer to a query, as a result of kind
   `solver`, and the object compiled from a file of generated C, in the
-  store's `caches/objects`. A run solves and compiles only what no earlier
-  run did, and CI restores the stores of `main`'s last run.
+  cache's `caches/objects`. A run solves and compiles only what no earlier
+  run did, and CI restores the caches of `main`'s last run.
 - **The standard library's own tests are written in Truss.** Each file of
   `stage0/test/codegen/library/` is a module of tests for one module of the
   library, named after it. `library_tests` builds every file's tests into

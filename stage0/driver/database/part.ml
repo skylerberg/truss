@@ -55,7 +55,7 @@ type t =
 
 let package_of_definition = function
   | Source file | Parsed file | File_declarations file | Import_check file -> file.module_.package
-  | Packages -> Compiler_bug.bug ~stage:"Pipeline" "the set of packages belongs to no package"
+  | Packages -> Compiler_bug.bug ~stage:"Database" "the set of packages belongs to no package"
   | Modules package
   | Dependencies package
   | Namespace package
@@ -102,7 +102,7 @@ let package_of_definition = function
   | Recursion_group path ->
       Path.package path
   | Ground_types _ | Layout _ | Lowered _ | Test_key _ ->
-      Compiler_bug.bug ~stage:"Pipeline" "a part of lowering belongs to the package of its type"
+      Compiler_bug.bug ~stage:"Database" "a part of lowering belongs to the package of its type"
 
 let type_package : Ground.ty -> Path.package = function
   | Named { path; _ } -> Path.package path

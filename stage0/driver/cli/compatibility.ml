@@ -3,7 +3,7 @@ module Environment = Interface.Environment
 
 type change = Breaks of string | Grows of string
 type public_change = { path : Path.t; change : change }
-type side = { pipeline : Pipeline.t; lookups : Interface.Lookups.t }
+type side = { database : Database.t; lookups : Interface.Lookups.t }
 
 let public (side : side) (declaration : Names.declaration) =
   declaration.ordinal = 0
@@ -15,7 +15,7 @@ let declarations (side : side) package = side.lookups.names.package_declarations
 let read_form (side : side) key =
   Option.map
     (fun (checked : Infer.checked) -> checked.form.definition)
-    (Pipeline.read_checked_body side.pipeline key)
+    (Database.read_checked_body side.database key)
 
 let no_contract : Core.contract = { requires = []; ensures = []; decreases = []; costs = [] }
 
@@ -238,8 +238,8 @@ let impls (side : side) package =
     (declarations side package)
 
 let compare ~before ~after package =
-  let before = { pipeline = before; lookups = Pipeline.interface_lookups before [ package ] }
-  and after = { pipeline = after; lookups = Pipeline.interface_lookups after [ package ] } in
+  let before = { database = before; lookups = Database.make_interface_lookups before [ package ] }
+  and after = { database = after; lookups = Database.make_interface_lookups after [ package ] } in
   let old = List.filter (public before) (declarations before package) in
   let now = List.filter (public after) (declarations after package) in
   let public_change path change = { path; change } in

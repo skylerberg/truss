@@ -13,20 +13,20 @@ let standard =
 
 let setup ?dependencies files = Support.setup ?dependencies (standard @ files)
 
-let diagnostics database name =
+let diagnostics packages name =
   let file = file_of name in
-  (match Support.parse_errors database file with
+  (match Support.parse_errors packages file with
   | [] -> ()
   | errors -> fail "the test input does not parse: %s" (String.concat " " errors));
-  Pipeline.For_testing.(diagnostics [ Resolve ]) (Pipeline.create database) file
+  Database.For_testing.(list_diagnostics [ Resolve ]) (Database.create packages) file
 
 let codes = Support.codes
 
 let no_diagnostics files =
-  let database = setup files in
+  let packages = setup files in
   List.iter
     (fun (name, _) ->
-      match diagnostics database name with
+      match diagnostics packages name with
       | [] -> ()
       | reported ->
           fail "%s: %s" name
@@ -34,12 +34,12 @@ let no_diagnostics files =
                (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) reported)))
     files
 
-let check database = Pipeline.For_testing.(diagnostics [ Resolve ]) (Pipeline.create database)
+let check packages = Database.For_testing.(list_diagnostics [ Resolve ]) (Database.create packages)
 let one_diagnostic = Support.one_diagnostic ~setup:(fun files -> setup files) ~check
 
-let name_at database name text occurrence =
+let name_at packages name text occurrence =
   let file = file_of name in
-  let source = Source.text (Support.source database file) in
+  let source = Source.text (Support.source packages file) in
   let offset = Option.get (Substring.For_testing.find ~occurrence source text) in
   if offset < 0 then failwith (Printf.sprintf "no occurrence %d of %S" occurrence text);
   let located =
@@ -47,10 +47,10 @@ let name_at database name text occurrence =
       (fun (declaration : Resolve.Names.declaration) ->
         let key = Resolve.Names.key_of declaration in
         match
-          ( (Support.names database key.module_.package).definition key,
-            (Support.names database key.module_.package).spans key,
-            (Support.names database key.module_.package).place key,
-            Pipeline.resolved (Support.pipeline database) key )
+          ( (Support.names packages key.module_.package).definition key,
+            (Support.names packages key.module_.package).spans key,
+            (Support.names packages key.module_.package).place key,
+            Database.read_resolved (Support.database packages) key )
         with
         | Some definition, Some spans, Some { base; _ }, Some resolved ->
             Option.map
@@ -59,7 +59,7 @@ let name_at database name text occurrence =
                  (fun (name : Syntax.name) -> base + spans.(name.id).start = offset)
                  (Syntax_walk.collect_names spans definition))
         | _ -> None)
-      ((Support.names database file.module_.package).declarations_in file)
+      ((Support.names packages file.module_.package).declarations_in file)
   in
   match located with
   | Some located -> located
@@ -87,18 +87,18 @@ let describe (spans : Source.Definition_span.t array) base (target : Resolve.tar
   | Some (Unknown _) -> "unknown"
 
 let refers ?(others = []) text ~name:(written, occurrence) expected =
-  let database = setup (("app::main", text) :: others) in
-  let name, spans, base, resolved = name_at database "app::main" written occurrence in
+  let packages = setup (("app::main", text) :: others) in
+  let name, spans, base, resolved = name_at packages "app::main" written occurrence in
   let actual = describe spans base resolved.names.(name.id) in
   if actual <> expected then fail "`%s` #%d is %s, not %s" written occurrence actual expected
 
 let refers_to_binding text ~use ~binding =
-  let database = setup [ ("app::main", text) ] in
+  let packages = setup [ ("app::main", text) ] in
   let source = text in
   let binding_offset =
     Option.get (Substring.For_testing.find ~occurrence:(snd binding) source (fst binding))
   in
-  let name, spans, base, resolved = name_at database "app::main" (fst use) (snd use) in
+  let name, spans, base, resolved = name_at packages "app::main" (fst use) (snd use) in
   let actual = describe spans base resolved.names.(name.id) in
   let expected = Printf.sprintf "local at %d" binding_offset in
   if actual <> expected then fail "`%s` is %s, not %s" (fst use) actual expected
@@ -255,17 +255,17 @@ let () =
         "variant Some of standard::option::Option")
 
 let bracket_of text written occurrence =
-  let database = setup [ ("app::main", text) ] in
+  let packages = setup [ ("app::main", text) ] in
   let offset = Option.get (Substring.For_testing.find ~occurrence text written) in
-  let declarations = Support.declarations database (Support.module_of "app::main") in
+  let declarations = Support.declarations packages (Support.module_of "app::main") in
   List.find_map
     (fun (declaration : Resolve.Names.declaration) ->
       let key = Resolve.Names.key_of declaration in
       match
-        ( (Support.names database key.module_.package).definition key,
-          (Support.names database key.module_.package).spans key,
-          (Support.names database key.module_.package).place key,
-          Pipeline.resolved (Support.pipeline database) key )
+        ( (Support.names packages key.module_.package).definition key,
+          (Support.names packages key.module_.package).spans key,
+          (Support.names packages key.module_.package).place key,
+          Database.read_resolved (Support.database packages) key )
       with
       | Some definition, Some spans, Some { base; _ }, Some resolved ->
           let bracket = ref None in
@@ -354,14 +354,14 @@ let () =
       one_diagnostic ~others "use app::shapes\n\nfn f() -> Int64 {\n  shapes::missing::area()\n}\n"
         "resolve.unknown_module");
   test "a file where the parser recovered reports no unused import" (fun () ->
-      let database =
+      let packages =
         setup
           (others
           @ [ ("app::main", "use app::shapes\n\nfn f() -> Int64 {\n  let = shapes::area()\n}\n") ])
       in
       let file = file_of "app::main" in
-      if Support.parse_errors database file = [] then fail "parsed";
-      match Pipeline.For_testing.(diagnostics [ Resolve ]) (Pipeline.create database) file with
+      if Support.parse_errors packages file = [] then fail "parsed";
+      match Database.For_testing.(list_diagnostics [ Resolve ]) (Database.create packages) file with
       | [] -> ()
       | reported -> fail "reported %s" (String.concat "; " (codes reported)));
   test "an import of a module that does not exist is an error" (fun () ->
@@ -386,14 +386,14 @@ let () =
       one_diagnostic Fixtures.Resolve.second_definition_with_one_name_is_an_error
         "resolve.duplicate_definition");
   test "a method's type head names its type" (fun () ->
-      let database = setup [ ("app::main", Fixtures.Resolve.methods_type_head_names_its_type) ] in
+      let packages = setup [ ("app::main", Fixtures.Resolve.methods_type_head_names_its_type) ] in
       let owner = Path.Top { module_ = module_of "app::main"; name = "Counter" } in
       let owner_package = (module_of "app::main").package in
-      match (Support.names database owner_package).members owner "get" with
+      match (Support.names packages owner_package).members owner "get" with
       | [ { path = Method { receiver = Read; _ }; _ } ] -> ()
       | reported -> fail "found %d members" (List.length reported));
   test "a method can be written in another file of its type's package" (fun () ->
-      let database =
+      let packages =
         setup
           [
             ("app::main", "public type Counter(count: Int64)\n");
@@ -402,34 +402,34 @@ let () =
       in
       let owner = Path.Top { module_ = module_of "app::main"; name = "Counter" } in
       let owner_package = (module_of "app::main").package in
-      match (Support.names database owner_package).members owner "get" with
+      match (Support.names packages owner_package).members owner "get" with
       | [ _ ] -> ()
       | reported -> fail "found %d members" (List.length reported));
   test "a body the parser could not read is not resolved" (fun () ->
-      let database =
+      let packages =
         setup [ ("app::main", Fixtures.Resolve.body_the_parser_could_not_read_is_not_resolved) ]
       in
       let file = file_of "app::main" in
-      if Support.parse_errors database file = [] then fail "parsed";
-      match Pipeline.For_testing.(diagnostics [ Resolve ]) (Pipeline.create database) file with
+      if Support.parse_errors packages file = [] then fail "parsed";
+      match Database.For_testing.(list_diagnostics [ Resolve ]) (Database.create packages) file with
       | [] -> ()
       | reported -> fail "resolved the broken body: %s" (String.concat "; " (codes reported)))
 
 let () =
   test "a method in another file of its type's package is resolved, and its import counts"
     (fun () ->
-      let database =
+      let packages =
         setup
           [
             ("app::main", "public type Counter(count: Int64)\n");
             ("app::extra", Fixtures.Resolve.method_in_another_file_of_its_types_package_is_extra);
           ]
       in
-      match codes (diagnostics database "app::extra") with
+      match codes (diagnostics packages "app::extra") with
       | [ "resolve.unknown_name" ] -> ()
       | reported -> fail "found [%s]" (String.concat "; " reported));
   test "an import used only in a part the parser could not read is not unused" (fun () ->
-      let database =
+      let packages =
         setup
           [
             ("app::shapes", "public fn area() -> Int64 { 0 }\n");
@@ -437,8 +437,8 @@ let () =
           ]
       in
       match
-        Pipeline.For_testing.(diagnostics [ Resolve ])
-          (Pipeline.create database) (file_of "app::main")
+        Database.For_testing.(list_diagnostics [ Resolve ])
+          (Database.create packages) (file_of "app::main")
       with
       | [] -> ()
       | reported -> fail "found [%s]" (String.concat "; " (codes reported)));
@@ -455,12 +455,12 @@ let () =
   test "a generic parameter cannot take a prelude variant's name" (fun () ->
       one_diagnostic "fn f[Some](value: Some) {}\n" "resolve.shadowed_name");
   test "a trait whose header did not parse is not resolved" (fun () ->
-      let database =
+      let packages =
         setup [ ("app::main", Fixtures.Resolve.trait_whose_header_did_not_parse_is_not_resolved) ]
       in
       match
-        Pipeline.For_testing.(diagnostics [ Resolve ])
-          (Pipeline.create database) (file_of "app::main")
+        Database.For_testing.(list_diagnostics [ Resolve ])
+          (Database.create packages) (file_of "app::main")
       with
       | [] -> ()
       | reported -> fail "found [%s]" (String.concat "; " (codes reported)))
@@ -484,14 +484,14 @@ let () =
   in
   let uses_both = Fixtures.Resolve.uses_both in
   test "a path into a package with an owner starts with the owner and the name" (fun () ->
-      let database =
+      let packages =
         with_geometry ~dependencies:[ { Path.owner = Some "acme"; name = "geometry" } ] uses_both
       in
-      (match diagnostics database "app::main" with
+      (match diagnostics packages "app::main" with
       | [] -> ()
       | reported -> fail "found [%s]" (String.concat "; " (codes reported)));
       match
-        (Support.names database (file_of "app::main").module_.package).imports
+        (Support.names packages (file_of "app::main").module_.package).imports
           {
             module_ = (file_of "app::main").module_;
             path = Top { module_ = (file_of "app::main").module_; name = "f" };
@@ -501,17 +501,17 @@ let () =
       | [ ("vector", imported) ] when imported = geometry -> ()
       | _ -> fail "imported differently");
   test "a package with an owner that the manifest does not list cannot be named" (fun () ->
-      let database = with_geometry ~dependencies:[] uses_both in
-      match codes (diagnostics database "app::main") with
+      let packages = with_geometry ~dependencies:[] uses_both in
+      match codes (diagnostics packages "app::main") with
       | "resolve.unknown_module" :: _ -> ()
       | reported -> fail "found [%s]" (String.concat "; " reported));
   test "an owner alone names no package" (fun () ->
-      let database =
+      let packages =
         with_geometry
           ~dependencies:[ { Path.owner = Some "acme"; name = "geometry" } ]
           Fixtures.Resolve.owner_alone_names_no_package
       in
-      match codes (diagnostics database "app::main") with
+      match codes (diagnostics packages "app::main") with
       | "resolve.unknown_module" :: _ -> ()
       | reported -> fail "found [%s]" (String.concat "; " reported))
 

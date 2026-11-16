@@ -10,11 +10,11 @@ type hole = {
   blocks : string list;
 }
 
-let of_declaration snapshot packages pipeline (names : Names.lookups)
+let of_declaration snapshot packages database (names : Names.lookups)
     (declaration : Names.declaration) =
   let key = Names.key_of declaration in
   match
-    (names.definition key, names.spans key, names.place key, Pipeline.resolved pipeline key)
+    (names.definition key, names.spans key, names.place key, Database.read_resolved database key)
   with
   | Some definition, Some spans, Some { file; base }, Some resolved ->
       let source = Command_packages.source snapshot packages file in
@@ -33,27 +33,27 @@ let of_declaration snapshot packages pipeline (names : Names.lookups)
         (Inspect.holes spans definition resolved
            (Option.map
               (fun (checked : Infer.checked) -> checked.tables)
-              (Pipeline.read_checked_body pipeline key)))
+              (Database.read_checked_body database key)))
   | _ -> []
 
-let gather snapshot packages pipeline paths =
-  let names = Pipeline.names pipeline packages in
+let gather snapshot packages database paths =
+  let names = Database.make_name_lookups database packages in
   List.concat_map
     (fun file ->
       List.concat_map
         (fun (declaration : Names.declaration) ->
           if declaration.ordinal = 0 then
-            of_declaration snapshot packages pipeline names declaration
+            of_declaration snapshot packages database names declaration
           else [])
         (names.declarations_in file))
     (Command_packages.selected snapshot packages paths)
 
-let with_blocks snapshot packages pipeline holes =
+let with_blocks snapshot packages database holes =
   let roots =
     (match Program_command.mains snapshot packages with [ main ] -> [ ("main", main) ] | _ -> [])
     @ List.map
         (fun (test : Test_command.test) -> ("test " ^ Test_command.label test, test.path))
-        (Test_command.select snapshot pipeline packages ~paths:[] ~match_:None)
+        (Test_command.select snapshot database packages ~paths:[] ~match_:None)
   in
   let callers = Hashtbl.create 16 in
   let calls (root : Path.t) definition =
@@ -62,13 +62,13 @@ let with_blocks snapshot packages pipeline holes =
       match Hashtbl.find_opt callers (viewer, definition) with
       | Some reached -> reached
       | None ->
-          let reached = Pipeline.callers pipeline ~viewer definition in
+          let reached = Database.list_callers database ~viewer definition in
           Hashtbl.replace callers (viewer, definition) reached;
           reached
     in
     List.exists (Path.equal root) reached
   in
-  let compile = lazy (Compiler.lowering_only pipeline packages) in
+  let compile = lazy (Compiler.lowering_only database packages) in
   let todo_types = Hashtbl.create 16 in
   let reaches_type root definition =
     let reached =
@@ -124,12 +124,12 @@ let print hole =
 
 let run ~paths =
   let snapshot, packages = Command_packages.current () in
-  let pipeline = Database.pipeline snapshot in
-  let report = Report.gather pipeline snapshot packages in
+  let database = Workspace.open_database snapshot in
+  let report = Report.gather database snapshot packages in
   let holes =
-    match gather snapshot packages pipeline paths with
+    match gather snapshot packages database paths with
     | [] -> []
-    | holes -> with_blocks snapshot packages pipeline holes
+    | holes -> with_blocks snapshot packages database holes
   in
   if Output.json () then
     Json.print (Report.document report [ ("holes", Json.List (List.map to_json holes)) ])

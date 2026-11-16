@@ -22,11 +22,11 @@
   emit_c
   unicode
   compile
-  pipeline
+  database
   solver
   prover
-  database
-  store
+  workspace
+  cache
   project
   types
   infer

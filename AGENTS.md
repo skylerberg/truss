@@ -86,7 +86,7 @@ It does not mean everyday vocabulary.
    value is, such as `found_type` against `expected_type`.
 
    Do not use a letter where the value has a name: write `builder`, not
-   `b`; `store`, not `t`; `Types.ty`, not `T.ty`. A letter in place of a
+   `b`; `cache`, not `t`; `Types.ty`, not `T.ty`. A letter in place of a
    name says nothing about the value, and the next author copies it.
 
    A letter is the right name where it is the convention, and a longer
@@ -96,7 +96,7 @@ It does not mean everyday vocabulary.
    |---|---|
    | Mathematics: coordinates, real arguments, counts in a formula | `x`, `y`, `n` |
    | An index in a quantifier or a short loop | `forall i in 0..n`, `i < j` |
-   | A module's main type, by the OCaml convention | `type t`, `Store.t` |
+   | A module's main type, by the OCaml convention | `type t`, `Cache.t` |
    | A type variable | `'a`, `'value` |
    | A name a published specification gives, so the code reads against it | SHA-2's `a` to `h` |
    | A test's program, where the name stands for nothing | `fn f(x: Int64)` |
@@ -120,11 +120,11 @@ entry module of an executable needs none: dune gives it an empty one.
 
 Test through the public interface. A test is not a user for this rule: an
 export that only tests read hides dead code from the compiler as surely as
-a missing `.mli`. When a test needs an internal value, such as an engine's
-log or a printer of an intermediate form, export that value in a
-`For_testing` submodule, and only the values the tests read, never a whole
-module. CI rejects a use of `For_testing` outside `stage0/test` and
-`stage0/tools`.
+a missing `.mli`. When a test needs an internal value, such as the
+database's log of computed parts or a printer of an intermediate form,
+export that value in a `For_testing` submodule, and only the values the
+tests read, never a whole module. CI rejects a use of `For_testing` outside
+`stage0/test` and `stage0/tools`.
 
 ## Testing
 

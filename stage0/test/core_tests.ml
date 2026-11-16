@@ -1,10 +1,10 @@
 open Harness
 open Support
 
-let core_of database key =
+let core_of packages key =
   Option.map
     (fun (checked : Infer.checked) -> checked.form)
-    (Pipeline.read_checked_body (pipeline database) key)
+    (Database.read_checked_body (database packages) key)
 
 type form = { core : Core.t; names : (Core.local, string) Hashtbl.t }
 
@@ -71,14 +71,14 @@ and argument form (passed : Core.argument) =
   | Default -> "default"
 
 let definition_form text name =
-  let database = setup [ ("app::main", text) ] in
+  let packages = setup [ ("app::main", text) ] in
   let file = file_of "app::main" in
   (match
      List.map
        (fun message -> Diagnostic.make ~code:(Types Mismatch) (Source.span 0 0) message)
-       (parse_errors database file)
-     @ Pipeline.For_testing.(diagnostics [ Resolve; Interface; Infer ])
-         (Support.pipeline database) file
+       (parse_errors packages file)
+     @ Database.For_testing.(list_diagnostics [ Resolve; Interface; Infer ])
+         (Support.database packages) file
    with
   | [] -> ()
   | reported ->
@@ -90,14 +90,14 @@ let definition_form text name =
       (fun (declaration : Resolve.Names.declaration) ->
         let key = Resolve.Names.key_of declaration in
         if Path.show key.path = "app::main::" ^ name then
-          Option.map (fun core -> (key, core)) (core_of database key)
+          Option.map (fun core -> (key, core)) (core_of packages key)
         else None)
-      ((Support.names database file.module_.package).declarations_in file)
+      ((Support.names packages file.module_.package).declarations_in file)
   in
   match definition with
   | Some (key, core) ->
       Core_lint.check
-        (Pipeline.interface_lookups (pipeline database) [ key.module_.package ])
+        (Database.make_interface_lookups (database packages) [ key.module_.package ])
         key core;
       form_of core
   | None -> failwith (Printf.sprintf "`%s` has no core form" name)
@@ -159,9 +159,9 @@ let () =
     (fun statement ->
       test (Printf.sprintf "`%s` on a hole has a core form" statement) (fun () ->
           no_diagnostics
-            ~check:(fun database module_ ->
-              Pipeline.For_testing.(diagnostics [ Resolve; Interface; Infer ])
-                (Support.pipeline database) module_)
+            ~check:(fun packages module_ ->
+              Database.For_testing.(list_diagnostics [ Resolve; Interface; Infer ])
+                (Support.database packages) module_)
             [
               ( "app::main",
                 "type Config(port: Int64)\n\n\
@@ -226,13 +226,13 @@ let () =
   test "a call's `uses` and a lambda's type contain the inferred set, not the callee's parameter"
     (fun () ->
       let text = apply ^ Fixtures.Core.calls_uses_and_a_lambdas_type_contain_the_inferred in
-      let database = setup [ ("app::main", text) ] in
+      let packages = setup [ ("app::main", text) ] in
       let actual = ref [] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
           let key = Resolve.Names.key_of declaration in
           if Path.show key.path = "app::main::g" then
-            match core_of database key with
+            match core_of packages key with
             | Some form ->
                 Core_walk.definition
                   {
@@ -249,18 +249,18 @@ let () =
                   }
                   form.definition
             | None -> fail "no core form")
-        (Support.declarations database (Support.module_of "app::main"));
+        (Support.declarations packages (Support.module_of "app::main"));
       if List.sort compare !actual <> [ "(fn() uses Console)"; "needs {Console}" ] then
         fail "found [%s]" (String.concat "; " !actual));
   test "a capability parameter in a result type is inferred separately for each call" (fun () ->
       let text = Fixtures.Core.capability_parameter_in_a_result_type_is_inferred in
-      let database = setup [ ("app::main", text) ] in
+      let packages = setup [ ("app::main", text) ] in
       let actual = ref [] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
           let key = Resolve.Names.key_of declaration in
           if Path.show key.path = "app::main::g" then
-            match core_of database key with
+            match core_of packages key with
             | Some form ->
                 Core_walk.definition
                   {
@@ -274,21 +274,21 @@ let () =
                   }
                   form.definition
             | None -> fail "no core form")
-        (Support.declarations database (Support.module_of "app::main"));
+        (Support.declarations packages (Support.module_of "app::main"));
       if List.sort compare !actual <> [ "first: (fn() uses Console)"; "second: (fn() uses Clock)" ]
       then fail "found [%s]" (String.concat "; " !actual))
 
 let () =
   test "a node's origin gives its source span" (fun () ->
       let text = Fixtures.Core.nodes_origin_gives_its_source_span in
-      let database = setup [ ("app::main", text) ] in
+      let packages = setup [ ("app::main", text) ] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
           let key = Resolve.Names.key_of declaration in
           match
-            ( core_of database key,
-              (Support.names database key.module_.package).spans key,
-              (Support.names database key.module_.package).text key )
+            ( core_of packages key,
+              (Support.names packages key.module_.package).spans key,
+              (Support.names packages key.module_.package).text key )
           with
           | Some form, Some spans, Some written ->
               let actual = ref [] in
@@ -307,7 +307,7 @@ let () =
                 form.definition;
               if !actual <> [ "total += item" ] then fail "found [%s]" (String.concat "; " !actual)
           | _ -> fail "no core form")
-        (Support.declarations database (Support.module_of "app::main")))
+        (Support.declarations packages (Support.module_of "app::main")))
 
 let () =
   let applied form =
@@ -377,22 +377,22 @@ let () =
     [ "time(standard::core::Equal.equal) for Element by a bound" ];
   test "in a trait, `time(Self.method)` names the trait's own method" (fun () ->
       no_diagnostics
-        ~check:(fun database module_ ->
-          Pipeline.For_testing.(diagnostics [ Resolve; Interface; Infer ])
-            (Support.pipeline database) module_)
+        ~check:(fun packages module_ ->
+          Database.For_testing.(list_diagnostics [ Resolve; Interface; Infer ])
+            (Support.database packages) module_)
         [ ("app::main", Fixtures.Core.in_a_trait_time_self_method_names_the_traits_own) ])
 
 let () =
   test "the origin of a cost is its cost clause" (fun () ->
       let text = Fixtures.Core.origin_of_a_cost_is_its_cost_clause in
-      let database = setup [ ("app::main", text) ] in
+      let packages = setup [ ("app::main", text) ] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
           let key = Resolve.Names.key_of declaration in
           match
-            ( core_of database key,
-              (Support.names database key.module_.package).spans key,
-              (Support.names database key.module_.package).text key )
+            ( core_of packages key,
+              (Support.names packages key.module_.package).spans key,
+              (Support.names packages key.module_.package).text key )
           with
           | ( Some { definition = Function { contract = { costs = [ cost ]; _ }; _ }; _ },
               Some spans,
@@ -401,10 +401,10 @@ let () =
               let quoted = String.sub written span.start (span.stop - span.start) in
               if quoted <> "cost time O(items.length())" then fail "found `%s`" quoted
           | _ -> fail "no core form with exactly one cost")
-        (Support.declarations database (Support.module_of "app::main")))
+        (Support.declarations packages (Support.module_of "app::main")))
 
 let () =
-  let database = setup [] in
+  let packages = setup [] in
   let forms = ref 0 in
   List.iter
     (fun ((file : Path.file), _) ->
@@ -414,15 +414,15 @@ let () =
           forms :=
             !forms
             + Core_lint.check_file
-                (Pipeline.interface_lookups (pipeline database) [ file.module_.package ])
-                ~core:(core_of database) file))
+                (Database.make_interface_lookups (database packages) [ file.module_.package ])
+                ~core:(core_of packages) file))
     Standard_library.files;
   test "the standard library has core forms" (fun () ->
       if !forms < 500 then fail "only %d of its definitions have one" !forms)
 
 let () =
   test "a `todo` type has no derived core form" (fun () ->
-      let database = setup [ ("app::main", "type Later = todo\n  derives Equal\n") ] in
+      let packages = setup [ ("app::main", "type Later = todo\n  derives Equal\n") ] in
       let path : Path.t =
         Method
           {
@@ -436,13 +436,15 @@ let () =
             receiver = Read;
           }
       in
-      if Pipeline.For_testing.derived (pipeline database) path <> None then
+      if Database.For_testing.read_derived_form (database packages) path <> None then
         fail "it has a core form");
   test
     "every method of a derived impl in the standard library has a core form that satisfies the \
      invariants" (fun () ->
-      let database = setup [] in
-      let interface = Pipeline.interface_lookups (pipeline database) [ Path.standard_package ] in
+      let packages = setup [] in
+      let interface =
+        Database.make_interface_lookups (database packages) [ Path.standard_package ]
+      in
       let derived =
         List.filter_map
           (fun (_, (impl : Path.t)) -> match impl with Derived _ -> Some impl | _ -> None)
@@ -468,7 +470,7 @@ let () =
               List.iter
                 (fun (name, receiver) ->
                   let path : Path.t = Method { owner = impl; name; receiver } in
-                  match Pipeline.For_testing.derived (pipeline database) path with
+                  match Database.For_testing.read_derived_form (database packages) path with
                   | Some form -> (
                       match impl with
                       | Derived { type_ = Top { module_; _ }; _ } ->
@@ -493,14 +495,14 @@ let () =
     }
   in
   let core_of_method name =
-    let database = setup [ ("app::main", text) ] in
+    let packages = setup [ ("app::main", text) ] in
     let both_package = Path.package both in
     let parameter : Types.parameter = { owner = both; name = "Value" } in
     let bounds (actual : Types.parameter) = if actual = parameter then [ described ] else [] in
     let owner =
       match
         Interface.Impls.implements
-          (Pipeline.interface_lookups (pipeline database) [ both_package ])
+          (Database.make_interface_lookups (database packages) [ both_package ])
           ~bounds
           (Types.named both [ Types.Parameter parameter ])
           described
@@ -509,8 +511,7 @@ let () =
       | _ -> failwith "no impl"
     in
     match
-      Pipeline.For_testing.core_of_path (pipeline database)
-        (Method { owner; name; receiver = Read })
+      Database.For_testing.read_core (database packages) (Method { owner; name; receiver = Read })
     with
     | Some (form, substitution) ->
         ( form_of form,
@@ -536,12 +537,12 @@ let () =
         [ Printf.sprintf "add(%s, %s)" describe describe; "Self = Both[Value]" ]
         (observed "twice"));
   test "a method of a derived impl has the generated core form" (fun () ->
-      let database = setup [ ("app::main", text) ] in
+      let packages = setup [ ("app::main", text) ] in
       let owner : Path.t = Derived { type_ = both; trait = Well_known.path Equal } in
       match
-        ( Pipeline.For_testing.core_of_path (pipeline database)
+        ( Database.For_testing.read_core (database packages)
             (Method { owner; name = "equal"; receiver = Read }),
-          Pipeline.For_testing.core_of_path (pipeline database)
+          Database.For_testing.read_core (database packages)
             (Method { owner; name = "not_equal"; receiver = Read }) )
       with
       | Some (_, []), Some (_, [ _ ]) -> ()

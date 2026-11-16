@@ -1922,19 +1922,18 @@ The database stores three relationships:
 ### Propagation
 
 The changes the files hold since the last propagation are one *change set*.
-The driver parses each changed file and gives its definitions to the
-database. The database compares each definition with its stored tree,
-ignoring positions, and marks stale every part that read a tree that
-changed. The driver then repeats three steps until no part is stale:
+The workspace gives the database the text of each changed file. The
+database parses each changed file, and compares each definition with its
+stored tree, ignoring positions. It marks stale the readers of every
+changed tree. It then repeats three steps until no part is stale:
 
-1. It takes the next stale part from the database.
+1. It takes the next stale part.
 2. It calls the stage that computes the part, with a record of lookups.
-3. It gives the result to the database. The database replaces the part's
-   recorded reads with the reads the lookups made, and compares the result
-   with the stored part. If the two differ, it stores the result and marks
-   stale every part that read it.
+3. It replaces the part's recorded reads with the reads the lookups made,
+   and compares the result with the stored part. If the two differ, it
+   stores the result and marks stale every part that read it.
 
-The database hands out stale parts in the order of the stages, and within a
+The database takes stale parts in the order of the stages, and within a
 stage in the order of dependencies, so a lookup never reads a stale part. If
 one change set edits both `Point` and `Segment`, which holds a `Point`, the
 type facts of `Point` are computed before those of `Segment`, and both
@@ -1992,9 +1991,11 @@ every part that a lookup returns current. Since no stage can start a
 computation, no stage can start a scan: the cost of an edit follows from the
 relationships the database stores and from the lookups each stage has.
 
-**The database calls nothing.** The driver calls the parser, the database,
-the stages, and the test runner. A stage depends on the types of the data it
-reads, not on the stages that produce that data, and not on the database.
+**No stage calls the database.** The database calls the parser and the
+stages. The command line runs the solver through the prover, and the tests
+through code generation; neither runs inside the database. A stage depends
+on the types of the data it reads, not on the stages that produce that
+data, and not on the database.
 
 | Rule | Reason |
 |---|---|
@@ -2050,13 +2051,16 @@ or the contract, whichever holds its syntax.
 
 ### Caches
 
-Three results are cached in the user's store, each by its whole input:
+The user's cache holds these results and no others, each keyed by its whole
+input:
 
 | Result | Key |
 |---|---|
 | A solver answer | The query's text, whose symbols are numbered in order of appearance |
 | An object file | The C text, the C compiler, and its flags |
 | A test result | The test's key: the code generator's version, the target system, the flags, and a hash of the code the test reaches, in which each reference is numbered |
+| The database of the standard library or of a registry package | The package's content hash, the content hashes of the versions selected for its dependencies, and the compiler |
+| A fetched registry package | Its content hash |
 
 A cache never makes a result wrong: deleting it only makes the next build
 slower. Every worktree and CI share the caches. The database itself caches
@@ -2064,13 +2068,23 @@ nothing, so a revert or a branch switch is a change to the files like any
 other. The database computes the cheap stages again, and the solver, the C
 compiler, and the tests are cache hits.
 
+The cache's directory also holds two kinds of file that are not results.
+The background process and its clients both use them. The two processes can
+have different environments, so neither process's `$TMPDIR` is sure to be
+reachable by the other:
+
+| File | Reason |
+|---|---|
+| A built program, until the process that runs it exits | The background process builds `truss run`'s program, and the client runs it. |
+| The background processes' sockets, locks, and logs, and the identities of `truss` executables | Every client of a project must find the one process that owns the project's database. `truss clean` stops every background process before it deletes the directory. |
+
 ### Where the database lives
 
 | State | Place | Reason |
 |---|---|---|
 | A project's database | `.truss/` in the project's root, which git ignores | It is deleted with its worktree. `cp -r` gives a new worktree its start, and the first propagation brings it up to date with the files that differ. |
-| The caches | The user's store | They are keyed by content, so every worktree and CI share them. |
-| The database of the standard library and of each registry package | The user's store, keyed by the package's content hash, the content hashes of the versions selected for its dependencies, and the compiler | A package's facts are a function of its sources and its dependencies' sources. Nothing downstream adds to them: an `impl` lives with its trait or its type, and a call sees only the traits its own package can see. |
+| The user's cache | `$TRUSS_CACHE`, else `$XDG_CACHE_HOME/truss`, else `~/.cache/truss` | Its results are keyed by content, so every worktree and CI share them. |
+| The database of the standard library and of each registry package | The user's cache | A package's facts are a function of its sources and its dependencies' sources. Nothing downstream adds to them: an `impl` lives with its trait or its type, and a call sees only the traits its own package can see. |
 
 | Rule | Reason |
 |---|---|

@@ -7,8 +7,8 @@ let source = Fixtures.Shared.shared_probe
 
 let loaded =
   lazy
-    (let pipeline =
-       Pipeline.create
+    (let database =
+       Database.create
          [
            {
              name = Path.standard_package;
@@ -17,23 +17,23 @@ let loaded =
            };
          ]
      in
-     Pipeline.For_testing.root pipeline
+     Database.For_testing.root database
        (Program_main (Top { module_ = probe.module_; name = "main" }));
      let text = Source.create ~path:(Path.show_file probe) source in
-     (match diagnostics pipeline probe with
+     (match diagnostics database probe with
      | [] -> ()
      | diagnostics ->
          fail "the source has diagnostics:\n%s"
            (String.concat "" (List.map (Diagnostic.render text) diagnostics)));
-     ( pipeline,
+     ( database,
        Compile.create
-         (Pipeline.lowering_requests pipeline [ Path.standard_package ])
+         (Database.make_lowering_requests database [ Path.standard_package ])
          (Lazy.force compiler) (Lazy.force cache) (Lazy.force settings) ))
 
 let () =
   test "shared values are updated, copied, and dropped without a leak" (fun () ->
-      let pipeline, compile = Lazy.force loaded in
-      match Compile.run_tests compile ~time_limit_ms:2000 (tests_in pipeline probe.module_) with
+      let database, compile = Lazy.force loaded in
+      match Compile.run_tests compile ~time_limit_ms:2000 (tests_in database probe.module_) with
       | Ok records ->
           expect_string
             ~expected:(String.concat "" (List.init 5 (Printf.sprintf "test %d passed\n")))
@@ -65,8 +65,8 @@ let () =
   test
     "Shared's operations need Tasks except directly in a method of a capability's impl, and its \
      value must be Storable" (fun () ->
-      let pipeline =
-        Pipeline.create
+      let database =
+        Database.create
           [
             {
               name = Path.standard_package;
@@ -82,7 +82,7 @@ let () =
             ( Diagnostic.Code.name diagnostic.code,
               String.sub text diagnostic.span.start (diagnostic.span.stop - diagnostic.span.start)
             ))
-          (diagnostics pipeline checks)
+          (diagnostics database checks)
       in
       let expected =
         [

@@ -1,0 +1,20 @@
+(library
+ (name workspace)
+ (libraries
+  unix
+  compiler_bug
+  blake3
+  cbor
+  cache
+  path
+  source
+  manifest
+  project
+  diagnostic
+  file_system
+  process
+  standard_library
+  compiler_version
+  database
+  registry
+  watcher))

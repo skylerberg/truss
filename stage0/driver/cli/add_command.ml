@@ -30,7 +30,7 @@ let run ~names =
       Outcome.cannot_run "%s:%d: %s" (Shown_path.shown manifest) line message
   in
   if with_entries <> written then Command_packages.write_file manifest with_entries;
-  match Database.plan_lock (Command_packages.retake snapshot) ~set:wanted ~all:false with
+  match Workspace.plan_lock (Command_packages.retake snapshot) ~set:wanted ~all:false with
   | Error message ->
       if with_entries <> written then Command_packages.write_file manifest written;
       Outcome.cannot_run "%s" message

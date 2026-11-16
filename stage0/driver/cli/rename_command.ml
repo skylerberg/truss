@@ -37,7 +37,7 @@ let in_package packages from_ =
         "Only the definitions of this project's packages can be renamed, and `%s` is not in one."
         from_
 
-let target_of snapshot pipeline packages from_ =
+let target_of snapshot database packages from_ =
   let { Path.package; modules = names }, member = in_package packages from_ in
   let package_name = Path.show_package package in
   if member = None && module_exists snapshot packages { package; modules = names } then
@@ -54,7 +54,7 @@ let target_of snapshot pipeline packages from_ =
                 ->
                   Path.equal owner other_owner && name = other_name
               | candidate, path -> Path.equal candidate path)
-            (List.concat_map (Pipeline.names pipeline packages).declarations
+            (List.concat_map (Database.make_name_lookups database packages).declarations
                (Command_packages.modules snapshot packages))
         in
         let path : Path.t =
@@ -83,21 +83,24 @@ let new_name ~from_ to_ =
   if name = "" then Outcome.cannot_run "`%s` gives no new name." to_;
   name
 
-let occurrences pipeline snapshot packages =
-  let names = Pipeline.names pipeline packages in
+let occurrences database snapshot packages =
+  let names = Database.make_name_lookups database packages in
   List.concat_map
     (fun file ->
       List.concat_map
         (fun declaration ->
           let key = Names.key_of declaration in
           match
-            (names.place key, names.definition key, names.spans key, Pipeline.resolved pipeline key)
+            ( names.place key,
+              names.definition key,
+              names.spans key,
+              Database.read_resolved database key )
           with
           | Some { file; base }, Some definition, Some spans, Some resolved ->
               let tables =
                 Option.map
                   (fun (checked : Infer.checked) -> checked.tables)
-                  (Pipeline.read_checked_body pipeline key)
+                  (Database.read_checked_body database key)
               in
               List.map
                 (fun ({ span; target } : References.occurrence) ->
@@ -107,17 +110,17 @@ let occurrences pipeline snapshot packages =
         (names.declarations_in file))
     (Command_packages.files snapshot packages)
 
-let plan_definition pipeline snapshot packages path name =
+let plan_definition database snapshot packages path name =
   let edits =
     List.filter_map
       (fun (file, span, target) ->
         if References.names_definition path target then Some (file, Diagnostic.replace span name)
         else None)
-      (occurrences pipeline snapshot packages)
+      (occurrences database snapshot packages)
   in
   { edits = by_file edits; moved = None }
 
-let plan_module pipeline snapshot packages (old_module : Path.module_) to_ =
+let plan_module database snapshot packages (old_module : Path.module_) to_ =
   let package = old_module.package in
   let modules =
     match in_package packages to_ with
@@ -141,11 +144,11 @@ let plan_module pipeline snapshot packages (old_module : Path.module_) to_ =
       (fun (file, (span : Source.span), (target : References.target)) ->
         match target with
         | Module edit_module when edit_module = old_module ->
-            let text = Source.text (Database.source snapshot file) in
+            let text = Source.text (Workspace.source snapshot file) in
             let written = String.sub text span.start (span.stop - span.start) in
             Some (file, Diagnostic.replace span (if String.contains written ':' then full else last))
         | _ -> None)
-      (occurrences pipeline snapshot packages)
+      (occurrences database snapshot packages)
     @ List.concat_map
         (fun (file : Path.file) ->
           List.filter_map
@@ -153,13 +156,15 @@ let plan_module pipeline snapshot packages (old_module : Path.module_) to_ =
               if module_ = old_module then Some (file, Diagnostic.replace span full) else None)
             (References.uses
                ~used_module:
-                 (Names.used_module (Pipeline.names pipeline packages) ~from:file.module_)
-               (Pipeline.parsed pipeline file).file.uses))
+                 (Names.used_module
+                    (Database.make_name_lookups database packages)
+                    ~from:file.module_)
+               (Database.read_parsed database file).file.uses))
         (Command_packages.files snapshot packages)
   in
   { edits = by_file edits; moved = Some (old_module, new_module) }
 
-let text_of snapshot file = Source.text (Database.source snapshot file)
+let text_of snapshot file = Source.text (Workspace.source snapshot file)
 
 let applied snapshot packages plan =
   List.map
@@ -183,7 +188,7 @@ let path_of snapshot packages (file : Path.file) =
   Filename.concat (directory_of snapshot packages file.module_) (file.name ^ ".truss")
 
 let trial snapshot after =
-  let path file = Database.file_path snapshot file in
+  let path file = Workspace.file_path snapshot file in
   let written = List.map (fun (_, file, text) -> (path file, Some text)) after in
   let removed =
     List.filter_map
@@ -192,7 +197,7 @@ let trial snapshot after =
         if List.mem_assoc old_path written then None else Some (old_path, None))
       after
   in
-  Database.trial snapshot (written @ removed)
+  Workspace.make_trial snapshot (written @ removed)
 
 let edits_json snapshot packages plan =
   List.concat_map
@@ -213,21 +218,21 @@ let edits_json snapshot packages plan =
 let run ~from_ ~to_ =
   let json = Output.json () in
   let snapshot, packages = Command_packages.worktree () in
-  let pipeline = Database.pipeline snapshot in
-  let report = Report.gather pipeline snapshot packages in
+  let database = Workspace.open_database snapshot in
+  let report = Report.gather database snapshot packages in
   if not (Report.clean report) then raise (Report.Errors report);
   let plan =
-    match target_of snapshot pipeline packages from_ with
-    | Definition path -> plan_definition pipeline snapshot packages path (new_name ~from_ to_)
-    | Module module_ -> plan_module pipeline snapshot packages module_ to_
+    match target_of snapshot database packages from_ with
+    | Definition path -> plan_definition database snapshot packages path (new_name ~from_ to_)
+    | Module module_ -> plan_module database snapshot packages module_ to_
   in
   let after = applied snapshot packages plan in
-  let pipeline = Database.pipeline (trial snapshot after) in
-  Pipeline.check pipeline packages;
+  let database = Workspace.open_database (trial snapshot after) in
+  Database.check database packages;
   let caused =
     List.filter_map
       (fun (_, file, text) ->
-        match Diagnostic.shown (Pipeline.file_diagnostics pipeline file) with
+        match Diagnostic.shown (Database.list_file_diagnostics database file) with
         | [] -> None
         | diagnostics ->
             Some

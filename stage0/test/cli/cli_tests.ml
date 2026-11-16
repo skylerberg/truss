@@ -29,7 +29,7 @@ let captured work =
       }
       work
   in
-  Database.flush ();
+  Workspace.flush ();
   (result, Buffer.contents out ^ Buffer.contents err)
 
 let truss arguments =
@@ -113,9 +113,11 @@ let modules (snapshot, packages) = Command_packages.modules snapshot packages
 let files (snapshot, packages) = Command_packages.files snapshot packages
 
 let gather ?proofs (snapshot, packages) =
-  Report.gather ?proofs (Database.pipeline snapshot) snapshot packages
+  Report.gather ?proofs (Workspace.open_database snapshot) snapshot packages
 
-let select (snapshot, packages) = Test_command.select snapshot (Database.pipeline snapshot) packages
+let select (snapshot, packages) =
+  Test_command.select snapshot (Workspace.open_database snapshot) packages
+
 let mains (snapshot, packages) = Program_command.mains snapshot packages
 
 let () =
@@ -194,7 +196,7 @@ let () =
           ]
       in
       let project = Command_packages.load (Filename.concat root "one") in
-      let problems = Database.problems (fst project) in
+      let problems = Workspace.problems (fst project) in
       if
         not
           (List.exists
@@ -244,7 +246,7 @@ let () =
       in
       let project = Command_packages.load (Filename.concat root "app") in
       expect_strings ~expected:[ "app" ] (names project);
-      let problems = Database.problems (fst project) in
+      let problems = Workspace.problems (fst project) in
       if
         not
           (List.exists
@@ -272,7 +274,7 @@ let () =
 
 let problems files =
   let project = Command_packages.load (directory files) in
-  Database.problems (fst project)
+  Workspace.problems (fst project)
 
 let report_problems report =
   match Json.field "problems" (Report.document report []) with
@@ -402,10 +404,10 @@ let () =
           ]
       in
       let project = Command_packages.load (Filename.concat root "one") in
-      let limit = Database.time_limit_ms (fst project) in
+      let limit = Workspace.time_limit_ms (fst project) in
       if limit <> 3000 then fail "got %d ms" limit);
   test "a project without a time limit gives tests 10 seconds" (fun () ->
-      let limit = Database.time_limit_ms (fst (Command_packages.load (package []))) in
+      let limit = Workspace.time_limit_ms (fst (Command_packages.load (package []))) in
       if limit <> 10_000 then fail "got %d ms" limit);
   test "a time limit in a package's manifest that is not its project's is a problem" (fun () ->
       let root =
@@ -416,7 +418,7 @@ let () =
           ]
       in
       let project = Command_packages.load root in
-      let problems = Database.problems (fst project) in
+      let problems = Workspace.problems (fst project) in
       if
         not
           (List.exists
@@ -574,7 +576,8 @@ let () =
       if List.mem "impl Display for Point {" geometry then
         fail "the geometry's Point showed %s" (String.concat "; " geometry))
 
-let lowering (snapshot, packages) = Compiler.lowering_only (Database.pipeline snapshot) packages
+let lowering (snapshot, packages) =
+  Compiler.lowering_only (Workspace.open_database snapshot) packages
 
 let () =
   test "a todo main can reach is refused, with the way from main to it" (fun () ->
@@ -1165,7 +1168,7 @@ let () =
       let root =
         directory [ ("truss.toml", manifest_of "demo" ^ "[dependencies]\n\"acme::units\" = []\n") ]
       in
-      let problems = Database.problems (fst (Command_packages.load root)) in
+      let problems = Workspace.problems (fst (Command_packages.load root)) in
       match
         List.filter
           (fun (problem : Project.problem) ->
@@ -1198,7 +1201,7 @@ let () =
       if
         List.exists
           (fun state -> contains state "acme::rings" || contains state "acme::chains")
-          (Database.states ())
+          (Workspace.list_package_databases ())
       then fail "a package of the cycle has a state");
   test "a project's package and a registry package that depend on each other form a cycle"
     (fun () ->
@@ -1290,7 +1293,7 @@ let () =
       if
         not
           (List.mem "units/lengths/lengths.truss"
-             (List.map (Database.file_path (fst project)) (files project)))
+             (List.map (Workspace.file_path (fst project)) (files project)))
       then fail "the project's package is not the one in the build")
 
 let upgrade root names = truss ([ "upgrade"; "-C"; root ] @ names)

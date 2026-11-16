@@ -6,16 +6,16 @@ let usage =
    every stage, or stops a commit before its rename. With no file, it edits the corpus beside it."
 
 let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [] }
-let standard_state = lazy (Database.For_testing.standard_state ())
+let standard_package_database = lazy (Workspace.For_testing.load_standard_package_database ())
 
 type file = { name : string; text : string }
 
 let path_of file : Path.file = { module_ = example; name = file.name }
 
 let built files =
-  let pipeline =
-    Pipeline.create
-      ~loaded:[ Lazy.force standard_state ]
+  let database =
+    Database.create
+      ~loaded:[ Lazy.force standard_package_database ]
       [
         {
           name = example.package;
@@ -24,8 +24,8 @@ let built files =
         };
       ]
   in
-  Pipeline.propagate pipeline;
-  pipeline
+  Database.propagate database;
+  database
 
 let lines text =
   match List.rev (String.split_on_char '\n' text) with
@@ -241,22 +241,22 @@ let write_project root files =
     (fun file -> File_system.write (Filename.concat root (file.name ^ ".truss")) file.text)
     files
 
-let database root =
-  match Database.take_snapshot root with
-  | Ok (snapshot, _) -> Database.pipeline snapshot
+let open_database root =
+  match Workspace.take_snapshot root with
+  | Ok (snapshot, _) -> Workspace.open_database snapshot
   | Error message -> failwith message
 
 let checked_and_reopened root =
-  Pipeline.check (database root) [ example.package ];
-  Database.flush ()
+  Database.check (open_database root) [ example.package ];
+  Workspace.flush ()
 
 let reopening root =
   match random 8 with
-  | 0 | 1 -> Some ("commit and reopen", Database.flush)
+  | 0 | 1 -> Some ("commit and reopen", Workspace.flush)
   | 2 ->
       Some
         ( "stop a commit before its rename",
-          fun () -> Database.For_testing.interrupt_commit (Unix.realpath root) )
+          fun () -> Workspace.For_testing.interrupt_commit (Unix.realpath root) )
   | _ -> None
 
 let () =
@@ -297,7 +297,7 @@ let () =
   let root = Filename.temp_dir "database-fuzz" "" in
   at_exit (fun () -> try File_system.remove root with Sys_error _ | Unix.Unix_error _ -> ());
   write_project root files;
-  Pipeline.propagate (database root);
+  Database.propagate (open_database root);
   let current = ref files in
   let failures = ref 0 and skipped = ref 0 in
   let report step (edit : edit) problem =
@@ -305,7 +305,7 @@ let () =
     Printf.printf "seed %d, edit %d (%s): %s\n%!" !seed step edit.description problem
   in
   let start_over () =
-    Database.flush ();
+    Workspace.flush ();
     File_system.remove (Filename.concat root ".truss")
   in
   for step = 1 to !count do
@@ -323,14 +323,14 @@ let () =
         end;
         let propagated =
           outcome (fun () ->
-              let hot = database root in
-              Pipeline.propagate hot;
+              let hot = open_database root in
+              Database.propagate hot;
               hot)
         in
         match (propagated, outcome (fun () -> built edit.files)) with
         | Ok hot, Ok cold -> (
             current := edit.files;
-            match Pipeline.For_testing.differences hot cold with
+            match Database.For_testing.list_differences hot cold with
             | [] -> (
                 match reopening root with
                 | Some (description, reopen) ->
@@ -352,7 +352,7 @@ let () =
               Printf.printf "  skipped: a cold build raises %s\n%!" (shown_failure failure);
             write_project root !current)
   done;
-  Database.flush ();
+  Workspace.flush ();
   Printf.printf "%d edits, %d skipped because a cold build raises, %d failures\n" !count !skipped
     !failures;
   exit (if !failures > 0 then 1 else 0)

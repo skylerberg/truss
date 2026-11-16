@@ -1,4 +1,4 @@
-module Part = Pipeline.Part
+module Part = Database.Part
 
 module Part_set = Set.Make (struct
   type t = Part.t
@@ -31,15 +31,15 @@ let sentence = function
         (if this_worktree then "this" else "the other")
         (Path.show change.path) (Output.listed change.kinds) (describe reads)
 
-let own_changes snapshot pipeline base =
-  let own = List.map snd (Database.packages snapshot) in
+let own_changes snapshot database base =
+  let own = List.map snd (Workspace.packages snapshot) in
   Part_set.of_list
     (List.filter
        (fun part ->
          match Part.definition part with
          | Some path -> List.mem (Path.package path) own
          | None -> false)
-       (Pipeline.changes pipeline base))
+       (Database.list_changes database base))
 
 let places_of parts =
   let kinds = Hashtbl.create 16 in
@@ -55,10 +55,10 @@ let places_of parts =
     (fun path kinds places -> { path; kinds = List.sort_uniq compare kinds } :: places)
     kinds []
 
-let reading_overlaps ~this_worktree pipeline ~changed ~changed_by_other =
+let reading_overlaps ~this_worktree database ~changed ~changed_by_other =
   let groups = Hashtbl.create 16 in
   List.iter
-    (fun ({ dependent; dependency } : Pipeline.read) ->
+    (fun ({ dependent; dependency } : Database.read) ->
       if
         Part_set.mem dependent changed
         && Part_set.mem dependency changed_by_other
@@ -72,7 +72,7 @@ let reading_overlaps ~this_worktree pipeline ~changed ~changed_by_other =
             Hashtbl.replace groups (change, read)
               (Part.kind_name dependent :: changes, Part.kind_name dependency :: reads)
         | _ -> ())
-    (Pipeline.dependencies pipeline
+    (Database.list_dependencies database
        (List.sort_uniq Path.compare (List.filter_map Part.definition (Part_set.elements changed))));
   Hashtbl.fold
     (fun (change, read) (changes, reads) overlaps ->
@@ -85,35 +85,35 @@ let reading_overlaps ~this_worktree pipeline ~changed ~changed_by_other =
       :: overlaps)
     groups []
 
-let overlaps snapshot pipeline (side : Database.side) =
-  let base = Database.pipeline side.base and theirs = Database.pipeline side.other in
-  let mine_changed = own_changes snapshot pipeline base in
+let overlaps snapshot database (side : Workspace.side) =
+  let base = Workspace.open_database side.base and theirs = Workspace.open_database side.other in
+  let mine_changed = own_changes snapshot database base in
   let theirs_changed = own_changes side.other theirs base in
   List.sort compare
     (List.map
        (fun place -> Both_change place)
        (places_of (Part_set.inter mine_changed theirs_changed))
-    @ reading_overlaps ~this_worktree:true pipeline ~changed:mine_changed
+    @ reading_overlaps ~this_worktree:true database ~changed:mine_changed
         ~changed_by_other:theirs_changed
     @ reading_overlaps ~this_worktree:false theirs ~changed:theirs_changed
         ~changed_by_other:mine_changed)
 
 let keyed_diagnostics snapshot =
-  let pipeline = Database.pipeline snapshot in
-  let packages = List.map snd (Database.packages snapshot) in
-  Pipeline.check pipeline packages;
+  let database = Workspace.open_database snapshot in
+  let packages = List.map snd (Workspace.packages snapshot) in
+  Database.check database packages;
   List.concat_map
     (fun file ->
       List.map
         (fun (diagnostic : Diagnostic.t) ->
-          ( ( Database.file_path snapshot file,
+          ( ( Workspace.file_path snapshot file,
               Diagnostic.Code.name diagnostic.code,
               diagnostic.message ),
             diagnostic ))
-        (Pipeline.file_diagnostics pipeline file))
+        (Database.list_file_diagnostics database file))
     (Command_packages.files snapshot packages)
 
-let merge_diagnostics snapshot (side : Database.side) =
+let merge_diagnostics snapshot (side : Workspace.side) =
   Result.map
     (fun merged ->
       let sides = List.map fst (keyed_diagnostics snapshot @ keyed_diagnostics side.other) in
@@ -123,11 +123,11 @@ let merge_diagnostics snapshot (side : Database.side) =
         (List.sort_uniq (fun (left, _) (right, _) -> compare left right) (keyed_diagnostics merged)))
     (side.merged ())
 
-let compare_with ~merge snapshot pipeline (other, side) =
+let compare_with ~merge snapshot database (other, side) =
   match side with
   | Error message -> { other; overlaps = []; merged = []; error = Some message }
   | Ok side -> (
-      let overlaps = overlaps snapshot pipeline side in
+      let overlaps = overlaps snapshot database side in
       match if merge then merge_diagnostics snapshot side else Ok [] with
       | Ok merged -> { other; overlaps; merged; error = None }
       | Error message -> { other; overlaps; merged = []; error = Some message })
@@ -191,26 +191,26 @@ let print comparisons =
 
 let worktree_sides snapshot =
   List.map
-    (fun other -> (Shown_path.shown other, Database.other_worktree snapshot other))
-    (Database.other_worktrees snapshot)
+    (fun other -> (Shown_path.shown other, Workspace.read_other_worktree snapshot other))
+    (Workspace.list_other_worktrees snapshot)
 
-let with_other_worktrees snapshot pipeline =
+let with_other_worktrees snapshot database =
   List.filter
     (fun comparison -> comparison.overlaps <> [])
-    (List.map (compare_with ~merge:false snapshot pipeline) (worktree_sides snapshot))
+    (List.map (compare_with ~merge:false snapshot database) (worktree_sides snapshot))
 
 let run ~with_ ~merge =
   let snapshot, _ = Command_packages.current () in
-  let pipeline = Database.pipeline snapshot in
+  let database = Workspace.open_database snapshot in
   let sides =
     match with_ with
     | Some name -> (
-        match Database.branch snapshot name with
+        match Workspace.read_branch snapshot name with
         | Ok side -> [ (name, Ok side) ]
         | Error message -> Outcome.cannot_run "%s" message)
     | None -> worktree_sides snapshot
   in
-  let comparisons = List.map (compare_with ~merge snapshot pipeline) sides in
+  let comparisons = List.map (compare_with ~merge snapshot database) sides in
   if Output.json () then
     Json.print (Json.document ~diagnostics:[] [ ("overlaps", to_json comparisons) ])
   else if sides = [] then

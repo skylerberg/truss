@@ -4,7 +4,7 @@ open Support
 
 let changes ?(modules = []) before after =
   let package : Path.package = { owner = None; name = "lib" } in
-  let state text = pipeline (setup (("lib::shapes", text) :: modules)) in
+  let state text = database (setup (("lib::shapes", text) :: modules)) in
   Compatibility.compare ~before:(state before) ~after:(state after) package
 
 let show actual =
@@ -239,7 +239,7 @@ let () =
         \  }\n\
          }\n"
       in
-      let state files = pipeline (setup files) in
+      let state files = database (setup files) in
       match
         show
           (Compatibility.compare

@@ -1,17 +1,17 @@
 open Harness
 open Support
 
-let check database =
-  Pipeline.For_testing.(diagnostics [ Resolve; Interface; Infer; Patterns ])
-    (Support.pipeline database)
+let check packages =
+  Database.For_testing.(list_diagnostics [ Resolve; Interface; Infer; Patterns ])
+    (Support.database packages)
 
 let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]
 let priority = Fixtures.Patterns.priority
 
 let message text =
-  let database = setup [ ("app::main", text) ] in
-  match check database (file_of "app::main") with
+  let packages = setup [ ("app::main", text) ] in
+  match check packages (file_of "app::main") with
   | [ diagnostic ] -> diagnostic.message
   | actual -> failwith (Printf.sprintf "%d diagnostics" (List.length actual))
 
@@ -56,11 +56,11 @@ let () =
 
 let () =
   let codes_of text =
-    let database = setup [ ("app::main", text) ] in
-    (match parse_errors database (file_of "app::main") with
+    let packages = setup [ ("app::main", text) ] in
+    (match parse_errors packages (file_of "app::main") with
     | [] -> ()
     | errors -> fail "the test input does not parse: %s" (String.concat " " errors));
-    codes (check database (file_of "app::main"))
+    codes (check packages (file_of "app::main"))
   in
   let expect text expected =
     match codes_of text with

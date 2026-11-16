@@ -1,20 +1,30 @@
 (library
  (name database)
  (libraries
-  unix
   compiler_bug
-  blake3
-  cbor
-  store
   path
+  intrinsic
   source
+  syntax
+  types
+  diagnostic
+  components
+  core
   manifest
   project
-  diagnostic
-  file_system
-  process
-  standard_library
-  compiler_version
-  pipeline
-  registry
-  watcher))
+  parsed
+  resolve
+  interface
+  infer
+  patterns
+  usage
+  mir
+  ownership
+  package_checks
+  compile
+  instance
+  ground
+  memory_layout
+  libc
+  prover
+  zarith))

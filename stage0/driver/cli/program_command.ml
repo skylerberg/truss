@@ -1,14 +1,14 @@
-let main_of snapshot pipeline packages (package : Path.package) =
+let main_of snapshot database packages (package : Path.package) =
   if List.mem { Path.package; modules = [] } (Command_packages.modules snapshot packages) then
-    Pipeline.main pipeline package
+    Database.find_main database package
   else None
 
 let mains snapshot packages =
-  List.filter_map (main_of snapshot (Database.pipeline snapshot) packages) packages
+  List.filter_map (main_of snapshot (Workspace.open_database snapshot) packages) packages
 
-let main snapshot pipeline packages =
+let main snapshot database packages =
   let package = Command_packages.one packages in
-  match main_of snapshot pipeline packages package with
+  match main_of snapshot database packages package with
   | Some main -> main
   | None ->
       Outcome.cannot_run
@@ -38,7 +38,7 @@ let refuse_unshippable snapshot packages compile main proofs =
           (fun definition ->
             List.map
               (fun (file, line, column) -> (file, line, column, `Proof_hole, [ definition ]))
-              (Proofs.holes snapshot packages proofs definition))
+              (Proofs.list_holes snapshot packages proofs definition))
           definitions
   in
   match List.sort_uniq compare (in_code @ in_proofs) with
@@ -81,11 +81,11 @@ let refuse_unshippable snapshot packages compile main proofs =
 
 let build_program ?output snapshot packages (build : Compiler.build) =
   let is_release = build = Release in
-  let pipeline = Database.pipeline ~checks:(not is_release) snapshot in
-  let report = Report.gather ~proofs:is_release pipeline snapshot packages in
+  let database = Workspace.open_database ~checks:(not is_release) snapshot in
+  let report = Report.gather ~proofs:is_release database snapshot packages in
   if not (Report.clean report) then raise (Report.Errors report);
-  let main = main snapshot pipeline packages in
-  let compile = Compiler.create pipeline snapshot packages build in
+  let main = main snapshot database packages in
+  let compile = Compiler.create database snapshot packages build in
   Option.iter (refuse_unshippable snapshot packages compile main) (Report.proofs report);
   let output = Option.value output ~default:(Compile.fresh_program compile) in
   match Compile.build_program compile ~main ~output with

@@ -7,10 +7,10 @@ val with_dependencies :
 
 val source : Project.package list -> Path.file -> Source.t
 val parse_errors : Project.package list -> Path.file -> string list
-val pipeline : Project.package list -> Pipeline.t
+val database : Project.package list -> Database.t
 val names : Project.package list -> Path.package -> Resolve.Names.lookups
 val declarations : Project.package list -> Path.module_ -> Resolve.Names.declaration list
-val diagnostics : Pipeline.t -> Path.file -> Diagnostic.t list
+val diagnostics : Database.t -> Path.file -> Diagnostic.t list
 val codes : Diagnostic.t list -> string list
 
 type core_nodes = {
@@ -36,7 +36,7 @@ val one_diagnostic :
   string ->
   unit
 
-val proven : Pipeline.t -> Path.file -> Pipeline.proofs
-val proof_diagnostics : Pipeline.t -> Path.file -> Diagnostic.t list
-val proof_states : Pipeline.t -> Path.file -> Source.span Prover.state list
-val proofs : Pipeline.t -> Path.file -> Resolve.Names.key -> Prover.proof
+val proven : Database.t -> Path.file -> Database.proofs
+val proof_diagnostics : Database.t -> Path.file -> Diagnostic.t list
+val proof_states : Database.t -> Path.file -> Source.span Prover.state list
+val proofs : Database.t -> Path.file -> Resolve.Names.key -> Prover.proof

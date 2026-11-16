@@ -10,7 +10,7 @@
   documents
   file_system
   substring
-  database
+  workspace
   resolve
   types
   interface
@@ -20,4 +20,4 @@
   toolchain
   build
   compile
-  pipeline))
+  database))
