@@ -135,11 +135,10 @@ let lower_pattern_constant (pattern : Core.pattern) (value : Core.pattern_consta
         }
 
 let lower_range_bound (pattern : Core.pattern) (bound : Core.range_bound) : operand =
-  let type_ = pattern.type_ in
-  match bound with
-  | Integer_bound value -> Constant { value = Integer value; type_ }
-  | Constant_bound { path; origin } ->
-      Use { place = { root = Constant path; projections = [] }; type_; node = pattern.id; origin }
+  lower_pattern_constant pattern
+    (match bound with
+    | Integer_bound value -> Integer_constant value
+    | Constant_bound path -> Named_constant path)
 
 let rec expression builder (node : Core.expression) : operand option =
   let origin = node.origin in

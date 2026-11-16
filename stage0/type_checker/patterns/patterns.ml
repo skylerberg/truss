@@ -143,7 +143,7 @@ and constant_value context seen (value : Core.expression) : space option =
 and evaluate_range_bound context (bound : Core.range_bound) =
   match bound with
   | Integer_bound value -> Ok value
-  | Constant_bound { path; _ } -> (
+  | Constant_bound path -> (
       match context.lookups.interface.constant_value path with
       | Some value -> Ok value
       | None -> Error (Path.show path))

@@ -329,7 +329,7 @@ and pattern_constant (before : pattern_constant) (after : pattern_constant) =
 and range_bound (before : range_bound) (after : range_bound) =
   match (before, after) with
   | Integer_bound before, Integer_bound after -> Z.equal before after
-  | Constant_bound { path; origin = _ }, Constant_bound after -> Path.equal path after.path
+  | Constant_bound before, Constant_bound after -> Path.equal before after
   | (Integer_bound _ | Constant_bound _), _ -> false
 
 let callback_contract renaming ({ inputs; requires } : callback_contract)

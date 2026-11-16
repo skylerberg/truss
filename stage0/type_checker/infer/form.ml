@@ -621,7 +621,7 @@ let build_range_bound state (bound : Syntax.range_end) : Core.range_bound =
       match state.tables.literals.(bound.id) with
       | Some (Integer_value number) -> Integer_bound number
       | Some (Float_value _) | None -> bug "a range bound has no integer value")
-  | End_constant _ -> Constant_bound { path = read_constant_path state bound.id; origin = bound.id }
+  | End_constant _ -> Constant_bound (read_constant_path state bound.id)
 
 let pattern_fields state (fields : Types.field list) (matched : (string * pattern) list) =
   List.filter_map

@@ -10,7 +10,7 @@ type pattern_constant =
   | String_constant of string
   | Named_constant of Path.t
 
-type range_bound = Integer_bound of Z.t | Constant_bound of { path : Path.t; origin : origin }
+type range_bound = Integer_bound of Z.t | Constant_bound of Path.t
 
 type 'indirect target =
   | Function of { path : Path.t; type_arguments : Types.argument list }
