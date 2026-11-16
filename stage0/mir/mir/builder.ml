@@ -1508,26 +1508,23 @@ and lower_lambda builder (parameters : Core.pattern list) (captures : Core.captu
       captures
   in
   let parameter_locals =
-    Emitter.run_in_scope inner 0 (fun () ->
-        let locals =
-          List.map
-            (fun (pattern : Core.pattern) ->
-              match pattern.kind with
-              | Bind { local; mode; name; is_var } ->
-                  Emitter.bind_source ~name ~is_var inner local mode pattern.type_ pattern.origin
-              | _ -> Emitter.allocate_local inner Temporary pattern.type_ pattern.origin)
-            parameters
-        in
-        List.iter2
-          (fun (pattern : Core.pattern) local ->
-            match pattern.kind with
-            | Bind _ -> ()
-            | _ ->
-                bind inner pattern (Emitter.make_local_place local) ~scrutinee_origin:pattern.origin)
-          parameters locals;
-        lower_body inner body ~returns:true;
-        locals)
+    List.map
+      (fun (pattern : Core.pattern) ->
+        match pattern.kind with
+        | Bind { local; mode; name; is_var } ->
+            Emitter.bind_source ~name ~is_var inner local mode pattern.type_ pattern.origin
+        | _ -> Emitter.allocate_local inner Temporary pattern.type_ pattern.origin)
+      parameters
   in
+  Emitter.run_in_scope inner 0 (fun () ->
+      List.iter2
+        (fun (pattern : Core.pattern) local ->
+          match pattern.kind with
+          | Bind _ -> ()
+          | _ ->
+              bind inner pattern (Emitter.make_local_place local) ~scrutinee_origin:pattern.origin)
+        parameters parameter_locals;
+      lower_body inner body ~returns:true);
   let rec compute_unconverted_type (value : Core.expression) =
     match value.kind with
     | Convert { conversion = To_integer; value = inner } -> compute_unconverted_type inner
