@@ -27,7 +27,7 @@ type scope = {
 
 let panic_only description =
   {
-    available = Types.capability_set [ panic ];
+    available = Types.make_capability_set [ panic ];
     kind = Restricted description;
     implemented_capability = None;
   }
@@ -56,20 +56,20 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.callee) =
           check_grant checking origin
             ~subject:(Printf.sprintf "`%s`" (Path.show path))
             (Path.package path) signature.uses)
-        (Interface.Impls.signature state.lookups.interface path)
+        (Interface.Impls.read_signature state.lookups.interface path)
   | Trait_method { trait; name; receiver; evidence; _ } -> (
       (match Members.trait_method state.lookups trait.trait name receiver with
       | Some method_ ->
           check_grant checking origin
             ~subject:(Printf.sprintf "`%s.%s`" (Path.show trait.trait) name)
             (Path.package trait.trait)
-            (Interface.Definition.method_signature state.lookups.interface ~owner:trait.trait
+            (Interface.Definition.read_method_signature state.lookups.interface ~owner:trait.trait
                method_)
               .uses
       | None -> ());
       match evidence with
       | Impl { impl; _ } -> (
-          match Interface.Impls.impl_interface state.lookups.interface impl with
+          match Interface.Definition.read_impl_interface state.lookups.interface impl with
           | Some interface when List.mem (name, receiver) interface.impl_methods ->
               Option.iter
                 (fun (signature : Types.signature) ->
@@ -79,7 +79,7 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.callee) =
                          (Types.show_trait interface.implements)
                          (Types.show interface.for_type))
                     (Path.package impl) signature.uses)
-                (Interface.Impls.signature state.lookups.interface
+                (Interface.Impls.read_signature state.lookups.interface
                    (Method { owner = impl; name; receiver }))
           | Some _ | None -> ())
       | Bound | Dynamic -> ())
@@ -90,8 +90,8 @@ let require_available checking scope (origin : Core.origin) ?(for_implementation
   let state = checking.state in
   let superset =
     if indirect_call then
-      Types.capability_union scope.available
-        (Types.capability_set (Option.to_list scope.implemented_capability))
+      Types.union_capabilities scope.available
+        (Types.make_capability_set (Option.to_list scope.implemented_capability))
     else scope.available
   in
   let report_missing (missing : Types.capability_set) =
@@ -141,7 +141,7 @@ let require_available checking scope (origin : Core.origin) ?(for_implementation
 let require_intrinsic_uses checking scope (origin : Core.origin) operation =
   if Option.is_none scope.implemented_capability then
     require_available checking scope origin
-      (Types.capability_set
+      (Types.make_capability_set
          (List.map (fun capability -> Types.Capability capability) (Intrinsic.uses operation)))
 
 let require_callee_uses checking scope (origin : Core.origin) (callee : Core.callee) =
@@ -150,29 +150,30 @@ let require_callee_uses checking scope (origin : Core.origin) (callee : Core.cal
   match callee with
   | Function { path; _ } ->
       require_available checking scope origin
-        (match Interface.Impls.signature state.lookups.interface path with
+        (match Interface.Impls.read_signature state.lookups.interface path with
         | Some signature -> signature.uses
         | None -> Types.no_capabilities)
   | Trait_method { trait; name; receiver; self_type; type_arguments; _ } ->
       require_available checking scope origin
         (match
            ( Members.trait_method state.lookups trait.trait name receiver,
-             Interface.Definition.trait_interface state.lookups.interface trait.trait )
+             Interface.Definition.read_trait_interface state.lookups.interface trait.trait )
          with
         | Some method_, Some interface ->
             let signature =
-              Interface.Definition.method_signature state.lookups.interface ~owner:trait.trait
+              Interface.Definition.read_method_signature state.lookups.interface ~owner:trait.trait
                 method_
             in
             Interface.Impls.normalize_capabilities state.lookups.interface ~bounds:(bounds state)
               (Types.substitute_capabilities
-                 (Interface.Properties.trait_substitution interface ~self:self_type trait
+                 (Interface.Properties.make_trait_substitution interface ~self:self_type trait
                  @ Option.value ~default:[]
-                     (Types.substitution_of signature.generics type_arguments))
+                     (Types.make_substitution signature.generics type_arguments))
                  signature.uses)
         | _ -> Types.no_capabilities)
   | Capability_method { capability; _ } ->
-      require_available checking scope origin (Types.capability_set [ Types.Capability capability ])
+      require_available checking scope origin
+        (Types.make_capability_set [ Types.Capability capability ])
   | Intrinsic { operation; _ } -> require_intrinsic_uses checking scope origin operation
   | Indirect _ -> ()
 
@@ -231,7 +232,7 @@ and check_statement checking scope (statement : Core.statement) =
   | Parallel branches ->
       List.iter (check_statement checking (panic_only "a `parallel` branch")) branches
   | Concurrent branches ->
-      require_available checking scope statement.origin (Types.capability_set [ tasks ]);
+      require_available checking scope statement.origin (Types.make_capability_set [ tasks ]);
       List.iter (check_statement checking scope) branches
   | For { mode; pattern; iteration; clauses; body } ->
       (match iteration with
@@ -255,7 +256,7 @@ and check_statement checking scope (statement : Core.statement) =
         | Parallel_loop -> panic_only "a `parallel for`"
         | Sequential -> scope
         | Concurrent_loop ->
-            require_available checking scope statement.origin (Types.capability_set [ tasks ]);
+            require_available checking scope statement.origin (Types.make_capability_set [ tasks ]);
             scope)
         body
   | While { condition; clauses; body; _ } ->
@@ -323,15 +324,15 @@ and check_provide checking scope implementations body =
             interface.impl_uses)
         impls;
       provided :=
-        Types.capability_union !provided
-          (Types.capability_set
+        Types.union_capabilities !provided
+          (Types.make_capability_set
              (List.map
                 (fun ((provided : Core.provided), _) -> Types.Capability provided.capability)
                 impls)))
     implementations;
   checking.provides <- (scope.available, implementations, body) :: checking.provides;
   check_block checking
-    { scope with available = Types.capability_union scope.available !provided }
+    { scope with available = Types.union_capabilities scope.available !provided }
     body
 
 let solve (state : state) =
@@ -354,7 +355,7 @@ let solve (state : state) =
       | capability -> [ capability ])
   in
   let missing (constraint_ : subset_constraint) =
-    Types.capability_difference (substitute constraint_.subset) (substitute constraint_.superset)
+    Types.subtract_capabilities (substitute constraint_.subset) (substitute constraint_.superset)
   in
   let rec grow () =
     let changed =
@@ -371,7 +372,7 @@ let solve (state : state) =
             List.iter
               (fun variable ->
                 Hashtbl.replace solution variable
-                  (Types.capability_union missing (value_of variable)))
+                  (Types.union_capabilities missing (value_of variable)))
               variables;
             true
           end)
@@ -396,18 +397,18 @@ let rec can_call_capability_code (state : state) ~bounds ?(seen = []) (type_ : T
     in
     List.exists
       (fun (bound : Types.trait_reference) ->
-        match Interface.Definition.trait_interface state.lookups.interface bound.trait with
+        match Interface.Definition.read_trait_interface state.lookups.interface bound.trait with
         | Some interface ->
             List.exists
               (fun (method_ : Types.trait_method) ->
                 List.exists can_hold_a_capability
-                  ((Interface.Definition.method_signature state.lookups.interface ~owner:bound.trait
-                      method_)
+                  ((Interface.Definition.read_method_signature state.lookups.interface
+                      ~owner:bound.trait method_)
                      .uses
                     :> Types.capability list))
               interface.methods
         | None -> false)
-      (trait :: Interface.Properties.bound_closure state.lookups.interface ~self:type_ trait)
+      (trait :: Interface.Properties.list_bound_closure state.lookups.interface ~self:type_ trait)
   in
   let arguments =
     List.exists (function
@@ -483,16 +484,16 @@ let check_monitor_callbacks checking implementations =
         List.iter
           (fun ((provided : Core.provided), (_ : Types.impl_interface)) ->
             match
-              Interface.Definition.trait_interface state.lookups.interface provided.capability
+              Interface.Definition.read_trait_interface state.lookups.interface provided.capability
             with
             | Some capability ->
                 List.iter
                   (fun (method_ : Types.trait_method) ->
                     let signature =
-                      Interface.Definition.method_signature state.lookups.interface
+                      Interface.Definition.read_method_signature state.lookups.interface
                         ~owner:provided.capability method_
                     in
-                    let bounds = Types.bounds_of signature.generics in
+                    let bounds = Types.list_bounds signature.generics in
                     match
                       List.find_opt
                         (fun (parameter : Types.parameter_info) ->
@@ -517,7 +518,7 @@ let check_monitor_callbacks checking implementations =
           (Form.find_capability_impls state implementation.type_))
     implementations
 
-let check (state : state) (lowered : Environment.lowered_interface) (form : Core.t) =
+let check (state : state) (elaborated : Environment.elaborated_interface) (form : Core.t) =
   let checking = { state; provides = [] } in
   let function_body ?implemented_capability available =
     { available; kind = Function_body; implemented_capability }
@@ -553,11 +554,11 @@ let check (state : state) (lowered : Environment.lowered_interface) (form : Core
           check_block checking (no_capabilities "a law") law.body)
         laws
   | Constant _ | Test _ | Law_proof _ | Empty -> ());
-  (match (form.definition, state.definition.kind, lowered.interface) with
+  (match (form.definition, state.definition.kind, elaborated.interface) with
   | Function { body; _ }, (Function _ | Method_declaration _), Function_interface signature ->
       let implemented_capability =
         Option.bind (state.lookups.interface.names.container state.key) (fun container ->
-            match (state.lookups.interface.lowered_interface container).interface with
+            match (state.lookups.interface.elaborated_interface container).interface with
             | Impl_interface impl
               when Resolve.Names.kind_of state.lookups.interface.names impl.implements.trait
                    = Some Capability ->
@@ -572,7 +573,7 @@ let check (state : state) (lowered : Environment.lowered_interface) (form : Core
         body
   | Test (Some body), _, Test_interface uses ->
       check_block checking
-        (function_body (Types.capability_union uses (Types.capability_set [ panic ])))
+        (function_body (Types.union_capabilities uses (Types.make_capability_set [ panic ])))
         body
   | Function { body = Some body; _ }, Theorem _, _ | Law_proof { body = Some body; _ }, _, _ ->
       check_block checking (no_capabilities "a proof") body

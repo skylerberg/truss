@@ -83,7 +83,7 @@ let call_node (interface : Interface.Lookups.t) (path : Path.t) =
   | Method { owner; name; receiver }
     when not (List.exists (Path.equal path) (Mir.Call_edges.written_methods interface.names owner))
     -> (
-      match Interface.Impls.impl_interface interface owner with
+      match Interface.Definition.read_impl_interface interface owner with
       | Some impl -> Path.Method { owner = impl.implements.trait; name; receiver }
       | None -> path)
   | _ -> path
@@ -97,7 +97,7 @@ let is_runtime_call (path : Path.t) =
   | _ -> false
 
 let bound_methods (interface : Interface.Lookups.t) path type_arguments =
-  match Interface.Impls.signature interface path with
+  match Interface.Impls.read_signature interface path with
   | Some (signature : Types.signature) ->
       let rec pairs (generics : Types.generic list) (arguments : Ground.argument list) =
         match (generics, arguments) with
@@ -496,7 +496,7 @@ type progress =
   | Ended of { test : int; record : record }
 
 let external_test compiler test =
-  match Interface.Definition.test_uses compiler.requests.interface test with
+  match Interface.Definition.read_test_uses compiler.requests.interface test with
   | Some uses -> uses <> Types.no_capabilities
   | None -> false
 
@@ -728,7 +728,7 @@ let run_template_check compiler ~from_template ~literals ~clauses =
 
 let evaluate_call compiler ~function_ ~arguments =
   reporting compiler @@ fun () ->
-  match Interface.Impls.signature compiler.requests.interface function_ with
+  match Interface.Impls.read_signature compiler.requests.interface function_ with
   | Some { output = Returns result; _ } ->
       let ty = Monomorphic.ground compiler.monomorphic [] result in
       let key = Instance.Call_evaluation { function_; arguments } in

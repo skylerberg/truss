@@ -77,8 +77,8 @@ let signature ~(before : Types.signature) ~(after : Types.signature) =
            now.has_default && not was.has_default)
          before.parameters after.parameters
   in
-  let more = Types.capability_difference after.uses before.uses
-  and fewer = Types.capability_difference before.uses after.uses in
+  let more = Types.subtract_capabilities after.uses before.uses
+  and fewer = Types.subtract_capabilities before.uses after.uses in
   List.concat
     [
       (if
@@ -225,7 +225,7 @@ let impls (side : side) package =
   List.filter_map
     (fun (declaration : Names.declaration) ->
       if declaration.kind = Impl && declaration.ordinal = 0 then
-        match Interface.Definition.impl_interface side.lookups declaration.path with
+        match Interface.Definition.read_impl_interface side.lookups declaration.path with
         | Some (impl : Types.impl_interface) ->
             Some
               ( declaration.path,
@@ -238,8 +238,8 @@ let impls (side : side) package =
     (declarations side package)
 
 let compare ~before ~after package =
-  let before = { database = before; lookups = Database.make_interface_lookups before [ package ] }
-  and after = { database = after; lookups = Database.make_interface_lookups after [ package ] } in
+  let before = { database = before; lookups = Database.drain_interface_lookups before [ package ] }
+  and after = { database = after; lookups = Database.drain_interface_lookups after [ package ] } in
   let old = List.filter (public before) (declarations before package) in
   let now = List.filter (public after) (declarations after package) in
   let public_change path change = { path; change } in
@@ -255,8 +255,8 @@ let compare ~before ~after package =
             let before_key = Names.key_of was and after_key = Names.key_of is in
             List.map (public_change path)
               (match
-                 ( Interface.Definition.interface before.lookups path,
-                   Interface.Definition.interface after.lookups path )
+                 ( Interface.Definition.read_interface before.lookups path,
+                   Interface.Definition.read_interface after.lookups path )
                with
               | ( Some (Function_interface old_signature | Theorem_interface old_signature),
                   Some (Function_interface new_signature | Theorem_interface new_signature) ) ->
@@ -272,9 +272,9 @@ let compare ~before ~after package =
                     ~before_laws:(read_laws before before_key)
                     ~after_laws:(read_laws after after_key)
                     ~signature_before:
-                      (Interface.Definition.method_signature before.lookups ~owner:path)
+                      (Interface.Definition.read_method_signature before.lookups ~owner:path)
                     ~signature_after:
-                      (Interface.Definition.method_signature after.lookups ~owner:path)
+                      (Interface.Definition.read_method_signature after.lookups ~owner:path)
                     ~contract_before:(read_method_contract before path)
                     ~contract_after:(read_method_contract after path)
               | Some (Constant_interface old_constant), Some (Constant_interface new_constant) ->
@@ -315,9 +315,9 @@ let compare ~before ~after package =
                          (Printf.sprintf "added `%s` to its `%s`: %s"
                             (Types.show_capability capability)
                             name shown)))
-                  (Types.capability_difference is was :> Types.capability list)
+                  (Types.subtract_capabilities is was :> Types.capability list)
                 @
-                if Types.capability_difference was is <> Types.no_capabilities then
+                if Types.subtract_capabilities was is <> Types.no_capabilities then
                   [
                     public_change path
                       (Grows (Printf.sprintf "removed capabilities from its `%s`: %s" name shown));

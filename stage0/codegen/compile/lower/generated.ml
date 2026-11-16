@@ -159,7 +159,7 @@ let locked_entry context (key : Instance.key) ~capability ~name : Emit_c.Builder
 
 let locked_table context (key : Instance.key) ~capability : Lowered.table =
   let interface =
-    match Interface.Definition.trait_interface context.lookups.interface capability with
+    match Interface.Definition.read_trait_interface context.lookups.interface capability with
     | Some interface -> interface
     | None -> bug "no interface for %s" (Path.show capability)
   in
@@ -172,15 +172,15 @@ let locked_table context (key : Instance.key) ~capability : Lowered.table =
           ( Instance.Generated (Locked_entry { capability; name = trait_method.method_name }),
             fst
               (entry_signature context
-                 (Interface.Definition.method_signature context.lookups.interface ~owner:capability
-                    trait_method)) ))
+                 (Interface.Definition.read_method_signature context.lookups.interface
+                    ~owner:capability trait_method)) ))
         interface.methods;
   }
 
 let impl_table context (key : Instance.key) ~impl ~type_arguments : Lowered.table =
   let interface, capability, _ = impl_capability context impl in
   let capability_interface =
-    match Interface.Definition.trait_interface context.lookups.interface capability with
+    match Interface.Definition.read_trait_interface context.lookups.interface capability with
     | Some position -> position
     | None -> bug "no interface for %s" (Path.show capability)
   in
@@ -198,8 +198,8 @@ let impl_table context (key : Instance.key) ~impl ~type_arguments : Lowered.tabl
             (Entry { impl; name = trait_method.method_name; receiver; type_arguments }),
           fst
             (entry_signature context
-               (Interface.Definition.method_signature context.lookups.interface ~owner:capability
-                  trait_method)) ))
+               (Interface.Definition.read_method_signature context.lookups.interface
+                  ~owner:capability trait_method)) ))
       capability_interface.methods
   in
   { table_key = key; capability = Some capability; entries }
@@ -212,7 +212,7 @@ let find_real_implementation (interface : Interface.Lookups.t) (capability : Pat
   with
   | [] -> None
   | [ impl ] -> (
-      match Interface.Impls.impl_interface interface impl with
+      match Interface.Definition.read_impl_interface interface impl with
       | Some impl_interface -> Some (impl, impl_interface)
       | None -> bug "the real implementation %s has no interface" (Path.show impl))
   | impls ->
@@ -427,7 +427,7 @@ let any_table context (key : Instance.key) ~impl ~type_arguments : Lowered.table
             (Any_entry { impl; name = trait_method.method_name; receiver; type_arguments }),
           let signature, _, _ =
             any_entry_signature context ~any ~trait
-              (Interface.Definition.method_signature context.lookups.interface ~owner:trait
+              (Interface.Definition.read_method_signature context.lookups.interface ~owner:trait
                  trait_method)
           in
           signature ))

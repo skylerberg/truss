@@ -63,7 +63,7 @@ type package_database = {
   trait_headers : (Names.key, Resolve.trait_header part) Hashtbl.t;
   constant_values : Z.t option part Path_table.t;
   headers : (Names.key, Environment.header part) Hashtbl.t;
-  interfaces : (Names.key, Environment.lowered_interface part) Hashtbl.t;
+  interfaces : (Names.key, Environment.elaborated_interface part) Hashtbl.t;
   derived_interfaces : (Path.t * Path.t, Types.impl_interface part) Hashtbl.t;
   type_facts : Environment.type_facts part Path_table.t;
   grants : (Path.package, Environment.grant) Hashtbl.t;
@@ -576,7 +576,7 @@ let resolved database note section key = value (resolved_part database note sect
 let read_whole_resolution database note key =
   Resolve.merge (List.map (fun section -> resolved database note section key) Resolve.sections)
 
-let lowered_interface database note ~is_checked (key : Names.key) =
+let read_elaborated_interface database note ~is_checked (key : Names.key) =
   let owner = owner database key.module_.package in
   read database note (Interface key);
   if is_checked then begin
@@ -590,9 +590,9 @@ let lowered_interface database note ~is_checked (key : Names.key) =
   | Some part -> value part
   | None -> unchecked (Interface key)
 
-let interface_lookups database note ~is_checked : Interface.Lookups.t =
+let make_interface_lookups database note ~is_checked : Interface.Lookups.t =
   let names = recording_names database note in
-  let lowered_interface = lowered_interface database note ~is_checked in
+  let read_elaborated_interface = read_elaborated_interface database note ~is_checked in
   {
     names;
     resolved = resolved database note;
@@ -612,10 +612,10 @@ let interface_lookups database note ~is_checked : Interface.Lookups.t =
       (fun key ->
         read database note (Header key);
         Option.map value (Hashtbl.find_opt (owner database key.module_.package).headers key));
-    lowered_interface;
+    elaborated_interface = read_elaborated_interface;
     derived_interface =
       (fun ~type_ ~trait ->
-        Option.iter (fun key -> ignore (lowered_interface key)) (names.key type_);
+        Option.iter (fun key -> ignore (read_elaborated_interface key)) (names.key type_);
         read database note (Derived_interface { type_; trait });
         Option.map value
           (Hashtbl.find_opt (owner database (Path.package type_)).derived_interfaces (type_, trait)));
@@ -629,14 +629,14 @@ let interface_lookups database note ~is_checked : Interface.Lookups.t =
         Hashtbl.find_opt (owner database package).grants dependency);
   }
 
-let interface_part (lowered : Environment.lowered_interface) =
-  match (lowered.diagnostics, lowered.interface) with
+let make_interface_part (elaborated : Environment.elaborated_interface) =
+  match (elaborated.diagnostics, elaborated.interface) with
   | [], Error_interface _ -> Blocked
-  | [], _ -> Value lowered
+  | [], _ -> Value elaborated
   | diagnostics, _ -> Failed diagnostics
 
-let type_interface lookups path =
-  match computed (Interface.Definition.type_interface lookups) path with
+let read_type_interface lookups path =
+  match computed (Interface.Definition.read_type_interface lookups) path with
   | Value interface -> interface
   | Failed _ | Blocked -> None
 
@@ -711,7 +711,7 @@ let checked_core database note key = (checked_body database note key).form
 
 let infer_lookups database note : Infer.Lookups.t =
   {
-    interface = interface_lookups database note ~is_checked:true;
+    interface = make_interface_lookups database note ~is_checked:true;
     contract = read_part database note (fun key -> Part.Contract key) (fun owner -> owner.contracts);
   }
 
@@ -723,7 +723,7 @@ let type_check run lookups key =
   | exception Reads_failed_part -> Blocked
 
 let form_origin database note =
-  Infer.form_origin (interface_lookups database note ~is_checked:true) ~is_derived:(fun path ->
+  Infer.form_origin (make_interface_lookups database note ~is_checked:true) ~is_derived:(fun path ->
       read database note (Derived_form path);
       Path_table.mem (owner database (Path.package path)).derived_forms path)
 
@@ -746,7 +746,10 @@ let mir_lookups database note : Mir.lookups =
   }
 
 let call_edge_lookups database note : Mir.Call_edges.lookups =
-  { interface = interface_lookups database note ~is_checked:true; mir = mir_lookups database note }
+  {
+    interface = make_interface_lookups database note ~is_checked:true;
+    mir = mir_lookups database note;
+  }
 
 let read_call_edges database note path =
   read database note (Call_edges path);
@@ -757,7 +760,7 @@ let read_call_edges database note path =
 let patterns_lookups database note : Patterns.Lookups.t =
   {
     core = checked_core database note;
-    interface = interface_lookups database note ~is_checked:true;
+    interface = make_interface_lookups database note ~is_checked:true;
   }
 
 let usage_lookups database note : Usage.Lookups.t =
@@ -770,7 +773,7 @@ let usage_lookups database note : Usage.Lookups.t =
 let ownership_lookups database note : Ownership.Lookups.t =
   {
     graph = (fun key -> Mir.graph (body_mir database note key));
-    interface = interface_lookups database note ~is_checked:true;
+    interface = make_interface_lookups database note ~is_checked:true;
   }
 
 let used_packages database note (key : Names.key) =
@@ -781,7 +784,7 @@ let used_packages database note (key : Names.key) =
 
 let package_checks_lookups database note : Package_checks.Lookups.t =
   {
-    interface = interface_lookups database note ~is_checked:true;
+    interface = make_interface_lookups database note ~is_checked:true;
     core = checked_core database note;
     used_packages =
       read_part database note (fun key -> Part.Used_packages key) (fun owner -> owner.used_packages);
@@ -830,7 +833,7 @@ let proof_lookups database note : Prover.Lookups.t =
       (fun file ->
         note (Part.Input (Source file));
         source database file);
-    interface = interface_lookups database note ~is_checked:true;
+    interface = make_interface_lookups database note ~is_checked:true;
     mir = mir_lookups database note;
     patterns = read_part database note (fun key -> Part.Patterns key) (fun owner -> owner.patterns);
     must_be_disjoint =
@@ -839,7 +842,10 @@ let proof_lookups database note : Prover.Lookups.t =
   }
 
 let stage_lowering_lookups database note : Compile.Lookups.t =
-  { interface = interface_lookups database note ~is_checked:true; mir = mir_lookups database note }
+  {
+    interface = make_interface_lookups database note ~is_checked:true;
+    mir = mir_lookups database note;
+  }
 
 let instance_part database note table part instance =
   read database note (Lowering part);
@@ -1337,11 +1343,11 @@ let compute_type_facts database paths =
     computing database
       (List.map (fun path -> Part.Type_facts path) paths)
       (fun note ->
-        let lookups = interface_lookups database note ~is_checked:false in
-        let interfaces = List.map (fun path -> (path, type_interface lookups path)) paths in
+        let lookups = make_interface_lookups database note ~is_checked:false in
+        let interfaces = List.map (fun path -> (path, read_type_interface lookups path)) paths in
         if List.for_all (fun (_, interface) -> Option.is_some interface) interfaces then
           computed
-            (Interface.Properties.component_facts lookups)
+            (Interface.Properties.compute_component_facts lookups)
             (List.filter_map
                (fun (path, interface) -> Option.map (fun interface -> (path, interface)) interface)
                interfaces)
@@ -1405,14 +1411,16 @@ let compute_part database (part : Part.computed) =
       into (at_path package_database.constant_values path) (fun note ->
           Some
             (computed
-               (Interface.Constants.value_of (interface_lookups database note ~is_checked:false))
+               (Interface.Constants.evaluate_constant
+                  (make_interface_lookups database note ~is_checked:false))
                path))
   | Header key ->
       into (keyed package_database.headers key) (fun note ->
           Some
             (match
                computed
-                 (Interface.Definition.header (interface_lookups database note ~is_checked:false))
+                 (Interface.Elaborate.header
+                    (make_interface_lookups database note ~is_checked:false))
                  key
              with
             | Value (Ok header) -> Value header
@@ -1423,10 +1431,11 @@ let compute_part database (part : Part.computed) =
           Some
             (match
                computed
-                 (Interface.Definition.lower (interface_lookups database note ~is_checked:false))
+                 (Interface.Elaborate.definition
+                    (make_interface_lookups database note ~is_checked:false))
                  key
              with
-            | Value lowered -> interface_part lowered
+            | Value elaborated -> make_interface_part elaborated
             | Failed _ | Blocked -> Blocked))
   | Derived_interface { type_; trait } ->
       into
@@ -1436,8 +1445,8 @@ let compute_part database (part : Part.computed) =
             (match
                computed
                  (fun trait ->
-                   Interface.Impls.derived_interface
-                     (interface_lookups database note ~is_checked:false)
+                   Interface.Impls.derive_interface
+                     (make_interface_lookups database note ~is_checked:false)
                      ~type_ ~trait)
                  trait
              with
@@ -1454,7 +1463,7 @@ let compute_part database (part : Part.computed) =
           note (Input (Dependencies package));
           Some
             (Interface.Grants.resolve_grant
-               (interface_lookups database note ~is_checked:false)
+               (make_interface_lookups database note ~is_checked:false)
                ~package entry.capabilities))
   | Signature_check key ->
       into (keyed package_database.signature_checks key) (fun note ->
@@ -1464,8 +1473,8 @@ let compute_part database (part : Part.computed) =
             | Some (Value _) ->
                 checked_part
                   (fun key ->
-                    ( Interface.Check.diagnostics
-                        (interface_lookups database note ~is_checked:false)
+                    ( Interface.Check.list_diagnostics
+                        (make_interface_lookups database note ~is_checked:false)
                         key,
                       () ))
                   key
@@ -1493,8 +1502,8 @@ let compute_part database (part : Part.computed) =
           Some
             (match Hashtbl.find_opt package_database.checked_bodies key with
             | Some (Value checked) -> (
-                match lowered_interface database note ~is_checked:true key with
-                | lowered -> Value (Mir.body_part ~interface:lowered.interface checked.form)
+                match read_elaborated_interface database note ~is_checked:true key with
+                | elaborated -> Value (Mir.body_part ~interface:elaborated.interface checked.form)
                 | exception Reads_failed_part -> Blocked)
             | Some (Failed _ | Blocked) -> Blocked
             | None -> unchecked (Checked_body key)))
@@ -1507,8 +1516,8 @@ let compute_part database (part : Part.computed) =
                 Value
                   (Mir.contract_part
                      ~type_interface:
-                       (Interface.Definition.type_interface
-                          (interface_lookups database note ~is_checked:true))
+                       (Interface.Definition.read_type_interface
+                          (make_interface_lookups database note ~is_checked:true))
                      key.path form)
             | Some (Failed _ | Blocked) -> Blocked
             | None -> unchecked (Contract key)))
@@ -1522,8 +1531,8 @@ let compute_part database (part : Part.computed) =
                     ( Mir.body_part form,
                       Mir.contract_part
                         ~type_interface:
-                          (Interface.Definition.type_interface
-                             (interface_lookups database note ~is_checked:true))
+                          (Interface.Definition.read_type_interface
+                             (make_interface_lookups database note ~is_checked:true))
                         path form )
               | Failed _ | Blocked -> Blocked)
             (Path_table.find_opt package_database.derived_forms path))
@@ -1612,16 +1621,16 @@ let list_components database (stage : Stage.t) package parts =
       in
       let in_closure = Path_table.create 64 in
       List.iter (fun path -> Path_table.replace in_closure path ()) paths;
-      let lookups = interface_lookups database ignore ~is_checked:false in
+      let lookups = make_interface_lookups database ignore ~is_checked:false in
       List.map
         (fun paths -> Type_fact_component paths)
         (Strongly_connected.find_components
            (module Path)
            ~successors:(fun path ->
-             match type_interface lookups path with
+             match read_type_interface lookups path with
              | Some interface ->
                  List.filter (Path_table.mem in_closure)
-                   (Interface.Properties.fields_named ~package interface)
+                   (Interface.Properties.list_field_type_paths ~package interface)
              | None -> [])
            paths)
   | _ -> List.map (fun part -> Single part) parts
@@ -2232,8 +2241,7 @@ let definition_diagnostics database (key : Names.key) checker =
   | Resolve ->
       List.concat_map (fun section -> failed owner.resolved_names (key, section)) Resolve.sections
   | Interface ->
-      without_duplicates
-        (failed owner.headers key @ failed owner.interfaces key @ failed owner.signature_checks key)
+      failed owner.headers key @ failed owner.interfaces key @ failed owner.signature_checks key
   | Infer -> failed owner.contracts key @ failed owner.checked_bodies key
   | Patterns -> failed owner.patterns key
   | Usage -> failed owner.usage key
@@ -2446,9 +2454,9 @@ let requested table part key =
         (Part.show_computed (Lowering part))
   | None -> unchecked (Lowering part)
 
-let make_interface_lookups database packages =
+let drain_interface_lookups database packages =
   drain database ~through:Signature_checks packages;
-  interface_lookups database ignore ~is_checked:true
+  make_interface_lookups database ignore ~is_checked:true
 
 let check_calls database interface viewers key = function
   | Ok lowered ->
@@ -2500,7 +2508,7 @@ let reached_todo_types database key =
   List.sort_uniq Path.compare (visit [] (Stored (Computed (Lowering (Test_key key)))))
 
 let make_lowering_requests database packages : Compile.requests =
-  let interface = make_interface_lookups database packages in
+  let interface = drain_interface_lookups database packages in
   {
     settings = lowering_settings database;
     source = source database;

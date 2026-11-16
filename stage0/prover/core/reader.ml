@@ -946,7 +946,7 @@ and read_statement context frame run (statement : Mir.statement) =
           | [] -> bug "a `continue` outside a loop")
       | Cancel { task; winner; number; returned } -> (
           let frame =
-            bind frame (local_key run winner) (Types.builtin UInt32)
+            bind frame (local_key run winner) (Types.make_builtin UInt32)
               (Logic.Integer (Z.of_int number))
           in
           let frame =
@@ -987,7 +987,7 @@ and read_statement context frame run (statement : Mir.statement) =
           (Use
              {
                place = { root = Local winner; projections = [] };
-               type_ = Types.builtin UInt32;
+               type_ = Types.make_builtin UInt32;
                origin = statement.origin;
              })
       in

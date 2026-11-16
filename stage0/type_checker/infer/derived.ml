@@ -29,9 +29,9 @@ let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
   | Method { owner = Derived { type_; trait } as impl; name; receiver = _ } when gives trait name
     -> (
       match
-        ( Interface.Impls.impl_interface lookups.interface impl,
-          Interface.Definition.type_interface lookups.interface type_,
-          Interface.Impls.signature lookups.interface path )
+        ( Interface.Definition.read_impl_interface lookups.interface impl,
+          Interface.Definition.read_type_interface lookups.interface type_,
+          Interface.Impls.read_signature lookups.interface path )
       with
       | _, Some { shape = Todo_type; _ }, _ -> None
       | Some interface, Some { shape; _ }, Some signature ->
@@ -55,7 +55,7 @@ let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
             { patterns = [ pattern ]; guard = None; body; origin }
           in
           let self_type = interface.for_type in
-          let bounds = Types.bounds_of interface.impl_generics in
+          let bounds = Types.list_bounds interface.impl_generics in
           let result =
             match signature.output with
             | Returns type_ -> type_
@@ -150,7 +150,8 @@ let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                 mode = Read;
                 value =
                   Place
-                    (Temporary (node (Types.named (Well_known.path String_slice) []) (String text)));
+                    (Temporary
+                       (node (Types.make_named (Well_known.path String_slice) []) (String text)));
                 mode_keyword = None;
               }
           in
@@ -158,7 +159,7 @@ let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
             Passed
               {
                 mode = Read;
-                value = Value (node (Types.builtin UInt64) (Integer (Z.of_int count)));
+                value = Value (node (Types.make_builtin UInt64) (Integer (Z.of_int count)));
                 mode_keyword = None;
               }
           in
@@ -315,7 +316,8 @@ let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                        mode = Read;
                                        value =
                                          Value
-                                           (node (Types.builtin UInt64) (Integer (Z.of_int number)));
+                                           (node (Types.make_builtin UInt64)
+                                              (Integer (Z.of_int number)));
                                        mode_keyword = None;
                                      };
                                  ];
@@ -341,7 +343,7 @@ let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                 let other = other_place () in
                 let ordering name = node result (Construct { variant = Some name; fields = [] }) in
                 let declared variant fields =
-                  Interface.Definition.in_declared_order lookups.interface type_ ~variant
+                  Interface.Definition.sort_in_declared_order lookups.interface type_ ~variant
                     ~name:(fun ((field : Types.field), _) -> field.field_name)
                     fields
                 in
@@ -383,7 +385,7 @@ let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                    ];
                                }))
                 in
-                let number = Types.builtin UInt32 in
+                let number = Types.make_builtin UInt32 in
                 match variants with
                 | None | Some [ _ ] ->
                     of_self result (fun variant _ mine ->
@@ -515,7 +517,7 @@ let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                             "end_variant" )
                     in
                     let mine =
-                      Interface.Definition.in_declared_order lookups.interface type_ ~variant
+                      Interface.Definition.sort_in_declared_order lookups.interface type_ ~variant
                         ~name:(fun ((field : Types.field), _) -> field.field_name)
                         mine
                     in
@@ -539,7 +541,7 @@ let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   | Named { arguments = [ _; Type error ]; _ } -> error
                   | _ -> bug "`deserialize` returns a `Result`"
                 in
-                let result_of ok = Types.named (Well_known.path Result) [ ok; error_type ] in
+                let result_of ok = Types.make_named (Well_known.path Result) [ ok; error_type ] in
                 let source_call name arguments type_ =
                   trait_call ~trait:deserializer ~name ~receiver:Mut ~self_type:source_type
                     ~evidence:Bound
@@ -663,7 +665,7 @@ let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                       | _ -> [])
                 in
                 let invariant_check built_place (index, text) =
-                  let bool = Types.bool and uint64 = Types.builtin UInt64 in
+                  let bool = Types.bool and uint64 = Types.make_builtin UInt64 in
                   let holds =
                     node bool
                       (Call
@@ -773,7 +775,9 @@ let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   let updates =
                     List.map
                       (fun (field : Types.field) ->
-                        let optional = Types.named (Well_known.path Option) [ field.field_type ] in
+                        let optional =
+                          Types.make_named (Well_known.path Option) [ field.field_type ]
+                        in
                         let present = local () in
                         statement
                           (Evaluate
@@ -867,7 +871,7 @@ let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                     let body = fields_then_built None (record_fields ()) "end_record" in
                     { body with statements = begun "begin_record" :: body.statements }
                 | Some variants ->
-                    let string_type = Types.named (Well_known.path String) [] in
+                    let string_type = Types.make_named (Well_known.path String) [] in
                     let name = local () in
                     let name_place : Core.place =
                       Local { local = name; type_ = string_type; origin }

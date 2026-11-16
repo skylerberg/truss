@@ -2,7 +2,7 @@ open Syntax
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
-module Lower = Interface.Lower
+module Elaborate = Interface.Elaborate
 open State
 open Modes
 open Hooks
@@ -18,7 +18,7 @@ let bit_vector_names state (value : Core.expression) =
          place =
            (function
            | Local { type_; origin; _ }
-             when not (Types.is_builtin Bool type_ || Types.integer_range type_ <> None) ->
+             when not (Types.is_builtin Bool type_ || Types.find_integer_range type_ <> None) ->
                report state Not_bit_vector (read_span state origin)
                  (Printf.sprintf
                     "An assertion `by bit_vector` can name only integers and booleans, and this is \
@@ -74,7 +74,7 @@ and statement state env (written : statement) ~last : unit =
       let type_ =
         match annotation with
         | Some annotation ->
-            let annotated = Lower.type_ state.context annotation in
+            let annotated = Elaborate.type_ state.context annotation in
             check state env value annotated;
             annotated
         | None -> expression state env value
@@ -170,7 +170,7 @@ and statement state env (written : statement) ~last : unit =
           let element, variable_mode = loop_iterable state env written ~mode inner in
           (match annotation with
           | Some written_annotation ->
-              let annotated = Lower.type_ state.context written_annotation in
+              let annotated = Elaborate.type_ state.context written_annotation in
               if not (unify state element annotated) then
                 ignore
                   (reported_mismatch state Mismatch

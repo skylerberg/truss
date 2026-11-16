@@ -126,7 +126,7 @@ let no_diagnostics ~check files =
                   reported)));
       ignore
         (Core_lint.check_file
-           (Database.make_interface_lookups database [ (file_of name).module_.package ])
+           (Database.drain_interface_lookups database [ (file_of name).module_.package ])
            ~core:(fun key ->
              Option.map
                (fun (checked : Infer.checked) -> checked.form)

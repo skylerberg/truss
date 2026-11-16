@@ -8,21 +8,24 @@ type result = {
 let implements_capability (lookups : Lookups.t) key =
   match lookups.interface.names.container key with
   | Some (container : Resolve.Names.key) -> (
-      match Interface.Impls.impl_interface lookups.interface container.path with
+      match Interface.Definition.read_impl_interface lookups.interface container.path with
       | Some impl -> (
-          match Interface.Definition.trait_interface lookups.interface impl.implements.trait with
+          match
+            Interface.Definition.read_trait_interface lookups.interface impl.implements.trait
+          with
           | Some trait -> trait.is_capability
           | None -> false)
       | None -> false)
   | None -> false
 
 let check (lookups : Lookups.t) (key : Resolve.Names.key) : result =
-  let lowered = lookups.interface.lowered_interface key in
+  let elaborated = lookups.interface.elaborated_interface key in
   let context : Context.context =
     {
       lookups;
       bounds =
-        (fun parameter -> Option.value ~default:[] (List.assoc_opt parameter lowered.scope.bounds));
+        (fun parameter ->
+          Option.value ~default:[] (List.assoc_opt parameter elaborated.scope.bounds));
       spans = lazy (lookups.interface.names.spans key);
       mode_keywords = Hashtbl.create 8;
       names = Hashtbl.create 32;
@@ -36,13 +39,13 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) : result =
     }
   in
   let mir =
-    if Interface.Environment.is_specification lowered.interface then None else lookups.graph key
+    if Interface.Definition.is_specification elaborated.interface then None else lookups.graph key
   in
   Option.iter
     (fun (mir : Mir.Graph.t) ->
       Context.collect context mir;
       let returns_to_caller =
-        match lowered.interface with Function_interface _ -> true | _ -> false
+        match elaborated.interface with Function_interface _ -> true | _ -> false
       in
       let move_analyses =
         List.map

@@ -28,7 +28,7 @@ let source_at (lookups : Lookups.t) (path : Path.t) =
 
 let trait_substitution (lookups : Lookups.t) (trait : Types.trait_reference) (ty : Types.ty) =
   let generics =
-    match Interface.Definition.interface lookups.interface trait.trait with
+    match Interface.Definition.read_interface lookups.interface trait.trait with
     | Some (Interface.Environment.Trait_interface interface) ->
         List.map (fun (generic : Types.generic) -> generic.generic) interface.trait_generics
     | _ -> []
@@ -76,7 +76,7 @@ let law_proofs (lookups : Lookups.t) package (trait : Types.trait_reference) (fo
     match (left, right) with Type left, Type right -> Types.equal left right | _ -> left = right
   in
   let named_laws =
-    match (Interface.Impls.head for_type, lookups.interface.trait_header trait.trait) with
+    match (Interface.Impls.find_head for_type, lookups.interface.trait_header trait.trait) with
     | Some type_head, Some header ->
         List.concat_map
           (fun law ->
@@ -86,7 +86,7 @@ let law_proofs (lookups : Lookups.t) package (trait : Types.trait_reference) (fo
   in
   List.filter_map
     (fun (key : Names.key) ->
-      match Interface.Definition.interface lookups.interface key.path with
+      match Interface.Definition.read_interface lookups.interface key.path with
       | Some (Interface.Environment.Law_proof_interface proven) -> (
           let variables =
             List.map (fun (generic : Types.generic) -> generic.generic) proven.generics
@@ -116,7 +116,7 @@ let law_unshown (lookups : Lookups.t) (impl : Path.t) (trait : Types.trait_refer
   | None -> false
 
 let make_contract (lookups : Lookups.t) path ~own ~others =
-  let signature = Interface.Impls.signature lookups.interface path in
+  let signature = Interface.Impls.read_signature lookups.interface path in
   let is_logic_function =
     match signature with
     | Some (signature : Types.signature) -> (

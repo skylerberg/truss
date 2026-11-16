@@ -766,7 +766,7 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
       type_arguments
   in
   let generics_of path =
-    match Interface.Impls.signature context.lookups.interface path with
+    match Interface.Impls.read_signature context.lookups.interface path with
     | Some (signature : Types.signature) ->
         List.map (fun (generic : Types.generic) -> generic.generic) signature.generics
     | None -> []
@@ -803,7 +803,7 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
           in
           match concrete_impl context trait (substituted context frame self_type) with
           | Some (impl, _)
-            when Interface.Impls.signature context.lookups.interface
+            when Interface.Impls.read_signature context.lookups.interface
                    (Path.Method { owner = impl; name; receiver })
                  <> None ->
               signature_terminates context (Path.Method { owner = impl; name; receiver })
@@ -880,9 +880,9 @@ let apply_call ?lent_final context frame (site : Invocation.site) (invocation : 
       let operands () = List.map (fun (passed : passed) -> passed.term) values in
       match (name, evidence, operands ()) with
       | ("minimum_value" | "maximum_value" | "bit_width"), _, []
-        when Well_known.is Fixed_width_integer trait.trait && Types.integer_bits self_type <> None
-        -> (
-          match (name, Types.integer_range self_type, Types.integer_bits self_type) with
+        when Well_known.is Fixed_width_integer trait.trait
+             && Types.find_integer_bits self_type <> None -> (
+          match (name, Types.find_integer_range self_type, Types.find_integer_bits self_type) with
           | "minimum_value", Some (low, _), _ -> Some (frame, Logic.Integer low)
           | "maximum_value", Some (_, high), _ -> Some (frame, Logic.Integer high)
           | _, _, Some (bits, _) -> Some (frame, Logic.int bits)

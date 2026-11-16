@@ -5,19 +5,16 @@ type state = {
   lookups : Lookups.t;
   key : Names.key;
   definition : definition;
-  lowered : Environment.lowered_interface;
+  elaborated : Environment.elaborated_interface;
   spans : Source.Definition_span.t array;
-  mutable diagnostics : Diagnostic.in_definition list;
+  diagnostics : Diagnostic.in_definition list ref;
 }
 
-let reported state ?fixes code (span : Source.Definition_span.t) message =
-  let diagnostic = Diagnostic.make ?fixes ~code:(Types code) span message in
-  state.diagnostics <- diagnostic :: state.diagnostics;
-  Diagnostic.reported diagnostic
+let report state ?fixes code span message =
+  ignore (Elaborate.record_diagnostic state.diagnostics ?fixes code span message)
 
-let report state ?fixes code span message = ignore (reported state ?fixes code span message)
+let list_bounds state parameter =
+  Option.value ~default:[] (List.assoc_opt parameter state.elaborated.scope.bounds)
 
-let bounds state parameter =
-  Option.value ~default:[] (List.assoc_opt parameter state.lowered.scope.bounds)
-
-let implements state type_ trait = Impls.implements state.lookups ~bounds:(bounds state) type_ trait
+let implements state type_ trait =
+  Impls.implements state.lookups ~bounds:(list_bounds state) type_ trait

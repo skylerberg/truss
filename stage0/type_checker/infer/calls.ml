@@ -2,7 +2,7 @@ open Syntax
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
-module Lower = Interface.Lower
+module Elaborate = Interface.Elaborate
 open State
 open Modes
 open Instantiation

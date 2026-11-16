@@ -3,7 +3,7 @@ module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
 module Properties = Interface.Properties
-module Lower = Interface.Lower
+module Elaborate = Interface.Elaborate
 open State
 open Modes
 open Instantiation
@@ -183,7 +183,7 @@ and method_time state (value : expression) (type_ : Types.ty) (member : name) =
           methods
           (Members.trait_methods state.lookups bound.trait member.text))
       []
-      (Interface.Properties.known_bounds state.lookups.interface ~bounds:(bounds state) type_)
+      (Interface.Properties.list_known_bounds state.lookups.interface ~bounds:(bounds state) type_)
   in
   let chosen =
     match overloads with
@@ -334,7 +334,7 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
                 methods @ [ (bound, method_) ]
             | _ -> methods)
           []
-          (Interface.Properties.known_bounds state.lookups.interface ~bounds:(bounds state)
+          (Interface.Properties.list_known_bounds state.lookups.interface ~bounds:(bounds state)
              (Types.Parameter parameter))
       in
       match (without_self, overloads state type_ member.text) with
@@ -360,7 +360,7 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
 and trait_method_through_type state env ?expected:_ ?trait_arguments (value : expression) self_type
     (trait : Types.trait_reference) (method_ : Types.trait_method) arguments =
   let trait_generics =
-    match Interface.Definition.trait_interface state.lookups.interface trait.trait with
+    match Interface.Definition.read_trait_interface state.lookups.interface trait.trait with
     | Some interface -> interface.trait_generics
     | None -> []
   in
@@ -379,7 +379,7 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : ex
   in
   let extra =
     (({ owner = trait.trait; name = "Self" } : Types.parameter), Types.Type self_type)
-    :: Option.value ~default:[] (Types.substitution_of trait_generics trait_arguments)
+    :: Option.value ~default:[] (Types.make_substitution trait_generics trait_arguments)
   in
   let signature = Members.method_signature state.lookups trait.trait method_ in
   let instance = instantiate state (read_span state value.id) ~extra signature in
@@ -414,7 +414,7 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : ex
     receiver_argument @ check_arguments state env parameters matched ~offset:receiver_offset
   in
   let reference = { trait with trait_arguments } in
-  let result = Types.result_type instance.signature.output in
+  let result = Types.extract_result_type instance.signature.output in
   note_lending state value instance.signature.output;
   let own_arguments =
     List.filteri (fun index _ -> index < List.length signature.generics) instance.type_arguments
@@ -473,14 +473,14 @@ and capability_call state env (value : expression) capability (member : name) ar
         match_arguments state value instance.signature.parameters arguments ~record:false
       in
       let checked = check_arguments state env instance.signature.parameters matched ~offset:0 in
-      let result = Types.result_type instance.signature.output in
+      let result = Types.extract_result_type instance.signature.output in
       state.tables.calls.(value.id) <-
         Some
           {
             callee = Capability_method { capability; name = member.text };
             arguments = checked;
             omitted_defaults = left_out;
-            uses = Types.capability_set [ Types.Capability capability ];
+            uses = Types.make_capability_set [ Types.Capability capability ];
             callee_result = result;
           };
       Form.register_call state value;
@@ -665,7 +665,7 @@ and method_with_receiver state env ?expected ?(type_arguments = []) (value : exp
 and trait_method_call state env (value : expression) ~(receiver : expression) ~receiver_type
     (trait : Types.trait_reference) (method_ : Types.trait_method) ~type_arguments arguments =
   let trait_generics =
-    match Interface.Definition.trait_interface state.lookups.interface trait.trait with
+    match Interface.Definition.read_trait_interface state.lookups.interface trait.trait with
     | Some interface -> interface.trait_generics
     | None -> []
   in
@@ -675,11 +675,11 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
   in
   let extra =
     (({ owner = trait.trait; name = "Self" } : Types.parameter), Types.Type receiver_type)
-    :: Option.value ~default:[] (Types.substitution_of trait_generics trait_arguments)
+    :: Option.value ~default:[] (Types.make_substitution trait_generics trait_arguments)
   in
   (match receiver_type with
   | Types.Any _ -> (
-      match Impls.through_any state.lookups.interface ~trait:trait.trait method_ with
+      match Impls.classify_through_any state.lookups.interface ~trait:trait.trait method_ with
       | Callable -> ()
       | Has_generics ->
           report state Not_callable (read_span state value.id)
@@ -705,7 +705,7 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
   in
   let checked = check_arguments state env instance.signature.parameters matched ~offset:1 in
   let reference = { trait with trait_arguments } in
-  let result = Types.result_type instance.signature.output in
+  let result = Types.extract_result_type instance.signature.output in
   note_lending state value instance.signature.output;
   let receiver_argument =
     {

@@ -14,10 +14,10 @@ type context = {
 }
 
 let plain context type_ =
-  Interface.Impls.plain context.lookups.interface ~bounds:context.bounds type_
+  Interface.Impls.is_plain context.lookups.interface ~bounds:context.bounds type_
 
 let copyable context type_ =
-  Interface.Impls.copyable context.lookups.interface ~bounds:context.bounds type_
+  Interface.Impls.is_copyable context.lookups.interface ~bounds:context.bounds type_
 
 let is_view context type_ =
   Interface.Impls.is_view context.lookups.interface ~bounds:context.bounds type_
@@ -26,7 +26,9 @@ let holds_function context type_ =
   Interface.Impls.holds_function context.lookups.interface ~bounds:context.bounds type_
 
 let callee_signatures context (callee : Mir.callee) : Types.signature list =
-  let signature path = Option.to_list (Interface.Impls.signature context.lookups.interface path) in
+  let signature path =
+    Option.to_list (Interface.Impls.read_signature context.lookups.interface path)
+  in
   match callee with
   | Function { path; _ } -> signature path
   | Trait_method { trait; name; receiver; _ } ->

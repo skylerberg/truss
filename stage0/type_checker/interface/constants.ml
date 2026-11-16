@@ -1,7 +1,7 @@
 open Syntax
 
-let rec expression lookups ~visiting resolved (value : expression) : Z.t option =
-  let recurse = expression lookups ~visiting resolved in
+let rec evaluate_expression lookups ~visiting resolved (value : expression) : Z.t option =
+  let recurse = evaluate_expression lookups ~visiting resolved in
   match value.kind with
   | Integer value -> Some value
   | Parenthesized inner -> recurse inner
@@ -21,28 +21,21 @@ let rec expression lookups ~visiting resolved (value : expression) : Z.t option 
       | _ -> None)
   | Name path -> (
       match (resolved : Resolve.resolved).names.(path.last.id) with
-      | Some (Definition (Constant, path)) -> evaluate lookups ~visiting path
+      | Some (Definition (Constant, path)) -> evaluate_path lookups ~visiting path
       | _ -> None)
   | Member ({ kind = Name owner; _ }, member) -> (
       match resolved.names.(owner.last.id) with
       | Some (Definition (Type, owner)) ->
-          evaluate lookups ~visiting (Member_constant { owner; name = member.text })
+          evaluate_path lookups ~visiting (Member_constant { owner; name = member.text })
       | _ -> None)
   | _ -> None
 
-and evaluate (lookups : Lookups.t) ~visiting path =
+and evaluate_path (lookups : Lookups.t) ~visiting path =
   if List.exists (Path.equal path) visiting then None
   else
     match Resolve.Names.definition_of_path lookups.names path with
     | Some (key, { kind = Constant { value; _ }; _ }) ->
-        expression lookups ~visiting:(path :: visiting) (lookups.resolved Body key) value
+        evaluate_expression lookups ~visiting:(path :: visiting) (lookups.resolved Body key) value
     | _ -> None
 
-let value_of lookups path = evaluate lookups ~visiting:[] path
-
-let is_uint64 (lookups : Lookups.t) path =
-  match Resolve.Names.definition_of_path lookups.names path with
-  | Some (key, { kind = Constant { type_ = { kind = Path_type written; _ }; _ }; _ }) ->
-      (lookups.resolved Interface key).names.(written.path.last.id)
-      = Some (Definition (Type, Intrinsic.builtin_path UInt64))
-  | _ -> false
+let evaluate_constant lookups path = evaluate_path lookups ~visiting:[] path

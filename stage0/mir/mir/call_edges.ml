@@ -5,7 +5,7 @@ type lookups = { interface : Interface.Lookups.t; mir : Parts.lookups }
 let head_of (ty : Types.ty) = match ty with Named { path; _ } -> Some path | _ -> None
 
 let rec traits_with_required interface (trait : Path.t) =
-  match Interface.Definition.interface interface trait with
+  match Interface.Definition.read_interface interface trait with
   | Some (Interface.Environment.Trait_interface trait_interface) ->
       trait
       :: List.concat_map
@@ -21,7 +21,7 @@ let written_methods (names : Names.lookups) impl =
 let impl_methods (interface : Interface.Lookups.t) impl =
   let written = written_methods interface.names impl in
   match
-    Option.bind (Interface.Impls.impl_interface interface impl)
+    Option.bind (Interface.Definition.read_impl_interface interface impl)
       (fun (implemented : Types.impl_interface) -> interface.names.key implemented.implements.trait)
   with
   | Some trait_key ->
@@ -42,14 +42,15 @@ let impls_for interface package traits ty =
   match head_of ty with
   | Some head ->
       List.concat_map
-        (fun trait -> Interface.Impls.impls_in interface ~trait ~type_:head package)
+        (fun trait ->
+          Interface.Impls.list_impls_of_trait_for_type interface ~trait ~type_:head package)
         (List.sort_uniq Path.compare traits)
   | None -> []
 
 let impls_used interface package (callee : _ Core.target) =
   match callee with
   | Function { path; type_arguments } -> (
-      match Interface.Impls.signature interface path with
+      match Interface.Impls.read_signature interface path with
       | Some (signature : Types.signature) ->
           let rec pairs generics arguments =
             match (generics, arguments) with
@@ -79,7 +80,7 @@ let integer_trait owner =
   || Well_known.is Unsigned_integer owner
 
 let integer_types =
-  List.filter (fun builtin -> Types.is_integer_type (Types.builtin builtin)) Intrinsic.builtins
+  List.filter (fun builtin -> Types.is_integer_type (Types.make_builtin builtin)) Intrinsic.builtins
 
 let dispatched (called : _ Core.target) =
   match called with
@@ -128,7 +129,7 @@ let edges (lookups : lookups) ~package (code : Tree.t) =
                 (fun impl ->
                   let method_ = Path.Method { owner = impl; name; receiver } in
                   if writes lookups impl method_ then Some method_ else None)
-                (impls_for [ trait.trait ] (Types.builtin builtin)))
+                (impls_for [ trait.trait ] (Types.make_builtin builtin)))
             integer_types
         in
         match own with
@@ -218,7 +219,7 @@ let of_path (lookups : lookups) path =
 let list_implementations (lookups : lookups) ~viewer (path : Path.t) =
   match path with
   | Method { owner; name; receiver } -> (
-      match Interface.Definition.interface lookups.interface owner with
+      match Interface.Definition.read_interface lookups.interface owner with
       | Some (Interface.Environment.Trait_interface _) ->
           List.concat_map
             (fun package ->
@@ -226,7 +227,7 @@ let list_implementations (lookups : lookups) ~viewer (path : Path.t) =
                 (fun impl ->
                   let method_ = Path.Method { owner = impl; name; receiver } in
                   if writes lookups impl method_ then Some method_ else None)
-                (Interface.Impls.impls_of lookups.interface ~trait:owner package))
+                (Interface.Impls.list_impls_of_trait lookups.interface ~trait:owner package))
             (viewer :: Names.list_transitive_dependencies lookups.interface.names viewer)
       | _ -> [])
   | _ -> []

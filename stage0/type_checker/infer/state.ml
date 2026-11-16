@@ -2,7 +2,7 @@ open Syntax
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
-module Lower = Interface.Lower
+module Elaborate = Interface.Elaborate
 
 type local = { type_ : Types.ty; is_var : bool; mode : Types.mode }
 
@@ -65,7 +65,7 @@ type state = {
   package : Path.package;
   definition : definition;
   resolved : Resolve.resolved;
-  context : Lower.context;
+  context : Elaborate.context;
   text : string Lazy.t;
   mutable tables : Tables.t;
   form : form;
@@ -461,10 +461,10 @@ let implements state type_ trait =
     (normalize_trait state trait)
 
 let copyable state type_ =
-  Interface.Impls.copyable state.lookups.interface ~bounds:(bounds state) (zonk state type_)
+  Interface.Impls.is_copyable state.lookups.interface ~bounds:(bounds state) (zonk state type_)
 
 let plain state type_ =
-  Interface.Impls.plain state.lookups.interface ~bounds:(bounds state) (zonk state type_)
+  Interface.Impls.is_plain state.lookups.interface ~bounds:(bounds state) (zonk state type_)
 
 let is_view state type_ =
   Interface.Impls.is_view state.lookups.interface ~bounds:(bounds state) (zonk state type_)
@@ -472,7 +472,8 @@ let is_view state type_ =
 let associated state type_ (trait : Types.trait_reference) name ~(at : Source.Definition_span.t) =
   let type_ = normalize state type_ and trait = normalize_trait state trait in
   match
-    Interface.Impls.associated_type state.lookups.interface ~bounds:(bounds state) type_ trait name
+    Interface.Impls.project_associated_type state.lookups.interface ~bounds:(bounds state) type_
+      trait name
   with
   | Some associated_type -> associated_type
   | None ->
@@ -598,8 +599,8 @@ let settle state frame =
           Hashtbl.replace state.unifier.type_solutions index
             (match kind with
             | Integer_literal ->
-                if frame.frame_specification then Types.Integer else Types.builtin Int64
-            | Float_literal -> Types.builtin Float64)
+                if frame.frame_specification then Types.Integer else Types.make_builtin Int64
+            | Float_literal -> Types.make_builtin Float64)
       | _ -> ())
     (unknowns ());
   run_pending ();
@@ -752,8 +753,8 @@ let default_literal state ~at type_ =
     default
   in
   match Unify.resolve state.unifier type_ with
-  | Types.Literal (Integer_literal, _) -> decide (Types.builtin Int64)
-  | Types.Literal (Float_literal, _) -> decide (Types.builtin Float64)
+  | Types.Literal (Integer_literal, _) -> decide (Types.make_builtin Int64)
+  | Types.Literal (Float_literal, _) -> decide (Types.make_builtin Float64)
   | _ -> type_
 
 let head state (value : expression) = Resolve.head state.resolved value
@@ -868,7 +869,7 @@ let rec call_with_mode_keyword state (value : expression) =
 
 let check_resource state (resource : Syntax.resource) =
   let capability (path : path_type) (method_ : name option) =
-    let shown = Interface.Lower.show_path path.path in
+    let shown = Interface.Elaborate.show_path path.path in
     match target state path.path.last with
     | Some (Definition (Capability, capability)) -> (
         match method_ with
@@ -908,7 +909,7 @@ let check_resource state (resource : Syntax.resource) =
 
 let slice state ~origin ~viewed (base : Core.place) ~start ~stop ~inclusive : Core.kind =
   let make = synthetic_expression state ~origin in
-  let uint64 = Types.builtin UInt64 in
+  let uint64 = Types.make_builtin UInt64 in
   let path, type_arguments =
     match Core_walk.place_type base with
     | Types.Named { path; arguments } -> (path, arguments)
@@ -1028,11 +1029,11 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
       Some To_integer
   | _, Types.Integer, _ when env.specification && integer_type state actual_type -> Some To_integer
   | Types.Function actual_function, Types.Function wanted_function, _
-    when not (Types.same_clauses actual_function wanted_function) ->
-      let unlisted = Types.capability_difference actual_function.uses wanted_function.uses in
+    when not (Types.has_same_clauses actual_function wanted_function) ->
+      let unlisted = Types.subtract_capabilities actual_function.uses wanted_function.uses in
       let unknown =
-        Types.capabilities_unsolved actual_function.uses
-        || Types.capabilities_unsolved wanted_function.uses
+        Types.has_unsolved_capabilities actual_function.uses
+        || Types.has_unsolved_capabilities wanted_function.uses
       in
       let proven =
         Types.costs_imply ~provided:actual_function.costs ~required:wanted_function.costs

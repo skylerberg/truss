@@ -34,12 +34,12 @@ let rec offending state (value : expression) : expression option =
 
 let rec check_arithmetic state (value : expression) =
   let worked_out part =
-    Interface.Constants.expression state.lookups.interface ~visiting:[] state.resolved part
+    Interface.Constants.evaluate_expression state.lookups.interface ~visiting:[] state.resolved part
   in
   (match (value.kind, state.tables.types.(value.id)) with
   | Prefix (Negate, { kind = Integer _; _ }), _ -> ()
   | (Prefix _ | Binary _), Some type_ -> (
-      match (Types.integer_range type_, worked_out value, value.kind) with
+      match (Types.find_integer_range type_, worked_out value, value.kind) with
       | Some (low, high), Some constant, _ when Z.lt constant low || Z.gt constant high ->
           report state Constant_overflow (read_span state value.id)
             (Printf.sprintf "This is %s, which does not fit in `%s`, which holds %s to %s."

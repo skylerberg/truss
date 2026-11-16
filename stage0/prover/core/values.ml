@@ -290,7 +290,7 @@ let text_value context frame (ty : Types.ty) text =
       assume_valid context
         { frame with condition = Logic.Boolean true; bound = []; binders = [] }
         ty literal;
-      let byte = Types.builtin UInt8 in
+      let byte = Types.make_builtin UInt8 in
       let holds model =
         add_fact context
           (Logic.equal (sequence_length context byte model) (Logic.int (String.length text)));
@@ -460,7 +460,7 @@ let global_value context frame (site : Invocation.site) path type_arguments ~is_
         "a function the prover cannot read, used as a value"
 
 let constant_type context path =
-  match Interface.Definition.constant_type context.lookups.interface path with
+  match Interface.Definition.read_constant_type context.lookups.interface path with
   | Some ty -> ty
   | None -> raise (Foreign_unsupported "a constant with errors")
 
@@ -520,7 +520,7 @@ let check_built context frame (site : Invocation.site) ty term =
 let indirect context (ty : Types.ty) variant =
   match (ty, variant) with
   | Types.Named { path; _ }, Some variant -> (
-      match Interface.Definition.interface context.lookups.interface path with
+      match Interface.Definition.read_interface context.lookups.interface path with
       | Some (Interface.Environment.Type_interface { shape = Sum variants; _ }) ->
           List.exists
             (fun (written : Types.variant) -> written.variant_name = variant && written.indirect)
@@ -573,7 +573,7 @@ let apply_construct context frame (site : Invocation.site) variant
     | None -> (frame, arrive context frame "built" ty)
 
 let text_matches context span ty term text =
-  let byte = Types.builtin UInt8 in
+  let byte = Types.make_builtin UInt8 in
   match model_of context ty term ~element:byte with
   | Some model ->
       Logic.conjunction
@@ -657,7 +657,7 @@ let apply_specification_function context frame ~span (measure : specification_fu
 let copied ?literal context frame ty term =
   if
     context.counters = []
-    || Interface.Impls.plain context.lookups.interface ~bounds:(current_bounds context) ty
+    || Interface.Impls.is_plain context.lookups.interface ~bounds:(current_bounds context) ty
        && not (try has_potential context ty with Foreign_unsupported _ -> true)
   then frame
   else
@@ -670,7 +670,7 @@ let copied ?literal context frame ty term =
               | None ->
                   trait_method_time context frame
                     (Path.Method
-                       { owner = Interface.Impls.copyable_path; name = "copy"; receiver = Read })
+                       { owner = Well_known.path Copyable; name = "copy"; receiver = Read })
                     ty
             in
             let copy_potential =

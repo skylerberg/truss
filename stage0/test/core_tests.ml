@@ -96,7 +96,7 @@ let definition_form text (path : Path.t) =
   match definition with
   | Some (key, core) ->
       Core_lint.check
-        (Database.make_interface_lookups (database packages) [ key.module_.package ])
+        (Database.drain_interface_lookups (database packages) [ key.module_.package ])
         key core;
       form_of core
   | None -> failwith (Printf.sprintf "`%s` has no core form" (Path.show path))
@@ -414,7 +414,7 @@ let () =
           forms :=
             !forms
             + Core_lint.check_file
-                (Database.make_interface_lookups (database packages) [ file.module_.package ])
+                (Database.drain_interface_lookups (database packages) [ file.module_.package ])
                 ~core:(core_of packages) file))
     Standard_library.files;
   test "the standard library has core forms" (fun () ->
@@ -443,7 +443,7 @@ let () =
      invariants" (fun () ->
       let packages = setup [] in
       let interface =
-        Database.make_interface_lookups (database packages) [ Path.standard_package ]
+        Database.drain_interface_lookups (database packages) [ Path.standard_package ]
       in
       let derived =
         List.filter_map
@@ -453,12 +453,13 @@ let () =
       if derived = [] then fail "the standard library derives nothing";
       List.iter
         (fun impl ->
-          match Interface.Impls.impl_interface interface impl with
+          match Interface.Definition.read_impl_interface interface impl with
           | None -> fail "`%s` has no interface" (Path.show impl)
           | Some impl_interface ->
               let provided =
                 match
-                  Interface.Definition.trait_interface interface impl_interface.implements.trait
+                  Interface.Definition.read_trait_interface interface
+                    impl_interface.implements.trait
                 with
                 | Some trait ->
                     List.filter_map
@@ -498,9 +499,9 @@ let () =
     let owner =
       match
         Interface.Impls.implements
-          (Database.make_interface_lookups (database packages) [ both_package ])
+          (Database.drain_interface_lookups (database packages) [ both_package ])
           ~bounds
-          (Types.named both [ Types.Parameter parameter ])
+          (Types.make_named both [ Types.Parameter parameter ])
           described
       with
       | Some (From_impl { impl; _ }) -> impl

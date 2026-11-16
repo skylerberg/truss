@@ -50,23 +50,27 @@ and resource =
 
 and cost_bound = Finite_cost | Order_of | No_more_than of Z.t option | Exactly_cost of Z.t option
 
-let capability_set capabilities : capability_set = List.sort_uniq compare capabilities
+let make_capability_set capabilities : capability_set = List.sort_uniq compare capabilities
 let no_capabilities : capability_set = []
-let capability_union (left : capability_set) (right : capability_set) = capability_set (left @ right)
 
-let capability_subset (smaller : capability_set) (larger : capability_set) =
+let union_capabilities (left : capability_set) (right : capability_set) =
+  make_capability_set (left @ right)
+
+let is_capability_subset (smaller : capability_set) (larger : capability_set) =
   List.for_all (fun capability -> List.mem capability larger) smaller
 
-let capability_difference (left : capability_set) (right : capability_set) =
+let subtract_capabilities (left : capability_set) (right : capability_set) =
   List.filter (fun capability -> not (List.mem capability right)) left
 
-let flat_map_capabilities f (set : capability_set) = capability_set (List.concat_map f set)
-let builtin builtin = Named { path = Intrinsic.builtin_path builtin; arguments = [] }
-let unit = builtin Unit
-let bool = builtin Bool
-let named path arguments = Named { path; arguments = List.map (fun type_ -> Type type_) arguments }
+let flat_map_capabilities f (set : capability_set) = make_capability_set (List.concat_map f set)
+let make_builtin builtin = Named { path = Intrinsic.builtin_path builtin; arguments = [] }
+let unit = make_builtin Unit
+let bool = make_builtin Bool
 
-let builtin_of = function
+let make_named path arguments =
+  Named { path; arguments = List.map (fun type_ -> Type type_) arguments }
+
+let find_builtin = function
   | Named { path; arguments = [] } -> Intrinsic.builtin_of_path path
   | Named { path; _ } -> (
       match Intrinsic.builtin_of_path path with
@@ -74,7 +78,7 @@ let builtin_of = function
       | _ -> None)
   | _ -> None
 
-let is_builtin wanted type_ = builtin_of type_ = Some wanted
+let is_builtin wanted type_ = find_builtin type_ = Some wanted
 let is_well_known wanted = function Named { path; _ } -> Well_known.is wanted path | _ -> false
 
 let integer_types : Intrinsic.builtin list =
@@ -83,10 +87,10 @@ let integer_types : Intrinsic.builtin list =
 let float_types : Intrinsic.builtin list = [ Float32; Float64 ]
 
 let is_integer_type type_ =
-  match builtin_of type_ with Some builtin -> List.mem builtin integer_types | None -> false
+  match find_builtin type_ with Some builtin -> List.mem builtin integer_types | None -> false
 
-let integer_bits type_ =
-  match builtin_of type_ with
+let find_integer_bits type_ =
+  match find_builtin type_ with
   | Some Int8 -> Some (8, true)
   | Some Int16 -> Some (16, true)
   | Some Int32 -> Some (32, true)
@@ -97,17 +101,18 @@ let integer_bits type_ =
   | Some UInt64 -> Some (64, false)
   | _ -> None
 
-let integer_range type_ =
+let find_integer_range type_ =
   Option.map
     (fun (bits, signed) ->
       if signed then (Z.neg (Z.shift_left Z.one (bits - 1)), Z.pred (Z.shift_left Z.one (bits - 1)))
       else (Z.zero, Z.pred (Z.shift_left Z.one bits)))
-    (integer_bits type_)
+    (find_integer_bits type_)
 
-let is_signed type_ = match integer_bits type_ with Some (_, signed) -> signed | None -> false
+let is_signed type_ =
+  match find_integer_bits type_ with Some (_, signed) -> signed | None -> false
 
 let is_float_type type_ =
-  match builtin_of type_ with Some builtin -> List.mem builtin float_types | None -> false
+  match find_builtin type_ with Some builtin -> List.mem builtin float_types | None -> false
 
 type substitution = (parameter * argument) list
 
@@ -175,7 +180,7 @@ and substitute_function substitution (function_type : function_type) =
     costs = function_type.costs;
   }
 
-let result_type = function Returns type_ | Lends (_, type_) -> type_
+let extract_result_type = function Returns type_ | Lends (_, type_) -> type_
 let show_mode = function Read -> "" | Mut -> "mut " | Own -> "own "
 
 let rec map ?(capabilities = Fun.id) transform type_ =
@@ -251,23 +256,23 @@ let is_error = function Error _ -> true | _ -> false
 
 let rec contains_unsolved = function
   | Variable _ | Literal _ | Hole -> true
-  | Named { arguments; _ } -> List.exists argument_unsolved arguments
-  | Projection { base; trait; _ } -> contains_unsolved base || trait_unsolved trait
+  | Named { arguments; _ } -> List.exists is_unsolved_argument arguments
+  | Projection { base; trait; _ } -> contains_unsolved base || is_unsolved_trait trait
   | Function { inputs; output; _ } ->
       List.exists (fun (_, type_) -> contains_unsolved type_) inputs || contains_unsolved output
-  | Any trait -> trait_unsolved trait
+  | Any trait -> is_unsolved_trait trait
   | Parameter _ | Never | Integer | Error _ -> false
 
-and argument_unsolved = function
+and is_unsolved_argument = function
   | Type type_ -> contains_unsolved type_
   | Value (Value_variable _) -> true
   | Value _ | Capabilities _ -> false
 
-and trait_unsolved trait =
-  List.exists argument_unsolved trait.trait_arguments
+and is_unsolved_trait trait =
+  List.exists is_unsolved_argument trait.trait_arguments
   || List.exists (fun (_, type_) -> contains_unsolved type_) trait.associated
 
-let capabilities_unsolved capabilities =
+let has_unsolved_capabilities capabilities =
   List.exists
     (function
       | Capability_variable _ -> true
@@ -278,7 +283,7 @@ let capabilities_unsolved capabilities =
 let terminates (function_type : function_type) =
   List.exists (fun (cost : cost) -> cost.resource = Time) function_type.costs
 
-let same_clauses (left : function_type) (right : function_type) =
+let has_same_clauses (left : function_type) (right : function_type) =
   left.uses = right.uses && List.sort_uniq compare left.costs = List.sort_uniq compare right.costs
 
 let bound_implies (provided : cost_bound) (required : cost_bound) =
@@ -301,26 +306,26 @@ let costs_imply ~(provided : cost list) ~(required : cost list) =
         provided)
     required
 
-let path_name = function Path.Top { name; _ } -> name | path -> Path.show path
+let show_path_name = function Path.Top { name; _ } -> name | path -> Path.show path
 
 let show_resource = function
   | Time -> "time"
   | Allocations -> "allocations"
   | Allocated_bytes -> "allocated_bytes"
   | Calls { capability; method_ } ->
-      Printf.sprintf "calls(%s%s)" (path_name capability)
+      Printf.sprintf "calls(%s%s)" (show_path_name capability)
         (match method_ with Some method_ -> "." ^ method_ | None -> "")
 
 let rec show_capability = function
-  | Capability path -> path_name path
+  | Capability path -> show_path_name path
   | Capability_parameter { name; _ } -> name
   | Capability_projection { base; name; _ } -> show base ^ "." ^ name
   | Capability_variable _ -> "_"
 
 and show = function
-  | Named { path; arguments = [] } -> path_name path
+  | Named { path; arguments = [] } -> show_path_name path
   | Named { path; arguments } ->
-      Printf.sprintf "%s[%s]" (path_name path)
+      Printf.sprintf "%s[%s]" (show_path_name path)
         (String.concat ", " (List.map show_argument arguments))
   | Parameter { name; _ } -> name
   | Projection { base; name; _ } -> show base ^ "." ^ name
@@ -346,8 +351,8 @@ and show_trait trait =
   let arguments = List.map show_argument trait.trait_arguments in
   let associated = List.map (fun (name, type_) -> name ^ " = " ^ show type_) trait.associated in
   match arguments @ associated with
-  | [] -> path_name trait.trait
-  | all -> Printf.sprintf "%s[%s]" (path_name trait.trait) (String.concat ", " all)
+  | [] -> show_path_name trait.trait
+  | all -> Printf.sprintf "%s[%s]" (show_path_name trait.trait) (String.concat ", " all)
 
 and show_output = function
   | Returns type_ when type_ = unit -> ""
@@ -386,7 +391,7 @@ and show_function (function_type : function_type) =
 type generic_kind = Type_generic of trait_reference list | Value_generic | Capability_generic
 type generic = { generic : parameter; kind : generic_kind }
 
-let generic_arguments generics =
+let list_generic_arguments generics =
   List.map
     (fun generic ->
       match generic.kind with
@@ -395,7 +400,7 @@ let generic_arguments generics =
       | Capability_generic -> Capabilities [ Capability_parameter generic.generic ])
     generics
 
-let bounds_of generics parameter =
+let list_bounds generics parameter =
   List.concat_map
     (fun generic ->
       match generic.kind with
@@ -403,7 +408,7 @@ let bounds_of generics parameter =
       | _ -> [])
     generics
 
-let substitution_of (generics : generic list) arguments : substitution option =
+let make_substitution (generics : generic list) arguments : substitution option =
   if List.length generics = List.length arguments then
     Some (List.combine (List.map (fun generic -> generic.generic) generics) arguments)
   else None
@@ -450,14 +455,14 @@ let substitute_signature substitution (signature : signature) =
     uses = substitute_capabilities substitution signature.uses;
   }
 
-let method_in_impl ~impl_generics ~impl_uses (signature : signature) =
+let add_impl_generics_and_uses ~impl_generics ~impl_uses (signature : signature) =
   {
     signature with
     generics = impl_generics @ signature.generics;
-    uses = capability_union signature.uses impl_uses;
+    uses = union_capabilities signature.uses impl_uses;
   }
 
-let function_type_of (signature : signature) =
+let make_function_type (signature : signature) =
   let receiver =
     match signature.receiver with
     | Some (Static, _) | None -> []
@@ -498,17 +503,19 @@ type type_interface = {
 }
 
 let substitute_fields interface arguments fields =
-  let substitution = Option.value ~default:[] (substitution_of interface.type_generics arguments) in
+  let substitution =
+    Option.value ~default:[] (make_substitution interface.type_generics arguments)
+  in
   List.map
     (fun (field : field) -> { field with field_type = substitute substitution field.field_type })
     fields
 
-let fields_of interface arguments =
+let instantiate_fields interface arguments =
   match interface.shape with
   | Record fields -> Some (substitute_fields interface arguments fields)
   | Sum _ | Todo_type | Builtin_type _ -> None
 
-let variants_of interface arguments =
+let instantiate_variants interface arguments =
   match interface.shape with
   | Sum variants ->
       Some
@@ -520,6 +527,16 @@ let variants_of interface arguments =
              })
            variants)
   | Record _ | Todo_type | Builtin_type _ -> None
+
+let list_field_types interface =
+  match interface.shape with
+  | Record fields -> List.map (fun field -> field.field_type) fields
+  | Sum variants ->
+      List.concat_map
+        (fun variant ->
+          List.map (fun field -> field.field_type) (Option.value ~default:[] variant.fields))
+        variants
+  | Todo_type | Builtin_type _ -> []
 
 type associated_type = { associated_name : string; associated_bounds : trait_reference list }
 type trait_method = { method_name : string; method_receiver : Path.receiver; provided : bool }

@@ -52,21 +52,21 @@ and cost_bound = Finite_cost | Order_of | No_more_than of Z.t option | Exactly_c
 
 val unit : ty
 val bool : ty
-val builtin : Intrinsic.builtin -> ty
-val named : Path.t -> ty list -> ty
+val make_builtin : Intrinsic.builtin -> ty
+val make_named : Path.t -> ty list -> ty
 val is_builtin : Intrinsic.builtin -> ty -> bool
-val builtin_of : ty -> Intrinsic.builtin option
+val find_builtin : ty -> Intrinsic.builtin option
 val is_well_known : Well_known.t -> ty -> bool
-val integer_bits : ty -> (int * bool) option
-val integer_range : ty -> (Z.t * Z.t) option
+val find_integer_bits : ty -> (int * bool) option
+val find_integer_range : ty -> (Z.t * Z.t) option
 val is_integer_type : ty -> bool
 val is_signed : ty -> bool
 val is_float_type : ty -> bool
-val capability_set : capability list -> capability_set
+val make_capability_set : capability list -> capability_set
 val no_capabilities : capability_set
-val capability_union : capability_set -> capability_set -> capability_set
-val capability_subset : capability_set -> capability_set -> bool
-val capability_difference : capability_set -> capability_set -> capability_set
+val union_capabilities : capability_set -> capability_set -> capability_set
+val is_capability_subset : capability_set -> capability_set -> bool
+val subtract_capabilities : capability_set -> capability_set -> capability_set
 val flat_map_capabilities : (capability -> capability list) -> capability_set -> capability_set
 
 type substitution = (parameter * argument) list
@@ -76,18 +76,18 @@ val substitute_argument : substitution -> argument -> argument
 val substitute_trait : substitution -> trait_reference -> trait_reference
 val substitute_function : substitution -> function_type -> function_type
 val substitute_capabilities : substitution -> capability_set -> capability_set
-val result_type : result -> ty
+val extract_result_type : result -> ty
 val show_mode : mode -> string
 val map : ?capabilities:(capability_set -> capability_set) -> (ty -> ty option) -> ty -> ty
 val exists : ?resolve:(ty -> ty) -> (ty -> bool) -> ty -> bool
 val find_specification_only_type : ty -> ty option
 val has_capability_variable : capability_set -> bool
-val capabilities_unsolved : capability_set -> bool
+val has_unsolved_capabilities : capability_set -> bool
 val equal : ty -> ty -> bool
 val is_error : ty -> bool
 val contains_unsolved : ty -> bool
 val terminates : function_type -> bool
-val same_clauses : function_type -> function_type -> bool
+val has_same_clauses : function_type -> function_type -> bool
 val costs_imply : provided:cost list -> required:cost list -> bool
 val show : ty -> string
 val show_capability : capability -> string
@@ -98,9 +98,9 @@ val show_output : result -> string
 type generic_kind = Type_generic of trait_reference list | Value_generic | Capability_generic
 type generic = { generic : parameter; kind : generic_kind }
 
-val generic_arguments : generic list -> argument list
-val bounds_of : generic list -> parameter -> trait_reference list
-val substitution_of : generic list -> argument list -> substitution option
+val list_generic_arguments : generic list -> argument list
+val list_bounds : generic list -> parameter -> trait_reference list
+val make_substitution : generic list -> argument list -> substitution option
 
 type parameter_info = { name : string; mode : mode; type_ : ty; has_default : bool }
 
@@ -118,10 +118,10 @@ type signature = {
 val map_signature : (ty -> ty) -> signature -> signature
 val substitute_signature : substitution -> signature -> signature
 
-val method_in_impl :
+val add_impl_generics_and_uses :
   impl_generics:generic list -> impl_uses:capability_set -> signature -> signature
 
-val function_type_of : signature -> function_type option
+val make_function_type : signature -> function_type option
 
 type field = { field_name : string; field_type : ty; field_has_default : bool }
 type variant = { variant_name : string; fields : field list option; indirect : bool }
@@ -139,8 +139,9 @@ type type_interface = {
   derives : Path.t list;
 }
 
-val fields_of : type_interface -> argument list -> field list option
-val variants_of : type_interface -> argument list -> variant list option
+val instantiate_fields : type_interface -> argument list -> field list option
+val instantiate_variants : type_interface -> argument list -> variant list option
+val list_field_types : type_interface -> ty list
 
 type associated_type = { associated_name : string; associated_bounds : trait_reference list }
 type trait_method = { method_name : string; method_receiver : Path.receiver; provided : bool }

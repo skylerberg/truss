@@ -1,6 +1,6 @@
 module Environment = Environment
 module Lookups = Lookups
-module Lower = Lower
+module Elaborate = Elaborate
 module Constants = Constants
 module Definition = Definition
 module Properties = Properties

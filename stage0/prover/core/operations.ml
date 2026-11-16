@@ -86,7 +86,7 @@ let to_any context frame (site : Invocation.site) =
 
 let current_bounds context : Interface.Impls.bounds =
   let impl_generics path =
-    match Interface.Impls.impl_interface context.lookups.interface path with
+    match Interface.Definition.read_impl_interface context.lookups.interface path with
     | Some interface -> interface.impl_generics
     | None -> []
   in
@@ -95,15 +95,15 @@ let current_bounds context : Interface.Impls.bounds =
     | Method { owner; _ } -> (
         impl_generics owner
         @
-        match Interface.Impls.signature context.lookups.interface context.current with
+        match Interface.Impls.read_signature context.lookups.interface context.current with
         | Some signature -> signature.generics
         | None -> [])
     | current -> (
-        match Interface.Impls.signature context.lookups.interface current with
+        match Interface.Impls.read_signature context.lookups.interface current with
         | Some signature -> signature.generics
         | None -> impl_generics current)
   in
-  fun parameter -> Types.bounds_of generics parameter
+  fun parameter -> Types.list_bounds generics parameter
 
 let concrete_impl context (trait : Types.trait_reference) (ty : Types.ty) =
   match ty with
@@ -118,7 +118,7 @@ let concrete_impl context (trait : Types.trait_reference) (ty : Types.ty) =
         (fun package ->
           List.find_map
             (fun impl ->
-              match Interface.Impls.impl_interface context.lookups.interface impl with
+              match Interface.Definition.read_impl_interface context.lookups.interface impl with
               | Some interface -> (
                   let variables =
                     List.map
@@ -138,12 +138,13 @@ let concrete_impl context (trait : Types.trait_reference) (ty : Types.ty) =
                                 Option.is_some
                                   (Interface.Impls.implements context.lookups.interface ~bounds
                                      argument bound))
-                              (Interface.Impls.required interface.impl_generics arguments) ->
+                              (Interface.Impls.list_required_bounds interface.impl_generics
+                                 arguments) ->
                       Some (impl, arguments)
                   | _ -> None)
               | None -> None)
-            (Interface.Impls.impls_in context.lookups.interface ~trait:trait.trait ~type_:path
-               package))
+            (Interface.Impls.list_impls_of_trait_for_type context.lookups.interface
+               ~trait:trait.trait ~type_:path package))
         packages
   | _ -> None
 
@@ -226,7 +227,7 @@ let equal_of context frame (ty : Types.ty) left right =
     | Some equal -> equal
     | None -> derived_equal context frame ty left right
 
-let width (ty : Types.ty) = Option.map fst (Types.integer_bits ty)
+let width (ty : Types.ty) = Option.map fst (Types.find_integer_bits ty)
 
 let opaque_operation context frame ty operation arguments =
   let sorts = List.map (fun _ -> Logic.Int) arguments in

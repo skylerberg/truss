@@ -15,4 +15,4 @@ type scope = {
   implemented_capability : Types.capability option;
 }
 
-val check : State.state -> State.Environment.lowered_interface -> Core.t -> unit
+val check : State.state -> State.Environment.elaborated_interface -> Core.t -> unit

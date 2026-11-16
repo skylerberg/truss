@@ -2,7 +2,7 @@ open Syntax
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
-module Lower = Interface.Lower
+module Elaborate = Interface.Elaborate
 open State
 
 let rec binding_pattern state env written type_ ~is_var ~mode =
@@ -286,7 +286,7 @@ and unknown_pattern state env (written : pattern) unknown ~is_var ~mode =
 
 and constant_pattern state id span path type_ =
   state.tables.patterns.(id) <- Some (Constant_pattern path);
-  match Interface.Definition.constant_type state.lookups.interface path with
+  match Interface.Definition.read_constant_type state.lookups.interface path with
   | Some constant_type ->
       if not (unify state constant_type type_) then
         mismatch state span ~expected:type_ ~actual:constant_type
@@ -313,14 +313,14 @@ and structural ?(seen = []) state (type_ : Types.ty) =
   else
     match type_ with
     | Types.Named { path; arguments } -> (
-        match Interface.Definition.interface state.lookups.interface path with
+        match Interface.Definition.read_interface state.lookups.interface path with
         | Some (Environment.Type_interface interface)
           when (not interface.opaque) || Path.package path = state.package ->
             let derives_equal =
               List.exists (fun derived -> Well_known.is Equal derived) interface.derives
             in
             let substitution =
-              Option.value ~default:[] (Types.substitution_of interface.type_generics arguments)
+              Option.value ~default:[] (Types.make_substitution interface.type_generics arguments)
             in
             let fields_structural (fields : Types.field list) =
               List.for_all
@@ -368,7 +368,7 @@ and check_literal_fits state (value : expression) number type_ =
           (match
              match resolved with
              | Types.Parameter _ | Types.Projection _ -> state.unifier.integer_range resolved
-             | _ -> Types.integer_range resolved
+             | _ -> Types.find_integer_range resolved
            with
           | Some (low, high) when Z.lt number low || Z.gt number high ->
               report state Literal_out_of_range (read_span state value.id)
@@ -416,7 +416,7 @@ and character_value state id (literal : string_literal) (builtin : Intrinsic.bui
 
 and character_literal state id literal builtin =
   character_value state id literal builtin;
-  Types.builtin builtin
+  Types.make_builtin builtin
 
 and literal_pattern state id (span : Source.Definition_span.t) literal type_ =
   match literal with
@@ -427,7 +427,7 @@ and literal_pattern state id (span : Source.Definition_span.t) literal type_ =
           report state Mismatch span
             (Printf.sprintf "An integer pattern matches an integer, not `%s`." (Types.show type_))
         else
-          match Types.integer_range type_ with
+          match Types.find_integer_range type_ with
           | Some (low, high) when Z.lt number low || Z.gt number high ->
               report state Literal_out_of_range span
                 (Printf.sprintf "`%s` does not fit in `%s`." (Z.to_string number) (Types.show type_))
@@ -449,8 +449,8 @@ and literal_pattern state id (span : Source.Definition_span.t) literal type_ =
       match character_tag state tagged with
       | Some builtin ->
           character_value state id tagged builtin;
-          if not (unify state type_ (Types.builtin builtin)) then
-            mismatch state span ~expected:type_ ~actual:(Types.builtin builtin)
+          if not (unify state type_ (Types.make_builtin builtin)) then
+            mismatch state span ~expected:type_ ~actual:(Types.make_builtin builtin)
       | None -> string_pattern state span type_)
 
 and string_pattern state span type_ =

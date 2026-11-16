@@ -1,7 +1,7 @@
 open Syntax
 module Names = Resolve.Names
 module Environment = Interface.Environment
-module Lower = Interface.Lower
+module Elaborate = Interface.Elaborate
 open State
 open Statements
 open Expressions
@@ -115,13 +115,13 @@ let check_function_type_requires state env (written : parameter list) (signature
               (fun (info : Types.parameter_info) -> info.name = name.text)
               signature.parameters
           with
-          | Some { type_ = Types.Function lowered; _ } ->
+          | Some { type_ = Types.Function elaborated; _ } ->
               List.iter2
                 (fun (input : function_input) (mode, type_) ->
                   Option.iter
                     (fun input_name -> declare state input_name type_ ~is_var:false ~mode)
                     input.name)
-                inputs lowered.inputs;
+                inputs elaborated.inputs;
               List.iter
                 (fun (clause : clause) ->
                   match clause.kind with
@@ -272,8 +272,9 @@ let check_function state ~broken_body (written : signature) (body_block : block 
         Function { parameters; contract; body });
   match body_block with Some block when not broken_body -> body state env block | _ -> ()
 
-let check_deserialized_invariants state (lowered : Environment.lowered_interface) (form : Core.t) =
-  match (form.definition, lowered.interface) with
+let check_deserialized_invariants state (elaborated : Environment.elaborated_interface)
+    (form : Core.t) =
+  match (form.definition, elaborated.interface) with
   | Type { invariants; _ }, Type_interface interface
     when List.exists (Well_known.is Deserialize) interface.derives ->
       List.iter
@@ -287,13 +288,13 @@ let check_deserialized_invariants state (lowered : Environment.lowered_interface
         invariants
   | _ -> ()
 
-let check_definition state (lowered : Environment.lowered_interface) ~checks_body =
+let check_definition state (elaborated : Environment.elaborated_interface) ~checks_body =
   let definition = state.definition in
   let broken (part : Resolve.Parts.part) =
     Names.is_broken state.lookups.interface.names state.key part || (part = Body && not checks_body)
   in
   if not (broken Header) then
-    match (definition.kind, lowered.interface) with
+    match (definition.kind, elaborated.interface) with
     | Function { signature; body = written }, Function_interface lowered_signature ->
         check_function state ~broken_body:(broken Body) signature (Some written) lowered_signature
     | Method_declaration signature, Function_interface lowered_signature ->
@@ -301,7 +302,10 @@ let check_definition state (lowered : Environment.lowered_interface) ~checks_bod
     | Type_definition { body = type_body; clauses; _ }, Type_interface interface -> (
         let self =
           Types.Named
-            { path = state.key.path; arguments = Types.generic_arguments interface.type_generics }
+            {
+              path = state.key.path;
+              arguments = Types.list_generic_arguments interface.type_generics;
+            }
         in
         let env : env = { no_output with specification = true; self = Some self } in
         List.iter
@@ -368,12 +372,12 @@ let check_definition state (lowered : Environment.lowered_interface) ~checks_bod
               | Field_declaration { name; default = Some value; _ } -> (
                   match
                     List.find_opt
-                      (fun (lowered : Types.field) -> lowered.field_name = name.text)
+                      (fun (elaborated : Types.field) -> elaborated.field_name = name.text)
                       lowered_fields
                   with
-                  | Some lowered ->
+                  | Some elaborated ->
                       in_statement state constant_expression (read_span state value.id) (fun () ->
-                          check state constant_expression value lowered.field_type);
+                          check state constant_expression value elaborated.field_type);
                       Constant.check state ~default:true value
                   | None -> ())
               | _ -> ())
@@ -387,7 +391,8 @@ let check_definition state (lowered : Environment.lowered_interface) ~checks_bod
                 match
                   ( variant.fields,
                     List.find_opt
-                      (fun (lowered : Types.variant) -> lowered.variant_name = variant.name.text)
+                      (fun (elaborated : Types.variant) ->
+                        elaborated.variant_name = variant.name.text)
                       lowered_variants )
                 with
                 | Some fields, Some { fields = Some lowered_fields; _ } ->
@@ -445,8 +450,9 @@ let check_definition state (lowered : Environment.lowered_interface) ~checks_bod
                     (fun (parameter : parameter) ->
                       match parameter.kind with
                       | Named_parameter { name; type_; _ } ->
-                          declare state name (Lower.type_ state.context type_) ~is_var:false
-                            ~mode:Types.Read
+                          declare state name
+                            (Elaborate.type_ state.context type_)
+                            ~is_var:false ~mode:Types.Read
                       | _ -> ())
                     law.parameters;
                   List.iter
@@ -501,10 +507,10 @@ let check_definition state (lowered : Environment.lowered_interface) ~checks_bod
                 });
         if not (broken Body) then body state env written
     | Law_proof { body = written; _ }, Law_proof_interface { trait; law; for_type; _ } ->
-        (match Interface.Definition.trait_interface state.lookups.interface trait.trait with
+        (match Interface.Definition.read_trait_interface state.lookups.interface trait.trait with
         | Some interface ->
             let substitution =
-              Interface.Properties.trait_substitution interface ~self:for_type trait
+              Interface.Properties.make_trait_substitution interface ~self:for_type trait
             in
             state.law_parameters <-
               List.map
@@ -655,7 +661,7 @@ let integer_literal_range (bounds : Types.trait_reference list) =
   Option.bind implementors (fun builtins ->
       List.fold_left
         (fun range builtin ->
-          match (range, Types.integer_range (Types.builtin builtin)) with
+          match (range, Types.find_integer_range (Types.make_builtin builtin)) with
           | Some (low, high), Some (other_low, other_high) ->
               Some (Z.max low other_low, Z.min high other_high)
           | None, found | found, None -> found)
@@ -668,11 +674,13 @@ let check (lookups : Lookups.t) (key : Names.key) ~checks_body =
          (fun section -> lookups.interface.resolved section key)
          (if checks_body then Resolve.sections else [ Interface; Contract ]))
   in
-  let lowered = lookups.interface.lowered_interface key in
+  let elaborated = lookups.interface.elaborated_interface key in
   let module_ = key.module_ in
   let definition = lookups.interface.names.definition key in
   let spans = lookups.interface.names.spans key in
-  let context = Interface.Lower.create lookups.interface resolved ~spans lowered.scope in
+  let context =
+    Interface.Elaborate.create_context lookups.interface resolved ~spans elaborated.scope
+  in
   let text = lazy (lookups.interface.names.text key) in
   let state : state =
     {
@@ -716,11 +724,11 @@ let check (lookups : Lookups.t) (key : Names.key) ~checks_body =
   state.unifier.integer_range <-
     (fun type_ ->
       integer_literal_range
-        (Interface.Properties.known_bounds lookups.interface ~bounds:(bounds state) type_));
-  check_definition state lowered ~checks_body;
+        (Interface.Properties.list_known_bounds lookups.interface ~bounds:(bounds state) type_));
+  check_definition state elaborated ~checks_body;
   state.diagnostics <- !(context.diagnostics) @ state.diagnostics;
   state.diagnostics <-
-    Interface.Check.bound_diagnostics lookups.interface ~package:state.package
+    Interface.Check.list_bound_diagnostics lookups.interface ~package:state.package
       ~bounds:(bounds state) ~spans !(context.named)
     @ state.diagnostics;
   finalize state;
@@ -771,8 +779,8 @@ let check (lookups : Lookups.t) (key : Names.key) ~checks_body =
   let checked = if is_clean () then Some (build ()) else None in
   (match checked with
   | Some form ->
-      Capabilities.check state lowered form;
-      check_deserialized_invariants state lowered form
+      Capabilities.check state elaborated form;
+      check_deserialized_invariants state elaborated form
   | None -> state.capability_solution <- Some (Hashtbl.create 1));
   let has_capability_variables = state.unifier.capability_variable_count > 0 in
   if has_capability_variables then finalize state;

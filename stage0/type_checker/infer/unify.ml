@@ -33,11 +33,11 @@ let fresh_value unifier =
 
 let fresh_capability_variable unifier =
   unifier.capability_variable_count <- unifier.capability_variable_count + 1;
-  Types.capability_set [ Types.Capability_variable unifier.capability_variable_count ]
+  Types.make_capability_set [ Types.Capability_variable unifier.capability_variable_count ]
 
 let unify_capabilities unifier (left : Types.capability_set) right =
   left = right
-  || (Types.capabilities_unsolved left || Types.capabilities_unsolved right)
+  || (Types.has_unsolved_capabilities left || Types.has_unsolved_capabilities right)
      && begin
        unifier.deferred_capability_equalities <-
          (left, right) :: unifier.deferred_capability_equalities;

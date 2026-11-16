@@ -7,7 +7,7 @@ let storage element =
 let view element =
   Types.Named { path = Intrinsic.builtin_path View; arguments = [ Types.Type element ] }
 
-let libc_scalar scalar = Types.builtin (Intrinsic.libc_builtin scalar)
+let libc_scalar scalar = Types.make_builtin (Intrinsic.libc_builtin scalar)
 
 let sequence element =
   Types.Named { path = Well_known.path Sequence; arguments = [ Types.Type element ] }
@@ -36,7 +36,7 @@ let signature (operation : Intrinsic.operation) : Types.signature =
     }
   in
   let value = parameter_type "Value" and element = parameter_type "Element" in
-  let uint64 = Types.builtin UInt64 and bool = Types.bool in
+  let uint64 = Types.make_builtin UInt64 and bool = Types.bool in
   let binary output =
     make ~generics:[ "Value" ] ~output:(Returns output) [ input "left" value; input "right" value ]
   in
@@ -55,7 +55,7 @@ let signature (operation : Intrinsic.operation) : Types.signature =
       generics = [ generic "Element"; { Types.generic = count; kind = Value_generic } ];
     }
   in
-  let work_item = Types.builtin UInt64 in
+  let work_item = Types.make_builtin UInt64 in
   let work =
     Types.Function
       {
@@ -107,8 +107,11 @@ let signature (operation : Intrinsic.operation) : Types.signature =
         [ input "bits" (parameter_type "Bits") ]
   | Compare_bytes ->
       make
-        ~output:(Returns (Types.builtin Int8))
-        [ input "left" (view (Types.builtin UInt8)); input "right" (view (Types.builtin UInt8)) ]
+        ~output:(Returns (Types.make_builtin Int8))
+        [
+          input "left" (view (Types.make_builtin UInt8));
+          input "right" (view (Types.make_builtin UInt8));
+        ]
   | Storage_empty -> make ~generics:[ "Element" ] ~output:(Returns (storage element)) []
   | Storage_with_capacity ->
       make ~generics:[ "Element" ] ~output:(Returns (storage element)) [ input "capacity" uint64 ]
@@ -180,14 +183,18 @@ let signature (operation : Intrinsic.operation) : Types.signature =
       make ~output:(Returns Types.Never)
         [ input "message" (Types.Named { path = Well_known.path String_slice; arguments = [] }) ]
   | Handle_from ->
-      make ~output:(Returns (Types.builtin Handle)) [ input "descriptor" (Types.builtin Int32) ]
+      make
+        ~output:(Returns (Types.make_builtin Handle))
+        [ input "descriptor" (Types.make_builtin Int32) ]
   | Handle_descriptor ->
-      make ~output:(Returns (Types.builtin Int32)) [ input "handle" (Types.builtin Handle) ]
+      make
+        ~output:(Returns (Types.make_builtin Int32))
+        [ input "handle" (Types.make_builtin Handle) ]
   | Handle_release ->
       make
-        ~output:(Returns (Types.builtin Int32))
-        [ input ~mode:Own "handle" (Types.builtin Handle) ]
-  | Run_test -> make [ input "index" (Types.builtin UInt32) ]
+        ~output:(Returns (Types.make_builtin Int32))
+        [ input ~mode:Own "handle" (Types.make_builtin Handle) ]
+  | Run_test -> make [ input "index" (Types.make_builtin UInt32) ]
   | Coroutine_start ->
       {
         (make ~output:(Returns uint64) [ input ~mode:Own "work" work; input "item" work_item ]) with
@@ -235,16 +242,16 @@ let signature (operation : Intrinsic.operation) : Types.signature =
           }
       | _ ->
           {
-            (make ~output:(Returns (Types.builtin UInt64)) [ input "shared" shared ]) with
+            (make ~output:(Returns (Types.make_builtin UInt64)) [ input "shared" shared ]) with
             generics = [ bounded Storable "Value" ];
           })
   | Coroutine_resume -> make ~output:(Returns bool) [ input "coroutine" uint64 ]
   | Coroutine_suspend -> make []
-  | Report_tests_to -> make [ input "descriptor" (Types.builtin Int32) ]
+  | Report_tests_to -> make [ input "descriptor" (Types.make_builtin Int32) ]
   | Live_blocks -> make ~output:(Returns uint64) []
   | Environment_entry ->
       make
-        ~output:(Returns (view (Types.builtin UInt8)))
+        ~output:(Returns (view (Types.make_builtin UInt8)))
         [ input "index" uint64; input ~mode:Mut "is_present" bool ]
   | System_is_os _ | System_is_architecture _ -> make ~output:(Returns bool) []
   | Libc function_ ->
@@ -255,7 +262,7 @@ let signature (operation : Intrinsic.operation) : Types.signature =
           (Returns
              (match result with
              | Returns scalar | Points_at scalar -> libc_scalar scalar
-             | Text -> view (Types.builtin UInt8)
+             | Text -> view (Types.make_builtin UInt8)
              | Never -> Types.Never))
         (List.concat_map
            (fun (name, (passes : Libc.passes)) ->

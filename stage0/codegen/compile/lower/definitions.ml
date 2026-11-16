@@ -15,7 +15,7 @@ type context = {
 
 let monomorphic (interface : Interface.Lookups.t) : Monomorphic.context =
   {
-    type_interface = Interface.Definition.type_interface interface;
+    type_interface = Interface.Definition.read_type_interface interface;
     normalize = Interface.Impls.normalize interface ~bounds:Interface.Impls.no_bounds;
     normalize_capabilities =
       Interface.Impls.normalize_capabilities interface ~bounds:Interface.Impls.no_bounds;
@@ -78,17 +78,17 @@ let key_of context path =
 let bind = Monomorphic.substitution
 
 let impl_interface context impl =
-  match Interface.Impls.impl_interface context.lookups.interface impl with
+  match Interface.Definition.read_impl_interface context.lookups.interface impl with
   | Some position -> position
   | None -> bug "no interface for %s" (Path.show impl)
 
 let trait_substitution context impl =
-  match Interface.Impls.trait_substitution context.lookups.interface impl with
+  match Interface.Impls.make_impl_substitution context.lookups.interface impl with
   | Some substitution -> substitution
   | None -> bug "no trait for %s" (Path.show impl)
 
 let signature_of context (path : Path.t) =
-  match Interface.Impls.signature context.lookups.interface path with
+  match Interface.Impls.read_signature context.lookups.interface path with
   | Some signature -> signature
   | None -> bug "no signature for %s" (Path.show path)
 
@@ -122,7 +122,7 @@ let code_of context (path : Path.t) type_arguments : code =
             (unwritten ~definition:path ~substitution:[] ~result:(Returns Types.unit)) with
             written = Some (read_written context key);
             real =
-              (match Interface.Definition.test_uses context.lookups.interface path with
+              (match Interface.Definition.read_test_uses context.lookups.interface path with
               | Some uses ->
                   List.filter_map
                     (function Types.Capability path -> Some path | _ -> None)

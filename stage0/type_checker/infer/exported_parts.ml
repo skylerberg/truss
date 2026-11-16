@@ -25,7 +25,7 @@ let called_from_other_packages (state : state) =
   match state.lookups.interface.names.container state.key with
   | None -> Names.is_public state.definition.visibility
   | Some container -> (
-      match Interface.Definition.interface state.lookups.interface container.path with
+      match Interface.Definition.read_interface state.lookups.interface container.path with
       | Some (Trait_interface _) -> visible_to_other_packages state.lookups container.path
       | Some (Impl_interface impl) -> (
           visible_to_other_packages state.lookups impl.implements.trait
