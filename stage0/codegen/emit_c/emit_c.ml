@@ -2,6 +2,8 @@ module Key_table = Hashtbl.Make (Structural_key.Make (struct
   type t = C_types.key
 end))
 
+module Path_table = Hashtbl.Make (Path)
+
 type build = C_runtime.build = Development | Release
 type linkage = C_runtime.linkage = External | Internal
 
@@ -44,7 +46,7 @@ let walk ~lookup ~follows_only_called_entries roots =
   let queue = Queue.create () in
   List.iter (fun root -> Queue.add (root, []) queue) roots;
   let reachable = ref [] in
-  let tables = Hashtbl.create 16 and called_slots = Hashtbl.create 16 in
+  let tables = Path_table.create 16 and called_slots = Path_table.create 16 in
   let enqueue_entry table (slot, chain) =
     match List.nth_opt table.references slot with
     | Some entry -> Queue.add (entry, chain) queue
@@ -64,16 +66,17 @@ let walk ~lookup ~follows_only_called_entries roots =
       in
       match fragment.kind with
       | Table_entries (Some capability) when follows_only_called_entries ->
-          Hashtbl.add tables capability fragment;
-          List.iter (enqueue_entry fragment) (List.rev (Hashtbl.find_all called_slots capability))
+          Path_table.add tables capability fragment;
+          List.iter (enqueue_entry fragment)
+            (List.rev (Path_table.find_all called_slots capability))
       | _ when follows_only_called_entries ->
           List.iter
             (fun (capability, slot) ->
-              if not (List.mem_assoc slot (Hashtbl.find_all called_slots capability)) then begin
-                Hashtbl.add called_slots capability (slot, chain);
+              if not (List.mem_assoc slot (Path_table.find_all called_slots capability)) then begin
+                Path_table.add called_slots capability (slot, chain);
                 List.iter
                   (fun table -> enqueue_entry table (slot, chain))
-                  (List.rev (Hashtbl.find_all tables capability))
+                  (List.rev (Path_table.find_all tables capability))
               end)
             fragment.calls;
           enqueue_references ()
