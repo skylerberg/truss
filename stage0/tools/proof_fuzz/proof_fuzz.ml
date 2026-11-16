@@ -218,7 +218,7 @@ let mutants text =
             | _ -> None
           in
           match swapped with
-          | Some other -> [ replace token.span (Token.punctuation_spelling other) ]
+          | Some other -> [ replace token.span (Token.spell_punctuation other) ]
           | None -> [])
       | _ -> [])
 

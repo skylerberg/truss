@@ -6,7 +6,7 @@ val scan :
   nesting:int ->
   scanned option
 
-val after_name :
+val lex_after_name :
   Cursor.t ->
   scan:(Cursor.t -> inline:bool -> nesting:int -> Cursor.item) ->
   nesting:int ->
@@ -14,4 +14,4 @@ val after_name :
   Token.kind ->
   (Token.kind * Cursor.ending) option
 
-val curly_quoted_string : Cursor.t -> opening_length:int -> closing:string -> Token.kind option
+val lex_curly_quoted_string : Cursor.t -> opening_length:int -> closing:string -> Token.kind option

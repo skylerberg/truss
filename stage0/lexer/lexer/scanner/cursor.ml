@@ -46,9 +46,8 @@ let create ~foreign_escape source diagnostics =
     foreign_escape;
   }
 
-let span = Source.span
-let at_end cursor index = index >= cursor.length
-let char cursor index = cursor.text.[index]
+let is_at_end cursor index = index >= cursor.length
+let lookup_char cursor index = cursor.text.[index]
 let is_at cursor index character = index < cursor.length && cursor.text.[index] = character
 let satisfies cursor index predicate = index < cursor.length && predicate cursor.text.[index]
 
@@ -57,7 +56,7 @@ let report cursor ?notes ?fixes ~code span message =
     (Diagnostic.make ?notes ?fixes ~code:(Lexer code) span message)
 
 let is_line_break character = character = '\n' || character = '\r'
-let is_end_of_line cursor index = at_end cursor index || is_line_break cursor.text.[index]
+let is_end_of_line cursor index = is_at_end cursor index || is_line_break cursor.text.[index]
 let is_space character = character = ' ' || character = '\t'
 let is_digit character = character >= '0' && character <= '9'
 
@@ -79,7 +78,7 @@ let joins_neighbor cursor (span : Source.span) code =
   and after = if span.stop < cursor.length then Some cursor.text.[span.stop] else None in
   Token.joins_neighbor ~before ~after code
 
-let code_fixes cursor span codes =
+let list_code_fixes cursor span codes =
   List.filter_map
     (fun code ->
       if joins_neighbor cursor span code then None
@@ -100,20 +99,20 @@ let skip_spaces cursor index =
   in
   loop index
 
-let end_of_line cursor index =
+let compute_end_of_line cursor index =
   let rec loop position =
     if is_end_of_line cursor position then position else loop (position + 1)
   in
   loop index
 
-let line_break_length cursor index =
+let measure_line_break cursor index =
   if is_at cursor index '\r' && is_at cursor (index + 1) '\n' then 2 else 1
 
-let indentation cursor offset =
+let extract_indentation cursor offset =
   let start = Source.line_start cursor.source offset in
   String.sub cursor.text start (skip_spaces cursor start - start)
 
-let spaces_before cursor offset =
+let count_spaces_before cursor offset =
   let line_start = Source.line_start cursor.source offset in
   let rec loop position =
     if position > line_start && is_space cursor.text.[position - 1] then loop (position - 1)
@@ -121,8 +120,8 @@ let spaces_before cursor offset =
   in
   loop offset
 
-let only_spaces_before cursor offset =
-  spaces_before cursor offset = Source.line_start cursor.source offset
+let has_only_spaces_before cursor offset =
+  count_spaces_before cursor offset = Source.line_start cursor.source offset
 
 let describe_code_point value =
   match Unicode.forbidden_name value with

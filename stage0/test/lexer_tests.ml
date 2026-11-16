@@ -15,8 +15,8 @@ let show (token : Token.t) =
   match token.kind with
   | Upper name | Lower name -> name
   | Underscore -> "_"
-  | Keyword keyword -> Token.keyword_spelling keyword
-  | Reserved reserved -> "reserved " ^ Token.reserved_spelling reserved
+  | Keyword keyword -> Token.spell_keyword keyword
+  | Reserved reserved -> "reserved " ^ Token.spell_reserved reserved
   | Integer value -> Z.to_string value
   | Float { significand; exponent } ->
       Printf.sprintf "%se%s" (Z.to_string significand) (Z.to_string exponent)
@@ -27,11 +27,10 @@ let show (token : Token.t) =
           (String.concat "${}"
              (List.map
                 (fun (text : Token.text) -> text.value)
-                (Array.to_list (Token.texts literal))))
+                (Array.to_list (Token.list_texts literal))))
   | Punctuation punctuation ->
-      (if token.span.start = token.span.stop then "+" else "")
-      ^ Token.punctuation_spelling punctuation
-  | Foreign foreign -> Token.foreign_spelling foreign
+      (if token.span.start = token.span.stop then "+" else "") ^ Token.spell_punctuation punctuation
+  | Foreign foreign -> Token.spell_foreign foreign
   | Newline -> "NL"
   | End_of_file -> "EOF"
 
@@ -60,7 +59,7 @@ let interpolation_tokens text index =
         match token.kind with String literal -> Some literal | _ -> None)
   in
   match first_string with
-  | Some literal -> shown (Token.interpolations literal).(index).tokens
+  | Some literal -> shown (Token.list_interpolations literal).(index).tokens
   | None -> []
 
 let error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
@@ -779,7 +778,7 @@ let () =
         (words (block_after specification "### Punctuation")));
   Harness.test "SPECIFICATION.md's line-break lists match Layout" (fun () ->
       let kind_of spelling =
-        match Token.word spelling with
+        match Token.find_word spelling with
         | Some kind -> Some kind
         | None ->
             if spelling = "_" then Some Underscore
@@ -794,8 +793,8 @@ let () =
       let can_end = listed "**can end a statement**:" "- the first token after it" in
       let can_begin = listed "**can begin a statement**:" "3. Several line feeds" in
       let spelling = function
-        | Token.Keyword keyword -> Token.keyword_spelling keyword
-        | Punctuation punctuation -> Token.punctuation_spelling punctuation
+        | Token.Keyword keyword -> Token.spell_keyword keyword
+        | Punctuation punctuation -> Token.spell_punctuation punctuation
         | _ -> "_"
       in
       List.iter

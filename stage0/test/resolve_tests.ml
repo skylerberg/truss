@@ -257,13 +257,13 @@ let bracket_of text written occurrence =
       with
       | definition, spans, { base; _ }, Some resolved ->
           let bracket = ref None in
-          Syntax_walk.definition
+          Syntax_walk.visit_definition
             (let rec visit (value : Syntax.expression) =
                (match value.kind with
                | Bracket _ when base + spans.(value.id).start = offset ->
                    bracket := resolved.brackets.(value.id)
                | _ -> ());
-               Syntax_walk.children visit value
+               Syntax_walk.visit_children visit value
              in
              visit)
             definition;

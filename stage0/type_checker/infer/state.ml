@@ -145,7 +145,7 @@ let rec list_operands state (value : Syntax.expression) : Syntax.expression list
   | If _ | Parenthesized _ | Mode _ -> []
   | _ ->
       let checked_parts = ref [] in
-      Syntax_walk.expression_parts ~statement:ignore value ~expression:(fun part ->
+      Syntax_walk.visit_expression_parts ~statement:ignore value ~expression:(fun part ->
           checked_parts := checked part :: !checked_parts);
       List.concat (List.rev !checked_parts)
 

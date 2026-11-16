@@ -33,9 +33,9 @@ let expression_at text written occurrence =
                    when exact other || ((not (exact value)) && length other <= length value) ->
                      ()
                  | _ -> best := Some value);
-              Syntax_walk.children visit value
+              Syntax_walk.visit_children visit value
             in
-            Syntax_walk.definition visit definition;
+            Syntax_walk.visit_definition visit definition;
             Option.map (fun value -> (value, result)) !best
         | _ -> None)
       ((Support.names packages file.module_.package).declarations_in file)
