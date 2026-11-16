@@ -108,7 +108,7 @@ let add_bitwise_definitions (query : Logic.query) =
 let bit_vector_assertion (context : State.context) frame ~named ~origin
     ~(read : State.frame -> Logic.term) =
   let saved_facts = context.facts and saved_decisions = context.decisions in
-  let saved_stated = Hashtbl.copy context.stated in
+  let saved_stated = Tables.Stated_table.copy context.stated in
   context.facts <- [];
   context.decisions <- [];
   let isolated =
@@ -155,8 +155,8 @@ let bit_vector_assertion (context : State.context) frame ~named ~origin
     :: context.obligations;
   context.facts <- saved_facts;
   context.decisions <- saved_decisions;
-  Hashtbl.reset context.stated;
-  Hashtbl.iter (Hashtbl.replace context.stated) saved_stated
+  Tables.Stated_table.reset context.stated;
+  Tables.Stated_table.iter (Tables.Stated_table.replace context.stated) saved_stated
 
 let check_assertion context frame ~origin ~bit_vector term =
   (match bit_vector with

@@ -1,3 +1,5 @@
+module Path_table = Hashtbl.Make (Path)
+
 type hole = {
   definition : Path.t;
   file : string;
@@ -54,14 +56,14 @@ let with_blocks snapshot packages database holes =
   in
   let compile = lazy (Compiler.lowering_only database packages) in
   let read_memoized table list_reached root =
-    match Hashtbl.find_opt table root with
+    match Path_table.find_opt table root with
     | Some reached -> reached
     | None ->
         let reached = list_reached (Lazy.force compile) root in
-        Hashtbl.replace table root reached;
+        Path_table.replace table root reached;
         reached
   in
-  let reached_definitions = Hashtbl.create 16 and reached_todo_types = Hashtbl.create 16 in
+  let reached_definitions = Path_table.create 16 and reached_todo_types = Path_table.create 16 in
   List.map
     (fun hole ->
       let list_reached =

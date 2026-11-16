@@ -52,17 +52,50 @@ type t = {
 let segments_directory cache = Filename.concat cache.root "segments"
 let directory cache = cache.root
 
+let home_directory () =
+  match Sys.getenv_opt "HOME" with
+  | Some home when home <> "" -> Some home
+  | _ -> (
+      match Unix.getpwuid (Unix.getuid ()) with
+      | { pw_dir; _ } when pw_dir <> "" -> Some pw_dir
+      | _ | (exception Not_found) -> None)
+
 let default_directory () =
   match Sys.getenv_opt "TRUSS_CACHE" with
-  | Some directory when directory <> "" -> directory
+  | Some directory when directory <> "" -> Ok directory
   | _ -> (
       match Sys.getenv_opt "XDG_CACHE_HOME" with
-      | Some cache when cache <> "" -> Filename.concat cache "truss"
-      | _ ->
-          let home =
-            Option.value (Sys.getenv_opt "HOME") ~default:(Filename.get_temp_dir_name ())
-          in
-          Filename.concat (Filename.concat home ".cache") "truss")
+      | Some cache when cache <> "" -> Ok (Filename.concat cache "truss")
+      | _ -> (
+          match home_directory () with
+          | Some home -> Ok (Filename.concat (Filename.concat home ".cache") "truss")
+          | None ->
+              Error "This user has no home directory for the cache; set TRUSS_CACHE to a directory."
+          ))
+
+let make_root root =
+  match
+    File_system.make_directory (Filename.dirname root);
+    (try Unix.mkdir root 0o700 with Unix.Unix_error (EEXIST, _, _) -> ());
+    Unix.stat root
+  with
+  | { st_kind = S_DIR; st_uid; _ } when st_uid <> Unix.getuid () ->
+      Error
+        (Printf.sprintf
+           "The cache %s belongs to another user, who could plant results in it that this user's \
+            builds would trust. Set TRUSS_CACHE to a directory of this user's own."
+           root)
+  | { st_kind = S_DIR; st_perm; _ } when st_perm land 0o022 <> 0 ->
+      Error
+        (Printf.sprintf
+           "Users other than its owner can write the cache %s, so they could plant results in it \
+            that this user's builds would trust. Delete it with `truss clean`, or set TRUSS_CACHE \
+            to another directory."
+           root)
+  | { st_kind = S_DIR; _ } -> Ok root
+  | _ -> Error (Printf.sprintf "The cache %s is not a directory." root)
+  | exception Unix.Unix_error (error, _, _) ->
+      Error (Printf.sprintf "Cannot make the cache %s: %s." root (Unix.error_message error))
 
 let close_channel segment =
   Option.iter close_in_noerr segment.channel;
@@ -293,10 +326,14 @@ let append_record cache kind key value =
   if Buffer.length writer.pending >= pending_limit then drain writer
 
 let open_ root =
-  File_system.make_directory root;
-  let cache = { root; segments = []; refreshed = 0.; writer = None; used = Hashtbl.create 64 } in
-  refresh cache;
-  cache
+  Result.map
+    (fun root ->
+      let cache =
+        { root; segments = []; refreshed = 0.; writer = None; used = Hashtbl.create 64 }
+      in
+      refresh cache;
+      cache)
+    (make_root root)
 
 let close cache =
   seal cache;

@@ -39,6 +39,9 @@ val call :
 val list_servers : unit -> string list
 val stop : unit -> unit
 val wait_until_ended : key:string -> unit
+
+exception Unusable_cache of string
+
 val open_cache : unit -> Cache.t
 val reset : unit -> unit
 

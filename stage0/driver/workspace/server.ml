@@ -6,12 +6,16 @@ let stamp path =
   | stat -> Some (Printf.sprintf "%d %h %h %d" stat.st_size stat.st_mtime stat.st_ctime stat.st_ino)
   | exception Unix.Unix_error _ -> None
 
+let cache_root () = Result.bind (Cache.default_directory ()) Cache.make_root
+
 let executable_identity () =
   let path = executable () in
-  match stamp path with
-  | None -> "unknown"
-  | Some current -> (
-      let remembered = Filename.concat (Cache.default_directory ()) "identities" in
+  let digest_executable () = Blake3.hex_digest (File_system.read path) in
+  match (stamp path, cache_root ()) with
+  | None, _ -> "unknown"
+  | Some _, Error _ -> digest_executable ()
+  | Some current, Ok root -> (
+      let remembered = Filename.concat root "identities" in
       let entries =
         (try In_channel.with_open_bin remembered In_channel.input_lines with Sys_error _ -> [])
         |> List.filter_map (fun line ->
@@ -24,7 +28,7 @@ let executable_identity () =
       with
       | Some (_, _, identity) -> identity
       | None ->
-          let identity = Blake3.hex_digest (File_system.read path) in
+          let identity = digest_executable () in
           let existing =
             List.filter
               (fun (known, known_stamp, _) -> known <> path && stamp known = Some known_stamp)
@@ -43,7 +47,6 @@ let executable_identity () =
 let short identity = if String.length identity > 16 then String.sub identity 0 16 else identity
 
 let private_directory directory =
-  File_system.make_directory (Filename.dirname directory);
   (try Unix.mkdir directory 0o700 with Unix.Unix_error _ -> ());
   match Unix.lstat directory with
   | { st_kind = S_DIR; st_uid; st_perm; _ } when st_uid = Unix.getuid () && st_perm land 0o077 = 0
@@ -53,7 +56,7 @@ let private_directory directory =
       Error (directory ^ " is not a directory that only this user can use; try --no-server.")
 
 let servers_directory () =
-  private_directory (Filename.concat (Cache.default_directory ()) "servers")
+  Result.bind (cache_root ()) (fun root -> private_directory (Filename.concat root "servers"))
 
 let server_path directory identity key =
   Filename.concat directory (short identity ^ "-" ^ Blake3.hex_digest ~digits:16 key)

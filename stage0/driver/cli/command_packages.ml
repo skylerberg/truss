@@ -1,3 +1,7 @@
+module Package_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Path.package
+end))
+
 let manifest_name = "truss.toml"
 let write_file = File_system.write_atomically
 
@@ -50,18 +54,20 @@ let modules snapshot packages =
 
 let project_dependencies snapshot packages =
   let project_packages = List.map snd (Workspace.packages snapshot) in
-  let seen = Hashtbl.create 8 in
+  let seen = Package_table.create 8 in
   let rec visit name =
     List.iter
       (fun dependency ->
-        if List.mem dependency project_packages && not (Hashtbl.mem seen dependency) then begin
-          Hashtbl.replace seen dependency ();
+        if List.mem dependency project_packages && not (Package_table.mem seen dependency) then begin
+          Package_table.replace seen dependency ();
           visit dependency
         end)
       (Workspace.dependency_names snapshot name)
   in
   List.iter visit packages;
-  List.filter (fun name -> Hashtbl.mem seen name && not (List.mem name packages)) project_packages
+  List.filter
+    (fun name -> Package_table.mem seen name && not (List.mem name packages))
+    project_packages
 
 let program_packages snapshot packages = packages @ project_dependencies snapshot packages
 

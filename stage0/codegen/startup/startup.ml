@@ -199,10 +199,13 @@ static void t_install_signal_dispositions(void) {
 let allocation =
   {|
 #ifdef T_TESTS
-static uint64_t t_live_blocks = 0;
-#define t_block_allocated() (t_live_blocks += 1)
-#define t_block_freed() (t_live_blocks -= 1)
-uint64_t t_runtime_live_blocks(void) { return t_live_blocks; }
+static _Atomic uint64_t t_live_blocks;
+#define t_block_allocated() \
+  ((void)atomic_fetch_add_explicit(&t_live_blocks, 1, memory_order_relaxed))
+#define t_block_freed() ((void)atomic_fetch_sub_explicit(&t_live_blocks, 1, memory_order_relaxed))
+uint64_t t_runtime_live_blocks(void) {
+  return atomic_load_explicit(&t_live_blocks, memory_order_relaxed);
+}
 #else
 #define t_block_allocated() ((void)0)
 #define t_block_freed() ((void)0)

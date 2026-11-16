@@ -28,9 +28,9 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) : result =
           Option.value ~default:[] (List.assoc_opt parameter elaborated.scope.bounds));
       spans = lazy (lookups.interface.names.spans key);
       mode_keywords = Hashtbl.create 8;
-      names = Hashtbl.create 32;
-      binding_modes = Hashtbl.create 32;
-      types = Hashtbl.create 32;
+      names = Context.Local_table.create 32;
+      binding_modes = Context.Local_table.create 32;
+      types = Context.Local_table.create 32;
       parameters = [];
       implements_capability = implements_capability lookups key;
       mutable_locals = [];

@@ -1,5 +1,9 @@
 type path = { local : Mir.local; projections : Mir.projection list }
 
+module Place_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = path
+end))
+
 let path_of_place (place : Mir.place) =
   match place.root with
   | Constant _ | Literal _ -> None
@@ -126,7 +130,7 @@ let terminator_moves ~moving ~owns basic = moved (terminator_uses ~moving ~owns 
 
 type t = {
   paths : path array;
-  positions : (path, int) Hashtbl.t;
+  positions : int Place_table.t;
   of_local : (Mir.local, int list) Hashtbl.t;
   inside : int list array;
   parameters : Mir.local list;
@@ -146,7 +150,7 @@ and state = {
 
 type status = Holds | Empty | Maybe
 
-let index analysis path = Hashtbl.find_opt analysis.positions path
+let index analysis path = Place_table.find_opt analysis.positions path
 
 let affected analysis place =
   match path_of_place place with
@@ -203,7 +207,7 @@ let ended_by = ends
 let may_be_empty analysis state (path : path) =
   List.find_opt
     (fun (tracked : path) ->
-      overlaps tracked path && state.maybe_empty.(Hashtbl.find analysis.positions tracked))
+      overlaps tracked path && state.maybe_empty.(Place_table.find analysis.positions tracked))
     (List.sort
        (fun (left : path) (right : path) ->
          compare (List.length left.projections) (List.length right.projections))
@@ -334,8 +338,8 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.Gra
   let owns, lent_mut = owners ?passed body in
   let tracks local = owns local || lent_mut local in
   let moves = moves ~moving and terminator_moves = terminator_moves ~moving ~owns in
-  let candidates = Hashtbl.create 64 in
-  let add path = Hashtbl.replace candidates path () in
+  let candidates = Place_table.create 64 in
+  let add path = Place_table.replace candidates path () in
   let consider (place : Mir.place) =
     match path_of_place place with
     | Some path when tracks path.local ->
@@ -367,12 +371,13 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.Gra
     body.blocks;
   let paths =
     Array.of_list
-      (List.sort compare (List.filter needs_drop (List.of_seq (Hashtbl.to_seq_keys candidates))))
+      (List.sort compare
+         (List.filter needs_drop (List.of_seq (Place_table.to_seq_keys candidates))))
   in
-  let positions = Hashtbl.create (Array.length paths) and of_local = Hashtbl.create 16 in
+  let positions = Place_table.create (Array.length paths) and of_local = Hashtbl.create 16 in
   Array.iteri
     (fun position path ->
-      Hashtbl.replace positions path position;
+      Place_table.replace positions path position;
       Hashtbl.replace of_local path.local
         (position :: Option.value (Hashtbl.find_opt of_local path.local) ~default:[]))
     paths;

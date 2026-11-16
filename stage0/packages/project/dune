@@ -1,3 +1,3 @@
 (library
  (name project)
- (libraries path manifest registry))
+ (libraries structural_key path manifest registry))

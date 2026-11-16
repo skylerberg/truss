@@ -24,6 +24,7 @@
  (name workspace)
  (modules :standard \ digest_compiler)
  (libraries
+  structural_key
   unix
   compiler_bug
   blake3

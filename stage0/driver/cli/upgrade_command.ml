@@ -1,3 +1,5 @@
+module Path_table = Hashtbl.Make (Path)
+
 let wanted text =
   let written, version =
     match String.index_opt text '@' with
@@ -115,13 +117,13 @@ let signatures snapshot trial =
         && match Database.Part.definition part with Some path -> not (is_own path) | None -> false)
       (Database.list_changes database upgraded)
   in
-  let dependents = Hashtbl.create 16 in
+  let dependents = Path_table.create 16 in
   List.iter
     (fun ({ dependent; dependency } : Database.read) ->
       match (Database.Part.definition dependent, Database.Part.definition dependency) with
       | Some reader, Some path when is_own reader && List.mem dependency changed ->
-          Hashtbl.replace dependents path
-            (reader :: Option.value (Hashtbl.find_opt dependents path) ~default:[])
+          Path_table.replace dependents path
+            (reader :: Option.value (Path_table.find_opt dependents path) ~default:[])
       | _ -> ())
     (Database.list_dependents database
        (List.sort_uniq Path.compare (List.filter_map Database.Part.definition changed)));
@@ -130,7 +132,7 @@ let signatures snapshot trial =
   in
   List.sort
     (fun left right -> Path.compare left.path right.path)
-    (Hashtbl.fold
+    (Path_table.fold
        (fun path readers signatures ->
          {
            path;
