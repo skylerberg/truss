@@ -614,7 +614,7 @@ let make_recording_interface_lookups database note ~is_checked : Interface.Looku
       (fun ~type_ ~trait ->
         Option.iter (fun key -> ignore (read_elaborated_interface key)) (names.find_key type_);
         find_value database note (Derived_interface { type_; trait }));
-    find_type_facts = (fun path -> find_value database note (Type_facts path));
+    read_type_facts = (fun path -> read_value database note (Type_facts path));
     find_grant = (fun package dependency -> find_value database note (Grant (package, dependency)));
   }
 

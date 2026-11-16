@@ -158,6 +158,11 @@ let list_required_bounds (generics : Types.generic list) (substitution : Types.s
       | _ -> [])
     generics
 
+let find_built_in_evidence : Properties.decision -> evidence option = function
+  | Holds -> Some Built_in
+  | Fails -> None
+  | Depends_on open_type -> Some (Accepted open_type)
+
 let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_conditions = true)
     (type_ : Types.ty) (wanted : Types.trait_reference) : evidence option =
   let broken_trait =
@@ -178,19 +183,17 @@ let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_cond
     let property : Properties.property =
       if Well_known.is Plain wanted.trait then Plain else Copyable
     in
-    if
-      (not checks_conditions)
-      || Properties.has_property lookups ~list_bounds ~normalize:(normalize lookups ~list_bounds)
-           property type_
-    then Some Built_in
-    else None
+    if not checks_conditions then Some Built_in
+    else
+      find_built_in_evidence
+        (Properties.decide_property lookups ~list_bounds ~normalize:(normalize lookups ~list_bounds)
+           property type_)
   else if Well_known.is Storable wanted.trait then
-    if
-      (not checks_conditions)
-      || Properties.is_storable lookups ~list_bounds ~normalize:(normalize lookups ~list_bounds)
-           type_
-    then Some Built_in
-    else None
+    if not checks_conditions then Some Built_in
+    else
+      find_built_in_evidence
+        (Properties.decide_storable lookups ~list_bounds ~normalize:(normalize lookups ~list_bounds)
+           type_)
   else
     match type_ with
     | Types.Error _ | Types.Hole | Types.Variable _ -> Some (Accepted type_)
@@ -437,9 +440,19 @@ let read_signature lookups (path : Path.t) =
       | _ -> None)
   | None, _ -> None
 
+let decide_property property lookups ~list_bounds type_ =
+  Properties.decide_property lookups ~list_bounds ~normalize:(normalize lookups ~list_bounds)
+    property type_
+
 let has_property property lookups ~list_bounds type_ =
-  Properties.has_property lookups ~list_bounds ~normalize:(normalize lookups ~list_bounds) property
-    type_
+  match decide_property property lookups ~list_bounds type_ with
+  | Holds -> true
+  | Fails -> false
+  | Depends_on open_type ->
+      raise_bug "whether `%s` %s depends on the open type `%s`, so it has no bool answer"
+        (Types.show type_)
+        (Properties.show_property property)
+        (Types.show open_type)
 
 let is_copyable = has_property Copyable
 let is_plain = has_property Plain

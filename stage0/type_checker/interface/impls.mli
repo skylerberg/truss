@@ -81,6 +81,10 @@ val normalize_capabilities :
 
 val normalize : Lookups.t -> list_bounds:bounds -> ?defining:Path.t list ref -> Types.ty -> Types.ty
 val read_signature : Lookups.t -> Path.t -> Types.signature option
+
+val decide_property :
+  Properties.property -> Lookups.t -> list_bounds:bounds -> Types.ty -> Properties.decision
+
 val is_copyable : Lookups.t -> list_bounds:bounds -> Types.ty -> bool
 val is_plain : Lookups.t -> list_bounds:bounds -> Types.ty -> bool
 val is_view : Lookups.t -> list_bounds:bounds -> Types.ty -> bool

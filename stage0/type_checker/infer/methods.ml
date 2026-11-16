@@ -527,7 +527,8 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
     | None
       when (not has_mode_keyword)
            && ((not place)
-              || State.is_plain state receiver_type
+              || State.decide_property state Interface.Properties.Plain receiver_type
+                 <> Interface.Properties.Fails
               || not (List.mem_assoc Path.Mut overloads)) -> (
         match List.assoc_opt Path.Own overloads with
         | Some method_path ->
