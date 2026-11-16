@@ -56,7 +56,7 @@ let relative watcher path =
 
 let is_skipped watcher relative = List.exists watcher.skipped (String.split_on_char '/' relative)
 
-let taken watcher =
+let drain watcher =
   let paths, is_overflowed = take watcher.handle in
   let relatives = List.filter_map (relative watcher) paths in
   if not (is_recursive ()) then
@@ -84,7 +84,7 @@ let changes watcher =
       | exception Unix.Unix_error (EINTR, _, _) -> wait paths is_overflowed
       | [], _, _ -> Overflow
       | _ ->
-          let relatives, overflowed = taken watcher in
+          let relatives, overflowed = drain watcher in
           let is_overflowed = is_overflowed || overflowed in
           let paths =
             List.filter

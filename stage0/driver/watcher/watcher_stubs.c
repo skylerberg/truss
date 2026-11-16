@@ -147,13 +147,13 @@ static value watcher_take(struct watcher *watcher) {
   char bytes[256];
   while (read(watcher->signal[0], bytes, sizeof bytes) > 0) {
   }
-  struct paths taken;
+  struct paths drained;
   pthread_mutex_lock(&watcher->lock);
-  taken = watcher->pending;
+  drained = watcher->pending;
   memset(&watcher->pending, 0, sizeof watcher->pending);
   pthread_mutex_unlock(&watcher->lock);
-  value result = paths_take(&taken);
-  paths_free(&taken);
+  value result = paths_take(&drained);
+  paths_free(&drained);
   return result;
 }
 

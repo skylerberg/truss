@@ -56,9 +56,9 @@ let response_word path =
   let buffer = Buffer.create (String.length path + 2) in
   Buffer.add_char buffer '"';
   String.iter
-    (fun compiler ->
-      if compiler = '"' || compiler = '\\' then Buffer.add_char buffer '\\';
-      Buffer.add_char buffer compiler)
+    (fun character ->
+      if character = '"' || character = '\\' then Buffer.add_char buffer '\\';
+      Buffer.add_char buffer character)
     path;
   Buffer.add_char buffer '"';
   Buffer.contents buffer
