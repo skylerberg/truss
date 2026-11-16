@@ -36,5 +36,8 @@ val classify_binding_mode : context -> Place.root -> Types.mode
 val show_root : context -> Place.root -> string
 val show : context -> Place.t -> string
 val collect : context -> Mir.Graph.t -> mode_keywords:Core.mode_keyword list -> unit
-val copy_edits : context -> Core.origin -> Source.Definition_span.t Diagnostic.edit list
+
+val copy_fix :
+  context -> string -> Types.ty -> Core.origin -> Source.Definition_span.t Diagnostic.fix list
+
 val locate_with_mode_keyword : context -> Core.origin -> Source.Definition_span.t
