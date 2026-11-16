@@ -2,7 +2,7 @@
   const canvas = document.getElementById("canvas");
   const panel = document.getElementById("panel");
   const find = document.getElementById("find");
-  const svg = canvas.querySelector("svg");
+  const testAndToolsToggle = document.getElementById("show-test-and-tools");
 
   const libraries = new Map(LIBRARIES.map((library) => [library.name, library]));
   const dependents = new Map(LIBRARIES.map((library) => [library.name, []]));
@@ -10,9 +10,9 @@
     for (const dependency of library.deps) dependents.get(dependency)?.push(library.name);
   }
   const dependencies = new Map(LIBRARIES.map((library) => [library.name, library.deps]));
-  const byName = (a, b) => a.localeCompare(b);
+  const compareNames = (a, b) => a.localeCompare(b);
 
-  const reachable = (start, adjacency) => {
+  const findReachable = (start, adjacency) => {
     const seen = new Set();
     const stack = [start];
     while (stack.length > 0) {
@@ -26,45 +26,64 @@
     return seen;
   };
 
-  const areas = [...new Set(LIBRARIES.map((library) => library.area))].sort(byName);
-  const areaColor = (area) => `var(--area-${areas.indexOf(area) % 14})`;
+  const toAreaClass = (area) => `area-${AREAS.indexOf(area)}`;
 
-  const nodes = new Map();
-  for (const node of svg.querySelectorAll("g.node")) {
-    const name = node.id.replace(/^lib-/, "");
-    nodes.set(name, node);
-    node.style.setProperty("--area", areaColor(libraries.get(name).area));
-  }
-  const edges = [...svg.querySelectorAll("g.edge")].map((edge) => {
-    const [source, target] = edge
-      .querySelector("title")
-      .textContent.split("->")
-      .map((end) => end.replace(/^lib:/, ""));
-    return { edge, source, target };
-  });
+  let shown = null;
+
+  const loadDrawing = (graph) => {
+    const svg = graph.ownerSVGElement;
+    const viewBox = svg.viewBox.baseVal;
+    svg.removeAttribute("width");
+    svg.removeAttribute("height");
+    const nodes = new Map();
+    for (const node of graph.querySelectorAll("g.node")) {
+      const name = node.querySelector("title").textContent.replace(/^lib:/, "");
+      nodes.set(name, node);
+      node.classList.add(toAreaClass(libraries.get(name).area));
+      node.addEventListener("mouseenter", () => {
+        if (name !== shown && !canvas.classList.contains("panning")) show(name);
+      });
+    }
+    const edges = [...graph.querySelectorAll("g.edge")].map((edge) => {
+      const [source, target] = edge
+        .querySelector("title")
+        .textContent.split("->")
+        .map((end) => end.replace(/^lib:/, ""));
+      return { edge, source, target };
+    });
+    const bounds = { x: viewBox.x, y: viewBox.y, width: viewBox.width, height: viewBox.height };
+    return { svg, graph, nodes, edges, bounds };
+  };
+  const withoutTestAndTools = loadDrawing(document.getElementById("without-test-and-tools"));
+  const withTestAndTools = loadDrawing(document.getElementById("with-test-and-tools"));
+  let drawing = withoutTestAndTools;
+
+  const filterToDrawing = (names) => [...names].filter((name) => drawing.nodes.has(name));
 
   const escape = (text) =>
     String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
-  const chip = (name) => {
+  const renderChip = (name) => {
     const library = libraries.get(name);
-    const color = areaColor(library.area);
-    const label = `<span class="dot" style="--area: ${color}"></span>${escape(name)}`;
+    const label = `<span class="dot ${toAreaClass(library.area)}"></span>${escape(name)}`;
     return library.page
       ? `<a class="chip" href="${escape(library.page)}">${label}</a>`
       : `<span class="chip">${label}</span>`;
   };
 
-  const chips = (names) =>
+  const renderChips = (names) =>
     names.length === 0
       ? '<p class="muted">None</p>'
-      : `<div class="chips">${[...names].sort(byName).map(chip).join("")}</div>`;
+      : `<div class="chips">${[...names].sort(compareNames).map(renderChip).join("")}</div>`;
 
-  const overview = () => {
-    const counts = new Map(areas.map((area) => [area, 0]));
-    for (const library of LIBRARIES) counts.set(library.area, counts.get(library.area) + 1);
+  const renderOverview = () => {
+    const counts = new Map();
+    for (const name of drawing.nodes.keys()) {
+      const area = libraries.get(name).area;
+      counts.set(area, (counts.get(area) ?? 0) + 1);
+    }
     return `
-      <h2>${LIBRARIES.length} libraries</h2>
+      <h2>${drawing.nodes.size} libraries</h2>
       <p>An arrow points from a library to a library it depends on.</p>
       <p>Hover over a library to highlight its
       <b class="dependency-key">dependencies</b> and its
@@ -72,51 +91,52 @@
       library to open its documentation. Hover over a directory to highlight
       its libraries. Drag to pan and scroll to zoom.</p>
       <h3>Directories</h3>
-      <div class="areas">${areas
+      <div class="areas">${AREAS.filter((area) => counts.has(area))
         .map(
           (area) =>
-            `<div data-area="${escape(area)}"><span class="dot" style="--area: ${areaColor(area)}"></span>` +
+            `<div data-area="${escape(area)}"><span class="dot ${toAreaClass(area)}"></span>` +
             `stage0/${escape(area)}<span class="count">${counts.get(area)}</span></div>`,
         )
         .join("")}</div>`;
   };
 
-  const details = (name) => {
+  const renderDetails = (name) => {
     const library = libraries.get(name);
-    const allDependencies = reachable(name, dependencies);
-    const allDependents = reachable(name, dependents);
+    const directDependencies = filterToDrawing(library.deps);
+    const directDependents = filterToDrawing(dependents.get(name));
+    const allDependencies = filterToDrawing(findReachable(name, dependencies));
+    const allDependents = filterToDrawing(findReachable(name, dependents));
     const title = library.page
       ? `<a href="${escape(library.page)}">${escape(name)}</a>`
       : escape(name);
     return `
       <h2>${title}</h2>
       <p class="muted">${escape(library.dir)}</p>
-      <h3><span class="dependency-key">Depends on</span> · ${library.deps.length} directly,
-      ${allDependencies.size} in total</h3>
-      ${chips(library.deps)}
-      <h3><span class="dependent-key">Used by</span> · ${dependents.get(name).length} directly,
-      ${allDependents.size} in total</h3>
-      ${chips(dependents.get(name))}`;
+      <h3><span class="dependency-key">Depends on</span> · ${directDependencies.length} directly,
+      ${allDependencies.length} in total</h3>
+      ${renderChips(directDependencies)}
+      <h3><span class="dependent-key">Used by</span> · ${directDependents.length} directly,
+      ${allDependents.length} in total</h3>
+      ${renderChips(directDependents)}`;
   };
 
-  let shown = null;
-
   const clearHighlight = () => {
-    for (const element of svg.querySelectorAll(".focus, .dependency, .dependent, .member")) {
+    for (const element of drawing.svg.querySelectorAll(".focus, .dependency, .dependent, .member")) {
       element.classList.remove("focus", "dependency", "dependent", "member");
     }
-    svg.classList.remove("focused");
+    drawing.svg.classList.remove("focused");
   };
 
   const highlightArea = (area) => {
     clearHighlight();
-    svg.classList.add("focused");
-    const areaOf = (name) => libraries.get(name).area;
-    for (const [name, node] of nodes) {
-      if (areaOf(name) === area) node.classList.add("member");
+    drawing.svg.classList.add("focused");
+    for (const [name, node] of drawing.nodes) {
+      if (libraries.get(name).area === area) node.classList.add("member");
     }
-    for (const { edge, source, target } of edges) {
-      if (areaOf(source) === area && areaOf(target) === area) edge.classList.add("member");
+    for (const { edge, source, target } of drawing.edges) {
+      if (libraries.get(source).area === area && libraries.get(target).area === area) {
+        edge.classList.add("member");
+      }
     }
   };
 
@@ -124,47 +144,37 @@
     shown = name;
     clearHighlight();
     if (name === null) {
-      panel.innerHTML = overview();
+      panel.innerHTML = renderOverview();
       for (const row of panel.querySelectorAll("[data-area]")) {
         row.addEventListener("mouseenter", () => highlightArea(row.dataset.area));
         row.addEventListener("mouseleave", clearHighlight);
       }
       return;
     }
-    svg.classList.add("focused");
-    const allDependencies = reachable(name, dependencies);
-    const allDependents = reachable(name, dependents);
-    nodes.get(name)?.classList.add("focus");
-    for (const dependency of allDependencies) nodes.get(dependency)?.classList.add("dependency");
-    for (const dependent of allDependents) nodes.get(dependent)?.classList.add("dependent");
-    for (const { edge, source, target } of edges) {
+    drawing.svg.classList.add("focused");
+    const allDependencies = findReachable(name, dependencies);
+    const allDependents = findReachable(name, dependents);
+    drawing.nodes.get(name).classList.add("focus");
+    for (const dependency of allDependencies) drawing.nodes.get(dependency)?.classList.add("dependency");
+    for (const dependent of allDependents) drawing.nodes.get(dependent)?.classList.add("dependent");
+    for (const { edge, source, target } of drawing.edges) {
       if (source === name || allDependencies.has(source)) edge.classList.add("dependency");
       else if (target === name || allDependents.has(target)) edge.classList.add("dependent");
     }
-    panel.innerHTML = details(name);
+    panel.innerHTML = renderDetails(name);
   };
 
-  for (const [name, node] of nodes) {
-    node.addEventListener("mouseenter", () => {
-      if (name !== shown && !canvas.classList.contains("panning")) show(name);
-    });
-  }
-
-  const drawing = svg.viewBox.baseVal;
-  const bounds = { x: drawing.x, y: drawing.y, width: drawing.width, height: drawing.height };
-  svg.removeAttribute("width");
-  svg.removeAttribute("height");
-  const graph = svg.querySelector("g.graph");
   const view = { x: 0, y: 0, scale: 1 };
   let fitScale = 1;
 
   const apply = () => {
     const width = canvas.clientWidth / view.scale;
     const height = canvas.clientHeight / view.scale;
-    svg.setAttribute("viewBox", `${view.x - width / 2} ${view.y - height / 2} ${width} ${height}`);
+    drawing.svg.setAttribute("viewBox", `${view.x - width / 2} ${view.y - height / 2} ${width} ${height}`);
   };
 
   const fit = () => {
+    const { bounds } = drawing;
     fitScale = 0.97 * Math.min(canvas.clientWidth / bounds.width, canvas.clientHeight / bounds.height);
     view.x = bounds.x + bounds.width / 2;
     view.y = bounds.y + bounds.height / 2;
@@ -183,15 +193,25 @@
   };
 
   const center = (name) => {
-    const box = nodes.get(name).getBBox();
+    const box = drawing.nodes.get(name).getBBox();
     const point = new DOMPoint(box.x + box.width / 2, box.y + box.height / 2).matrixTransform(
-      graph.transform.baseVal.consolidate()?.matrix ?? new DOMMatrix(),
+      drawing.graph.transform.baseVal.consolidate()?.matrix ?? new DOMMatrix(),
     );
     view.x = point.x;
     view.y = point.y;
     view.scale = Math.max(view.scale, 1.2);
     apply();
   };
+
+  const switchDrawing = () => {
+    clearHighlight();
+    drawing = testAndToolsToggle.checked ? withTestAndTools : withoutTestAndTools;
+    withTestAndTools.svg.toggleAttribute("hidden", drawing !== withTestAndTools);
+    withoutTestAndTools.svg.toggleAttribute("hidden", drawing !== withoutTestAndTools);
+    fit();
+    show(shown !== null && drawing.nodes.has(shown) ? shown : null);
+  };
+  testAndToolsToggle.addEventListener("change", switchDrawing);
 
   canvas.addEventListener(
     "wheel",
@@ -251,26 +271,29 @@
   document.getElementById("fit").addEventListener("click", fit);
   new ResizeObserver(apply).observe(canvas);
 
-  document.getElementById("library-names").innerHTML = [...nodes.keys()]
-    .sort(byName)
+  const names = [...libraries.keys()].sort(compareNames);
+  document.getElementById("library-names").innerHTML = names
     .map((name) => `<option value="${escape(name)}">`)
     .join("");
 
   const select = (query) => {
     const text = query.trim().toLowerCase();
     if (text === "") return;
-    const names = [...nodes.keys()].sort(byName);
     const match =
       names.find((name) => name === text) ??
       names.find((name) => name.startsWith(text)) ??
       names.find((name) => name.includes(text));
     if (match === undefined) return;
+    if (!drawing.nodes.has(match)) {
+      testAndToolsToggle.checked = true;
+      switchDrawing();
+    }
     show(match);
     center(match);
     find.value = "";
   };
   find.addEventListener("change", () => {
-    if (nodes.has(find.value.trim())) select(find.value);
+    if (libraries.has(find.value.trim())) select(find.value);
   });
   find.addEventListener("keydown", (event) => {
     if (event.key === "Enter") select(find.value);
@@ -279,6 +302,5 @@
     if (event.key === "Escape") show(null);
   });
 
-  fit();
-  show(null);
+  switchDrawing();
 })();
