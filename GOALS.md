@@ -32,8 +32,9 @@ and verifying the correctness of the code.
 
 #### How we do it
 
-We store our code in a content-addressed database that has all the
-information to trace everything that can be affected by a change.
+We keep the facts derived from our code in a database that records each
+fact's dependencies, so it can trace every dependent of a change. Expensive
+results, such as solver answers and test results, are cached by their content.
 
 We keep most code pure and we track all side-effects any code can have. Our
 capabilities system allows us to swap providers for any side-effect which allows

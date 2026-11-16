@@ -1922,19 +1922,18 @@ The database stores three relationships:
 ### Propagation
 
 The changes the files hold since the last propagation are one *change set*.
-The driver parses each changed file and gives its definitions to the
-database. The database compares each definition with its stored tree,
-ignoring positions, and marks stale every part that read a tree that
-changed. The driver then repeats three steps until no part is stale:
+The workspace gives the database the text of each changed file. The
+database parses each changed file, and compares each definition with its
+stored tree, ignoring positions. It marks stale the readers of every
+changed tree. It then repeats three steps until no part is stale:
 
-1. It takes the next stale part from the database.
+1. It takes the next stale part.
 2. It calls the stage that computes the part, with a record of lookups.
-3. It gives the result to the database. The database replaces the part's
-   recorded reads with the reads the lookups made, and compares the result
-   with the stored part. If the two differ, it stores the result and marks
-   stale every part that read it.
+3. It replaces the part's recorded reads with the reads the lookups made,
+   and compares the result with the stored part. If the two differ, it
+   stores the result and marks stale every part that read it.
 
-The database hands out stale parts in the order of the stages, and within a
+The database takes stale parts in the order of the stages, and within a
 stage in the order of dependencies, so a lookup never reads a stale part. If
 one change set edits both `Point` and `Segment`, which holds a `Point`, the
 type facts of `Point` are computed before those of `Segment`, and both
@@ -1992,9 +1991,11 @@ every part that a lookup returns current. Since no stage can start a
 computation, no stage can start a scan: the cost of an edit follows from the
 relationships the database stores and from the lookups each stage has.
 
-**The database calls nothing.** The driver calls the parser, the database,
-the stages, and the test runner. A stage depends on the types of the data it
-reads, not on the stages that produce that data, and not on the database.
+**No stage calls the database.** The database calls the parser and the
+stages. The command line runs the solver through the prover, and the tests
+through code generation; neither runs inside the database. A stage depends
+on the types of the data it reads, not on the stages that produce that
+data, and not on the database.
 
 | Rule | Reason |
 |---|---|
