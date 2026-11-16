@@ -750,7 +750,13 @@ let () =
   Harness.test "a map holds an inserted value under its key" (fun () ->
       expect_proven Fixtures.Prover.map_insert);
   Harness.test "a map keeps its other keys' values" (fun () ->
-      expect_proven Fixtures.Prover.map_insert_keeping_another_key)
+      expect_proven Fixtures.Prover.map_insert_keeping_another_key);
+  Harness.test "a value read from a map is the value assigned to an equal key" (fun () ->
+      expect_proven Fixtures.Prover.value_read_after_assign);
+  Harness.test "a value indexed in a map is the value inserted under an equal key" (fun () ->
+      expect_proven Fixtures.Prover.value_indexed_after_insert);
+  Harness.test "a loop invariant bounds every value of a map" (fun () ->
+      expect_proven Fixtures.Prover.word_count_bounded_by_its_index)
 
 let () =
   Harness.test "a map literal holds each key's value" (fun () ->
