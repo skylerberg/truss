@@ -1,0 +1,7 @@
+trait Tagged[Tag] {
+  fn name(self) -> String
+}
+
+fn name_of[Item: Tagged[Int64] + Tagged[String]](item: Item) -> String {
+  item.name()
+}

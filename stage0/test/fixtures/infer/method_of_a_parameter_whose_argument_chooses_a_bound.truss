@@ -1,0 +1,7 @@
+trait Scaled[Factor] {
+  fn scale(self, factor: Factor) -> Self
+}
+
+fn scale_twice[Item: Scaled[Int64] + Scaled[Float64]](item: Item, count: Int64, ratio: Float64) -> Item {
+  item.scale(count).scale(ratio)
+}

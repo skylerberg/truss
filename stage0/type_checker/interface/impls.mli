@@ -49,6 +49,9 @@ val implements :
   Types.trait_reference ->
   evidence option
 
+val list_matching_bounds :
+  Lookups.t -> bounds:bounds -> Types.ty -> Types.trait_reference -> Types.trait_reference list
+
 val read_declaring_type_trait :
   Lookups.t -> base:Types.ty -> Types.trait_reference -> string -> Types.trait_reference
 

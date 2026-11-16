@@ -96,6 +96,7 @@ val has_unsolved_capabilities : capability_set -> bool
 val equal : ty -> ty -> bool
 val is_error : ty -> bool
 val contains_unsolved : ty -> bool
+val is_unsolved_argument : argument -> bool
 val terminates : function_type -> bool
 val has_same_clauses : function_type -> function_type -> bool
 val costs_imply : provided:cost list -> required:cost list -> bool

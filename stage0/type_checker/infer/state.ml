@@ -460,6 +460,28 @@ let implements state type_ trait =
   Interface.Impls.implements state.lookups.interface ~bounds:(lookup_bounds state)
     (normalize state type_) (normalize_trait state trait)
 
+let solve_trait_arguments state type_ (trait : Types.trait_reference) =
+  let trait = Unify.zonk_trait state.unifier trait in
+  match normalize state type_ with
+  | (Parameter _ | Projection _ | Any _) as bounded
+    when List.exists Types.is_unsolved_argument trait.trait_arguments -> (
+      let normalized = normalize_trait state trait in
+      match
+        List.sort_uniq compare
+          (List.map
+             (fun (bound : Types.trait_reference) -> bound.trait_arguments)
+             (Interface.Impls.list_matching_bounds state.lookups.interface
+                ~bounds:(lookup_bounds state) bounded normalized))
+      with
+      | [ arguments ] ->
+          if Unify.unify_arguments state.unifier normalized.trait_arguments arguments then
+            Unify.zonk_trait state.unifier trait
+          else
+            raise_bug "`%s` has one bound of `%s`, and its arguments do not unify with the trait's"
+              (Types.show bounded) (Types.show_trait trait)
+      | _ -> trait)
+  | _ -> trait
+
 let is_copyable state type_ =
   Interface.Impls.is_copyable state.lookups.interface ~bounds:(lookup_bounds state)
     (zonk state type_)
@@ -552,11 +574,12 @@ let settle state frame =
     List.concat_map
       (fun id ->
         match state.tables.calls.(id) with
+        | Some { callee = Trait_method { trait; type_arguments; _ }; _ } ->
+            trait.trait_arguments @ type_arguments
         | Some
             {
               callee =
                 ( Function { type_arguments; _ }
-                | Trait_method { type_arguments; _ }
                 | Constructor { type_arguments; _ }
                 | Intrinsic { type_arguments; _ } );
               _;
@@ -619,10 +642,42 @@ let settle state frame =
   state.undecided <-
     List.filter (fun (undecided : undecided_literal) -> undecided.owner != frame) state.undecided;
   if unsolved <> [] then begin
+    let list_trait_unknowns (trait : Types.trait_reference) =
+      List.concat_map (Unify.list_argument_unknowns state.unifier) trait.trait_arguments
+    in
+    let undetermined_traits =
+      List.filter_map
+        (fun id ->
+          match state.tables.calls.(id) with
+          | Some { callee = Trait_method { trait; self_type; _ }; _ }
+            when (not (Types.contains_unsolved (zonk state self_type)))
+                 && List.exists
+                      (fun unknown -> List.mem unknown unsolved)
+                      (list_trait_unknowns trait) ->
+              Some (id, trait)
+          | _ -> None)
+        frame.recorded_expressions
+    in
+    let call_reports =
+      List.map
+        (fun (id, (trait : Types.trait_reference)) ->
+          add_diagnostic state Cannot_infer (read_span state id)
+            (Printf.sprintf
+               "This call does not determine the arguments of `%s`. Write the call in full with \
+                them."
+               (match trait.trait with Top { name; _ } -> name | path -> Path.show path)))
+        undetermined_traits
+    in
+    let explained =
+      List.concat_map (fun (_, trait) -> list_trait_unknowns trait) undetermined_traits
+    in
     let report =
-      add_diagnostic state Cannot_infer frame.span
-        "The types in this statement cannot be inferred from it alone. Give the `let` a type, or \
-         the call type arguments, such as `var names: List[String] = []`."
+      match call_reports with
+      | first :: _ when List.for_all (fun unknown -> List.mem unknown explained) unsolved -> first
+      | _ ->
+          add_diagnostic state Cannot_infer frame.span
+            "The types in this statement cannot be inferred from it alone. Give the `let` a type, \
+             or the call type arguments, such as `var names: List[String] = []`."
     in
     if Option.is_none state.unsolved then state.unsolved <- Some report;
     List.iter

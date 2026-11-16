@@ -814,6 +814,26 @@ let () =
       fine Fixtures.Infer.full_call_of_a_trait_with_a_count);
   Harness.test "a bound with a count argument gives an associated type its methods" (fun () ->
       fine Fixtures.Infer.method_of_an_associated_type_bounded_by_a_count);
+  Harness.test "the one bound of a trait gives a call written in full the trait's argument"
+    (fun () -> fine Fixtures.Infer.full_call_of_a_trait_whose_argument_a_bound_fixes);
+  Harness.test "a bound written directly and through a supertrait is one instance of the trait"
+    (fun () -> fine Fixtures.Infer.full_call_of_a_trait_bound_directly_and_through_a_supertrait);
+  Harness.test "an impl does not give a call the trait's argument that its signature omits"
+    (fun () ->
+      one_diagnostic Fixtures.Infer.method_of_a_trait_with_an_argument_its_signature_omits
+        ~says:"does not determine the arguments of `Tagged`" "types.cannot_infer");
+  Harness.test "an impl does not give a call the trait's count that its signature omits" (fun () ->
+      one_diagnostic Fixtures.Infer.method_of_a_trait_with_a_count_its_signature_omits
+        ~says:"does not determine the arguments of `Sized`" "types.cannot_infer");
+  Harness.test "a method call through two bounds of one trait does not choose the first" (fun () ->
+      one_diagnostic Fixtures.Infer.method_of_a_parameter_with_two_bounds_of_one_trait
+        ~says:"does not determine the arguments of `Tagged`" "types.cannot_infer");
+  Harness.test "a method call through an `any` with two instances of one trait chooses neither"
+    (fun () ->
+      one_diagnostic Fixtures.Infer.method_through_an_any_with_two_instances_of_one_trait
+        "types.cannot_infer");
+  Harness.test "a method call's argument chooses among two bounds of one trait" (fun () ->
+      fine Fixtures.Infer.method_of_a_parameter_whose_argument_chooses_a_bound);
   Harness.test "a generic parameter given type arguments is an error type, not the parameter"
     (fun () ->
       one_diagnostic Fixtures.Infer.method_of_a_parameter_given_type_arguments "types.arity");
