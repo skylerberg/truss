@@ -1,0 +1,30 @@
+type Session = todo
+
+fn none() -> Option[Session] {
+  None
+}
+
+fn has_none() -> Bool {
+  none().is_none()
+}
+
+fn greet() -> String {
+  todo
+}
+
+test "greets" {
+  assert has_none()
+  assert greet() == "hi"
+}
+
+test "counts" {
+  assert 1 + 1 == 2
+}
+
+fn main(arguments: List[String]) -> ExitCode {
+  if has_none() && greet() == "hi" {
+    ExitCode.success
+  } else {
+    ExitCode.failure
+  }
+}

@@ -12,7 +12,7 @@ type requests = {
   source : Path.file -> Source.t;
   interface : Interface.Lookups.t;
   mir : Mir.lookups;
-  lowered : Instance.key -> (lowered, unsupported) result;
+  lowered : Instance.key -> (lowered, unsupported) result option;
   test_key : Instance.key -> (string, unsupported) result;
   reached_todo_types : Instance.key -> Path.t list;
 }
@@ -237,8 +237,9 @@ let env compiler =
 
 let lowered compiler key =
   match compiler.requests.lowered key with
-  | Ok lowered -> lowered
-  | Error unsupported -> raise (Lower.Unsupported unsupported)
+  | Some (Ok lowered) -> lowered
+  | Some (Error unsupported) -> raise (Lower.Unsupported unsupported)
+  | None -> bug "%s is requested from code with errors" (Instance.to_string key)
 
 let read_test_key compiler root =
   match compiler.requests.test_key root with
@@ -656,14 +657,19 @@ type unshippable = {
   way : Path.t list;
 }
 
-let trace_main compiler ~main =
-  match compiler.requests.reached_todo_types (Generated (Program_main main)) with
-  | [] ->
-      Emit_c.trace_reachable ~lookup:(compiled compiler) [ Instance.Generated (Program_main main) ]
-  | _ :: _ -> []
+let make_root_key (root : Path.t) : Instance.key =
+  match root with Test _ -> make_test_root root | _ -> Generated (Program_main root)
 
-let reached_definitions compiler ~main =
-  reporting compiler @@ fun () ->
+let rec read_executed_fragment compiler key =
+  match compiler.requests.lowered key with
+  | Some (Ok (Compiled fragment | Folded (_, fragment))) -> Some fragment
+  | Some (Ok (Evaluate (path, _))) -> read_executed_fragment compiler (Instance.Evaluator path)
+  | Some (Error _) | None -> None
+
+let trace_root compiler root =
+  Emit_c.trace_reachable ~lookup:(read_executed_fragment compiler) [ make_root_key root ]
+
+let list_reached_definitions compiler root =
   List.sort_uniq Path.compare
     (List.filter_map
        (fun (_, way) ->
@@ -671,17 +677,16 @@ let reached_definitions compiler ~main =
          | (Instance.Code { path; _ } | Constant path | Generated (Program_main path)) :: _ ->
              Some path
          | _ -> None)
-       (trace_main compiler ~main))
+       (trace_root compiler root))
 
-let unshippable compiler ~main =
-  reporting compiler @@ fun () ->
-  let reached = trace_main compiler ~main in
+let list_unshippable compiler ~main =
+  let reached = trace_root compiler main in
   begin
     let definitions keys =
       List.fold_left
         (fun acc (key : Instance.key) ->
           match key with
-          | Code { path; _ } -> (
+          | Code { path; _ } | Constant path -> (
               match acc with last :: _ when Path.equal last path -> acc | _ -> path :: acc)
           | _ -> acc)
         [ main ] keys
@@ -692,7 +697,7 @@ let unshippable compiler ~main =
         (fun path ->
           let ({ file; line; column } : Emit_c.position) = todo_type_position compiler path in
           { failure = `Todo; file; line; column; way = [ main; path ] })
-        (compiler.requests.reached_todo_types (Generated (Program_main main)))
+        (compiler.requests.reached_todo_types (make_root_key main))
       @ List.concat_map
           (fun (compiled, keys) ->
             List.map
@@ -726,7 +731,7 @@ let unshippable compiler ~main =
   end
 
 let program_root compiler ~main =
-  let root = Instance.Generated (Program_main main) in
+  let root = make_root_key main in
   match compiler.requests.reached_todo_types root with
   | [] -> root
   | todo_types ->
@@ -753,9 +758,8 @@ let build_program compiler ~main ~output =
   let root = program_root compiler ~main in
   build compiler ~roots:[ root ] ~startup:(Startup.program_calling (Instance.symbol root)) ~output
 
-let reached_todo_types compiler (root : Path.t) =
-  compiler.requests.reached_todo_types
-    (match root with Test _ -> make_test_root root | _ -> Generated (Program_main root))
+let list_reached_todo_types compiler root =
+  compiler.requests.reached_todo_types (make_root_key root)
 
 let run_template_check compiler ~from_template ~literals ~clauses =
   let ran =
