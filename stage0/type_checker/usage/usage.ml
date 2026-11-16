@@ -13,92 +13,113 @@ let report context ?(fixes = []) code (span : Source.Definition_span.t) message 
   context.diagnostics <-
     Diagnostic.make ~fixes ~code:(Usage code) span message :: context.diagnostics
 
-let find_used_bindings (resolved : Resolve.resolved) =
-  let is_used = Array.make (Array.length resolved.names) false in
-  Array.iter (function Some (Resolve.Local id) -> is_used.(id) <- true | _ -> ()) resolved.names;
-  is_used
+type removal = Wildcard | Field_wildcard | Field_deletion of Source.Definition_span.t
+type binding = { name : name; removal : removal }
 
-let parameter_names (definition : definition) =
-  let names = ref [] in
-  let add (parameters : parameter list) =
-    List.iter
-      (fun (parameter : parameter) ->
-        match parameter.kind with
-        | Named_parameter { name; _ } -> names := name.id :: !names
-        | _ -> ())
-      parameters
-  in
-  (match definition.kind with
-  | Function { signature; _ } | Method_declaration signature -> add signature.parameters
-  | Theorem { parameters; _ } -> add parameters
-  | Trait { members; _ } ->
-      List.iter
-        (fun (line : trait_member node) ->
-          match line.kind with Law law -> add law.parameters | _ -> ())
-        members
-  | _ -> ());
-  !names
-
-let pattern_bindings (definition : definition) =
+let collect_bindings context (definition : definition) =
   let bindings = ref [] in
-  let rec pattern ~is_bare_field (written : pattern) =
+  let bind (name : name) removal = bindings := { name; removal } :: !bindings in
+  let rec pattern (written : pattern) =
     match written.kind with
-    | Binding name -> bindings := (name, is_bare_field) :: !bindings
+    | Binding name -> bind name Wildcard
     | Variant { fields = Some fields; _ } | Record fields -> pattern_fields fields
-    | Alternatives alternatives -> List.iter (pattern ~is_bare_field) alternatives
+    | Alternatives alternatives -> List.iter pattern alternatives
     | _ -> ()
   and pattern_fields (fields : pattern_field list) =
+    let has_rest = List.exists (fun (field : pattern_field) -> field.kind = Rest) fields in
     let has_several_fields =
       List.length (List.filter (fun (field : pattern_field) -> field.kind <> Rest) fields) > 1
     in
-    List.iter
-      (fun (field : pattern_field) ->
-        match field.kind with
-        | Named_field (_, inner) -> pattern ~is_bare_field:false inner
-        | Field inner -> pattern ~is_bare_field:has_several_fields inner
-        | Rest -> ())
-      fields
+    let rec bind_fields = function
+      | [] -> ()
+      | (field : pattern_field) :: following ->
+          (match (field.kind, following) with
+          | Field { kind = Binding name; _ }, next :: _ when has_rest ->
+              bind name
+                (Field_deletion
+                   (Source.Definition_span.make context.spans.(field.id).start
+                      context.spans.(next.id).start))
+          | Field { kind = Binding name; _ }, _ when has_rest || has_several_fields ->
+              bind name Field_wildcard
+          | (Named_field (_, inner) | Field inner), _ -> pattern inner
+          | Rest, _ -> ());
+          bind_fields following
+    in
+    bind_fields fields
   in
   let rec expression (value : expression) =
     (match value.kind with
-    | Is { pattern = written; _ } -> pattern ~is_bare_field:false written
-    | Lambda { parameters; _ } -> List.iter (pattern ~is_bare_field:false) parameters
-    | Match { arms; _ } ->
-        List.iter (fun (arm : arm) -> List.iter (pattern ~is_bare_field:false) arm.patterns) arms
-    | Quantified { binder = Binder_in (written, _); _ } -> pattern ~is_bare_field:false written
+    | Is { pattern = written; _ } -> pattern written
+    | Lambda { parameters; _ } -> List.iter pattern parameters
+    | Match { arms; _ } -> List.iter (fun (arm : arm) -> List.iter pattern arm.patterns) arms
+    | Quantified { binder = Binder_in (written, _); _ } -> pattern written
     | _ -> ());
     Syntax_walk.expression_parts ~expression ~statement value
   and statement (written : statement) =
     (match written.kind with
     | Let { pattern = written_pattern; _ } | For { pattern = written_pattern; _ } ->
-        pattern ~is_bare_field:false written_pattern
+        pattern written_pattern
     | _ -> ());
     Syntax_walk.statement_parts ~expression ~statement written
   in
   Syntax_walk.definition ~statement expression definition;
   List.rev !bindings
 
+let describe_removal (binding : binding) =
+  match binding.removal with
+  | Wildcard -> ("Replace it with `_`.", "Write `_`.")
+  | Field_wildcard ->
+      let written = binding.name.text ^ ": _" in
+      (Printf.sprintf "Match its field with `%s`." written, Printf.sprintf "Write `%s`." written)
+  | Field_deletion _ ->
+      ("Delete it, since `..` matches its field.", Printf.sprintf "Delete `%s`." binding.name.text)
+
+let make_edit context (binding : binding) =
+  let span = context.spans.(binding.name.id) in
+  match binding.removal with
+  | Wildcard -> Diagnostic.replace span "_"
+  | Field_wildcard -> Diagnostic.replace span (binding.name.text ^ ": _")
+  | Field_deletion field -> Diagnostic.delete field
+
 let check_unused context (definition : definition) =
-  let is_used = find_used_bindings context.resolved in
-  let parameters = parameter_names definition in
+  let targets = context.resolved.names in
+  let bindings = collect_bindings context definition in
+  let is_binding = Array.make (Array.length targets) false in
+  List.iter (fun (binding : binding) -> is_binding.(binding.name.id) <- true) bindings;
+  let is_used = Array.make (Array.length targets) false in
+  Array.iteri
+    (fun index target ->
+      match target with
+      | Some (Resolve.Local id) when not is_binding.(index) -> is_used.(id) <- true
+      | _ -> ())
+    targets;
+  let rec find_first_alternative id =
+    match targets.(id) with
+    | Some (Resolve.Local first) when is_binding.(id) -> find_first_alternative first
+    | _ -> id
+  in
+  let later_alternatives = Hashtbl.create 8 in
   List.iter
-    (fun ((name : name), is_bare_field) ->
-      if
-        context.resolved.names.(name.id) = Some Binding
-        && (not (List.mem name.id parameters))
-        && not is_used.(name.id)
-      then
-        let replacement = if is_bare_field then name.text ^ ": _" else "_" in
-        let span = context.spans.(name.id) in
-        report context Unused_variable span
-          ~fixes:
-            [
-              Diagnostic.fix
-                (Printf.sprintf "Write `%s`." replacement)
-                [ Diagnostic.replace span replacement ];
-            ]
-          (Printf.sprintf "`%s` is never used. Bind it to `_` instead." name.text))
-    (pattern_bindings definition)
+    (fun (binding : binding) ->
+      let first = find_first_alternative binding.name.id in
+      if first <> binding.name.id then Hashtbl.add later_alternatives first binding)
+    bindings;
+  List.iter
+    (fun (binding : binding) ->
+      let name = binding.name in
+      if targets.(name.id) = Some Binding && not is_used.(name.id) then
+        let occurrences = binding :: List.rev (Hashtbl.find_all later_alternatives name.id) in
+        let instruction, title =
+          match occurrences with
+          | [ only ] -> describe_removal only
+          | _ ->
+              ( "Remove it from every alternative of the pattern.",
+                Printf.sprintf "Remove `%s` from every alternative." name.text )
+        in
+        report context Unused_variable context.spans.(name.id)
+          ~fixes:[ Diagnostic.fix title (List.map (make_edit context) occurrences) ]
+          (Printf.sprintf "`%s` is never used. %s" name.text instruction))
+    bindings
 
 let check_block context (written : block) =
   let rec check_statements = function
