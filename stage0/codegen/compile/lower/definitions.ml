@@ -134,7 +134,7 @@ let make_code context (path : Path.t) type_arguments : code =
           let trait = (read_impl_interface context impl).implements.trait in
           let trait_signature = read_signature context provided.path in
           let count = List.length (read_impl_interface context impl).impl_generics in
-          let of_impl = List.filteri (fun position _ -> position < count) substitution in
+          let of_impl = List.take count substitution in
           let of_trait =
             List.map
               (fun (parameter, argument) -> (parameter, Types.substitute_argument of_impl argument))
@@ -145,7 +145,7 @@ let make_code context (path : Path.t) type_arguments : code =
               (fun (generic : Types.generic) -> not (Path.equal generic.generic.owner trait))
               trait_signature.generics
           in
-          let own = List.filteri (fun position _ -> position >= count) type_arguments in
+          let own = List.drop count type_arguments in
           function_code ~enclosing_impl provided ~interface:trait_signature
             ~substitution:(of_trait @ bind own_generics own @ substitution)
       | Some (Inherited _, _), _ -> bug "%s inherits a method outside an impl" (Path.show path)

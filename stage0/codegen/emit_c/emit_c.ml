@@ -144,8 +144,7 @@ let render_fragment fragment =
   number "@site_" (List.map C_runtime.render_site_symbol fragment.sites);
   let rename identifier =
     if String.starts_with ~prefix:self identifier then
-      "@self"
-      ^ String.sub identifier (String.length self) (String.length identifier - String.length self)
+      "@self" ^ String.drop_first (String.length self) identifier
     else Option.value (Hashtbl.find_opt names identifier) ~default:identifier
   in
   let whole =
@@ -268,9 +267,7 @@ let render_file env build (fragments : (fragment * linkage) list) =
   in
   let symbol_of header =
     let before = String.sub header 0 (String.index header '(') in
-    match String.rindex_opt before ' ' with
-    | Some space -> String.sub before (space + 1) (String.length before - space - 1)
-    | None -> before
+    match String.split_last ~sep:" " before with Some (_, symbol) -> symbol | None -> before
   in
   let declared = Hashtbl.create 64 in
   let declarations = Buffer.create 4096 in

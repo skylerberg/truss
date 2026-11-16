@@ -225,10 +225,10 @@ let show_float bits =
   if text = "nan" || text = "-nan" then "NaN"
   else if text = "inf" then "infinity"
   else if text = "-inf" then "-infinity"
+  else if String.contains text '.' then text
   else
-    match String.index_opt text 'e' with
-    | _ when String.contains text '.' -> text
-    | Some at -> String.sub text 0 at ^ ".0" ^ String.sub text at (String.length text - at)
+    match String.split_first ~sep:"e" text with
+    | Some (mantissa, exponent) -> mantissa ^ ".0e" ^ exponent
     | None -> text ^ ".0"
 
 let show_truss_value members text =
@@ -264,19 +264,19 @@ let show_truss_value members text =
     | Field { field; _ } -> field
     | other -> Logic.show_symbol other
   in
-  let opaque atom = match String.index_opt atom '!' with Some _ -> true | None -> false in
+  let is_opaque atom = String.contains atom '!' in
   let bits atom =
-    if String.length atom > 2 && String.sub atom 0 2 = "#b" then
-      Some (String.sub atom 2 (String.length atom - 2))
-    else if String.length atom > 2 && String.sub atom 0 2 = "#x" then
-      Some
-        (String.concat ""
-           (List.map
-              (fun digit ->
-                let value = int_of_string ("0x" ^ String.make 1 digit) in
-                String.init 4 (fun index -> if value land (8 lsr index) <> 0 then '1' else '0'))
-              (List.of_seq (String.to_seq (String.sub atom 2 (String.length atom - 2))))))
-    else None
+    match String.cut_first 2 atom with
+    | "#b", digits when digits <> "" -> Some digits
+    | "#x", digits when digits <> "" ->
+        Some
+          (String.concat ""
+             (List.map
+                (fun digit ->
+                  let value = Char.Ascii.hex_digit_to_int digit in
+                  String.init 4 (fun index -> if value land (8 lsr index) <> 0 then '1' else '0'))
+                (List.of_seq (String.to_seq digits))))
+    | _ -> None
   in
   let rec one = function
     | `Open :: `Atom "fp" :: `Atom sign :: `Atom exponent :: `Atom fraction :: `Close :: rest -> (
@@ -291,7 +291,7 @@ let show_truss_value members text =
           | "-oo" -> "-infinity"
           | _ -> "NaN"),
           rest )
-    | `Atom atom :: rest when opaque atom -> ("a value the prover knows nothing more about", rest)
+    | `Atom atom :: rest when is_opaque atom -> ("a value the prover knows nothing more about", rest)
     | `Atom atom :: rest -> (
         match List.assoc_opt atom members with
         | Some (internal, _) -> (constructor internal, rest)
@@ -376,7 +376,7 @@ let substitute_clause text spans clause replacements =
             (fun (origin, replacement) -> (Source.Definition_span.locate spans origin, replacement))
             replacements))
   in
-  Buffer.add_string buffer (String.sub clause_text next (String.length clause_text - next));
+  Buffer.add_string buffer (String.drop_first next clause_text);
   Buffer.contents buffer
 
 let render (lookups : Lookups.t) (message : State.message) =

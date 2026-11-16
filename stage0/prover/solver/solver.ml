@@ -147,18 +147,7 @@ let parse_canonical text =
   match String.split_on_char '\n' text with
   | "proven" :: _ -> Some Proven_canonical
   | "out_of_steps" :: _ -> Some Out_of_steps_canonical
-  | "counterexample" :: lines ->
-      Some
-        (Values
-           (List.filter_map
-              (fun line ->
-                match String.index_opt line ' ' with
-                | Some space ->
-                    Some
-                      ( String.sub line 0 space,
-                        String.sub line (space + 1) (String.length line - space - 1) )
-                | None -> None)
-              lines))
+  | "counterexample" :: lines -> Some (Values (List.filter_map (String.split_first ~sep:" ") lines))
   | _ -> None
 
 let find_known_answer solver key =
@@ -196,8 +185,7 @@ let solve solver (request, query) =
             Values
               (match rest with
               | List pairs :: _ ->
-                  List.filteri
-                    (fun index _ -> index < List.length request.requested)
+                  List.take (List.length request.requested)
                     (List.mapi
                        (fun index pair ->
                          match (pair, List.nth_opt request.requested index) with

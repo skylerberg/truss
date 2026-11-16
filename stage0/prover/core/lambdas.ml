@@ -10,9 +10,7 @@ let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_fr
     (function_type : Types.function_type) term ~called ~arguments ~start_fresh ~end_fresh
     ~start_declarations ~premises ~shown ~ended =
   let declared_here =
-    List.filteri
-      (fun index _ -> index < List.length context.declarations - start_declarations)
-      context.declarations
+    List.take (List.length context.declarations - start_declarations) context.declarations
   in
   let captures_fresh = function
     | Logic.Symbol.Lambda _ as name when not (Tables.Symbol_table.mem context.fresh_order name) -> (
@@ -389,9 +387,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   in
   let mark = context.fresh and facts_mark = List.length context.facts in
   let premises =
-    List.filteri
-      (fun index _ -> index >= List.length context.facts - facts_mark)
-      (list_facts_since context start_facts)
+    List.drop (List.length context.facts - facts_mark) (list_facts_since context start_facts)
   in
   let ended = ref [] in
   let saved_returns = context.returns and saved_terminates = context.terminates in

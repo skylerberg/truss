@@ -125,18 +125,8 @@ end = struct
   let normalized ~significand ~exponent =
     if Z.equal significand Z.zero then { significand = Z.zero; exponent = Z.zero }
     else
-      let digits = Z.to_string significand in
-      let rec trailing_zeros count =
-        if digits.[String.length digits - 1 - count] = '0' then trailing_zeros (count + 1)
-        else count
-      in
-      let zeros = trailing_zeros 0 in
-      if zeros = 0 then { significand; exponent }
-      else
-        {
-          significand = Z.divexact significand (Z.pow ten zeros);
-          exponent = Z.add exponent (Z.of_int zeros);
-        }
+      let significand, zeros = Z.remove significand ten in
+      { significand; exponent = Z.add exponent (Z.of_int zeros) }
 end
 
 type t = {

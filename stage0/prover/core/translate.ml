@@ -565,7 +565,7 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
                     ( Locals.add (Core_local local) term locals,
                       Locals.add (Core_local local) (Types.substitute renaming type_) types ))
                   (start.locals, start.types) parameters
-                  (List.filteri (fun index _ -> index < List.length parameters) terms)
+                  (List.take (List.length parameters) terms)
               in
               Facts.restrict start
                 (Logic.not_

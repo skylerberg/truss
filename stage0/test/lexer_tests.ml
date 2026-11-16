@@ -44,8 +44,7 @@ let tokens_of text = shown (fst (lex text))
 let recovered_tokens text =
   List.map
     (fun shown ->
-      if String.length shown > 1 && shown.[0] = '+' then String.sub shown 1 (String.length shown - 1)
-      else shown)
+      if String.length shown > 1 && shown.[0] = '+' then String.drop_first 1 shown else shown)
     (tokens_of text)
 
 let tokens text expected =

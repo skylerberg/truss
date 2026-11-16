@@ -471,7 +471,7 @@ let rec drain reader =
       let line = String.sub text 0 stop in
       let consume count =
         Buffer.clear reader.pending;
-        Buffer.add_string reader.pending (String.sub text count (String.length text - count))
+        Buffer.add_string reader.pending (String.drop_first count text)
       in
       match String.split_on_char ' ' line with
       | [ (("message" | "echo") as label); count ] ->

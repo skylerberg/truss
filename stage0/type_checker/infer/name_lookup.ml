@@ -271,7 +271,7 @@ and check_explicit_type_arguments ?(head = 0) state (value : Syntax.expression) 
     match Instantiation.check_written_arguments state items with
     | Error error -> Error error
     | Ok written -> (
-        let own = List.filteri (fun index _ -> index >= head) instance.type_arguments in
+        let own = List.drop head instance.type_arguments in
         if List.length written <> List.length own then
           Error
             (State.make_error_type state Arity (State.read_span state value.id)

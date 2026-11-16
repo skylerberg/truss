@@ -40,15 +40,9 @@ let cut text spans =
         else at)
       0 spans
   in
-  Buffer.add_string buffer (String.sub text at (String.length text - at));
+  Buffer.add_string buffer (String.drop_first at text);
   String.split_on_char '\n' (Buffer.contents buffer)
-  |> List.map (fun line ->
-      let rec stop position =
-        if position > 0 && (line.[position - 1] = ' ' || line.[position - 1] = '\t') then
-          stop (position - 1)
-        else position
-      in
-      String.sub line 0 (stop (String.length line)))
+  |> List.map (String.drop_last_while Char.Ascii.is_blank)
   |> List.filter (( <> ) "")
   |> String.concat "\n"
 

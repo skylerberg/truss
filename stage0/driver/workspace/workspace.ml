@@ -245,8 +245,7 @@ let make_relative_to root directory =
   if directory = root then ""
   else
     let prefix = root ^ "/" in
-    if String.starts_with ~prefix directory then
-      String.sub directory (String.length prefix) (String.length directory - String.length prefix)
+    if String.starts_with ~prefix directory then String.drop_first (String.length prefix) directory
     else ""
 
 let list_packages snapshot =
@@ -357,25 +356,14 @@ let make_header loaded =
   compiler_line :: List.map (fun (loaded : loaded) -> "loaded " ^ Blake3.to_hex loaded.key) loaded
 
 let of_hex hex =
-  let digit character =
-    match character with
-    | '0' .. '9' -> Some (Char.code character - Char.code '0')
-    | 'a' .. 'f' -> Some (Char.code character - Char.code 'a' + 10)
-    | _ -> None
-  in
-  if String.length hex mod 2 <> 0 then None
+  if String.length hex mod 2 <> 0 || not (String.for_all Char.Ascii.is_hex_digit hex) then None
   else
-    let bytes = Bytes.create (String.length hex / 2) in
-    let rec fill index =
-      if index = Bytes.length bytes then Some (Bytes.to_string bytes)
-      else
-        match (digit hex.[2 * index], digit hex.[(2 * index) + 1]) with
-        | Some high, Some low ->
-            Bytes.set bytes index (Char.chr ((high * 16) + low));
-            fill (index + 1)
-        | None, _ | _, None -> None
+    let byte_at index =
+      Char.chr
+        ((Char.Ascii.hex_digit_to_int hex.[2 * index] * 16)
+        + Char.Ascii.hex_digit_to_int hex.[(2 * index) + 1])
     in
-    fill 0
+    Some (String.init (String.length hex / 2) byte_at)
 
 let find_saved_package_database ~(current : loaded list) key =
   match List.find_opt (fun (loaded : loaded) -> loaded.key = key) current with

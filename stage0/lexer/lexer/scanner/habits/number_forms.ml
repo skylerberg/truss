@@ -141,7 +141,7 @@ let rec lex_foreign_number text : Numbers.checked option =
             fixes = [];
           }
       else if is_radix text && Char.uppercase_ascii text.[1] = text.[1] then
-        let prefix = "0" ^ String.make 1 (Char.lowercase_ascii text.[1]) in
+        let prefix = "0" ^ String.of_char (Char.lowercase_ascii text.[1]) in
         translated Number_uppercase_prefix
           (Printf.sprintf "Number prefixes are lowercase: write `%s`." prefix)
           0 2
@@ -183,7 +183,7 @@ let rec lex_foreign_number text : Numbers.checked option =
             let whole =
               measure_span text 0 (fun character -> is_digit character || character = '_')
             in
-            let digits = String.concat "" (String.split_on_char '_' (String.sub text 0 whole)) in
+            let digits = Numbers.remove_underscores (String.sub text 0 whole) in
             if is_radix text || String.length digits < 2 || digits.[0] <> '0' then None
             else
               let without_zeros =

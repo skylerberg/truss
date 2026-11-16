@@ -426,7 +426,7 @@ let locate_directory arguments =
   let rec named = function
     | "-C" :: directory :: _ -> Some directory
     | option :: _ when String.length option > 2 && String.starts_with ~prefix:"-C" option ->
-        Some (String.sub option 2 (String.length option - 2))
+        Some (String.drop_first 2 option)
     | _ :: rest -> named rest
     | [] -> None
   in
