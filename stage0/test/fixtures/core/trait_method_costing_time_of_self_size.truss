@@ -1,5 +1,6 @@
 trait Sized {
   fn size(self) -> UInt64
+    cost time finite
 
   fn double(self) -> UInt64
     cost time O(time(Self.size))

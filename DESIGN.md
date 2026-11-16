@@ -745,10 +745,29 @@ only for a function type with a `time` clause, because a function with a
 `time` clause cannot call one without. `type Button(on_click: fn(Button))`
 is therefore legal.
 
+**Whether a call terminates is part of its capability set.** A function
+without a `time` clause may not terminate, and that fact travels as a
+capability does: a call needs it where its callee has it, and a capability
+parameter passes it on. `map` therefore states a `time` bound and still
+takes a function that may not terminate. Such a call may not terminate, so
+only a caller without a `time` clause can make it. Koka and F* track
+divergence as an effect in the same way. The alternative is a `time` clause
+on every callback's type, which rejects each function that has none, and a
+function has none unless its author wrote one.
+
+The check is the capability check. It runs in the type checker, it covers a
+function bound to a local as it covers one passed to a call, and a
+specification, which has no capabilities, calls only functions that
+terminate.
+
 | Rule | Reason |
 |---|---|
 | Structural recursion needs no annotation, and other recursion states `decreases`. The compiler never infers a measure. | Lean accepts structural recursion in the same way. Dafny infers a measure. A structural check with an explicit clause is more predictable than an inference that may fail. |
 | A loop that runs until a capability says to stop has no termination proof. | An implementation could supply data forever. |
+| A function type with a `time` clause takes only functions that terminate, even where its `uses` names a capability parameter. | A written clause holds. If the parameter could carry a function that may not terminate into such a type, `cost time finite` there would promise nothing. |
+| A `time` clause follows a function parameter only where its bound names `time(parameter)`. `finite` names none, so it promises termination whatever is passed. | The bound is true as written: it is unbounded exactly where the parameter's time is. A `finite` that followed its callbacks would be a condition that the signature does not show. |
+| No parameter passes on termination alone. A callback that may not terminate is taken through a capability parameter, which also takes its capabilities. | A callee needs a callback without capabilities only to apply it in a contract, and there the callback must terminate too. One mechanism then covers both. |
+| A lambda may not terminate when it calls a function that may not, or holds a loop without a measure. | Its capabilities are inferred from its body, and so is this. A lambda with neither stays in the logic, so a proof can reason about a call that passes it. |
 
 ### Cost clauses
 

@@ -300,7 +300,7 @@ public fn List[Element: Copyable].copy_from(mut self, source: Slice[Element])
 
 public fn List[Element].update_each[capability Granted](
   mut self,
-  change: (fn(mut Element) uses Granted cost time finite),
+  change: (fn(mut Element) uses Granted),
 )
   uses Granted
   ensures self.length() == old(self.length())
@@ -319,17 +319,19 @@ public fn List[Element: Ordered].sort(mut self)
   mut self[..].sort()
 }
 
-public fn List[Element].sort_by(mut self, compare: (fn(Element, Element) -> Ordering cost time finite))
+public fn List[Element].sort_by[capability Granted](mut self, compare: (fn(Element, Element) -> Ordering uses Granted))
+  uses Granted
   ensures self.length() == old(self.length())
   cost time O(self.length() * log(self.length()) * time(compare))
 {
   mut self[..].sort_by(compare)
 }
 
-public fn List[Element].min_by(
+public fn List[Element].min_by[capability Granted](
   self,
-  compare: (fn(Element, Element) -> Ordering cost time finite),
+  compare: (fn(Element, Element) -> Ordering uses Granted),
 ) lends Option[Element]
+  uses Granted
   ensures (result is Some(_)) == (self.length() > 0)
   cost time O(self.length() * time(compare))
 {
@@ -339,10 +341,11 @@ public fn List[Element].min_by(
   }
 }
 
-public fn List[Element].max_by(
+public fn List[Element].max_by[capability Granted](
   self,
-  compare: (fn(Element, Element) -> Ordering cost time finite),
+  compare: (fn(Element, Element) -> Ordering uses Granted),
 ) lends Option[Element]
+  uses Granted
   ensures (result is Some(_)) == (self.length() > 0)
   cost time O(self.length() * time(compare))
 {
@@ -352,9 +355,10 @@ public fn List[Element].max_by(
   }
 }
 
-public fn List[Element].sort_by_key[Key: Ordered](mut self, key: (fn(Element) -> Key cost time finite))
+public fn List[Element].sort_by_key[Key: Ordered, capability Granted](mut self, key: (fn(Element) -> Key uses Granted))
+  uses Granted
   ensures self.length() == old(self.length())
-  cost time finite
+  cost time O(self.length() * log(self.length()) * (time(key) + time(Key.compare)))
 {
   mut self[..].sort_by_key(key)
 }

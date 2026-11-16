@@ -37,7 +37,7 @@ public fn Result[Value, Error].err(own self) -> Option[Error]
 
 public fn Result[Value, Error].map[Output, capability Granted](
   own self,
-  transform: (fn(own Value) -> Output uses Granted cost time finite),
+  transform: (fn(own Value) -> Output uses Granted),
 ) -> Result[Output, Error]
   uses Granted
   cost time O(time(transform))
@@ -50,7 +50,7 @@ public fn Result[Value, Error].map[Output, capability Granted](
 
 public fn Result[Value, Error].map_error[Other, capability Granted](
   own self,
-  transform: (fn(own Error) -> Other uses Granted cost time finite),
+  transform: (fn(own Error) -> Other uses Granted),
 ) -> Result[Value, Other]
   uses Granted
   cost time O(time(transform))
@@ -63,7 +63,7 @@ public fn Result[Value, Error].map_error[Other, capability Granted](
 
 public fn Result[Value, Error].and_then[Output, capability Granted](
   own self,
-  next: (fn(own Value) -> Result[Output, Error] uses Granted cost time finite),
+  next: (fn(own Value) -> Result[Output, Error] uses Granted),
 ) -> Result[Output, Error]
   uses Granted
   cost time O(time(next))
@@ -76,7 +76,7 @@ public fn Result[Value, Error].and_then[Output, capability Granted](
 
 public fn Result[Value, Error].or_else[Other, capability Granted](
   own self,
-  recover: (fn(own Error) -> Result[Value, Other] uses Granted cost time finite),
+  recover: (fn(own Error) -> Result[Value, Other] uses Granted),
 ) -> Result[Value, Other]
   uses Granted
   cost time O(time(recover))
@@ -100,7 +100,7 @@ public fn Result[Value, Error].unwrap_or(own self, default: own Value) -> Value
 
 public fn Result[Value, Error].unwrap_or_else[capability Granted](
   own self,
-  recover: (fn(own Error) -> Value uses Granted cost time finite),
+  recover: (fn(own Error) -> Value uses Granted),
 ) -> Value
   uses Granted
   cost time O(time(recover))

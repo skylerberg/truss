@@ -1,0 +1,7 @@
+fn spread(value: Int64) -> List[Int64] {
+  [value]
+}
+
+fn f(values: List[Int64]) -> List[Int64] {
+  values.flat_map(spread)
+}

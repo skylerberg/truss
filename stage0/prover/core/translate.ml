@@ -184,7 +184,7 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
     proof
     ||
     match signature with
-    | Some (signature : Types.signature) -> signature.terminates
+    | Some (signature : Types.signature) -> Types.terminates signature.uses
     | None -> false
   in
   let pair_up terms =
