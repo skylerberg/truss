@@ -15,9 +15,14 @@ val serve :
   unit
 
 val call :
-  ?program:string ->
-  ?start_server:bool ->
-  key:string ->
-  progress:(string -> unit) ->
-  'a ->
-  ('b, string) result
+  ?start_server:bool -> key:string -> progress:(string -> unit) -> 'a -> ('b, string) result
+
+module For_testing : sig
+  val call :
+    program:string ->
+    ?start_server:bool ->
+    key:string ->
+    progress:(string -> unit) ->
+    'a ->
+    ('b, string) result
+end

@@ -35,7 +35,5 @@ let () =
       let status, _, _ = Process.run ~input:mebibyte "/bin/sh" [ "-c"; "exit 3" ] in
       if status <> 3 then Harness.fail "status %d" status);
   Harness.test "a process that has run a program can still fork" (fun () ->
-      ignore
-        (Process.run_with_time_limit ~input:"" ~on_output:ignore ~time_limit_ms:10_000 "/bin/sh"
-           [ "-c"; "echo" ]);
+      ignore (Process.run ~input:"" ~on_output:ignore "/bin/sh" [ "-c"; "echo" ]);
       match Unix.fork () with 0 -> Unix._exit 0 | child -> ignore (Unix.waitpid [] child))

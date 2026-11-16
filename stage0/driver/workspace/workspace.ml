@@ -791,6 +791,7 @@ module For_testing = struct
   let build_cold_database = build_cold_database ~checks:true
   let collect_cache = collect
   let listen = Server.listen
+  let call = Server.For_testing.call
 
   let interrupt_commit root =
     match Hashtbl.find_opt worktrees root with
