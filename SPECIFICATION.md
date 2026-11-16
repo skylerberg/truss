@@ -908,16 +908,13 @@ fn serve(handle: (fn(Request) -> Response uses Database, Log cost time finite))
   argument that the `requires` allows:
 
   ```truss
-  fn List[Element].map[Output](
-    self,
-    transform: (fn(element: Element) -> Output requires self.model().contains(element)),
-  ) -> List[Output]
-    ensures result.length() == self.length()
-  {
-    todo
-  }
+  fn List[Element].generate(
+    count: UInt64,
+    make: (fn(index: UInt64) -> Element requires index < count cost time finite),
+  ) -> List[Element]
+    ensures result.length() == count
 
-  let picked = indices.map(fn(i) { values[i] })
+  let reversed = List.generate(values.length(), make: fn(index) { values[values.length() - 1 - index] })
   ```
 
 - A function-typed parameter can be called but not stored. One declared
@@ -949,7 +946,7 @@ fn List[Element].push(mut self, item: own Element)
 fn List[Element: Ordered].sort(mut self)
   cost time O(self.length() * log(self.length()) * time(Element.compare))
 
-fn List[Element].map[Output](self, transform: fn(Element) -> Output) -> List[Output]
+fn List[Element].zip[Other](self, other: Slice[Other]) -> Zipped[Element, Other]
 ```
 
 - A method is a function declared as `fn Type.name`. One whose first
