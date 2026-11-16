@@ -5,6 +5,7 @@ let headers =
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
+#include <spawn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -1661,6 +1662,22 @@ int32_t t_runtime_dup2(int32_t descriptor, int32_t target) {
   if (target >= 0 && target < T_DESCRIPTORS)
     atomic_store(&t_descriptor_registered[target], 0);
   return dup2(descriptor, target);
+}
+
+int t_runtime_posix_spawnp(int *process, const char *program, const void *file_actions,
+                           char *const *arguments, char *const *environment) {
+  posix_spawnattr_t attributes;
+  int failed = posix_spawnattr_init(&attributes);
+  if (failed) return failed;
+  sigset_t signals;
+  sigemptyset(&signals);
+  posix_spawnattr_setsigmask(&attributes, &signals);
+  sigaddset(&signals, SIGPIPE);
+  posix_spawnattr_setsigdefault(&attributes, &signals);
+  posix_spawnattr_setflags(&attributes, (short)(POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF));
+  failed = posix_spawnp(process, program, file_actions, &attributes, arguments, environment);
+  posix_spawnattr_destroy(&attributes);
+  return failed;
 }
 
 static struct t_group *t_group_new(struct t_group *parent) {
