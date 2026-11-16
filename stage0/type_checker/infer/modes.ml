@@ -263,7 +263,9 @@ let check_mode state env (value : Syntax.expression) (parameter : Types.paramete
         (Printf.sprintf "`%s` mutates its argument in place, so it must be a place passed `mut`."
            name)
   | Own, With_mode (Own, inner) ->
-      if State.is_plain state type_ then
+      if
+        State.is_plain state type_ && not (Types.exists Types.is_open_type (State.zonk state type_))
+      then
         State.report state Redundant_mode (State.read_span state value.id)
           ~fixes:
             [

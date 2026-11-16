@@ -1,0 +1,8 @@
+type Basket(items: List[Int64])
+
+fn keep(items: own Option[List[Int64]]) {}
+
+fn f(basket: Basket) {
+  let items = Some(basket.itemz)
+  keep(own items)
+}
