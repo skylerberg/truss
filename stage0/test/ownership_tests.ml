@@ -803,6 +803,17 @@ let () =
     "a `while` body cannot mutate the lender while a name the condition binds aliases the lent part"
     (fun () ->
       expect_one_diagnostic Fixtures.Ownership.while_body_mutating_the_lender
+        "ownership.mutated_while_viewed");
+  Harness.test
+    "a name an `if` condition binds may alias the lent part when the `if` is the function's result"
+    (fun () -> expect_fine Fixtures.Ownership.if_as_the_result_aliasing_the_lent_part);
+  Harness.test
+    "a name an `if` condition binds may alias the lent part when the `if` is a lambda's result"
+    (fun () -> expect_fine Fixtures.Ownership.if_as_a_lambda_result_aliasing_the_lent_part);
+  Harness.test
+    "the then-block of the function's result cannot mutate the lender while a name the condition \
+     binds aliases the lent part" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.then_block_of_the_result_mutating_the_lender
         "ownership.mutated_while_viewed")
 
 let count_disjoint_obligations text =
