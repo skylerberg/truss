@@ -1,0 +1,3 @@
+(library
+ (name lock_file)
+ (libraries unix compiler_bug))
