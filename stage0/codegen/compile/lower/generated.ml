@@ -5,15 +5,7 @@ open Emit_c.Builder
 
 let generated_state context ~key ~definition ~substitution =
   enter context ~builder:(create context.env ~key)
-    (frame_of
-       (unwritten
-          ~definition_key:
-            {
-              Names.module_ = { package = { owner = None; name = "" }; modules = [] };
-              path = definition;
-              ordinal = 0;
-            }
-          ~substitution ~result:(Returns Types.unit)))
+    (frame_of (unwritten ~definition ~substitution ~result:(Returns Types.unit)))
 
 let passed_on st result_ty =
   match result_place st with Some place -> place | None -> temporary st result_ty
