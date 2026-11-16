@@ -44,12 +44,9 @@ and dataless = { niche : niche; niche_values : (string * Z.t) list }
 and niche = { path : step list; scalar : scalar; start : Z.t; count : Z.t }
 and step = Field of string | Tag
 
-module Type_table = Hashtbl.Make (struct
+module Type_table = Hashtbl.Make (Structural_key.Make (struct
   type t = Ground.ty
-
-  let equal left right = Ground.compare left right = 0
-  let hash = Hashtbl.hash_param 64 256
-end)
+end))
 
 exception Infinite_size of Ground.ty
 

@@ -32,7 +32,7 @@ let under_binder :
       (fun () -> read body_frame)
   in
   let with_facts term =
-    if !facts <> [] then Hashtbl.replace context.quantifier_facts term (List.rev !facts);
+    if !facts <> [] then Tables.Term_table.replace context.quantifier_facts term (List.rev !facts);
     term
   in
   (body_frame, body, with_facts)
@@ -160,11 +160,11 @@ let find_model_function (context : State.context) (ty : Types.ty) ~(model : Type
 
 let model_function (context : State.context) (ty : Types.ty) ~(model : Types.ty) =
   let key = (ty, model) in
-  match Hashtbl.find_opt context.models key with
+  match Tables.Model_table.find_opt context.models key with
   | Some model_fn -> model_fn
   | None ->
       let model_fn = find_model_function context ty ~model in
-      Hashtbl.replace context.models key model_fn;
+      Tables.Model_table.replace context.models key model_fn;
       model_fn
 
 let rec model_of context (ty : Types.ty) term ~element =

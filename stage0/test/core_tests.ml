@@ -3,7 +3,7 @@ let core_of packages key =
     (fun (checked : Infer.checked) -> checked.form)
     (Database.read_checked_body (Support.database packages) key)
 
-type form = { core : Core.t; names : (Core.local, string) Hashtbl.t }
+type form = { core : Core.t; names : string Core_walk.For_testing.Local_table.t }
 
 let form_of (core : Core.t) = { core; names = Core_walk.For_testing.local_names core.definition }
 
@@ -22,7 +22,8 @@ let calls form =
 let name form (local : Core.local) =
   match local with
   | Self -> "self"
-  | Named _ | Synthetic _ -> Option.value ~default:"" (Hashtbl.find_opt form.names local)
+  | Named _ | Synthetic _ ->
+      Option.value ~default:"" (Core_walk.For_testing.Local_table.find_opt form.names local)
 
 let rec access_path form (place : Core.place) =
   match place with

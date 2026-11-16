@@ -1,7 +1,9 @@
+module Parameter_table : Hashtbl.S with type key = Types.parameter
+
 type t = {
   lookups : Lookups.t;
   resolved : Resolve.resolved;
-  bounds : (Types.parameter, Types.trait_reference list) Hashtbl.t;
+  bounds : Types.trait_reference list Parameter_table.t;
   self_type : Types.ty option;
   self_trait : Types.trait_reference option;
   self_associated : (string * Types.ty) list;

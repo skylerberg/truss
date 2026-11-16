@@ -1,11 +1,13 @@
+module Local_table : Hashtbl.S with type key = Core.local
+
 type context = {
   lookups : Lookups.t;
   bounds : Types.parameter -> Types.trait_reference list;
   spans : Source.Definition_span.t array Lazy.t;
   mode_keywords : (Core.origin, Types.mode * Core.mode_keyword) Hashtbl.t;
-  names : (Core.local, string) Hashtbl.t;
-  binding_modes : (Core.local, Types.mode) Hashtbl.t;
-  types : (Core.local, Types.ty) Hashtbl.t;
+  names : string Local_table.t;
+  binding_modes : Types.mode Local_table.t;
+  types : Types.ty Local_table.t;
   mutable parameters : Core.local list;
   implements_capability : bool;
   mutable mutable_locals : Core.local list;

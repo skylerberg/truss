@@ -29,27 +29,25 @@ let lookup instances key =
 
 let references program key = Emit_c.references (lookup program key)
 
-module Instance_key = struct
+module Instance_key = Structural_key.Make (struct
   type t = Instance.key
+end)
 
-  let equal = Instance.equal
-  let hash = Hashtbl.hash
-  let compare = Instance.compare
-end
+module Instance_table = Hashtbl.Make (Instance_key)
 
 let find_components program root =
   Strongly_connected.find_components (module Instance_key) ~successors:(references program) [ root ]
 
 let reach_key program root =
   let link key = (Reachable.own_hash (lookup program key), references program key) in
-  let known = Hashtbl.create 16 in
+  let known = Instance_table.create 16 in
   List.iter
     (fun members ->
       List.iter
-        (fun (key, reach_key) -> Hashtbl.replace known key reach_key)
-        (Reachable.component_keys ~link ~deep:(Hashtbl.find known) members))
+        (fun (key, reach_key) -> Instance_table.replace known key reach_key)
+        (Reachable.component_keys ~link ~deep:(Instance_table.find known) members))
     (find_components program root);
-  Hashtbl.find known root
+  Instance_table.find known root
 
 let show_components program root =
   List.map

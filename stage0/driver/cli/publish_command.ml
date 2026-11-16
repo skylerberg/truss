@@ -1,3 +1,7 @@
+module Package_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Path.package
+end))
+
 module Names = Resolve.Names
 module Version = Registry.Version
 module Lock = Registry.Lock
@@ -47,11 +51,11 @@ let record database snapshot registry (package : Path.package) =
   in
   let problems = ref [] in
   let rec closure name : Lock.t =
-    let seen = Hashtbl.create 16 and entries = ref [] in
+    let seen = Package_table.create 16 and entries = ref [] in
     let add name version hash = entries := { Lock.name; version; hash; holds = [] } :: !entries in
     let rec visit name =
-      if not (Hashtbl.mem seen name) then begin
-        Hashtbl.replace seen name ();
+      if not (Package_table.mem seen name) then begin
+        Package_table.replace seen name ();
         match (in_registry name, directory_of name) with
         | Some (_, version, hash), _ ->
             add name version hash;

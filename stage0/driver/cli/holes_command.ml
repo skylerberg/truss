@@ -1,3 +1,8 @@
+module Caller_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Path.package * Path.t
+end))
+
+module Path_table = Hashtbl.Make (Path)
 module Names = Resolve.Names
 
 type hole = {
@@ -54,28 +59,28 @@ let with_blocks snapshot packages database holes =
         (fun (test : Test_command.test) -> ("test " ^ Test_command.label test, test.path))
         (Test_command.select snapshot database packages ~paths:[] ~match_:None)
   in
-  let callers = Hashtbl.create 16 in
+  let callers = Caller_table.create 16 in
   let calls (root : Path.t) definition =
     let viewer = Path.package root in
     let reached =
-      match Hashtbl.find_opt callers (viewer, definition) with
+      match Caller_table.find_opt callers (viewer, definition) with
       | Some reached -> reached
       | None ->
           let reached = Database.list_callers database ~viewer definition in
-          Hashtbl.replace callers (viewer, definition) reached;
+          Caller_table.replace callers (viewer, definition) reached;
           reached
     in
     List.exists (Path.equal root) reached
   in
   let compile = lazy (Compiler.lowering_only database packages) in
-  let todo_types = Hashtbl.create 16 in
+  let todo_types = Path_table.create 16 in
   let reaches_type root definition =
     let reached =
-      match Hashtbl.find_opt todo_types root with
+      match Path_table.find_opt todo_types root with
       | Some reached -> reached
       | None ->
           let reached = Compile.reached_todo_types (Lazy.force compile) root in
-          Hashtbl.replace todo_types root reached;
+          Path_table.replace todo_types root reached;
           reached
     in
     List.exists (Path.equal definition) reached

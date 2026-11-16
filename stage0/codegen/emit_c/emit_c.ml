@@ -1,3 +1,7 @@
+module Key_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = C_types.key
+end))
+
 type build = C_runtime.build = Development | Release
 type linkage = C_runtime.linkage = External | Internal
 
@@ -187,13 +191,13 @@ let fragment env (compiled : compiled) =
 
 let file env build (fragments : (fragment * linkage) list) =
   let context = C_types.new_context env "" in
-  let local_types = Hashtbl.create 16 in
+  let local_types = Key_table.create 16 in
   List.iter
     (fun ((fragment : fragment), _) ->
       List.iter (C_types.register context) fragment.types;
       List.iter
         (fun (key, (defined : C_types.defined)) ->
-          Hashtbl.replace local_types key defined;
+          Key_table.replace local_types key defined;
           C_types.register context key;
           List.iter (C_types.register context) defined.references)
         fragment.environments)
@@ -235,7 +239,7 @@ let file env build (fragments : (fragment * linkage) list) =
     fragments;
   let definitions = ref C_types.Keys.empty in
   let define_key key =
-    match Hashtbl.find_opt local_types key with
+    match Key_table.find_opt local_types key with
     | Some defined -> defined
     | None -> C_types.define context key
   in

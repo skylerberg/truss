@@ -1405,7 +1405,7 @@ and write_assignment context run (target : Mir.place) ~(copied : Mir.operand lis
       match run.infos.(local).kind with
       | Source { local = (Named _ | Synthetic _) as core; name = Some name; _ }
         when frame.source.key = Some context.home ->
-          Hashtbl.replace context.local_names core name
+          Tables.Local_table.replace context.local_names core name
       | Source _ | Temporary | Lent _ -> ())
   | Constant _ | Literal _ -> ());
   let copied_slice =

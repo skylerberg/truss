@@ -1,3 +1,7 @@
+module Arguments_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Z.t list
+end))
+
 let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [] }
 let example_file : Path.file = { module_ = example; name = "main" }
 let standard_package_database = lazy (Workspace.For_testing.load_standard_package_database ())
@@ -165,11 +169,11 @@ let run_mutant ~samples text =
                 | Ok (Ran (Static_scalar (Bool true))) -> true
                 | _ -> false
               in
-              let tried = Hashtbl.create 16 in
+              let tried = Arguments_table.create 16 in
               List.iter
                 (fun arguments ->
-                  if (not (Hashtbl.mem tried arguments)) && admitted arguments then begin
-                    Hashtbl.replace tried arguments ();
+                  if (not (Arguments_table.mem tried arguments)) && admitted arguments then begin
+                    Arguments_table.replace tried arguments ();
                     incr runs;
                     match call candidate.path arguments with
                     | Ok (Stopped report) ->

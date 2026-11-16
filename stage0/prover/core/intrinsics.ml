@@ -303,7 +303,7 @@ let appended context frame element parts part =
 let byte_order context left right =
   let sequence = Facts.sort_of context (Models.sequence_type (Types.make_builtin UInt8)) in
   let symbol = Symbol.Compare_bytes_order in
-  let first = not (Hashtbl.mem context.declared symbol) in
+  let first = not (Tables.Symbol_table.mem context.declared symbol) in
   Facts.declare context (Logic.Function (symbol, [ sequence; sequence ], Logic.Int));
   let order first_term second_term = Logic.Apply (symbol, [ first_term; second_term ]) in
   if first then begin

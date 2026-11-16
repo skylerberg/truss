@@ -348,11 +348,11 @@ let find_buffer_elements context (ty : Types.ty) =
 
 let buffer_elements (context : State.context) (ty : Types.ty) =
   let key = ty in
-  match Hashtbl.find_opt context.buffers key with
+  match Tables.Type_table.find_opt context.buffers key with
   | Some elements -> elements
   | None ->
       let elements = find_buffer_elements context ty in
-      Hashtbl.replace context.buffers key elements;
+      Tables.Type_table.replace context.buffers key elements;
       elements
 
 let buffer_slack context (ty : Types.ty) term =
@@ -386,11 +386,11 @@ and has_potential (context : State.context) ?(seen = []) (ty : Types.ty) =
   if seen <> [] then holds_potential_type context ~seen ty
   else
     let key = ty in
-    match Hashtbl.find_opt context.holds_potential key with
+    match Tables.Type_table.find_opt context.holds_potential key with
     | Some holds -> holds
     | None ->
         let holds = holds_potential_type context ~seen ty in
-        Hashtbl.replace context.holds_potential key holds;
+        Tables.Type_table.replace context.holds_potential key holds;
         holds
 
 and holds_potential_type context ~seen (ty : Types.ty) =

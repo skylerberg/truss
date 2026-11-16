@@ -105,7 +105,7 @@ type call_argument =
       lambda : lambda_code;
     }
 
-type stated =
+type stated = Tables.stated =
   | In_range of Logic.symbol
   | Value_of of Logic.symbol
   | Contract_of of Logic.symbol
@@ -122,21 +122,21 @@ type context = {
   mutable callbacks : (Core.local * string * Mir.callback) list;
   measures : Mir.formula list;
   mutable declarations : Logic.declaration list;
-  declared : (Logic.symbol, unit) Hashtbl.t;
-  datatypes : (Types.ty, unit) Hashtbl.t;
-  stated : (stated, unit) Hashtbl.t;
+  declared : unit Tables.Symbol_table.t;
+  datatypes : unit Tables.Type_table.t;
+  stated : unit Tables.Stated_table.t;
   mutable facts : Logic.term list;
   mutable obligations : obligation list;
   mutable fresh : int;
   mutable values : (Logic.symbol * string) list;
-  local_names : (Core.local, string) Hashtbl.t;
+  local_names : string Tables.Local_table.t;
   mutable returns : (frame * Logic.term option) list;
   mutable lent_back : (Types.ty * Logic.term * Logic.term) list;
   mutable instantiating : Path.t list;
   mutable axiomatizing : Logic.symbol list;
-  axiom_clauses : (Logic.symbol * string * Core.origin, unit) Hashtbl.t;
+  axiom_clauses : unit Tables.Axiom_clause_table.t;
   mutable open_axioms : open_axiom list;
-  axioms_of : (Logic.symbol, open_axiom) Hashtbl.t;
+  axioms_of : open_axiom Tables.Symbol_table.t;
   disjoint : (int * int) list;
   mutable indexes : (int * place_value) list;
   mutable yielded_part : Types.ty option;
@@ -145,16 +145,16 @@ type context = {
   mutable laws_assumed : (Types.trait_reference * Types.ty) list;
   mutable counters : Costs.counter list;
   mutable own_bounds : Costs.counter list;
-  fresh_order : (Logic.symbol, int) Hashtbl.t;
+  fresh_order : int Tables.Symbol_table.t;
   mutable logs : (Logic.term * bool) list;
   mutable powers : (Logic.term * Logic.term) list;
   mutable lambda_times : (Logic.term * (Logic.term * obligation list)) list;
   mutable lambda_captures : (Logic.term * Core.local list) list;
-  lambda_definitions : (Logic.symbol, Logic.term) Hashtbl.t;
+  lambda_definitions : Logic.term Tables.Symbol_table.t;
   mutable potentials : Logic.term list;
-  models : (Types.ty * Types.ty, (Logic.term -> Logic.term) option) Hashtbl.t;
-  holds_potential : (Types.ty, bool) Hashtbl.t;
-  buffers : (Types.ty, (Types.ty * (Logic.term -> Logic.term)) option) Hashtbl.t;
+  models : (Logic.term -> Logic.term) option Tables.Model_table.t;
+  holds_potential : bool Tables.Type_table.t;
+  buffers : (Types.ty * (Logic.term -> Logic.term)) option Tables.Type_table.t;
   mutable equalities : Logic.term list;
   mutable decisions : (string * string option * Logic.term * Logic.term) list;
   mutable entry : Logic.symbol list;
@@ -165,7 +165,7 @@ type context = {
   mutable reading_callback : bool;
   ranking : bool;
   mutable scopes : (Logic.symbol * Logic.term list ref) list;
-  quantifier_facts : (Logic.term, Logic.term list) Hashtbl.t;
+  quantifier_facts : Logic.term list Tables.Term_table.t;
   mutable quantifier_symbols : Logic.symbol list;
   mutable validating : Types.ty list;
   run_body : frame -> lambdas:Mir.body array -> Mir.body -> unit;

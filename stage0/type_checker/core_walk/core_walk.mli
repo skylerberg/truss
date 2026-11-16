@@ -28,7 +28,9 @@ val can_use_tasks : ?solved:(int -> Types.capability_set) -> Core.block -> bool
 val traverse_indirect : ('a -> 'b option) -> 'a Core.target -> 'b Core.target option
 
 module For_testing : sig
-  val local_names : Core.definition -> (Core.local, string) Hashtbl.t
+  module Local_table : Hashtbl.S with type key = Core.local
+
+  val local_names : Core.definition -> string Local_table.t
 
   val expression_exists :
     ?expression:(Core.expression -> bool) ->

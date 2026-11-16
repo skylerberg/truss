@@ -370,7 +370,7 @@ let signed_type state (type_ : Types.ty) =
   | _ -> false
 
 let bounds state parameter =
-  Option.value ~default:[] (Hashtbl.find_opt state.context.bounds parameter)
+  Option.value ~default:[] (Elaborator.Parameter_table.find_opt state.context.bounds parameter)
 
 let normalize state type_ =
   Interface.Impls.normalize state.lookups.interface ~bounds:(bounds state) (zonk state type_)

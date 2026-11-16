@@ -382,7 +382,9 @@ let preserved_validity context (entry : State.frame) (changed : State.changed) =
       match (Facts.local_type context entry local, Locals.find_opt local entry.locals) with
       | Some ty, Some before ->
           obligation
-            (Option.value (Hashtbl.find_opt context.local_names local) ~default:"a local")
+            (Option.value
+               (Tables.Local_table.find_opt context.local_names local)
+               ~default:"a local")
             ty before
             (fun (at : State.frame) -> Locals.find_opt local at.locals)
       | _ -> None)

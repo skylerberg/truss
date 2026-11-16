@@ -1,3 +1,7 @@
+module Place_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Moves.path
+end))
+
 let copy_fix context title type_ (at : Source.Definition_span.t) =
   if Context.copyable context type_ then
     [
@@ -69,16 +73,16 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
     | origin :: _ -> Some origin
     | [] -> None
   in
-  let reported_use_after_move = Hashtbl.create 8 in
+  let reported_use_after_move = Place_table.create 8 in
   let check_use_after_move state (place : Mir.place) origin =
     match Moves.path_of_place place with
     | None -> ()
     | Some path -> (
         match Moves.may_be_empty moves state path with
-        | Some moved when not (Hashtbl.mem reported_use_after_move moved) -> (
+        | Some moved when not (Place_table.mem reported_use_after_move moved) -> (
             match (place_of moved, first_move state moved) with
             | Some shown, Some moved_origin ->
-                Hashtbl.replace reported_use_after_move moved ();
+                Place_table.replace reported_use_after_move moved ();
                 let shown = Context.show context shown in
                 Context.report context Use_after_move (Context.span context origin)
                   ~notes:
@@ -94,16 +98,16 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
             | _ -> ())
         | _ -> ())
   in
-  let reported_not_reinitialized = Hashtbl.create 8 in
+  let reported_not_reinitialized = Place_table.create 8 in
   let check_reinitialized state ~locals ?(moved_in_scope = fun _ -> true) ~at message =
     List.iter
       (fun local ->
         if Moves.lent_mut moves local then
           match Moves.may_be_empty moves state { local; projections = [] } with
-          | Some moved when not (Hashtbl.mem reported_not_reinitialized moved) -> (
+          | Some moved when not (Place_table.mem reported_not_reinitialized moved) -> (
               match (place_of moved, first_move state moved) with
               | Some shown, Some moved_origin when moved_in_scope moved ->
-                  Hashtbl.replace reported_not_reinitialized moved ();
+                  Place_table.replace reported_not_reinitialized moved ();
                   let moved_span = Context.span context moved_origin in
                   let root = Context.show context { shown with steps = [] } in
                   Context.report context Not_reinitialized

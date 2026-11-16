@@ -1,3 +1,7 @@
+module Local_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Core.local
+end))
+
 let bug format = Compiler_bug.bug ~stage:"MIR" format
 
 type frame = Bindings | Statement | Condition
@@ -26,7 +30,7 @@ type t = {
   mutable local_count : int;
   mutable statements : Tree.statement list;
   mutable reaches : bool;
-  sources : (Core.local, Tree.local) Hashtbl.t;
+  sources : Tree.local Local_table.t;
   mutable scopes : scope list;
   mutable loops : enclosing_loop list;
   mutable compound_target : Tree.place option;
@@ -57,7 +61,7 @@ let create ?(is_specification = false) ?(entry_locals = []) ?(takes_free_locals 
     local_count = 0;
     statements = [];
     reaches = true;
-    sources = Hashtbl.create 16;
+    sources = Local_table.create 16;
     scopes = [];
     loops = [];
     compound_target = None;
@@ -131,13 +135,13 @@ let block_of builder (build : unit -> Tree.operand option) : Tree.block =
   block
 
 let free_source builder (local : Core.local) ~type_ ~origin =
-  match Hashtbl.find_opt builder.sources local with
+  match Local_table.find_opt builder.sources local with
   | Some local -> local
   | None when builder.takes_free_locals ->
       let free =
         new_local builder (Source { local; mode = Read; name = None; is_var = false }) type_ origin
       in
-      Hashtbl.replace builder.sources local free;
+      Local_table.replace builder.sources local free;
       builder.free <- free :: builder.free;
       free
   | None -> bug "a local that nothing binds"
@@ -151,11 +155,11 @@ let register_binding builder local =
   Option.iter (fun scope -> scope.bound <- local :: scope.bound) (binding_scope builder)
 
 let bind_source ?name ?(is_var = false) builder (local : Core.local) mode type_ origin =
-  match Hashtbl.find_opt builder.sources local with
+  match Local_table.find_opt builder.sources local with
   | Some bound -> bound
   | None ->
       let bound = new_local builder (Source { local; mode; name; is_var }) type_ origin in
-      Hashtbl.replace builder.sources local bound;
+      Local_table.replace builder.sources local bound;
       (match builder.deferred with
       | Some deferred -> builder.deferred <- Some (bound :: deferred)
       | None -> register_binding builder bound);
@@ -436,8 +440,8 @@ let is_specification builder = builder.is_specification
 let entry_locals builder = builder.entry_locals
 let local_info builder local = Hashtbl.find builder.infos local
 let locals builder = Array.init builder.local_count (Hashtbl.find builder.infos)
-let source builder local = Hashtbl.find_opt builder.sources local
-let add_source builder core local = Hashtbl.replace builder.sources core local
+let source builder local = Local_table.find_opt builder.sources local
+let add_source builder core local = Local_table.replace builder.sources core local
 let free_locals builder = List.rev builder.free
 let statements builder = List.rev builder.statements
 let emitted builder = builder.statements

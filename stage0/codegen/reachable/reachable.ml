@@ -1,18 +1,17 @@
-module Table = Hashtbl.Make (struct
+module Instance_table = Hashtbl.Make (Structural_key.Make (struct
   type t = Instance.key
+end))
 
-  let equal = Instance.equal
-  let hash key = Hashtbl.hash_param 64 256 key
-end)
+module Path_table = Hashtbl.Make (Path)
 
 let bug format = Compiler_bug.bug ~stage:"Reachable" format
 
 let walk ~lookup ~by_call roots =
-  let seen = Table.create 256 in
+  let seen = Instance_table.create 256 in
   let queue = Queue.create () in
   List.iter (fun root -> Queue.add (root, []) queue) roots;
   let reached = ref [] in
-  let tables = Hashtbl.create 16 and called = Hashtbl.create 16 in
+  let tables = Path_table.create 16 and called = Path_table.create 16 in
   let entry table (slot, way) =
     match List.nth_opt (Emit_c.references table) slot with
     | Some key -> Queue.add (key, way) queue
@@ -20,8 +19,8 @@ let walk ~lookup ~by_call roots =
   in
   while not (Queue.is_empty queue) do
     let key, way = Queue.pop queue in
-    if not (Table.mem seen key) then begin
-      Table.replace seen key ();
+    if not (Instance_table.mem seen key) then begin
+      Instance_table.replace seen key ();
       let compiled = lookup key in
       let way = key :: way in
       reached := (compiled, List.rev way) :: !reached;
@@ -30,16 +29,16 @@ let walk ~lookup ~by_call roots =
       in
       match Emit_c.table compiled with
       | Some (Some capability) when by_call ->
-          Hashtbl.add tables capability compiled;
-          List.iter (entry compiled) (List.rev (Hashtbl.find_all called capability))
+          Path_table.add tables capability compiled;
+          List.iter (entry compiled) (List.rev (Path_table.find_all called capability))
       | _ when by_call ->
           List.iter
             (fun (capability, slot) ->
-              if not (List.mem_assoc slot (Hashtbl.find_all called capability)) then begin
-                Hashtbl.add called capability (slot, way);
+              if not (List.mem_assoc slot (Path_table.find_all called capability)) then begin
+                Path_table.add called capability (slot, way);
                 List.iter
                   (fun table -> entry table (slot, way))
-                  (List.rev (Hashtbl.find_all tables capability))
+                  (List.rev (Path_table.find_all tables capability))
               end)
             (Emit_c.calls compiled);
           all ()
@@ -67,13 +66,13 @@ let unit_key ~own reached =
 
 let group_key ~link ~deep ~members start =
   let inside key = List.exists (Instance.equal key) members in
-  let order = Table.create 8 in
+  let order = Instance_table.create 8 in
   let rec walk visited = function
     | [] -> List.rev visited
     | key :: queue ->
-        if Table.mem order key then walk visited queue
+        if Instance_table.mem order key then walk visited queue
         else begin
-          Table.replace order key (Table.length order);
+          Instance_table.replace order key (Instance_table.length order);
           let own, references = link key in
           walk ((own, references) :: visited) (queue @ List.filter inside references)
         end
@@ -91,7 +90,8 @@ let group_key ~link ~deep ~members start =
                  Cbor.Array
                    (List.map
                       (fun key ->
-                        if inside key then Cbor.Array [ Text "in"; Cbor.int (Table.find order key) ]
+                        if inside key then
+                          Cbor.Array [ Text "in"; Cbor.int (Instance_table.find order key) ]
                         else Cbor.Array [ Text "out"; Bytes (deep key) ])
                       references);
                ])

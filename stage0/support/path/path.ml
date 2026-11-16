@@ -108,9 +108,13 @@ and show_argument = function
   | Count value -> Z.to_string value
   | Constant path -> show path
 
-let compare = Stdlib.compare
-let equal left right = compare left right = 0
-let hash path = Hashtbl.hash_param 64 256 path
+module Key = Structural_key.Make (struct
+  type nonrec t = t
+end)
+
+let compare = Key.compare
+let equal = Key.equal
+let hash = Key.hash
 
 module Ordered = struct
   type nonrec t = t

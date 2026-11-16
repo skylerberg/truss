@@ -1,11 +1,15 @@
+module Local_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Core.local
+end))
+
 type context = {
   lookups : Lookups.t;
   bounds : Types.parameter -> Types.trait_reference list;
   spans : Source.Definition_span.t array Lazy.t;
   mode_keywords : (Core.origin, Types.mode * Core.mode_keyword) Hashtbl.t;
-  names : (Core.local, string) Hashtbl.t;
-  binding_modes : (Core.local, Types.mode) Hashtbl.t;
-  types : (Core.local, Types.ty) Hashtbl.t;
+  names : string Local_table.t;
+  binding_modes : Types.mode Local_table.t;
+  types : Types.ty Local_table.t;
   mutable parameters : Core.local list;
   implements_capability : bool;
   mutable mutable_locals : Core.local list;
@@ -65,12 +69,13 @@ let binding_mode context (root : Place.root) : Types.mode =
   match root with
   | Constant _ -> Read
   | Environment | Temporary _ -> Own
-  | Local local -> Option.value ~default:Types.Own (Hashtbl.find_opt context.binding_modes local)
+  | Local local ->
+      Option.value ~default:Types.Own (Local_table.find_opt context.binding_modes local)
 
 let show_root context (root : Place.root) =
   match root with
   | Local Self -> "self"
-  | Local local -> Option.value ~default:"this" (Hashtbl.find_opt context.names local)
+  | Local local -> Option.value ~default:"this" (Local_table.find_opt context.names local)
   | Temporary _ -> "temporary"
   | Constant (Top { name; _ } | Member_constant { name; _ }) -> name
   | Constant path -> Path.show path
@@ -101,9 +106,9 @@ let collect context (mir : Mir.Graph.t) =
         match info.kind with
         | Source { local = core; mode; name = Some name; is_var }
           when not (List.mem local body.captures) ->
-            Hashtbl.replace context.names core name;
-            Hashtbl.replace context.binding_modes core mode;
-            Hashtbl.replace context.types core info.type_;
+            Local_table.replace context.names core name;
+            Local_table.replace context.binding_modes core mode;
+            Local_table.replace context.types core info.type_;
             if is_var then context.mutable_locals <- core :: context.mutable_locals
         | Source _ | Temporary | Lent _ -> ())
       body.locals;

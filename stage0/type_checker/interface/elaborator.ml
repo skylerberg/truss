@@ -1,9 +1,13 @@
 module Names = Resolve.Names
 
+module Parameter_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Types.parameter
+end))
+
 type t = {
   lookups : Lookups.t;
   resolved : Resolve.resolved;
-  bounds : (Types.parameter, Types.trait_reference list) Hashtbl.t;
+  bounds : Types.trait_reference list Parameter_table.t;
   self_type : Types.ty option;
   self_trait : Types.trait_reference option;
   self_associated : (string * Types.ty) list;
@@ -14,8 +18,10 @@ type t = {
 }
 
 let create lookups resolved ~spans (scope : Environment.scope) =
-  let bounds = Hashtbl.create 8 in
-  List.iter (fun (parameter, traits) -> Hashtbl.replace bounds parameter traits) scope.bounds;
+  let bounds = Parameter_table.create 8 in
+  List.iter
+    (fun (parameter, traits) -> Parameter_table.replace bounds parameter traits)
+    scope.bounds;
   {
     lookups;
     resolved;
@@ -37,7 +43,7 @@ let make_scope context : Environment.scope =
     self_capabilities = context.self_capabilities;
     bounds =
       List.sort compare
-        (Hashtbl.fold
+        (Parameter_table.fold
            (fun parameter bounds bounds_by_parameter -> (parameter, bounds) :: bounds_by_parameter)
            context.bounds []);
   }
@@ -176,7 +182,7 @@ and find_declaring_trait ?(capability = false) context trait name =
     (list_trait_closure context.lookups trait)
 
 and elaborate_associated context base parameter (key : Syntax.name) =
-  let bounds = Option.value ~default:[] (Hashtbl.find_opt context.bounds parameter) in
+  let bounds = Option.value ~default:[] (Parameter_table.find_opt context.bounds parameter) in
   let associated_type =
     List.find_map
       (fun (bound : Types.trait_reference) ->
@@ -388,7 +394,9 @@ and elaborate_capability context (written : Syntax.capability_reference) : Types
       match find_parameter context base with
       | Error _ -> []
       | Ok parameter -> (
-          let bounds = Option.value ~default:[] (Hashtbl.find_opt context.bounds parameter) in
+          let bounds =
+            Option.value ~default:[] (Parameter_table.find_opt context.bounds parameter)
+          in
           match find_capability_projection context (Types.Parameter parameter) bounds key with
           | Some projection -> [ projection ]
           | None ->
@@ -503,7 +511,7 @@ let elaborate_generics context owner (written : Syntax.generic_parameter list) :
       match kind with
       | `Type bounds ->
           let bounds = elaborate_trait_bounds context bounds in
-          Hashtbl.replace context.bounds parameter bounds;
+          Parameter_table.replace context.bounds parameter bounds;
           { Types.generic = parameter; kind = Type_generic bounds }
       | `Value _ -> { Types.generic = parameter; kind = Value_generic }
       | `Capability -> { Types.generic = parameter; kind = Capability_generic })
@@ -649,7 +657,7 @@ let elaborate_container (context : t) (path : Path.t) (definition : Syntax.defin
           associated = [];
         }
       in
-      Hashtbl.replace context.bounds self_parameter [ self_trait ];
+      Parameter_table.replace context.bounds self_parameter [ self_trait ];
       let context =
         {
           context with

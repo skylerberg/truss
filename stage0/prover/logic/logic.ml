@@ -64,6 +64,18 @@ type declaration =
 
 type query = { declarations : declaration list; facts : term list; goal : term }
 
+module Sort_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = sort
+end))
+
+module Symbol_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = symbol
+end))
+
+module Term_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = term
+end))
+
 let bits_text width value =
   "#b" ^ String.init width (fun index -> if Z.testbit value (width - 1 - index) then '1' else '0')
 
@@ -391,19 +403,19 @@ let chosen_triggers ~triggering variables trigger body =
   match trigger with [] -> triggers ~triggering variables body | terms -> [ terms ]
 
 let triggering_in declarations =
-  let functions = Hashtbl.create 64 in
+  let functions = Symbol_table.create 64 in
   List.iter
     (function
-      | Function (name, _, _) -> Hashtbl.replace functions name ()
+      | Function (name, _, _) -> Symbol_table.replace functions name ()
       | Datatype (_, constructors) ->
           List.iter
             (fun (constructor, fields) ->
-              Hashtbl.replace functions constructor ();
-              List.iter (fun (selector, _) -> Hashtbl.replace functions selector ()) fields)
+              Symbol_table.replace functions constructor ();
+              List.iter (fun (selector, _) -> Symbol_table.replace functions selector ()) fields)
             constructors
       | Constant _ -> ())
     declarations;
-  Hashtbl.mem functions
+  Symbol_table.mem functions
 
 let has_untriggered_fact query =
   let triggering = triggering_in query.declarations in
@@ -418,10 +430,11 @@ let declared_symbols declared term =
   let symbols = ref [] in
   let rec walk bound = function
     | Symbol name ->
-        if (not (List.mem name bound)) && Hashtbl.mem declared name then symbols := name :: !symbols
+        if (not (List.mem name bound)) && Symbol_table.mem declared name then
+          symbols := name :: !symbols
     | Integer _ | Boolean _ | Bits _ -> ()
     | Apply (name, arguments) ->
-        if Hashtbl.mem declared name then symbols := name :: !symbols;
+        if Symbol_table.mem declared name then symbols := name :: !symbols;
         List.iter (walk bound) arguments
     | Operation (_, arguments) -> List.iter (walk bound) arguments
     | Is (_, argument) -> walk bound argument
@@ -432,14 +445,14 @@ let declared_symbols declared term =
   !symbols
 
 let prune query =
-  let declared = Hashtbl.create 64 in
+  let declared = Symbol_table.create 64 in
   List.iter
     (function
-      | Constant (name, _) | Function (name, _, _) -> Hashtbl.replace declared name ()
+      | Constant (name, _) | Function (name, _, _) -> Symbol_table.replace declared name ()
       | Datatype _ -> ())
     query.declarations;
-  let reached = Hashtbl.create 64 in
-  let reach symbols = List.iter (fun symbol -> Hashtbl.replace reached symbol ()) symbols in
+  let reached = Symbol_table.create 64 in
+  let reach symbols = List.iter (fun symbol -> Symbol_table.replace reached symbol ()) symbols in
   reach (declared_symbols declared query.goal);
   let triggering = triggering_in query.declarations in
   let rec needs fact symbols =
@@ -447,19 +460,19 @@ let prune query =
     | Operation ("=>", [ _; (Forall _ as inner) ]) -> needs inner symbols
     | Forall (variables, trigger, body) -> (
         match chosen_triggers ~triggering variables trigger body with
-        | [] -> fun () -> List.exists (Hashtbl.mem reached) symbols
+        | [] -> fun () -> List.exists (Symbol_table.mem reached) symbols
         | triggers ->
             let triggers = List.map (List.concat_map (declared_symbols declared)) triggers in
             fun () ->
-              List.exists (fun trigger -> List.for_all (Hashtbl.mem reached) trigger) triggers)
-    | _ -> fun () -> List.exists (Hashtbl.mem reached) symbols
+              List.exists (fun trigger -> List.for_all (Symbol_table.mem reached) trigger) triggers)
+    | _ -> fun () -> List.exists (Symbol_table.mem reached) symbols
   in
   let distinct =
-    let seen = Hashtbl.create 64 in
+    let seen = Term_table.create 64 in
     List.filter
       (fun fact ->
-        let is_new = not (Hashtbl.mem seen fact) in
-        Hashtbl.replace seen fact ();
+        let is_new = not (Term_table.mem seen fact) in
+        Term_table.replace seen fact ();
         is_new)
       query.facts
   in
@@ -488,13 +501,13 @@ let prune query =
   { query with facts = List.filteri (fun index _ -> is_needed.(index)) query.facts }
 
 type numbering = {
-  declared : (symbol, declaration) Hashtbl.t;
-  datatypes : (sort, (symbol * (symbol * sort) list) list) Hashtbl.t;
-  member_of : (symbol, sort * string) Hashtbl.t;
+  declared : declaration Symbol_table.t;
+  datatypes : (symbol * (symbol * sort) list) list Sort_table.t;
+  member_of : (sort * string) Symbol_table.t;
   triggering : symbol -> bool;
-  symbol_names : (symbol, string) Hashtbl.t;
+  symbol_names : string Symbol_table.t;
   symbol_order : symbol Dynarray.t;
-  sort_names : (sort, string) Hashtbl.t;
+  sort_names : string Sort_table.t;
   sort_order : sort Dynarray.t;
 }
 
@@ -503,13 +516,13 @@ let rec sort_name numbering = function
   | Bool -> "Bool"
   | Float (exponent, significand) -> Printf.sprintf "(_ FloatingPoint %d %d)" exponent significand
   | (Type_sort _ | Function_sort _) as sort -> (
-      match Hashtbl.find_opt numbering.sort_names sort with
+      match Sort_table.find_opt numbering.sort_names sort with
       | Some canonical -> canonical
       | None ->
-          let canonical = Printf.sprintf "S%d" (Hashtbl.length numbering.sort_names) in
-          Hashtbl.replace numbering.sort_names sort canonical;
+          let canonical = Printf.sprintf "S%d" (Sort_table.length numbering.sort_names) in
+          Sort_table.replace numbering.sort_names sort canonical;
           Dynarray.add_last numbering.sort_order sort;
-          (match Hashtbl.find_opt numbering.datatypes sort with
+          (match Sort_table.find_opt numbering.datatypes sort with
           | Some constructors ->
               List.iter
                 (fun (_, fields) ->
@@ -519,14 +532,14 @@ let rec sort_name numbering = function
           canonical)
 
 let symbol_name numbering name =
-  match Hashtbl.find_opt numbering.symbol_names name with
+  match Symbol_table.find_opt numbering.symbol_names name with
   | Some canonical -> Some canonical
   | None -> (
-      match Hashtbl.find_opt numbering.declared name with
+      match Symbol_table.find_opt numbering.declared name with
       | None -> None
       | Some declaration ->
-          let canonical = Printf.sprintf "x%d" (Hashtbl.length numbering.symbol_names) in
-          Hashtbl.replace numbering.symbol_names name canonical;
+          let canonical = Printf.sprintf "x%d" (Symbol_table.length numbering.symbol_names) in
+          Symbol_table.replace numbering.symbol_names name canonical;
           Dynarray.add_last numbering.symbol_order name;
           (match declaration with
           | Constant (_, sort) -> ignore (sort_name numbering sort)
@@ -539,7 +552,7 @@ let symbol_name numbering name =
 let member_name numbering name =
   Option.map
     (fun (datatype, suffix) -> sort_name numbering datatype ^ suffix)
-    (Hashtbl.find_opt numbering.member_of name)
+    (Symbol_table.find_opt numbering.member_of name)
 
 let function_name numbering name =
   match member_name numbering name with
@@ -620,23 +633,24 @@ and quantifier numbering bound buffer word variables trigger body =
       add "))"
 
 let numbering query =
-  let declared = Hashtbl.create 64 in
-  let datatypes = Hashtbl.create 8 in
-  let member_of = Hashtbl.create 32 in
+  let declared = Symbol_table.create 64 in
+  let datatypes = Sort_table.create 8 in
+  let member_of = Symbol_table.create 32 in
   List.iter
     (fun declaration ->
       match declaration with
-      | Constant (name, _) | Function (name, _, _) -> Hashtbl.replace declared name declaration
+      | Constant (name, _) | Function (name, _, _) -> Symbol_table.replace declared name declaration
       | Datatype (ty, constructors) ->
           let sort = Type_sort ty in
-          Hashtbl.replace datatypes sort constructors;
+          Sort_table.replace datatypes sort constructors;
           List.iteri
             (fun index (constructor, fields) ->
               let suffix = Printf.sprintf "_c%d" index in
-              Hashtbl.replace member_of constructor (sort, suffix);
+              Symbol_table.replace member_of constructor (sort, suffix);
               List.iteri
                 (fun field (selector, _) ->
-                  Hashtbl.replace member_of selector (sort, Printf.sprintf "%s_f%d" suffix field))
+                  Symbol_table.replace member_of selector
+                    (sort, Printf.sprintf "%s_f%d" suffix field))
                 fields)
             constructors)
     query.declarations;
@@ -645,9 +659,9 @@ let numbering query =
     datatypes;
     member_of;
     triggering = triggering_in query.declarations;
-    symbol_names = Hashtbl.create 64;
+    symbol_names = Symbol_table.create 64;
     symbol_order = Dynarray.create ();
-    sort_names = Hashtbl.create 8;
+    sort_names = Sort_table.create 8;
     sort_order = Dynarray.create ();
   }
 
@@ -667,8 +681,8 @@ let render query =
   let declarations =
     List.map
       (fun name ->
-        let canonical = Hashtbl.find numbering.symbol_names name in
-        match Hashtbl.find numbering.declared name with
+        let canonical = Symbol_table.find numbering.symbol_names name in
+        match Symbol_table.find numbering.declared name with
         | Constant (_, sort) ->
             Printf.sprintf "(declare-fun %s () %s)\n" canonical (sort_name numbering sort)
         | Function (_, inputs, output) ->
@@ -682,22 +696,23 @@ let render query =
   let sorts =
     List.filter_map
       (fun name ->
-        if Hashtbl.mem numbering.datatypes name then None
-        else Some (Printf.sprintf "(declare-sort %s 0)\n" (Hashtbl.find numbering.sort_names name)))
+        if Sort_table.mem numbering.datatypes name then None
+        else
+          Some (Printf.sprintf "(declare-sort %s 0)\n" (Sort_table.find numbering.sort_names name)))
       sort_order
   in
-  let datatypes = List.filter (Hashtbl.mem numbering.datatypes) sort_order in
+  let datatypes = List.filter (Sort_table.mem numbering.datatypes) sort_order in
   let datatype_block =
     match datatypes with
     | [] -> []
     | _ ->
         let heads =
           List.map
-            (fun name -> Printf.sprintf "(%s 0)" (Hashtbl.find numbering.sort_names name))
+            (fun name -> Printf.sprintf "(%s 0)" (Sort_table.find numbering.sort_names name))
             datatypes
         in
         let body name =
-          let sort = Hashtbl.find numbering.sort_names name in
+          let sort = Sort_table.find numbering.sort_names name in
           let constructors =
             List.mapi
               (fun index (_, fields) ->
@@ -710,7 +725,7 @@ let render query =
                     fields
                 in
                 "(" ^ constructor ^ String.concat "" fields ^ ")")
-              (Hashtbl.find numbering.datatypes name)
+              (Sort_table.find numbering.datatypes name)
           in
           "(" ^ String.concat " " constructors ^ ")"
         in
@@ -729,13 +744,14 @@ let text query = (render query).text
 
 let term_text { numbering; _ } term =
   let rec named = function
-    | Symbol name -> Hashtbl.mem numbering.symbol_names name
+    | Symbol name -> Symbol_table.mem numbering.symbol_names name
     | Integer _ | Boolean _ | Bits _ -> true
     | Apply (name, arguments) ->
-        (Hashtbl.mem numbering.member_of name || Hashtbl.mem numbering.symbol_names name)
+        (Symbol_table.mem numbering.member_of name || Symbol_table.mem numbering.symbol_names name)
         && List.for_all named arguments
     | Operation (_, arguments) -> List.for_all named arguments
-    | Is (constructor, argument) -> Hashtbl.mem numbering.member_of constructor && named argument
+    | Is (constructor, argument) ->
+        Symbol_table.mem numbering.member_of constructor && named argument
     | Forall _ | Exists _ -> false
   in
   if named term then begin
@@ -747,14 +763,14 @@ let term_text { numbering; _ } term =
 
 let symbols { numbering; _ } =
   List.map
-    (fun name -> (name, Hashtbl.find numbering.symbol_names name))
+    (fun name -> (name, Symbol_table.find numbering.symbol_names name))
     (Dynarray.to_list numbering.symbol_order)
 
 let members query =
   let { numbering; _ } = render query in
-  Hashtbl.fold
+  Sort_table.fold
     (fun datatype constructors entries ->
-      match Hashtbl.find_opt numbering.sort_names datatype with
+      match Sort_table.find_opt numbering.sort_names datatype with
       | Some sort ->
           List.mapi
             (fun index (constructor, fields) ->

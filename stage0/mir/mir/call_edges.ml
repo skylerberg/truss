@@ -1,3 +1,9 @@
+type entered = [ `Default of Path.t * string option * string | `Invariant of Path.t * Z.t ]
+
+module Entered_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = entered
+end))
+
 module Names = Resolve.Names
 
 type lookups = { interface : Interface.Lookups.t; mir : Parts.lookups }
@@ -139,11 +145,11 @@ let edges (lookups : lookups) ~package (code : Tree.t) =
         add [ Path.Method { owner = trait.trait; name; receiver } ]
     | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _ -> ()
   in
-  let entered = Hashtbl.create 4 in
+  let entered = Entered_table.create 4 in
   let enters code =
-    if Hashtbl.mem entered code then false
+    if Entered_table.mem entered code then false
     else (
-      Hashtbl.replace entered code ();
+      Entered_table.replace entered code ();
       true)
   in
   let rec statement (locals : Tree.local_info array) (statement : Tree.statement) =

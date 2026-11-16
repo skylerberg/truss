@@ -17,8 +17,8 @@ let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_fr
       context.declarations
   in
   let captures_fresh = function
-    | Symbol.Lambda _ as name when not (Hashtbl.mem context.fresh_order name) -> (
-        match Hashtbl.find_opt context.lambda_definitions name with
+    | Symbol.Lambda _ as name when not (Tables.Symbol_table.mem context.fresh_order name) -> (
+        match Tables.Symbol_table.find_opt context.lambda_definitions name with
         | Some defined -> Facts.mentions_fresh_after context start_fresh defined
         | None -> false)
     | _ -> false
@@ -31,46 +31,49 @@ let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_fr
         function_type.inputs
     in
     let variables = List.map (fun (name, _) -> Logic.Symbol name) parameters in
-    let renamed = Hashtbl.create 16 in
+    let renamed = Tables.Symbol_table.create 16 in
     (match called with
-    | Logic.Symbol name -> Hashtbl.replace renamed name (Logic.Boolean true)
+    | Logic.Symbol name -> Tables.Symbol_table.replace renamed name (Logic.Boolean true)
     | _ -> ());
     List.iter2
       (fun argument variable ->
-        match argument with Logic.Symbol name -> Hashtbl.replace renamed name variable | _ -> ())
+        match argument with
+        | Logic.Symbol name -> Tables.Symbol_table.replace renamed name variable
+        | _ -> ())
       arguments variables;
-    let functions = Hashtbl.create 8 in
+    let functions = Tables.Symbol_table.create 8 in
     List.iter
       (function
-        | Logic.Constant (name, sort) when not (Hashtbl.mem renamed name) ->
+        | Logic.Constant (name, sort) when not (Tables.Symbol_table.mem renamed name) ->
             let is_fresh_in_body =
-              match Hashtbl.find_opt context.fresh_order name with
+              match Tables.Symbol_table.find_opt context.fresh_order name with
               | Some order -> order > start_fresh && order <= end_fresh
               | None -> captures_fresh name
             in
             if is_fresh_in_body then begin
               let lifted = Symbol.Lifted name in
               Facts.declare context (Logic.Function (lifted, List.map snd parameters, sort));
-              Hashtbl.replace renamed name (Logic.Apply (lifted, variables))
+              Tables.Symbol_table.replace renamed name (Logic.Apply (lifted, variables))
             end
         | Logic.Function (name, inputs, sort) when frame.binders <> [] -> (
-            match Hashtbl.find_opt context.fresh_order name with
+            match Tables.Symbol_table.find_opt context.fresh_order name with
             | Some order when order > start_fresh && order <= end_fresh ->
                 let lifted = Symbol.Lifted name in
                 Facts.declare context
                   (Logic.Function (lifted, inputs @ List.map snd parameters, sort));
-                Hashtbl.replace functions name lifted
+                Tables.Symbol_table.replace functions name lifted
             | _ -> ())
         | _ -> ())
       declared_here;
     let rec lift = function
-      | Logic.Symbol name as symbol -> Option.value (Hashtbl.find_opt renamed name) ~default:symbol
+      | Logic.Symbol name as symbol ->
+          Option.value (Tables.Symbol_table.find_opt renamed name) ~default:symbol
       | (Logic.Integer _ | Logic.Boolean _ | Logic.Bits _) as term -> term
       | Logic.Apply (name, _)
         when match called with Logic.Apply (called_name, _) -> called_name = name | _ -> false ->
           Logic.Boolean true
-      | Logic.Apply (name, arguments) when Hashtbl.mem functions name ->
-          Logic.Apply (Hashtbl.find functions name, List.map lift arguments @ variables)
+      | Logic.Apply (name, arguments) when Tables.Symbol_table.mem functions name ->
+          Logic.Apply (Tables.Symbol_table.find functions name, List.map lift arguments @ variables)
       | (Logic.Apply _ | Logic.Operation _ | Logic.Is _) as term -> Logic.map_arguments lift term
       | Logic.Forall (bound, trigger, body) -> Logic.Forall (bound, List.map lift trigger, lift body)
       | Logic.Exists (bound, body) -> Logic.Exists (bound, lift body)
@@ -247,7 +250,7 @@ let lambda_definition context frame (function_type : Types.function_type)
           let application =
             applied context function_type term (List.map (fun (name, _) -> Logic.Symbol name) bound)
           in
-          Hashtbl.replace context.lambda_definitions symbol defined;
+          Tables.Symbol_table.replace context.lambda_definitions symbol defined;
           Facts.fact context frame (Logic.forall (bound, Logic.equal application defined));
           (match written.code.value_type with
           | Some value_type -> (

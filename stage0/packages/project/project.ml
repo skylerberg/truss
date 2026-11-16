@@ -1,5 +1,13 @@
 type root = Project | Registry of string
 
+module Root_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = root
+end))
+
+module Package_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Path.package
+end))
+
 type files = {
   tree : root -> string list option;
   text : root -> string -> string option;
@@ -114,7 +122,7 @@ let layout (files_in : files) root =
         | None -> limit)
       Manifest.default_time_limit_seconds parsed
   in
-  let seen = Hashtbl.create 8 in
+  let seen = Package_table.create 8 in
   let packages =
     List.filter_map
       (fun (directory, (manifest : Manifest.t)) ->
@@ -124,13 +132,13 @@ let layout (files_in : files) root =
             problem directory "The package name `standard` is the standard library's.";
             None
         | Some package -> (
-            match Hashtbl.find_opt seen package.name with
+            match Package_table.find_opt seen package.name with
             | Some other ->
                 problem directory "The package name `%s` is already used by %s."
                   (Path.show_package package.name) (manifest_file other);
                 None
             | None ->
-                Hashtbl.replace seen package.name directory;
+                Package_table.replace seen package.name directory;
                 Some (directory, package)))
       parsed
   in
@@ -252,12 +260,12 @@ let selection (files : files) (own : layout) =
 type place = { root : root; directory : string; manifest : Manifest.package }
 
 let places ~layout ~(selection : selection) =
-  let by_name = Hashtbl.create 16 in
+  let by_name = Package_table.create 16 in
   let add root =
     List.iter
       (fun (directory, (manifest : Manifest.package)) ->
-        if not (Hashtbl.mem by_name manifest.name) then
-          Hashtbl.replace by_name manifest.name { root; directory; manifest })
+        if not (Package_table.mem by_name manifest.name) then
+          Package_table.replace by_name manifest.name { root; directory; manifest })
       (layout root).packages
   in
   add Project;
@@ -266,7 +274,7 @@ let places ~layout ~(selection : selection) =
     selection.selected;
   List.sort
     (fun (left, _) (right, _) -> Path.compare_package left right)
-    (Hashtbl.fold (fun name place packages -> (name, place) :: packages) by_name [])
+    (Package_table.fold (fun name place packages -> (name, place) :: packages) by_name [])
 
 let package (files : files) ~(layout : root -> layout) { root; directory; manifest } =
   {
@@ -290,11 +298,11 @@ let dependency_cycle (places : (Path.package * place) list) =
           place.manifest.dependencies
     | None -> []
   in
-  let visited = Hashtbl.create 8 in
+  let visited = Package_table.create 8 in
   let rec reaches target name =
-    if Hashtbl.mem visited name then None
+    if Package_table.mem visited name then None
     else begin
-      Hashtbl.replace visited name ();
+      Package_table.replace visited name ();
       List.find_map
         (fun next ->
           if next = target then Some [ name; target ]
@@ -305,7 +313,7 @@ let dependency_cycle (places : (Path.package * place) list) =
   let own, registry = List.partition (fun (_, place) -> place.root = Project) places in
   List.find_map
     (fun (name, place) ->
-      Hashtbl.reset visited;
+      Package_table.reset visited;
       Option.map (fun cycle -> (place, cycle)) (reaches name name))
     (own @ registry)
 
@@ -377,13 +385,13 @@ type t = {
 }
 
 let of_files files =
-  let layouts = Hashtbl.create 4 in
+  let layouts = Root_table.create 4 in
   let layout root =
-    match Hashtbl.find_opt layouts root with
+    match Root_table.find_opt layouts root with
     | Some layout -> layout
     | None ->
         let computed = layout files root in
-        Hashtbl.replace layouts root computed;
+        Root_table.replace layouts root computed;
         computed
   in
   let own = layout Project in
