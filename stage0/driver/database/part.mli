@@ -48,7 +48,6 @@ type t =
   | Callees of Path.t * Path.package
   | Recursion_group of Path.t
   | Proof of Resolve.Names.key
-  | Folded_constants of Path.t
   | Lowered of Instance.key
   | Test_key of Instance.key
 

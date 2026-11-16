@@ -22,7 +22,6 @@ type t =
   | Callees
   | Recursion_groups
   | Proofs
-  | Folded_constants
   | Lowered_code
   | Test_keys
 
@@ -51,7 +50,6 @@ let all =
     Callees;
     Recursion_groups;
     Proofs;
-    Folded_constants;
     Lowered_code;
     Test_keys;
   ]
@@ -64,7 +62,7 @@ let position stage =
 let precedes earlier later = position earlier <= position later
 
 let is_lowering = function
-  | Folded_constants | Lowered_code | Test_keys -> true
+  | Lowered_code | Test_keys -> true
   | Input | Parse | Namespaces | Resolution | Import_checks | Trait_headers | Constant_values
   | Headers | Interfaces | Derived_interfaces | Type_facts | Grants | Signature_checks | Contracts
   | Checked_bodies | Derived_forms | Mir | Call_edges | Body_checks | Package_checks | Callees
@@ -104,6 +102,5 @@ let of_part : Part.t -> t = function
   | Callees _ -> Callees
   | Recursion_group _ -> Recursion_groups
   | Proof _ -> Proofs
-  | Folded_constants _ -> Folded_constants
   | Lowered _ -> Lowered_code
   | Test_key _ -> Test_keys

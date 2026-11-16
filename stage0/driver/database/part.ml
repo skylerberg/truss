@@ -48,7 +48,6 @@ type t =
   | Callees of Path.t * Path.package
   | Recursion_group of Path.t
   | Proof of Resolve.Names.key
-  | Folded_constants of Path.t
   | Lowered of Instance.key
   | Test_key of Instance.key
 
@@ -100,7 +99,7 @@ let package_of_definition = function
   | Call_edges path
   | Recursion_group path ->
       Path.package path
-  | Folded_constants _ | Lowered _ | Test_key _ ->
+  | Lowered _ | Test_key _ ->
       Compiler_bug.bug ~stage:"Database" "a part of lowering belongs to the package of its instance"
 
 let type_package : Ground.ty -> Path.package = function
@@ -123,7 +122,6 @@ let instance_package : Instance.key -> Path.package = function
       Path.package (Instance.make_method_path impl_method)
 
 let package = function
-  | Folded_constants path -> Path.package path
   | Lowered key | Test_key key -> instance_package key
   | part -> package_of_definition part
 
@@ -196,6 +194,7 @@ let show part =
         | Sealed declared -> "sealed " ^ key declared
         | Impl declared -> "impl " ^ key declared
         | Type declared -> "type " ^ key declared
+        | Constant declared -> "constant " ^ key declared
         | Instantiations -> "instantiations"
         | Tests -> "tests"
         | Dependencies -> "dependencies")
@@ -203,7 +202,6 @@ let show part =
       Printf.sprintf "callees %s %s" (Path.show_package package) (Path.show path)
   | Recursion_group path -> "recursion group " ^ Path.show path
   | Proof declared -> "proof " ^ key declared
-  | Folded_constants path -> "folded constants " ^ Path.show path
   | Lowered instance -> "lowered " ^ Instance.to_string instance
   | Test_key instance -> "test key " ^ Instance.to_string instance
 
@@ -254,7 +252,7 @@ let definition = function
   | Ownership key
   | Used_packages key
   | Proof key
-  | Package_check (_, (Sealed key | Impl key | Type key)) ->
+  | Package_check (_, (Sealed key | Impl key | Type key | Constant key)) ->
       Some key.path
   | Members (path, _)
   | Impls_of_type (_, path)
@@ -269,7 +267,6 @@ let definition = function
   | Callees (path, _)
   | Recursion_group path ->
       Some path
-  | Folded_constants path -> Some path
   | Lowered key | Test_key key -> instance_definition key
 
 let kind_name = function
@@ -322,6 +319,5 @@ let kind_name = function
   | Callees _ -> "callees"
   | Recursion_group _ -> "recursion group"
   | Proof _ -> "proof"
-  | Folded_constants _ -> "folded constants"
   | Lowered _ -> "lowered code"
   | Test_key _ -> "test key"

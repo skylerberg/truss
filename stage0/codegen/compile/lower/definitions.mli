@@ -4,7 +4,6 @@ val bug : ('a, unit, string, 'b) format4 -> 'a
 
 type context = {
   lookups : Lookups.t;
-  constant : Path.t -> Lowered.static_value option;
   env : Memory_layout.env;
   drop_and_copy : Drop_and_copy.t;
   monomorphic : Monomorphic.context;
@@ -14,14 +13,7 @@ type context = {
 }
 
 val monomorphic : Interface.Lookups.t -> Monomorphic.context
-
-val context :
-  Lookups.settings ->
-  constant:(Path.t -> Lowered.static_value option) ->
-  env:Memory_layout.env ->
-  Lookups.t ->
-  context
-
+val context : Lookups.settings -> env:Memory_layout.env -> Lookups.t -> context
 val test_key : Path.t -> Instance.key
 
 type code = {

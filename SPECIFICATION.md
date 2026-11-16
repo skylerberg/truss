@@ -640,6 +640,8 @@ public let seconds_per_day: Int64 = 24 * 60 * 60
   strings built from those. It calls no function. The compiler evaluates it,
   building a `Map` or `Set` with the standard library's compiled code and no
   random hash key.
+- A constant's value does not depend on itself, through another constant or
+  through the default of a field that a record or variant in it leaves out.
 - A constant lives in static memory. Reading it or taking a view of it costs
   nothing, an owned value from it is made with `copy()`, and it is never
   passed `own` or `mut`.
