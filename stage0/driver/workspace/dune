@@ -1,5 +1,28 @@
+(executable
+ (name digest_compiler)
+ (modules digest_compiler))
+
+(rule
+ (target compiler_version.ml)
+ (deps
+  (sandbox always)
+  (source_tree %{workspace_root}/stage0))
+ (action
+  (with-stdout-to
+   %{target}
+   (run
+    ./digest_compiler.exe
+    %{workspace_root}/stage0
+    %{ocaml_version}
+    %{profile}
+    %{system}
+    %{architecture}
+    %{version:zarith}
+    %{version:cmdliner}))))
+
 (library
  (name workspace)
+ (modules :standard \ digest_compiler)
  (libraries
   unix
   compiler_bug
@@ -14,7 +37,6 @@
   file_system
   process
   standard_library
-  compiler_version
   database
   registry
   watcher))
