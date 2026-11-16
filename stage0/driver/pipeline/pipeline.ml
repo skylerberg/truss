@@ -2435,31 +2435,15 @@ let template_checks (proofs : proofs) =
           | Some (Value _ | Failed _) | None -> true)
         checks
 
-let run_template_checks compiler checks =
-  List.map
-    (fun ({ from_template; literals; clauses } as check : Prover.State.template_check) ->
-      (check, Compile.run_template_check compiler ~from_template ~literals ~clauses))
-    checks
+let list_proofs (proofs : proofs) =
+  List.filter_map
+    (fun key ->
+      match proof proofs key with
+      | Some (Value proof) -> Some (key, proof)
+      | Some (Failed _ | Blocked) | None -> None)
+    proofs.keys
 
-type verdicts = { lookups : Prover.Lookups.t; verdicts : (Names.key, Prover.verdict) Hashtbl.t }
-
-let decide ~runs solver (proofs : proofs) =
-  let lookups = proof_lookups proofs.pipeline ignore in
-  let verdicts = Hashtbl.create (List.length proofs.keys) in
-  List.iter
-    (fun (key, verdict) -> Hashtbl.replace verdicts key verdict)
-    (Prover.verdicts ~runs lookups solver
-       (List.filter_map
-          (fun key ->
-            match proof proofs key with
-            | Some (Value proof) -> Some (key, proof)
-            | Some (Failed _ | Blocked) | None -> None)
-          proofs.keys));
-  { lookups; verdicts }
-
-let verdict verdicts key = Option.value (Hashtbl.find_opt verdicts.verdicts key) ~default:[]
-let states verdicts file = Prover.states verdicts.lookups ~verdict:(verdict verdicts) file
-let diagnostics verdicts file = Prover.diagnostics verdicts.lookups ~verdict:(verdict verdicts) file
+let make_proof_lookups pipeline = proof_lookups pipeline ignore
 
 let parsed pipeline (file : Path.file) =
   drain pipeline ~through:Parse [ file.module_.package ];
@@ -2653,8 +2637,6 @@ module For_testing = struct
           | Infer.Written key | Inherited key ->
               Option.map (fun (checked : Infer.checked) -> checked.form) (checked_body pipeline key)
           | Generated -> derived pipeline path))
-
-  let proof_lookups pipeline = proof_lookups pipeline ignore
 
   let mir pipeline package =
     drain pipeline ~through:Mir [ package ];

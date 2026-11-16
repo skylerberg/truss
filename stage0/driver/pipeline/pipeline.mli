@@ -38,22 +38,8 @@ val prove : t -> Path.file list -> proofs
 val proof : proofs -> Resolve.Names.key -> Prover.proof part option
 val holes : proofs -> Path.t -> (Path.file * int) list
 val template_checks : proofs -> Prover.State.template_check list
-
-val run_template_checks :
-  Compile.t ->
-  Prover.State.template_check list ->
-  (Prover.State.template_check * (bool list, string) result) list
-
-type verdicts
-
-val decide :
-  runs:(Prover.State.template_check * (bool list, string) result) list ->
-  Solver.t ->
-  proofs ->
-  verdicts
-
-val states : verdicts -> Path.file -> Source.span Prover.state list
-val diagnostics : verdicts -> Path.file -> Diagnostic.t list
+val list_proofs : proofs -> (Resolve.Names.key * Prover.proof) list
+val make_proof_lookups : t -> Prover.Lookups.t
 
 module For_testing : sig
   type stage = Resolve | Interface | Infer | Patterns | Usage | Ownership | Package_checks
@@ -62,7 +48,6 @@ module For_testing : sig
   val checked_body : t -> Resolve.Names.key -> Infer.checked option
   val derived : t -> Path.t -> Core.t option
   val core_of_path : t -> Path.t -> (Core.t * Types.substitution) option
-  val proof_lookups : t -> Prover.Lookups.t
   val mir : t -> Path.package -> Mir.lookups
   val ownership : t -> Resolve.Names.key -> (Core.origin * Core.origin) list part
   val reads : t -> string -> string list

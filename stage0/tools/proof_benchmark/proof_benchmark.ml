@@ -21,8 +21,11 @@ let () =
             let start = Unix.gettimeofday () in
             let failed =
               List.length
-                (Pipeline.diagnostics
-                   (Pipeline.decide ~runs:[] solver (Pipeline.prove pipeline [ file ]))
+                (Prover.list_diagnostics
+                   (Prover.decide ~runs:[]
+                      (Pipeline.make_proof_lookups pipeline)
+                      solver
+                      (Pipeline.list_proofs (Pipeline.prove pipeline [ file ])))
                    file)
             in
             Some

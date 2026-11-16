@@ -3,13 +3,20 @@ open Codegen_support
 let solver =
   lazy (match Solver.find () with Ok solver -> solver | Error message -> failwith message)
 
+let run_template_checks compile checks =
+  List.map
+    (fun ({ from_template; literals; clauses } as check : Prover.State.template_check) ->
+      (check, Compile.run_template_check compile ~from_template ~literals ~clauses))
+    checks
+
 let verdicts compile pipeline =
   let proofs = Pipeline.prove pipeline [ example_file ] in
-  Pipeline.decide
-    ~runs:(Pipeline.run_template_checks compile (Pipeline.template_checks proofs))
-    (Lazy.force solver) proofs
+  Prover.decide
+    ~runs:(run_template_checks compile (Pipeline.template_checks proofs))
+    (Pipeline.make_proof_lookups pipeline)
+    (Lazy.force solver) (Pipeline.list_proofs proofs)
 
-let diagnostics compile pipeline = Pipeline.diagnostics (verdicts compile pipeline) example_file
+let diagnostics compile pipeline = Prover.list_diagnostics (verdicts compile pipeline) example_file
 
 let proven_with_running ?results text =
   let pipeline, compile = load ?results text in
@@ -96,7 +103,7 @@ let () =
       let pipeline, compile =
         load (shout ^ Fixtures.Evaluate.state_says_whether_its_proof_trusts_compiled_code)
       in
-      let states = Pipeline.states (verdicts compile pipeline) example_file in
+      let states = Prover.list_states (verdicts compile pipeline) example_file in
       let with_code code =
         List.filter
           (fun (state : Source.span Prover.state) ->

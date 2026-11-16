@@ -545,7 +545,9 @@ let run_answer runs ({ check; clause } : State.template_clause) =
       | Error report -> Run_failed report)
     (Hashtbl.find_opt runs check)
 
-let verdicts ~runs lookups solver proofs =
+type verdicts = { lookups : Lookups.t; verdicts : (Names.key, verdict) Hashtbl.t }
+
+let decide ~runs lookups solver proofs =
   let runs = Hashtbl.of_seq (List.to_seq runs) in
   let question (obligation : State.obligation) =
     match Option.bind obligation.template_clause (run_answer runs) with
@@ -598,7 +600,8 @@ let verdicts ~runs lookups solver proofs =
     solve solver
       (List.concat_map (fun (_, _, questions) -> List.filter_map snd questions) local_questions)
   in
-  List.map
+  let verdicts = Hashtbl.create (List.length proofs) in
+  List.iter
     (fun (key, proof, questions) ->
       let answers =
         List.map
@@ -612,10 +615,12 @@ let verdicts ~runs lookups solver proofs =
                 | Proven | Out_of_steps -> Solved (plain_answer plain_request)))
           questions
       in
-      (key, definition_states lookups key proof answers))
-    local_questions
+      Hashtbl.replace verdicts key (definition_states lookups key proof answers))
+    local_questions;
+  { lookups; verdicts }
 
-let file_states (lookups : Lookups.t) ~verdict file =
+let file_states { lookups; verdicts } file =
+  let verdict key = Option.value (Hashtbl.find_opt verdicts key) ~default:[] in
   List.filter_map
     (fun declaration ->
       let key = Names.key_of declaration in
@@ -667,11 +672,11 @@ let sorted_diagnostics list =
       compare (left.span, left.code) (right.span, right.code))
     list
 
-let states lookups ~verdict file =
-  List.concat (file_states lookups ~verdict file)
+let list_states verdicts file =
+  List.concat (file_states verdicts file)
   |> List.sort (fun left right -> compare (left.span, left.code) (right.span, right.code))
 
-let diagnostics lookups ~verdict file =
+let list_diagnostics verdicts file =
   List.concat_map
     (fun states ->
       List.fold_left
@@ -682,5 +687,5 @@ let diagnostics lookups ~verdict file =
           | _ -> (reported, diagnostics))
         ([], []) states
       |> snd)
-    (file_states lookups ~verdict file)
+    (file_states verdicts file)
   |> sorted_diagnostics

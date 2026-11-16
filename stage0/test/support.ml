@@ -170,9 +170,15 @@ let solver =
         exit 1)
 
 let proven pipeline file = Pipeline.prove pipeline [ file ]
-let verdicts pipeline file = Pipeline.decide ~runs:[] (Lazy.force solver) (proven pipeline file)
-let proof_diagnostics pipeline file = Pipeline.diagnostics (verdicts pipeline file) file
-let proof_states pipeline file = Pipeline.states (verdicts pipeline file) file
+
+let verdicts pipeline file =
+  Prover.decide ~runs:[]
+    (Pipeline.make_proof_lookups pipeline)
+    (Lazy.force solver)
+    (Pipeline.list_proofs (proven pipeline file))
+
+let proof_diagnostics pipeline file = Prover.list_diagnostics (verdicts pipeline file) file
+let proof_states pipeline file = Prover.list_states (verdicts pipeline file) file
 
 let proofs pipeline file =
   let proofs = proven pipeline file in

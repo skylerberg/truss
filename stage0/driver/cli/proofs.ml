@@ -4,13 +4,18 @@ let solver () =
   | Ok solver -> solver
   | Error message -> Outcome.cannot_run "%s" message
 
-type t = { proofs : Pipeline.proofs; verdicts : Pipeline.verdicts Lazy.t }
+type t = { proofs : Pipeline.proofs; verdicts : Prover.verdicts Lazy.t }
+
+let run_template_checks compiler checks =
+  List.map
+    (fun ({ from_template; literals; clauses } as check : Prover.State.template_check) ->
+      (check, Compile.run_template_check compiler ~from_template ~literals ~clauses))
+    checks
 
 let runs pipeline snapshot packages proofs =
   match Pipeline.template_checks proofs with
   | [] -> []
-  | checks ->
-      Pipeline.run_template_checks (Compiler.create pipeline snapshot packages Development) checks
+  | checks -> run_template_checks (Compiler.create pipeline snapshot packages Development) checks
 
 let check pipeline snapshot packages files =
   let proofs = Pipeline.prove pipeline files in
@@ -19,11 +24,14 @@ let check pipeline snapshot packages files =
     verdicts =
       lazy
         (let solver = solver () in
-         Pipeline.decide ~runs:(runs pipeline snapshot packages proofs) solver proofs);
+         Prover.decide
+           ~runs:(runs pipeline snapshot packages proofs)
+           (Pipeline.make_proof_lookups pipeline)
+           solver (Pipeline.list_proofs proofs));
   }
 
-let diagnostics checked file = Pipeline.diagnostics (Lazy.force checked.verdicts) file
-let states checked file = Pipeline.states (Lazy.force checked.verdicts) file
+let diagnostics checked file = Prover.list_diagnostics (Lazy.force checked.verdicts) file
+let states checked file = Prover.list_states (Lazy.force checked.verdicts) file
 
 let holes snapshot packages checked definition =
   List.map

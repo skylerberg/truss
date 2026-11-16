@@ -53,7 +53,7 @@ type candidate = {
 let runnable pipeline =
   let mir = Pipeline.For_testing.mir pipeline example.package in
   let interface = Pipeline.interface_lookups pipeline [ example.package ] in
-  let lookups = Pipeline.For_testing.proof_lookups pipeline in
+  let lookups = Pipeline.make_proof_lookups pipeline in
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
       let key = Resolve.Names.key_of declaration in
@@ -121,8 +121,11 @@ let run_mutant ~samples text =
   | Some (pipeline, _) -> (
       incr checked;
       let states =
-        Pipeline.states
-          (Pipeline.decide ~runs:[] (Lazy.force solver) (Pipeline.prove pipeline [ example_file ]))
+        Prover.list_states
+          (Prover.decide ~runs:[]
+             (Pipeline.make_proof_lookups pipeline)
+             (Lazy.force solver)
+             (Pipeline.list_proofs (Pipeline.prove pipeline [ example_file ])))
           example_file
       in
       let candidates =
@@ -240,9 +243,11 @@ let () =
             match load text with
             | Some (pipeline, _) ->
                 let unproven =
-                  Pipeline.diagnostics
-                    (Pipeline.decide ~runs:[] (Lazy.force solver)
-                       (Pipeline.prove pipeline [ example_file ]))
+                  Prover.list_diagnostics
+                    (Prover.decide ~runs:[]
+                       (Pipeline.make_proof_lookups pipeline)
+                       (Lazy.force solver)
+                       (Pipeline.list_proofs (Pipeline.prove pipeline [ example_file ])))
                     example_file
                 in
                 shown unproven;

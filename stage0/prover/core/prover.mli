@@ -18,17 +18,14 @@ type 'span state = {
   trusts_compiled_code : bool;
 }
 
-type verdict = (Source.Definition_span.t state * (Resolve.Names.key * Core.origin) option) list
+type verdicts
 
-val verdicts :
+val decide :
   runs:(State.template_check * (bool list, string) result) list ->
   Lookups.t ->
   Solver.t ->
   (Resolve.Names.key * proof) list ->
-  (Resolve.Names.key * verdict) list
+  verdicts
 
-val states :
-  Lookups.t -> verdict:(Resolve.Names.key -> verdict) -> Path.file -> Source.span state list
-
-val diagnostics :
-  Lookups.t -> verdict:(Resolve.Names.key -> verdict) -> Path.file -> Diagnostic.t list
+val list_states : verdicts -> Path.file -> Source.span state list
+val list_diagnostics : verdicts -> Path.file -> Diagnostic.t list

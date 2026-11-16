@@ -26,6 +26,5 @@
   ground
   memory_layout
   libc
-  solver
   prover
   zarith))
