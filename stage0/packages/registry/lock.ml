@@ -7,10 +7,13 @@ let malformed line format =
   Printf.ksprintf (fun message -> raise (Malformed { line; message })) format
 
 let header = "format 1"
-let sorted entries = List.sort (fun left right -> Path.compare_package left.name right.name) entries
+
+let sort_entries entries =
+  List.sort (fun left right -> Path.compare_package left.name right.name) entries
+
 let find entries name = List.find_opt (fun entry -> entry.name = name) entries
 
-let entry_of_line line text =
+let parse_entry line text =
   let words = List.filter (( <> ) "") (String.split_on_char ' ' text) in
   match words with
   | written :: version :: hash :: rest ->
@@ -24,12 +27,12 @@ let entry_of_line line text =
       in
       let version =
         match Version.parse version with
-        | Some ((major, _, _) as version) when major = Version.major_of_name name -> version
+        | Some ((major, _, _) as version) when major = Version.parse_major name -> version
         | Some _ ->
             malformed line
               "A version of `%s` starts with %d, the number at the end of its name, or 1 for a \
                name without one."
-              written (Version.major_of_name name)
+              written (Version.parse_major name)
         | None ->
             malformed line "`%s` is not a version, which is three numbers, such as 1.4.2." version
       in
@@ -63,7 +66,7 @@ let parse text =
   | [] -> []
   | (_, first) :: rest when String.trim first = header ->
       let entries =
-        List.map (fun (line, text) -> (line, entry_of_line line (String.trim text))) rest
+        List.map (fun (line, text) -> (line, parse_entry line (String.trim text))) rest
       in
       ignore
         (List.fold_left
@@ -72,7 +75,7 @@ let parse text =
                malformed line "`%s` already has a line above." (Path.show_package entry.name);
              entry.name :: seen)
            [] entries);
-      sorted (List.map snd entries)
+      sort_entries (List.map snd entries)
   | (line, _) :: _ -> malformed line "A lock file starts with the line `%s`." header
 
 let print entries =
@@ -85,4 +88,4 @@ let print entries =
              (match entry.holds with
              | [] -> ""
              | holds -> " holds " ^ String.concat ", " (List.sort String.compare holds)))
-         (sorted entries))
+         (sort_entries entries))

@@ -159,9 +159,10 @@ let rec compute_conditions lookups ~facts_of ~resolve ~leaf ?(in_progress = []) 
       in
       match property with
       | Copyable ->
-          if requires [ Well_known.path Copyable; Well_known.path Plain ] then Some [] else None
+          if requires [ Well_known.make_path Copyable; Well_known.make_path Plain ] then Some []
+          else None
       | Plain -> None
-      | View -> if requires [ Well_known.path Storable ] then Some [] else None
+      | View -> if requires [ Well_known.make_path Storable ] then Some [] else None
       | Holds_function -> None)
   | Types.Named { path; arguments } -> (
       match (Intrinsic.builtin_of_path path, property) with
@@ -290,8 +291,8 @@ let compute_facts lookups ~facts_of (interface : Types.type_interface) : Environ
   let is_undeclared property =
     interface.opaque
     && not
-         (is_declared (Well_known.path Plain)
-         || (property = Copyable && is_declared (Well_known.path Copyable)))
+         (is_declared (Well_known.make_path Plain)
+         || (property = Copyable && is_declared (Well_known.make_path Copyable)))
   in
   let find_owned_conditions property =
     if is_undeclared property || (property = Plain && allocates) then None
@@ -331,7 +332,7 @@ let list_field_type_paths ~package (interface : Types.type_interface) =
     ignore
       (Types.map
          (function
-           | Types.Named { path = named; _ } when Path.package named = package ->
+           | Types.Named { path = named; _ } when Path.locate_package named = package ->
                named_types := named :: !named_types;
                None
            | _ -> None)
@@ -368,8 +369,8 @@ let has_property (lookups : Lookups.t) ~bounds ~normalize property type_ =
     let bounded trait = has_bound lookups ~bounds type_ trait in
     let adds_nothing =
       match property with
-      | Copyable -> bounded (Well_known.path Copyable) || bounded (Well_known.path Plain)
-      | Plain -> bounded (Well_known.path Plain)
+      | Copyable -> bounded (Well_known.make_path Copyable) || bounded (Well_known.make_path Plain)
+      | Plain -> bounded (Well_known.make_path Plain)
       | View -> is_open type_
       | Holds_function -> true
     in
@@ -385,7 +386,7 @@ let has_property (lookups : Lookups.t) ~bounds ~normalize property type_ =
 
 let is_storable (lookups : Lookups.t) ~bounds ~normalize type_ =
   let leaf type_ =
-    if has_bound lookups ~bounds type_ (Well_known.path Storable) then Some [] else None
+    if has_bound lookups ~bounds type_ (Well_known.make_path Storable) then Some [] else None
   in
   Option.is_some
     (compute_conditions lookups ~facts_of:(read_facts lookups) ~resolve:normalize ~leaf View

@@ -1,3 +1,5 @@
+let bug format = Compiler_bug.bug ~stage:"MIR" format
+
 type entered =
   [ `Default of Path.t * string option * string | `Invariant of Path.t * Z.t | `Requires of Path.t ]
 
@@ -182,7 +184,29 @@ let list_edges (lookups : lookups) ~package ~may_panic (code : Tree.t) =
             in
             if omitted <> [] then field_defaults type_ variant omitted
         | None -> ())
-    | _ -> ()
+    | Basic (Assign { value = Construct _; _ }) -> bug "a construction outside a temporary"
+    | Basic (Provide { provided; _ }) ->
+        List.iter
+          (fun (implementation : Tree.provided) ->
+            List.iter
+              (fun (provided : Core.provided) ->
+                add (list_written_methods lookups.interface.names provided.impl))
+              implementation.provides)
+          provided
+    | Basic
+        ( Assign
+            {
+              value =
+                ( Operand _ | Operation _ | Compare _ | Not _ | Array _ | Is_variant _ | Convert _
+                | Copy _ | Lambda _ | Value_parameter _ | Specification _ );
+              _;
+            }
+        | Live _ | Dead _ | Assert _ | Echo _ | Provide_end | Loan_start _ | Loan_end _
+        | Ghost_assert _ | Matched _ | Proof _ )
+    | For { iteration = Range _; _ }
+    | Jump (Return _ | Break | Continue | Cancel _ | Unreachable | Written_unreachable | Todo)
+    | Choose _ | Assert_by_bit_vector _ | While _ | Fork _ | Resume _ | Yield _ ->
+        ()
   and field_defaults type_ variant omitted =
     match Parts.read_defaults lookups.mir type_ with
     | Some { form = Field_defaults defaults; _ } ->
@@ -235,7 +259,9 @@ let list_path_edges (lookups : lookups) path =
     | None -> false
   in
   List.sort_uniq Path.compare
-    (List.concat_map (list_edges lookups ~package:(Path.package path) ~may_panic) (code @ defaults))
+    (List.concat_map
+       (list_edges lookups ~package:(Path.locate_package path) ~may_panic)
+       (code @ defaults))
 
 let list_implementations (lookups : lookups) ~viewer (path : Path.t) =
   match path with

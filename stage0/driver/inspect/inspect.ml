@@ -1,17 +1,19 @@
 module References = References
 
-let at table id = if id < Array.length table then table.(id) else None
+let find_at table id = if id < Array.length table then table.(id) else None
 
 let show_type (tables : Infer.tables) id =
-  match at tables.types id with
+  match find_at tables.types id with
   | Some (Types.Error _ | Types.Hole) -> "not decided yet"
   | Some type_ -> Types.show type_
   | None -> "an unknown type"
 
-let local_type (tables : Infer.tables) id =
-  match at tables.local_types id with Some type_ -> Types.show type_ | None -> "an unknown type"
+let show_local_type (tables : Infer.tables) id =
+  match find_at tables.local_types id with
+  | Some type_ -> Types.show type_
+  | None -> "an unknown type"
 
-let from_tables (tables : Infer.tables option) show id =
+let show_from_tables (tables : Infer.tables option) show id =
   match tables with Some tables -> show tables id | None -> "an unknown type"
 
 type unfinished = {
@@ -20,7 +22,7 @@ type unfinished = {
   span : Source.Definition_span.t;
 }
 
-let unfinished (spans : Source.Definition_span.t array) (definition : Syntax.definition) =
+let list_unfinished (spans : Source.Definition_span.t array) (definition : Syntax.definition) =
   let found = ref [] in
   let add keyword id (span : Source.Definition_span.t) = found := { keyword; id; span } :: !found in
   let rec visit (value : Syntax.expression) =
@@ -28,9 +30,9 @@ let unfinished (spans : Source.Definition_span.t array) (definition : Syntax.def
     | Todo -> add `Todo (Some value.id) spans.(value.id)
     | Echo _ -> add `Echo (Some value.id) spans.(value.id)
     | _ -> ());
-    Syntax_walk.children visit value
+    Syntax_walk.visit_children visit value
   in
-  Syntax_walk.definition visit definition;
+  Syntax_walk.visit_definition visit definition;
   (match definition.kind with
   | Type_definition { name; body = Type_todo; _ } -> add `Todo None spans.(name.id)
   | _ -> ());
@@ -38,7 +40,7 @@ let unfinished (spans : Source.Definition_span.t array) (definition : Syntax.def
 
 type hole = { offset : int; expected : string option; scope : (string * string) list }
 
-let holes spans definition (resolved : Resolve.resolved) tables =
+let list_holes spans definition (resolved : Resolve.resolved) tables =
   List.filter_map
     (fun { keyword; id; span } ->
       match (keyword, id) with
@@ -49,20 +51,20 @@ let holes spans definition (resolved : Resolve.resolved) tables =
             (fun scope ->
               {
                 offset = span.start;
-                expected = Some (from_tables tables show_type id);
+                expected = Some (show_from_tables tables show_type id);
                 scope =
                   List.map
                     (fun (name, (value : Resolve.value)) ->
                       ( name,
                         match value with
-                        | Value_local binding -> from_tables tables local_type binding
+                        | Value_local binding -> show_from_tables tables show_local_type binding
                         | Value_generic _ -> "UInt64"
                         | Value_field _ -> "a field"
                         | Value_law_parameter _ -> "a parameter of the law" ))
                     scope;
               })
             (List.assoc_opt id resolved.holes))
-    (unfinished spans definition)
+    (list_unfinished spans definition)
 
 type explanation = {
   text : string;
@@ -89,32 +91,32 @@ let describe_target (target : Resolve.target) =
   | Specification_function _ -> ("a specification function", None)
   | Unknown _ -> ("nothing: the name is not known", None)
 
-let resolved_meaning (resolved : Resolve.resolved) (name : Syntax.name) =
-  match at resolved.names name.id with
+let explain_resolved (resolved : Resolve.resolved) (name : Syntax.name) =
+  match find_at resolved.names name.id with
   | Some target ->
       let meaning, refers_to = describe_target target in
       (Some meaning, refers_to)
   | None -> (None, None)
 
-let definition_meaning path = (Some (Printf.sprintf "the definition %s" (Path.show path)), Some path)
+let explain_definition path = (Some (Printf.sprintf "the definition %s" (Path.show path)), Some path)
 let contains (span : Source.Definition_span.t) offset = span.start <= offset && offset <= span.stop
 
-let known_type (tables : Infer.tables) id =
-  Option.map (fun _ -> show_type tables id) (at tables.types id)
+let find_known_type (tables : Infer.tables) id =
+  Option.map (fun _ -> show_type tables id) (find_at tables.types id)
 
 let explain_name ~(path : Path.t) (definition : Syntax.definition) (resolved : Resolve.resolved)
     (tables : Infer.tables option) (name : Syntax.name) =
   let is_declared =
-    match References.declared_name definition with
+    match References.find_declared_name definition with
     | Some declared -> declared.id = name.id
     | None -> false
   in
   let meaning, refers_to =
-    if is_declared then definition_meaning path else resolved_meaning resolved name
+    if is_declared then explain_definition path else explain_resolved resolved name
   in
   let type_ =
     Option.bind tables (fun (tables : Infer.tables) ->
-        Option.map Types.show (at tables.local_types name.id))
+        Option.map Types.show (find_at tables.local_types name.id))
   in
   { text = name.text; meaning; refers_to; type_ }
 
@@ -130,10 +132,10 @@ let explain_at ~path (spans : Source.Definition_span.t array) (definition : Synt
       (match value.kind with
       | Name _ | Member _ | Call _ | Bracket _ -> innermost := Some value
       | _ -> if !innermost = None then innermost := Some value);
-      Syntax_walk.children visit value
+      Syntax_walk.visit_children visit value
     end
   in
-  Syntax_walk.definition visit definition;
+  Syntax_walk.visit_definition visit definition;
   let name_at =
     List.find_opt
       (fun (name : Syntax.name) -> contains spans.(name.id) offset)
@@ -155,18 +157,20 @@ let explain_at ~path (spans : Source.Definition_span.t array) (definition : Synt
       let written = Source.Definition_span.quote text spans.(value.id) in
       let meaning, refers_to =
         match value.kind with
-        | Name path -> resolved_meaning resolved path.last
+        | Name path -> explain_resolved resolved path.last
         | _ -> (
             match tables with
             | Some tables -> (
-                match at tables.resolutions value.id with
-                | Some (Global { path; _ }) -> definition_meaning path
+                match find_at tables.resolutions value.id with
+                | Some (Global { path; _ }) -> explain_definition path
                 | Some resolution -> (Some (Infer.show_resolution resolution), None)
                 | None -> (
-                    match Option.bind (Hashtbl.find_opt calls value.id) (at tables.callees) with
-                    | Some callee -> definition_meaning callee
+                    match
+                      Option.bind (Hashtbl.find_opt calls value.id) (find_at tables.callees)
+                    with
+                    | Some callee -> explain_definition callee
                     | None -> (None, None)))
             | None -> (None, None))
       in
-      let type_ = Option.bind tables (fun tables -> known_type tables value.id) in
+      let type_ = Option.bind tables (fun tables -> find_known_type tables value.id) in
       Some { text = written; meaning; refers_to; type_ }

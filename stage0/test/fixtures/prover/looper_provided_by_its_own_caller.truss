@@ -1,0 +1,20 @@
+capability Ping {
+  fn ping() -> UInt64
+    cost time finite
+}
+
+type Looper()
+
+impl Ping for Looper {
+  fn ping(self) -> UInt64 {
+    ping_through_looper()
+  }
+}
+
+fn ping_through_looper() -> UInt64
+  cost time finite
+{
+  provide Looper() {
+    Ping.ping()
+  }
+}

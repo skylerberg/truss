@@ -1,5 +1,5 @@
-let panic : Types.capability = Capability (Well_known.path Panic)
-let tasks : Types.capability = Capability (Well_known.path Tasks)
+let panic : Types.capability = Capability (Well_known.make_path Panic)
+let tasks : Types.capability = Capability (Well_known.make_path Tasks)
 
 type checking = {
   state : State.state;
@@ -49,14 +49,14 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.callee) =
         (fun (signature : Types.signature) ->
           check_grant checking origin
             ~subject:(Printf.sprintf "`%s`" (Path.show path))
-            (Path.package path) signature.uses)
+            (Path.locate_package path) signature.uses)
         (Interface.Impls.read_signature state.lookups.interface path)
   | Trait_method { trait; name; receiver; evidence; _ } -> (
       (match Members.find_trait_method state.lookups trait.trait name receiver with
       | Some method_ ->
           check_grant checking origin
             ~subject:(Printf.sprintf "`%s.%s`" (Path.show trait.trait) name)
-            (Path.package trait.trait)
+            (Path.locate_package trait.trait)
             (Interface.Definition.read_method_signature state.lookups.interface ~owner:trait.trait
                method_)
               .uses
@@ -72,7 +72,7 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.callee) =
                       (Printf.sprintf "The `impl` of `%s` for `%s`"
                          (Types.show_trait interface.implements)
                          (Types.show interface.for_type))
-                    (Path.package impl) signature.uses)
+                    (Path.locate_package impl) signature.uses)
                 (Interface.Impls.read_signature state.lookups.interface
                    (Method { owner = impl; name; receiver }))
           | Some _ | None -> ())
@@ -259,7 +259,8 @@ and check_statement checking scope (statement : Core.statement) =
       check_loop_clauses checking clauses;
       check_block checking scope body
   | Proof body -> check_block checking (make_no_capabilities_scope "a proof") body
-  | _ -> check_children checking scope (`Statement statement)
+  | Let _ | Evaluate _ | Assign _ | Compound_assign _ | Assert _ | Yield _ ->
+      check_children checking scope (`Statement statement)
 
 and check_loop_clauses checking (clauses : Core.loop_clause list) =
   List.iter
@@ -314,7 +315,8 @@ and check_provide checking scope implementations body =
             ~subject:
               (Printf.sprintf "The `impl` of `%s` for `%s`" (Path.show provided.capability)
                  (Types.show interface.for_type))
-            (Path.package provided.impl) interface.impl_uses;
+            (Path.locate_package provided.impl)
+            interface.impl_uses;
           require_available checking scope implementation.origin ~for_implementation:true
             interface.impl_uses)
         impls;
@@ -444,7 +446,7 @@ let check_monitor_lock checking ~(solved : int -> Types.capability_set) availabl
   let provides_tasks (implementation : Core.implementation) =
     List.exists
       (fun ((provided : Core.provided), (_ : Types.impl_interface)) ->
-        Path.equal provided.capability (Well_known.path Tasks))
+        Path.equal provided.capability (Well_known.make_path Tasks))
       (Form.find_capability_impls state implementation.type_)
   in
   let available =

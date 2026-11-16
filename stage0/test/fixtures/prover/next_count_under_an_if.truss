@@ -1,0 +1,6 @@
+fn next(flag: Bool, count: UInt8) -> UInt8 {
+  if flag {
+    return count + 1
+  }
+  0
+}

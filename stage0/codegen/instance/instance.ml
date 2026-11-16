@@ -213,7 +213,7 @@ let prefix_length = 180
 
 let shorten name =
   if String.length name <= limit then name
-  else String.sub name 0 prefix_length ^ "_Hash_" ^ Blake3.hex_digest ~digits:32 name
+  else String.sub name 0 prefix_length ^ "_Hash_" ^ Blake3.hash_to_hex ~digits:32 name
 
 let make_symbol key = shorten ("t_" ^ mangle key)
 let make_type_symbol ty = shorten ("t_" ^ mangle_ty ty)

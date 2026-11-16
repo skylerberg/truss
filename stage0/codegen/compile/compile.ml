@@ -109,7 +109,7 @@ let list_bound_methods (interface : Interface.Lookups.t) path type_arguments =
                 (Mir.Call_edges.list_impls_for interface package traits
                    (Named { path = head; arguments = [] })))
             (List.sort_uniq Path.compare_package
-               (Path.package head :: List.map Path.package traits)))
+               (Path.locate_package head :: List.map Path.locate_package traits)))
         (pairs signature.generics type_arguments)
   | None -> []
 
@@ -265,7 +265,7 @@ let make_result_key compiler root =
        (Cbor.Array
           [
             Cbor.int Emit_c.version;
-            Cbor.Text (Libc.system_name compiler.requests.settings.system);
+            Cbor.Text (Libc.show_system compiler.requests.settings.system);
             Bytes (read_test_key compiler root);
             Cbor.Array (List.map (fun flag -> Cbor.Text flag) compiler.settings.extra);
           ]))
@@ -274,7 +274,7 @@ let locate_offset compiler (definition : Path.t) offset : Emit_c.position =
   let names = compiler.requests.interface.names in
   match Option.map names.place (names.key definition) with
   | Some { file; base } ->
-      let line, column = Source.position (compiler.requests.source file) (base + offset) in
+      let line, column = Source.compute_position (compiler.requests.source file) (base + offset) in
       { file = compiler.file_name file; line; column }
   | None -> bug "%s has no place in a file" (Path.show definition)
 
@@ -298,13 +298,13 @@ let list_small_callees ~find ~worked_on fragment =
         (fun (key : Instance.key) ->
           match (key, find key) with
           | Code { path = callee; _ }, Some copy
-            when (not (worked_on (Path.package callee))) && Emit_c.is_small copy ->
+            when (not (worked_on (Path.locate_package callee))) && Emit_c.is_small copy ->
               Some copy
           | _ -> None)
         (Emit_c.called fragment)
   | _ -> []
 
-let test_runner : Instance.key = Code { path = Well_known.path Run_tests; type_arguments = [] }
+let test_runner : Instance.key = Code { path = Well_known.make_path Run_tests; type_arguments = [] }
 let make_test_root path = Instance.Code { path; type_arguments = [] }
 
 let list_roots ~tests ~mains =

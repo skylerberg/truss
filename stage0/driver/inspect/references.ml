@@ -1,7 +1,7 @@
 type target = Definition of Path.t | Module of Path.module_
 type occurrence = { span : Source.Definition_span.t; target : target }
 
-let declared_name (definition : Syntax.definition) : Syntax.name option =
+let find_declared_name (definition : Syntax.definition) : Syntax.name option =
   match definition.kind with
   | Function { signature = { name = Plain_name name | Member_name (_, name); _ }; _ }
   | Method_declaration { name = Plain_name name | Member_name (_, name); _ }
@@ -13,7 +13,7 @@ let declared_name (definition : Syntax.definition) : Syntax.name option =
       Some name
   | Impl _ | Test _ | Law_proof _ | Definition_error _ -> None
 
-let member_targets (tables : Infer.tables) (definition : Syntax.definition) =
+let list_member_targets (tables : Infer.tables) (definition : Syntax.definition) =
   let members = ref [] in
   let add (name : Syntax.name) path = members := (name, path) :: !members in
   let at table id = if id < Array.length table then table.(id) else None in
@@ -28,12 +28,12 @@ let member_targets (tables : Infer.tables) (definition : Syntax.definition) =
         | Some (Global { path = (Method _ | Member_constant _) as path; _ }) -> add name path
         | _ -> ())
     | _ -> ());
-    Syntax_walk.children visit expression
+    Syntax_walk.visit_children visit expression
   in
-  Syntax_walk.definition visit definition;
+  Syntax_walk.visit_definition visit definition;
   !members
 
-let occurrences ~(path : Path.t) (spans : Source.Definition_span.t array)
+let list_occurrences ~(path : Path.t) (spans : Source.Definition_span.t array)
     (definition : Syntax.definition) (resolved : Resolve.resolved) (tables : Infer.tables option) =
   let names = Syntax_walk.collect_names spans definition in
   let occurrence span target = { span; target } in
@@ -46,7 +46,7 @@ let occurrences ~(path : Path.t) (spans : Source.Definition_span.t array)
            with
            | Some (Definition (_, path)) -> [ occurrence spans.(name.id) (Definition path) ]
            | Some (Module module_) ->
-               let parts = Path.module_parts module_ in
+               let parts = Path.list_module_parts module_ in
                let written_in_full =
                  List.length parts > 1
                  && List.for_all Fun.id
@@ -72,7 +72,7 @@ let occurrences ~(path : Path.t) (spans : Source.Definition_span.t array)
          names)
   in
   let declared =
-    match declared_name definition with
+    match find_declared_name definition with
     | Some name -> [ occurrence spans.(name.id) (Definition path) ]
     | None -> []
   in
@@ -81,7 +81,7 @@ let occurrences ~(path : Path.t) (spans : Source.Definition_span.t array)
     | Some tables ->
         List.map
           (fun ((name : Syntax.name), path) -> occurrence spans.(name.id) (Definition path))
-          (member_targets tables definition)
+          (list_member_targets tables definition)
     | None -> []
   in
   List.sort

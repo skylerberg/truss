@@ -99,7 +99,7 @@ let make_conformance lookups ~bounds ~(trait_span : Source.Definition_span.t)
                   with
                   | Some fixed, _ when is_declared_by_impl -> Some fixed
                   | None, Some missing when is_declared_by_impl ->
-                      Some (Types.Error (Diagnostic.reported missing))
+                      Some (Types.Error (Diagnostic.make_reported missing))
                   | _ ->
                       Impls.project_associated_type lookups ~bounds:impl_bounds impl.for_type
                         projected name)

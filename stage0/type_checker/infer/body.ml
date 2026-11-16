@@ -658,7 +658,7 @@ let list_used_packages (resolved : Resolve.resolved) ~evidence_packages (form : 
   let named =
     List.filter_map
       (function
-        | Some (Resolve.Definition (_, path) | Variant (path, _)) -> Some (Path.package path)
+        | Some (Resolve.Definition (_, path) | Variant (path, _)) -> Some (Path.locate_package path)
         | Some (Module module_) -> Some module_.package
         | _ -> None)
       (Array.to_list resolved.names)
@@ -668,8 +668,8 @@ let list_used_packages (resolved : Resolve.resolved) ~evidence_packages (form : 
     (Core_walk.make_callee_visitor (function
       | Trait_method { trait; evidence; _ } ->
           called :=
-            Path.package trait.trait
-            :: (match evidence with Impl { impl; _ } -> [ Path.package impl ] | _ -> [])
+            Path.locate_package trait.trait
+            :: (match evidence with Impl { impl; _ } -> [ Path.locate_package impl ] | _ -> [])
             @ !called
       | _ -> ()))
     form.definition;

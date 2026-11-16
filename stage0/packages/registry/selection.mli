@@ -11,9 +11,9 @@ type problem =
   | Cannot_load of { name : Path.package; version : Version.t; reason : string }
   | Two_contents of { name : Path.package; version : Version.t; recorded_by : Path.package }
 
-val sentence : problem -> string
+val describe_problem : problem -> string
 
-val manifest_and_record :
+val read_manifest_and_record :
   read:(string -> string option) -> Path.package -> (Manifest.package * Lock.t, string) result
 
 val choose :
@@ -24,7 +24,7 @@ val choose :
   package list * problem list
 
 val lock : project:Manifest.dependency list -> package list -> Lock.t
-val differences : written:Lock.t -> current:Lock.t -> string list
+val list_differences : written:Lock.t -> current:Lock.t -> string list
 
 module For_testing : sig
   val holds : project:Manifest.dependency list -> package list -> (Path.package * string list) list

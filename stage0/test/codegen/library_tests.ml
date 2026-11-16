@@ -46,7 +46,7 @@ let () =
                   match (expected_panic path, record.outcome, record.message) with
                   | None, Passed, _ -> ()
                   | Some expected, Panicked, Some message
-                    when Codegen_support.contains message expected ->
+                    when String.includes ~affix:expected message ->
                       ()
                   | _, outcome, message ->
                       Codegen_support.fail "%s%s" (Compile.show_outcome outcome)

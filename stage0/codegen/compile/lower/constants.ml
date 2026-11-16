@@ -317,7 +317,7 @@ let compile_constant context path =
   | ty, Some value -> Folded { data_key = Constant path; ty; value }
   | ty, None -> Run ty
 
-let write_fully = Well_known.path Write_fully
+let write_fully = Well_known.make_path Write_fully
 
 let write_output (st : Lowering.state) output =
   let builder = st.builder in

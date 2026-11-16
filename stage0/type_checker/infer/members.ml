@@ -33,7 +33,7 @@ let find_variants (lookups : Lookups.t) path arguments =
 
 let are_fields_visible (lookups : Lookups.t) ~package (path : Path.t) =
   match Interface.Definition.read_type_interface lookups.interface path with
-  | Some { opaque = true; _ } -> Path.package path = package
+  | Some { opaque = true; _ } -> Path.locate_package path = package
   | _ -> true
 
 let read_method_signature (lookups : Lookups.t) trait method_ =

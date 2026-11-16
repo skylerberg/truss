@@ -1,0 +1,13 @@
+trait Sized[count: UInt64] {
+  fn size(self) -> Array[UInt64, count]
+}
+
+trait Holder {
+  type Held: Sized[3]
+
+  fn held(self) -> Self.Held
+}
+
+fn sizes[Box: Holder](box: Box) -> Array[UInt64, 3] {
+  box.held().size()
+}

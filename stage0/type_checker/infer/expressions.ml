@@ -151,7 +151,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
       in
       State.register_expression state value (fun () ->
           Form.build_range_record state value start stop ~inclusive);
-      Types.Named { path = Well_known.path Range; arguments = [ Types.Type element ] }
+      Types.Named { path = Well_known.make_path Range; arguments = [ Types.Type element ] }
   | Quantified { quantifier; binder; body } ->
       (match binder with
       | Binder_in (written, collection) ->
@@ -261,7 +261,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
   | Block body ->
       State.register_expression state value (fun () -> Block (State.build_block state body));
       Statements.check_block_value state env ?expected body
-  | Expression_error -> Types.Error (Diagnostic.recovered (State.read_span state value.id))
+  | Expression_error -> Types.Error (Diagnostic.make_recovered (State.read_span state value.id))
 
 and check_member_value state env (value : Syntax.expression) (base : Syntax.expression)
     (member : Syntax.name) =
@@ -330,7 +330,10 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
       Option.iter (fun stop -> check state env stop (Types.make_builtin UInt64)) stop;
       State.record state range
         (Types.Named
-           { path = Well_known.path Range; arguments = [ Types.Type (Types.make_builtin UInt64) ] });
+           {
+             path = Well_known.make_path Range;
+             arguments = [ Types.Type (Types.make_builtin UInt64) ];
+           });
       State.register_expression state value (fun () ->
           let base = State.make_place (State.build_expression state base) in
           let start = Option.map (State.build_expression state) start in
@@ -341,7 +344,7 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
       | Types.Named { path; arguments = Types.Type element :: _ }
         when Well_known.is List path || Well_known.is Slice path
              || Intrinsic.builtin_of_path path = Some Array ->
-          Types.Named { path = Well_known.path Slice; arguments = [ Types.Type element ] }
+          Types.Named { path = Well_known.make_path Slice; arguments = [ Types.Type element ] }
       | Types.Named { path; _ } when Well_known.is String path || Well_known.is String_slice path ->
           State.make_error_type state Not_indexable (State.read_span state value.id)
             "Strings cannot be indexed: say which you mean with `bytes()` or `characters()`."
@@ -360,7 +363,9 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
             ignore (check_expression state env key);
             base_type
         | _ -> (
-            let index_trait = State.make_trait_reference (Well_known.path Index) in
+            let index_trait =
+              State.make_trait_reference ~arguments:[] (Well_known.make_path Index)
+            in
             match State.implements state base_type index_trait with
             | Some evidence ->
                 let associated name =

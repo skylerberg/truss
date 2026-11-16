@@ -6,7 +6,6 @@ let diagnostics database (file : Path.file) =
 
 let fail = Harness.fail
 let expect_string = Harness.expect_string
-let contains = Substring.contains
 
 let expect_int ~expected actual =
   if expected <> actual then fail "expected %d, got %d" expected actual
@@ -174,7 +173,7 @@ let strict =
       "-Wno-unused-parameter";
       "-Wno-unused-but-set-variable";
       "-Wno-array-parameter";
-      (if Substring.contains (Lazy.force compiler).identity "clang" then
+      (if String.includes ~affix:"clang" (Lazy.force compiler).identity then
          "-Wno-sometimes-uninitialized"
        else "-Wno-maybe-uninitialized");
     ]
@@ -311,7 +310,7 @@ let standard_context : Monomorphic.context =
   }
 
 let standard module_ name ?(arguments = []) () =
-  Ground.Named { path = Path.standard [ module_ ] name; arguments }
+  Ground.Named { path = Path.make_standard_path [ module_ ] name; arguments }
 
 let standard_layout ty =
   Memory_layout.For_testing.to_string

@@ -49,7 +49,7 @@ let rec check_arithmetic (state : State.state) (value : Syntax.expression) =
             "This divides by zero."
       | _ -> ())
   | _ -> ());
-  Syntax_walk.expression_parts ~expression:(check_arithmetic state) ~statement:ignore value
+  Syntax_walk.visit_expression_parts ~expression:(check_arithmetic state) ~statement:ignore value
 
 let check state ~default (value : Syntax.expression) =
   (match find_offending_expression state value with

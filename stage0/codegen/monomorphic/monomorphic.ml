@@ -9,7 +9,7 @@ type context = {
 }
 
 let ground_mode : Types.mode -> Ground.mode = function Read -> Read | Mut -> Mut | Own -> Own
-let panic_capability = Well_known.path Panic
+let panic_capability = Well_known.make_path Panic
 
 let list_capabilities context substitution (set : Types.capability_set) : Path.t list =
   List.sort_uniq Path.compare

@@ -6,7 +6,7 @@ let callee_name : Core.callee -> string = function
   | Function { path; _ } -> Path.show path
   | Trait_method { trait; name; _ } -> Path.show trait.trait ^ "." ^ name
   | Capability_method { capability; name } -> Path.show capability ^ "." ^ name
-  | Intrinsic { operation; _ } -> "intrinsic::" ^ Intrinsic.operation_name operation
+  | Intrinsic { operation; _ } -> "intrinsic::" ^ Intrinsic.show_operation operation
   | Indirect _ -> "a function value"
 
 let method_signature interface owner name receiver =
@@ -176,7 +176,7 @@ let operator_types context (node : Core.expression) (operation : Intrinsic.opera
     (fun (operand : Core.expression) ->
       if not (fits context ~expected:node.type_ ~found:operand.type_) then
         context.wrong "an operand of `%s` has the type `%s`, and the operator `%s`"
-          (Intrinsic.operation_name operation)
+          (Intrinsic.show_operation operation)
           (Types.show operand.type_) (Types.show node.type_))
     operands
 

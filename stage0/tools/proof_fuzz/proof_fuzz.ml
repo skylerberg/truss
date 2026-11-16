@@ -94,7 +94,7 @@ let runnable database =
           match List.filter_map Fun.id ranges with
           | ranges_written
             when List.length ranges_written = List.length ranges
-                 && not (List.exists (fun admit -> Substring.contains admit "==>") admits) ->
+                 && not (List.exists (fun admit -> String.includes ~affix:"==>" admit) admits) ->
               Some { path = declaration.path; key; signature; admits; ranges = ranges_written }
           | _ -> None)
       | _ -> None)
@@ -218,7 +218,7 @@ let mutants text =
             | _ -> None
           in
           match swapped with
-          | Some other -> [ replace token.span (Token.punctuation_spelling other) ]
+          | Some other -> [ replace token.span (Token.spell_punctuation other) ]
           | None -> [])
       | _ -> [])
 

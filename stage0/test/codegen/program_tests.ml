@@ -53,15 +53,10 @@ let () =
     "a build checks each primitive operation that could fail, and evaluates no requires clause"
     (fun () ->
       let output = Codegen_support.run_source Fixtures.Program.pick_and_primitive_operations in
-      let contains text =
-        let text_length = String.length text and output_length = String.length output in
-        let rec occurs_at position =
-          position + text_length <= output_length
-          && (String.sub output position text_length = text || occurs_at (position + 1))
-        in
-        if not (occurs_at 0) then Codegen_support.fail "%S is not in the output:\n%s" text output
-      in
-      List.iter contains
+      List.iter
+        (fun text ->
+          if not (String.includes ~affix:text output) then
+            Codegen_support.fail "%S is not in the output:\n%s" text output)
         [
           "test 0 passed\n";
           "test 1 panicked\n";
@@ -107,7 +102,7 @@ let () =
         (fun (operation, failure) ->
           let status, _, errors = run operation in
           Codegen_support.expect_int ~expected:101 status;
-          if not (Codegen_support.contains errors ("panic: " ^ failure)) then
+          if not (String.includes ~affix:("panic: " ^ failure) errors) then
             Codegen_support.fail "%s stopped with %S" operation errors)
         [
           ("overflow", "arithmetic overflow");
@@ -658,7 +653,7 @@ let () =
       match Codegen_support.run_main ~arguments:[ "a"; "b"; "c"; "d" ] source with
       | 101, output, errors ->
           Codegen_support.expect_string ~expected:"counted 5\n" output;
-          if not (Codegen_support.contains errors "many arguments") then
+          if not (String.includes ~affix:"many arguments" errors) then
             Codegen_support.fail "panicked with %S" errors
       | status, _, errors -> Codegen_support.fail "ended with status %d: %s" status errors)
 
@@ -675,6 +670,5 @@ let () =
       | Error message ->
           if
             not
-              (Codegen_support.contains message
-                 "main uses Greeter, which has no real implementation")
+              (String.includes ~affix:"main uses Greeter, which has no real implementation" message)
           then Codegen_support.fail "failed with: %s" message)

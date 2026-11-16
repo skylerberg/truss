@@ -1,10 +1,10 @@
-let leading_directory = function
+let move_leading_directory = function
   | program :: "-C" :: directory :: command :: rest
     when not (String.starts_with ~prefix:"-" command) ->
       program :: command :: "-C" :: directory :: rest
   | arguments -> arguments
 
-let program_arguments = function
+let extract_program_arguments = function
   | program :: "run" :: rest ->
       let rec options = function
         | "--" :: rest -> "--" :: rest
@@ -21,4 +21,4 @@ let program_arguments = function
       program :: "run" :: options rest
   | arguments -> arguments
 
-let prepare arguments = program_arguments (leading_directory arguments)
+let prepare arguments = extract_program_arguments (move_leading_directory arguments)

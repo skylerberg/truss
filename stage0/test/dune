@@ -26,11 +26,11 @@
   compatibility_tests
   prover_tests
   library_use_tests
-  database_tests)
+  database_tests
+  standard_package_loading_tests)
  (libraries
   process
   harness
-  substring
   compiler_bug
   source
   diagnostic

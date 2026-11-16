@@ -244,7 +244,7 @@ let compute_tasks_use ?(solved = fun (_ : int) : Types.capability_set -> Types.n
   let usage = ref No_tasks in
   let rec used (capability : Types.capability) =
     match capability with
-    | Capability path -> if Path.equal path (Well_known.path Tasks) then usage := Uses_tasks
+    | Capability path -> if Path.equal path (Well_known.make_path Tasks) then usage := Uses_tasks
     | Capability_parameter _ | Capability_projection _ ->
         if !usage = No_tasks then usage := Through_parameter
     | Capability_variable variable -> List.iter used (solved variable :> Types.capability list)
@@ -264,7 +264,10 @@ let compute_tasks_use ?(solved = fun (_ : int) : Types.capability_set -> Types.n
            (fun node ->
              match node.kind with
              | Concurrent _ | For { mode = Concurrent_loop; _ } -> usage := Uses_tasks
-             | _ -> ());
+             | For { mode = Sequential | Parallel_loop; _ }
+             | Let _ | Evaluate _ | Assign _ | Compound_assign _ | While _ | Parallel _ | Proof _
+             | Assert _ | Yield _ ->
+                 ());
        })
     body;
   !usage

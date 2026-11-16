@@ -10,13 +10,13 @@ type t = {
 let list_magic = "truss database"
 let segment_magic = "truss segment\n"
 let list_path t = Filename.concat t.directory "list"
-let next_list_path t = Filename.concat t.directory "list.new"
-let segments_directory t = Filename.concat t.directory "segments"
+let make_next_list_path t = Filename.concat t.directory "list.new"
+let make_segments_directory t = Filename.concat t.directory "segments"
 
-let segment_path t number =
-  Filename.concat (segments_directory t) (Printf.sprintf "%08d.segment" number)
+let make_segment_path t number =
+  Filename.concat (make_segments_directory t) (Printf.sprintf "%08d.segment" number)
 
-let digest_of text = Digest.BLAKE128.to_hex (Digest.BLAKE128.string text)
+let digest text = Digest.BLAKE128.to_hex (Digest.BLAKE128.string text)
 
 let write_durably path text =
   let descriptor = Unix.openfile path [ O_WRONLY; O_CREAT; O_TRUNC; O_CLOEXEC ] 0o644 in
@@ -75,7 +75,7 @@ let header t = t.header
 
 exception Damaged
 
-let records text =
+let parse_records text =
   let length = String.length text in
   let length_at position =
     if position + 4 > length then raise Damaged
@@ -102,12 +102,13 @@ let records text =
   else raise Damaged
 
 let read_segment t segment =
-  match File_system.read (segment_path t segment.number) with
-  | text when String.length text = segment.size && digest_of text = segment.digest -> records text
+  match File_system.read (make_segment_path t segment.number) with
+  | text when String.length text = segment.size && digest text = segment.digest ->
+      parse_records text
   | _ -> raise Damaged
   | exception Sys_error _ -> raise Damaged
 
-let live t =
+let list_live t =
   let table = Hashtbl.create 4096 in
   List.iter
     (fun segment ->
@@ -120,10 +121,10 @@ let live t =
     t.segments;
   Hashtbl.fold (fun key value entries -> (key, value) :: entries) table []
 
-let entries t = match live t with entries -> Some entries | exception Damaged -> None
+let read_entries t = match list_live t with entries -> Some entries | exception Damaged -> None
 
-let segment_numbers t =
-  match Sys.readdir (segments_directory t) with
+let list_segment_numbers t =
+  match Sys.readdir (make_segments_directory t) with
   | names ->
       List.filter_map
         (fun name ->
@@ -152,11 +153,12 @@ let write_segment t entries =
   let text = Buffer.contents buffer in
   let number =
     1
-    + List.fold_left max 0 (segment_numbers t @ List.map (fun segment -> segment.number) t.segments)
+    + List.fold_left max 0
+        (list_segment_numbers t @ List.map (fun segment -> segment.number) t.segments)
   in
-  File_system.make_directory (segments_directory t);
-  write_durably (segment_path t number) text;
-  { number; size = String.length text; digest = digest_of text }
+  File_system.make_directory (make_segments_directory t);
+  write_durably (make_segment_path t number) text;
+  { number; size = String.length text; digest = digest text }
 
 let list_text ~header segments =
   String.concat "\n"
@@ -169,18 +171,18 @@ let list_text ~header segments =
 
 let prepare_commit t ~header entries =
   let segments = if entries = [] then t.segments else t.segments @ [ write_segment t entries ] in
-  write_durably (next_list_path t) (list_text ~header segments);
+  write_durably (make_next_list_path t) (list_text ~header segments);
   segments
 
 let remove_unlisted t =
   List.iter
     (fun number ->
       if not (List.exists (fun segment -> segment.number = number) t.segments) then
-        try Sys.remove (segment_path t number) with Sys_error _ -> ())
-    (segment_numbers t)
+        try Sys.remove (make_segment_path t number) with Sys_error _ -> ())
+    (list_segment_numbers t)
 
 let rename_list t ~header segments =
-  Unix.rename (next_list_path t) (list_path t);
+  Unix.rename (make_next_list_path t) (list_path t);
   t.header <- Some header;
   t.segments <- segments;
   remove_unlisted t
@@ -193,10 +195,10 @@ let is_compaction_due t =
   | [] -> false
 
 let compact t ~header =
-  match live t with
+  match list_live t with
   | entries ->
       let compacted = write_segment t (List.map (fun (key, value) -> (key, Some value)) entries) in
-      write_durably (next_list_path t) (list_text ~header [ compacted ]);
+      write_durably (make_next_list_path t) (list_text ~header [ compacted ]);
       rename_list t ~header [ compacted ]
   | exception Damaged -> ()
 

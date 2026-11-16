@@ -116,7 +116,7 @@ and match_arguments state (value : Syntax.expression) (parameters : Types.parame
               | None ->
                   State.report state Unknown_label (State.read_span state label.id)
                     ~fixes:
-                      (match Diagnostic.closest label.text (List.map fst named) with
+                      (match Diagnostic.find_closest label.text (List.map fst named) with
                       | Some candidate ->
                           [
                             State.fix

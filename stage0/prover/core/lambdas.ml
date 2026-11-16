@@ -305,7 +305,9 @@ let list_loop_counters locals (body : Mir.body) =
   let rec visit (block : Mir.block) =
     List.iter
       (fun (statement : Mir.statement) ->
-        (match statement.kind with While { loop; _ } | For { loop; _ } -> note loop | _ -> ());
+        (match statement.kind with
+        | While { loop; _ } | For { loop; _ } -> note loop
+        | Basic _ | Choose _ | Assert_by_bit_vector _ | Fork _ | Resume _ | Yield _ | Jump _ -> ());
         List.iter visit (Mir.list_nested_blocks statement))
       block.statements
   in

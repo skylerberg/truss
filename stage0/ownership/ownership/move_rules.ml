@@ -176,10 +176,10 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
       check_uses state (Moves.list_terminator_uses moves basic);
       match basic.terminator with
       | Return _ -> check_at_return at state
-      | Iteration_end { loop } -> (
-          match body.blocks.(loop).terminator with
-          | For { part; _ } -> check_reinitialized state ~locals:[ part ] ~at:None scope_end
-          | _ -> ())
+      | Iteration_end { loop } ->
+          check_reinitialized state
+            ~locals:[ (Mir.Graph.read_loop_head body loop).part ]
+            ~at:None scope_end
       | Join _ ->
           List.iter
             (fun (blocks, entry) ->
@@ -196,7 +196,9 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
                        `mut` borrow."
                       moved))
             concurrent_branches
-      | _ -> ())
+      | Goto _ | Branch _ | For _ | Fork _ | Yield _ | Cancel _ | Resume _ | Unreachable
+      | Written_unreachable | Todo ->
+          ())
     body.blocks
 
 let analyse context body =

@@ -286,7 +286,7 @@ let () =
   Codegen_support.test "a mut parameter is a restrict pointer in C" (fun () ->
       let c_file = c_file (Codegen_support.shape_env ()) [ (bump, External) ] in
       let expected = "void t_test__bump(int32_t *restrict l0_count)" in
-      if not (Codegen_support.contains c_file expected) then
+      if not (String.includes ~affix:expected c_file) then
         Codegen_support.fail "no %S in:\n%s" expected c_file);
   let callback =
     ({ parameters = [ (Read, Codegen_support.int32) ]; result = Codegen_support.int32; uses = [] }
@@ -497,9 +497,9 @@ let () =
         c_file (Codegen_support.shape_env ()) [ (caller, External); (callee, Internal) ]
       in
       let copy = "static inline int32_t t_test__callee(int32_t l0) {" in
-      if not (Codegen_support.contains c_file copy) then
+      if not (String.includes ~affix:copy c_file) then
         Codegen_support.fail "no %S in:\n%s" copy c_file;
-      if Codegen_support.contains c_file "\nint32_t t_test__callee(int32_t);" then
+      if String.includes ~affix:"\nint32_t t_test__callee(int32_t);" c_file then
         Codegen_support.fail "the callee is also declared as another file's:\n%s" c_file);
   Codegen_support.test "the C checks each type's size and alignment against its layout" (fun () ->
       let pair_shape =
@@ -539,7 +539,7 @@ let () =
       let expected =
         "_Static_assert(sizeof(t_test__Pair) == 16 && _Alignof(t_test__Pair) == 8, \"layout\");"
       in
-      if not (Codegen_support.contains c_file expected) then
+      if not (String.includes ~affix:expected c_file) then
         Codegen_support.fail "no %S in:\n%s" expected c_file);
   Codegen_support.test "emitting the same instances twice gives the same C" (fun () ->
       let instances = [ (bump, Emit_c.External) ] in
@@ -574,12 +574,12 @@ let () =
       let c_file = c_file (Codegen_support.shape_env ()) [ (entry, External) ] in
       List.iter
         (fun name ->
-          if not (Codegen_support.contains c_file name) then
+          if not (String.includes ~affix:name c_file) then
             Codegen_support.fail "no %s in:\n%s" name c_file)
         [ "l1_late"; "l2_early" ];
       List.iter
         (fun name ->
-          if Codegen_support.contains c_file name then Codegen_support.fail "%s in:\n%s" name c_file)
+          if String.includes ~affix:name c_file then Codegen_support.fail "%s in:\n%s" name c_file)
         [ "l0_unused"; "l3_dead"; "b3:" ]);
   ()
 
@@ -588,7 +588,7 @@ let () =
       let key =
         Instance.Code
           {
-            path = Method { owner = Well_known.path List; name = "each"; receiver = Read };
+            path = Method { owner = Well_known.make_path List; name = "each"; receiver = Read };
             type_arguments = [ Type Codegen_support.int64 ];
           }
       in
@@ -637,7 +637,7 @@ let () =
     "storage with room is pushed onto, and inserts, removes, swaps, and pops in place" (fun () ->
       let storage_ty =
         Ground.Named
-          { path = Intrinsic.builtin_path Storage; arguments = [ Type Codegen_support.int32 ] }
+          { path = Intrinsic.make_builtin_path Storage; arguments = [ Type Codegen_support.int32 ] }
       in
       Codegen_support.expect_status 171
         [
@@ -768,12 +768,12 @@ let () =
   Codegen_support.test "an array's elements are moved into new storage, in order" (fun () ->
       let storage_ty =
         Ground.Named
-          { path = Intrinsic.builtin_path Storage; arguments = [ Type Codegen_support.int32 ] }
+          { path = Intrinsic.make_builtin_path Storage; arguments = [ Type Codegen_support.int32 ] }
       in
       let array_ty =
         Ground.Named
           {
-            path = Intrinsic.builtin_path Array;
+            path = Intrinsic.make_builtin_path Array;
             arguments = [ Type Codegen_support.int32; Value (Z.of_int 3) ];
           }
       in
@@ -860,13 +860,13 @@ let () =
       let array_ty =
         Ground.Named
           {
-            path = Intrinsic.builtin_path Array;
+            path = Intrinsic.make_builtin_path Array;
             arguments = [ Type Codegen_support.int32; Value (Z.of_int 3) ];
           }
       in
       let view_ty =
         Ground.Named
-          { path = Intrinsic.builtin_path View; arguments = [ Type Codegen_support.int32 ] }
+          { path = Intrinsic.make_builtin_path View; arguments = [ Type Codegen_support.int32 ] }
       in
       let extra =
         [
@@ -956,7 +956,7 @@ let () =
       let array_ty =
         Ground.Named
           {
-            path = Intrinsic.builtin_path Array;
+            path = Intrinsic.make_builtin_path Array;
             arguments = [ Type Codegen_support.int32; Value (Z.of_int 3) ];
           }
       in
@@ -1161,7 +1161,7 @@ let () =
       let storage_ty = Storage.make_storage_type Codegen_support.uint8 in
       let view_ty =
         Ground.Named
-          { path = Intrinsic.builtin_path View; arguments = [ Type Codegen_support.uint8 ] }
+          { path = Intrinsic.make_builtin_path View; arguments = [ Type Codegen_support.uint8 ] }
       in
       let extra =
         [
@@ -1212,7 +1212,7 @@ let () =
                   status);
             ]
         in
-        if status <> 101 || not (Codegen_support.contains errors saying) then
+        if status <> 101 || not (String.includes ~affix:saying errors) then
           Codegen_support.fail "expected a panic saying %S, got status %d (%s)" saying status errors
       in
       let index = "index out of bounds" and slice = "slice out of bounds" in
@@ -1297,7 +1297,7 @@ let () =
       let array_of count : Ground.ty =
         Named
           {
-            path = Intrinsic.builtin_path Array;
+            path = Intrinsic.make_builtin_path Array;
             arguments = [ Type Codegen_support.int32; Value (Z.of_int count) ];
           }
       in

@@ -15,9 +15,9 @@ let scan (cursor : Cursor.t) buffer =
         [
           Diagnostic.fix
             ("Write `" ^ replacement ^ "`")
-            [ Diagnostic.replace (Cursor.span start stop) replacement ];
+            [ Diagnostic.replace (Source.make_span start stop) replacement ];
         ]
-      (Cursor.span start stop)
+      (Source.make_span start stop)
       (Printf.sprintf
          "`%s` is not an escape in Truss. A character is written by its code point: `%s`."
          (String.sub cursor.text start (stop - start))
@@ -31,9 +31,9 @@ let scan (cursor : Cursor.t) buffer =
     | Some value when is_scalar value -> for_character (start + 2 + count) value
     | _ -> false
   in
-  if Cursor.at_end cursor (start + 1) then false
+  if Cursor.is_at_end cursor (start + 1) then false
   else
-    match Cursor.char cursor (start + 1) with
+    match Cursor.lookup_char cursor (start + 1) with
     | 'u' when not (Cursor.is_at cursor (start + 2) '{') -> hex 4
     | 'x' -> hex 2
     | 'U' -> hex 8
@@ -59,11 +59,11 @@ let scan (cursor : Cursor.t) buffer =
                 [
                   Diagnostic.fix "Write `${...}`"
                     [
-                      Diagnostic.replace (Cursor.span start content) "${";
-                      Diagnostic.replace (Cursor.span stop (stop + 1)) "}";
+                      Diagnostic.replace (Source.make_span start content) "${";
+                      Diagnostic.replace (Source.make_span stop (stop + 1)) "}";
                     ];
                 ]
-              (Cursor.span start (stop + 1))
+              (Source.make_span start (stop + 1))
               "A string interpolates with `${...}`.";
             Buffer.add_substring buffer cursor.text start (stop + 1 - start);
             cursor.position <- stop + 1;
@@ -73,9 +73,10 @@ let scan (cursor : Cursor.t) buffer =
         Cursor.report cursor ~code:Invalid_escape
           ~fixes:
             [
-              Diagnostic.fix "Write `'`" [ Diagnostic.replace (Cursor.span start (start + 2)) "'" ];
+              Diagnostic.fix "Write `'`"
+                [ Diagnostic.replace (Source.make_span start (start + 2)) "'" ];
             ]
-          (Cursor.span start (start + 2))
+          (Source.make_span start (start + 2))
           "`'` needs no escape in a string.";
         Buffer.add_char buffer '\'';
         cursor.position <- start + 2;

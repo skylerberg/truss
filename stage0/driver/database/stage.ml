@@ -48,12 +48,12 @@ let all =
     Test_keys;
   ]
 
-let position stage =
+let rank_stage stage =
   match List.find_index (fun candidate -> candidate = stage) all with
   | Some position -> position
   | None -> Compiler_bug.bug ~stage:"Database" "a stage is missing from the order of stages"
 
-let precedes earlier later = position earlier <= position later
+let precedes earlier later = rank_stage earlier <= rank_stage later
 
 let is_lowering = function
   | Lowered_code | Test_keys -> true

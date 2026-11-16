@@ -18,7 +18,21 @@ let list_nested_blocks_of_kind (kind : Tree.statement_kind) : Tree.block list =
       Option.to_list (Option.map (fun (lent : Tree.lent_element) -> lent.count) lent) @ [ body ]
   | Fork { branches; _ } -> branches
   | Resume { exits; _ } -> List.map (fun (exit : Tree.early_exit) -> exit.resumed) exits
-  | Basic _ | Yield _ | Jump _ -> []
+  | Basic
+      ( Assign
+          {
+            value =
+              ( Operand _ | Operation _ | Compare _ | Not _ | Construct _ | Array _ | Is_variant _
+              | Convert _ | To_any _ | Copy _ | Function_value _ | Lambda _ | Value_parameter _
+              | Specification
+                  (Result | Entry _ | Yielded | Identical _ | Applied _ | Method_time _ | Map _) );
+            _;
+          }
+      | Call _ | Lend _ | Slice _ | Template _ | Live _ | Dead _ | Assert _ | Echo _ | Provide _
+      | Provide_end | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ )
+  | Yield _
+  | Jump (Return _ | Break | Continue | Cancel _ | Unreachable | Written_unreachable | Todo) ->
+      []
 
 let list_nested_blocks (statement : Tree.statement) = list_nested_blocks_of_kind statement.kind
 
@@ -129,7 +143,11 @@ let rec visit_block visit locals (block : Tree.block) =
       | Basic (Ghost_assert { condition; _ }) -> visit_formula visit condition
       | Basic (Proof code) -> visit_code visit code
       | While { loop; _ } | For { loop; _ } -> visit_loop visit loop
-      | _ -> ());
+      | Basic
+          ( Assign _ | Call _ | Lend _ | Slice _ | Template _ | Live _ | Dead _ | Assert _ | Echo _
+          | Provide _ | Provide_end | Loan_start _ | Loan_end _ | Matched _ )
+      | Choose _ | Assert_by_bit_vector _ | Fork _ | Resume _ | Yield _ | Jump _ ->
+          ());
       List.iter (visit_block visit locals) (list_nested_blocks statement))
     block.statements
 

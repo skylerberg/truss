@@ -57,9 +57,9 @@ type computed =
 type stored = Computed of computed | Recursion_group of Path.t
 type t = Input of input | Name of name | Stored of stored
 
-val package : computed -> Path.package
-val name_package : name -> Path.package
+val locate_package : computed -> Path.package
+val locate_name_package : name -> Path.package
 val show : t -> string
 val show_computed : computed -> string
-val definition : t -> Path.t option
-val kind_name : t -> string
+val find_definition : t -> Path.t option
+val show_kind : t -> string

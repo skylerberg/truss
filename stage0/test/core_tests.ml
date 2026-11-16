@@ -44,7 +44,7 @@ and expression form (node : Core.expression) =
            (Passed { mode = Read; value = Place base; mode_keyword = None } :: bounds))
   | Operator { operation; arguments } ->
       Printf.sprintf "%s(%s)"
-        (Intrinsic.operation_name operation)
+        (Intrinsic.show_operation operation)
         (list (expression form) arguments)
   | Call { callee; arguments; _ } ->
       let dispatch =
@@ -76,7 +76,7 @@ let definition_form text (path : Path.t) =
   let file = Support.file_of "app::main" in
   (match
      List.map
-       (fun message -> Diagnostic.make ~code:(Types Mismatch) (Source.span 0 0) message)
+       (fun message -> Diagnostic.make ~code:(Types Mismatch) (Source.make_span 0 0) message)
        (Support.parse_errors packages file)
      @ Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ]
          (Support.database packages) file
@@ -436,7 +436,7 @@ let () =
               Derived
                 {
                   type_ = Top { module_ = Support.module_of "app::main"; name = "Later" };
-                  trait = Well_known.path Equal;
+                  trait = Well_known.make_path Equal;
                 };
             name = "equal";
             receiver = Read;
@@ -500,7 +500,7 @@ let () =
   in
   let core_of_method name =
     let packages = Support.setup [ ("app::main", text) ] in
-    let both_package = Path.package both in
+    let both_package = Path.locate_package both in
     let parameter : Types.parameter = { owner = both; name = "Value" } in
     let bounds (actual : Types.parameter) = if actual = parameter then [ described ] else [] in
     let owner =
@@ -543,7 +543,7 @@ let () =
         (observed "twice"));
   Harness.test "a method of a derived impl has the generated core form" (fun () ->
       let packages = Support.setup [ ("app::main", text) ] in
-      let owner : Path.t = Derived { type_ = both; trait = Well_known.path Equal } in
+      let owner : Path.t = Derived { type_ = both; trait = Well_known.make_path Equal } in
       match
         ( Database.For_testing.read_core (Support.database packages)
             (Method { owner; name = "equal"; receiver = Read }),

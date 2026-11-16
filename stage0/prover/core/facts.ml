@@ -11,6 +11,10 @@ let bug format = Compiler_bug.bug ~stage:"Prover" format
 let is_in_recursion_group (context : State.context) path =
   List.exists (Path.equal path) (context.lookups.recursion_group context.current)
 
+let has_method_in_recursion_group (context : State.context) impl =
+  List.exists (is_in_recursion_group context)
+    (Mir.Call_edges.list_written_methods context.lookups.interface.names impl)
+
 let list_clauses (requires : Mir.requirement list) =
   List.map (fun (requirement : Mir.requirement) -> requirement.clause) requires
 
@@ -138,7 +142,7 @@ let assume context (frame : State.frame) term =
 let locate (context : State.context) (source : State.source) origin =
   if source.key = Some context.home then State.Node origin else Whole_definition
 
-let add_requires (context : State.context) required =
+let make_requires_fix (context : State.context) required =
   let names = context.lookups.interface.names in
   let text = names.text context.home in
   let brace =
@@ -197,8 +201,6 @@ let truss_of_value context term =
   in
   arithmetic 0 term
 
-let show_implication premise conclusion = Printf.sprintf "(%s) ==> (%s)" premise conclusion
-
 let truss_of_goal context term =
   let value = truss_of_value context in
   let rec print = function
@@ -212,7 +214,7 @@ let truss_of_goal context term =
     | Logic.Operation ("not", [ inner ]) -> Option.map (Printf.sprintf "!(%s)") (print inner)
     | Logic.Operation ("=>", [ premise; conclusion ]) -> (
         match (print premise, print conclusion) with
-        | Some premise, Some conclusion -> Some (show_implication premise conclusion)
+        | Some premise, Some conclusion -> Some (Printf.sprintf "(%s) ==> (%s)" premise conclusion)
         | _ -> None)
     | term -> value term
   and joined separator parts =
@@ -232,13 +234,15 @@ let truss_of_goal context term =
     printed
   else None
 
-let add_requires_under_condition context (frame : State.frame) conclusion =
+let add_requires context (frame : State.frame) (required : State.message) =
   match frame.condition with
-  | Logic.Boolean true -> add_requires context [ Text conclusion ]
+  | Logic.Boolean true -> make_requires_fix context required
   | condition -> (
       match truss_of_goal context condition with
-      | Some premise -> add_requires context [ Text (show_implication premise conclusion) ]
-      | None -> [])
+      | Some premise ->
+          make_requires_fix context
+            ((State.Text ("(" ^ premise ^ ") ==> (") :: required) @ [ State.Text ")" ])
+      | None -> make_requires_fix context required)
 
 let rec make_closed_obligation ?template_clause context (frame : State.frame) code location message
     goal =
@@ -308,13 +312,8 @@ let record_obligation ?template_clause ?cited ~fixes ~may_stop_with_panic contex
       let fixes =
         match fixes with
         | [] when frame.source.key = Some context.home && frame.makes_obligations -> (
-            let goal =
-              match frame.condition with
-              | Logic.Boolean true -> goal
-              | condition -> Logic.( ==> ) condition goal
-            in
             match truss_of_goal context goal with
-            | Some required -> add_requires context [ Text required ]
+            | Some required -> add_requires context frame [ Text required ]
             | None -> [])
         | fixes -> fixes
       in
@@ -368,14 +367,15 @@ let make_constructor_symbol (ty : Types.ty) variant =
 
 let make_selector_symbol ty variant field = Logic.Symbol.Field { type_ = ty; variant; field }
 let is_standard_equal = Well_known.is Equal
-let equal_trait = Well_known.path Equal
+let equal_trait = Well_known.make_path Equal
 
 let find_visible_type (context : State.context) (ty : Types.ty) =
   match ty with
   | Named { path; arguments } when Types.find_builtin ty = None -> (
       match Interface.Definition.read_interface context.lookups.interface path with
       | Some (Interface.Environment.Type_interface interface)
-        when (not interface.opaque) || Path.package path = Path.package context.current ->
+        when (not interface.opaque)
+             || Path.locate_package path = Path.locate_package context.current ->
           let substitution = Types.make_substitution interface.type_generics arguments in
           Some (interface, substitution)
       | _ -> None)
@@ -724,7 +724,8 @@ let merge context ?value_type ~condition
         Some
           (define "parts"
              (declare_sort context
-                (Types.Named { path = Well_known.path Sequence; arguments = [ Types.Type part ] }))
+                (Types.Named
+                   { path = Well_known.make_path Sequence; arguments = [ Types.Type part ] }))
              values)
     | _ -> first.yielded_so_far
   in

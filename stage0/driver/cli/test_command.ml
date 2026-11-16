@@ -4,15 +4,18 @@ let select snapshot database packages ~paths ~match_ =
   let names = Database.make_name_lookups database packages in
   List.concat_map
     (fun (file : Path.file) ->
-      let source = Command_packages.source snapshot packages file in
+      let source = Command_packages.read_source snapshot packages file in
       List.filter_map
         (fun (declaration : Resolve.Names.declaration) ->
           match declaration.path with
           | Test { name; _ }
             when declaration.ordinal = 0
-                 && match match_ with Some text -> Substring.contains name text | None -> true ->
+                 && match match_ with Some text -> String.includes ~affix:text name | None -> true
+            ->
               let line =
-                fst (Source.position source (names.place (Resolve.Names.make_key declaration)).base)
+                fst
+                  (Source.compute_position source
+                     (names.place (Resolve.Names.make_key declaration)).base)
               in
               Some
                 {
@@ -24,24 +27,24 @@ let select snapshot database packages ~paths ~match_ =
                 }
           | _ -> None)
         (names.declarations_in file))
-    (Command_packages.selected snapshot packages paths)
+    (Command_packages.select_files snapshot packages paths)
 
-let label test = Path.show_module test.module_ ^ " " ^ Diagnostic.quote test.name
+let label_test test = Path.show_module test.module_ ^ " " ^ Diagnostic.quote test.name
 
-let duration microseconds =
+let show_duration microseconds =
   if microseconds >= 1_000_000 then Printf.sprintf "%.2fs" (float microseconds /. 1e6)
   else if microseconds >= 1_000 then Printf.sprintf "%dms" (microseconds / 1_000)
   else Printf.sprintf "%dµs" microseconds
 
-let seconds microseconds = Printf.sprintf "%.1fs" (float microseconds /. 1e6)
-let now_microseconds () = int_of_float (Unix.gettimeofday () *. 1e6)
+let show_seconds microseconds = Printf.sprintf "%.1fs" (float microseconds /. 1e6)
+let read_microseconds () = int_of_float (Unix.gettimeofday () *. 1e6)
 
-let indented text =
+let print_indented text =
   String.split_on_char '\n' text
   |> List.filter (( <> ) "")
   |> List.iter (fun line -> Output.print_line ("    " ^ line))
 
-let summary (records : Compile.record list) =
+let summarize (records : Compile.record list) =
   let count outcome =
     List.length (List.filter (fun (record : Compile.record) -> record.outcome = outcome) records)
   in
@@ -65,9 +68,9 @@ let print_report tests (records : Compile.record list) ~timings:show_timings tim
   List.iter2
     (fun test (record : Compile.record) ->
       if record.outcome <> Passed then begin
-        Output.printf "%s: %s\n" (label test) (Compile.show_outcome record.outcome);
-        Option.iter indented record.message;
-        Option.iter indented record.echo
+        Output.printf "%s: %s\n" (label_test test) (Compile.show_outcome record.outcome);
+        Option.iter print_indented record.message;
+        Option.iter print_indented record.echo
       end)
     tests records;
   if List.exists (fun (record : Compile.record) -> record.outcome <> Passed) records then
@@ -79,19 +82,20 @@ let print_report tests (records : Compile.record list) ~timings:show_timings tim
           compare right.microseconds left.microseconds)
     in
     let shown =
-      List.map (fun (_, (record : Compile.record)) -> duration record.microseconds) rows
+      List.map (fun (_, (record : Compile.record)) -> show_duration record.microseconds) rows
     in
     let width = List.fold_left (fun widest name -> max widest (String.length name)) 0 shown in
     List.iter2
       (fun (test, (record : Compile.record)) text ->
-        Output.printf "%*s  %s%s\n" width text (label test)
+        Output.printf "%*s  %s%s\n" width text (label_test test)
           (if record.cached then "  cached" else ""))
       rows shown;
     Output.print_line ""
   end;
   Output.printf "%s in %s (check %s, build %s, tests %s)\n"
-    (if records = [] then "No tests" else summary records)
-    (seconds timings.total) (seconds timings.check) (seconds timings.build) (seconds timings.tests)
+    (if records = [] then "No tests" else summarize records)
+    (show_seconds timings.total) (show_seconds timings.check) (show_seconds timings.build)
+    (show_seconds timings.tests)
 
 let test_json test (record : Compile.record) =
   Json.Object
@@ -103,11 +107,11 @@ let test_json test (record : Compile.record) =
       ("outcome", Json.String (Compile.show_outcome record.outcome));
       ("cached", Json.Bool record.cached);
       ("microseconds", Json.Int record.microseconds);
-      ("message", Json.option (fun message -> Json.String message) record.message);
-      ("echo", Json.option (fun echo -> Json.String echo) record.echo);
+      ("message", Json.encode_option (fun message -> Json.String message) record.message);
+      ("echo", Json.encode_option (fun echo -> Json.String echo) record.echo);
     ]
 
-let timings_json timings =
+let encode_timings timings =
   Json.Object
     [
       ("check", Json.Int timings.check);
@@ -126,14 +130,16 @@ type progress = {
 }
 
 let draw progress =
-  let now = now_microseconds () in
+  let now = read_microseconds () in
   let total = Array.length progress.tests in
   let width = String.length (string_of_int total) in
   let parts =
     [ Printf.sprintf "[%*d/%d]" width progress.ended total ]
     @ (if progress.not_passed > 0 then [ Printf.sprintf "%d not passed" progress.not_passed ]
        else [])
-    @ (match progress.running_since with Some start -> [ seconds (now - start) ] | None -> [])
+    @ (match progress.running_since with
+      | Some start -> [ show_seconds (now - start) ]
+      | None -> [])
     @
     match
       Hashtbl.fold
@@ -144,24 +150,28 @@ let draw progress =
         progress.running None
     with
     | Some (test, start) ->
-        [ Printf.sprintf "running %s (%s)" (label progress.tests.(test)) (seconds (now - start)) ]
+        [
+          Printf.sprintf "running %s (%s)"
+            (label_test progress.tests.(test))
+            (show_seconds (now - start));
+        ]
     | None -> []
   in
   Status_line.show progress.line (String.concat " · " parts)
 
-let on_progress progress ~build_ended (event : Compile.progress) =
+let handle_progress progress ~build_ended (event : Compile.progress) =
   match event with
   | Lowering -> Status_line.show progress.line "building · lowering"
   | Compiling { compiled; total } ->
       Status_line.show progress.line
         (Printf.sprintf "building · compiling %d/%d C files" compiled total)
   | Running _ ->
-      let now = now_microseconds () in
+      let now = read_microseconds () in
       build_ended := Some now;
       progress.running_since <- Some now;
       draw progress
   | Started { test } ->
-      Hashtbl.replace progress.running test (now_microseconds ());
+      Hashtbl.replace progress.running test (read_microseconds ());
       draw progress
   | Ended { test; record } ->
       Hashtbl.remove progress.running test;
@@ -183,11 +193,11 @@ let run_tests ?rerun ?progress database snapshot packages tests =
 
 let run ~paths ~match_ ~timings:show_timings ~rerun =
   let json = Output.json () in
-  let started = now_microseconds () in
-  let snapshot, packages = Command_packages.current () in
+  let started = read_microseconds () in
+  let snapshot, packages = Command_packages.load_current () in
   let database = Workspace.open_database snapshot in
   let report = Report.gather database snapshot packages in
-  let checked = now_microseconds () in
+  let checked = read_microseconds () in
   let tests = select snapshot database packages ~paths ~match_ in
   if not (Report.clean report) then raise (Report.Errors report);
   let progress =
@@ -206,10 +216,10 @@ let run ~paths ~match_ ~timings:show_timings ~rerun =
       ~finally:(fun () -> Status_line.clear progress.line)
       (fun () ->
         run_tests ~rerun
-          ~progress:(on_progress progress ~build_ended)
+          ~progress:(handle_progress progress ~build_ended)
           database snapshot packages tests)
   in
-  let ended = now_microseconds () in
+  let ended = read_microseconds () in
   let build_end = Option.value !build_ended ~default:ended in
   let timings =
     {
@@ -221,14 +231,14 @@ let run ~paths ~match_ ~timings:show_timings ~rerun =
   in
   if json then
     Json.print
-      (Json.document ~diagnostics:[]
+      (Json.make_document ~diagnostics:[]
          [
            ("tests", Json.List (List.map2 test_json tests records));
-           ("timings", timings_json timings);
+           ("timings", encode_timings timings);
          ])
   else print_report tests records ~timings:show_timings timings;
   if List.for_all (fun (record : Compile.record) -> record.outcome = Passed) records then 0 else 1
 
 module For_testing = struct
-  let duration = duration
+  let duration = show_duration
 end

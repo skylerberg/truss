@@ -1,12 +1,12 @@
-let skipped name = name = "" || name.[0] = '.' || name = "_build" || name = "node_modules"
+let is_skipped name = name = "" || name.[0] = '.' || name = "_build" || name = "node_modules"
 
 let hash files =
   let lines =
     List.map
-      (fun (path, bytes) -> Printf.sprintf "%s %s\n" path (Blake3.hex_digest bytes))
+      (fun (path, bytes) -> Printf.sprintf "%s %s\n" path (Blake3.hash_to_hex bytes))
       (List.sort (fun (left, _) (right, _) -> String.compare left right) files)
   in
-  Blake3.hex_digest (String.concat "" lines)
+  Blake3.hash_to_hex (String.concat "" lines)
 
 let is_hash text =
   String.length text = 64
@@ -39,18 +39,18 @@ let walk ~enters_directory ~keeps_file directory =
 let is_other_package directory = Sys.file_exists (Filename.concat directory "truss.toml")
 let is_published name = is_input name || Filename.check_suffix name ".md"
 
-let published_files =
+let list_published_files =
   walk
-    ~enters_directory:(fun ~entry ~full -> not (skipped entry || is_other_package full))
+    ~enters_directory:(fun ~entry ~full -> not (is_skipped entry || is_other_package full))
     ~keeps_file:(fun ~relative ~entry ->
       is_published entry && (entry <> "truss.lock" || relative = ""))
 
-let input_files =
+let list_input_files =
   walk
-    ~enters_directory:(fun ~entry ~full:_ -> not (skipped entry))
+    ~enters_directory:(fun ~entry ~full:_ -> not (is_skipped entry))
     ~keeps_file:(fun ~relative:_ ~entry -> is_input entry)
 
-let all_files =
+let list_all_files =
   walk
     ~enters_directory:(fun ~entry:_ ~full:_ -> true)
     ~keeps_file:(fun ~relative:_ ~entry:_ -> true)

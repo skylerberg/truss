@@ -1,4 +1,4 @@
-let solver () =
+let make_solver () =
   let cache = Workspace.open_cache () in
   match
     Solver.find
@@ -20,7 +20,7 @@ let run_template_checks compiler checks =
       (check, Compile.run_template_check compiler ~from_template ~literals ~clauses))
     checks
 
-let runs database snapshot packages proofs =
+let list_runs database snapshot packages proofs =
   match Database.list_template_checks proofs with
   | [] -> []
   | checks -> run_template_checks (Compiler.create database snapshot packages Development) checks
@@ -31,9 +31,9 @@ let check database snapshot packages files =
     proofs;
     verdicts =
       lazy
-        (let solver = solver () in
+        (let solver = make_solver () in
          Prover.decide
-           ~runs:(runs database snapshot packages proofs)
+           ~runs:(list_runs database snapshot packages proofs)
            (Database.make_proof_lookups database)
            solver (Database.list_proofs proofs));
   }
@@ -44,7 +44,7 @@ let list_states checked file = Prover.list_states (Lazy.force checked.verdicts) 
 let list_holes snapshot packages checked definition =
   List.map
     (fun (file, offset) ->
-      let source = Command_packages.source snapshot packages file in
-      let line, column = Source.position source offset in
-      (Shown_path.shown (Source.path source), line, column))
+      let source = Command_packages.read_source snapshot packages file in
+      let line, column = Source.compute_position source offset in
+      (Shown_path.show_path (Source.path source), line, column))
     (Database.list_holes checked.proofs definition)

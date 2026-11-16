@@ -15,7 +15,7 @@ type input =
 
 type mode = File of { recovery : bool } | Interpolation
 
-let token kind span =
+let make_token kind span =
   {
     Token.kind;
     span;
@@ -24,9 +24,8 @@ let token kind span =
     is_inserted_closer = false;
   }
 
-let spelling punctuation = Token.punctuation_spelling punctuation
-let opener_spelling bracket = spelling (Open bracket)
-let closer_spelling bracket = spelling (Close bracket)
+let spell_opener bracket = Token.spell_punctuation (Open bracket)
+let spell_closer bracket = Token.spell_punctuation (Close bracket)
 
 let is_name_byte character =
   (character >= 'a' && character <= 'z')
@@ -44,11 +43,11 @@ let starts_definition source offset =
   let stop = word_end offset in
   stop > offset
   &&
-  match Token.word (String.sub text offset (stop - offset)) with
+  match Token.find_word (String.sub text offset (stop - offset)) with
   | Some (Keyword keyword) -> List.mem keyword Token.definition_keywords
   | _ -> false
 
-let indentation_of source offset =
+let extract_indentation source offset =
   let text = Source.text source in
   let start = Source.line_start source offset in
   let rec stop index =
@@ -60,25 +59,25 @@ let indentation_of source offset =
 
 let token_starts_definition source ~first_line_break (kind : Token.kind) offset =
   first_line_break <> None
-  && indentation_of source offset = ""
+  && extract_indentation source offset = ""
   && match kind with Keyword keyword -> List.mem keyword Token.definition_keywords | _ -> false
 
-let closer_position first_line_break position =
+let compute_closer_position first_line_break position =
   match first_line_break with
   | Some (line_break : Source.span) -> line_break.start
   | None -> position
 
 type opener = { bracket : Token.bracket; span : Source.span; index : int }
 
-let closing_position source tokens ~closers ~is_unterminated_string (opener : opener) =
+let find_closing_position source tokens ~closers ~is_unterminated_string (opener : opener) =
   let opener_line = Source.line_start source opener.span.start in
-  let indentation = String.length (indentation_of source opener.span.start) in
+  let indentation = String.length (extract_indentation source opener.span.start) in
   let last_on_opener_line = ref (Some opener.span.stop) and last_indented = ref None in
   let element ~start ~stop ~contains_closer =
     let place = if contains_closer then None else Some stop in
     let line = Source.line_start source start in
     if line = opener_line then last_on_opener_line := place
-    else if String.length (indentation_of source start) > indentation then
+    else if String.length (extract_indentation source start) > indentation then
       last_indented := Some place
   in
   let rec scan index =
@@ -103,27 +102,27 @@ let closing_position source tokens ~closers ~is_unterminated_string (opener : op
   | Some place -> Option.map (fun stop -> (stop, true)) place
   | None -> Option.map (fun stop -> (stop, false)) !last_on_opener_line
 
-let closing_edits source tokens ~closers ~is_unterminated_string openers =
+let find_closing_edits source tokens ~closers ~is_unterminated_string openers =
   let rec edits earliest reversed = function
     | [] -> Some (List.rev reversed)
     | (opener : opener) :: outer -> (
-        match closing_position source tokens ~closers ~is_unterminated_string opener with
+        match find_closing_position source tokens ~closers ~is_unterminated_string opener with
         | None -> None
         | Some (position, own_line) ->
             let position = max position earliest in
-            let closer = closer_spelling opener.bracket in
+            let closer = spell_closer opener.bracket in
             let replacement =
               if own_line && opener.bracket = Curly then
-                "\n" ^ indentation_of source opener.span.start ^ closer
+                "\n" ^ extract_indentation source opener.span.start ^ closer
               else closer
             in
             edits position
-              (Diagnostic.insert (Source.zero_width position) replacement :: reversed)
+              (Diagnostic.insert (Source.make_zero_width position) replacement :: reversed)
               outer)
   in
   edits 0 [] openers
 
-let bracket_index = function Token.Paren -> 0 | Square -> 1 | Curly -> 2
+let index_bracket = function Token.Paren -> 0 | Square -> 1 | Curly -> 2
 
 let run ~source ~diagnostics ~mode next_input =
   let output = Dynarray.create () in
@@ -142,20 +141,21 @@ let run ~source ~diagnostics ~mode next_input =
   let report diagnostic = Diagnostic.Collector.add diagnostics diagnostic in
   let push bracket span =
     stack := { bracket; span; index = Dynarray.length output } :: !stack;
-    open_count.(bracket_index bracket) <- open_count.(bracket_index bracket) + 1
+    open_count.(index_bracket bracket) <- open_count.(index_bracket bracket) + 1
   in
   let pop closer =
     match !stack with
     | opener :: rest ->
         stack := rest;
-        open_count.(bracket_index opener.bracket) <- open_count.(bracket_index opener.bracket) - 1;
+        open_count.(index_bracket opener.bracket) <- open_count.(index_bracket opener.bracket) - 1;
         Dynarray.set closers opener.index (Some (Dynarray.length output));
         emit closer
     | [] -> ()
   in
   let insert_closer position =
     match !stack with
-    | opener :: _ -> pop (token (Punctuation (Close opener.bracket)) (Source.zero_width position))
+    | opener :: _ ->
+        pop (make_token (Punctuation (Close opener.bracket)) (Source.make_zero_width position))
     | [] -> ()
   in
   let close_silently position =
@@ -164,7 +164,7 @@ let run ~source ~diagnostics ~mode next_input =
     done
   in
   let closing_fix openers ~title =
-    match closing_edits source output ~closers ~is_unterminated_string openers with
+    match find_closing_edits source output ~closers ~is_unterminated_string openers with
     | Some edits -> [ Diagnostic.fix title edits ]
     | None -> []
   in
@@ -173,31 +173,29 @@ let run ~source ~diagnostics ~mode next_input =
     | [] -> ()
     | innermost :: outer ->
         let closers =
-          String.concat "" (List.map (fun opener -> closer_spelling opener.bracket) !stack)
+          String.concat "" (List.map (fun opener -> spell_closer opener.bracket) !stack)
         in
         let notes =
           List.map
             (fun opener ->
               ( opener.span,
-                Printf.sprintf "This `%s` is not closed either." (opener_spelling opener.bracket) ))
+                Printf.sprintf "This `%s` is not closed either." (spell_opener opener.bracket) ))
             outer
         in
         report
           (Diagnostic.make ~code:(Lexer Unclosed_bracket) ~notes
              ~fixes:(closing_fix !stack ~title:(Printf.sprintf "Insert `%s`" closers))
              innermost.span
-             (Printf.sprintf "This `%s` is never closed%s."
-                (opener_spelling innermost.bracket)
-                reason));
+             (Printf.sprintf "This `%s` is never closed%s." (spell_opener innermost.bracket) reason));
         close_silently position
   in
   let close_bracket (current : Token.t) bracket =
     let span = current.span in
-    if open_count.(bracket_index bracket) = 0 then
+    if open_count.(index_bracket bracket) = 0 then
       report
         (Diagnostic.make ~code:(Lexer Unmatched_closing_bracket) span
-           (Printf.sprintf "This `%s` has no `%s` to close." (closer_spelling bracket)
-              (opener_spelling bracket)))
+           (Printf.sprintf "This `%s` has no `%s` to close." (spell_closer bracket)
+              (spell_opener bracket)))
     else begin
       let rec close_unclosed () =
         match !stack with
@@ -208,13 +206,13 @@ let run ~source ~diagnostics ~mode next_input =
                    [
                      ( span,
                        Printf.sprintf "This `%s` closes an earlier `%s` first."
-                         (closer_spelling bracket) (opener_spelling bracket) );
+                         (spell_closer bracket) (spell_opener bracket) );
                    ]
                  ~fixes:
                    (closing_fix [ opener ]
-                      ~title:(Printf.sprintf "Insert `%s`" (closer_spelling opener.bracket)))
+                      ~title:(Printf.sprintf "Insert `%s`" (spell_closer opener.bracket)))
                  opener.span
-                 (Printf.sprintf "This `%s` is never closed." (opener_spelling opener.bracket)));
+                 (Printf.sprintf "This `%s` is never closed." (spell_opener opener.bracket)));
             insert_closer span.start;
             close_unclosed ()
         | _ -> ()
@@ -226,23 +224,26 @@ let run ~source ~diagnostics ~mode next_input =
   let finish ~position ~first_line_break ~blank_line ~ends_unterminated =
     if !stack <> [] then open_at_end := true;
     (match mode with
-    | File _ when ends_unterminated -> close_silently (closer_position first_line_break position)
+    | File _ when ends_unterminated ->
+        close_silently (compute_closer_position first_line_break position)
     | Interpolation when ends_unterminated -> close_silently position
     | File _ ->
         close_all
-          ~position:(closer_position first_line_break position)
+          ~position:(compute_closer_position first_line_break position)
           ~reason:" before the end of the file"
     | Interpolation -> close_all ~position ~reason:" before the end of the interpolation");
     (match (mode, !previous) with
     | File _, Some previous_kind when Token.can_end previous_kind ->
         emit
-          (token Newline
-             (match first_line_break with Some span -> span | None -> Source.zero_width position))
+          (make_token Newline
+             (match first_line_break with
+             | Some span -> span
+             | None -> Source.make_zero_width position))
     | _ -> ());
     emit
       {
         kind = End_of_file;
-        span = Source.zero_width position;
+        span = Source.make_zero_width position;
         line_break_before = first_line_break <> None;
         blank_line_before = blank_line;
         is_inserted_closer = false;
@@ -258,7 +259,7 @@ let run ~source ~diagnostics ~mode next_input =
         | File { recovery = true }
           when !stack <> [] && token_starts_definition source ~first_line_break kind span.start ->
             close_all
-              ~position:(closer_position first_line_break span.start)
+              ~position:(compute_closer_position first_line_break span.start)
               ~reason:" before the next definition"
         | _ -> ());
         let ignores_line_breaks =
@@ -267,7 +268,7 @@ let run ~source ~diagnostics ~mode next_input =
         (match (first_line_break, !previous) with
         | Some line_break, Some previous_kind
           when (not ignores_line_breaks) && Token.can_end previous_kind && Token.can_begin kind ->
-            emit (token Newline line_break)
+            emit (make_token Newline line_break)
         | _ -> ());
         if unterminated_string then Hashtbl.replace unterminated_strings span.start ();
         let current =
@@ -290,8 +291,8 @@ let run ~source ~diagnostics ~mode next_input =
   let tokens = loop () in
   (tokens, !open_at_end)
 
-let file ~source ~diagnostics ~recovery next_input =
+let lex_file ~source ~diagnostics ~recovery next_input =
   run ~source ~diagnostics ~mode:(File { recovery }) next_input
 
-let interpolation ~source ~diagnostics next_input =
+let lex_interpolation ~source ~diagnostics next_input =
   fst (run ~source ~diagnostics ~mode:Interpolation next_input)

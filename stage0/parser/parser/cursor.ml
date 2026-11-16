@@ -49,7 +49,7 @@ let create ~diagnostics ~base tokens ~first ~stop =
     is_unterminated_interpolation = false;
   }
 
-let interpolation cursor (inner : Token.interpolation) =
+let enter_interpolation cursor (inner : Token.interpolation) =
   {
     (create ~diagnostics:cursor.diagnostics ~base:cursor.base inner.tokens ~first:0
        ~stop:(Array.length inner.tokens - 1))
@@ -62,27 +62,29 @@ let interpolation cursor (inner : Token.interpolation) =
 
 let index cursor = cursor.index
 
-let end_token cursor =
+let make_end_token cursor =
   let position =
     if cursor.stop > cursor.first then cursor.tokens.(cursor.stop - 1).span.stop else cursor.base
   in
   {
     Token.kind = End_of_file;
-    span = Source.zero_width position;
+    span = Source.make_zero_width position;
     line_break_before = false;
     blank_line_before = false;
     is_inserted_closer = false;
   }
 
-let token_at cursor index = if index < cursor.stop then cursor.tokens.(index) else end_token cursor
-let peek cursor = token_at cursor cursor.index
+let lookup_token cursor index =
+  if index < cursor.stop then cursor.tokens.(index) else make_end_token cursor
+
+let peek cursor = lookup_token cursor cursor.index
 let peek_kind cursor = (peek cursor).kind
-let peek_ahead cursor count = (token_at cursor (cursor.index + count)).kind
+let peek_ahead cursor count = (lookup_token cursor (cursor.index + count)).kind
 
 let record_recovery cursor ~index (span : Source.span) =
   let span =
     if span.start = span.stop && index > cursor.first then
-      Source.span (min span.start (token_at cursor (index - 1)).span.start) span.stop
+      Source.make_span (min span.start (lookup_token cursor (index - 1)).span.start) span.stop
     else span
   in
   cursor.recoveries := span :: !(cursor.recoveries)
@@ -98,12 +100,12 @@ let advance cursor =
     cursor.index <- cursor.index + 1
   end
 
-let next cursor =
+let take cursor =
   let token = peek cursor in
   advance cursor;
   token
 
-let at_end cursor = cursor.index >= cursor.stop
+let is_at_end cursor = cursor.index >= cursor.stop
 let is cursor kind = peek_kind cursor = kind
 
 let is_punctuation cursor punctuation =
@@ -128,31 +130,31 @@ let accept_keyword cursor keyword =
   end
   else false
 
-let definition_span cursor span = Source.Definition_span.of_file ~base:cursor.base span
+let make_definition_span cursor span = Source.Definition_span.of_file ~base:cursor.base span
 
-let previous_token cursor =
+let find_previous_token cursor =
   if cursor.index > cursor.first then Some cursor.tokens.(cursor.index - 1) else None
 
-let previous_stop cursor =
-  match previous_token cursor with Some token -> token.span.stop | None -> cursor.base
+let compute_previous_stop cursor =
+  match find_previous_token cursor with Some token -> token.span.stop | None -> cursor.base
 
-let span_from cursor start_index =
-  let start = (token_at cursor start_index).span.start in
-  let stop = max start (previous_stop cursor) in
-  definition_span cursor (Source.span start stop)
+let make_span_from cursor start_index =
+  let start = (lookup_token cursor start_index).span.start in
+  let stop = max start (compute_previous_stop cursor) in
+  make_definition_span cursor (Source.make_span start stop)
 
-let file_span cursor span = Source.Definition_span.to_file ~base:cursor.base span
+let make_file_span cursor span = Source.Definition_span.to_file ~base:cursor.base span
 
 let allocate_id cursor span =
   Dynarray.add_last cursor.spans span;
   Dynarray.length cursor.spans - 1
 
-let allocate_id_from cursor start_index = allocate_id cursor (span_from cursor start_index)
+let allocate_id_from cursor start_index = allocate_id cursor (make_span_from cursor start_index)
 let read_span cursor id = Dynarray.get cursor.spans id
 let set_span cursor id span = Dynarray.set cursor.spans id span
-let read_file_span cursor id = file_span cursor (read_span cursor id)
+let read_file_span cursor id = make_file_span cursor (read_span cursor id)
 
-let rec tokens_within (tokens : Token.t array) ~first ~stop (span : Source.span) =
+let rec list_tokens_within (tokens : Token.t array) ~first ~stop (span : Source.span) =
   let inside = ref [] and enclosing = ref None in
   for index = first to stop - 1 do
     let token = tokens.(index) in
@@ -167,17 +169,19 @@ let rec tokens_within (tokens : Token.t array) ~first ~stop (span : Source.span)
         List.find_opt
           (fun (interpolation : Token.interpolation) ->
             interpolation.span.start <= span.start && span.stop <= interpolation.span.stop)
-          (Array.to_list (Token.interpolations literal))
+          (Array.to_list (Token.list_interpolations literal))
       with
       | Some interpolation ->
-          tokens_within interpolation.tokens ~first:0 ~stop:(Array.length interpolation.tokens) span
+          list_tokens_within interpolation.tokens ~first:0
+            ~stop:(Array.length interpolation.tokens)
+            span
       | None -> [||])
   | inside, _ -> Array.of_list (List.rev inside)
 
-let spelling cursor ?insertions span =
-  match tokens_within cursor.tokens ~first:cursor.first ~stop:cursor.stop span with
+let spell cursor ?insertions span =
+  match list_tokens_within cursor.tokens ~first:cursor.first ~stop:cursor.stop span with
   | [||] -> None
-  | tokens -> Token.spelling ?insertions tokens
+  | tokens -> Token.spell_tokens ?insertions tokens
 
 let joins_neighbors cursor (span : Source.span) code =
   let adjacent is_adjacent =
@@ -185,7 +189,8 @@ let joins_neighbors cursor (span : Source.span) code =
       if index >= cursor.stop then None
       else
         let token = cursor.tokens.(index) in
-        if token.span.start < token.span.stop && is_adjacent token then Token.spelling [| token |]
+        if token.span.start < token.span.stop && is_adjacent token then
+          Token.spell_tokens [| token |]
         else search (index + 1)
     in
     Option.bind (search cursor.first) (fun spelling ->
@@ -215,12 +220,12 @@ let describe (token : Token.t) =
   | End_of_file -> "the end of the definition"
   | Upper name | Lower name -> Printf.sprintf "the name `%s`" name
   | Underscore -> "`_`"
-  | Keyword keyword -> Printf.sprintf "`%s`" (Token.keyword_spelling keyword)
-  | Reserved reserved -> Printf.sprintf "`%s`" (Token.reserved_spelling reserved)
+  | Keyword keyword -> Printf.sprintf "`%s`" (Token.spell_keyword keyword)
+  | Reserved reserved -> Printf.sprintf "`%s`" (Token.spell_reserved reserved)
   | Integer _ | Float _ -> "a number"
   | String _ -> "a string"
-  | Punctuation punctuation -> Printf.sprintf "`%s`" (Token.punctuation_spelling punctuation)
-  | Foreign foreign -> Printf.sprintf "`%s`" (Token.foreign_spelling foreign)
+  | Punctuation punctuation -> Printf.sprintf "`%s`" (Token.spell_punctuation punctuation)
+  | Foreign foreign -> Printf.sprintf "`%s`" (Token.spell_foreign foreign)
 
 let fail cursor expected =
   let token = peek cursor in
@@ -233,7 +238,7 @@ let fail cursor expected =
   | Reserved reserved ->
       report cursor Reserved_word token.span
         (Printf.sprintf "`%s` is reserved for possible later use, and means nothing in Truss yet."
-           (Token.reserved_spelling reserved))
+           (Token.spell_reserved reserved))
   | _ ->
       report cursor Unexpected_token token.span
         (Printf.sprintf "Expected %s, found %s." expected (describe token)));
@@ -241,11 +246,11 @@ let fail cursor expected =
 
 let expect_punctuation cursor punctuation =
   if not (accept_punctuation cursor punctuation) then
-    fail cursor (Printf.sprintf "`%s`" (Token.punctuation_spelling punctuation))
+    fail cursor (Printf.sprintf "`%s`" (Token.spell_punctuation punctuation))
 
 let expect_keyword cursor keyword =
   if not (accept_keyword cursor keyword) then
-    fail cursor (Printf.sprintf "`%s`" (Token.keyword_spelling keyword))
+    fail cursor (Printf.sprintf "`%s`" (Token.spell_keyword keyword))
 
 let nested cursor parse =
   if cursor.nesting_depth >= nesting_limit then begin
@@ -274,7 +279,7 @@ let check_chain_length cursor ~chain_length =
     raise Failed
   end
 
-let closer cursor index = cursor.group_ends.(index - cursor.first)
+let lookup_closer cursor index = cursor.group_ends.(index - cursor.first)
 
 let skip_to cursor limit =
   while cursor.index < min limit cursor.stop do
@@ -282,12 +287,12 @@ let skip_to cursor limit =
   done
 
 let skip_one cursor =
-  if cursor.index < cursor.stop then skip_to cursor (closer cursor cursor.index + 1)
+  if cursor.index < cursor.stop then skip_to cursor (lookup_closer cursor cursor.index + 1)
 
 let group cursor =
-  Array.sub cursor.tokens cursor.index (closer cursor cursor.index - cursor.index + 1)
+  Array.sub cursor.tokens cursor.index (lookup_closer cursor cursor.index - cursor.index + 1)
 
-let separated cursor ~separator item =
+let parse_separated cursor ~separator item =
   let rec gather items =
     let items = item cursor :: items in
     if accept_punctuation cursor separator then gather items else List.rev items
@@ -308,9 +313,9 @@ let skip_line cursor ~closer_index =
     skip_one cursor
   done
 
-let bracketed cursor ~item ~recover =
+let parse_bracketed cursor ~item ~recover =
   let opener = cursor.index in
-  let closer_index = closer cursor opener in
+  let closer_index = lookup_closer cursor opener in
   advance cursor;
   let rec gather items =
     if cursor.index >= closer_index then List.rev items
@@ -327,8 +332,8 @@ let bracketed cursor ~item ~recover =
             skip_one cursor
           done;
           let span =
-            definition_span cursor
-              (Source.span (token_at cursor start).span.start (peek cursor).span.start)
+            make_definition_span cursor
+              (Source.make_span (lookup_token cursor start).span.start (peek cursor).span.start)
           in
           if cursor.index < closer_index then advance cursor;
           gather (recover span :: items)
@@ -337,10 +342,10 @@ let bracketed cursor ~item ~recover =
   skip_to cursor (closer_index + 1);
   items
 
-let lines cursor ~item ~recover =
+let parse_lines cursor ~item ~recover =
   let enclosing_after_inserted_closer = cursor.after_inserted_closer in
   let opener = cursor.index in
-  let closer_index = closer cursor opener in
+  let closer_index = lookup_closer cursor opener in
   advance cursor;
   let rec gather items =
     if cursor.index >= closer_index then List.rev items
@@ -351,7 +356,7 @@ let lines cursor ~item ~recover =
           cursor.after_inserted_closer <- false;
           let value = item cursor in
           let ends_with_comma =
-            match previous_token cursor with
+            match find_previous_token cursor with
             | Some { kind = Punctuation Comma; _ } -> true
             | _ -> false
           in
@@ -364,7 +369,7 @@ let lines cursor ~item ~recover =
         | value -> value
         | exception Failed ->
             skip_line cursor ~closer_index;
-            recover (span_from cursor start)
+            recover (make_span_from cursor start)
       in
       if cursor.index < closer_index && peek_kind cursor = Newline then advance cursor;
       gather (value :: items)
@@ -377,5 +382,5 @@ let lines cursor ~item ~recover =
 let collect_positions cursor : Syntax.positions =
   {
     spans = Dynarray.to_array cursor.spans;
-    recovered = List.sort_uniq compare (List.map (definition_span cursor) !(cursor.recoveries));
+    recovered = List.sort_uniq compare (List.map (make_definition_span cursor) !(cursor.recoveries));
   }

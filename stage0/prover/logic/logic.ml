@@ -130,10 +130,10 @@ let rec show_symbol : symbol -> string = function
       Printf.sprintf "time.method.%s%s[%s]" (Path.show method_) (instance_text trait_arguments)
         (Types.show self_type)
   | Opaque_operation { operation; type_; _ } ->
-      Printf.sprintf "operation.%s.%s" (Intrinsic.operation_name operation) (Types.show type_)
-  | Bit_count { count; width } -> Printf.sprintf "bits.%s.%d" (Intrinsic.operation_name count) width
-  | System operation -> "system." ^ Intrinsic.operation_name operation
-  | Libc_number number -> "libc.number." ^ Libc.number_name number
+      Printf.sprintf "operation.%s.%s" (Intrinsic.show_operation operation) (Types.show type_)
+  | Bit_count { count; width } -> Printf.sprintf "bits.%s.%d" (Intrinsic.show_operation count) width
+  | System operation -> "system." ^ Intrinsic.show_operation operation
+  | Libc_number number -> "libc.number." ^ Libc.show_number number
   | Handle_descriptor -> "handle.descriptor"
   | Compare_bytes_order -> "compare_bytes.order"
   | Cost_most -> "cost.most"
@@ -786,4 +786,4 @@ let list_members query =
     numbering.datatypes []
   |> List.sort compare
 
-let hash text = "smt1-blake3-" ^ Blake3.hex_digest text
+let hash text = "smt1-blake3-" ^ Blake3.hash_to_hex text

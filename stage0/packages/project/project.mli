@@ -7,9 +7,9 @@ type files = {
 }
 
 val lock_file : string
-val manifest_file : string -> string
-val file_path : directory:string -> Path.file -> string
-val package_directory : is_package:(string -> bool) -> string -> string option
+val make_manifest_path : string -> string
+val make_file_path : directory:string -> Path.file -> string
+val find_package_directory : is_package:(string -> bool) -> string -> string option
 
 type source_file = { path : string; directory : string; file : Path.file }
 type problem = { file : string; line : int option; message : string }

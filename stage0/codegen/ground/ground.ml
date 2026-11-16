@@ -10,7 +10,7 @@ and argument = Type of ty | Value of Z.t | Capabilities of Path.t list
 and function_type = { parameters : (mode * ty) list; result : ty; uses : Path.t list }
 
 let compare = Stdlib.compare
-let make_builtin builtin = Named { path = Intrinsic.builtin_path builtin; arguments = [] }
+let make_builtin builtin = Named { path = Intrinsic.make_builtin_path builtin; arguments = [] }
 
 let rec show_path_name : Path.t -> string = function
   | Top { name; _ } | Test { name; _ } -> name

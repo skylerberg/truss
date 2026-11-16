@@ -43,7 +43,7 @@ let rec check_tokens text ~start ~stop (tokens : Token.t array) =
             (fun (interpolation : Token.interpolation) ->
               check_tokens text ~start:interpolation.span.start ~stop:interpolation.span.stop
                 interpolation.tokens)
-            (Token.interpolations literal)
+            (Token.list_interpolations literal)
       | _ -> ())
     tokens;
   if !stack <> [] then fail "unbalanced brackets in %s" quoted
@@ -90,7 +90,7 @@ let check_tree text (item : Syntax.definition Syntax.item) =
     Hashtbl.replace ids value.id ();
     if value.id >= item.value.id then fail "an id is not before its definition's in %s" quoted;
     let previous = ref span.start in
-    Syntax_walk.children
+    Syntax_walk.visit_children
       (fun (inner : Syntax.expression) ->
         let inner_start = spans.(inner.id).start in
         if inner_start < !previous then fail "expressions out of order in %s" quoted;
@@ -108,7 +108,7 @@ let check_tree text (item : Syntax.definition Syntax.item) =
     (fun (span : Source.Definition_span.t) ->
       if span.stop > length then fail "a recovery is out of bounds in %s" quoted)
     item.positions.recovered;
-  Syntax_walk.definition (expression definition_span) item.value
+  Syntax_walk.visit_definition (expression definition_span) item.value
 
 let check_parse_robust text =
   match parse text with
@@ -161,7 +161,7 @@ let check_parsers_agree text =
         | String literal ->
             List.map
               (fun (inner : Token.interpolation) -> inner.span)
-              (Array.to_list (Token.interpolations literal))
+              (Array.to_list (Token.list_interpolations literal))
         | _ -> [])
   in
   let inside_interpolation (span : Source.span) =
@@ -250,7 +250,7 @@ let rec joined_spans ~(edits : Source.span Diagnostic.edit list) ~(written : Tok
           (Array.to_list
              (Array.map
                 (fun (interpolation : Token.interpolation) -> interpolation.tokens)
-                (Token.interpolations literal)))
+                (Token.list_interpolations literal)))
     | _ -> [||]
   in
   let rec walk (written : Token.t list) (fixed : Token.t list) =
@@ -322,7 +322,7 @@ let check_machine_fixes_work text =
     let others = List.filter (fun diagnostic -> not (List.memq diagnostic applied)) diagnostics in
     adds_none ~before:others ~after:remaining
   in
-  match Diagnostic.machine_applicable diagnostics with
+  match Diagnostic.list_machine_applicable diagnostics with
   | [] -> ()
   | applied ->
       if not (applies_cleanly applied) then

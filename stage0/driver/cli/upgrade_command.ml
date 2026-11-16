@@ -1,6 +1,6 @@
 module Path_table = Hashtbl.Make (Path)
 
-let wanted text =
+let parse_wanted text =
   let written, version =
     match String.index_opt text '@' with
     | Some at ->
@@ -52,7 +52,7 @@ let lock_changes ~(before : Registry.Lock.t) ~(after : Registry.Lock.t) =
 
 let holds = function [] -> "" | held -> ", which holds " ^ String.concat ", " held
 
-let change_sentence = function
+let describe_change = function
   | Entered entry ->
       Printf.sprintf "`%s` %s enters the build%s." (Path.show_package entry.name)
         (Registry.Version.show entry.version)
@@ -67,7 +67,7 @@ let change_sentence = function
       Printf.sprintf "`%s` would hold %s, which it did not." (Path.show_package name)
         (String.concat ", " gained)
 
-let change_json = function
+let encode_change = function
   | Entered entry ->
       Json.Object
         [
@@ -106,29 +106,34 @@ type signature = {
   dependents : Path.t list;
 }
 
-let signatures snapshot trial =
+let list_signatures snapshot trial =
   let database = Workspace.open_database snapshot and upgraded = Workspace.open_database trial in
-  let own = List.map snd (Workspace.packages snapshot) in
-  let is_own path = List.mem (Path.package path) own in
+  let own = List.map snd (Workspace.list_packages snapshot) in
+  let is_own path = List.mem (Path.locate_package path) own in
   let changed =
     List.filter
       (fun part ->
         Signatures.is_signature part
-        && match Database.Part.definition part with Some path -> not (is_own path) | None -> false)
+        &&
+        match Database.Part.find_definition part with
+        | Some path -> not (is_own path)
+        | None -> false)
       (Database.list_changes database upgraded)
   in
   let dependents = Path_table.create 16 in
   List.iter
     (fun ({ dependent; dependency } : Database.read) ->
-      match (Database.Part.definition dependent, Database.Part.definition dependency) with
+      match (Database.Part.find_definition dependent, Database.Part.find_definition dependency) with
       | Some reader, Some path when is_own reader && List.mem dependency changed ->
           Path_table.replace dependents path
             (reader :: Option.value (Path_table.find_opt dependents path) ~default:[])
       | _ -> ())
     (Database.list_dependents database
-       (List.sort_uniq Path.compare (List.filter_map Database.Part.definition changed)));
+       (List.sort_uniq Path.compare (List.filter_map Database.Part.find_definition changed)));
   let text database path =
-    Signatures.of_path (Database.make_name_lookups database [ Path.package path ]) path
+    Signatures.find_signature
+      (Database.make_name_lookups database [ Path.locate_package path ])
+      path
   in
   List.sort
     (fun left right -> Path.compare left.path right.path)
@@ -144,7 +149,7 @@ let signatures snapshot trial =
        dependents [])
 
 let new_errors snapshot trial =
-  let own = List.map snd (Workspace.packages snapshot) in
+  let own = List.map snd (Workspace.list_packages snapshot) in
   let diagnostics (snapshot : Workspace.snapshot) =
     let database = Workspace.open_database snapshot in
     Database.check database own;
@@ -153,39 +158,41 @@ let new_errors snapshot trial =
         (fun file ->
           List.map
             (fun (diagnostic : Diagnostic.t) ->
-              Printf.sprintf "%s: %s" (Workspace.file_path snapshot file) diagnostic.message)
+              Printf.sprintf "%s: %s" (Workspace.locate_file snapshot file) diagnostic.message)
             (Database.list_file_diagnostics database file))
-        (List.concat_map (Workspace.package_files snapshot) own)
+        (List.concat_map (Workspace.list_package_files snapshot) own)
   in
   let now = diagnostics snapshot in
   List.filter (fun diagnostic -> not (List.mem diagnostic now)) (diagnostics trial)
 
-let signature_json (changed : signature) =
+let encode_signature (changed : signature) =
   Json.Object
     [
       ("path", Json.String (Path.show changed.path));
-      ("before", Json.option (fun text -> Json.String text) changed.before);
-      ("after", Json.option (fun text -> Json.String text) changed.after);
+      ("before", Json.encode_option (fun text -> Json.String text) changed.before);
+      ("after", Json.encode_option (fun text -> Json.String text) changed.after);
       ("read_by", Json.List (List.map (fun path -> Json.String (Path.show path)) changed.dependents));
     ]
 
 let print_signature (changed : signature) =
   Output.printf "  %s\n" (Path.show changed.path);
-  Option.iter (fun text -> Output.print_line (Signatures.labeled "was:" text)) changed.before;
-  Option.iter (fun text -> Output.print_line (Signatures.labeled "now:" text)) changed.after;
+  Option.iter
+    (fun text -> Output.print_line (Signatures.label_signature "was:" text))
+    changed.before;
+  Option.iter (fun text -> Output.print_line (Signatures.label_signature "now:" text)) changed.after;
   Output.printf "    read by: %s\n" (String.concat ", " (List.map Path.show changed.dependents))
 
 let report ~lock ~signatures ~broken =
   if Output.json () then
     Json.print
-      (Json.document ~diagnostics:[]
+      (Json.make_document ~diagnostics:[]
          [
-           ("changes", Json.List (List.map change_json lock));
-           ("signatures", Json.List (List.map signature_json signatures));
+           ("changes", Json.List (List.map encode_change lock));
+           ("signatures", Json.List (List.map encode_signature signatures));
            ("breaks", Json.List (List.map (fun sentence -> Json.String sentence) broken));
          ])
   else begin
-    List.iter (fun change -> Output.print_line (change_sentence change)) lock;
+    List.iter (fun change -> Output.print_line (describe_change change)) lock;
     if signatures <> [] then begin
       Output.print_line "";
       Output.print_line "Signatures the project reads that change:";
@@ -198,24 +205,24 @@ let report ~lock ~signatures ~broken =
     end
   end
 
-let lock_file snapshot = Filename.concat (Workspace.root snapshot) "truss.lock"
+let lock_file snapshot = Filename.concat (Workspace.locate_root snapshot) "truss.lock"
 
 let run ~names =
-  let snapshot, _ = Command_packages.current () in
-  let set = List.map wanted names in
+  let snapshot, _ = Command_packages.load_current () in
+  let set = List.map parse_wanted names in
   match Workspace.plan_lock snapshot ~set ~all:(names = []) with
   | Error message -> Outcome.cannot_run "%s" message
   | Ok plan ->
       let lock = lock_changes ~before:plan.before ~after:plan.after in
       if lock = [] then begin
         if Output.json () then
-          Json.print (Json.document ~diagnostics:[] [ ("changes", Json.List []) ])
+          Json.print (Json.make_document ~diagnostics:[] [ ("changes", Json.List []) ])
         else Output.print_line "Every package is at the version asked for.";
         0
       end
       else begin
         let trial = Workspace.make_trial snapshot [ (Project.lock_file, Some plan.text) ] in
-        let signatures = signatures snapshot trial in
+        let signatures = list_signatures snapshot trial in
         let broken = new_errors snapshot trial in
         Command_packages.write_file (lock_file snapshot) plan.text;
         report ~lock ~signatures ~broken;

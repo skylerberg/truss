@@ -371,7 +371,7 @@ let () =
               {
                 tag = None;
                 form = Ordinary;
-                first = { value = ""; span = Source.zero_width 0 };
+                first = { value = ""; span = Source.make_zero_width 0 };
                 rest = [||];
               };
           ]
@@ -386,8 +386,8 @@ let () =
           then
             Harness.fail "%s begins a statement, but a line break before it is not a NEWLINE"
               (match kind with
-              | Keyword keyword -> Token.keyword_spelling keyword
-              | Punctuation punctuation -> Token.punctuation_spelling punctuation
+              | Keyword keyword -> Token.spell_keyword keyword
+              | Punctuation punctuation -> Token.spell_punctuation punctuation
               | _ -> "a name or a literal"))
         kinds)
 
@@ -397,16 +397,16 @@ let ids_of (definition : Syntax.definition) =
     if value.id >= parent then
       Harness.fail "an expression's id %d is not before its parent's %d" value.id parent;
     ids := value.id :: !ids;
-    Syntax_walk.expression_parts ~expression:(expression ~parent:value.id)
+    Syntax_walk.visit_expression_parts ~expression:(expression ~parent:value.id)
       ~statement:(statement ~parent:value.id) value
   and statement ~parent (written : Syntax.statement) =
     if written.id >= parent then
       Harness.fail "a statement's id %d is not before its parent's %d" written.id parent;
     ids := written.id :: !ids;
-    Syntax_walk.statement_parts ~expression:(expression ~parent:written.id)
+    Syntax_walk.visit_statement_parts ~expression:(expression ~parent:written.id)
       ~statement:(statement ~parent:written.id) written
   in
-  Syntax_walk.definition (expression ~parent:definition.id) definition;
+  Syntax_walk.visit_definition (expression ~parent:definition.id) definition;
   !ids
 
 let () =

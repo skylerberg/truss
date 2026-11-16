@@ -65,7 +65,7 @@ let expect_recomputed recomputed ~exactly =
 let expect_untouched recomputed ~names =
   List.iter
     (fun part ->
-      if List.exists (fun name -> Substring.contains part name) names then
+      if List.exists (fun name -> String.includes ~affix:name part) names then
         Harness.fail "recomputed %s; it recomputed %s" part (String.concat ", " recomputed))
     recomputed
 
@@ -213,15 +213,13 @@ let () =
      replace its socket" (fun () ->
       let cache = Harness.scratch "writable-cache" in
       Unix.chmod cache 0o777;
-      Harness.with_environment
-        [ ("TRUSS_CACHE", cache) ]
-        (fun () ->
-          match Workspace.For_testing.listen ~key:(Harness.scratch "refused") with
-          | Ok socket ->
-              Unix.close socket;
-              Harness.fail "listened"
-          | Error message ->
-              if not (Substring.contains message cache) then Harness.fail "refused with: %s" message));
+      Unix.putenv "TRUSS_CACHE" cache;
+      match Workspace.For_testing.listen ~key:(Harness.scratch "refused") with
+      | Ok socket ->
+          Unix.close socket;
+          Harness.fail "listened"
+      | Error message ->
+          if not (String.includes ~affix:cache message) then Harness.fail "refused with: %s" message);
   Harness.test "the background process answers each request and sends its progress" (fun () ->
       let key = Harness.scratch "served" in
       let socket =
@@ -760,7 +758,7 @@ let () =
       Workspace.flush ();
       Harness.write_files root [ ("main/main.truss", edited_body) ];
       ignore (settled_on_disk root);
-      Workspace.For_testing.interrupt_commit (Workspace.root (opened root));
+      Workspace.For_testing.interrupt_commit (Workspace.locate_root (opened root));
       Harness.write_files root [ ("main/main.truss", callee_and_caller) ];
       expect_recomputed (settled_on_disk root) ~exactly:[];
       Workspace.flush ());

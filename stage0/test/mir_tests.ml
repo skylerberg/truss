@@ -878,7 +878,7 @@ let () =
       let default_mir =
         match
           Option.bind
-            ((Support.names packages (Path.package default_method)).key default_method)
+            ((Support.names packages (Path.locate_package default_method)).key default_method)
             (graph_of parts)
         with
         | Some mir -> mir
@@ -1024,7 +1024,7 @@ let () =
       let module_ = Support.module_of "app::main" in
       let g : Path.t = Top { module_; name = "g" } in
       let key =
-        match (Support.names packages (Path.package g)).key g with
+        match (Support.names packages (Path.locate_package g)).key g with
         | Some key -> key
         | None -> failwith "the program has no g"
       in

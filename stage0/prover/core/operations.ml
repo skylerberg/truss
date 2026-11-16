@@ -56,8 +56,8 @@ let make_range_fix context frame ty term =
   match (find_integer_limits ty, find_parameter_spelling context frame term) with
   | Some (name, low, _), Some text ->
       let least = if Z.sign low = 0 then "0" else name ^ ".minimum" in
-      Facts.add_requires_under_condition context frame
-        (Printf.sprintf "%s <= %s && %s <= %s.maximum" least text text name)
+      Facts.add_requires context frame
+        [ Text (Printf.sprintf "%s <= %s && %s <= %s.maximum" least text text name) ]
   | _ -> []
 
 let convert_from_integer context frame (site : Invocation.site) term =
@@ -88,7 +88,9 @@ let spend (context : State.context) (frame : State.frame) (amount : Costs.counte
 
 let declare_unknown_amount context frame (counter : Costs.counter) =
   let amount = Facts.declare_fresh context frame "spent" Logic.Int in
-  let least = match counter.resource with Time -> 1 | _ -> 0 in
+  let least =
+    match counter.resource with Time -> 1 | Allocations | Allocated_bytes | Calls _ -> 0
+  in
   Facts.assume context frame (Logic.Operation ("<=", [ Logic.int least; amount ]));
   amount
 
@@ -132,7 +134,9 @@ let find_concrete_impl (context : State.context) (trait : Types.trait_reference)
         || match context.current with Method { owner; _ } -> Path.equal owner impl | _ -> false
       in
       let bounds = compute_current_bounds context in
-      let packages = List.sort_uniq compare [ Path.package context.current; Path.package path ] in
+      let packages =
+        List.sort_uniq compare [ Path.locate_package context.current; Path.locate_package path ]
+      in
       List.find_map
         (fun package ->
           List.find_map
@@ -301,12 +305,12 @@ let make_overflow_fix context frame ty (operation : Intrinsic.operation) left ri
         | _ -> None
       in
       match (bound_on_left, operation) with
-      | Some required, _ -> Facts.add_requires context [ Text required ]
+      | Some required, _ -> Facts.add_requires context frame [ Text required ]
       | None, (Add | Multiply) when is_unsigned -> (
           match find_parameter_spelling context frame exact with
           | Some text ->
-              Facts.add_requires_under_condition context frame
-                (Printf.sprintf "%s <= %s.maximum" text name)
+              Facts.add_requires context frame
+                [ Text (Printf.sprintf "%s <= %s.maximum" text name) ]
           | None -> [])
       | None, Subtract when is_unsigned -> []
       | None, _ -> make_range_fix context frame ty exact)
@@ -317,45 +321,44 @@ let make_division_overflow_fix context frame ty left right =
       let dividend_not_minimum = Printf.sprintf "%s != %s.minimum" dividend name in
       match right with
       | Logic.Integer divisor when Z.equal divisor Z.minus_one ->
-          Facts.add_requires_under_condition context frame dividend_not_minimum
+          Facts.add_requires context frame [ Text dividend_not_minimum ]
       | _ -> (
           match find_parameter_spelling context frame right with
           | Some divisor ->
-              Facts.add_requires_under_condition context frame
-                (Printf.sprintf "%s || %s != -1" dividend_not_minimum divisor)
+              Facts.add_requires context frame
+                [ Text (Printf.sprintf "%s || %s != -1" dividend_not_minimum divisor) ]
           | None -> []))
   | _ -> []
 
 let make_negation_fix context frame ty inner =
   match (find_integer_limits ty, find_parameter_spelling context frame inner) with
   | Some (name, _, _), Some text ->
-      Facts.add_requires_under_condition context frame (Printf.sprintf "%s != %s.minimum" text name)
+      Facts.add_requires context frame [ Text (Printf.sprintf "%s != %s.minimum" text name) ]
   | _ -> []
 
 let arithmetic context (frame : State.frame) (site : Invocation.site) ty
     (operation : Intrinsic.operation) left right =
   let source = frame.source in
   let location = Facts.locate context frame.source site.origin in
-  let exact =
+  let exact, is_division =
     match operation with
-    | Add -> Logic.Operation ("+", [ left; right ])
-    | Subtract -> Logic.Operation ("-", [ left; right ])
-    | Multiply -> Logic.Operation ("*", [ left; right ])
-    | Divide -> Logic.truncated_divide left right
-    | _ -> Logic.truncated_remainder left right
+    | Add -> (Logic.Operation ("+", [ left; right ]), false)
+    | Subtract -> (Logic.Operation ("-", [ left; right ]), false)
+    | Multiply -> (Logic.Operation ("*", [ left; right ]), false)
+    | Divide -> (Logic.truncated_divide left right, true)
+    | Remainder -> (Logic.truncated_remainder left right, true)
+    | _ -> Facts.bug "`%s` is not arithmetic" (Intrinsic.show_operation operation)
   in
-  (match operation with
-  | Divide | Remainder ->
-      Facts.oblige_safe_operation context frame Division location
-        ~fixes:
-          (match find_parameter_spelling context frame right with
-          | Some text -> Facts.add_requires context [ Text (text ^ " != 0") ]
-          | None -> [])
-        [ Text "The divisor in `"; Facts.quote source site.origin; Text "` may be zero." ]
-        (Logic.not_ (Logic.equal right (Logic.int 0)))
-  | _ -> ());
+  if is_division then
+    Facts.oblige_safe_operation context frame Division location
+      ~fixes:
+        (match find_parameter_spelling context frame right with
+        | Some text -> Facts.add_requires context frame [ Text (text ^ " != 0") ]
+        | None -> [])
+      [ Text "The divisor in `"; Facts.quote source site.origin; Text "` may be zero." ]
+      (Logic.not_ (Logic.equal right (Logic.int 0)));
   (match Facts.find_bounds ty with
-  | Some (low, _) when operation = Divide || operation = Remainder ->
+  | Some (low, _) when is_division ->
       if Z.sign low < 0 then
         Facts.oblige_safe_operation context frame Overflow location
           ~fixes:(make_division_overflow_fix context frame ty left right)
@@ -478,9 +481,10 @@ let primitive_operation context (frame : State.frame) ~(site : Invocation.site)
   let is_float = match types with ty :: _ -> Facts.find_float_format ty <> None | [] -> false in
   let exact operation left right =
     match (operation : Intrinsic.operation) with
-    | Add | Wrapping_add | Add_overflows -> Logic.Operation ("+", [ left; right ])
-    | Subtract | Wrapping_subtract | Subtract_overflows -> Logic.Operation ("-", [ left; right ])
-    | _ -> Logic.Operation ("*", [ left; right ])
+    | Wrapping_add | Add_overflows -> Logic.Operation ("+", [ left; right ])
+    | Wrapping_subtract | Subtract_overflows -> Logic.Operation ("-", [ left; right ])
+    | Wrapping_multiply | Multiply_overflows -> Logic.Operation ("*", [ left; right ])
+    | _ -> Facts.bug "`%s` has no exact integer result" (Intrinsic.show_operation operation)
   in
   match (operation, types, operands) with
   | Add, _ :: _, [ left; right ] when is_float -> make_float_operation "fp.add" left right
@@ -518,7 +522,7 @@ let primitive_operation context (frame : State.frame) ~(site : Invocation.site)
                   [ State.Text "The shift amount `"; Facts.quote source amount; Text "`" ],
                   match find_parameter_spelling context frame right with
                   | Some text ->
-                      Facts.add_requires context [ Text (Printf.sprintf "%s < %d" text bits) ]
+                      Facts.add_requires context frame [ Text (Printf.sprintf "%s < %d" text bits) ]
                   | None -> [] )
             | None ->
                 ( location,
