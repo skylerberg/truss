@@ -456,12 +456,13 @@ let () =
       if derived = [] then fail "the standard library derives nothing";
       List.iter
         (fun impl ->
-          match Interface.Impls.impl_interface interface impl with
+          match Interface.Definition.read_impl_interface interface impl with
           | None -> fail "`%s` has no interface" (Path.show impl)
           | Some impl_interface ->
               let provided =
                 match
-                  Interface.Definition.trait_interface interface impl_interface.implements.trait
+                  Interface.Definition.read_trait_interface interface
+                    impl_interface.implements.trait
                 with
                 | Some trait ->
                     List.filter_map
@@ -503,7 +504,7 @@ let () =
         Interface.Impls.implements
           (Database.make_interface_lookups (database packages) [ both_package ])
           ~bounds
-          (Types.named both [ Types.Parameter parameter ])
+          (Types.make_named both [ Types.Parameter parameter ])
           described
       with
       | Some (From_impl { impl; _ }) -> impl

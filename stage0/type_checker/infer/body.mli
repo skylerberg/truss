@@ -1,6 +1,6 @@
 module Names = Resolve.Names
 module Environment = Interface.Environment
-module Lower = Interface.Lower
+module Elaborator = Interface.Elaborator
 
 type checked = { form : Core.t; tables : Tables.published; evidence_packages : Path.package list }
 

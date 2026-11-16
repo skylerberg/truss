@@ -321,7 +321,7 @@ let find_buffer_elements context (ty : Types.ty) =
     when Intrinsic.builtin_of_path path = Some View ->
       Some (element, fun term -> buffer_model context View element term)
   | Types.Named { path; arguments } when builtin ty = None -> (
-      match Interface.Definition.interface context.lookups.interface path with
+      match Interface.Definition.read_interface context.lookups.interface path with
       | Some (Interface.Environment.Type_interface { shape = Record [ field ]; type_generics; _ })
         -> (
           let substitution =
@@ -398,7 +398,7 @@ and holds_potential_type context ~seen (ty : Types.ty) =
     | Types.Named { path; arguments } when builtin ty = None -> (
         potential_clause context ty <> None
         ||
-        match Interface.Definition.interface context.lookups.interface path with
+        match Interface.Definition.read_interface context.lookups.interface path with
         | Some (Interface.Environment.Type_interface interface) ->
             let substitution =
               try
@@ -533,9 +533,10 @@ let method_time_bound context (method_ : Path.t) self_type =
   let holds ty = try has_potential context ty with Foreign_unsupported _ -> true in
   match method_ with
   | Method { owner = trait; name; receiver } -> (
-      if Path.equal trait Interface.Impls.copyable_path then
+      if Well_known.is Copyable trait then
         if
-          Interface.Impls.plain context.lookups.interface ~bounds:(current_bounds context) self_type
+          Interface.Impls.is_plain context.lookups.interface ~bounds:(current_bounds context)
+            self_type
           && not (holds self_type)
         then Some Z.one
         else None
@@ -545,7 +546,7 @@ let method_time_bound context (method_ : Path.t) self_type =
         | Some (impl, arguments) -> (
             let path = Path.Method { owner = impl; name; receiver } in
             let makes_no_potential =
-              match Interface.Impls.signature context.lookups.interface path with
+              match Interface.Impls.read_signature context.lookups.interface path with
               | Some (signature : Types.signature) -> (
                   List.for_all
                     (fun (parameter : Types.parameter_info) ->

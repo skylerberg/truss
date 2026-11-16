@@ -110,6 +110,12 @@ develop as well as make it easier to bootstrap the compiler in parts.
 
 ### Stages
 
+- **Elaboration turns resolved syntax into a typed internal form.**
+  `interface` elaborates a definition's declaration into its interface. It
+  infers nothing, because every type in a declaration is written. `infer`
+  infers the types of a contract or a body and elaborates it into Core.
+  Lowering is the later translation of one internal form into a lower one:
+  Core into the MIR, and the MIR into C.
 - **Every stage after the type checker reads the MIR.** Ownership, the
   prover, and code generation read no core expression.
 - **The MIR is a tree, and the builder lowers each expression once.** A

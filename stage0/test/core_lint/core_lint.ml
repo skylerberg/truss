@@ -8,15 +8,15 @@ let callee_name : Core.callee -> string = function
   | Indirect _ -> "a function value"
 
 let method_signature interface owner name receiver =
-  Interface.Definition.signature interface (Method { owner; name; receiver })
+  Interface.Definition.read_declared_signature interface (Method { owner; name; receiver })
 
 let declared_fields interface path arguments =
-  Option.bind (Interface.Definition.type_interface interface path) (fun type_interface ->
-      Types.fields_of type_interface arguments)
+  Option.bind (Interface.Definition.read_type_interface interface path) (fun type_interface ->
+      Types.instantiate_fields type_interface arguments)
 
 let declared_variants interface path arguments =
-  Option.bind (Interface.Definition.type_interface interface path) (fun type_interface ->
-      Types.variants_of type_interface arguments)
+  Option.bind (Interface.Definition.read_type_interface interface path) (fun type_interface ->
+      Types.instantiate_variants type_interface arguments)
 
 type context = {
   interface : Interface.Lookups.t;
@@ -60,7 +60,7 @@ let fits context ~expected ~found =
   | _ -> Types.equal (normal context expected) (normal context found)
 
 let substitution context generics arguments ~subject =
-  match Types.substitution_of generics arguments with
+  match Types.make_substitution generics arguments with
   | Some substitution -> substitution
   | None ->
       context.wrong "%s has %d type arguments for %d generic parameters" subject
@@ -83,7 +83,7 @@ let instantiated context (callee : Core.callee) =
   in
   match callee with
   | Function { path; type_arguments } -> (
-      match Interface.Impls.signature context.interface path with
+      match Interface.Impls.read_signature context.interface path with
       | Some signature ->
           of_signature (substitution context signature.generics type_arguments ~subject) signature
       | None -> None)
@@ -93,11 +93,11 @@ let instantiated context (callee : Core.callee) =
   | Trait_method { trait = reference; name; receiver; self_type; type_arguments; _ } -> (
       match
         ( method_signature context.interface reference.trait name receiver,
-          Interface.Definition.trait_interface context.interface reference.trait )
+          Interface.Definition.read_trait_interface context.interface reference.trait )
       with
       | Some signature, Some interface ->
           of_signature
-            (Interface.Properties.trait_substitution interface ~self:self_type reference
+            (Interface.Properties.make_trait_substitution interface ~self:self_type reference
             @ substitution context signature.generics type_arguments ~subject)
             signature
       | _ -> None)
@@ -153,7 +153,7 @@ let is_built_in context (ty : Types.ty) =
            (fun (bound : Types.trait_reference) -> is_integer_trait bound.trait)
            (context.bounds parameter)
   | Projection { trait; _ } -> is_integer_trait trait.trait
-  | _ -> Option.is_some (Types.builtin_of ty)
+  | _ -> Option.is_some (Types.find_builtin ty)
 
 let operator_types context (node : Core.expression) (operation : Intrinsic.operation) arguments =
   if not (is_built_in context node.type_) then
@@ -203,7 +203,7 @@ let construct_fields context (node : Core.expression) variant fields =
       in
       let type_name = Types.show node.type_ in
       match declared with
-      | None when fields = [] && Option.is_some (Types.builtin_of node.type_) -> ()
+      | None when fields = [] && Option.is_some (Types.find_builtin node.type_) -> ()
       | None -> context.wrong "a construct of `%s` names no record or variant" type_name
       | Some declared ->
           let names = List.map fst fields in
@@ -289,7 +289,7 @@ let is_executable context (condition : Core.expression) =
          match node.kind with
          | Quantified _ | Old _ | Result | Specification_function _ | Method_time _ -> true
          | Call { callee = Function { path; _ }; _ } -> (
-             match Interface.Impls.signature context.interface path with
+             match Interface.Impls.read_signature context.interface path with
              | Some signature -> signature.specification_only
              | None -> false)
          | _ -> false)
@@ -379,7 +379,7 @@ let check_semantics context (form : Core.t) =
                    when List.exists
                           (fun known -> Well_known.is known trait.trait)
                           [ Add; Subtract; Multiply; Divide; Remainder; Negate ]
-                        && Option.is_some (Types.builtin_of self_type) ->
+                        && Option.is_some (Types.find_builtin self_type) ->
                      context.wrong
                        "an arithmetic operator on `%s` is a call of `%s`, not an Operator"
                        (Types.show self_type) (callee_name call.callee)
@@ -450,7 +450,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
   let own =
     let of_generics = List.map (fun (generic : T.generic) -> generic.generic) in
     let declared path =
-      match Interface.Definition.interface interface path with
+      match Interface.Definition.read_interface interface path with
       | Some (Function_interface signature | Theorem_interface signature) ->
           of_generics signature.generics
       | Some (Type_interface interface) -> of_generics interface.type_generics
@@ -461,7 +461,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
       | _ -> []
     in
     declared path
-    @ (match Interface.Impls.signature interface path with
+    @ (match Interface.Impls.read_signature interface path with
       | Some signature -> of_generics signature.generics
       | None -> [])
     @
@@ -559,7 +559,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
     in
     match callee with
     | Function { path; _ } ->
-        Option.map (of_signature ~has_receiver:true) (Interface.Impls.signature interface path)
+        Option.map (of_signature ~has_receiver:true) (Interface.Impls.read_signature interface path)
     | Trait_method { trait = reference; name; receiver; _ } ->
         Option.map (of_signature ~has_receiver:true)
           (method_signature interface reference.trait name receiver)
@@ -833,7 +833,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
   let bounds parameter =
     let of_key key =
       Option.value ~default:[]
-        (List.assoc_opt parameter (interface.lowered_interface key).scope.bounds)
+        (List.assoc_opt parameter (interface.elaborated_interface key).scope.bounds)
     in
     match key with
     | Some key -> of_key key @ Option.fold ~none:[] ~some:of_key (interface.names.container key)

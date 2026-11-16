@@ -2,7 +2,7 @@ open Syntax
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
-module Lower = Interface.Lower
+module Elaborator = Interface.Elaborator
 open State
 open Modes
 open Instantiation
@@ -170,7 +170,9 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
             report state Specification_only (read_span state value.id)
               "A quantifier over a whole type cannot run, so it is only for specifications and the \
                bodies of functions for specifications only. Quantify over a range or a collection.";
-          declare state bound (Lower.type_ state.context written) ~is_var:false ~mode:Types.Read);
+          declare state bound
+            (Elaborator.elaborate_type state.context written)
+            ~is_var:false ~mode:Types.Read);
       check state { env with in_quantifier = true } body Types.bool;
       register_expression state value (fun () ->
           let quantifier : Core.quantifier =
@@ -317,11 +319,11 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
   in
   match items with
   | [ Item ({ kind = Range { start; stop; _ }; _ } as range) ] -> (
-      Option.iter (fun start -> check state env start (Types.builtin UInt64)) start;
-      Option.iter (fun stop -> check state env stop (Types.builtin UInt64)) stop;
+      Option.iter (fun start -> check state env start (Types.make_builtin UInt64)) start;
+      Option.iter (fun stop -> check state env stop (Types.make_builtin UInt64)) stop;
       record state range
         (Types.Named
-           { path = Well_known.path Range; arguments = [ Types.Type (Types.builtin UInt64) ] });
+           { path = Well_known.path Range; arguments = [ Types.Type (Types.make_builtin UInt64) ] });
       register_expression state value (fun () ->
           let base = place_of (build_expression state base) in
           let start = Option.map (build_expression state) start in

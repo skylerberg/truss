@@ -30,7 +30,7 @@ let compute_integer_range type_ =
       Some (Z.neg (Z.shift_left Z.one (width - 1)), Z.pred (Z.shift_left Z.one (width - 1)))
     else Some (Z.zero, Z.pred (Z.shift_left Z.one width))
   in
-  match Types.builtin_of type_ with
+  match Types.find_builtin type_ with
   | Some Int8 -> compute_bounds true 8
   | Some Int16 -> compute_bounds true 16
   | Some Int32 -> compute_bounds true 32
@@ -43,17 +43,17 @@ let compute_integer_range type_ =
   | _ -> None
 
 let read_fields context path arguments =
-  Option.bind (Interface.Definition.type_interface context.lookups.interface path) (fun interface ->
-      Types.fields_of interface arguments)
+  Option.bind (Interface.Definition.read_type_interface context.lookups.interface path)
+    (fun interface -> Types.instantiate_fields interface arguments)
 
 let read_variants context path arguments =
-  Option.bind (Interface.Definition.type_interface context.lookups.interface path) (fun interface ->
-      Types.variants_of interface arguments)
+  Option.bind (Interface.Definition.read_type_interface context.lookups.interface path)
+    (fun interface -> Types.instantiate_variants interface arguments)
 
 let read_shape context path =
   Option.map
     (fun (interface : Types.type_interface) -> interface.shape)
-    (Interface.Definition.type_interface context.lookups.interface path)
+    (Interface.Definition.read_type_interface context.lookups.interface path)
 
 let read_constructor_fields context type_ constructor =
   match (type_, constructor) with

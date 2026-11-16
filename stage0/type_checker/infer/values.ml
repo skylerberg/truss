@@ -2,7 +2,7 @@ open Syntax
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
-module Lower = Interface.Lower
+module Elaborator = Interface.Elaborator
 open State
 open Modes
 open Instantiation
@@ -86,7 +86,7 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
         | Some expected -> Types.is_well_known String_slice expected
         | None -> false
       in
-      if is_view_expected then Types.named (Well_known.path String_slice) [] else string_type
+      if is_view_expected then Types.make_named (Well_known.path String_slice) [] else string_type
   | Some tag -> (
       match target state tag.last with
       | Some (Definition (Type, tag_path)) ->

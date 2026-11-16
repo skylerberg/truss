@@ -1,16 +1,13 @@
-val header :
-  Lookups.t -> Resolve.Names.key -> (Environment.header, Diagnostic.in_definition list) result
+val is_specification : Environment.interface -> bool
+val read_interface : Lookups.t -> Path.t -> Environment.interface option
 
-val lower : Lookups.t -> Resolve.Names.key -> Environment.lowered_interface
-val interface : Lookups.t -> Path.t -> Environment.interface option
-
-val in_declared_order :
+val sort_in_declared_order :
   Lookups.t -> Path.t -> variant:string option -> name:('a -> string) -> 'a list -> 'a list
 
-val type_interface : Lookups.t -> Path.t -> Types.type_interface option
-val signature : Lookups.t -> Path.t -> Types.signature option
-val method_signature : Lookups.t -> owner:Path.t -> Types.trait_method -> Types.signature
-val trait_interface : Lookups.t -> Path.t -> Types.trait_interface option
-val impl_interface : Lookups.t -> Path.t -> Types.impl_interface option
-val constant_type : Lookups.t -> Path.t -> Types.ty option
-val test_uses : Lookups.t -> Path.t -> Types.capability_set option
+val read_type_interface : Lookups.t -> Path.t -> Types.type_interface option
+val read_declared_signature : Lookups.t -> Path.t -> Types.signature option
+val read_method_signature : Lookups.t -> owner:Path.t -> Types.trait_method -> Types.signature
+val read_trait_interface : Lookups.t -> Path.t -> Types.trait_interface option
+val read_impl_interface : Lookups.t -> Path.t -> Types.impl_interface option
+val read_constant_type : Lookups.t -> Path.t -> Types.ty option
+val read_test_uses : Lookups.t -> Path.t -> Types.capability_set option

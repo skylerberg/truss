@@ -2,7 +2,7 @@ open Syntax
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
-module Lower = Interface.Lower
+module Elaborator = Interface.Elaborator
 open State
 open Instantiation
 open Hooks
@@ -29,7 +29,8 @@ let check_bitwise_operand state span type_ =
 
 let check_shift_operands state ~left:(left_span, left_type) ~right:(right_span, right_type) =
   (match resolve state right_type with
-  | Types.Literal (Integer_literal, _) -> ignore (unify state right_type (Types.builtin UInt64))
+  | Types.Literal (Integer_literal, _) ->
+      ignore (unify state right_type (Types.make_builtin UInt64))
   | _ -> ());
   defer state (fun () ->
       match (normalize state left_type, normalize state right_type) with
@@ -415,7 +416,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
           match comparison with
           | Equal | Not_equal -> (Well_known.path Equal, "equal", Types.bool)
           | Less | Less_equal | Greater | Greater_equal ->
-              (Well_known.path Ordered, "compare", Types.named (Well_known.path Ordering) [])
+              (Well_known.path Ordered, "compare", Types.make_named (Well_known.path Ordering) [])
         in
         state.tables.calls.(value.id) <-
           Some
@@ -618,13 +619,13 @@ and any_ state env ?expected (value : expression) (inner : expression) =
               List.iter
                 (fun (bound : Types.trait_reference) ->
                   match
-                    Interface.Definition.trait_interface state.lookups.interface bound.trait
+                    Interface.Definition.read_trait_interface state.lookups.interface bound.trait
                   with
                   | Some interface ->
                       List.iter
                         (fun name ->
                           match
-                            (Interface.Impls.capability_set state.lookups.interface
+                            (Interface.Impls.project_capability_set state.lookups.interface
                                ~bounds:(bounds state) inner_type { bound with associated = [] } name
                               :> Types.capability list)
                           with
@@ -642,7 +643,8 @@ and any_ state env ?expected (value : expression) (inner : expression) =
                                          set))))
                         interface.associated_capabilities
                   | None -> ())
-                (Interface.Properties.bound_closure state.lookups.interface ~self:inner_type trait);
+                (Interface.Properties.list_bound_closure state.lookups.interface ~self:inner_type
+                   trait);
             true
           end);
       any_type

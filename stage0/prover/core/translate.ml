@@ -172,7 +172,7 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
   let signature =
     Option.map
       (Types.map_signature (Types.substitute substitution))
-      (Interface.Impls.signature lookups.interface path)
+      (Interface.Impls.read_signature lookups.interface path)
   in
   let terminates =
     proof
@@ -580,9 +580,9 @@ let type_ (lookups : Lookups.t) (source : source) ~path =
   (match Mir.type_clauses_of_path lookups.mir path with
   | Some { form = { invariants; potential }; _ } ->
       let ty =
-        match Interface.Definition.interface lookups.interface path with
+        match Interface.Definition.read_interface lookups.interface path with
         | Some (Interface.Environment.Type_interface interface) ->
-            Types.Named { path; arguments = Types.generic_arguments interface.type_generics }
+            Types.Named { path; arguments = Types.list_generic_arguments interface.type_generics }
         | _ -> Types.Named { path; arguments = [] }
       in
       let start = { (empty_frame source) with self_type = Some ty } in

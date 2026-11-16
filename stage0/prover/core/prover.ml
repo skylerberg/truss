@@ -13,11 +13,11 @@ type proof =
 let inherited (lookups : Lookups.t) (path : Path.t) =
   match path with
   | Method { owner = impl; name; receiver } -> (
-      match Interface.Definition.interface lookups.interface impl with
+      match Interface.Definition.read_interface lookups.interface impl with
       | Some (Interface.Environment.Impl_interface interface) -> (
           let implemented = interface.implements.trait in
           let substitution =
-            Option.value ~default:[] (Interface.Impls.trait_substitution lookups.interface impl)
+            Option.value ~default:[] (Interface.Impls.make_impl_substitution lookups.interface impl)
           in
           match Contracts.trait_part lookups implemented name receiver with
           | Some part -> Some (part, substitution)
@@ -29,7 +29,7 @@ let inherited (lookups : Lookups.t) (path : Path.t) =
   | _ -> None
 
 let impl_laws (lookups : Lookups.t) (key : Names.key) source =
-  match Interface.Definition.interface lookups.interface key.path with
+  match Interface.Definition.read_interface lookups.interface key.path with
   | Some (Interface.Environment.Impl_interface interface)
     when not (Contracts.impl_unfinished lookups key) ->
       [
@@ -62,7 +62,7 @@ let integer_implementors (bounds : Types.trait_reference list) =
 
 let integer_instances (lookups : Lookups.t) (path : Path.t) =
   let generics =
-    match Interface.Impls.signature lookups.interface path with
+    match Interface.Impls.read_signature lookups.interface path with
     | Some signature ->
         List.filter_map
           (fun (generic : Types.generic) ->
@@ -95,7 +95,7 @@ let integer_instances (lookups : Lookups.t) (path : Path.t) =
                         Printf.sprintf "`%s` is `%s`" parameter.name
                           (Intrinsic.builtin_name builtin);
                       ],
-                    (parameter, Types.Type (Types.builtin builtin)) :: substitution ))
+                    (parameter, Types.Type (Types.make_builtin builtin)) :: substitution ))
                 builtins)
             instances)
     [ ([], []) ]
@@ -104,7 +104,7 @@ let integer_instances (lookups : Lookups.t) (path : Path.t) =
 
 let derived_default (lookups : Lookups.t) (key : Names.key) (source : State.source) =
   let derives_default =
-    match Interface.Definition.interface lookups.interface key.path with
+    match Interface.Definition.read_interface lookups.interface key.path with
     | Some (Interface.Environment.Type_interface interface) ->
         List.exists (Well_known.is Default) interface.derives
     | _ -> false

@@ -111,7 +111,7 @@ let substituted_value_term context (value : Types.value) =
       let symbol = Symbol.Generic_value { owner = parameter.owner; name = parameter.name } in
       once context (In_range symbol) (fun () ->
           declare context (Logic.Constant (symbol, Int));
-          add_fact context (in_range (Types.builtin UInt64) (Logic.Symbol symbol)));
+          add_fact context (in_range (Types.make_builtin UInt64) (Logic.Symbol symbol)));
       Logic.Symbol symbol
   | Value_variable _ -> raise (Foreign_unsupported "an unsolved size")
 

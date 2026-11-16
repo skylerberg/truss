@@ -2,9 +2,9 @@ type state = {
   lookups : Lookups.t;
   key : Resolve.Names.key;
   definition : Syntax.definition;
-  lowered : Environment.lowered_interface;
+  elaborated : Environment.elaborated_interface;
   spans : Source.Definition_span.t array;
-  mutable diagnostics : Diagnostic.in_definition list;
+  diagnostics : Diagnostic.in_definition list ref;
 }
 
 val report :
@@ -15,5 +15,5 @@ val report :
   string ->
   unit
 
-val bounds : state -> Types.parameter -> Types.trait_reference list
+val list_bounds : state -> Types.parameter -> Types.trait_reference list
 val implements : state -> Types.ty -> Types.trait_reference -> Impls.evidence option

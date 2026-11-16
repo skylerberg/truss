@@ -55,7 +55,7 @@ let check_sealed (lookups : Lookups.t) (declaration : Names.declaration) =
         else if Well_known.is Fixed_width_integer trait then
           Some
             (List.filter
-               (fun builtin -> Types.is_integer_type (Types.builtin builtin))
+               (fun builtin -> Types.is_integer_type (Types.make_builtin builtin))
                Intrinsic.builtins)
         else None
       in
@@ -121,7 +121,8 @@ let overlap (first : Types.impl_interface) (second : Types.impl_interface) =
 let check_method_names (lookups : Lookups.t) (declaration : Names.declaration) spans
     (definition : definition) (impl : Types.impl_interface) =
   match
-    (impl.for_type, Interface.Definition.trait_interface lookups.interface impl.implements.trait)
+    ( impl.for_type,
+      Interface.Definition.read_trait_interface lookups.interface impl.implements.trait )
   with
   | Types.Named { path; _ }, Some trait when not trait.is_capability ->
       List.filter_map
@@ -169,7 +170,7 @@ let check_method_names (lookups : Lookups.t) (declaration : Names.declaration) s
   | _ -> []
 
 let type_fields (lookups : Lookups.t) path =
-  match Interface.Definition.type_interface lookups.interface path with
+  match Interface.Definition.read_type_interface lookups.interface path with
   | Some interface ->
       let parameters =
         List.map (fun (generic : Types.generic) -> generic.generic) interface.type_generics
@@ -194,8 +195,8 @@ let type_arguments arguments =
 
 let contained_types (lookups : Lookups.t) path =
   let bounds =
-    match Interface.Definition.type_interface lookups.interface path with
-    | Some interface -> Types.bounds_of interface.type_generics
+    match Interface.Definition.read_type_interface lookups.interface path with
+    | Some interface -> Types.list_bounds interface.type_generics
     | None -> fun _ -> []
   in
   List.concat_map
@@ -207,9 +208,11 @@ let contained_types (lookups : Lookups.t) path =
               Some
                 ( written,
                   path,
-                  Properties.through (if indirect then Indirect else In_place) occurrence )
+                  Properties.compose_occurrences
+                    (if indirect then Indirect else In_place)
+                    occurrence )
           | _ -> None)
-        (Interface.Impls.contents lookups.interface ~bounds field.field_type).contained)
+        (Interface.Impls.list_contents lookups.interface ~bounds field.field_type).contained)
     (snd (type_fields lookups path))
 
 let memoized compute =
@@ -231,7 +234,7 @@ let self_occurrences ~contained (start : Path.t) =
     else begin
       Hashtbl.replace visited (path, occurrence) ();
       List.concat_map
-        (fun (_, target, step) -> from target (Properties.through occurrence step))
+        (fun (_, target, step) -> from target (Properties.compose_occurrences occurrence step))
         (contained path)
     end
   in
@@ -374,7 +377,7 @@ let check_recursion lookups ~contained (declaration : Names.declaration) spans
 let check_associated_types (lookups : Lookups.t) ~contained (declaration : Names.declaration) spans
     (definition : definition) (impl : Types.impl_interface) =
   let key = Names.key_of declaration in
-  let bounds = Types.bounds_of impl.impl_generics in
+  let bounds = Types.list_bounds impl.impl_generics in
   let written name =
     match definition.kind with
     | Impl { members; _ } ->
@@ -425,7 +428,7 @@ let check_associated_types (lookups : Lookups.t) ~contained (declaration : Names
                   && not (reported_at_definition recursion)
                 then Some (recursion.recursive, recursion.occurrence)
                 else None)
-              (Interface.Impls.contents lookups.interface ~bounds type_).recursions)))
+              (Interface.Impls.list_contents lookups.interface ~bounds type_).recursions)))
     impl.implements.associated
 
 let instantiation_edges (lookups : Lookups.t) (key : Names.key) =
@@ -512,7 +515,7 @@ let check_tests (lookups : Lookups.t) (package : Path.package) =
 let check_overlaps (lookups : Lookups.t) (declaration : Names.declaration) spans definition
     (impl : Types.impl_interface) =
   let package = declaration.module_.package in
-  match Interface.Impls.head impl.for_type with
+  match Interface.Impls.find_head impl.for_type with
   | Some type_ when List.mem package (outer_packages impl) ->
       let trait = impl.implements.trait in
       let rec before = function
@@ -527,15 +530,15 @@ let check_overlaps (lookups : Lookups.t) (declaration : Names.declaration) spans
         List.filter
           (fun (other : Types.impl_interface) -> List.mem package (outer_packages other))
           (List.filter_map
-             (Interface.Impls.impl_interface lookups.interface)
+             (Interface.Definition.read_impl_interface lookups.interface)
              (before (lookups.interface.names.impls package)))
       in
       let dependencies =
         List.concat_map
           (fun name ->
             List.filter_map
-              (Interface.Impls.impl_interface lookups.interface)
-              (Interface.Impls.impls_in lookups.interface ~trait ~type_ name))
+              (Interface.Definition.read_impl_interface lookups.interface)
+              (Interface.Impls.list_impls_of_trait_for_type lookups.interface ~trait ~type_ name))
           (Names.list_transitive_dependencies lookups.interface.names package)
       in
       List.filter_map
@@ -555,7 +558,7 @@ let check_overlaps (lookups : Lookups.t) (declaration : Names.declaration) spans
 
 let check_impl lookups ~contained (declaration : Names.declaration) =
   match
-    ( Interface.Impls.impl_interface lookups.Lookups.interface declaration.path,
+    ( Interface.Definition.read_impl_interface lookups.Lookups.interface declaration.path,
       read_definition lookups declaration )
   with
   | Some impl, (definition, spans) ->

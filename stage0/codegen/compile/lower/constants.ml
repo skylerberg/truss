@@ -144,7 +144,7 @@ let constant_state context path =
     | None -> bug "%s is not a constant" (Path.show path)
   in
   let ty =
-    match Interface.Definition.constant_type context.lookups.interface path with
+    match Interface.Definition.read_constant_type context.lookups.interface path with
     | Some ty -> Monomorphic.ground context.monomorphic [] ty
     | None -> bug "%s has no type" (Path.show path)
   in

@@ -299,7 +299,7 @@ let standard_interface =
 let standard_context : Monomorphic.context =
   {
     type_interface =
-      (fun path -> Interface.Definition.type_interface (Lazy.force standard_interface) path);
+      (fun path -> Interface.Definition.read_type_interface (Lazy.force standard_interface) path);
     normalize = Fun.id;
     normalize_capabilities = Fun.id;
   }

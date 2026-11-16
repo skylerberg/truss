@@ -1447,7 +1447,7 @@ and call_into st (call : Mir.call) destination ~origin =
 and capability_defaults st ~capability ~name (arguments : Mir.argument list) evaluated =
   if List.mem Mir.Default arguments then begin
     let receiver =
-      match Interface.Definition.trait_interface st.context.lookups.interface capability with
+      match Interface.Definition.read_trait_interface st.context.lookups.interface capability with
       | Some interface -> (
           match
             List.find_opt

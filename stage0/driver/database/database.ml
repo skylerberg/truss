@@ -63,7 +63,7 @@ type package_database = {
   trait_headers : (Names.key, Resolve.trait_header part) Hashtbl.t;
   constant_values : Z.t option part Path_table.t;
   headers : (Names.key, Environment.header part) Hashtbl.t;
-  interfaces : (Names.key, Environment.lowered_interface part) Hashtbl.t;
+  interfaces : (Names.key, Environment.elaborated_interface part) Hashtbl.t;
   derived_interfaces : (Path.t * Path.t, Types.impl_interface part) Hashtbl.t;
   type_facts : Environment.type_facts part Path_table.t;
   grants : (Path.package, Environment.grant) Hashtbl.t;
@@ -582,7 +582,7 @@ let read_whole_resolution database note key =
   Resolve.merge
     (List.map (fun section -> read_resolution database note section key) Resolve.sections)
 
-let read_lowered_interface database note ~is_checked (key : Names.key) =
+let read_elaborated_interface database note ~is_checked (key : Names.key) =
   let owner = find_owner database key.module_.package in
   read database note (Interface key);
   if is_checked then begin
@@ -598,7 +598,7 @@ let read_lowered_interface database note ~is_checked (key : Names.key) =
 
 let make_recording_interface_lookups database note ~is_checked : Interface.Lookups.t =
   let names = make_recording_name_lookups database note in
-  let lowered_interface = read_lowered_interface database note ~is_checked in
+  let read_elaborated_interface = read_elaborated_interface database note ~is_checked in
   {
     names;
     resolved = read_resolution database note;
@@ -619,10 +619,10 @@ let make_recording_interface_lookups database note ~is_checked : Interface.Looku
         read database note (Header key);
         Option.map require_value
           (Hashtbl.find_opt (find_owner database key.module_.package).headers key));
-    lowered_interface;
+    elaborated_interface = read_elaborated_interface;
     derived_interface =
       (fun ~type_ ~trait ->
-        Option.iter (fun key -> ignore (lowered_interface key)) (names.key type_);
+        Option.iter (fun key -> ignore (read_elaborated_interface key)) (names.key type_);
         read database note (Derived_interface { type_; trait });
         Option.map require_value
           (Hashtbl.find_opt (find_owner database (Path.package type_)).derived_interfaces
@@ -638,14 +638,14 @@ let make_recording_interface_lookups database note ~is_checked : Interface.Looku
         Hashtbl.find_opt (find_owner database package).grants dependency);
   }
 
-let make_interface_part (lowered : Environment.lowered_interface) =
-  match (lowered.diagnostics, lowered.interface) with
+let make_interface_part (elaborated : Environment.elaborated_interface) =
+  match (elaborated.diagnostics, elaborated.interface) with
   | [], Error_interface _ -> Blocked
-  | [], _ -> Value lowered
+  | [], _ -> Value elaborated
   | diagnostics, _ -> Failed diagnostics
 
 let find_type_interface lookups path =
-  match make_part (Interface.Definition.type_interface lookups) path with
+  match make_part (Interface.Definition.read_type_interface lookups) path with
   | Value interface -> interface
   | Failed _ | Blocked -> None
 
@@ -1322,7 +1322,7 @@ let compute_type_facts database paths =
         let interfaces = List.map (fun path -> (path, find_type_interface lookups path)) paths in
         if List.for_all (fun (_, interface) -> Option.is_some interface) interfaces then
           make_part
-            (Interface.Properties.component_facts lookups)
+            (Interface.Properties.compute_component_facts lookups)
             (List.filter_map
                (fun (path, interface) -> Option.map (fun interface -> (path, interface)) interface)
                interfaces)
@@ -1390,7 +1390,7 @@ let compute_part database (part : Part.computed) =
       into (make_path_slot package_database.constant_values path) (fun note ->
           Some
             (make_part
-               (Interface.Constants.value_of
+               (Interface.Constants.evaluate_constant
                   (make_recording_interface_lookups database note ~is_checked:false))
                path))
   | Header key ->
@@ -1398,7 +1398,7 @@ let compute_part database (part : Part.computed) =
           Some
             (match
                make_part
-                 (Interface.Definition.header
+                 (Interface.Elaborator.elaborate_header
                     (make_recording_interface_lookups database note ~is_checked:false))
                  key
              with
@@ -1410,11 +1410,11 @@ let compute_part database (part : Part.computed) =
           Some
             (match
                make_part
-                 (Interface.Definition.lower
+                 (Interface.Elaborator.elaborate_definition
                     (make_recording_interface_lookups database note ~is_checked:false))
                  key
              with
-            | Value lowered -> make_interface_part lowered
+            | Value elaborated -> make_interface_part elaborated
             | Failed _ | Blocked -> Blocked))
   | Derived_interface { type_; trait } ->
       into
@@ -1424,7 +1424,7 @@ let compute_part database (part : Part.computed) =
             (match
                make_part
                  (fun trait ->
-                   Interface.Impls.derived_interface
+                   Interface.Impls.derive_interface
                      (make_recording_interface_lookups database note ~is_checked:false)
                      ~type_ ~trait)
                  trait
@@ -1452,7 +1452,7 @@ let compute_part database (part : Part.computed) =
             | Some (Value _) ->
                 make_checked_part
                   (fun key ->
-                    ( Interface.Check.diagnostics
+                    ( Interface.Check.list_diagnostics
                         (make_recording_interface_lookups database note ~is_checked:false)
                         key,
                       () ))
@@ -1481,8 +1481,8 @@ let compute_part database (part : Part.computed) =
           Some
             (match Hashtbl.find_opt package_database.checked_bodies key with
             | Some (Value checked) -> (
-                match read_lowered_interface database note ~is_checked:true key with
-                | lowered -> Value (Mir.body_part ~interface:lowered.interface checked.form)
+                match read_elaborated_interface database note ~is_checked:true key with
+                | elaborated -> Value (Mir.body_part ~interface:elaborated.interface checked.form)
                 | exception Reads_failed_part -> Blocked)
             | Some (Failed _ | Blocked) -> Blocked
             | None -> report_uncomputed (Checked_body key)))
@@ -1495,7 +1495,7 @@ let compute_part database (part : Part.computed) =
                 Value
                   (Mir.contract_part
                      ~type_interface:
-                       (Interface.Definition.type_interface
+                       (Interface.Definition.read_type_interface
                           (make_recording_interface_lookups database note ~is_checked:true))
                      key.path form)
             | Some (Failed _ | Blocked) -> Blocked
@@ -1510,7 +1510,7 @@ let compute_part database (part : Part.computed) =
                     ( Mir.body_part form,
                       Mir.contract_part
                         ~type_interface:
-                          (Interface.Definition.type_interface
+                          (Interface.Definition.read_type_interface
                              (make_recording_interface_lookups database note ~is_checked:true))
                         path form )
               | Failed _ | Blocked -> Blocked)
@@ -1615,7 +1615,7 @@ let list_components database (stage : Stage.t) package parts =
              match find_type_interface lookups path with
              | Some interface ->
                  List.filter (Path_table.mem in_closure)
-                   (Interface.Properties.fields_named ~package interface)
+                   (Interface.Properties.list_field_type_paths ~package interface)
              | None -> [])
            paths)
   | _ -> List.map (fun part -> Single part) parts
@@ -2205,10 +2205,9 @@ let list_definition_diagnostics database (key : Names.key) checker =
         (fun section -> list_failure_diagnostics owner.resolved_names (key, section))
         Resolve.sections
   | Interface ->
-      remove_duplicates
-        (list_failure_diagnostics owner.headers key
-        @ list_failure_diagnostics owner.interfaces key
-        @ list_failure_diagnostics owner.signature_checks key)
+      list_failure_diagnostics owner.headers key
+      @ list_failure_diagnostics owner.interfaces key
+      @ list_failure_diagnostics owner.signature_checks key
   | Infer ->
       list_failure_diagnostics owner.contracts key
       @ list_failure_diagnostics owner.checked_bodies key

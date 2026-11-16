@@ -16,7 +16,7 @@ let body_part ?interface (form : Core.t) : body_part =
       match
         of_definition
           ~is_specification:
-            (Option.fold ~none:false ~some:Interface.Environment.is_specification interface)
+            (Option.fold ~none:false ~some:Interface.Definition.is_specification interface)
           definition
       with
       | Some tree -> Body (code_of tree)
@@ -128,7 +128,8 @@ let type_clauses_of ~type_interface path (definition : Core.definition) =
               name = "self";
               mode = Read;
               type_ =
-                Types.Named { path; arguments = Types.generic_arguments interface.type_generics };
+                Types.Named
+                  { path; arguments = Types.list_generic_arguments interface.type_generics };
               default = None;
               callback_contract = None;
             }

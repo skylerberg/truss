@@ -3,7 +3,7 @@ module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
 module Properties = Interface.Properties
-module Lower = Interface.Lower
+module Elaborator = Interface.Elaborator
 open State
 open Modes
 open Instantiation
@@ -45,7 +45,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
   | Value_parameter parameter ->
       state.tables.resolutions.(value.id) <- Some (Value_parameter parameter);
       register_expression state value (fun () -> Value_parameter parameter);
-      Types.builtin UInt64
+      Types.make_builtin UInt64
   | Type_parameter _ | Capability_parameter _ ->
       error state Not_a_value (read_span state value.id)
         (Printf.sprintf "`%s` is a type, not a value." text)
@@ -66,7 +66,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
       state.tables.resolutions.(value.id) <- Some (Global { path; type_arguments = [] });
       register_expression state value (fun () ->
           Use (Form.build_constant_place state ~origin:value.id path));
-      match Interface.Definition.constant_type state.lookups.interface path with
+      match Interface.Definition.read_constant_type state.lookups.interface path with
       | Some type_ -> type_
       | None -> bug "the constant `%s` has no type" (Path.show path))
   | Definition (Type, path) ->
@@ -111,7 +111,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
       state.tables.resolutions.(value.id) <- Some Specification_value;
       register_expression state value (fun () -> Result);
       match env.output with
-      | Some output -> Types.result_type output
+      | Some output -> Types.extract_result_type output
       | None -> bug "`result` is named where nothing is returned")
   | Old | Identical | Final | Specification_function _ ->
       state.tables.resolutions.(value.id) <- Some Specification_value;
@@ -208,7 +208,7 @@ and field state (value : expression) base_type (member : name) =
   | _ -> unknown []
 
 and function_value state (value : expression) (signature : Types.signature) =
-  match Types.function_type_of signature with
+  match Types.make_function_type signature with
   | Some function_type ->
       register_expression state value (fun () -> Form.build_function_value state value);
       Types.Function function_type
@@ -230,7 +230,7 @@ and static_member state (value : expression) type_ (member : name) =
               Some (Global { path = constant; type_arguments = [] });
             register_expression state value (fun () ->
                 Use (Form.build_constant_place state ~origin:value.id constant));
-            match Interface.Definition.constant_type state.lookups.interface constant with
+            match Interface.Definition.read_constant_type state.lookups.interface constant with
             | Some type_ -> type_
             | None -> bug "the constant `%s` has no type" (Path.show constant))
         | None -> (
@@ -289,7 +289,7 @@ and explicit_type_arguments ?(head = 0) state (value : expression) instance item
 
 and finish_call state env (value : expression) path callee (instance : instance) arguments left_out
     =
-  let result = Types.result_type instance.signature.output in
+  let result = Types.extract_result_type instance.signature.output in
   state.tables.calls.(value.id) <-
     Some
       {
@@ -312,7 +312,7 @@ and reject_specification_call state env (value : expression) (path : Path.t)
     in
     let specification_type =
       List.find_map Types.find_specification_only_type
-        (Types.result_type signature.output
+        (Types.extract_result_type signature.output
         :: List.map (fun (parameter : Types.parameter_info) -> parameter.type_) signature.parameters
         )
     in
@@ -320,7 +320,7 @@ and reject_specification_call state env (value : expression) (path : Path.t)
       (Types.Error
          (report_specification_only state (read_span state value.id)
             (match
-               (Interface.Definition.interface state.lookups.interface path, specification_type)
+               (Interface.Definition.read_interface state.lookups.interface path, specification_type)
              with
             | Some (Theorem_interface _), _ ->
                 Printf.sprintf
@@ -338,7 +338,7 @@ and reject_specification_call state env (value : expression) (path : Path.t)
 
 and could_implement state type_ trait =
   let arguments =
-    match Interface.Definition.trait_interface state.lookups.interface trait with
+    match Interface.Definition.read_trait_interface state.lookups.interface trait with
     | Some interface ->
         List.map (fun (_ : Types.generic) -> Types.Type (fresh state)) interface.trait_generics
     | None -> []
@@ -420,12 +420,13 @@ and trait_candidates state receiver_type name =
   | Types.Parameter parameter ->
       unique
         (List.filter_map with_method
-           (Interface.Properties.known_bounds state.lookups.interface ~bounds:(bounds state)
+           (Interface.Properties.list_known_bounds state.lookups.interface ~bounds:(bounds state)
               (Types.Parameter parameter)))
   | Types.Any trait ->
       unique
         (List.filter_map with_method
-           (Interface.Properties.bound_closure state.lookups.interface ~self:receiver_type trait))
+           (Interface.Properties.list_bound_closure state.lookups.interface ~self:receiver_type
+              trait))
   | _ ->
       unique
         (List.concat_map
@@ -434,7 +435,9 @@ and trait_candidates state receiver_type name =
                (fun trait ->
                  let reference = trait_reference trait in
                  let has_generics =
-                   match Interface.Definition.trait_interface state.lookups.interface trait with
+                   match
+                     Interface.Definition.read_trait_interface state.lookups.interface trait
+                   with
                    | Some interface -> interface.trait_generics <> []
                    | None -> false
                  in
@@ -447,7 +450,7 @@ and one_family state (traits : Types.trait_reference list) =
   let requires (first : Types.trait_reference) (second : Types.trait_reference) =
     List.exists
       (fun (bound : Types.trait_reference) -> Path.equal bound.trait second.trait)
-      (Interface.Properties.bound_closure state.lookups.interface
+      (Interface.Properties.list_bound_closure state.lookups.interface
          ~self:(Types.Parameter { owner = first.trait; name = "Self" })
          first)
   in
@@ -550,7 +553,7 @@ and elements_calls state (span : Source.Definition_span.t) type_ (mode : Types.m
           Some
             ( Tables.Elements
                 {
-                  count = argumentless_call count counted (Types.builtin UInt64);
+                  count = argumentless_call count counted (Types.make_builtin UInt64);
                   element = argumentless_call element lent part;
                   lends;
                 },
@@ -581,5 +584,5 @@ and remaining_call state (span : Source.Definition_span.t) cursor =
   match method_version state span cursor "remaining" Read with
   | Some (callee, ({ parameters = []; output = Returns bound; _ } as signature))
     when Types.is_builtin UInt64 (normalize state bound) ->
-      Some (argumentless_call callee signature (Types.builtin UInt64))
+      Some (argumentless_call callee signature (Types.make_builtin UInt64))
   | _ -> None

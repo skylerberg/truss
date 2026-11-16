@@ -88,7 +88,8 @@ let rec back : Ground.ty -> Types.ty = function
               function_type.parameters;
           output = back function_type.result;
           uses =
-            Types.capability_set (List.map (fun path -> Types.Capability path) function_type.uses);
+            Types.make_capability_set
+              (List.map (fun path -> Types.Capability path) function_type.uses);
           costs = [];
         }
   | Any { trait; arguments; associated } ->
@@ -103,7 +104,7 @@ and back_argument : Ground.argument -> Types.argument = function
   | Type ty -> Type (back ty)
   | Value value -> Value (Known value)
   | Capabilities set ->
-      Capabilities (Types.capability_set (List.map (fun path -> Types.Capability path) set))
+      Capabilities (Types.make_capability_set (List.map (fun path -> Types.Capability path) set))
 
 let substitution (generics : Types.generic list) arguments =
   if List.length generics <> List.length arguments then

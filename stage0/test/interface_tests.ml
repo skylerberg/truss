@@ -12,7 +12,7 @@ let interface packages =
   Database.make_interface_lookups (Support.database packages) [ (module_of "app::main").package ]
 
 let standard = Path.standard
-let int64 = Types.builtin Int64
+let int64 = Types.make_builtin Int64
 
 let () =
   let packages = setup [] in
@@ -28,14 +28,14 @@ let () =
     Standard_library.files
 
 let () =
-  test "a function's signature is lowered" (fun () ->
+  test "a function's signature is elaborated" (fun () ->
       let packages =
         setup
           [
             ("app::main", "fn count(items: List[Int64], limit: own Int64 = 3) -> UInt64 { todo }\n");
           ]
       in
-      match Interface.Definition.signature (interface packages) (app "count") with
+      match Interface.Definition.read_declared_signature (interface packages) (app "count") with
       | Some { parameters = [ items; limit ]; output = Returns output; _ } ->
           if Types.show items.type_ <> "List[Int64]" then fail "items: %s" (Types.show items.type_);
           if limit.mode <> Own || not limit.has_default then fail "limit";
@@ -47,7 +47,7 @@ let () =
           [ ("app::main", Fixtures.Interface.methods_receiver_has_its_types_generic_parameters) ]
       in
       let path : Path.t = Method { owner = app "Box"; name = "get"; receiver = Read } in
-      match Interface.Definition.signature (interface packages) path with
+      match Interface.Definition.read_declared_signature (interface packages) path with
       | Some { receiver = Some (Read, self); _ } ->
           if Types.show self <> "Box[Value]" then fail "self: %s" (Types.show self)
       | _ -> fail "no receiver");
@@ -85,7 +85,7 @@ let () =
               "fn first[Items: Iterable](items: Items) -> Option[Items.Element] { todo }\n" );
           ]
       in
-      match Interface.Definition.signature (interface packages) (app "first") with
+      match Interface.Definition.read_declared_signature (interface packages) (app "first") with
       | Some { output = Returns output; _ } ->
           if Types.show output <> "Option[Items.Element]" then fail "output %s" (Types.show output)
       | _ -> fail "no signature")
@@ -208,78 +208,80 @@ let property name expected text type_ check =
       let actual = check (interface packages) ~bounds:(fun _ -> []) (type_ packages) in
       if actual <> expected then fail "expected %b" expected)
 
-let option type_ = Types.named (standard [ "option" ] "Option") [ type_ ]
-let list type_ = Types.named (standard [ "list" ] "List") [ type_ ]
-let slice type_ = Types.named (standard [ "list" ] "Slice") [ type_ ]
-let string = Types.named (standard [ "text" ] "String") []
+let option type_ = Types.make_named (standard [ "option" ] "Option") [ type_ ]
+let list type_ = Types.make_named (standard [ "list" ] "List") [ type_ ]
+let slice type_ = Types.make_named (standard [ "list" ] "Slice") [ type_ ]
+let string = Types.make_named (standard [ "text" ] "String") []
 
 let () =
-  property "an integer is Plain" true "" (fun _ -> int64) Interface.Impls.plain;
-  property "an Option of plain data is Plain" true "" (fun _ -> option int64) Interface.Impls.plain;
-  property "a List is Copyable" true "" (fun _ -> list int64) Interface.Impls.copyable;
+  property "an integer is Plain" true "" (fun _ -> int64) Interface.Impls.is_plain;
+  property "an Option of plain data is Plain" true ""
+    (fun _ -> option int64)
+    Interface.Impls.is_plain;
+  property "a List is Copyable" true "" (fun _ -> list int64) Interface.Impls.is_copyable;
   property "a handle is not Copyable" false ""
-    (fun _ -> Types.named (Intrinsic.builtin_path Handle) [])
-    Interface.Impls.copyable;
+    (fun _ -> Types.make_named (Intrinsic.builtin_path Handle) [])
+    Interface.Impls.is_copyable;
   property "a handle is not Plain" false ""
-    (fun _ -> Types.named (Intrinsic.builtin_path Handle) [])
-    Interface.Impls.plain;
+    (fun _ -> Types.make_named (Intrinsic.builtin_path Handle) [])
+    Interface.Impls.is_plain;
   property "an Option of a handle is not Copyable" false ""
-    (fun _ -> option (Types.named (Intrinsic.builtin_path Handle) []))
-    Interface.Impls.copyable;
+    (fun _ -> option (Types.make_named (Intrinsic.builtin_path Handle) []))
+    Interface.Impls.is_copyable;
   property "an Option of a handle is not Plain" false ""
-    (fun _ -> option (Types.named (Intrinsic.builtin_path Handle) []))
-    Interface.Impls.plain;
-  property "a List is not Plain" false "" (fun _ -> list int64) Interface.Impls.plain;
+    (fun _ -> option (Types.make_named (Intrinsic.builtin_path Handle) []))
+    Interface.Impls.is_plain;
+  property "a List is not Plain" false "" (fun _ -> list int64) Interface.Impls.is_plain;
   property "an Option of a Slice is a view" true ""
     (fun _ -> option (slice int64))
     Interface.Impls.is_view;
   property "a List of integers is not a view" false "" (fun _ -> list int64) Interface.Impls.is_view;
   property "a record of plain fields is Plain" true "type Point(x: Int64, y: Int64)\n"
-    (fun _ -> Types.named (app "Point") [])
-    Interface.Impls.plain;
+    (fun _ -> Types.make_named (app "Point") [])
+    Interface.Impls.is_plain;
   property "a variant held indirectly is not Plain" false
     Fixtures.Interface.variant_held_indirectly_is_not_plain
-    (fun _ -> Types.named (app "Tree") [])
-    Interface.Impls.plain;
+    (fun _ -> Types.make_named (app "Tree") [])
+    Interface.Impls.is_plain;
   property "a recursive type is still Copyable" true
     Fixtures.Interface.recursive_type_is_still_copyable
-    (fun _ -> Types.named (app "Tree") [])
-    Interface.Impls.copyable;
+    (fun _ -> Types.make_named (app "Tree") [])
+    Interface.Impls.is_copyable;
   property "an opaque type is not Copyable unless it says so" false
     "public opaque type Token(code: Int64)\n"
-    (fun _ -> Types.named (app "Token") [])
-    Interface.Impls.copyable;
+    (fun _ -> Types.make_named (app "Token") [])
+    Interface.Impls.is_copyable;
   property "an opaque type that derives Plain is Plain" true
     "public opaque type Token(code: Int64)\n  derives Plain\n"
-    (fun _ -> Types.named (app "Token") [])
-    Interface.Impls.plain;
+    (fun _ -> Types.make_named (app "Token") [])
+    Interface.Impls.is_plain;
   property "a generic opaque type is Plain when the fields that hold its argument are" false
     "public opaque type Box[Value](inner: Value)\n  derives Plain\n"
-    (fun _ -> Types.named (app "Box") [ string ])
-    Interface.Impls.plain;
+    (fun _ -> Types.make_named (app "Box") [ string ])
+    Interface.Impls.is_plain;
   property "an opaque type is Plain whatever an argument that no field holds is" true
     "public opaque type Id[Entity](value: UInt64)\n  derives Plain\n"
-    (fun _ -> Types.named (app "Id") [ string ])
-    Interface.Impls.plain;
+    (fun _ -> Types.make_named (app "Id") [ string ])
+    Interface.Impls.is_plain;
   property "a Slice is Plain whatever its elements are" true ""
     (fun _ -> slice string)
-    Interface.Impls.plain;
+    Interface.Impls.is_plain;
   property "a type defined as todo is not Copyable" false "type Session = todo\n"
-    (fun _ -> Types.named (app "Session") [])
-    Interface.Impls.copyable
+    (fun _ -> Types.make_named (app "Session") [])
+    Interface.Impls.is_copyable
 
 let holder = "type Holder[Value](value: Value)\n"
-let held type_ = Types.named (app "Holder") [ type_ ]
+let held type_ = Types.make_named (app "Holder") [ type_ ]
 let chain = Fixtures.Interface.chain
 let projection_holder = Fixtures.Interface.projection_holder
 
 let () =
   property "an Option of an Option of a List is not Plain" false ""
     (fun _ -> option (option (list int64)))
-    Interface.Impls.plain;
+    Interface.Impls.is_plain;
   property "an Option of an Option of plain data is Plain" true ""
     (fun _ -> option (option int64))
-    Interface.Impls.plain;
+    Interface.Impls.is_plain;
   property "a type nested in itself around a Slice is a view" true holder
     (fun _ -> held (held (slice int64)))
     Interface.Impls.is_view;
@@ -288,48 +290,48 @@ let () =
     Interface.Impls.is_view;
   property "a type nested in itself around a List is not Plain" false holder
     (fun _ -> held (held (list int64)))
-    Interface.Impls.plain;
+    Interface.Impls.is_plain;
   property "a type that contains itself is a view when its argument is" true chain
-    (fun _ -> Types.named (app "Chain") [ slice int64 ])
+    (fun _ -> Types.make_named (app "Chain") [ slice int64 ])
     Interface.Impls.is_view;
   property "a type that contains itself is not a view when its argument is not" false chain
-    (fun _ -> Types.named (app "Chain") [ int64 ])
+    (fun _ -> Types.make_named (app "Chain") [ int64 ])
     Interface.Impls.is_view;
   property "a type that contains itself around a Slice is a view" true
     Fixtures.Interface.type_that_contains_itself_around_a_slice_is_a_view
-    (fun _ -> Types.named (app "Nest") [ int64 ])
+    (fun _ -> Types.make_named (app "Nest") [ int64 ])
     Interface.Impls.is_view;
   property "types that hold each other are Copyable when nothing in them says otherwise" true
     Fixtures.Interface.types_that_hold_each_other_are_copyable_when
-    (fun _ -> Types.named (app "Even") [])
-    Interface.Impls.copyable;
+    (fun _ -> Types.make_named (app "Even") [])
+    Interface.Impls.is_copyable;
   property "types that hold each other are not Copyable when one holds a type that is not" false
     Fixtures.Interface.types_that_hold_each_other_are_not_copyable_when
-    (fun _ -> Types.named (app "Even") [])
-    Interface.Impls.copyable;
+    (fun _ -> Types.make_named (app "Even") [])
+    Interface.Impls.is_copyable;
   property "a type that holds an associated type is a view when that type is one" true
     projection_holder
-    (fun _ -> Types.named (app "Kept") [ Types.named (app "Numbers") [] ])
+    (fun _ -> Types.make_named (app "Kept") [ Types.make_named (app "Numbers") [] ])
     Interface.Impls.is_view;
   property "a type that holds an associated type is not a view when that type is not" false
     projection_holder
-    (fun _ -> Types.named (app "Kept") [ Types.named (app "Counted") [] ])
+    (fun _ -> Types.make_named (app "Kept") [ Types.make_named (app "Counted") [] ])
     Interface.Impls.is_view;
   property "a type that holds an associated type is Plain when that type is" true projection_holder
-    (fun _ -> Types.named (app "Kept") [ Types.named (app "Counted") [] ])
-    Interface.Impls.plain;
+    (fun _ -> Types.make_named (app "Kept") [ Types.make_named (app "Counted") [] ])
+    Interface.Impls.is_plain;
   property "a type that holds a type holding an associated type is a view when that type is one"
     true
     (projection_holder ^ "\ntype Outer(held: Kept[Numbers])\n")
-    (fun _ -> Types.named (app "Outer") [])
+    (fun _ -> Types.make_named (app "Outer") [])
     Interface.Impls.is_view;
   let through_itself = projection_holder ^ Fixtures.Interface.through_itself in
   property "a type that contains itself through an associated type is Copyable" true through_itself
-    (fun _ -> Types.named (app "Tree") [])
-    Interface.Impls.copyable;
+    (fun _ -> Types.make_named (app "Tree") [])
+    Interface.Impls.is_copyable;
   property "a type that contains itself through an associated type is not a view" false
     through_itself
-    (fun _ -> Types.named (app "Tree") [])
+    (fun _ -> Types.make_named (app "Tree") [])
     Interface.Impls.is_view
 
 let trait name arguments : Types.trait_reference =
@@ -343,7 +345,7 @@ let () =
   test "Int64 implements Add[Int64] with Output Int64" (fun () ->
       let packages = setup [] in
       match
-        Interface.Impls.associated_type (interface packages)
+        Interface.Impls.project_associated_type (interface packages)
           ~bounds:(fun _ -> [])
           int64 (trait "Add" [ int64 ]) "Output"
       with
@@ -357,7 +359,7 @@ let () =
           (Interface.Impls.implements (interface packages)
              ~bounds:(fun _ -> [])
              int64
-             (trait "Add" [ Types.builtin Int32 ]))
+             (trait "Add" [ Types.make_builtin Int32 ]))
       then fail "found an impl");
   test "a derived impl holds when its conditions do" (fun () ->
       let packages = setup [] in
@@ -369,7 +371,7 @@ let () =
       then fail "no impl");
   test "a derived impl does not hold when its conditions do not" (fun () ->
       let packages = setup [ ("app::main", "type Opaque(x: Int64)\n") ] in
-      let opaque = Types.named (app "Opaque") [] in
+      let opaque = Types.make_named (app "Opaque") [] in
       if
         Option.is_some
           (Interface.Impls.implements (interface packages)
@@ -383,7 +385,7 @@ let () =
           (Interface.Impls.implements (interface packages)
              ~bounds:(fun _ -> [])
              int64
-             (trait "From" [ Types.builtin Int32 ]))
+             (trait "From" [ Types.make_builtin Int32 ]))
       then fail "no impl")
 
 let () =
@@ -396,7 +398,7 @@ let () =
   let at packages type_ wanted name : Types.signature =
     let owner = impl_of packages type_ wanted in
     match
-      Interface.Impls.signature (interface packages) (Method { owner; name; receiver = Read })
+      Interface.Impls.read_signature (interface packages) (Method { owner; name; receiver = Read })
     with
     | Some signature -> signature
     | None -> failwith "no signature"
@@ -405,7 +407,7 @@ let () =
     String.concat ", "
       (List.map (fun (generic : Types.generic) -> generic.generic.name) signature.generics)
   in
-  let both = Types.named (app "Both") [ Types.named (app "One") [] ] in
+  let both = Types.make_named (app "Both") [ Types.make_named (app "One") [] ] in
   let described : Types.trait_reference =
     { trait = app "Described"; trait_arguments = []; associated = [] }
   in
@@ -432,7 +434,7 @@ let () =
       let clock : Types.trait_reference =
         { trait = standard [ "capabilities" ] "Clock"; trait_arguments = []; associated = [] }
       in
-      let signature = at packages (Types.named (app "FixedClock") []) clock "now" in
+      let signature = at packages (Types.make_named (app "FixedClock") []) clock "now" in
       match (signature.uses :> Types.capability list) with
       | [ Capability _ ] -> ()
       | uses -> fail "%d uses" (List.length uses))
@@ -463,9 +465,9 @@ let () =
         setup [ ("app::main", Fixtures.Interface.type_that_contains_itself_with_growing_arguments) ]
       in
       ignore
-        (Interface.Impls.copyable (interface packages)
+        (Interface.Impls.is_copyable (interface packages)
            ~bounds:(fun _ -> [])
-           (Types.named (app "Nested") [ int64 ])));
+           (Types.make_named (app "Nested") [ int64 ])));
   test "an impl's method may have the trait method's own generic parameters" (fun () ->
       no_diagnostics
         [ ("app::main", Fixtures.Interface.impls_method_may_have_the_trait_methods_own) ]);
@@ -500,9 +502,9 @@ let () =
       in
       if
         not
-          (Interface.Impls.copyable (interface packages)
+          (Interface.Impls.is_copyable (interface packages)
              ~bounds:(fun _ -> [])
-             (Types.named (app "Box") [ int64 ]))
+             (Types.make_named (app "Box") [ int64 ]))
       then fail "not Copyable");
   test "only some traits can be derived" (fun () ->
       one_diagnostic "type P()\n  derives Iterable\n" "types.not_derivable");
@@ -554,7 +556,7 @@ let () =
           (Interface.Impls.implements (interface packages)
              ~bounds:(fun _ -> [])
              any
-             (trait "From" [ Types.builtin Int32 ]))
+             (trait "From" [ Types.make_builtin Int32 ]))
       then fail "it does")
 
 let () =

@@ -1,4 +1,4 @@
-val bound_diagnostics :
+val list_bound_diagnostics :
   Lookups.t ->
   package:Path.package ->
   bounds:Impls.bounds ->
@@ -6,4 +6,4 @@ val bound_diagnostics :
   (Syntax.id * Types.ty) list ->
   Diagnostic.in_definition list
 
-val diagnostics : Lookups.t -> Resolve.Names.key -> Diagnostic.in_definition list
+val list_diagnostics : Lookups.t -> Resolve.Names.key -> Diagnostic.in_definition list

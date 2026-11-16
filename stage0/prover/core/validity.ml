@@ -253,7 +253,7 @@ let callback_facts context frame (invocation : Invocation.t) position known argu
           match List.assoc_opt position part.callbacks with
           | Some { inputs; requires } when List.length inputs = List.length arguments ->
               let substitution =
-                match Interface.Impls.signature context.lookups.interface path with
+                match Interface.Impls.read_signature context.lookups.interface path with
                 | Some (signature : Types.signature) ->
                     callee_substitution frame signature type_arguments
                 | None -> []
@@ -276,7 +276,7 @@ let callback_facts context frame (invocation : Invocation.t) position known argu
 let parameter_type context frame (invocation : Invocation.t) index =
   match invocation.callee with
   | Function { path; type_arguments } -> (
-      match Interface.Impls.signature context.lookups.interface path with
+      match Interface.Impls.read_signature context.lookups.interface path with
       | Some (signature : Types.signature) ->
           let types =
             (match signature.receiver with

@@ -587,7 +587,8 @@ let () =
                   List.filter_map
                     (fun (declaration : Resolve.Names.declaration) ->
                       match
-                        (declaration.path, Interface.Definition.signature interface declaration.path)
+                        ( declaration.path,
+                          Interface.Definition.read_declared_signature interface declaration.path )
                       with
                       | Top _, Some { generics = []; specification_only = false; _ } ->
                           Some (Instance.Code { path = declaration.path; type_arguments = [] })

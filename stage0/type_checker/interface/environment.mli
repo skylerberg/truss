@@ -22,19 +22,34 @@ type scope = {
   bounds : (Types.parameter * Types.trait_reference list) list;
 }
 
-val empty_scope : scope
-
-type lowered_interface = {
+type elaborated_interface = {
   interface : interface;
   diagnostics : Diagnostic.in_definition list;
   named : (Syntax.id * Types.ty) list;
   scope : scope;
 }
 
+type container =
+  | Trait_parts of {
+      trait_generics : Types.generic list;
+      requires : Types.trait_reference list;
+      associated_types : Types.associated_type list;
+      associated_capabilities : string list;
+      laws : (string * (string * Types.ty) list) list;
+    }
+  | Capability_parts
+  | Impl_parts of {
+      impl_generics : Types.generic list;
+      implements : Types.trait_reference;
+      for_type : Types.ty;
+      impl_uses : Types.capability_set;
+      capability_sets : (string * Types.capability_set) list;
+    }
+
 type header = {
+  container : container;
   container_scope : scope;
-  header_generics : Types.generic list;
-  header_uses : Types.capability_set;
+  container_named : (Syntax.id * Types.ty) list;
 }
 
 type occurrence = In_place | Indirect | Function_input
@@ -50,5 +65,3 @@ type type_facts = {
 }
 
 type grant = { capabilities : Path.t list; unknown : string list }
-
-val is_specification : interface -> bool

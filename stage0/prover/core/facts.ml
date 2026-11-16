@@ -316,10 +316,11 @@ let quoted text (span : Source.Definition_span.t) =
   if span.stop = span.start then "this expression" else Source.Definition_span.quote text span
 
 let text_of source origin = quoted (Lazy.force source.text) (span_of source origin)
-let builtin ty = Types.builtin_of ty
+let builtin ty = Types.find_builtin ty
 
 let bounds (ty : Types.ty) =
-  if Types.is_builtin Character ty then Some (Z.zero, Z.of_int 0x10FFFF) else Types.integer_range ty
+  if Types.is_builtin Character ty then Some (Z.zero, Z.of_int 0x10FFFF)
+  else Types.find_integer_range ty
 
 let is_numeric (ty : Types.ty) = match ty with Types.Integer -> true | _ -> bounds ty <> None
 
@@ -335,11 +336,11 @@ let equal_trait = Well_known.path Equal
 let visible_type context (ty : Types.ty) =
   match ty with
   | Named { path; arguments } when builtin ty = None -> (
-      match Interface.Definition.interface context.lookups.interface path with
+      match Interface.Definition.read_interface context.lookups.interface path with
       | Some (Interface.Environment.Type_interface interface)
         when (not interface.opaque) || Path.package path = Path.package context.current ->
           let substitution =
-            Option.value ~default:[] (Types.substitution_of interface.type_generics arguments)
+            Option.value ~default:[] (Types.make_substitution interface.type_generics arguments)
           in
           Some (interface, substitution)
       | _ -> None)

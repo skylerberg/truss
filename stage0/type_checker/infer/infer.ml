@@ -50,9 +50,9 @@ let form_origin (interface : Interface.Lookups.t) ~is_derived (path : Path.t) =
   | None, Method { owner = Derived { type_; _ }; _ } when is_derived path ->
       Option.map (fun type_key -> (Derived type_key, [])) (interface.names.key type_)
   | None, Method { owner = (Impl _ | Derived _) as owner; name; receiver } ->
-      Option.bind (Interface.Impls.impl_interface interface owner)
+      Option.bind (Interface.Definition.read_impl_interface interface owner)
         (fun (impl : Types.impl_interface) ->
-          Option.bind (Interface.Impls.trait_substitution interface owner) (fun substitution ->
+          Option.bind (Interface.Impls.make_impl_substitution interface owner) (fun substitution ->
               Option.map
                 (fun key -> (Inherited key, substitution))
                 (interface.names.key

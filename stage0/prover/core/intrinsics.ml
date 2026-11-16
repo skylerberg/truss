@@ -114,7 +114,7 @@ let slice_place context (site : Invocation.site) ~(owner : passed_place) ~owner_
   }
 
 let handle_descriptor context handle =
-  let handle_sort = sort_of context (Types.builtin Handle) in
+  let handle_sort = sort_of context (Types.make_builtin Handle) in
   declare context (Logic.Function (Symbol.Handle_descriptor, [ handle_sort ], Logic.Int));
   Logic.Apply (Symbol.Handle_descriptor, [ handle ])
 
@@ -123,7 +123,7 @@ let libc_number context frame (number : Libc.number) =
   declare context (Logic.Constant (symbol, Logic.Int));
   let term = Logic.Symbol symbol in
   assume context frame
-    (in_range (Types.builtin (Intrinsic.libc_builtin (Libc.number_type number))) term);
+    (in_range (Types.make_builtin (Intrinsic.libc_builtin (Libc.number_type number))) term);
   term
 
 let buffer_capacity context element term =
@@ -179,7 +179,7 @@ let libc_call context frame ~(site : Invocation.site) (function_ : Libc.function
       ]
       condition
   in
-  let element_of scalar = Types.builtin (Intrinsic.libc_builtin scalar) in
+  let element_of scalar = Types.make_builtin (Intrinsic.libc_builtin scalar) in
   let length element sequence = sequence_length context element sequence in
   List.iteri
     (fun position (_, passes) ->
@@ -296,7 +296,7 @@ let appended context frame element parts part =
   longer
 
 let byte_order context left right =
-  let sequence = sort_of context (sequence_type (Types.builtin UInt8)) in
+  let sequence = sort_of context (sequence_type (Types.make_builtin UInt8)) in
   let symbol = Symbol.Compare_bytes_order in
   let first = not (Hashtbl.mem context.declared symbol) in
   declare context (Logic.Function (symbol, [ sequence; sequence ], Logic.Int));
@@ -332,7 +332,7 @@ let buffer_operation context frame ~(site : Invocation.site) (operation : Intrin
     element operands ~changed known =
   let length sequence = sequence_length context element sequence in
   let fits value =
-    Logic.(Operation ("<=", [ int 0; value ]) &&& in_range (Types.builtin Int64) value)
+    Logic.(Operation ("<=", [ int 0; value ]) &&& in_range (Types.make_builtin Int64) value)
   in
   let model builtin term =
     let sequence = buffer_model context builtin element term in
@@ -544,7 +544,7 @@ let buffer_operation context frame ~(site : Invocation.site) (operation : Intrin
   | _ -> known
 
 let scalar_bytes element : int option =
-  match Types.builtin_of element with
+  match Types.find_builtin element with
   | Some (Int8 | UInt8 | Bool) -> Some 1
   | Some (Int16 | UInt16) -> Some 2
   | Some (Int32 | UInt32 | Float32 | Character) -> Some 4
@@ -565,7 +565,7 @@ let intrinsic context frame ~(site : Invocation.site) (operation : Intrinsic.ope
       element :: _ ) ->
       buffer_operation context frame ~site operation element operands ~changed (Lazy.force known)
   | Compare_bytes, _ ->
-      buffer_operation context frame ~site operation (Types.builtin UInt8) operands ~changed
+      buffer_operation context frame ~site operation (Types.make_builtin UInt8) operands ~changed
         (Lazy.force known)
   | Libc function_, _ ->
       libc_call context frame ~site function_ operands ~changed (Lazy.force known)
@@ -611,7 +611,7 @@ let intrinsic context frame ~(site : Invocation.site) (operation : Intrinsic.ope
           Lazy.force known
       | _ -> Lazy.force known)
   | Environment_entry, _ ->
-      let byte = Types.builtin UInt8 in
+      let byte = Types.make_builtin UInt8 in
       let model = buffer_model context View byte (Lazy.force known) in
       let length = sequence_length context byte model in
       (match sequence_at context byte model (Logic.Symbol (variable "entry.index")) with
@@ -636,7 +636,7 @@ let intrinsic context frame ~(site : Invocation.site) (operation : Intrinsic.ope
       match operands with
       | [ handle ] ->
           let descriptor = handle_descriptor context handle in
-          assume context frame (in_range (Types.builtin Int32) descriptor);
+          assume context frame (in_range (Types.make_builtin Int32) descriptor);
           descriptor
       | _ -> Lazy.force known)
   | _ ->

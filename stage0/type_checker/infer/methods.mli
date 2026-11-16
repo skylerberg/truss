@@ -2,7 +2,7 @@ module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
 module Properties = Interface.Properties
-module Lower = Interface.Lower
+module Elaborator = Interface.Elaborator
 
 val call :
   State.state ->

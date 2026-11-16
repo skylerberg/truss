@@ -3,18 +3,18 @@ module Names = Resolve.Names
 open Checking
 open Impl_checks
 
-let bound_diagnostics lookups ~package ~bounds ~spans named =
+let list_bound_diagnostics lookups ~package ~bounds ~spans named =
   List.concat_map
     (fun (id, (type_ : Types.ty)) ->
       let diagnostic code message = Diagnostic.make ~code spans.(id) message in
       match type_ with
       | Named { path; arguments } -> (
           match
-            Option.bind (Definition.type_interface lookups path)
+            Option.bind (Definition.read_type_interface lookups path)
               (fun (interface : Types.type_interface) ->
                 Option.map
-                  (Impls.required interface.type_generics)
-                  (Types.substitution_of interface.type_generics arguments))
+                  (Impls.list_required_bounds interface.type_generics)
+                  (Types.make_substitution interface.type_generics arguments))
           with
           | Some required ->
               List.concat_map
@@ -36,24 +36,25 @@ let bound_diagnostics lookups ~package ~bounds ~spans named =
     named
 
 let check_bounds state =
-  state.diagnostics <-
-    bound_diagnostics state.lookups ~package:state.key.module_.package ~bounds:(bounds state)
-      ~spans:state.spans state.lowered.named
-    @ state.diagnostics
+  state.diagnostics :=
+    list_bound_diagnostics state.lookups ~package:state.key.module_.package
+      ~bounds:(list_bounds state) ~spans:state.spans state.elaborated.named
+    @ !(state.diagnostics)
 
-let rec mentioned = function
-  | Types.Named { path; arguments } -> path :: List.concat_map mentioned_argument arguments
+let rec list_mentioned_paths = function
+  | Types.Named { path; arguments } -> path :: List.concat_map list_argument_paths arguments
   | Types.Function { inputs; output; _ } ->
-      List.concat_map (fun (_, type_) -> mentioned type_) inputs @ mentioned output
-  | Types.Any trait -> trait.trait :: List.concat_map mentioned_argument trait.trait_arguments
-  | Types.Projection { base; _ } -> mentioned base
+      List.concat_map (fun (_, type_) -> list_mentioned_paths type_) inputs
+      @ list_mentioned_paths output
+  | Types.Any trait -> trait.trait :: List.concat_map list_argument_paths trait.trait_arguments
+  | Types.Projection { base; _ } -> list_mentioned_paths base
   | _ -> []
 
-and mentioned_argument = function
-  | Types.Type type_ -> mentioned type_
+and list_argument_paths = function
+  | Types.Type type_ -> list_mentioned_paths type_
   | Types.Value _ | Types.Capabilities _ -> []
 
-let visibility_of state (path : Path.t) =
+let find_visibility state (path : Path.t) =
   match path with
   | Top { module_; name } -> (
       match state.lookups.names.find module_ name with
@@ -65,7 +66,7 @@ let check_private_in_public state ~visibility types (span : Source.Definition_sp
   if Names.is_public visibility then
     List.iter
       (fun path ->
-        match visibility_of state path with
+        match find_visibility state path with
         | Some (Private | Internal) ->
             report state Private_in_public span
               (Printf.sprintf
@@ -73,7 +74,7 @@ let check_private_in_public state ~visibility types (span : Source.Definition_sp
                   `%s` public, or this definition not."
                  (Path.show path) (Path.show path))
         | _ -> ())
-      (List.sort_uniq Path.compare (List.concat_map mentioned types))
+      (List.sort_uniq Path.compare (List.concat_map list_mentioned_paths types))
 
 let check_method_location state (head : type_head) =
   let owner =
@@ -101,8 +102,8 @@ let check_method_location state (head : type_head) =
       | _ -> ())
   | _ -> ()
 
-let signature_types (signature : Types.signature) =
-  Types.result_type signature.output
+let list_signature_types (signature : Types.signature) =
+  Types.extract_result_type signature.output
   :: List.map (fun (parameter : Types.parameter_info) -> parameter.type_) signature.parameters
   @ List.concat_map
       (fun (generic : Types.generic) ->
@@ -146,55 +147,44 @@ let check_duplicates state member_kind (names : name list) =
          name.text :: seen)
        [] names)
 
-let field_names (fields : field list) =
+let list_field_names (fields : field list) =
   List.filter_map
     (fun (field : field) ->
       match field.kind with Field_declaration { name; _ } -> Some name | Field_error -> None)
     fields
 
-let remove_derived (spans : Source.Definition_span.t array) (clause : type_clause)
+let make_derive_removal (spans : Source.Definition_span.t array) (clause : type_clause)
     (traits : path_type list) (written : path_type) =
   let delete start stop = Diagnostic.delete (Source.Definition_span.make start stop) in
   match traits with
   | [ _ ] -> delete spans.(clause.id).start spans.(clause.id).stop
   | _ -> (
-      let rec after = function
+      let rec find_next = function
         | (first : path_type) :: (next :: _ as rest) ->
-            if first == written then Some next else after rest
+            if first == written then Some next else find_next rest
         | _ -> None
       in
-      match after traits with
+      match find_next traits with
       | Some next -> delete spans.(written.id).start spans.(next.id).start
       | None -> (
-          let rec before = function
+          let rec find_previous = function
             | (previous : path_type) :: (next :: _ as rest) ->
-                if next == written then Some previous else before rest
+                if next == written then Some previous else find_previous rest
             | _ -> None
           in
-          match before traits with
+          match find_previous traits with
           | Some previous -> delete spans.(previous.id).stop spans.(written.id).stop
           | None -> delete spans.(written.id).start spans.(written.id).stop))
 
 let check_derives state (interface : Types.type_interface) (clauses : type_clause list) resolved =
-  let field_types =
-    match interface.shape with
-    | Record fields -> List.map (fun (field : Types.field) -> field.field_type) fields
-    | Sum variants ->
-        List.concat_map
-          (fun (variant : Types.variant) ->
-            List.map
-              (fun (field : Types.field) -> field.field_type)
-              (Option.value ~default:[] variant.fields))
-          variants
-    | Todo_type | Builtin_type _ -> []
-  in
-  let derived_bounds trait parameter =
+  let field_types = Types.list_field_types interface in
+  let list_derived_bounds trait parameter =
     if
       List.exists
         (fun (generic : Types.generic) -> generic.generic = parameter)
         interface.type_generics
-    then bounds state parameter @ [ { Types.trait; trait_arguments = []; associated = [] } ]
-    else bounds state parameter
+    then list_bounds state parameter @ [ { Types.trait; trait_arguments = []; associated = [] } ]
+    else list_bounds state parameter
   in
   List.iter
     (fun (clause : type_clause) ->
@@ -204,7 +194,7 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
             (fun (written : path_type) ->
               match (resolved : Resolve.resolved).names.(written.path.last.id) with
               | Some (Definition (_, trait)) ->
-                  let shown = Lower.show_path written.path in
+                  let shown = Elaborator.show_path written.path in
                   if
                     not
                       (Names.derivable trait || Well_known.is Copyable trait
@@ -222,7 +212,7 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
                         ~fixes:
                           [
                             Diagnostic.fix "Remove the declaration."
-                              [ remove_derived state.spans clause traits written ];
+                              [ make_derive_removal state.spans clause traits written ];
                           ]
                         (Printf.sprintf
                            "Whether `%s` holds for this type is derived from its fields, which are \
@@ -233,8 +223,10 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
                         List.for_all
                           (fun type_ ->
                             if Well_known.is Plain trait then
-                              Impls.plain state.lookups ~bounds:(derived_bounds trait) type_
-                            else Impls.copyable state.lookups ~bounds:(derived_bounds trait) type_)
+                              Impls.is_plain state.lookups ~bounds:(list_derived_bounds trait) type_
+                            else
+                              Impls.is_copyable state.lookups ~bounds:(list_derived_bounds trait)
+                                type_)
                           field_types
                       in
                       let allocates =
@@ -279,8 +271,8 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
                         in
                         if
                           Option.is_none
-                            (Impls.implements state.lookups ~bounds:(derived_bounds trait) type_
-                               wanted)
+                            (Impls.implements state.lookups ~bounds:(list_derived_bounds trait)
+                               type_ wanted)
                         then
                           report state Cannot_derive state.spans.(written.id)
                             (Printf.sprintf
@@ -302,28 +294,19 @@ let check_no_capability_parameter state definition_kind (name : name)
       | Capability_parameter parameter ->
           report state Misplaced_capability_parameter state.spans.(generic.id)
             (Printf.sprintf
-               "Only a function can take a capability parameter. No type argument can \
-                be                 written for `%s`, so no signature or field could name %s `%s` \
-                with the                 capabilities that it uses. Write the capabilities in the \
-                function type, as in                 `(fn() uses Clock)`."
+               "Only a function can take a capability parameter. No type argument can be written \
+                for `%s`, so no signature or field could name %s `%s` with the capabilities that \
+                it uses. Write the capabilities in the function type, as in `(fn() uses Clock)`."
                parameter.text definition_kind name.text)
       | Type_parameter _ | Value_parameter _ | Generic_error -> ())
     generics
 
 let check_trait_cycle state (requires : path_type list) =
-  let visited = Hashtbl.create 16 in
-  let rec reaches path =
-    if Path.equal path state.key.path then true
-    else if Hashtbl.mem visited path then false
-    else begin
-      Hashtbl.replace visited path ();
-      match state.lookups.trait_header path with
-      | Some header -> List.exists reaches header.required
-      | None -> false
-    end
+  let is_required_by required =
+    List.exists (Path.equal state.key.path) (Elaborator.list_trait_closure state.lookups required)
   in
   match state.lookups.trait_header state.key.path with
-  | Some header when List.exists reaches header.required -> (
+  | Some header when List.exists is_required_by header.required -> (
       match requires with
       | first :: _ ->
           report state Trait_cycle state.spans.(first.id)
@@ -338,14 +321,14 @@ let check_redeclared state (name : name) (receiver : Path.receiver) ~(trait_path
       (fun (required : Types.trait_reference) ->
         List.concat_map
           (fun (bound : Types.trait_reference) ->
-            match Definition.trait_interface state.lookups bound.trait with
+            match Definition.read_trait_interface state.lookups bound.trait with
             | Some interface ->
                 List.map
                   (fun (method_ : Types.trait_method) ->
                     ((method_.method_name, method_.method_receiver), bound.trait))
                   interface.methods
             | None -> [])
-          (Properties.bound_closure state.lookups
+          (Properties.list_bound_closure state.lookups
              ~self:(Types.Parameter { owner = trait_path; name = "Self" })
              required))
       trait.requires
@@ -371,10 +354,10 @@ let check_proof_bounds state (written : type_head) (generics : Types.generic lis
             | Value_generic -> Types.Value (Types.Value_parameter of_impl.generic)
             | Capability_generic ->
                 Types.Capabilities
-                  (Types.capability_set [ Types.Capability_parameter of_impl.generic ]) ))
+                  (Types.make_capability_set [ Types.Capability_parameter of_impl.generic ]) ))
         generics impl.impl_generics
     in
-    let impl_bounds = Types.bounds_of impl.impl_generics in
+    let impl_bounds = Types.list_bounds impl.impl_generics in
     List.iteri
       (fun index ((proof : Types.generic), (of_impl : Types.generic)) ->
         match proof.kind with
@@ -405,23 +388,23 @@ let check_proof_bounds state (written : type_head) (generics : Types.generic lis
 let check state =
   let lookups = state.lookups in
   let definition = state.definition in
-  let broken part = Names.is_broken lookups.names state.key part in
+  let is_broken part = Names.is_broken lookups.names state.key part in
   check_bounds state;
   let resolved = lookups.resolved Interface state.key in
-  if not (broken Header) then
-    match (lookups.names.container state.key, definition.kind, state.lowered.interface) with
+  if not (is_broken Header) then
+    match (lookups.names.container state.key, definition.kind, state.elaborated.interface) with
     | ( Some container,
         (Function { signature; _ } | Method_declaration signature),
         Function_interface written ) -> (
         let name = Names.signature_name signature in
         match
-          (lookups.names.definition container, (lookups.lowered_interface container).interface)
+          (lookups.names.definition container, (lookups.elaborated_interface container).interface)
         with
         | { kind = Trait _; visibility; _ }, Trait_interface trait ->
             check_redeclared state name
               (Names.receiver signature.parameters)
               ~trait_path:container.path trait;
-            check_private_in_public state ~visibility (signature_types written)
+            check_private_in_public state ~visibility (list_signature_types written)
               state.spans.(name.id)
         | { kind = Impl { trait_; _ }; _ }, Impl_interface impl ->
             check_impl_method state name
@@ -431,18 +414,18 @@ let check state =
               trait_
         | _ -> ())
     | Some _, _, _ -> ()
-    | None, Function { signature; _ }, Function_interface lowered ->
+    | None, Function { signature; _ }, Function_interface elaborated ->
         (match signature.name with
         | Member_name (head, _) -> check_method_location state head
         | Plain_name name ->
             if name.text = "main" && state.key.module_.modules = [] then
-              check_main state lowered state.spans.(name.id));
+              check_main state elaborated state.spans.(name.id));
         let span =
           match signature.name with
           | Plain_name name | Member_name (_, name) -> state.spans.(name.id)
         in
-        check_private_in_public state ~visibility:definition.visibility (signature_types lowered)
-          span
+        check_private_in_public state ~visibility:definition.visibility
+          (list_signature_types elaborated) span
     | None, Law_proof { law; type_; _ }, Law_proof_interface { generics; trait; for_type; _ } -> (
         (match lookups.trait_header trait.trait with
         | Some header when not (List.mem law.text header.laws) ->
@@ -466,35 +449,26 @@ let check state =
           | Some (Impls.From_impl { impl; _ }) ->
               Option.iter
                 (check_proof_bounds state type_ generics)
-                (Impls.impl_interface lookups impl)
+                (Definition.read_impl_interface lookups impl)
           | Some _ -> ())
     | None, Type_definition { name; generics; body; clauses }, Type_interface interface ->
         check_no_capability_parameter state "the type" name generics;
         (match body with
-        | Fields fields -> check_duplicates state "field" (field_names fields)
+        | Fields fields -> check_duplicates state "field" (list_field_names fields)
         | Variants variants ->
             check_duplicates state "variant"
               (List.map (fun (variant : variant) -> variant.name) variants);
             List.iter
               (fun (variant : variant) ->
                 Option.iter
-                  (fun fields -> check_duplicates state "field" (field_names fields))
+                  (fun fields -> check_duplicates state "field" (list_field_names fields))
                   variant.fields)
               variants
         | Type_todo -> ());
         check_derives state interface clauses resolved;
         if definition.visibility = Public then
           check_private_in_public state ~visibility:definition.visibility
-            (match interface.shape with
-            | Record fields -> List.map (fun (field : Types.field) -> field.field_type) fields
-            | Sum variants ->
-                List.concat_map
-                  (fun (variant : Types.variant) ->
-                    List.map
-                      (fun (field : Types.field) -> field.field_type)
-                      (Option.value ~default:[] variant.fields))
-                  variants
-            | _ -> [])
+            (Types.list_field_types interface)
             state.spans.(name.id)
     | None, Trait { name; generics; requires; _ }, Trait_interface trait ->
         check_no_capability_parameter state "the trait" name generics;
@@ -509,19 +483,19 @@ let check state =
     | None, Constant { name = Member_name (head, _); _ }, _ -> check_method_location state head
     | None, _, _ -> ()
 
-let diagnostics (lookups : Lookups.t) key =
+let list_diagnostics (lookups : Lookups.t) key =
   let state =
     {
       lookups;
       key;
       definition = lookups.names.definition key;
-      lowered = lookups.lowered_interface key;
+      elaborated = lookups.elaborated_interface key;
       spans = lookups.names.spans key;
-      diagnostics = [];
+      diagnostics = ref [];
     }
   in
   check state;
   List.sort
     (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
       compare (left.span, left.code) (right.span, right.code))
-    state.diagnostics
+    !(state.diagnostics)

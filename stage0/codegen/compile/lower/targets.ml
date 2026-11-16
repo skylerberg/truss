@@ -34,7 +34,7 @@ let resolve_impl context substitution ~(trait : Types.trait_reference) ~self_typ
     | Dynamic -> bug "a call through any, which reaches no one instance"
   in
   let impl_interface =
-    match Interface.Impls.impl_interface context.lookups.interface impl with
+    match Interface.Definition.read_impl_interface context.lookups.interface impl with
     | Some position -> position
     | None -> bug "no interface for %s" (Path.show impl)
   in
@@ -79,13 +79,13 @@ let method_slot context ~owner ~first ~missing (methods : Types.trait_method lis
   with
   | Some index ->
       ( first + index,
-        Interface.Definition.method_signature context.lookups.interface ~owner
+        Interface.Definition.read_method_signature context.lookups.interface ~owner
           (List.nth methods index) )
   | None -> missing ()
 
 let capability_method context capability name =
   let interface =
-    match Interface.Definition.trait_interface context.lookups.interface capability with
+    match Interface.Definition.read_trait_interface context.lookups.interface capability with
     | Some position -> position
     | None -> bug "no interface for %s" (Path.show capability)
   in
@@ -102,10 +102,10 @@ let entry_signature context (signature : Types.signature) =
 
 let callable_through_any context trait (trait_method : Types.trait_method) =
   trait_method.method_receiver <> Static
-  && Interface.Impls.through_any context.lookups.interface ~trait trait_method = Callable
+  && Interface.Impls.classify_through_any context.lookups.interface ~trait trait_method = Callable
 
 let any_methods context trait =
-  match Interface.Definition.trait_interface context.lookups.interface trait with
+  match Interface.Definition.read_trait_interface context.lookups.interface trait with
   | Some position -> List.filter (callable_through_any context trait) position.methods
   | None -> bug "no interface for %s" (Path.show trait)
 
@@ -114,12 +114,11 @@ let dynamic_method context trait name =
       bug "%s cannot be called through any" name)
 
 let is_copyable_any context (any : Types.trait_reference) =
-  Interface.Properties.has context.lookups.interface
-    ~bounds:(fun _ -> [])
-    ~normalize:context.monomorphic.normalize Interface.Properties.Copyable (Types.Any any)
+  Interface.Impls.is_copyable context.lookups.interface ~bounds:Interface.Impls.no_bounds
+    (Types.Any any)
 
 let any_substitution context ~(any : Types.trait_reference) trait : Types.substitution =
-  match Interface.Definition.trait_interface context.lookups.interface trait with
+  match Interface.Definition.read_trait_interface context.lookups.interface trait with
   | Some interface ->
       let reference =
         if Path.equal trait any.trait then any
@@ -127,13 +126,13 @@ let any_substitution context ~(any : Types.trait_reference) trait : Types.substi
           match
             List.find_opt
               (fun (bound : Types.trait_reference) -> Path.equal bound.trait trait)
-              (Interface.Properties.bound_closure context.lookups.interface ~self:(Types.Any any)
-                 any)
+              (Interface.Properties.list_bound_closure context.lookups.interface
+                 ~self:(Types.Any any) any)
           with
           | Some bound -> bound
           | None -> bug "%s is not a trait of %s" (Path.show trait) (Types.show (Types.Any any))
       in
-      Interface.Properties.trait_substitution interface ~self:(Types.Any any) reference
+      Interface.Properties.make_trait_substitution interface ~self:(Types.Any any) reference
   | None -> bug "no interface for %s" (Path.show trait)
 
 let any_entry_signature context ~any ~trait (signature : Types.signature) =
@@ -333,7 +332,7 @@ let in_type_definition st ~(source : Names.key) (ty : Ground.ty) nested_function
     | _ -> bug "defaults of %s" (Ground.to_string ty)
   in
   let interface =
-    match Interface.Definition.type_interface st.context.lookups.interface path with
+    match Interface.Definition.read_type_interface st.context.lookups.interface path with
     | Some position -> position
     | None -> bug "no interface for %s" (Path.show path)
   in
@@ -472,7 +471,7 @@ let literal_place st (ty : Ground.ty) text =
   build ty (Build { ty; variant = None; fields = [ (field, Copy part) ] })
 
 let static_constant st path : Lowered.place =
-  match Interface.Definition.constant_type st.context.lookups.interface path with
+  match Interface.Definition.read_constant_type st.context.lookups.interface path with
   | Some ty -> { root = Static { key = Constant path; ty = ground st ty }; projections = [] }
   | None -> bug "no type for the constant %s" (Path.show path)
 

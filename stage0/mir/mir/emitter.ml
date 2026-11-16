@@ -335,7 +335,7 @@ let group_of builder (task : task) origin =
   match Hashtbl.find_opt builder.groups key with
   | Some group -> group
   | None ->
-      let winner = new_local builder Temporary (Types.builtin UInt32) origin in
+      let winner = new_local builder Temporary (Types.make_builtin UInt32) origin in
       let group = { winner; exits = [] } in
       Hashtbl.replace builder.groups key group;
       group
@@ -410,7 +410,7 @@ let start_group builder key origin =
   | Some { winner; exits = _ :: _ } ->
       add_temporary builder winner;
       assign builder (at winner)
-        (Operand (Constant { value = Integer Z.zero; type_ = Types.builtin UInt32 }))
+        (Operand (Constant { value = Integer Z.zero; type_ = Types.make_builtin UInt32 }))
         origin
   | _ -> ()
 

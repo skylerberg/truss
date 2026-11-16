@@ -129,7 +129,7 @@ let assume_laws context frame ~at (trait : Types.trait_reference) (ty : Types.ty
 let template_trait : Path.t = Well_known.path From_template
 
 let signature_terminates context path =
-  match Interface.Impls.signature context.lookups.interface path with
+  match Interface.Impls.read_signature context.lookups.interface path with
   | Some (signature : Types.signature) -> signature.terminates
   | None -> true
 

@@ -37,8 +37,8 @@ let require state ~(at : Source.Definition_span.t) type_ (bound : Types.trait_re
             List.iter
               (fun (name, wanted) ->
                 match
-                  Interface.Impls.associated_type state.lookups.interface ~bounds:(bounds state)
-                    type_ trait name
+                  Interface.Impls.project_associated_type state.lookups.interface
+                    ~bounds:(bounds state) type_ trait name
                 with
                 | Some associated_type when not (unify state associated_type wanted) ->
                     unmet type_ (Some (name, associated_type))
@@ -73,10 +73,10 @@ let require_bounds state (span : Source.Definition_span.t) ?of_type generics sub
               | None -> needs ^ ", which does not hold."
               | Some (name, associated_type) ->
                   Printf.sprintf "%s, and its `%s` is `%s`." needs name (show state associated_type))))
-    (Impls.required generics substitution)
+    (Impls.list_required_bounds generics substitution)
 
 let fresh_arguments state (path : Path.t) =
-  match Interface.Definition.type_interface state.lookups.interface path with
+  match Interface.Definition.read_type_interface state.lookups.interface path with
   | Some interface ->
       List.map
         (fun (generic : Types.generic) ->
@@ -88,13 +88,13 @@ let fresh_arguments state (path : Path.t) =
   | None -> []
 
 let require_type_bounds state span path arguments =
-  match Interface.Definition.type_interface state.lookups.interface path with
+  match Interface.Definition.read_type_interface state.lookups.interface path with
   | Some interface ->
       Option.iter
         (require_bounds state span
            ~of_type:(Types.Named { path; arguments })
            interface.type_generics)
-        (Types.substitution_of interface.type_generics arguments)
+        (Types.make_substitution interface.type_generics arguments)
   | None -> ()
 
 let instantiate_type state span path =
@@ -209,4 +209,4 @@ let intrinsic_signature path =
 let function_signature state (path : Path.t) =
   match intrinsic_signature path with
   | Some signature -> Some signature
-  | None -> Interface.Definition.signature state.lookups.interface path
+  | None -> Interface.Definition.read_declared_signature state.lookups.interface path

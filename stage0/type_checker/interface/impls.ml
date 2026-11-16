@@ -1,23 +1,23 @@
 module Names = Resolve.Names
 open Environment
 
-let head = function Types.Named { path; _ } -> Some path | _ -> None
+let find_head = function Types.Named { path; _ } -> Some path | _ -> None
 
-let impls_for (lookups : Lookups.t) (type_ : Path.t) package =
+let list_impls_for_type (lookups : Lookups.t) (type_ : Path.t) package =
   lookups.names.impls_of_type package type_
 
-let impls_in lookups ~trait ~type_ package =
+let list_impls_of_trait_for_type lookups ~trait ~type_ package =
   List.filter_map
     (fun (indexed_trait, impl) -> if Path.equal indexed_trait trait then Some impl else None)
-    (impls_for lookups type_ package)
+    (list_impls_for_type lookups type_ package)
 
-let impls_of (lookups : Lookups.t) ~trait package =
+let list_impls_of_trait (lookups : Lookups.t) ~trait package =
   List.sort_uniq Path.compare (lookups.names.impls_of_trait package trait)
 
-let cursor_trait = Well_known.path Cursor
-
-let derived_interface lookups ~type_ ~trait =
-  match (Definition.type_interface lookups type_, Definition.trait_interface lookups trait) with
+let derive_interface lookups ~type_ ~trait =
+  match
+    (Definition.read_type_interface lookups type_, Definition.read_trait_interface lookups trait)
+  with
   | Some type_interface, Some trait_interface ->
       let trait_reference : Types.trait_reference =
         { trait; trait_arguments = []; associated = [] }
@@ -33,7 +33,7 @@ let derived_interface lookups ~type_ ~trait =
       in
       let for_type =
         Types.Named
-          { path = type_; arguments = Types.generic_arguments type_interface.type_generics }
+          { path = type_; arguments = Types.list_generic_arguments type_interface.type_generics }
       in
       Some
         {
@@ -49,29 +49,25 @@ let derived_interface lookups ~type_ ~trait =
         }
   | _ -> None
 
-let impl_interface (lookups : Lookups.t) (path : Path.t) =
-  match path with
-  | Derived { type_; trait } -> lookups.derived_interface ~type_ ~trait
-  | _ -> Definition.impl_interface lookups path
-
-let trait_substitution lookups (impl : Path.t) =
-  Option.bind (impl_interface lookups impl) (fun (interface : Types.impl_interface) ->
+let make_impl_substitution lookups (impl : Path.t) =
+  Option.bind (Definition.read_impl_interface lookups impl)
+    (fun (interface : Types.impl_interface) ->
       Option.map
         (fun trait ->
-          Properties.trait_substitution trait ~self:interface.for_type interface.implements)
-        (Definition.trait_interface lookups interface.implements.trait))
+          Properties.make_trait_substitution trait ~self:interface.for_type interface.implements)
+        (Definition.read_trait_interface lookups interface.implements.trait))
 
-let open_type = function Types.Error _ | Types.Variable _ | Types.Hole -> true | _ -> false
+let is_open_type = function Types.Error _ | Types.Variable _ | Types.Hole -> true | _ -> false
 
 let rec match_type ~variables (substitution : Types.substitution) pattern type_ =
   match (pattern, type_) with
   | Types.Parameter parameter, _ when List.mem parameter variables -> (
       match List.assoc_opt parameter substitution with
       | Some (Types.Type bound) ->
-          if Types.equal bound type_ || open_type type_ then Some substitution else None
+          if Types.equal bound type_ || is_open_type type_ then Some substitution else None
       | Some (Types.Value _ | Types.Capabilities _) -> None
       | None -> Some ((parameter, Types.Type type_) :: substitution))
-  | _, argument_type when open_type argument_type -> Some substitution
+  | _, argument_type when is_open_type argument_type -> Some substitution
   | Types.Named left, Types.Named right when Path.equal left.path right.path ->
       match_arguments ~variables substitution left.arguments right.arguments
   | _ -> if Types.equal pattern type_ then Some substitution else None
@@ -107,7 +103,7 @@ type evidence =
 
 type through_any = Callable | Has_generics | Names_self
 
-let through_any lookups ~(trait : Path.t) (method_ : Types.trait_method) : through_any =
+let classify_through_any lookups ~(trait : Path.t) (method_ : Types.trait_method) : through_any =
   let self : Types.parameter = { owner = trait; name = "Self" } in
   let names_self type_ =
     let mentions_self = ref false in
@@ -123,8 +119,8 @@ let through_any lookups ~(trait : Path.t) (method_ : Types.trait_method) : throu
          type_);
     !mentions_self
   in
-  let signature = Definition.method_signature lookups ~owner:trait method_ in
-  let result = Types.result_type signature.output in
+  let signature = Definition.read_method_signature lookups ~owner:trait method_ in
+  let result = Types.extract_result_type signature.output in
   if signature.generics <> [] then Has_generics
   else if
     List.exists (fun (info : Types.parameter_info) -> names_self info.type_) signature.parameters
@@ -132,14 +128,11 @@ let through_any lookups ~(trait : Path.t) (method_ : Types.trait_method) : throu
   then Names_self
   else Callable
 
-let copyable_path = Properties.copyable_trait
-let plain_path = Properties.plain_trait
-
 type bounds = Types.parameter -> Types.trait_reference list
 
 let no_bounds _ = []
 
-let required (generics : Types.generic list) (substitution : Types.substitution) =
+let list_required_bounds (generics : Types.generic list) (substitution : Types.substitution) =
   List.concat_map
     (fun (generic : Types.generic) ->
       match (generic.kind, List.assoc_opt generic.generic substitution) with
@@ -150,15 +143,15 @@ let required (generics : Types.generic list) (substitution : Types.substitution)
       | _ -> [])
     generics
 
-let rec implements lookups ~(bounds : bounds) ?(depth = 0) ?(conditions = true) (type_ : Types.ty)
-    (wanted : Types.trait_reference) : evidence option =
+let rec implements lookups ~(bounds : bounds) ?(depth = 0) ?(checks_conditions = true)
+    (type_ : Types.ty) (wanted : Types.trait_reference) : evidence option =
   let arguments_match actual_arguments =
     List.length actual_arguments = List.length wanted.trait_arguments
     && List.for_all2
          (fun wanted actual ->
            match (wanted, actual) with
            | Types.Type wanted, Types.Type actual ->
-               open_type wanted || open_type actual
+               is_open_type wanted || is_open_type actual
                || Types.equal (normalize lookups ~bounds wanted) (normalize lookups ~bounds actual)
            | Types.Value wanted, Types.Value actual -> wanted = actual
            | _ -> false)
@@ -168,11 +161,11 @@ let rec implements lookups ~(bounds : bounds) ?(depth = 0) ?(conditions = true) 
     List.for_all
       (fun (name, wanted_type) ->
         let wanted_type = normalize lookups ~bounds wanted_type in
-        if open_type wanted_type then true
+        if is_open_type wanted_type then true
         else
           match List.assoc_opt name fixed with
           | Some defined ->
-              open_type defined || Types.equal (normalize lookups ~bounds defined) wanted_type
+              is_open_type defined || Types.equal (normalize lookups ~bounds defined) wanted_type
           | None -> (
               match (base, wanted_type) with
               | Some base, Types.Projection { base = projected; name = projected_name; _ } ->
@@ -181,26 +174,27 @@ let rec implements lookups ~(bounds : bounds) ?(depth = 0) ?(conditions = true) 
       wanted.associated
   in
   let broken_trait =
-    match Definition.interface lookups wanted.trait with
+    match Definition.read_interface lookups wanted.trait with
     | Some (Error_interface report) -> Some report
     | _ -> None
   in
   if depth > 32 then None
   else if Option.is_some broken_trait then
     Option.map (fun report -> Accepted (Types.Error report)) broken_trait
-  else if Path.equal wanted.trait copyable_path || Path.equal wanted.trait plain_path then
+  else if Well_known.is Copyable wanted.trait || Well_known.is Plain wanted.trait then
     let property : Properties.property =
-      if Path.equal wanted.trait plain_path then Plain else Copyable
+      if Well_known.is Plain wanted.trait then Plain else Copyable
     in
     if
-      (not conditions)
-      || Properties.has lookups ~bounds ~normalize:(normalize lookups ~bounds) property type_
+      (not checks_conditions)
+      || Properties.has_property lookups ~bounds ~normalize:(normalize lookups ~bounds) property
+           type_
     then Some Built_in
     else None
-  else if Path.equal wanted.trait Properties.storable_trait then
+  else if Well_known.is Storable wanted.trait then
     if
-      (not conditions)
-      || Properties.storable lookups ~bounds ~normalize:(normalize lookups ~bounds) type_
+      (not checks_conditions)
+      || Properties.is_storable lookups ~bounds ~normalize:(normalize lookups ~bounds) type_
     then Some Built_in
     else None
   else
@@ -214,7 +208,7 @@ let rec implements lookups ~(bounds : bounds) ?(depth = 0) ?(conditions = true) 
               Path.equal bound.trait wanted.trait
               && arguments_match bound.trait_arguments
               && associated_match ~base:(Some type_) bound.associated)
-            (Properties.known_bounds lookups ~bounds type_)
+            (Properties.list_known_bounds lookups ~bounds type_)
         then Some From_bound
         else None
     | Types.Any trait ->
@@ -226,7 +220,7 @@ let rec implements lookups ~(bounds : bounds) ?(depth = 0) ?(conditions = true) 
               && associated_match ~base:None
                    (if Path.equal bound.trait trait.trait then trait.associated
                     else bound.associated))
-            (Properties.bound_closure lookups ~self:type_ trait)
+            (Properties.list_bound_closure lookups ~self:type_ trait)
         then Some From_any
         else None
     | Types.Named { path; _ } ->
@@ -240,12 +234,13 @@ let rec implements lookups ~(bounds : bounds) ?(depth = 0) ?(conditions = true) 
         in
         let candidates =
           List.concat_map
-            (fun package -> impls_in lookups ~trait:wanted.trait ~type_:path package)
+            (fun package ->
+              list_impls_of_trait_for_type lookups ~trait:wanted.trait ~type_:path package)
             packages
         in
         List.find_map
           (fun impl_path ->
-            match impl_interface lookups impl_path with
+            match Definition.read_impl_interface lookups impl_path with
             | None -> None
             | Some impl -> (
                 let variables =
@@ -266,25 +261,25 @@ let rec implements lookups ~(bounds : bounds) ?(depth = 0) ?(conditions = true) 
                             impl.implements.associated
                         in
                         let conditions_hold =
-                          (not conditions)
+                          (not checks_conditions)
                           || List.for_all
                                (fun (argument, bound) ->
                                  Option.is_some
                                    (implements lookups ~bounds ~depth:(depth + 1) argument bound))
-                               (required impl.impl_generics substitution)
+                               (list_required_bounds impl.impl_generics substitution)
                         in
                         if conditions_hold && associated_match ~base:None associated then
                           Some (From_impl { impl = impl_path; substitution })
                         else None)))
           candidates
 
-and associated_type lookups ~bounds ?defining type_ (trait : Types.trait_reference) name =
+and project_associated_type lookups ~bounds ?defining type_ (trait : Types.trait_reference) name =
   match List.assoc_opt name trait.associated with
   | Some fixed -> Some fixed
   | None -> (
-      match implements lookups ~bounds ~conditions:false type_ trait with
+      match implements lookups ~bounds ~checks_conditions:false type_ trait with
       | Some (From_impl { impl; substitution }) -> (
-          match impl_interface lookups impl with
+          match Definition.read_impl_interface lookups impl with
           | Some interface ->
               Option.iter (fun defining -> defining := impl :: !defining) defining;
               Option.map (Types.substitute substitution)
@@ -294,7 +289,7 @@ and associated_type lookups ~bounds ?defining type_ (trait : Types.trait_referen
           match
             List.find_map
               (fun (bound : Types.trait_reference) -> List.assoc_opt name bound.associated)
-              (Properties.known_bounds lookups ~bounds type_)
+              (Properties.list_known_bounds lookups ~bounds type_)
           with
           | Some fixed -> Some fixed
           | None -> Some (Types.Projection { base = type_; trait; name }))
@@ -303,22 +298,22 @@ and associated_type lookups ~bounds ?defining type_ (trait : Types.trait_referen
           | Types.Any any ->
               List.find_map
                 (fun (bound : Types.trait_reference) -> List.assoc_opt name bound.associated)
-                (any :: Properties.bound_closure lookups ~self:type_ any)
+                (any :: Properties.list_bound_closure lookups ~self:type_ any)
           | _ -> None)
       | Some Built_in -> None
       | Some (Accepted (Types.Variable _)) -> None
       | Some (Accepted unknown) -> Some unknown
       | None -> None)
 
-and capability_set lookups ~bounds ?(depth = 0) type_ (trait : Types.trait_reference) name =
+and project_capability_set lookups ~bounds ?(depth = 0) type_ (trait : Types.trait_reference) name =
   let projection =
-    Types.capability_set [ Types.Capability_projection { base = type_; trait; name } ]
+    Types.make_capability_set [ Types.Capability_projection { base = type_; trait; name } ]
   in
   if depth > 32 then projection
   else
-    match implements lookups ~bounds ~conditions:false type_ trait with
+    match implements lookups ~bounds ~checks_conditions:false type_ trait with
     | Some (From_impl { impl; substitution }) -> (
-        match impl_interface lookups impl with
+        match Definition.read_impl_interface lookups impl with
         | Some interface ->
             normalize_capabilities lookups ~bounds ~depth:(depth + 1)
               (Types.substitute_capabilities substitution
@@ -335,7 +330,7 @@ and normalize_capabilities lookups ~bounds ?depth (capabilities : Types.capabili
     Types.flat_map_capabilities
       (function
         | Types.Capability_projection { base; trait; name } ->
-            (capability_set lookups ~bounds ?depth (normalize lookups ~bounds base)
+            (project_capability_set lookups ~bounds ?depth (normalize lookups ~bounds base)
                { trait with associated = [] } name
               :> Types.capability list)
         | capability -> [ capability ])
@@ -343,7 +338,7 @@ and normalize_capabilities lookups ~bounds ?depth (capabilities : Types.capabili
 
 and normalize lookups ~bounds ?defining (type_ : Types.ty) : Types.ty =
   let normalize = normalize lookups ~bounds ?defining in
-  let associated_type = associated_type lookups ~bounds ?defining in
+  let project_associated_type = project_associated_type lookups ~bounds ?defining in
   Types.map
     ~capabilities:(normalize_capabilities lookups ~bounds)
     (function
@@ -353,46 +348,49 @@ and normalize lookups ~bounds ?defining (type_ : Types.ty) : Types.ty =
           | Types.Variable _ | Types.Hole -> Some (Types.Projection { base; trait; name })
           | Types.Error _ -> Some base
           | Types.Parameter _ | Types.Projection _ -> (
-              match associated_type base trait name with
+              match project_associated_type base trait name with
               | Some (Types.Projection _ as projection) -> Some projection
               | Some fixed when not (Types.is_error fixed) -> Some (normalize fixed)
               | _ -> Some (Types.Projection { base; trait; name }))
           | _ -> (
-              match associated_type base trait name with
+              match project_associated_type base trait name with
               | Some fixed -> Some (normalize fixed)
               | None -> Some (Types.Projection { base; trait; name })))
       | _ -> None)
     type_
 
-let signature lookups (path : Path.t) =
-  match (Definition.signature lookups path, path) with
+let read_signature lookups (path : Path.t) =
+  match (Definition.read_declared_signature lookups path, path) with
   | Some signature, _ -> Some signature
   | None, Method { owner = (Impl _ | Derived _) as owner; name; receiver } -> (
-      match (impl_interface lookups owner, trait_substitution lookups owner) with
+      match
+        (Definition.read_impl_interface lookups owner, make_impl_substitution lookups owner)
+      with
       | Some impl, Some substitution ->
           Option.map
             (fun declared ->
               let signature =
-                Types.method_in_impl ~impl_generics:impl.impl_generics ~impl_uses:impl.impl_uses
+                Types.add_impl_generics_and_uses ~impl_generics:impl.impl_generics
+                  ~impl_uses:impl.impl_uses
                   (Types.substitute_signature substitution declared)
               in
-              let bounds = Types.bounds_of signature.generics in
+              let bounds = Types.list_bounds signature.generics in
               { signature with uses = normalize_capabilities lookups ~bounds signature.uses })
-            (Definition.signature lookups
+            (Definition.read_declared_signature lookups
                (Method { owner = impl.implements.trait; name; receiver }))
       | _ -> None)
   | None, _ -> None
 
-let has property lookups ~bounds type_ =
-  Properties.has lookups ~bounds ~normalize:(normalize lookups ~bounds) property type_
+let has_property property lookups ~bounds type_ =
+  Properties.has_property lookups ~bounds ~normalize:(normalize lookups ~bounds) property type_
 
-let copyable = has Copyable
-let plain = has Plain
-let is_view = has View
-let holds_function = has Holds_function
+let is_copyable = has_property Copyable
+let is_plain = has_property Plain
+let is_view = has_property View
+let holds_function = has_property Holds_function
 
-let contents lookups ~bounds type_ =
-  Properties.contents lookups
+let list_contents lookups ~bounds type_ =
+  Properties.collect_contents lookups
     ~normalize:(fun type_ ->
       let defining = ref [] in
       let normalized = normalize lookups ~bounds ~defining type_ in

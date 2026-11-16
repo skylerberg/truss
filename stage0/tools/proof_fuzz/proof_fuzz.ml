@@ -30,7 +30,7 @@ let load text =
              (Lazy.force compiler) (Lazy.force cache) settings) )
 
 let integer (ty : Types.ty) =
-  if Types.is_builtin Bool ty then Some (1, false) else Types.integer_bits ty
+  if Types.is_builtin Bool ty then Some (1, false) else Types.find_integer_bits ty
 
 let extremes (bits, signed) =
   if signed then
@@ -58,7 +58,7 @@ let runnable database =
     (fun (declaration : Resolve.Names.declaration) ->
       let key = Resolve.Names.key_of declaration in
       match
-        ( Interface.Definition.signature interface declaration.path,
+        ( Interface.Definition.read_declared_signature interface declaration.path,
           Prover.Contracts.home_source lookups key,
           Mir.contract_of_path mir declaration.path )
       with

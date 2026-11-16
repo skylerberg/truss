@@ -90,7 +90,7 @@ let failed_tests database snapshot packages =
   let tests =
     List.filter
       (fun (test : Test_command.test) ->
-        Interface.Definition.test_uses interface test.path = Some Types.no_capabilities)
+        Interface.Definition.read_test_uses interface test.path = Some Types.no_capabilities)
       (Test_command.select snapshot database packages ~paths:[] ~match_:None)
   in
   List.concat
