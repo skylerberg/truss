@@ -267,8 +267,8 @@ let check_mode state env (value : Syntax.expression) (parameter : Types.paramete
                   State.fix "Remove the keyword."
                     [ Diagnostic.delete (locate_mode_keyword state value inner) ];
                 ]
-              (Printf.sprintf "`%s` copies implicitly, so it needs no `own`."
-                 (State.show state type_)))
+              (Printf.sprintf "%s copies implicitly, so it needs no `own`."
+                 (String.capitalize_ascii (State.describe state type_))))
   | Own, (Temporary | Lent _) -> ()
   | Own, Place when Hashtbl.find_opt state.yielded value.id = Some Mut ->
       run_once_solved state type_ (fun () ->

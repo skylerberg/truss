@@ -829,6 +829,7 @@ let is_variant_name (member : Syntax.name) =
   member.text <> "" && member.text.[0] >= 'A' && member.text.[0] <= 'Z'
 
 let show state type_ = Types.show (zonk state type_)
+let describe state type_ = Types.describe (zonk state type_)
 
 let find_literal_decision state type_ =
   let rec follow (type_ : Types.ty) =
@@ -899,7 +900,7 @@ let add_mismatch state (span : Source.Definition_span.t) ~expected ~actual =
            (Types.show expected))
   | _ ->
       add_mismatch_diagnostic state Mismatch span ~sides
-        (Printf.sprintf "Expected `%s`, found `%s`." (Types.show expected) (Types.show actual))
+        (Printf.sprintf "Expected %s, found %s." (Types.describe expected) (Types.describe actual))
 
 let report_mismatch state span ~expected ~actual =
   ignore (add_mismatch state span ~expected ~actual)

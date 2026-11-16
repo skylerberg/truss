@@ -352,7 +352,8 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
       | Types.Error _ | Types.Hole -> base_type
       | _ ->
           State.make_error_type state Not_indexable (State.read_span state value.id)
-            (Printf.sprintf "`%s` cannot be sliced." (State.show state base_type)))
+            (Printf.sprintf "%s cannot be sliced."
+               (String.capitalize_ascii (State.describe state base_type))))
   | [ Item key ] -> (
       if Types.is_well_known String base_type || Types.is_well_known String_slice base_type then begin
         State.make_error_type state Not_indexable (State.read_span state value.id)
@@ -403,7 +404,8 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
             | None ->
                 ignore (check_expression state env key);
                 State.make_error_type state Not_indexable (State.read_span state value.id)
-                  (Printf.sprintf "`%s` cannot be indexed." (State.show state base_type))))
+                  (Printf.sprintf "%s cannot be indexed."
+                     (String.capitalize_ascii (State.describe state base_type)))))
   | _ ->
       State.make_error_type state Not_indexable (State.read_span state value.id)
         "An index is one value."

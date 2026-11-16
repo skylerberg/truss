@@ -363,11 +363,7 @@ and show = function
   | Any trait -> "any " ^ show_trait trait
   | Never -> "Never"
   | Integer -> "Integer"
-  | Variable _ -> "_"
-  | Literal (Integer_literal, _) -> "an integer"
-  | Literal (Float_literal, _) -> "a float"
-  | Hole -> "an undecided type"
-  | Error _ -> "_"
+  | Variable _ | Literal _ | Hole | Error _ -> "_"
 
 and show_argument = function
   | Type type_ -> show type_
@@ -417,6 +413,11 @@ and show_function (function_type : function_type) =
       Printf.sprintf "(%s%s%s)" base
         (if uses = [] then "" else " uses " ^ String.concat ", " uses)
         (String.concat "" (List.map (fun cost -> " " ^ cost) costs))
+
+let describe = function
+  | Literal (Integer_literal, _) -> "an integer"
+  | Literal (Float_literal, _) -> "a float"
+  | type_ -> "`" ^ show type_ ^ "`"
 
 type generic_kind = Type_generic of trait_reference list | Value_generic | Capability_generic
 type generic = { generic : parameter; kind : generic_kind }

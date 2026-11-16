@@ -97,8 +97,8 @@ let rec check_function_value_call state env (value : Syntax.expression) (callee 
   | _ ->
       check_arguments_alone state env arguments
         (State.make_error_type state Not_callable (State.read_span state callee.id)
-           (Printf.sprintf "`%s` is not a function, so it cannot be called."
-              (State.show state callee_type)))
+           (Printf.sprintf "%s is not a function, so it cannot be called."
+              (String.capitalize_ascii (State.describe state callee_type))))
 
 and check_argument state env (value : Syntax.expression) (parameter : Types.parameter_info) =
   let inner =

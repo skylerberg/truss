@@ -175,13 +175,15 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode 
               check_unknown
                 (State.make_error_type state Not_a_record
                    (State.read_span state written.id)
-                   (Printf.sprintf "`%s` is not a record." (State.show state type_))))
+                   (Printf.sprintf "%s is not a record."
+                      (String.capitalize_ascii (State.describe state type_)))))
       | Types.Error _ | Types.Hole -> check_unknown type_
       | _ ->
           check_unknown
             (State.make_error_type state Not_a_record
                (State.read_span state written.id)
-               (Printf.sprintf "`%s` is not a record." (State.show state type_))))
+               (Printf.sprintf "%s is not a record."
+                  (String.capitalize_ascii (State.describe state type_)))))
   | Alternatives alternatives ->
       List.iter (fun alternative -> recurse alternative type_) alternatives;
       State.register_pattern state written (fun () ->
