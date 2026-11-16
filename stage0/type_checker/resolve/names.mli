@@ -49,29 +49,29 @@ val is_derivable : Path.t -> bool
 
 type lookups = {
   find : Path.module_ -> string -> entry option;
-  entries : Path.module_ -> entry list;
-  imports : key -> (string * Path.module_) list;
+  list_entries : Path.module_ -> entry list;
+  list_imports : key -> (string * Path.module_) list;
   module_exists : Path.module_ -> bool;
   split_module : string list -> Path.module_ option;
-  dependency_names : Path.package -> Path.package list;
-  key : Path.t -> key option;
-  declaration : key -> declaration;
-  declarations : Path.module_ -> declaration list;
-  declarations_in : Path.file -> declaration list;
-  package_declarations : Path.package -> declaration list;
-  definition : key -> Syntax.definition;
-  text : key -> string;
-  spans : key -> Source.Definition_span.t array;
-  recovered : key -> Source.Definition_span.t list;
-  place : key -> place;
-  container : key -> key option;
-  contained : key -> key list;
-  members : Path.t -> string -> key list;
-  traits_declaring : Path.package -> string -> Path.t list;
-  impls : Path.package -> ((Path.t * Path.t) * Path.t) list;
-  impls_of_type : Path.package -> Path.t -> (Path.t * Path.t) list;
-  impls_of_trait : Path.package -> Path.t -> Path.t list;
-  law_proofs : Path.package -> law_proof_name -> key list;
+  list_dependency_names : Path.package -> Path.package list;
+  find_key : Path.t -> key option;
+  read_declaration : key -> declaration;
+  list_declarations : Path.module_ -> declaration list;
+  list_declarations_in : Path.file -> declaration list;
+  list_package_declarations : Path.package -> declaration list;
+  read_definition : key -> Syntax.definition;
+  read_text : key -> string;
+  list_spans : key -> Source.Definition_span.t array;
+  list_recovered : key -> Source.Definition_span.t list;
+  read_place : key -> place;
+  find_container : key -> key option;
+  list_contained : key -> key list;
+  list_members : Path.t -> string -> key list;
+  list_traits_declaring : Path.package -> string -> Path.t list;
+  list_impls : Path.package -> ((Path.t * Path.t) * Path.t) list;
+  list_impls_of_type : Path.package -> Path.t -> (Path.t * Path.t) list;
+  list_impls_of_trait : Path.package -> Path.t -> Path.t list;
+  list_law_proofs : Path.package -> law_proof_name -> key list;
 }
 
 type module_lookup =
@@ -146,5 +146,5 @@ val of_namespaces :
   namespace:(Path.package -> namespace) ->
   module_exists:(Path.module_ -> bool) ->
   split_module:(string list -> Path.module_ option) ->
-  dependency_names:(Path.package -> Path.package list) ->
+  list_dependency_names:(Path.package -> Path.package list) ->
   lookups

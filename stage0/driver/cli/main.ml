@@ -364,8 +364,8 @@ let handle ~progress request =
   let outcome =
     Output.with_
       {
-        out = Buffer.add_string buffer;
-        err = progress;
+        print_out = Buffer.add_string buffer;
+        print_err = progress;
         terminal = request.terminal;
         columns = request.columns;
         json = false;

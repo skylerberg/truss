@@ -109,7 +109,7 @@ let names packages (package : Path.package) =
   Database.make_name_lookups (database packages) [ package ]
 
 let declarations packages (module_ : Path.module_) =
-  (names packages module_.package).declarations module_
+  (names packages module_.package).list_declarations module_
 
 let first_core_nodes text =
   let packages = setup [ ("app::main", text) ] in

@@ -50,7 +50,7 @@ let resolve_target snapshot database packages from_ =
                 ->
                   Path.equal owner other_owner && name = other_name
               | candidate, path -> Path.equal candidate path)
-            (List.concat_map (Database.make_name_lookups database packages).declarations
+            (List.concat_map (Database.make_name_lookups database packages).list_declarations
                (Command_packages.list_modules snapshot packages))
         in
         let path : Path.t =
@@ -86,7 +86,7 @@ let list_occurrences database snapshot packages =
           let key = Resolve.Names.make_key declaration in
           match Database.read_resolved database key with
           | Some resolved ->
-              let ({ file; base } : Resolve.Names.place) = names.place key in
+              let ({ file; base } : Resolve.Names.place) = names.read_place key in
               let tables =
                 Option.map
                   (fun (checked : Infer.checked) -> checked.tables)
@@ -95,10 +95,10 @@ let list_occurrences database snapshot packages =
               List.map
                 (fun ({ span; target } : Inspect.References.occurrence) ->
                   (file, Source.Definition_span.to_file ~base span, target))
-                (Inspect.References.list_occurrences ~path:key.path (names.spans key)
-                   (names.definition key) resolved tables)
+                (Inspect.References.list_occurrences ~path:key.path (names.list_spans key)
+                   (names.read_definition key) resolved tables)
           | None -> [])
-        (names.declarations_in file))
+        (names.list_declarations_in file))
     (Command_packages.list_files snapshot packages)
 
 let plan_definition database snapshot packages path name =

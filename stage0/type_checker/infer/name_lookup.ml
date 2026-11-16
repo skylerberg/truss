@@ -373,7 +373,7 @@ and list_trait_static_methods (state : State.state) path name receiver =
               then Some (reference, method_)
               else None
           | None -> None)
-        (state.lookups.interface.names.traits_declaring package name))
+        (state.lookups.interface.names.list_traits_declaring package name))
     (Resolve.Names.list_visible_packages state.lookups.interface.names state.package)
 
 and resolve_evidence state (value : Syntax.expression) self_type (reference : Types.trait_reference)
@@ -458,7 +458,7 @@ and list_trait_candidates (state : State.state) receiver_type name =
                  if Option.is_some (State.implements state receiver_type reference) then
                    with_method reference
                  else None)
-               (state.lookups.interface.names.traits_declaring package name))
+               (state.lookups.interface.names.list_traits_declaring package name))
            (Resolve.Names.list_visible_packages state.lookups.interface.names state.package))
 
 and is_one_family (state : State.state) (traits : Types.trait_reference list) =

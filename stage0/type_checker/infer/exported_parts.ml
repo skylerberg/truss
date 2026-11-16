@@ -17,7 +17,7 @@ let is_visible_to_other_packages (lookups : Lookups.t) (path : Path.t) =
   | Unresolved _ -> false
 
 let is_called_from_other_packages (state : State.state) =
-  match state.lookups.interface.names.container state.key with
+  match state.lookups.interface.names.find_container state.key with
   | None -> Resolve.Names.is_public state.definition.visibility
   | Some container -> (
       match Interface.Definition.read_interface state.lookups.interface container.path with

@@ -3,7 +3,7 @@ let raise_bug format = Compiler_bug.raise_bug ~stage:"Monomorphic" format
 exception Todo_type of Ground.ty
 
 type context = {
-  type_interface : Path.t -> Types.type_interface option;
+  find_type_interface : Path.t -> Types.type_interface option;
   normalize : Types.ty -> Types.ty;
   normalize_capabilities : Types.capability_set -> Types.capability_set;
 }
@@ -150,7 +150,7 @@ let compute_shape context (ty : Ground.ty) : Memory_layout.shape =
       | Some Integer, _ -> raise_bug "Integer exists only in specifications"
       | Some _, _ -> raise_bug "a built-in type with the wrong arguments: %s" (Ground.to_string ty)
       | None, _ -> (
-          match context.type_interface path with
+          match context.find_type_interface path with
           | None -> raise_bug "%s is not a type" (Path.show path)
           | Some interface -> (
               let substitution = make_substitution interface.type_generics arguments in

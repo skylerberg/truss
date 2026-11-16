@@ -92,7 +92,7 @@ let definition_form text (path : Path.t) =
         let key = Resolve.Names.make_key declaration in
         if Path.equal key.path path then Option.map (fun core -> (key, core)) (core_of packages key)
         else None)
-      ((Support.names packages file.module_.package).declarations_in file)
+      ((Support.names packages file.module_.package).list_declarations_in file)
   in
   match definition with
   | Some (key, core) ->
@@ -292,8 +292,8 @@ let () =
           let key = Resolve.Names.make_key declaration in
           match
             ( core_of packages key,
-              (Support.names packages key.module_.package).spans key,
-              (Support.names packages key.module_.package).text key )
+              (Support.names packages key.module_.package).list_spans key,
+              (Support.names packages key.module_.package).read_text key )
           with
           | Some form, spans, written ->
               let actual = ref [] in
@@ -396,8 +396,8 @@ let () =
           let key = Resolve.Names.make_key declaration in
           match
             ( core_of packages key,
-              (Support.names packages key.module_.package).spans key,
-              (Support.names packages key.module_.package).text key )
+              (Support.names packages key.module_.package).list_spans key,
+              (Support.names packages key.module_.package).read_text key )
           with
           | ( Some { definition = Function { contract = { costs = [ cost ]; _ }; _ }; _ },
               spans,
@@ -454,7 +454,7 @@ let () =
       let derived =
         List.filter_map
           (fun (_, (impl : Path.t)) -> match impl with Derived _ -> Some impl | _ -> None)
-          (interface.names.impls Path.standard_package)
+          (interface.names.list_impls Path.standard_package)
       in
       if derived = [] then Harness.fail "the standard library derives nothing";
       List.iter

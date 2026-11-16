@@ -84,9 +84,9 @@ let runnable database =
               (fun (requirement : Mir.requirement) ->
                 "("
                 ^ Prover.Facts.quote_span
-                    (lookups.interface.names.text key)
+                    (lookups.interface.names.read_text key)
                     (Source.Definition_span.locate
-                       (lookups.interface.names.spans key)
+                       (lookups.interface.names.list_spans key)
                        requirement.clause.origin)
                 ^ ")")
               requires
@@ -98,10 +98,10 @@ let runnable database =
               Some { path = declaration.path; key; signature; admits; ranges = ranges_written }
           | _ -> None)
       | _ -> None)
-    (lookups.interface.names.declarations example)
+    (lookups.interface.names.list_declarations example)
 
 let proven (names : Resolve.Names.lookups) key states =
-  let base = (names.place key).base and text = names.text key in
+  let base = (names.read_place key).base and text = names.read_text key in
   List.for_all
     (fun (state : Source.span Prover.state) ->
       state.span.stop <= base

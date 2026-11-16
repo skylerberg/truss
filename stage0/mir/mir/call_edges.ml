@@ -22,16 +22,17 @@ let rec list_traits_with_required interface (trait : Path.t) =
   | _ -> [ trait ]
 
 let list_written_methods (names : Resolve.Names.lookups) impl =
-  match names.key impl with
+  match names.find_key impl with
   | Some impl_key ->
-      List.map (fun (member : Resolve.Names.key) -> member.path) (names.contained impl_key)
+      List.map (fun (member : Resolve.Names.key) -> member.path) (names.list_contained impl_key)
   | None -> []
 
 let list_impl_methods (interface : Interface.Lookups.t) impl =
   let written = list_written_methods interface.names impl in
   match
     Option.bind (Interface.Definition.read_impl_interface interface impl)
-      (fun (implemented : Types.impl_interface) -> interface.names.key implemented.implements.trait)
+      (fun (implemented : Types.impl_interface) ->
+        interface.names.find_key implemented.implements.trait)
   with
   | Some trait_key ->
       List.filter_map
@@ -41,7 +42,7 @@ let list_impl_methods (interface : Interface.Lookups.t) impl =
               let own = Path.Method { owner = impl; name; receiver } in
               Some (if List.exists (Path.equal own) written then own else trait_method)
           | _ -> None)
-        (interface.names.contained trait_key)
+        (interface.names.list_contained trait_key)
   | None -> written
 
 let writes (lookups : lookups) impl method_ =

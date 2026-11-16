@@ -15,7 +15,7 @@ let select snapshot database packages ~paths ~match_ =
               let line =
                 fst
                   (Source.compute_position source
-                     (names.place (Resolve.Names.make_key declaration)).base)
+                     (names.read_place (Resolve.Names.make_key declaration)).base)
               in
               Some
                 {
@@ -26,7 +26,7 @@ let select snapshot database packages ~paths ~match_ =
                   line;
                 }
           | _ -> None)
-        (names.declarations_in file))
+        (names.list_declarations_in file))
     (Command_packages.select_files snapshot packages paths)
 
 let label_test test = Path.show_module test.module_ ^ " " ^ Diagnostic.quote test.name

@@ -1,7 +1,7 @@
 exception Todo_type of Ground.ty
 
 type context = {
-  type_interface : Path.t -> Types.type_interface option;
+  find_type_interface : Path.t -> Types.type_interface option;
   normalize : Types.ty -> Types.ty;
   normalize_capabilities : Types.capability_set -> Types.capability_set;
 }

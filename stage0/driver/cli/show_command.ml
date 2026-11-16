@@ -11,11 +11,11 @@ let find_module (names : Resolve.Names.lookups) written : Path.module_ option =
   | Some _ | None -> None
 
 let list_module_declarations database (module_ : Path.module_) =
-  (Database.make_name_lookups database [ module_.package ]).declarations module_
+  (Database.make_name_lookups database [ module_.package ]).list_declarations module_
   |> List.filter (fun (declaration : Resolve.Names.declaration) -> declaration.ordinal = 0)
 
 let list_package_declarations database package =
-  (Database.make_name_lookups database [ package ]).package_declarations package
+  (Database.make_name_lookups database [ package ]).list_package_declarations package
   |> List.filter (fun (declaration : Resolve.Names.declaration) -> declaration.ordinal = 0)
 
 let is_visible packages (declaration : Resolve.Names.declaration) =
@@ -51,7 +51,7 @@ let resolve database packages text =
                   let package_declarations = list_package_declarations database module_.package in
                   let impls =
                     List.map snd
-                      ((Database.make_name_lookups database [ module_.package ]).impls_of_type
+                      ((Database.make_name_lookups database [ module_.package ]).list_impls_of_type
                          module_.package path)
                   in
                   declaration
@@ -88,7 +88,7 @@ let find snapshot database packages ~body text =
         && not (List.mem declaration.module_.package packages)
       in
       let names = Database.make_name_lookups database [ key.module_.package ] in
-      let ({ file = written; base } : Resolve.Names.place) = names.place key in
+      let ({ file = written; base } : Resolve.Names.place) = names.read_place key in
       let source = Command_packages.read_source snapshot packages written in
       {
         declaration;

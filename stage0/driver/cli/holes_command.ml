@@ -15,7 +15,7 @@ let list_holes snapshot packages database (names : Resolve.Names.lookups)
   let key = Resolve.Names.make_key declaration in
   match Database.read_resolved database key with
   | Some resolved ->
-      let ({ file; base } : Resolve.Names.place) = names.place key in
+      let ({ file; base } : Resolve.Names.place) = names.read_place key in
       let source = Command_packages.read_source snapshot packages file in
       List.map
         (fun (hole : Inspect.hole) ->
@@ -29,7 +29,7 @@ let list_holes snapshot packages database (names : Resolve.Names.lookups)
             in_scope = hole.scope;
             blocks = [];
           })
-        (Inspect.list_holes (names.spans key) (names.definition key) resolved
+        (Inspect.list_holes (names.list_spans key) (names.read_definition key) resolved
            (Option.map
               (fun (checked : Infer.checked) -> checked.tables)
               (Database.read_checked_body database key)))
@@ -43,7 +43,7 @@ let gather snapshot packages database paths =
         (fun (declaration : Resolve.Names.declaration) ->
           if declaration.ordinal = 0 then list_holes snapshot packages database names declaration
           else [])
-        (names.declarations_in file))
+        (names.list_declarations_in file))
     (Command_packages.select_files snapshot packages paths)
 
 let attach_blocks snapshot packages database holes =

@@ -27,7 +27,7 @@ let make_diagnostic (key : Resolve.Names.key) ?(fixes = []) code (span : Source.
 
 let read_definition (lookups : Lookups.t) (declaration : Resolve.Names.declaration) =
   let key = Resolve.Names.make_key declaration in
-  (lookups.interface.names.definition key, lookups.interface.names.spans key)
+  (lookups.interface.names.read_definition key, lookups.interface.names.list_spans key)
 
 let locate_header (spans : Source.Definition_span.t array) (definition : Syntax.definition) =
   match definition.kind with
@@ -62,7 +62,7 @@ let check_sealed (lookups : Lookups.t) (declaration : Resolve.Names.declaration)
   match
     ( List.find_opt
         (fun (_, impl) -> Path.equal impl declaration.path)
-        (lookups.interface.names.impls package),
+        (lookups.interface.names.list_impls package),
       read_definition lookups declaration )
   with
   | Some ((trait, type_), _), (definition, spans) -> (
@@ -137,7 +137,7 @@ let check_method_names (lookups : Lookups.t) (declaration : Resolve.Names.declar
   | Types.Named { path; _ }, Some trait when not trait.is_capability ->
       List.filter_map
         (fun (method_ : Types.trait_method) ->
-          let own = lookups.interface.names.members path method_.method_name in
+          let own = lookups.interface.names.list_members path method_.method_name in
           let same_version (key : Resolve.Names.key) =
             match key.path with
             | Method { receiver; _ } -> receiver = method_.method_receiver
@@ -460,7 +460,7 @@ let check_associated_types (lookups : Lookups.t) ~contained
     impl.implements.associated
 
 let list_instantiation_edges (lookups : Lookups.t) (key : Resolve.Names.key) =
-  let form = lookups.core key in
+  let form = lookups.read_core key in
   let grows = function
     | Types.Type (Types.Named { arguments; _ }) ->
         let mentions =
@@ -487,7 +487,7 @@ let check_instantiation (lookups : Lookups.t) (package : Path.package) =
       (fun (declaration : Resolve.Names.declaration) ->
         declaration.generic && declaration.ordinal = 0
         && (declaration.kind = Function || declaration.kind = Method))
-      (lookups.interface.names.package_declarations package)
+      (lookups.interface.names.list_package_declarations package)
   in
   let edges = Path_table.create 64 in
   List.iter
@@ -525,7 +525,7 @@ let check_tests (lookups : Lookups.t) (package : Path.package) =
     List.filter
       (fun (declaration : Resolve.Names.declaration) ->
         declaration.kind = Test && declaration.ordinal = 0)
-      (lookups.interface.names.package_declarations package)
+      (lookups.interface.names.list_package_declarations package)
   in
   snd
     (List.fold_left
@@ -563,7 +563,7 @@ let check_overlaps (lookups : Lookups.t) (declaration : Resolve.Names.declaratio
           (fun (other : Types.impl_interface) -> List.mem package (list_outer_packages other))
           (List.filter_map
              (Interface.Definition.read_impl_interface lookups.interface)
-             (before (lookups.interface.names.impls package)))
+             (before (lookups.interface.names.list_impls package)))
       in
       let dependencies =
         List.concat_map
@@ -606,14 +606,14 @@ let check_type lookups ~contained (declaration : Resolve.Names.declaration) =
   check_recursion lookups ~contained declaration spans definition
 
 let read_constant_value (lookups : Lookups.t) path =
-  match Option.map lookups.core (lookups.interface.names.key path) with
+  match Option.map lookups.read_core (lookups.interface.names.find_key path) with
   | Some { definition = Constant (Some value) } -> Some value
   | _ -> None
 
 let find_field_default (lookups : Lookups.t) (type_ : Types.ty) variant field =
   match type_ with
   | Named { path; _ } -> (
-      match Option.map lookups.core (lookups.interface.names.key path) with
+      match Option.map lookups.read_core (lookups.interface.names.find_key path) with
       | Some { definition = Type { defaults; _ } } ->
           List.find_map
             (fun (default_variant, default_field, value) ->
@@ -710,7 +710,7 @@ let check_constant (lookups : Lookups.t) (declaration : Resolve.Names.declaratio
            end
       in
       let key = Resolve.Names.make_key declaration in
-      let spans = lookups.interface.names.spans key in
+      let spans = lookups.interface.names.list_spans key in
       List.filter_map
         (fun (named : named_constant) ->
           if depends_on_constant named.constant then
@@ -753,22 +753,24 @@ let list_unused_dependencies (lookups : Lookups.t) package =
   let used =
     List.concat_map
       (fun (declaration : Resolve.Names.declaration) ->
-        lookups.used_packages (Resolve.Names.make_key declaration))
-      (lookups.interface.names.package_declarations package)
+        lookups.list_used_packages (Resolve.Names.make_key declaration))
+      (lookups.interface.names.list_package_declarations package)
   in
   List.filter
     (fun dependency -> not (List.mem dependency used))
-    (lookups.interface.names.dependency_names package)
+    (lookups.interface.names.list_dependency_names package)
 
 type outcome = Placed of placed list | Unused_dependencies of Path.package list
 
 let run (lookups : Lookups.t) package check =
   let contained = memoize (list_contained_types lookups) in
   match check with
-  | Sealed key -> Placed (check_sealed lookups (lookups.interface.names.declaration key))
-  | Impl key -> Placed (check_impl lookups ~contained (lookups.interface.names.declaration key))
-  | Type key -> Placed (check_type lookups ~contained (lookups.interface.names.declaration key))
-  | Constant key -> Placed (check_constant lookups (lookups.interface.names.declaration key))
+  | Sealed key -> Placed (check_sealed lookups (lookups.interface.names.read_declaration key))
+  | Impl key ->
+      Placed (check_impl lookups ~contained (lookups.interface.names.read_declaration key))
+  | Type key ->
+      Placed (check_type lookups ~contained (lookups.interface.names.read_declaration key))
+  | Constant key -> Placed (check_constant lookups (lookups.interface.names.read_declaration key))
   | Instantiations -> Placed (check_instantiation lookups package)
   | Tests -> Placed (check_tests lookups package)
   | Dependencies -> Unused_dependencies (list_unused_dependencies lookups package)

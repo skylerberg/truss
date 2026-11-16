@@ -438,17 +438,19 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
   let bounds parameter =
     let of_key key =
       Option.value ~default:[]
-        (List.assoc_opt parameter (interface.elaborated_interface key).scope.bounds)
+        (List.assoc_opt parameter (interface.read_elaborated_interface key).scope.bounds)
     in
     match key with
-    | Some key -> of_key key @ Option.fold ~none:[] ~some:of_key (interface.names.container key)
+    | Some key ->
+        of_key key @ Option.fold ~none:[] ~some:of_key (interface.names.find_container key)
     | None -> []
   in
   let normalize = Interface.Impls.normalize interface ~bounds in
   let at = ref None in
   let name = match key with Some key -> Resolve.Names.show_key key | None -> Path.show path in
   let source =
-    lazy (Option.map (fun key -> (interface.names.spans key, interface.names.text key)) key)
+    lazy
+      (Option.map (fun key -> (interface.names.list_spans key, interface.names.read_text key)) key)
   in
   let quoted () =
     match (!at, Lazy.force source) with
@@ -478,7 +480,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
       | Some signature -> of_generics signature.generics
       | None -> [])
     @
-    match Option.bind key interface.names.container with
+    match Option.bind key interface.names.find_container with
     | Some container -> declared container.path
     | None -> []
   in
@@ -865,4 +867,4 @@ let check_file (interface : Interface.Lookups.t) ~core (file : Path.file) =
           count + 1
       | None -> count)
     0
-    (interface.names.declarations_in file)
+    (interface.names.list_declarations_in file)

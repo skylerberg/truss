@@ -756,7 +756,7 @@ let disjoint_obligations text =
       | Value must_be_disjoint -> total + List.length must_be_disjoint
       | Failed _ | Blocked -> total)
     0
-    ((Support.names packages file.module_.package).declarations_in file)
+    ((Support.names packages file.module_.package).list_declarations_in file)
 
 let () =
   Harness.test "two slices of one list borrowed by one call produce one `Disjoint` obligation"

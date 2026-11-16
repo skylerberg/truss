@@ -7,7 +7,7 @@ let make_context (lookups : Lookups.t) ~home ~current ~terminates ~measures =
   let rec context =
     {
       State.run_body = (fun frame ~lambdas body -> Reader.read_body context frame ~lambdas body);
-      formula_term =
+      read_formula =
         (fun frame formula ~arguments -> Reader.read_formula context frame formula ~arguments);
       home;
       laws_assumed = [];
@@ -58,8 +58,8 @@ let make_context (lookups : Lookups.t) ~home ~current ~terminates ~measures =
       call_targets = [];
       reading_callback = false;
       validating = [];
-      ranking = terminates && measures = [] && lookups.recursion_group current <> [];
-      disjoint = lookups.must_be_disjoint home;
+      ranking = terminates && measures = [] && lookups.list_recursion_group current <> [];
+      disjoint = lookups.list_must_be_disjoint home;
       indexes = [];
     }
   in
@@ -549,7 +549,7 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
               let proof =
                 match
                   Option.bind proof_source.key (fun key ->
-                      Mir.find_code (lookups.mir.body_part key))
+                      Mir.find_code (lookups.mir.read_body_part key))
                 with
                 | Some proof -> proof
                 | None -> Facts.raise_bug "the proof `%s` has no MIR" proof_source.name
@@ -650,7 +650,7 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
 let test (lookups : Lookups.t) (source : State.source) ~path =
   let home = require_home source in
   let context = make_context lookups ~home ~current:path ~terminates:false ~measures:[] in
-  (match Mir.find_code (lookups.mir.body_part home) with
+  (match Mir.find_code (lookups.mir.read_body_part home) with
   | Some (mir : Mir.t) ->
       Reader.read_body context (make_empty_frame source) ~lambdas:mir.lambdas mir.body
   | None -> Facts.raise_bug "the test `%s` has no MIR" source.name);

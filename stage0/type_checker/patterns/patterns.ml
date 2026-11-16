@@ -117,10 +117,12 @@ and evaluate_pattern_constant context (value : Core.pattern_constant) : space =
 and evaluate_named_constant ?(seen = []) context path : space option =
   if List.exists (Path.equal path) seen then None
   else
-    match context.lookups.interface.constant_value path with
+    match context.lookups.interface.find_constant_value path with
     | Some value -> Some (Constructed (Interval (value, value), []))
     | None -> (
-        match Option.map context.lookups.core (context.lookups.interface.names.key path) with
+        match
+          Option.map context.lookups.read_core (context.lookups.interface.names.find_key path)
+        with
         | Some { definition = Constant (Some value); _ } ->
             evaluate_constant_expression context (path :: seen) value
         | _ -> None)
@@ -570,12 +572,12 @@ let check (lookups : Lookups.t) key =
   let context =
     {
       lookups;
-      spans = lazy (lookups.interface.names.spans key);
-      text = lazy (lookups.interface.names.text key);
+      spans = lazy (lookups.interface.names.list_spans key);
+      text = lazy (lookups.interface.names.read_text key);
       diagnostics = [];
     }
   in
-  check_definition context (lookups.core key).definition;
+  check_definition context (lookups.read_core key).definition;
   List.sort
     (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
       compare left.span right.span)

@@ -52,16 +52,16 @@ exception Infinite_size of Ground.ty
 
 type env = {
   system : Libc.system;
-  shape_of : Ground.ty -> shape;
+  compute_shape : Ground.ty -> shape;
   layouts : t Type_table.t;
   in_progress : unit Type_table.t;
 }
 
-let create system ~shape_of =
-  { system; shape_of; layouts = Type_table.create 64; in_progress = Type_table.create 8 }
+let create system ~compute_shape =
+  { system; compute_shape; layouts = Type_table.create 64; in_progress = Type_table.create 8 }
 
 let system env = env.system
-let shape env ty = env.shape_of ty
+let shape env ty = env.compute_shape ty
 
 let compute_integer_size = function
   | Int8 | UInt8 -> 1
@@ -160,7 +160,7 @@ let rec of_type env ty =
       let layout =
         Fun.protect
           ~finally:(fun () -> Type_table.remove env.in_progress ty)
-          (fun () -> lay_out env ty (env.shape_of ty))
+          (fun () -> lay_out env ty (env.compute_shape ty))
       in
       Type_table.replace env.layouts ty layout;
       layout
@@ -259,7 +259,7 @@ and of_sum env ty shapes =
       }
 
 let lay_out_block env ty name =
-  match env.shape_of ty with
+  match env.compute_shape ty with
   | Sum variants -> (
       match List.find_opt (fun (variant : variant_shape) -> variant.name = name) variants with
       | Some { indirect = true; fields = fields'; _ } -> lay_out_fields env fields'

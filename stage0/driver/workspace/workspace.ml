@@ -198,11 +198,11 @@ let project_of files =
     let project =
       Project.of_files
         {
-          tree = (fun name -> Option.map fst (root name));
-          text =
+          find_tree = (fun name -> Option.map fst (root name));
+          find_text =
             (fun name path ->
               Option.bind (root name) (fun (_, texts) -> Hashtbl.find_opt texts path));
-          unavailable = Hashtbl.find_opt unavailable;
+          find_unavailable_reason = Hashtbl.find_opt unavailable;
         }
     in
     match project.selection.missing with
@@ -595,8 +595,8 @@ let open_worktree root =
       let watcher =
         if !is_serving then
           Some
-            (Watcher.start ~skipped:Registry.Content.is_skipped ~cookie_directory:database_directory
-               root)
+            (Watcher.start ~is_skipped_name:Registry.Content.is_skipped
+               ~cookie_directory:database_directory root)
         else None
       in
       match

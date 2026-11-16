@@ -364,7 +364,7 @@ let is_integer_type state (type_ : Types.ty) =
   Types.is_integer_type type_
   ||
   match type_ with
-  | Parameter _ | Projection _ -> state.unifier.integer_range type_ <> None
+  | Parameter _ | Projection _ -> state.unifier.find_integer_range type_ <> None
   | _ -> false
 
 let is_signed_type state (type_ : Types.ty) =
@@ -372,7 +372,9 @@ let is_signed_type state (type_ : Types.ty) =
   ||
   match type_ with
   | Parameter _ | Projection _ -> (
-      match state.unifier.integer_range type_ with Some (low, _) -> Z.sign low < 0 | None -> false)
+      match state.unifier.find_integer_range type_ with
+      | Some (low, _) -> Z.sign low < 0
+      | None -> false)
   | _ -> false
 
 let lookup_bounds state parameter = Interface.Elaborator.list_bounds state.context parameter
@@ -877,7 +879,8 @@ let check_resource state (resource : Syntax.resource) =
     match find_target state path.path.last with
     | Some (Definition (Capability, capability)) -> (
         match method_ with
-        | Some method_ when state.lookups.interface.names.members capability method_.text = [] ->
+        | Some method_ when state.lookups.interface.names.list_members capability method_.text = []
+          ->
             report state Unknown_member (read_span state method_.id)
               (Printf.sprintf "`%s` has no method `%s`." shown method_.text)
         | _ -> ())

@@ -1,6 +1,6 @@
 type t = {
-  out : string -> unit;
-  err : string -> unit;
+  print_out : string -> unit;
+  print_err : string -> unit;
   terminal : bool;
   columns : int option;
   mutable json : bool;
@@ -8,8 +8,8 @@ type t = {
 
 let make_output () =
   {
-    out = print_string;
-    err =
+    print_out = print_string;
+    print_err =
       (fun text ->
         prerr_string text;
         flush stderr);
@@ -25,10 +25,10 @@ let with_ output work =
   current := output;
   Fun.protect ~finally:(fun () -> current := previous) work
 
-let print text = !current.out text
+let print text = !current.print_out text
 let print_line text = print (text ^ "\n")
 let printf format = Printf.ksprintf print format
-let eprint text = !current.err text
+let eprint text = !current.print_err text
 let eprint_line text = eprint (text ^ "\n")
 let eprintf format = Printf.ksprintf eprint format
 let terminal () = !current.terminal

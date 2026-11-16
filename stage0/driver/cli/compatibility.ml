@@ -4,10 +4,10 @@ type side = { database : Database.t; lookups : Interface.Lookups.t }
 
 let is_public (side : side) (declaration : Resolve.Names.declaration) =
   declaration.ordinal = 0
-  && side.lookups.names.container (Resolve.Names.make_key declaration) = None
+  && side.lookups.names.find_container (Resolve.Names.make_key declaration) = None
   && Resolve.Names.is_public declaration.visibility
 
-let list_declarations (side : side) package = side.lookups.names.package_declarations package
+let list_declarations (side : side) package = side.lookups.names.list_package_declarations package
 
 let read_form (side : side) key =
   Option.map
@@ -129,7 +129,7 @@ let compare_types ~(before : Types.type_interface) ~(after : Types.type_interfac
     ]
 
 let read_method_contract (side : side) (owner : Path.t) name receiver =
-  match side.lookups.names.key (Method { owner; name; receiver }) with
+  match side.lookups.names.find_key (Method { owner; name; receiver }) with
   | Some key -> read_contract side key
   | None -> ([], no_contract)
 
@@ -206,7 +206,7 @@ let compare_traits ~(before : Types.trait_interface) ~(after : Types.trait_inter
     ]
 
 let has_changed_value (before : side) (after : side) path ~before_key ~after_key =
-  match (before.lookups.constant_value path, after.lookups.constant_value path) with
+  match (before.lookups.find_constant_value path, after.lookups.find_constant_value path) with
   | Some before, Some after -> before <> after
   | Some _, None | None, Some _ -> true
   | None, None -> (

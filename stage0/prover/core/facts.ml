@@ -9,7 +9,7 @@ let raise_unsupported location format =
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Prover" format
 
 let is_in_recursion_group (context : State.context) path =
-  List.exists (Path.equal path) (context.lookups.recursion_group context.current)
+  List.exists (Path.equal path) (context.lookups.list_recursion_group context.current)
 
 let has_method_in_recursion_group (context : State.context) impl =
   List.exists (is_in_recursion_group context)
@@ -144,11 +144,11 @@ let locate (context : State.context) (source : State.source) origin =
 
 let make_requires_fix (context : State.context) required =
   let names = context.lookups.interface.names in
-  let text = names.text context.home in
+  let text = names.read_text context.home in
   let brace =
-    match names.definition context.home with
+    match names.read_definition context.home with
     | { kind = Function { body; _ }; _ } ->
-        Some (Source.Definition_span.locate (names.spans context.home) body.id).start
+        Some (Source.Definition_span.locate (names.list_spans context.home) body.id).start
     | _ -> None
   in
   let edit at before =
@@ -345,8 +345,8 @@ let quote_origin (context : State.context) (frame : State.frame) origin =
   if frame.source.key <> Some context.home then
     raise_bug "a quote of %s, outside the definition being proven" frame.source.name;
   let names = context.lookups.interface.names in
-  quote_span (names.text context.home)
-    (Source.Definition_span.locate (names.spans context.home) origin)
+  quote_span (names.read_text context.home)
+    (Source.Definition_span.locate (names.list_spans context.home) origin)
 
 let find_bounds (ty : Types.ty) =
   if Types.is_builtin Character ty then Some (Z.zero, Z.of_int 0x10FFFF)

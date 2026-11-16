@@ -135,9 +135,9 @@ type t = {
   of_local : (Mir.local, int list) Hashtbl.t;
   inside : int list array;
   parameters : Mir.local list;
-  owner : Mir.local -> bool;
-  lent : Mir.local -> bool;
-  moving : Types.ty -> bool;
+  is_owner : Mir.local -> bool;
+  is_lent : Mir.local -> bool;
+  is_moving : Types.ty -> bool;
   loop_parts : (Mir.Graph.block, Mir.local list) Hashtbl.t;
   entries : state array;
   mutable flagged : int list;
@@ -194,12 +194,12 @@ let apply_effects analysis state ~moves ~inits ~ends =
 
 let apply_moves analysis state statement =
   apply_effects analysis state
-    ~moves:(list_moves ~moving:analysis.moving statement)
+    ~moves:(list_moves ~moving:analysis.is_moving statement)
     ~inits:[] ~ends:[]
 
-let owns analysis local = analysis.owner local
-let is_lent_mut analysis local = analysis.lent local
-let list_statement_uses analysis statement = uses ~moving:analysis.moving statement
+let owns analysis local = analysis.is_owner local
+let is_lent_mut analysis local = analysis.is_lent local
+let list_statement_uses analysis statement = uses ~moving:analysis.is_moving statement
 let move_out analysis state place ~origin = set_empty ~origin state (list_affected analysis place)
 
 let list_moved_at analysis state path =
@@ -220,12 +220,12 @@ let may_be_empty analysis state (path : path) =
 
 let apply analysis state statement =
   apply_effects analysis state
-    ~moves:(list_moves ~moving:analysis.moving statement)
+    ~moves:(list_moves ~moving:analysis.is_moving statement)
     ~inits:(list_inits statement) ~ends:(list_ended statement)
 
 let apply_terminator_moves analysis state basic =
   apply_effects analysis state
-    ~moves:(list_terminator_moves ~moving:analysis.moving ~owns:analysis.owner basic)
+    ~moves:(list_terminator_moves ~moving:analysis.is_moving ~owns:analysis.is_owner basic)
     ~inits:[] ~ends:[]
 
 let find_status analysis state path =
@@ -413,9 +413,9 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.Gra
       of_local;
       inside;
       parameters;
-      owner = owns;
-      lent = lent_mut;
-      moving;
+      is_owner = owns;
+      is_lent = lent_mut;
+      is_moving = moving;
       loop_parts =
         (let parts = Hashtbl.create 4 in
          Array.iter
@@ -626,7 +626,7 @@ let compute_live_after analysis (body : Mir.Graph.body) =
       positions.(last + 1) <- Array.copy current;
       List.iter
         (fun local -> current.(local) <- true)
-        (reads (use_locals (list_terminator_uses ~moving:accept_all ~owns:analysis.owner basic)));
+        (reads (use_locals (list_terminator_uses ~moving:accept_all ~owns:analysis.is_owner basic)));
       positions.(last) <- Array.copy current;
       List.iteri
         (fun index (read, writes) ->
@@ -648,4 +648,4 @@ let compute_live_after analysis (body : Mir.Graph.body) =
   fun block step local -> before.(block).(step + 1).(local)
 
 let list_terminator_uses analysis basic =
-  list_terminator_uses ~moving:analysis.moving ~owns:analysis.owner basic
+  list_terminator_uses ~moving:analysis.is_moving ~owns:analysis.is_owner basic

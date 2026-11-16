@@ -6,7 +6,7 @@ type result = {
 }
 
 let implements_capability (lookups : Lookups.t) key =
-  match lookups.interface.names.container key with
+  match lookups.interface.names.find_container key with
   | Some (container : Resolve.Names.key) -> (
       match Interface.Definition.read_impl_interface lookups.interface container.path with
       | Some impl -> (
@@ -19,14 +19,14 @@ let implements_capability (lookups : Lookups.t) key =
   | None -> false
 
 let check (lookups : Lookups.t) (key : Resolve.Names.key) : result =
-  let elaborated = lookups.interface.elaborated_interface key in
+  let elaborated = lookups.interface.read_elaborated_interface key in
   let context : Context.context =
     {
       lookups;
-      bounds =
+      list_bounds =
         (fun parameter ->
           Option.value ~default:[] (List.assoc_opt parameter elaborated.scope.bounds));
-      spans = lazy (lookups.interface.names.spans key);
+      spans = lazy (lookups.interface.names.list_spans key);
       mode_keywords = Hashtbl.create 8;
       names = Context.Local_table.create 32;
       binding_modes = Context.Local_table.create 32;
@@ -39,7 +39,8 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) : result =
     }
   in
   let mir =
-    if Interface.Definition.is_specification elaborated.interface then None else lookups.graph key
+    if Interface.Definition.is_specification elaborated.interface then None
+    else lookups.find_graph key
   in
   Option.iter
     (fun (mir : Mir.Graph.t) ->

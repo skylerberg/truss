@@ -279,7 +279,7 @@ let () =
           | Some (Failed _ | Blocked) ->
               Harness.fail "the proof of %s is blocked" (Path.show declaration.path)
           | None -> Harness.fail "%s has no proof" (Path.show declaration.path))
-        ((Support.names packages main.module_.package).declarations_in main))
+        ((Support.names packages main.module_.package).list_declarations_in main))
 
 let tree = Fixtures.Prover.tree
 

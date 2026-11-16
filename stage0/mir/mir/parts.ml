@@ -10,10 +10,10 @@ type contract_part = {
 }
 
 type lookups = {
-  form_origin : Path.t -> (Infer.form_origin * Types.substitution) option;
-  body_part : Resolve.Names.key -> body_part;
-  contract_part : Resolve.Names.key -> contract_part;
-  generated_parts : Path.t -> body_part * contract_part;
+  find_form_origin : Path.t -> (Infer.form_origin * Types.substitution) option;
+  read_body_part : Resolve.Names.key -> body_part;
+  read_contract_part : Resolve.Names.key -> contract_part;
+  read_generated_parts : Path.t -> body_part * contract_part;
 }
 
 type 'form sourced = { source : Resolve.Names.key; form : 'form }
@@ -25,17 +25,17 @@ let read_body_part lookups path =
   Option.map
     (fun ((origin : Infer.form_origin), _) ->
       match origin with
-      | Written key | Inherited key -> { source = key; form = lookups.body_part key }
-      | Derived type_key -> { source = type_key; form = fst (lookups.generated_parts path) })
-    (lookups.form_origin path)
+      | Written key | Inherited key -> { source = key; form = lookups.read_body_part key }
+      | Derived type_key -> { source = type_key; form = fst (lookups.read_generated_parts path) })
+    (lookups.find_form_origin path)
 
 let read_contract_part lookups path =
   Option.map
     (fun ((origin : Infer.form_origin), _) ->
       match origin with
-      | Written key | Inherited key -> { source = key; form = lookups.contract_part key }
-      | Derived type_key -> { source = type_key; form = snd (lookups.generated_parts path) })
-    (lookups.form_origin path)
+      | Written key | Inherited key -> { source = key; form = lookups.read_contract_part key }
+      | Derived type_key -> { source = type_key; form = snd (lookups.read_generated_parts path) })
+    (lookups.find_form_origin path)
 
 let select read sourced = Option.map (fun form -> { sourced with form }) (read sourced.form)
 let read_from_body_part read lookups path = Option.bind (read_body_part lookups path) (select read)
@@ -63,7 +63,7 @@ let is_index_call (callee : _ Core.target) =
   | _ -> false
 
 let list_checked_requires lookups path =
-  match lookups.form_origin path with
+  match lookups.find_form_origin path with
   | Some (Written _, _) -> (
       match read_contract lookups path with
       | Some { form = { requires = _ :: _ as requires; _ }; _ }

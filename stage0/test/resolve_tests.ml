@@ -44,9 +44,9 @@ let name_at packages name text occurrence =
       (fun (declaration : Resolve.Names.declaration) ->
         let key = Resolve.Names.make_key declaration in
         match
-          ( (Support.names packages key.module_.package).definition key,
-            (Support.names packages key.module_.package).spans key,
-            (Support.names packages key.module_.package).place key,
+          ( (Support.names packages key.module_.package).read_definition key,
+            (Support.names packages key.module_.package).list_spans key,
+            (Support.names packages key.module_.package).read_place key,
             Database.read_resolved (Support.database packages) key )
         with
         | definition, spans, { base; _ }, Some resolved ->
@@ -56,7 +56,7 @@ let name_at packages name text occurrence =
                  (fun (name : Syntax.name) -> base + spans.(name.id).start = offset)
                  (Syntax_walk.collect_names spans definition))
         | _ -> None)
-      ((Support.names packages file.module_.package).declarations_in file)
+      ((Support.names packages file.module_.package).list_declarations_in file)
   in
   match located with
   | Some located -> located
@@ -250,9 +250,9 @@ let bracket_of text written occurrence =
     (fun (declaration : Resolve.Names.declaration) ->
       let key = Resolve.Names.make_key declaration in
       match
-        ( (Support.names packages key.module_.package).definition key,
-          (Support.names packages key.module_.package).spans key,
-          (Support.names packages key.module_.package).place key,
+        ( (Support.names packages key.module_.package).read_definition key,
+          (Support.names packages key.module_.package).list_spans key,
+          (Support.names packages key.module_.package).read_place key,
           Database.read_resolved (Support.database packages) key )
       with
       | definition, spans, { base; _ }, Some resolved ->
@@ -368,7 +368,7 @@ let () =
       let packages = setup [ ("app::main", Fixtures.Resolve.counter_method) ] in
       let owner = Path.Top { module_ = module_of "app::main"; name = "Counter" } in
       let owner_package = (module_of "app::main").package in
-      match (Support.names packages owner_package).members owner "get" with
+      match (Support.names packages owner_package).list_members owner "get" with
       | [ { path = Method { receiver = Read; _ }; _ } ] -> ()
       | reported -> Harness.fail "found %d members" (List.length reported));
   Harness.test "a method can be written in another file of its type's package" (fun () ->
@@ -381,7 +381,7 @@ let () =
       in
       let owner = Path.Top { module_ = module_of "app::main"; name = "Counter" } in
       let owner_package = (module_of "app::main").package in
-      match (Support.names packages owner_package).members owner "get" with
+      match (Support.names packages owner_package).list_members owner "get" with
       | [ _ ] -> ()
       | reported -> Harness.fail "found %d members" (List.length reported));
   Harness.test "a body the parser could not read is not resolved" (fun () ->
@@ -465,7 +465,7 @@ let () =
       | [] -> ()
       | reported -> Harness.fail "found [%s]" (String.concat "; " (codes reported)));
       match
-        (Support.names packages (file_of "app::main").module_.package).imports
+        (Support.names packages (file_of "app::main").module_.package).list_imports
           {
             module_ = (file_of "app::main").module_;
             path = Top { module_ = (file_of "app::main").module_; name = "f" };

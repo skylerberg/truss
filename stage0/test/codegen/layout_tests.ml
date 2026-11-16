@@ -186,7 +186,7 @@ let () =
       in
       let env =
         Memory_layout.create Codegen_support.host
-          ~shape_of:(Codegen_support.shapes [ ("Tree", tree) ])
+          ~compute_shape:(Codegen_support.shapes [ ("Tree", tree) ])
       in
       Codegen_support.expect_string ~expected:"24/8 struct(left@0 right@8 value@16)"
         (Memory_layout.For_testing.to_string
@@ -238,7 +238,7 @@ let () =
       Codegen_support.expect_int ~expected:1
         (Memory_layout.of_type
            (Memory_layout.create Codegen_support.host
-              ~shape_of:(Monomorphic.compute_shape Codegen_support.standard_context))
+              ~compute_shape:(Monomorphic.compute_shape Codegen_support.standard_context))
            (option bool))
           .size);
   Codegen_support.test "a String is its storage's buffer, length, and capacity" (fun () ->

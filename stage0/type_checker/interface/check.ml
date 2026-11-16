@@ -299,7 +299,7 @@ let check_trait_cycle (state : Checking.state) (requires : Syntax.path_type list
   let is_required_by required =
     List.exists (Path.equal state.key.path) (Elaborator.list_trait_closure state.lookups required)
   in
-  match state.lookups.trait_header state.key.path with
+  match state.lookups.find_trait_header state.key.path with
   | Some header when List.exists is_required_by header.required -> (
       match requires with
       | first :: _ ->
@@ -384,15 +384,16 @@ let check (state : Checking.state) =
   let definition = state.definition in
   let is_broken part = Resolve.Names.is_broken lookups.names state.key part in
   check_bounds state;
-  let resolved = lookups.resolved Interface state.key in
+  let resolved = lookups.read_resolved Interface state.key in
   if not (is_broken Header) then
-    match (lookups.names.container state.key, definition.kind, state.elaborated.interface) with
+    match (lookups.names.find_container state.key, definition.kind, state.elaborated.interface) with
     | ( Some container,
         (Function { signature; _ } | Method_declaration signature),
         Function_interface written ) -> (
         let name = Resolve.Names.extract_signature_name signature in
         match
-          (lookups.names.definition container, (lookups.elaborated_interface container).interface)
+          ( lookups.names.read_definition container,
+            (lookups.read_elaborated_interface container).interface )
         with
         | { kind = Trait _; visibility; _ }, Trait_interface trait ->
             check_redeclared state name
@@ -404,7 +405,7 @@ let check (state : Checking.state) =
             Impl_checks.check_impl_method state name
               (Resolve.Names.classify_receiver signature.parameters)
               written impl
-              ~trait_span:(lookups.names.spans container).(trait_.id)
+              ~trait_span:(lookups.names.list_spans container).(trait_.id)
               trait_
         | _ -> ())
     | Some _, _, _ -> ()
@@ -421,7 +422,7 @@ let check (state : Checking.state) =
         check_private_in_public state ~visibility:definition.visibility
           (list_signature_types elaborated) span
     | None, Law_proof { law; type_; _ }, Law_proof_interface { generics; trait; for_type; _ } -> (
-        (match lookups.trait_header trait.trait with
+        (match lookups.find_trait_header trait.trait with
         | Some header when not (List.mem law.text header.laws) ->
             Checking.report state Unknown_member state.spans.(law.id)
               (Printf.sprintf "`%s` has no law `%s`." (Types.show_trait trait) law.text)
@@ -483,9 +484,9 @@ let list_diagnostics (lookups : Lookups.t) key =
     {
       Checking.lookups;
       key;
-      definition = lookups.names.definition key;
-      elaborated = lookups.elaborated_interface key;
-      spans = lookups.names.spans key;
+      definition = lookups.names.read_definition key;
+      elaborated = lookups.read_elaborated_interface key;
+      spans = lookups.names.list_spans key;
       diagnostics = ref [];
     }
   in

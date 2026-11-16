@@ -679,15 +679,15 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
   let resolved =
     Resolve.merge
       (List.map
-         (fun section -> lookups.interface.resolved section key)
+         (fun section -> lookups.interface.read_resolved section key)
          (if checks_body then Resolve.sections else [ Interface; Contract ]))
   in
-  let elaborated = lookups.interface.elaborated_interface key in
+  let elaborated = lookups.interface.read_elaborated_interface key in
   let module_ = key.module_ in
-  let definition = lookups.interface.names.definition key in
-  let spans = lookups.interface.names.spans key in
+  let definition = lookups.interface.names.read_definition key in
+  let spans = lookups.interface.names.list_spans key in
   let context = Interface.Elaborator.create lookups.interface resolved ~spans elaborated.scope in
-  let text = lazy (lookups.interface.names.text key) in
+  let text = lazy (lookups.interface.names.read_text key) in
   let state : State.state =
     {
       lookups;
@@ -727,7 +727,7 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       annotatable = Hashtbl.create 8;
     }
   in
-  state.unifier.integer_range <-
+  state.unifier.find_integer_range <-
     (fun type_ ->
       find_integer_literal_range
         (Interface.Properties.list_known_bounds lookups.interface
