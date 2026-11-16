@@ -293,9 +293,9 @@ let check_body context (actions : Actions.t) moves =
                            holder))
               | _ -> ())
             dropped
-      | Bind_lent_part { lent_part; type_ } ->
+      | Bind_lent_part { scrutinee; lent_part_type } ->
           Context.report context Lent_part_escapes at
-            ~fixes:(Move_rules.copy_fix context "Copy the lent part." type_ lent_part)
+            ~fixes:(Move_rules.copy_fix context "Copy the scrutinee." lent_part_type scrutinee)
             "This part is lent only until the statement ends, so it cannot be bound to a name. Use \
              it in this statement, or copy it."
       | Pass_owned_function views -> (
