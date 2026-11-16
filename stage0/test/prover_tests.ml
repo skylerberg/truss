@@ -156,7 +156,7 @@ let () =
       let caller =
         List.find
           (fun (declaration : Resolve.Names.declaration) ->
-            Path.show declaration.path = "app::main::caller")
+            Path.equal declaration.path (Support.top "app::main" "caller"))
           (Support.declarations packages (Support.module_of "app::main"))
       in
       match
@@ -185,7 +185,7 @@ let () =
       let caller =
         List.find
           (fun (declaration : Resolve.Names.declaration) ->
-            Path.show declaration.path = "app::main::caller")
+            Path.equal declaration.path (Support.top "app::main" "caller"))
           (Support.declarations packages (Support.module_of "app::main"))
       in
       match
@@ -213,7 +213,7 @@ let () =
       let caller =
         List.find
           (fun (declaration : Resolve.Names.declaration) ->
-            Path.show declaration.path = "app::main::caller")
+            Path.equal declaration.path (Support.top "app::main" "caller"))
           (Support.declarations packages (Support.module_of "app::main"))
       in
       match
@@ -1451,7 +1451,7 @@ let () =
         let key =
           List.find
             (fun (declaration : Resolve.Names.declaration) ->
-              Path.show declaration.path = "app::main::f")
+              Path.equal declaration.path (Support.top "app::main" "f"))
             (Support.declarations packages (Support.module_of "app::main"))
         in
         match

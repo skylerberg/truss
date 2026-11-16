@@ -1,4 +1,3 @@
-type t = { names : string list; member : string option }
+type t = { prefix : string list; last : string; member : string option }
 
 val parse : string -> t
-val prefix : t -> string list

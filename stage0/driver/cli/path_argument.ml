@@ -1,16 +1,17 @@
-type t = { names : string list; member : string option }
+type t = { prefix : string list; last : string; member : string option }
 
 let parse text =
-  let names = String.split_on_char ':' text |> List.filter (( <> ) "") in
-  match List.rev names with
-  | last :: rest -> (
-      match String.index_opt last '.' with
-      | Some dot ->
-          {
-            names = List.rev (String.sub last 0 dot :: rest);
-            member = Some (String.sub last (dot + 1) (String.length last - dot - 1));
-          }
-      | None -> { names; member = None })
-  | [] -> { names = []; member = None }
-
-let prefix argument = match List.rev argument.names with _ :: rest -> List.rev rest | [] -> []
+  let refuse () =
+    Outcome.cannot_run
+      "`%s` is not a path, such as `weather::forecast::parse` or \
+       `weather::forecast::Forecast.summary`."
+      text
+  in
+  match Option.map List.rev (Path.parse_names text) with
+  | Some (last :: rest) -> (
+      let prefix = List.rev rest in
+      match String.split_on_char '.' last with
+      | [ last ] -> { prefix; last; member = None }
+      | [ last; member ] when last <> "" && member <> "" -> { prefix; last; member = Some member }
+      | _ -> refuse ())
+  | Some [] | None -> refuse ()

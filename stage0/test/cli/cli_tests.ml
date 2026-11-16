@@ -806,7 +806,31 @@ let () =
       expect_read
         (reads "dependents" (package [ ("main.truss", Fixtures.counter) ]) "Counter.bump")
         ~reader:"demo::bumped" ~parts:[ "checked body" ] ~reads:"interface"
-        ~of_:"demo::Counter.bump(mut self)")
+        ~of_:"demo::Counter.bump(mut self)");
+  test "a definition is found by its full path and by every suffix of its path" (fun () ->
+      let root = package [ ("main.truss", Fixtures.doubling) ] in
+      List.iter
+        (fun name ->
+          expect_read (reads "dependents" root name) ~reader:"demo::four" ~parts:[ "checked body" ]
+            ~reads:"interface" ~of_:"demo::double")
+        [ "demo::double"; "double" ]);
+  test "a suffix that ends inside a name finds nothing" (fun () ->
+      let root = package [ ("main.truss", Fixtures.doubling) ] in
+      let status, output = truss [ "dependents"; "-C"; root; "ouble" ] in
+      if status <> 2 || not (contains output "No definition named ouble") then
+        fail "status %d: %s" status output);
+  test "a name that is not a path is refused" (fun () ->
+      let root = package [ ("main.truss", Fixtures.doubling) ] in
+      let status, output = truss [ "dependents"; "-C"; root; "demo:double" ] in
+      if status <> 2 || not (contains output "`demo:double` is not a path") then
+        fail "status %d: %s" status output);
+  test "a method of an impl is found through the implementing type" (fun () ->
+      let root = package [ ("main.truss", Fixtures.square_area) ] in
+      List.iter
+        (fun name ->
+          let status, output = truss [ "dependencies"; "-C"; root; name ] in
+          if status <> 0 then fail "%s: status %d: %s" name status output)
+        [ "Square.area"; "demo::Square.area"; "Shape.area" ])
 
 let holes root = objects (Json.field "holes" (document [ "holes"; "-C"; root ]))
 

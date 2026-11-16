@@ -70,7 +70,7 @@ and argument form (passed : Core.argument) =
   | Passed { mode; value; _ } -> Types.show_mode mode ^ operand form value
   | Default -> "default"
 
-let definition_form text name =
+let definition_form text (path : Path.t) =
   let packages = setup [ ("app::main", text) ] in
   let file = file_of "app::main" in
   (match
@@ -89,8 +89,7 @@ let definition_form text name =
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
         let key = Resolve.Names.key_of declaration in
-        if Path.show key.path = "app::main::" ^ name then
-          Option.map (fun core -> (key, core)) (core_of packages key)
+        if Path.equal key.path path then Option.map (fun core -> (key, core)) (core_of packages key)
         else None)
       ((Support.names packages file.module_.package).declarations_in file)
   in
@@ -100,13 +99,13 @@ let definition_form text name =
         (Database.make_interface_lookups (database packages) [ key.module_.package ])
         key core;
       form_of core
-  | None -> failwith (Printf.sprintf "`%s` has no core form" name)
+  | None -> failwith (Printf.sprintf "`%s` has no core form" (Path.show path))
 
 let expect_observed expected observed =
   if observed <> expected then
     fail "expected [%s], found [%s]" (String.concat "; " expected) (String.concat "; " observed)
 
-let expect ?(definition = "g") test_name text observe expected =
+let expect ?(definition = Support.top "app::main" "g") test_name text observe expected =
   test test_name (fun () -> expect_observed expected (observe (definition_form text definition)))
 
 let contract form : Core.contract =
@@ -206,7 +205,8 @@ let () =
     List.concat_map
       (fun (call : Core.call) ->
         match call.callee with
-        | Function { path; type_arguments } when Path.show path = "app::main::apply" ->
+        | Function { path; type_arguments } when Path.equal path (Support.top "app::main" "apply")
+          ->
             List.concat_map
               (function
                 | Types.Capabilities set -> capabilities set
@@ -231,7 +231,7 @@ let () =
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
           let key = Resolve.Names.key_of declaration in
-          if Path.show key.path = "app::main::g" then
+          if Path.equal key.path (Support.top "app::main" "g") then
             match core_of packages key with
             | Some form ->
                 Core_walk.definition
@@ -241,7 +241,7 @@ let () =
                       (fun (node : Core.expression) ->
                         match node.kind with
                         | Call { callee = Function { path; _ }; uses; _ }
-                          when Path.show path = "app::main::apply" ->
+                          when Path.equal path (Support.top "app::main" "apply") ->
                             actual :=
                               ("needs " ^ Types.show_argument (Capabilities uses)) :: !actual
                         | Lambda _ -> actual := Types.show node.type_ :: !actual
@@ -259,7 +259,7 @@ let () =
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
           let key = Resolve.Names.key_of declaration in
-          if Path.show key.path = "app::main::g" then
+          if Path.equal key.path (Support.top "app::main" "g") then
             match core_of packages key with
             | Some form ->
                 Core_walk.definition
@@ -546,7 +546,16 @@ let () =
           fail "expected the derived method with no substitution and the inherited method with one")
 
 let () =
-  expect ~definition:"proof standard::core::Ordered.agrees_with_equal for app::main::Pair"
+  expect
+    ~definition:
+      (Law_proof
+         {
+           module_ = Support.module_of "app::main";
+           trait =
+             { path = Support.top "standard::core" "Ordered"; arguments = []; associated = [] };
+           law = "agrees_with_equal";
+           for_type = Support.top "app::main" "Pair";
+         })
     "a law's proof has the law's parameters, with the proof's type for Self"
     (Fixtures.Core.pair_ordering
    ^ "proof Ordered.agrees_with_equal for Pair {\n  only_equal(first, second: second)\n}\n")

@@ -41,7 +41,8 @@ let () =
           (core_nodes packages key).expressions
       with
       | [ [ [ { capability; impl = Impl _; arguments = [ (_, Type tag) ] } ] ] ]
-        when Path.show capability = "standard::capabilities::Clock" && Types.show tag = "Bool" ->
+        when Path.equal capability (Support.top "standard::capabilities" "Clock")
+             && Types.show tag = "Bool" ->
           ()
       | _ -> fail "not recorded");
   test "a specification may not use Panic" (fun () ->

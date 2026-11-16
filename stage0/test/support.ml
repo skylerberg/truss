@@ -1,9 +1,11 @@
 open Harness
 
 let module_of text : Path.module_ =
-  match String.split_on_char ':' text |> List.filter (( <> ) "") with
-  | name :: modules -> { package = { owner = None; name }; modules }
-  | [] -> invalid_arg text
+  match Path.parse_names text with
+  | Some (name :: modules) -> { package = { owner = None; name }; modules }
+  | Some [] | None -> invalid_arg text
+
+let top module_ name : Path.t = Top { module_ = module_of module_; name }
 
 let file_of text : Path.file =
   match String.index_opt text '/' with

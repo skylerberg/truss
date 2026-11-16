@@ -1,0 +1,11 @@
+trait Shape {
+  fn area(self) -> Int64
+}
+
+type Square(side: Int64)
+
+impl Shape for Square {
+  fn area(self) -> Int64 {
+    self.side
+  }
+}

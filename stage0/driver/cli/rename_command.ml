@@ -29,9 +29,8 @@ let by_file edits =
 let in_package packages from_ =
   let is_package package = List.mem package packages in
   let argument = Path_argument.parse from_ in
-  match Path.split_module ~is_package argument.names with
+  match Path.split_module ~is_package (argument.prefix @ [ argument.last ]) with
   | Some module_ -> (module_, argument.member)
-  | None when argument.names = [] -> Outcome.cannot_run "`%s` names nothing." from_
   | None ->
       Outcome.cannot_run
         "Only the definitions of this project's packages can be renamed, and `%s` is not in one."
@@ -69,18 +68,16 @@ let target_of snapshot database packages from_ =
 let new_name ~from_ to_ =
   let written = Path_argument.parse to_ and old = Path_argument.parse from_ in
   let owner_and_name (argument : Path_argument.t) =
-    let last = match List.rev argument.names with last :: _ -> last | [] -> "" in
-    match argument.member with Some member -> (last, member) | None -> ("", last)
+    match argument.member with Some member -> (argument.last, member) | None -> ("", argument.last)
   in
   let from_owner, _ = owner_and_name old in
-  if List.length written.names > 1 && Path_argument.prefix written <> Path_argument.prefix old then
+  if written.prefix <> [] && written.prefix <> old.prefix then
     Outcome.cannot_run
       "A rename keeps a definition in its module, and `%s` is in another one than `%s`." to_ from_;
   let owner, name = owner_and_name written in
   if written.member <> None && owner <> from_owner then
     Outcome.cannot_run "A rename keeps a method with its type, and `%s` is not under `%s`." to_
       from_owner;
-  if name = "" then Outcome.cannot_run "`%s` gives no new name." to_;
   name
 
 let occurrences database snapshot packages =
