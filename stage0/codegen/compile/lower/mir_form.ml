@@ -260,7 +260,10 @@ let outlives_call ~(owns : Mir.local -> bool) ~(is_view : Types.ty -> bool) (bod
       | (Call { destination = Some target; call } | Template { destination = target; call; _ })
         when is_local target ->
           if holds_view then viewed_by call else raise Made
-      | _ -> []
+      | Assign _ | Lend _ | Slice _ | Call _ | Template _ | Live _ | Dead _ | Assert _ | Echo _
+      | Provide _ | Provide_end | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _
+        ->
+          []
     in
     try
       Some
@@ -275,7 +278,17 @@ let outlives_call ~(owns : Mir.local -> bool) ~(is_view : Types.ty -> bool) (bod
              | For { iteration = Pull { cursor; _ }; part; _ } when part = local && holds_view ->
                  (cursor, true) :: places
              | For { part; _ } when part = local -> raise Made
-             | _ -> places)
+             | Resume { exits; _ }
+               when List.exists
+                      (fun (exit : Mir.Graph.early_exit) -> exit.returned = Some local)
+                      exits ->
+                 raise Made
+             | Cancel { winner; returned; _ }
+               when winner = local || Option.map snd returned = Some local ->
+                 raise Made
+             | For _ | Resume _ | Cancel _ | Goto _ | Branch _ | Fork _ | Join _ | Iteration_end _
+             | Yield _ | Return _ | Unreachable | Written_unreachable | Todo ->
+                 places)
            [] body.blocks)
     with Made -> None
   in

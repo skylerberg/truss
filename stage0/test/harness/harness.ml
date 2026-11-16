@@ -30,14 +30,7 @@ let fail format =
 let wanted =
   match Sys.getenv_opt "TRUSS_TEST" with
   | None | Some "" -> fun _ -> true
-  | Some part ->
-      fun name ->
-        let length = String.length part in
-        let rec from start =
-          start + length <= String.length name
-          && (String.sub name start length = part || from (start + 1))
-        in
-        from 0
+  | Some affix -> String.includes ~affix
 
 let always name body =
   incr count;

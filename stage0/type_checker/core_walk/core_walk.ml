@@ -264,7 +264,10 @@ let compute_tasks_use ?(solved = fun (_ : int) : Types.capability_set -> Types.n
            (fun node ->
              match node.kind with
              | Concurrent _ | For { mode = Concurrent_loop; _ } -> usage := Uses_tasks
-             | _ -> ());
+             | For { mode = Sequential | Parallel_loop; _ }
+             | Let _ | Evaluate _ | Assign _ | Compound_assign _ | While _ | Parallel _ | Proof _
+             | Assert _ | Yield _ ->
+                 ());
        })
     body;
   !usage

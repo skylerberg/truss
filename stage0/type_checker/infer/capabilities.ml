@@ -259,7 +259,8 @@ and check_statement checking scope (statement : Core.statement) =
       check_loop_clauses checking clauses;
       check_block checking scope body
   | Proof body -> check_block checking (make_no_capabilities_scope "a proof") body
-  | _ -> check_children checking scope (`Statement statement)
+  | Let _ | Evaluate _ | Assign _ | Compound_assign _ | Assert _ | Yield _ ->
+      check_children checking scope (`Statement statement)
 
 and check_loop_clauses checking (clauses : Core.loop_clause list) =
   List.iter

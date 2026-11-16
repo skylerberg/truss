@@ -6,7 +6,9 @@ let rec holds_break (block : Tree.block) =
       match statement.kind with
       | Jump Break -> true
       | While _ | For _ -> false
-      | _ -> List.exists holds_break (Walk.list_nested_blocks statement))
+      | Basic _ | Choose _ | Assert_by_bit_vector _ | Fork _ | Resume _ | Yield _
+      | Jump (Return _ | Continue | Cancel _ | Unreachable | Written_unreachable | Todo) ->
+          List.exists holds_break (Walk.list_nested_blocks statement))
     block.statements
 
 let project (place : Tree.place) projection =

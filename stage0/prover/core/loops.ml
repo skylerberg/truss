@@ -500,7 +500,9 @@ let compute_iterations_so_far context head costs =
   else None
 
 let make_step_cost (counter : Costs.counter) =
-  match counter.resource with Time -> Logic.int 1 | _ -> Costs.zero
+  match counter.resource with
+  | Time -> Logic.int 1
+  | Allocations | Allocated_bytes | Calls _ -> Costs.zero
 
 let declare_elements_so_far context (head : State.frame) ~element ~collection ~count yielded
     element_at =

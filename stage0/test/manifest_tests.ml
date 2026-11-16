@@ -4,8 +4,6 @@ let manifest_block () =
   let text = File_system.read (Harness.workspace_path "PACKAGES.md") in
   String.concat "\n" (Documents.block_after text "## Package manifest")
 
-let contains text part = Substring.contains text part
-
 let malformed_at line text =
   match Manifest.parse text with
   | exception Manifest.Malformed { line = actual; _ } when actual = line -> ()
@@ -84,13 +82,14 @@ let () =
     (fun () ->
       (match Manifest.parse "[package]\nname = \"a\"\nversion = \"1.0\"\n" with
       | exception Manifest.Malformed { line = 3; message } ->
-          if not (contains message "holds no version") then Harness.fail "said %s" message
+          if not (String.includes ~affix:"holds no version" message) then
+            Harness.fail "said %s" message
       | _ -> Harness.fail "accepted");
       (match
          Manifest.parse "[package]\nname = \"a\"\n[dependencies]\njson = { version = \"2.1\" }\n"
        with
       | exception Manifest.Malformed { line = 4; message } ->
-          if not (contains message "json = []") then Harness.fail "said %s" message
+          if not (String.includes ~affix:"json = []" message) then Harness.fail "said %s" message
       | _ -> Harness.fail "accepted");
       malformed_at 4 "[package]\nname = \"a\"\n[dependencies]\njson = \"2.1\"\n");
   Harness.test "a table or a key a manifest does not have is malformed" (fun () ->
@@ -167,8 +166,10 @@ let () =
       if without <> "[package]\nname = \"a\"\n\n[dependencies]\njson = []\n\"truss::toml\" = []\n"
       then Harness.fail "wrote %S" without;
       let without = Manifest.without_dependency text { Path.owner = Some "truss"; name = "toml" } in
-      if contains without "toml" || not (contains without "NetworkClient") then
-        Harness.fail "wrote %S" without);
+      if
+        String.includes ~affix:"toml" without
+        || not (String.includes ~affix:"NetworkClient" without)
+      then Harness.fail "wrote %S" without);
   Harness.test "a manifest without a dependency it does not list is unchanged" (fun () ->
       if Manifest.without_dependency text { Path.owner = None; name = "yaml" } <> text then
         Harness.fail "changed")

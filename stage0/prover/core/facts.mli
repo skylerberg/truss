@@ -6,6 +6,7 @@ exception Foreign_unsupported of string
 val unsupported : State.location -> ('a, unit, string, 'b) format4 -> 'a
 val bug : ('a, unit, string, 'b) format4 -> 'a
 val is_in_recursion_group : State.context -> Path.t -> bool
+val has_method_in_recursion_group : State.context -> Path.t -> bool
 val list_clauses : Mir.requirement list -> Mir.formula list
 val declare : State.context -> Logic.declaration -> unit
 val add_fact : State.context -> Logic.term -> unit

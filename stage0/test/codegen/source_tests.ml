@@ -161,7 +161,7 @@ let () =
       List.iter
         (fun name ->
           let c = Emit_c.For_testing.c (Compile.For_testing.compiled compile (function_ name)) in
-          if Codegen_support.contains c "t_lend" then
+          if String.includes ~affix:"t_lend" c then
             Codegen_support.fail "expected no lend record in `%s`:\n%s" name c)
         names)
 
