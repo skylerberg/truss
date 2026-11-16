@@ -79,13 +79,14 @@ let tokens ~file ~json =
 
 let tree ~file ~json =
   let source = read file in
-  let parsed = Parsed.parse source in
+  let tokens, lexer_diagnostics = Lexer.lex source in
+  let file, parser_diagnostics = Parser.parse tokens ~lexer_diagnostics in
   let diagnostics =
     List.stable_sort
       (fun (left : Diagnostic.t) (right : Diagnostic.t) -> compare left.span.start right.span.start)
-      parsed.diagnostics
+      (lexer_diagnostics @ parser_diagnostics)
   in
-  if not json then print_endline (Syntax_print.file parsed.file);
+  if not json then print_endline (Syntax_print.file file);
   show_diagnostics ~json source diagnostics
 
 let () =

@@ -47,6 +47,75 @@ let without_colliding_renames text (tokens : Token.t array) (diagnostics : Diagn
       | _ -> diagnostic)
     diagnostics
 
+type placed = { original : Source.span; fixed_start : int; fixed_stop : int }
+
+let placed_edits (edits : Source.span Diagnostic.edit list) =
+  let sorted =
+    List.stable_sort
+      (fun (left : Source.span Diagnostic.edit) right -> compare left.span.start right.span.start)
+      edits
+  in
+  let _, placed =
+    List.fold_left
+      (fun (shift, placed) (edit : Source.span Diagnostic.edit) ->
+        let fixed_start = edit.span.start + shift in
+        let fixed_stop = fixed_start + String.length edit.replacement in
+        ( shift + String.length edit.replacement - (edit.span.stop - edit.span.start),
+          { original = edit.span; fixed_start; fixed_stop } :: placed ))
+      (0, []) sorted
+  in
+  Array.of_list (List.rev placed)
+
+let original_offset (placed : placed array) ~is_stop offset =
+  let starts_before (edit : placed) =
+    if is_stop then edit.fixed_start < offset else edit.fixed_start <= offset
+  in
+  let rec search low high =
+    if low >= high then low
+    else
+      let middle = (low + high) / 2 in
+      if starts_before placed.(middle) then search (middle + 1) high else search low middle
+  in
+  match search 0 (Array.length placed) with
+  | 0 -> offset
+  | count ->
+      let edit = placed.(count - 1) in
+      if offset >= edit.fixed_stop then offset - edit.fixed_stop + edit.original.stop
+      else if is_stop then edit.original.stop
+      else edit.original.start
+
+let rec original_token placed (token : Token.t) =
+  let span (span : Source.span) =
+    let stop = original_offset placed ~is_stop:true span.stop in
+    if span.start = span.stop then Source.zero_width stop
+    else Source.span (original_offset placed ~is_stop:false span.start) stop
+  in
+  let kind : Token.kind =
+    match token.kind with
+    | String literal ->
+        let text (piece : Token.text) = { piece with span = span piece.span } in
+        String
+          {
+            literal with
+            tag = Option.map (fun (tag, tag_span) -> (tag, span tag_span)) literal.tag;
+            first = text literal.first;
+            rest =
+              Array.map
+                (fun ((interpolation : Token.interpolation), piece) ->
+                  ( {
+                      interpolation with
+                      tokens = Array.map (original_token placed) interpolation.tokens;
+                      span = span interpolation.span;
+                    },
+                    text piece ))
+                literal.rest;
+          }
+    | kind -> kind
+  in
+  { token with kind; span = span token.span }
+
+let to_original edits tokens = Array.map (original_token (placed_edits edits)) tokens
+
 let rec with_inserted_closers_marked (tokens : Token.t array) =
   Array.map
     (fun (token : Token.t) ->
@@ -76,28 +145,24 @@ let rec with_inserted_closers_marked (tokens : Token.t array) =
 
 let lex source =
   let tokens, diagnostics = scan source in
-  let attempt edits ~unfixed =
-    let fixed_tokens, remaining =
-      scan
-        (Source.create ~path:(Source.path source)
-           (Diagnostic.apply_edits (Source.text source) edits))
-    in
-    let fixed_tokens = Fixes.to_original edits fixed_tokens in
-    if
-      Fixes.alters_neighbors ~edits ~written:tokens ~fixed:fixed_tokens
-      || not (Diagnostic.adds_none ~before:unfixed ~after:remaining)
-    then None
-    else Some fixed_tokens
+  let diagnostics = without_colliding_renames (Source.text source) tokens diagnostics in
+  let edits =
+    List.concat_map
+      (fun (diagnostic : Diagnostic.t) ->
+        match diagnostic.fixes with [ fix ] -> fix.edits | _ -> [])
+      (Diagnostic.machine_applicable diagnostics)
   in
-  let diagnostics, fixed =
-    Fixes.apply ~stage:"Lexer" ~path:(Source.path source) ~attempt
-      ~is_applied:(fun _ -> true)
-      tokens
-      (without_colliding_renames (Source.text source) tokens diagnostics)
-  in
-  (with_inserted_closers_marked (Option.value fixed ~default:tokens), diagnostics)
+  match edits with
+  | [] -> (with_inserted_closers_marked tokens, diagnostics)
+  | _ ->
+      let fixed_tokens, _ =
+        scan
+          (Source.create ~path:(Source.path source)
+             (Diagnostic.apply_edits (Source.text source) edits))
+      in
+      (with_inserted_closers_marked (to_original edits fixed_tokens), diagnostics)
 
 module For_testing = struct
-  let can_end = Layout.can_end
-  let can_begin = Layout.can_begin
+  let scan = scan
+  let to_original = to_original
 end

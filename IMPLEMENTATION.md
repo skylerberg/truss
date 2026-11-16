@@ -86,30 +86,10 @@ develop as well as make it easier to bootstrap the compiler in parts.
   token that follows in fact, inside an interpolation as well. A token
   carries the trivia before it, so a token scanned ahead never takes a line
   break that precedes the token before it.
-- **A file's tokens are the tokens of its fixed text.** The lexer applies
-  every machine-applicable fix, lexes the result, and maps the tokens back
-  to the file's offsets, so the parser reads the file as its fixes would
-  write it. A fix whose text adds an error, or joins or splits a neighboring
-  token, is withheld, so a habit needs no guard of its own against those.
-  A fix can lex cleanly and still change a value, as when a string's text
-  would become an escape or an interpolation. `Fixes` cannot see that
-  change, so the habit that offers the fix must withhold it.
-- **The lexer checks fixes in groups, never one lex per fix.** A fix changes
-  how the text lexes only between the tokens on either side of its edits,
-  so fixes whose edits an untouched token separates are independent, and
-  one lex checks them all. When the lex fails, halving the group finds the
-  fixes that fail. Fixes whose edits touch form a set, and each round takes
-  one fix from each set: the fix is applied if it works alone and with the
-  fixes its set already applied. A set of more than eight touching fixes is
-  withheld unchecked, so the rounds are few. If the applied fixes then fail
-  together, the fixes were not independent, which is a compiler bug. A
-  check that lexes once for each fix makes a file with a fix on every line
-  quadratic.
 - **A token says what the lexer inserted.** A closer that the lexer inserts
   for an unclosed bracket is marked, and an interpolation records whether
   its `}` closed it. The parser reads these marks, never zero widths or
-  the text: a closer that a fix inserts is also zero-width after mapping,
-  and taking it for the lexer's would silence the errors after it.
+  the text.
 
 ### The parser
 

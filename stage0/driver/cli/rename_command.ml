@@ -159,7 +159,7 @@ let plan_module database snapshot packages (old_module : Path.module_) to_ =
                  (Names.used_module
                     (Database.make_name_lookups database packages)
                     ~from:file.module_)
-               (Database.read_parsed database file).file.uses))
+               (Database.read_parsed database file).uses))
         (Command_packages.files snapshot packages)
   in
   { edits = by_file edits; moved = Some (old_module, new_module) }

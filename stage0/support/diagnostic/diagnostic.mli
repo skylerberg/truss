@@ -287,7 +287,6 @@ val recovered : _ -> reported
 val map_spans : ('a -> 'b) -> 'a diagnostic -> 'b diagnostic
 val apply_fix : string -> Source.span fix -> string
 val apply_edits : string -> Source.span edit list -> string
-val adds_none : before:'span diagnostic list -> after:'span diagnostic list -> bool
 val machine_applicable : t list -> t list
 
 module Collector : sig

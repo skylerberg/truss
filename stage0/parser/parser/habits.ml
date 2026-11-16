@@ -3,7 +3,11 @@ open Syntax
 let node_spelling cursor id = Cursor.spelling cursor (Cursor.read_file_span cursor id)
 
 let report cursor code (span : Source.span) message fix_title edits =
-  Cursor.report cursor code span message ~fixes:[ Diagnostic.fix fix_title edits ]
+  let joins (edit : Source.span Diagnostic.edit) =
+    Cursor.joins_neighbors cursor edit.span edit.replacement
+  in
+  Cursor.report cursor code span message
+    ~fixes:(if List.exists joins edits then [] else [ Diagnostic.fix fix_title edits ])
 
 let token_with_trailing_space (token : Token.t) ~(next : Token.t) =
   Source.span token.span.start next.span.start

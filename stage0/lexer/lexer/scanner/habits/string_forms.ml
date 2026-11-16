@@ -193,7 +193,9 @@ let prefixed_string cursor ~scan ~prefix ~start ~nesting =
         ( "Truss has no byte strings. A string is UTF-8 text, and `text.bytes()` gives its bytes.",
           [] )
   in
-  report cursor ~code:String_prefix ~fixes (span start quote_start) message;
+  report cursor ~code:String_prefix
+    ~fixes:(if touches_word_before cursor start then [] else fixes)
+    (span start quote_start) message;
   (kind, ending)
 
 let hash_raw_string cursor ~start =
@@ -230,7 +232,11 @@ let hash_raw_string cursor ~start =
         let stop = text_stop + 1 + hashes in
         report cursor ~code:String_prefix
           ~fixes:
-            (if interpolates then []
+            (if
+               interpolates
+               || String.starts_with ~prefix:"\"" value
+               || String.ends_with ~suffix:"\"" value
+             then []
              else
                [
                  Diagnostic.fix "Write a raw string"
@@ -285,7 +291,7 @@ let quoted_string cursor ~scan ~nesting ~delimiter =
   let template = delimiter = '`' in
   report cursor ~code:String_delimiter
     ~fixes:
-      (if ending = Closed then
+      (if ending = Closed && not (touches_word_before cursor start) then
          [
            Diagnostic.fix "Write the string between `\"`s"
              ((Diagnostic.replace (span start (start + 1)) "\"" :: quote_edits (start + 1) [])
@@ -314,7 +320,10 @@ let curly_quoted_string cursor ~opening_length ~closing =
       let value = String.sub cursor.text text_start (text_stop - text_start) in
       let stop = text_stop + String.length closing in
       let reads_differently =
-        String.exists (fun character -> character = '\\' || character = '$') value
+        String.exists
+          (fun character -> character = '\\' || character = '$' || character = '"')
+          value
+        || touches_word_before cursor start
       in
       report cursor ~code:Confusable_character
         ~fixes:

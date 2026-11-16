@@ -24,31 +24,34 @@ let overlaps (tokens : Token.t array) piece (span : Source.span) =
   if span.start = span.stop then start <= span.start && span.start <= stop
   else span.start < stop && start < span.stop
 
-let with_lexer_recoveries tokens ~lexer_diagnostics ~nested piece (item : _ Syntax.item) =
-  let recovered =
-    List.filter_map
-      (fun ({ span; _ } : Diagnostic.t) ->
-        if
-          overlaps tokens piece span
-          && not (List.exists (fun inner -> overlaps tokens inner span) nested)
-        then
-          Some
-            (Source.Definition_span.of_file ~base:item.base
-               (Source.span (max span.start item.base) (min span.stop item.stop)))
-        else None)
-      lexer_diagnostics
+let with_lexer_errors tokens ~lexer_diagnostics ~nested piece
+    ((item : _ Syntax.item), (diagnostics : Diagnostic.t list)) =
+  let errors =
+    List.filter
+      (fun (span : Source.span) ->
+        overlaps tokens piece span
+        && not (List.exists (fun inner -> overlaps tokens inner span) nested))
+      (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.span) lexer_diagnostics)
   in
-  match recovered with
-  | [] -> item
+  match errors with
+  | [] -> (item, diagnostics)
   | _ ->
-      {
-        item with
-        positions =
-          {
-            item.positions with
-            recovered = List.sort_uniq compare (recovered @ item.positions.recovered);
-          };
-      }
+      let recovered =
+        List.map
+          (fun (span : Source.span) ->
+            Source.Definition_span.of_file ~base:item.base
+              (Source.span (max span.start item.base) (min span.stop item.stop)))
+          errors
+      in
+      ( {
+          item with
+          positions =
+            {
+              item.positions with
+              recovered = List.sort_uniq compare (recovered @ item.positions.recovered);
+            };
+        },
+        List.map (fun (diagnostic : Diagnostic.t) -> { diagnostic with fixes = [] }) diagnostics )
 
 let checked cursor (definition : Syntax.definition) =
   Precedence.definition cursor definition;
@@ -67,12 +70,10 @@ let parse_methods tokens ~lexer_diagnostics (container : Syntax.definition) piec
   | Some kind ->
       List.map
         (fun piece ->
-          let method_, diagnostics =
-            parse_piece tokens piece (fun cursor ->
-                checked cursor
-                  (Parse_definition.method_ cursor ~container:kind ~visibility:container.visibility))
-          in
-          (with_lexer_recoveries tokens ~lexer_diagnostics ~nested:[] piece method_, diagnostics))
+          with_lexer_errors tokens ~lexer_diagnostics ~nested:[] piece
+            (parse_piece tokens piece (fun cursor ->
+                 checked cursor
+                   (Parse_definition.method_ cursor ~container:kind ~visibility:container.visibility))))
         pieces
   | None -> []
 
@@ -83,14 +84,12 @@ let parse_definition tokens ~lexer_diagnostics piece : Syntax.top_level * Diagno
         (checked cursor definition, methods))
   in
   let definition, method_pieces = parsed.value in
-  let methods = parse_methods tokens ~lexer_diagnostics definition method_pieces in
-  ( {
-      definition =
-        with_lexer_recoveries tokens ~lexer_diagnostics ~nested:method_pieces piece
-          { parsed with value = definition };
-      methods = List.map fst methods;
-    },
-    diagnostics @ List.concat_map snd methods )
+  let definition, diagnostics =
+    with_lexer_errors tokens ~lexer_diagnostics ~nested:method_pieces piece
+      ({ parsed with value = definition }, diagnostics)
+  in
+  let methods = parse_methods tokens ~lexer_diagnostics definition.value method_pieces in
+  ({ definition; methods = List.map fst methods }, diagnostics @ List.concat_map snd methods)
 
 let use_path cursor : Syntax.path option =
   match

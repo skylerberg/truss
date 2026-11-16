@@ -56,7 +56,6 @@
   unix
   path
   well_known
-  parsed
   project
   resolve
   standard_library

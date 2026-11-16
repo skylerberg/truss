@@ -181,6 +181,29 @@ let spelling cursor ?insertions span =
   | [||] -> None
   | tokens -> Token.spelling ?insertions tokens
 
+let joins_neighbors cursor (span : Source.span) code =
+  let adjacent is_adjacent =
+    let rec search index =
+      if index >= cursor.stop then None
+      else
+        let token = cursor.tokens.(index) in
+        if token.span.start < token.span.stop && is_adjacent token then Token.spelling [| token |]
+        else search (index + 1)
+    in
+    Option.bind (search cursor.first) (fun spelling ->
+        if spelling = "" then None else Some spelling)
+  in
+  let before =
+    Option.map
+      (fun spelling -> spelling.[String.length spelling - 1])
+      (adjacent (fun token -> token.span.stop = span.start))
+  and after =
+    Option.map (fun spelling -> spelling.[0]) (adjacent (fun token -> token.span.start = span.stop))
+  in
+  Token.joins_neighbor ~before ~after code
+
+let has_reported cursor = Diagnostic.Collector.to_list cursor.diagnostics <> []
+
 let report cursor ?notes ?fixes code span message =
   (match code with
   | Diagnostic.Code.Missing_body -> cursor.recoveries := span :: !(cursor.recoveries)

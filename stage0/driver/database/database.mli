@@ -20,7 +20,7 @@ val list_file_diagnostics : t -> Path.file -> Diagnostic.t list
 val list_manifest_problems : t -> Path.package -> Package_checks.manifest_problem list
 val list_code_packages : t -> Path.package -> Path.package list option
 val read_checked_body : t -> Resolve.Names.key -> Infer.checked option
-val read_parsed : t -> Path.file -> Parsed.t
+val read_parsed : t -> Path.file -> Syntax.file
 val make_name_lookups : t -> Path.package list -> Resolve.Names.lookups
 val read_resolved : t -> Resolve.Names.key -> Resolve.resolved option
 val make_interface_lookups : t -> Path.package list -> Interface.Lookups.t

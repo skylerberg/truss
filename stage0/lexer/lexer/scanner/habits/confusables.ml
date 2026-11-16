@@ -40,16 +40,24 @@ let token spelling : Token.kind option =
 
 type scanned = Lexed of Token.kind | Spaced
 
+let follows_joining_confusable (cursor : Cursor.t) start replacement =
+  let rec character_start index =
+    if index > 0 && Char.code cursor.text.[index] land 0xC0 = 0x80 then character_start (index - 1)
+    else index
+  in
+  start > 0
+  &&
+  match find (Unicode.Decoded.code_point (Cursor.decode cursor (character_start (start - 1)))) with
+  | Some (Spelled spelling) -> Token.joins spelling.[String.length spelling - 1] replacement.[0]
+  | Some (Space | Opening_quote _) | None -> false
+
 let scan (cursor : Cursor.t) ~value ~length =
   let start = cursor.position in
   let report ~replacement ~name =
     Cursor.report cursor ~code:Confusable_character
       ~fixes:
-        [
-          Diagnostic.fix
-            ("Write `" ^ replacement ^ "`")
-            [ Diagnostic.replace (Cursor.span start (start + length)) replacement ];
-        ]
+        (if follows_joining_confusable cursor start replacement then []
+         else Cursor.code_fixes cursor (Cursor.span start (start + length)) [ replacement ])
       (Cursor.span start (start + length))
       (Printf.sprintf "%s is not %s. Truss is written with ASCII punctuation."
          (Cursor.show_character cursor start)

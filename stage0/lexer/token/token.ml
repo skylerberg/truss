@@ -412,3 +412,50 @@ and string_spelling literal =
       (tag ^ "\"" ^ escaped literal.first.value
       ^ String.concat "" (List.filter_map Fun.id pieces)
       ^ "\"")
+
+let joins left right =
+  let is_name_byte character =
+    (character >= 'a' && character <= 'z')
+    || (character >= 'A' && character <= 'Z')
+    || (character >= '0' && character <= '9')
+    || character = '_'
+    || Char.code character >= 0x80
+  in
+  let is_operator_byte character = String.contains "!%&*+-./:<=>^|" character in
+  (is_name_byte left && (is_name_byte right || right = '"' || right = '\''))
+  || (is_operator_byte left && is_operator_byte right)
+
+let joins_neighbor ~before ~after code =
+  match (code, before, after) with
+  | "", Some left, Some right -> joins left right
+  | "", _, _ -> false
+  | _ ->
+      Option.fold ~none:false ~some:(fun left -> joins left code.[0]) before
+      || Option.fold ~none:false ~some:(joins code.[String.length code - 1]) after
+
+let can_end = function
+  | Upper _ | Lower _ | Underscore | Integer _ | Float _ | String _ -> true
+  | Punctuation (Close _ | Question) -> true
+  | Keyword (True | False | Self_value | Self_type | Todo | Unreachable | Break | Continue | Return)
+    ->
+      true
+  | Foreign (Plus_plus | Minus_minus) -> true
+  | Foreign (Star_star | Colon_equal | Pipe_greater) -> false
+  | Keyword _ | Reserved _ | Punctuation _ | Newline | End_of_file -> false
+
+let can_begin = function
+  | Upper _ | Lower _ | Underscore | Integer _ | Float _ | String _ | Reserved _ -> true
+  | Foreign (Plus_plus | Minus_minus) -> true
+  | Foreign (Star_star | Colon_equal | Pipe_greater) -> false
+  | Punctuation (Open _ | Minus | Bang | Tilde) -> true
+  | Keyword
+      ( Any | Assert | Break | Capability | Concurrent | Continue | Echo | Exists | False | Fn | For
+      | Forall | If | Impl | Internal | Law | Let | Match | Mut | Own | Parallel | Proof | Provide
+      | Public | Return | Self_value | Self_type | Test | Theorem | Todo | Trait | True | Type
+      | Unreachable | Use | Var | While ) ->
+      true
+  | Keyword
+      ( Cost | Decreases | Derives | Else | Ensures | In | Indirect | Invariant | Is | Lends
+      | Opaque | Requires | Uses | With ) ->
+      false
+  | Punctuation _ | Newline | End_of_file -> false

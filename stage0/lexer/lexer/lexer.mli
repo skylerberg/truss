@@ -1,6 +1,6 @@
 val lex : Source.t -> Token.t array * Diagnostic.t list
 
 module For_testing : sig
-  val can_end : Token.kind -> bool
-  val can_begin : Token.kind -> bool
+  val scan : Source.t -> Token.t array * Diagnostic.t list
+  val to_original : Source.span Diagnostic.edit list -> Token.t array -> Token.t array
 end

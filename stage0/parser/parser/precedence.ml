@@ -89,7 +89,7 @@ let is_name_or_literal (value : expression) =
 
 type problem = Lowest_operand | Chained of string | Mixed of string | Mixed_bitwise
 
-let problem parent child ~right (operand : expression) =
+let find_problem parent child ~right (operand : expression) =
   let bitwise = function Shift | Bitwise _ -> true | _ -> false in
   match (parent, child) with
   | (And_group | Or_group | Implies_group), Lowest
@@ -120,7 +120,7 @@ let grouping_fix cursor ?context ~(whole : expression) ~(operand : expression)
   let last = if grouping = parsed then group whole else group operand in
   let wrap =
     match (context, last) with
-    | Some (outer, right), Some last -> problem outer last ~right whole <> None
+    | Some (outer, right), Some last -> find_problem outer last ~right whole <> None
     | _ -> false
   in
   let fallback =
@@ -131,12 +131,21 @@ let grouping_fix cursor ?context ~(whole : expression) ~(operand : expression)
   fix cursor ~fallback whole.id
     (if wrap then edits @ parentheses cursor whole.id whole.id else edits)
 
+let rec first_operand (value : expression) =
+  match value.kind with
+  | Binary { left; _ } when Option.equal ( = ) (group left) (group value) -> first_operand left
+  | Binary { left; _ } -> Some left
+  | Is { value; _ } -> Some value
+  | Range { start = Some start; stop = Some _; _ } -> Some start
+  | _ -> None
+
+let last_operand (value : expression) =
+  match value.kind with
+  | Binary { right; _ } -> Some right
+  | Range { start = Some _; stop = Some stop; _ } -> Some stop
+  | _ -> None
+
 let report_problem cursor ?context (whole : expression) (operand : expression) ~right problem =
-  let rec first_of_chain (value : expression) =
-    match value.kind with
-    | Binary { left; _ } when Option.equal ( = ) (group left) (group value) -> first_of_chain left
-    | _ -> Option.map fst (operands value)
-  in
   let pieces =
     match (operands whole, operands operand) with
     | Some (_, third_operator), Some (first_operator, second_operator) when not right ->
@@ -144,14 +153,25 @@ let report_problem cursor ?context (whole : expression) (operand : expression) ~
     | Some (first_operator, _), Some (_, third_operator) when right ->
         Option.map
           (fun second_operator -> (first_operator, second_operator, third_operator))
-          (first_of_chain operand)
+          (Option.map (fun (first : expression) -> first.id) (first_operand operand))
     | _ -> None
   in
   let parsed = if right then Right_first else Left_first in
   let other = if right then Left_first else Right_first in
   let fix_for pieces = grouping_fix cursor ?context ~whole ~operand pieces ~parsed in
+  let regroups_cleanly grouping =
+    grouping = parsed
+    ||
+    match (group whole, if right then first_operand operand else last_operand operand) with
+    | Some outer, Some (middle : expression) -> (
+        match group middle with
+        | Some inner -> find_problem outer inner ~right middle = None
+        | None -> true)
+    | _ -> true
+  in
   let groupings =
-    match operand.kind with Is _ when not right -> [ parsed ] | _ -> [ parsed; other ]
+    List.filter regroups_cleanly
+      (match operand.kind with Is _ when not right -> [ parsed ] | _ -> [ parsed; other ])
   in
   let both () =
     match pieces with Some pieces -> List.map (fix_for pieces) groupings | None -> []
@@ -177,7 +197,10 @@ let report_problem cursor ?context (whole : expression) (operand : expression) ~
                   if applies_first language ~first ~second then Left_first else Right_first)
                 [ `Truss; `C; `Go; `Swift ]
             in
-            let ordered = if List.mem other groupings then [ parsed; other ] else [ parsed ] in
+            let ordered =
+              List.filter regroups_cleanly
+                (if List.mem other groupings then [ parsed; other ] else [ parsed ])
+            in
             List.map (fix_for pieces) ordered
         | _ -> both ()
       in
@@ -207,7 +230,7 @@ let report_problem cursor ?context (whole : expression) (operand : expression) ~
 let rec checked_expression ?context cursor (value : expression) =
   let operand parent ~right (operand : expression) =
     checked_expression ~context:(parent, right) cursor operand;
-    match Option.bind (group operand) (fun child -> problem parent child ~right operand) with
+    match Option.bind (group operand) (fun child -> find_problem parent child ~right operand) with
     | Some problem -> report_problem cursor ?context value operand ~right problem
     | None -> ()
   in

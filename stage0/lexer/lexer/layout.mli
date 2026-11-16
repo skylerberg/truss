@@ -13,9 +13,6 @@ type input =
       ends_unterminated : bool;
     }
 
-val can_end : Token.kind -> bool
-val can_begin : Token.kind -> bool
-
 val file :
   source:Source.t ->
   diagnostics:Diagnostic.Collector.t ->

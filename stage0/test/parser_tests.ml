@@ -49,6 +49,28 @@ let () =
           if container.positions.recovered <> [] then fail "recorded in the container";
           if method_.positions.recovered = [] then fail "not recorded in the method"
       | items -> fail "expected a container and a method, got %d items" (List.length items));
+  test "a parser error in a definition with a lexer error has no fix" (fun () ->
+      let _, diagnostics = parse "fn f() {\n  let x = 0755\n  count++\n}" in
+      match
+        List.find_opt
+          (fun (diagnostic : Diagnostic.t) -> diagnostic.code = Parser Increment)
+          diagnostics
+      with
+      | Some { fixes = []; _ } -> ()
+      | Some _ -> fail "offered a fix"
+      | None -> fail "no parser.increment");
+  test "a missing body after another error in the definition has no fix" (fun () ->
+      let _, diagnostics =
+        parse "fn f(key: UInt64) -> Bool\n  cost allocations == match\n  {\n    key < 1\n  }\n"
+      in
+      match
+        List.find_opt
+          (fun (diagnostic : Diagnostic.t) -> diagnostic.code = Parser Missing_body)
+          diagnostics
+      with
+      | Some { fixes = []; _ } -> ()
+      | Some _ -> fail "offered a fix"
+      | None -> fail "no parser.missing_body");
   test "a missing body's recovery is where the body starts" (fun () ->
       let tokens, _ = Lexer.lex (source "fn f(x: Int64) -> Int64\nfn g() {}") in
       match
@@ -343,7 +365,7 @@ let () =
         (fun kind ->
           if
             Parser.For_testing.begins_statement kind
-            && (not (Lexer.For_testing.can_begin kind))
+            && (not (Token.can_begin kind))
             && not (List.mem kind only_in_brackets)
           then
             fail "%s begins a statement, but a line break before it is not a NEWLINE"

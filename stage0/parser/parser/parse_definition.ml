@@ -172,13 +172,17 @@ let body cursor =
         | _ -> false
       in
       if ends_member && not (Cursor.is_after_inserted_closer cursor) then begin
+        let has_earlier_error = Cursor.has_reported cursor in
         Cursor.report cursor Missing_body (Source.zero_width stop)
           "A function needs a body; write `{ todo }` for one that is not written yet."
           ~fixes:
-            [
-              Diagnostic.fix "Add `{ todo }`"
-                [ Diagnostic.insert (Source.zero_width stop) " { todo }" ];
-            ];
+            (match Cursor.previous_token cursor with
+            | Some previous when Token.can_end previous.kind && not has_earlier_error ->
+                [
+                  Diagnostic.fix "Add `{ todo }`"
+                    [ Diagnostic.insert (Source.zero_width stop) " { todo }" ];
+                ]
+            | Some _ | None -> []);
         let at = Cursor.definition_span cursor (Source.zero_width stop) in
         {
           statements = [ { kind = Statement_error; id = Cursor.allocate_id cursor at } ];
