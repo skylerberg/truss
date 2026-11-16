@@ -115,15 +115,13 @@ let () =
       let cache = Harness.scratch "writable-cache" in
       Unix.chmod cache 0o777;
       Workspace.reset ();
+      Unix.putenv "TRUSS_CACHE" cache;
       Fun.protect ~finally:Workspace.reset (fun () ->
-          Harness.with_environment
-            [ ("TRUSS_CACHE", cache) ]
-            (fun () ->
-              let status, output = truss [ "build"; "-C"; root ] in
-              if
-                status <> 2
-                || not (contains output ("Users other than its owner can write the cache " ^ cache))
-              then fail "exited with %d: %s" status output)))
+          let status, output = truss [ "build"; "-C"; root ] in
+          if
+            status <> 2
+            || not (contains output ("Users other than its owner can write the cache " ^ cache))
+          then fail "exited with %d: %s" status output))
 
 let names (_, packages) = List.sort compare (List.map Path.show_package packages)
 let modules (snapshot, packages) = Cli.Command_packages.modules snapshot packages
