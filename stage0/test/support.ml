@@ -181,11 +181,37 @@ let solver =
 
 let proven database file = Database.prove database [ file ]
 
+let toolchain =
+  lazy
+    (match Toolchain.find () with
+    | Ok toolchain -> toolchain
+    | Error message ->
+        prerr_endline message;
+        exit 1)
+
+let object_cache = lazy (Build.make_cache (Cache.make_objects_directory (Workspace.open_cache ())))
+
+let run_template_checks database (file : Path.file) proofs =
+  match Database.list_template_checks proofs with
+  | [] -> []
+  | checks ->
+      let compiler =
+        Compile.create
+          (Database.make_lowering_requests database [ file.module_.package ])
+          (Lazy.force toolchain) (Lazy.force object_cache)
+          { build = Development; optimization = O1; extra = [] }
+      in
+      List.map
+        (fun ({ from_template; literals; clauses } as check : Prover.State.template_check) ->
+          (check, Compile.run_template_check compiler ~from_template ~literals ~clauses))
+        checks
+
 let verdicts database file =
-  Prover.decide ~runs:[]
+  let proofs = proven database file in
+  Prover.decide
+    ~runs:(run_template_checks database file proofs)
     (Database.make_proof_lookups database)
-    (Lazy.force solver)
-    (Database.list_proofs (proven database file))
+    (Lazy.force solver) (Database.list_proofs proofs)
 
 let proof_diagnostics database file = Prover.list_diagnostics (verdicts database file) file
 let proof_states database file = Prover.list_states (verdicts database file) file
