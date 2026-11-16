@@ -267,6 +267,32 @@ let stop =
               Outcome.Exit 0)
       $ all $ common)
 
+let clean =
+  make_command "clean"
+    ~doc:
+      "Stop the background processes of every project and every build of truss, then delete the \
+       cache directory."
+    ~man:
+      [
+        `S Cmdliner.Manpage.s_description;
+        `P
+          "The cache directory is $(b,TRUSS_CACHE), else $(b,XDG_CACHE_HOME)/truss, else \
+           ~/.cache/truss.";
+      ]
+    Cmdliner.Term.(
+      const (fun () ->
+          ignore (Workspace.stop_servers ());
+          Workspace.reset ();
+          match Cache.locate_default_directory () with
+          | Error message -> raise (Outcome.Cannot_run message)
+          | Ok directory -> (
+              match File_system.remove directory with
+              | () -> Outcome.Exit 0
+              | exception Unix.Unix_error (error, _, path) ->
+                  Outcome.raise_cannot_run "Cannot delete %s: %s" path (Unix.error_message error)
+              | exception Sys_error message -> Outcome.raise_cannot_run "Cannot delete %s" message))
+      $ const ())
+
 let database_counts_variable = "TRUSS_DATABASE_COUNTS"
 
 let version =
@@ -312,6 +338,7 @@ let truss =
       new_;
       status;
       stop;
+      clean;
     ]
 
 let print_database_counts (counts : Database.counts list) =
@@ -483,20 +510,6 @@ let make_request arguments =
     columns = Output.columns ();
   }
 
-let clean_cache () =
-  ignore (Workspace.stop_servers ());
-  Workspace.reset ();
-  match Cache.locate_default_directory () with
-  | Error message ->
-      Output.eprint_line message;
-      2
-  | Ok directory -> (
-      match File_system.remove directory with
-      | () -> 0
-      | exception Unix.Unix_error (error, _, _) ->
-          Output.eprintf "Cannot delete %s: %s\n" directory (Unix.error_message error);
-          2)
-
 let locate_directory arguments =
   let rec find_name = function
     | "-C" :: directory :: _ -> Some directory
@@ -538,9 +551,8 @@ let run_client argv =
     finish outcome
   in
   match find_command arguments with
-  | Some "clean" -> clean_cache ()
   | Some "lsp" -> run_language_server ~no_server
-  | None | Some ("new" | "stop") -> run_locally ()
+  | None | Some ("new" | "stop" | "clean") -> run_locally ()
   | _ when no_server -> run_locally ()
   | Some "status" -> (
       match Workspace.list_servers () with
