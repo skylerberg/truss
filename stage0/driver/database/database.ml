@@ -2440,18 +2440,19 @@ let locate_stage : Part.stored -> Stage.t = function
   | Computed part -> Stage.of_part part
   | Recursion_group _ -> Recursion_groups
 
+let make_empty_counts kind =
+  { kind; computed = 0; unchanged = 0; writes = 0; reads = 0; distinct_reads = 0 }
+
 let count run =
   let counts_by_kind = Hashtbl.create 32 in
   let add (part : Part.stored) increment =
     let stage = locate_stage part and kind = Part.show_kind (Stored part) in
     let counts =
-      Option.value
-        (Hashtbl.find_opt counts_by_kind (stage, kind))
-        ~default:{ kind; computed = 0; unchanged = 0; writes = 0; reads = 0; distinct_reads = 0 }
+      Option.value (Hashtbl.find_opt counts_by_kind (stage, kind)) ~default:(make_empty_counts kind)
     in
     Hashtbl.replace counts_by_kind (stage, kind) (increment counts)
   in
-  let untracked_reads = ref 0 and untracked_parts = Part_table.create 64 in
+  let untracked = ref (make_empty_counts "untracked") and untracked_parts = Part_table.create 64 in
   let result =
     with_observer
       (function
@@ -2469,8 +2470,13 @@ let count run =
             add part (fun counts -> { counts with unchanged = counts.unchanged + 1 })
         | Write { part; _ } -> add part (fun counts -> { counts with writes = counts.writes + 1 })
         | Untracked_read part ->
-            incr untracked_reads;
-            Part_table.replace untracked_parts part ())
+            Part_table.replace untracked_parts part ();
+            untracked :=
+              {
+                !untracked with
+                reads = !untracked.reads + 1;
+                distinct_reads = Part_table.length untracked_parts;
+              })
       run
   in
   ( result,
@@ -2481,16 +2487,4 @@ let count run =
            | 0 -> String.compare kind other_kind
            | order -> order)
          (List.of_seq (Hashtbl.to_seq counts_by_kind)))
-    @
-    if !untracked_reads = 0 then []
-    else
-      [
-        {
-          kind = "untracked";
-          computed = 0;
-          unchanged = 0;
-          writes = 0;
-          reads = !untracked_reads;
-          distinct_reads = Part_table.length untracked_parts;
-        };
-      ] )
+    @ if !untracked.reads = 0 then [] else [ !untracked ] )
