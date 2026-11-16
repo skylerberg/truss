@@ -32,9 +32,9 @@ val find_own_callback : State.context -> Core.local -> (string * Mir.callback) o
 val check_escaping_callback : State.context -> State.frame -> Core.local -> unit
 val run_reading_callback : State.context -> (unit -> 'a) -> 'a
 
-val bind_part_arguments :
+val bind_arguments :
   State.frame ->
-  State.part ->
+  State.clauses ->
   arguments:(int * Logic.term) list ->
   substitution:Types.substitution ->
   State.frame

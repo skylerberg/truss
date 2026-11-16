@@ -171,12 +171,12 @@ let apply_template context (frame : State.frame) (site : Invocation.site) ~trait
       let path = Path.Method { owner = impl; name; receiver } in
       match Contracts.find_method_contract context.lookups trait name receiver evidence with
       | Some contract ->
-          let own = List.hd contract.parts in
+          let callee_clauses = contract.callee_clauses in
           let entry =
-            Validity.bind_part_arguments frame own ~arguments:[ (0, value_) ] ~substitution:[]
+            Validity.bind_arguments frame callee_clauses ~arguments:[ (0, value_) ] ~substitution:[]
           in
           let is_evaluable (requirement : Mir.requirement) =
-            match (evidence, own.parameters) with
+            match (evidence, callee_clauses.parameters) with
             | Impl { arguments = []; _ }, [ parameter ] ->
                 requirement.is_executable && reads_only_literals parameter.local requirement.clause
             | _ -> false
@@ -190,7 +190,7 @@ let apply_template context (frame : State.frame) (site : Invocation.site) ~trait
                   (List.mapi
                      (fun index requirement ->
                        if is_evaluable requirement then Some index else None)
-                     own.requires);
+                     callee_clauses.requires);
             }
           in
           List.iteri
@@ -203,11 +203,11 @@ let apply_template context (frame : State.frame) (site : Invocation.site) ~trait
               Facts.oblige ?template_clause context frame Requires location
                 [
                   Text "This template may not meet `";
-                  Facts.quote own.callee requirement.clause.origin;
+                  Facts.quote callee_clauses.callee requirement.clause.origin;
                   Text "`, which its tag requires.";
                 ]
                 (snd (Validity.read_specification context entry requirement.clause)))
-            own.requires;
+            callee_clauses.requires;
           let result = Facts.arrive context frame "tagged" tag_type in
           Validity.assume_valid context frame tag_type result;
           List.iter
@@ -215,13 +215,14 @@ let apply_template context (frame : State.frame) (site : Invocation.site) ~trait
               Facts.assume context frame
                 (snd
                    (Validity.read_specification context { entry with result = Some result } clause)))
-            own.ensures;
+            callee_clauses.ensures;
           let frame =
             Operations.spend context frame
-              (Amounts.compute_callee_amount context frame ~path ~parts:contract.parts
-                 ~bind_frame:(fun part ->
+              (Amounts.compute_callee_amount context frame ~path
+                 ~clauses:(Contracts.list_declared_clauses contract)
+                 ~bind_frame:(fun clauses ->
                    {
-                     (Validity.bind_part_arguments frame part
+                     (Validity.bind_arguments frame clauses
                         ~arguments:[ (0, value_) ]
                         ~substitution:[])
                      with
@@ -350,9 +351,9 @@ let assume_contract_for_every_argument context (frame : State.frame) (contract :
       makes_obligations = false;
     }
   in
-  let read (part : State.part) =
+  let read (clauses : State.clauses) =
     {
-      (Validity.bind_part_arguments over part
+      (Validity.bind_arguments over clauses
          ~arguments:(List.mapi (fun index input -> (index, input)) inputs)
          ~substitution:[])
       with
@@ -360,35 +361,29 @@ let assume_contract_for_every_argument context (frame : State.frame) (contract :
     }
   in
   try
-    let requiring =
-      match contract.parts with
-      | own :: others -> if own.requires <> [] || others = [] then [ own ] else others
-      | [] -> []
-    in
-    let conjoin_requires parts =
+    let precondition_clauses = Contracts.select_precondition_clauses contract in
+    let conjoin_requires (clauses : State.clauses) =
       Logic.conjunction
-        (List.concat_map
-           (fun (part : State.part) ->
-             List.map
-               (fun requirement ->
-                 snd (Validity.read_specification context (read part) requirement))
-               (Facts.list_clauses part.requires))
-           parts)
+        (List.map
+           (fun requirement -> snd (Validity.read_specification context (read clauses) requirement))
+           (Facts.list_clauses clauses.requires))
     in
-    let required = conjoin_requires requiring in
+    let required = conjoin_requires precondition_clauses in
     List.iter
-      (fun (part : State.part) ->
-        let required = if List.memq part requiring then required else conjoin_requires [ part ] in
+      (fun (clauses : State.clauses) ->
+        let required =
+          if clauses == precondition_clauses then required else conjoin_requires clauses
+        in
         List.iter
           (fun clause ->
-            match snd (Validity.read_specification context (read part) clause) with
+            match snd (Validity.read_specification context (read clauses) clause) with
             | ensured -> (
                 match Facts.close_over_binders over (Logic.( ==> ) required ensured) with
                 | Some closed -> Facts.add_fact context closed
                 | None -> ())
             | exception Facts.Unsupported _ -> ())
-          part.ensures)
-      contract.parts
+          clauses.ensures)
+      (Contracts.list_declared_clauses contract)
   with Facts.Unsupported _ -> ()
 
 let translate_named_function (context : State.context) (frame : State.frame)
@@ -406,13 +401,14 @@ let translate_named_function (context : State.context) (frame : State.frame)
       ]
       (Logic.Boolean false);
   let ty = Facts.substitute_type context frame site.type_ in
-  (match (ty, contract.parts) with
-  | Types.Function function_type, own :: _
-    when own.requires <> [] && frame.makes_obligations && not is_argument ->
+  let callee_clauses = contract.callee_clauses in
+  (match ty with
+  | Types.Function function_type
+    when callee_clauses.requires <> [] && frame.makes_obligations && not is_argument ->
       let inputs = Validity.declare_callback_arguments context frame function_type.inputs in
-      if List.length own.parameters = List.length inputs then begin
+      if List.length callee_clauses.parameters = List.length inputs then begin
         let inside =
-          Validity.bind_part_arguments frame own
+          Validity.bind_arguments frame callee_clauses
             ~arguments:(List.mapi (fun index input -> (index, input)) inputs)
             ~substitution:[]
         in
@@ -426,11 +422,11 @@ let translate_named_function (context : State.context) (frame : State.frame)
                      "`%s` is used as a value of `%s`, which promises nothing of its arguments, so \
                       its `"
                      (Path.show path) (Types.show ty));
-                Facts.quote own.callee requirement.origin;
+                Facts.quote callee_clauses.callee requirement.origin;
                 Text "` may not hold.";
               ]
               (snd (Validity.read_specification context inside requirement)))
-          (Facts.list_clauses own.requires)
+          (Facts.list_clauses callee_clauses.requires)
       end
   | _ -> ());
   let instance = List.map (Types.substitute_argument frame.substitution) type_arguments in
@@ -457,15 +453,15 @@ let translate_named_function (context : State.context) (frame : State.frame)
   | _ -> ());
   let constant_time =
     List.exists
-      (fun (part : State.part) ->
+      (fun (clauses : State.clauses) ->
         List.exists
           (fun (cost : Mir.cost) ->
             match cost with
             | { resource = Time; bound = Order_of amount; amortized = false; _ } ->
                 Contracts.find_integer_literal amount <> None
             | _ -> false)
-          part.costs)
-      contract.parts
+          clauses.costs)
+      (Contracts.list_declared_clauses contract)
   in
   (if constant_time then
      let time = Calls.make_time_term context frame ty term in

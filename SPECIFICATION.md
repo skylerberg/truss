@@ -771,6 +771,8 @@ public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Elemen
 - Repeated clauses all hold. Each `requires` may rely on the `requires`
   before it, and each `ensures` on every `requires` and the `ensures`
   before it.
+- A function's *contract* is its `requires`, `ensures`, `decreases`, and
+  `cost` clauses.
 - No clause is evaluated when the program runs.
 - `Self.Uses` and `Source.Uses` name an associated capability set (see
   [Associated capability sets](#associated-capability-sets)).
@@ -1921,11 +1923,13 @@ trait Ordered: Equal {
 - A `law` holds for every implementation and every set of values that meets
   its `requires`. It uses only methods with a `time` clause and no
   capabilities, and an `impl`'s method keeps its trait's `time` clause.
-- A trait's contracts and costs bind every `impl` and are proven for each.
-- **An `impl`'s method may promise more than its trait:** `ensures` and
-  `cost` clauses of its own, and a `requires` that the trait's implies. A
-  call known to reach that `impl` is proven against the `impl`'s contract,
-  and a call through a bound or `any` against the trait's.
+- A trait's contracts bind every `impl` and are proven for each.
+- **An `impl`'s method may promise more than its trait.** Its contract is
+  the trait method's, with the method's own `ensures` and `cost` clauses
+  added, and its own `requires`, if it has any, in place of the trait's.
+  The trait's `requires` must imply the method's. A call known to reach
+  that `impl` is proven against the `impl`'s contract, and a call through a
+  bound or `any` against the trait's.
 - **Required traits:** a type implements the traits a trait requires before
   it implements the trait, and a bound includes them. A trait cannot
   redeclare a method of a trait it requires, but can add an overload in
@@ -2112,8 +2116,8 @@ theorem   = "theorem" LOWER_NAME [ generics ] parameters { clause } block ;
 law_proof = "proof" path_type "." LOWER_NAME "for" type_head block ;
 ```
 
-Every promise is proven before a program is built: contracts, cost clauses,
-invariants, laws, loop invariants, and every operation that could fail.
+Every promise is proven before a program is built: contracts, invariants,
+laws, loop invariants, and every operation that could fail.
 There is no `assume`.
 
 ```truss
@@ -2155,9 +2159,9 @@ proof Ordered.transitive for Box[Item: Ordered] {
 
 ### Bodies and contracts in proofs
 
-- Every callee is known to its callers' proofs by its `requires` and
-  `ensures`, in every package: a function, a method of a type, a trait's
-  method, and an `impl`'s method alike. A callee whose body is its
+- Every callee is known to its callers' proofs by its contract, in every
+  package: a function, a method of a type, a trait's method, and an
+  `impl`'s method alike. A callee whose body is its
   definition states the body in its `ensures`:
   `ensures result == (forall index in 1..items.length() => items[index - 1] <= items[index])`.
 - An `impl`'s laws are proven from the contracts of its methods.
