@@ -30,18 +30,21 @@ let () =
     Harness.test name (fun () ->
         expect_one_diagnostic (functions ^ "fn f(items: mut List[Int64]) {\n" ^ body ^ "}\n") code)
   in
-  expect_rejected "a view cannot be passed after a `mut` borrow of the place that it views"
+  expect_rejected "a view cannot be passed after the place that it views is passed `mut`"
     "  var part = items.slice()\n  take(mut items, view: part)\n" "ownership.conflicting_loan";
-  expect_rejected "a view cannot be passed before a `mut` borrow of the place that it views"
+  expect_rejected "a view cannot be passed before the place that it views is passed `mut`"
     "  var part = items.slice()\n  give(part, items: mut items)\n" "ownership.conflicting_loan";
-  expect_rejected "a slice of a place cannot be passed with a `mut` borrow of the place"
+  expect_rejected "a slice of a place cannot be passed beside the place passed `mut`"
     "  take(mut items, view: items[..1])\n" "ownership.conflicting_loan";
   Harness.test
-    "a view of another place, and a value copied out of the place, can be passed with its `mut` \
-     borrow" (fun () -> expect_fine (functions ^ Fixtures.Ownership.take_and_measure_of_a_mut_list));
-  expect_rejected "a later argument cannot mutate a place that an earlier argument borrows"
+    "a view of another place, and a value copied out of the place, can be passed beside the place \
+     passed `mut`" (fun () ->
+      expect_fine (functions ^ Fixtures.Ownership.take_and_measure_of_a_mut_list));
+  expect_rejected
+    "a later argument cannot mutate a place that lends an element to an earlier argument"
     "  show(items[0], count: grow(mut items))\n" "ownership.mutated_while_viewed";
-  expect_rejected "a later argument cannot mutate a place that an earlier argument borrows `mut`"
+  expect_rejected
+    "a later argument cannot mutate a place that lends an element `mut` to an earlier argument"
     "  change(mut items[0], count: grow(mut items))\n" "ownership.mutated_while_viewed";
   expect_rejected "a later argument cannot mutate the place that an earlier argument views"
     "  count_of(items[..1], count: grow(mut items))\n" "ownership.mutated_while_viewed";
@@ -58,7 +61,7 @@ let () =
         "ownership.mutated_while_viewed");
   Harness.test "the fields of a constructor are evaluated in the order written" (fun () ->
       expect_fine (functions ^ Fixtures.Ownership.counted_built_with_count_first));
-  Harness.test "an operand that is a copy does not borrow its place" (fun () ->
+  Harness.test "an operand that is a copy does not view its place" (fun () ->
       expect_fine (functions ^ Fixtures.Ownership.copied_operand_beside_a_bump))
 
 let () =
@@ -247,7 +250,7 @@ let () =
     Fixtures.Ownership.capturing_lambda_passed_own "ownership.view_escapes";
   expect_rejected
     "a function value that is not owned cannot be passed to an `own` function-typed parameter"
-    Fixtures.Ownership.borrowed_handler_passed_own "ownership.view_escapes";
+    Fixtures.Ownership.read_only_handler_passed_own "ownership.view_escapes";
 
   expect_accepted
     "a capturing lambda can be stored in a local list and passed to a generic `own` parameter"
@@ -269,11 +272,11 @@ let () =
     Harness.test name (fun () -> expect_one_diagnostic (types ^ body) code)
   in
   let expect_accepted name body = Harness.test name (fun () -> expect_fine (types ^ body)) in
-  expect_rejected "a borrow of a value that owns data and stores a view views the value"
-    Fixtures.Ownership.labeled_reassigned_while_borrowed "ownership.mutated_while_viewed";
+  expect_rejected "a `let` of a value that owns data and stores a view views the value"
+    Fixtures.Ownership.labeled_reassigned_while_viewed "ownership.mutated_while_viewed";
   expect_rejected "a slice of a part of a value that owns data and stores a view views the value"
     Fixtures.Ownership.labeled_reassigned_while_its_name_is_viewed "ownership.mutated_while_viewed";
-  expect_rejected "a borrow of an `own` parameter cannot be returned"
+  expect_rejected "a slice of an `own` parameter cannot be returned"
     Fixtures.Ownership.slice_of_an_own_parameter_returned "ownership.view_escapes";
   expect_accepted "a view copied out of an `own` parameter can be returned"
     Fixtures.Ownership.view_field_of_an_own_parameter_returned;
@@ -335,17 +338,17 @@ let () =
 
 let () =
   let counter = Fixtures.Ownership.counter in
-  Harness.test "the body of a `provide` cannot use a place that the block borrows `mut`" (fun () ->
+  Harness.test "the body of a `provide` cannot use a place that the block provides `mut`" (fun () ->
       expect_one_diagnostic
         (counter ^ Fixtures.Ownership.provide_body_reading_its_mut_provided_place)
         "ownership.conflicting_loan");
-  Harness.test "the body of a `provide` cannot mutate a place that the block borrows" (fun () ->
+  Harness.test "the body of a `provide` cannot mutate a place that the block provides" (fun () ->
       expect_one_diagnostic
         (counter ^ Fixtures.Ownership.provide_body_assigning_its_provided_place)
         "ownership.mutated_while_viewed");
-  Harness.test "the body of a `provide` can read a place that the block borrows read-only"
+  Harness.test "the body of a `provide` can read a place that the block provides read-only"
     (fun () -> expect_fine (counter ^ Fixtures.Ownership.provide_body_reading_its_provided_place));
-  Harness.test "a place that a `provide` block borrows is usable again after the block" (fun () ->
+  Harness.test "a place that a `provide` block provides is usable again after the block" (fun () ->
       expect_fine (counter ^ Fixtures.Ownership.tally_read_after_its_provide))
 
 let () =
@@ -375,7 +378,7 @@ let () =
 let () =
   let reader = Fixtures.Ownership.reader in
   Harness.test
-    "a `mut` view argument does not store a view of a borrowed argument that is not a view"
+    "a `mut` view argument does not store a view of a read-only argument that is not a view"
     (fun () -> expect_fine (reader ^ Fixtures.Ownership.reader_reading_into_a_list))
 
 let () =
@@ -431,10 +434,10 @@ let () =
   expect_rejected "an iteration of a `concurrent for` can mutate only its own element and locals"
     ~says:"`concurrent for`" Fixtures.Ownership.concurrent_for_mutating_a_total
     "ownership.data_race";
-  expect_rejected
-    "a `concurrent` branch must reinitialize a place that it moves out of a `mut` borrow"
+  expect_rejected "a `concurrent` branch must reinitialize a place lent `mut` that it moves out of"
     Fixtures.Ownership.concurrent_branch_leaving_a_holder_moved "ownership.not_reinitialized";
-  expect_accepted "a `concurrent` branch can move a value out of a `mut` borrow and reinitialize it"
+  expect_accepted
+    "a `concurrent` branch can move a value out of a place lent `mut` and reinitialize it"
     Fixtures.Ownership.concurrent_branch_moving_out_of_a_mut_holder;
   expect_rejected
     "a place moved out before a `concurrent` block must be reinitialized where a branch returns"
@@ -513,8 +516,7 @@ let () =
   Harness.test "a compound assignment's operand may mutate the target, because it runs first"
     (fun () ->
       expect_fine (bag ^ Fixtures.Ownership.compound_assignment_whose_operand_grows_its_target));
-  Harness.test
-    "a compound assignment's borrowed operand cannot be mutated by the target's index keys"
+  Harness.test "a compound assignment's lent operand cannot be mutated by the target's index keys"
     (fun () ->
       expect_one_diagnostic
         (bag ^ Fixtures.Ownership.compound_assignment_whose_index_spoils_its_operand)
@@ -569,17 +571,17 @@ let () =
    let expect_rejected name body code =
      Harness.test name (fun () -> expect_one_diagnostic (holder ^ body) code)
    in
-   expect_accepted "a field of a `mut` borrow can be moved out and reinitialized"
+   expect_accepted "a field of a place lent `mut` can be moved out and reinitialized"
      Fixtures.Ownership.field_of_mut_self_moved_out_and_reinitialized;
    expect_rejected "a field moved out of `mut self` must be reinitialized"
      Fixtures.Ownership.field_moved_out_of_mut_self "ownership.not_reinitialized";
-   expect_accepted "a `mut` borrow can be moved out whole and reinitialized"
+   expect_accepted "a place lent `mut` can be moved out whole and reinitialized"
      Fixtures.Ownership.mut_slot_moved_out_and_reset;
-   expect_rejected "a `mut` borrow that is moved out whole must be reinitialized"
+   expect_rejected "a place lent `mut` that is moved out whole must be reinitialized"
      Fixtures.Ownership.mut_holder_moved_out_whole "ownership.not_reinitialized";
-   expect_rejected "a `mut` borrow must be reinitialized on every path"
+   expect_rejected "a place lent `mut` must be reinitialized on every path"
      Fixtures.Ownership.mut_holder_reinitialized_on_one_path "ownership.not_reinitialized";
-   expect_rejected "a `mut` borrow cannot be used while it is moved out"
+   expect_rejected "a place lent `mut` cannot be used while it is moved out"
      Fixtures.Ownership.mut_holder_read_while_moved_out "ownership.use_after_move";
    expect_accepted "a `mut` loop variable can be moved out and reinitialized in the iteration"
      Fixtures.Ownership.mut_loop_variable_moved_out_and_reinitialized;
@@ -589,7 +591,7 @@ let () =
      Fixtures.Ownership.mut_match_binding_moved_out "ownership.not_reinitialized";
    expect_rejected "a lending method must reinitialize a place of its caller that it moved out"
      Fixtures.Ownership.holder_lending_its_moved_items "ownership.not_reinitialized");
-  Harness.test "one place cannot be borrowed `mut` twice by one call" (fun () ->
+  Harness.test "one place cannot be passed `mut` twice to one call" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.swap_of_one_place "ownership.conflicting_loan");
   Harness.test "a place cannot be mutated while a view of it is live" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.push_while_a_view_lives
@@ -690,11 +692,10 @@ let () =
     (fun () ->
       expect_one_diagnostic Fixtures.Ownership.loop_mutating_its_list_in_a_branch
         "ownership.mutated_while_viewed");
-  Harness.test "a loop body cannot borrow `mut` the collection that the loop iterates over"
-    (fun () ->
+  Harness.test "a loop body cannot pass `mut` the collection that the loop iterates over" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.loop_pushing_onto_its_list
         "ownership.mutated_while_viewed");
-  Harness.test "a `parallel for` cannot borrow `mut` a place from outside the loop" (fun () ->
+  Harness.test "a `parallel for` cannot pass `mut` a place from outside the loop" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.parallel_for_pushing_onto_an_outer_list
         "ownership.data_race");
   Harness.test "a `parallel for` cannot assign a place from outside the loop, even inside a branch"
@@ -844,7 +845,7 @@ let count_disjoint_obligations text =
     ((Support.make_names packages file.module_.package).list_declarations_in file)
 
 let () =
-  Harness.test "two slices of one list borrowed by one call produce one `Disjoint` obligation"
+  Harness.test "two slices of one list passed to one call produce one `Disjoint` obligation"
     (fun () ->
       let actual = count_disjoint_obligations Fixtures.Ownership.two_mut_slices_of_one_list in
       if actual <> 1 then Harness.fail "%d obligations" actual);
@@ -911,8 +912,8 @@ let () =
   Harness.test "a `match` on a lent part binds views of it, which cannot be moved" (fun () ->
       expect_one_diagnostic (grid ^ Fixtures.Ownership.match_on_a_grid_cell) "ownership.not_owned");
   Harness.test
-    "a lending call borrows its whole receiver, so two parts cannot be lent `mut` in one statement"
-    (fun () ->
+    "a lending call keeps its whole receiver lent, so two parts cannot be lent `mut` in one \
+     statement" (fun () ->
       expect_one_diagnostic
         (grid ^ Fixtures.Ownership.two_grid_cells_lent_mut_in_one_call)
         "ownership.conflicting_loan");
@@ -920,8 +921,7 @@ let () =
       expect_one_diagnostic
         (grid ^ Fixtures.Ownership.grid_and_its_cell_passed_together)
         "ownership.mutated_while_viewed");
-  Harness.test
-    "a receiver that a lending call borrows read-only cannot be mutated in the same statement"
+  Harness.test "a receiver lent read-only to a lending call cannot be mutated in the same statement"
     (fun () ->
       expect_one_diagnostic
         (tally ^ Fixtures.Ownership.tally_element_assigned_from_another)
@@ -968,7 +968,7 @@ let () =
   Harness.test "a view argument can be stored in a `mut` parameter" (fun () ->
       expect_fine Fixtures.Ownership.view_parameter_pushed_onto_a_mut_list);
   Harness.test
-    "a view of a borrowed parameter that is not a view cannot be stored in a `mut` parameter"
+    "a view of a read-only parameter that is not a view cannot be stored in a `mut` parameter"
     (fun () ->
       expect_one_diagnostic Fixtures.Ownership.view_of_a_list_parameter_pushed_onto_a_mut_list
         "ownership.view_escapes");
@@ -983,7 +983,7 @@ let () =
   Harness.test "a `mut self` method can store a view argument in `self`" (fun () ->
       expect_fine (window ^ Fixtures.Ownership.window_widened_with_a_view));
   Harness.test
-    "a `mut self` method cannot store in `self` a view of a borrowed parameter that is not a view"
+    "a `mut self` method cannot store in `self` a view of a read-only parameter that is not a view"
     (fun () ->
       expect_one_diagnostic
         (window ^ Fixtures.Ownership.window_widened_with_a_view_of_a_list)

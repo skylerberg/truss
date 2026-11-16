@@ -137,7 +137,7 @@ let list_capabilities (set : Types.capability_set) =
 let shape = Fixtures.Core.shape
 
 let () =
-  expect "a match on a local borrows the local: its scrutinee is a place"
+  expect "a match on a local views the local: its scrutinee is a place"
     (shape ^ Fixtures.Core.match_on_a_shape_parameter)
     (fun form ->
       List.concat_map

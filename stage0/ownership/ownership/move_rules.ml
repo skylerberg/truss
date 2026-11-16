@@ -48,8 +48,8 @@ let decide_move context (place : Place.t) ~origin ~type_ ~is_returned ~is_captur
              (if place.steps = [] then "a constant" else "part of a constant"))
     | Read, _ ->
         refuse
-          (Printf.sprintf "`%s` is borrowed, not owned, so it cannot be moved. Copy it instead."
-             shown)
+          (Printf.sprintf "`%s` is %s, so it cannot be moved. Copy it instead." shown
+             (if place.steps = [] then "a view" else "part of a view"))
     | (Own | Mut), _ when Hashtbl.mem context.places_without_own origin ->
         Refused
           (fun context at type_ ->
@@ -133,8 +133,8 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
   let all_locals = List.init (Array.length body.locals) Fun.id in
   let describe_scope_end moved root =
     Printf.sprintf
-      "`%s` is moved out here and not reinitialized. `%s` is borrowed `mut`, so every part of it \
-       must be initialized when its loop iteration, its `match` arm, or its lambda ends."
+      "`%s` is moved out here and not reinitialized. `%s` is lent `mut`, so every part of it must \
+       be initialized when its loop iteration, its `match` arm, or its lambda ends."
       moved root
   in
   let check_at_return at state =
@@ -203,8 +203,8 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
                     Printf.sprintf
                       "`%s` is moved out in this branch and not reinitialized in it. If another \
                        branch exits the `concurrent` block early, the code after the block does \
-                       not run, so each branch must reinitialize each place it moves out of a \
-                       `mut` borrow."
+                       not run, so each branch must reinitialize each place lent `mut` that it \
+                       moves out of."
                       moved))
             concurrent_branches
       | Goto _ | Branch _ | For _ | Fork _ | Yield _ | Cancel _ | Resume _ | Unreachable

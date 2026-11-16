@@ -97,9 +97,8 @@ let () =
         Fixtures.Concurrent.bag_of_integers_lent_to_tasks)
 
 let () =
-  expect_pass_in_order
-    "a task borrows an element that a collection lends from a read-only parameter" ~count:3
-    Fixtures.Concurrent.bag_of_strings_lent_to_tasks;
+  expect_pass_in_order "a task views an element that a collection lends from a read-only parameter"
+    ~count:3 Fixtures.Concurrent.bag_of_strings_lent_to_tasks;
   expect_pass_in_order "a task owns a value that a cursor computes, and copies a plain one" ~count:2
     Fixtures.Concurrent.labels_cursor_owned_by_tasks
 
