@@ -1,0 +1,9 @@
+fn f(value: Int64) -> Int64 {
+  apply(value, change: fn(inner) {
+    var left = inner
+    while left != 0 {
+      left = left / 2
+    }
+    left
+  })
+}

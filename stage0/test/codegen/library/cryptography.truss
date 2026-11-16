@@ -203,7 +203,9 @@ fn pattern(count: UInt64) -> List[UInt8] {
   List.generate(count, make: fn(index) { pattern_byte(index) })
 }
 
-fn pattern_byte(index: UInt64) -> UInt8 {
+fn pattern_byte(index: UInt64) -> UInt8
+  cost time finite
+{
   let small = index % 251
   match UInt8.try_from(small) {
     Ok(byte) => byte
@@ -288,7 +290,9 @@ fn sealing_nonce() -> cryptography::Nonce {
   cryptography::Nonce(bytes: [64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75])
 }
 
-fn associated_byte(index: UInt64) -> UInt8 {
+fn associated_byte(index: UInt64) -> UInt8
+  cost time finite
+{
   match UInt8.try_from(160 + index % 7) {
     Ok(byte) => byte
     Err(_) => 0

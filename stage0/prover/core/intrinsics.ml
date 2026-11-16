@@ -246,7 +246,7 @@ let measure_type element : Types.function_type =
     inputs = [ (Types.Read, element) ];
     output = Types.Integer;
     uses = Types.no_capabilities;
-    costs = [ { amortized = false; resource = Types.Time; bound = Finite_cost } ];
+    costs = [];
   }
 
 let make_sequence_sum context element term measure =

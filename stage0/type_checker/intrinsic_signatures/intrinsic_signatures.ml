@@ -31,7 +31,7 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
       parameters;
       output;
       uses = Types.no_capabilities;
-      terminates = true;
+      costs = [];
       specification_only = false;
       capture_free_parameters = [];
     }
@@ -64,7 +64,7 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
       {
         inputs = [ (Read, work_item) ];
         output = Types.unit;
-        uses = Types.no_capabilities;
+        uses = Types.make_capability_set [ Types.unconditional_divergence ];
         costs = [];
       }
   in
@@ -250,7 +250,7 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
             {
               inputs = [ (Mut, value); (Own, make_parameter_type "Input") ];
               output = make_parameter_type "Result";
-              uses = Types.no_capabilities;
+              uses = Types.make_capability_set [ Types.unconditional_divergence ];
               costs = [];
             }
           in

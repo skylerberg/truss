@@ -402,11 +402,15 @@ let make_unsolved_type state =
 let resolve_capabilities state (capabilities : Types.capability_set) =
   match state.capability_solution with
   | Some solution when Types.has_capability_variable capabilities ->
+      let read_solved variable =
+        Option.value ~default:Types.no_capabilities (Hashtbl.find_opt solution variable)
+      in
       Types.flat_map_capabilities
         (function
           | Types.Capability_variable variable ->
-              (Option.value ~default:Types.no_capabilities (Hashtbl.find_opt solution variable)
-                :> Types.capability list)
+              (Types.remove_divergence (read_solved variable) :> Types.capability list)
+          | Types.Divergence (Of_variable variable) ->
+              (Types.list_divergence (read_solved variable) :> Types.capability list)
           | capability -> [ capability ])
         capabilities
   | _ -> capabilities
@@ -510,6 +514,13 @@ let resolve_associated_type state type_ (trait : Types.trait_reference) name
       make_error_type state Unknown_associated_type at
         (Printf.sprintf "`%s` gives no `%s` as a `%s`." (Types.show type_) name
            (Types.show_trait trait))
+
+let compute_callee_uses state (callee : Core.callee) =
+  Callee_uses.compute state.lookups.interface ~list_bounds:(lookup_bounds state) callee
+
+let make_call state ~callee ~arguments ~lends =
+  Callee_uses.make_call state.lookups.interface ~list_bounds:(lookup_bounds state) ~callee
+    ~arguments ~lends
 
 let convert_evidence = function
   | Interface.Impls.From_impl { impl; substitution } ->
@@ -898,6 +909,12 @@ let add_mismatch state (span : Source.Definition_span.t) ~expected ~actual =
         ~fixes:[ fix "Write it as a float." [ insert span.stop ".0" ] ]
         (Printf.sprintf "An integer literal is never a float, and `%s` is expected here."
            (Types.show expected))
+  | Types.Function found, Types.Function wanted
+    when Types.subtract_capabilities (Types.list_divergence found.uses) wanted.uses
+         <> Types.no_capabilities ->
+      add_mismatch_diagnostic state Mismatch span ~sides
+        (Printf.sprintf "Expected %s, found %s, which may not terminate." (Types.describe expected)
+           (Types.describe actual))
   | _ ->
       add_mismatch_diagnostic state Mismatch span ~sides
         (Printf.sprintf "Expected %s, found %s." (Types.describe expected) (Types.describe actual))
@@ -1060,17 +1077,15 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
                   | Types.Named { path; arguments } ->
                       make_synthetic_expression state ~origin:id expected
                         (Call
-                           {
-                             callee =
-                               Function
-                                 {
-                                   path = Method { owner = path; name = "slice"; receiver = Read };
-                                   type_arguments = arguments;
-                                 };
-                             arguments = [ Operands.build_argument Read inner ];
-                             lends = None;
-                             uses = Types.no_capabilities;
-                           })
+                           (make_call state
+                              ~callee:
+                                (Function
+                                   {
+                                     path = Method { owner = path; name = "slice"; receiver = Read };
+                                     type_arguments = arguments;
+                                   })
+                              ~arguments:[ Operands.build_argument Read inner ]
+                              ~lends:None))
                   | other -> raise_bug "`%s` is viewed and has no view" (Types.show other)))
             before
     | _ -> ()
@@ -1122,7 +1137,7 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
           (Types.Function
              { actual_function with uses = wanted_function.uses; costs = wanted_function.costs })
         && (unlisted = Types.no_capabilities || unknown)
-        && (proven || is_argument || Option.is_some expression)
+        && proven
       then begin
         if unlisted <> Types.no_capabilities then
           state.capability_constraints <-

@@ -124,10 +124,11 @@ public fn String.find_last(self, pattern: StringSlice) -> Option[UInt64]
   self.slice().find_last(pattern)
 }
 
-public fn String.find_character(
+public fn String.find_character[capability Granted](
   self,
-  predicate: (fn(Character) -> Bool cost time finite),
+  predicate: (fn(Character) -> Bool uses Granted),
 ) -> Option[UInt64]
+  uses Granted
   ensures match result {
     Some(offset) => offset < self.length() && self.is_boundary(offset)
     None => true
@@ -186,7 +187,8 @@ public fn String.trim_end(self) -> StringSlice
   self.slice().trim_end()
 }
 
-public fn String.trim_matching(self, predicate: (fn(Character) -> Bool cost time finite)) -> StringSlice
+public fn String.trim_matching[capability Granted](self, predicate: (fn(Character) -> Bool uses Granted)) -> StringSlice
+  uses Granted
   ensures result.length() <= self.length()
   cost time O(self.length() * time(predicate))
 {
@@ -211,7 +213,8 @@ public fn String.split_at_most(self, separator: StringSlice, parts: UInt64) -> L
   self.slice().split_at_most(separator, parts: parts)
 }
 
-public fn String.split_matching(self, predicate: (fn(Character) -> Bool cost time finite)) -> List[StringSlice]
+public fn String.split_matching[capability Granted](self, predicate: (fn(Character) -> Bool uses Granted)) -> List[StringSlice]
+  uses Granted
   ensures result.length() <= self.length() + 1
   cost time O(self.length() * time(predicate))
 {
