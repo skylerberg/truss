@@ -317,6 +317,12 @@ let () =
       expect_one_diagnostic Fixtures.Infer.own_left_off_a_lambda_parameter_solved_later
         "types.missing_mode"
         ~fixed:Fixtures.Infer.own_left_off_a_lambda_parameter_solved_later_fixed);
+  Harness.test
+    "a missing own is reported once a later element solves a type that also holds a hole's type"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.own_left_off_a_pair_of_a_hole_and_a_type_solved_later
+        "types.missing_mode"
+        ~fixed:Fixtures.Infer.own_left_off_a_pair_of_a_hole_and_a_type_solved_later_fixed);
   Harness.test "a redundant own is reported once a later element of the statement solves the type"
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.own_before_a_lambda_parameter_solved_later_as_an_integer

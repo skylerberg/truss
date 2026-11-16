@@ -228,22 +228,21 @@ let classify_argument state (value : Syntax.expression) =
       | Some mode -> Lent mode
       | None -> if State.is_place state value then Place else Temporary)
 
-let run_when_decided state type_ check =
+let run_once_solved state type_ check =
   State.defer state (fun () ->
-      match
-        ( State.decide_property state Interface.Properties.Plain type_,
-          State.decide_property state Interface.Properties.Copyable type_ )
-      with
-      | Interface.Properties.Unknown (Types.Variable _), _
-      | _, Interface.Properties.Unknown (Types.Variable _) ->
-          false
-      | plain, copyable ->
-          check ~plain ~copyable;
-          true)
+      let is_solved =
+        not
+          (Types.exists (function Types.Variable _ -> true | _ -> false) (State.zonk state type_))
+      in
+      if is_solved then check ();
+      is_solved)
 
-let list_copy_fixes state (value : Syntax.expression) ~copyable ~label =
-  if copyable = Interface.Properties.Holds then
-    [ State.fix label [ State.insert (State.read_span state value.id).stop ".copy()" ] ]
+let is_known_not_plain state type_ =
+  State.decide_property state Interface.Properties.Plain type_ = Interface.Properties.Fails
+
+let list_copy_fixes state (value : Syntax.expression) type_ ~label =
+  if State.decide_property state Interface.Properties.Copyable type_ = Interface.Properties.Holds
+  then [ State.fix label [ State.insert (State.read_span state value.id).stop ".copy()" ] ]
   else []
 
 let find_lent_field_mode (state : State.state) (value : Syntax.expression) type_ : Types.mode option
@@ -251,10 +250,7 @@ let find_lent_field_mode (state : State.state) (value : Syntax.expression) type_
   match (Hashtbl.find_opt state.yielded value.id, classify_argument state value) with
   | _ when is_slice value -> None
   | Some Read, With_mode (Mut, _) -> Some Read
-  | Some Read, (Place | Lent _)
-    when State.decide_property state Interface.Properties.Plain type_ = Interface.Properties.Fails
-    ->
-      Some Read
+  | Some Read, (Place | Lent _) when is_known_not_plain state type_ -> Some Read
   | Some Mut, With_mode (Mut, _) -> Some Mut
   | _ -> None
 
@@ -295,10 +291,10 @@ let check_mode state env (value : Syntax.expression) (parameter : Types.paramete
             lent from `mut`, so that it is lent `mut`."
            name)
   | Own, Lent _ ->
-      run_when_decided state type_ (fun ~plain ~copyable ->
-          if plain = Interface.Properties.Fails then
+      run_once_solved state type_ (fun () ->
+          if is_known_not_plain state type_ then
             State.report state Missing_mode (State.read_span state value.id)
-              ~fixes:(list_copy_fixes state value ~copyable ~label:"Pass a copy.")
+              ~fixes:(list_copy_fixes state value type_ ~label:"Pass a copy.")
               (Printf.sprintf
                  "`%s` takes ownership of its argument, and a part that is lent cannot be moved. \
                   Pass a copy."
@@ -308,8 +304,11 @@ let check_mode state env (value : Syntax.expression) (parameter : Types.paramete
         (Printf.sprintf "`%s` mutates its argument in place, so it must be a place passed `mut`."
            name)
   | Own, With_mode (Own, inner) ->
-      run_when_decided state type_ (fun ~plain ~copyable:_ ->
-          if plain = Interface.Properties.Holds then
+      run_once_solved state type_ (fun () ->
+          if
+            State.decide_property state Interface.Properties.Plain type_
+            = Interface.Properties.Holds
+          then
             State.report state Redundant_mode (State.read_span state value.id)
               ~fixes:
                 [
@@ -320,22 +319,22 @@ let check_mode state env (value : Syntax.expression) (parameter : Types.paramete
                  (State.show state type_)))
   | Own, Temporary -> ()
   | Own, Place when Hashtbl.find_opt state.yielded value.id = Some Mut ->
-      run_when_decided state type_ (fun ~plain ~copyable ->
-          if plain = Interface.Properties.Fails then
+      run_once_solved state type_ (fun () ->
+          if is_known_not_plain state type_ then
             State.report state Missing_mode (State.read_span state value.id)
               ~fixes:
                 (State.fix "Lend it `mut`."
                    [ State.insert (State.read_span state value.id).start "mut " ]
-                :: list_copy_fixes state value ~copyable ~label:"Pass a copy.")
+                :: list_copy_fixes state value type_ ~label:"Pass a copy.")
               (Printf.sprintf
                  "`%s` is a field of a value that is lent `mut`. Pass the place `mut` to lend it \
                   too, or pass a copy."
                  name))
   | Own, Place ->
       let immovable = find_immovable state env value in
-      run_when_decided state type_ (fun ~plain ~copyable ->
-          if plain = Interface.Properties.Fails then
-            let copy = list_copy_fixes state value ~copyable ~label:"Pass a copy." in
+      run_once_solved state type_ (fun () ->
+          if is_known_not_plain state type_ then
+            let copy = list_copy_fixes state value type_ ~label:"Pass a copy." in
             let fixes, message =
               match immovable with
               | None ->
@@ -397,9 +396,9 @@ let check_owned state env (value : Syntax.expression) type_ =
   match classify_argument state value with
   | Place when State.runs env ->
       let immovable = find_immovable state env value in
-      run_when_decided state type_ (fun ~plain ~copyable ->
-          if plain = Interface.Properties.Fails then
-            let copy = list_copy_fixes state value ~copyable ~label:"Copy it." in
+      run_once_solved state type_ (fun () ->
+          if is_known_not_plain state type_ then begin
+            let copy = list_copy_fixes state value type_ ~label:"Copy it." in
             let fixes, message =
               match immovable with
               | None ->
@@ -418,5 +417,6 @@ let check_owned state env (value : Syntax.expression) type_ =
             state.diagnostics <-
               Diagnostic.make ~fixes ~code:(Ownership Needs_owned) (State.read_span state value.id)
                 message
-              :: state.diagnostics)
+              :: state.diagnostics
+          end)
   | _ -> ()

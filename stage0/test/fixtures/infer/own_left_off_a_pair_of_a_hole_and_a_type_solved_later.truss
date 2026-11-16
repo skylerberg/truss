@@ -1,0 +1,15 @@
+type Pair[Left, Right](left: Left, right: Right)
+
+fn take[T](value: own T) -> UInt64 {
+  0
+}
+
+fn produce[Left, Right](make: fn(own Pair[Right, Left]) -> UInt64, right: own Right) -> Left {
+  todo
+}
+
+fn f() -> UInt64 {
+  let hole = todo
+  let lists = [produce(fn(pair) { take(pair) }, right: hole), [1]]
+  lists.length()
+}
