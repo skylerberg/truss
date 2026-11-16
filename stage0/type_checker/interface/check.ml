@@ -407,131 +407,121 @@ let check state =
   let definition = state.definition in
   let broken part = Names.is_broken lookups.names state.key part in
   check_bounds state;
-  match lookups.resolved Interface state.key with
-  | None -> ()
-  | Some resolved -> (
-      if not (broken Header) then
-        match (lookups.names.container state.key, definition.kind, state.lowered.interface) with
-        | ( Some container,
-            (Function { signature; _ } | Method_declaration signature),
-            Function_interface written ) -> (
-            let name = Names.signature_name signature in
-            match
-              ( lookups.names.definition container,
-                Option.map
-                  (fun (lowered : Environment.lowered_interface) -> lowered.interface)
-                  (lookups.lowered_interface container) )
-            with
-            | { kind = Trait _; visibility; _ }, Some (Trait_interface trait) ->
-                check_redeclared state name
-                  (Names.receiver signature.parameters)
-                  ~trait_path:container.path trait;
-                check_private_in_public state ~visibility (signature_types written)
-                  state.spans.(name.id)
-            | { kind = Impl { trait_; _ }; _ }, Some (Impl_interface impl) ->
-                check_impl_method state name
-                  (Names.receiver signature.parameters)
-                  written impl
-                  ~trait_span:(lookups.names.spans container).(trait_.id)
-                  trait_
-            | _ -> ())
-        | Some _, _, _ -> ()
-        | None, Function { signature; _ }, Function_interface lowered ->
-            (match signature.name with
-            | Member_name (head, _) -> check_method_location state head
-            | Plain_name name ->
-                if name.text = "main" && state.key.module_.modules = [] then
-                  check_main state lowered state.spans.(name.id));
-            let span =
-              match signature.name with
-              | Plain_name name | Member_name (_, name) -> state.spans.(name.id)
-            in
-            check_private_in_public state ~visibility:definition.visibility
-              (signature_types lowered) span
-        | None, Law_proof { law; type_; _ }, Law_proof_interface { generics; trait; for_type; _ }
-          -> (
-            (match lookups.trait_header trait.trait with
-            | Some header when not (List.mem law.text header.laws) ->
-                report state Unknown_member state.spans.(law.id)
-                  (Printf.sprintf "`%s` has no law `%s`." (Types.show_trait trait) law.text)
-            | _ -> ());
-            let arity_matches =
-              match for_type with
-              | Types.Named { path; _ } -> (
-                  match Names.generics_of lookups.names path with
-                  | Some expected -> List.length expected = List.length generics
-                  | None -> true)
-              | _ -> true
-            in
-            if arity_matches && not (Types.is_error for_type) then
-              match implements state for_type trait with
-              | None ->
-                  report state No_impl state.spans.(type_.id)
-                    (Printf.sprintf "`%s` does not implement `%s`, so it has no law of it to keep."
-                       (Types.show for_type) (Types.show_trait trait))
-              | Some (Impls.From_impl { impl; _ }) ->
-                  Option.iter
-                    (check_proof_bounds state type_ generics)
-                    (Impls.impl_interface lookups impl)
-              | Some _ -> ())
-        | None, Type_definition { name; generics; body; clauses }, Type_interface interface ->
-            check_no_capability_parameter state "the type" name generics;
-            (match body with
-            | Fields fields -> check_duplicates state "field" (field_names fields)
-            | Variants variants ->
-                check_duplicates state "variant"
-                  (List.map (fun (variant : variant) -> variant.name) variants);
-                List.iter
-                  (fun (variant : variant) ->
-                    Option.iter
-                      (fun fields -> check_duplicates state "field" (field_names fields))
-                      variant.fields)
-                  variants
-            | Type_todo -> ());
-            check_derives state interface clauses resolved;
-            if definition.visibility = Public then
-              check_private_in_public state ~visibility:definition.visibility
-                (match interface.shape with
-                | Record fields -> List.map (fun (field : Types.field) -> field.field_type) fields
-                | Sum variants ->
-                    List.concat_map
-                      (fun (variant : Types.variant) ->
-                        List.map
-                          (fun (field : Types.field) -> field.field_type)
-                          (Option.value ~default:[] variant.fields))
-                      variants
-                | _ -> [])
-                state.spans.(name.id)
-        | None, Trait { name; generics; requires; _ }, Trait_interface trait ->
-            check_no_capability_parameter state "the trait" name generics;
-            check_trait_cycle state requires;
-            check_private_in_public state ~visibility:definition.visibility
-              (List.map (fun (bound : Types.trait_reference) -> Types.Any bound) trait.requires)
+  let resolved = lookups.resolved Interface state.key in
+  if not (broken Header) then
+    match (lookups.names.container state.key, definition.kind, state.lowered.interface) with
+    | ( Some container,
+        (Function { signature; _ } | Method_declaration signature),
+        Function_interface written ) -> (
+        let name = Names.signature_name signature in
+        match
+          (lookups.names.definition container, (lookups.lowered_interface container).interface)
+        with
+        | { kind = Trait _; visibility; _ }, Trait_interface trait ->
+            check_redeclared state name
+              (Names.receiver signature.parameters)
+              ~trait_path:container.path trait;
+            check_private_in_public state ~visibility (signature_types written)
               state.spans.(name.id)
-        | None, Constant { name = Plain_name name; _ }, Constant_interface constant ->
-            check_private_in_public state ~visibility:definition.visibility
-              [ constant.constant_type ] state.spans.(name.id)
-        | None, Impl { trait_; members; _ }, Impl_interface impl ->
-            check_impl state members impl trait_
-        | None, Constant { name = Member_name (head, _); _ }, _ -> check_method_location state head
-        | None, _, _ -> ())
+        | { kind = Impl { trait_; _ }; _ }, Impl_interface impl ->
+            check_impl_method state name
+              (Names.receiver signature.parameters)
+              written impl
+              ~trait_span:(lookups.names.spans container).(trait_.id)
+              trait_
+        | _ -> ())
+    | Some _, _, _ -> ()
+    | None, Function { signature; _ }, Function_interface lowered ->
+        (match signature.name with
+        | Member_name (head, _) -> check_method_location state head
+        | Plain_name name ->
+            if name.text = "main" && state.key.module_.modules = [] then
+              check_main state lowered state.spans.(name.id));
+        let span =
+          match signature.name with
+          | Plain_name name | Member_name (_, name) -> state.spans.(name.id)
+        in
+        check_private_in_public state ~visibility:definition.visibility (signature_types lowered)
+          span
+    | None, Law_proof { law; type_; _ }, Law_proof_interface { generics; trait; for_type; _ } -> (
+        (match lookups.trait_header trait.trait with
+        | Some header when not (List.mem law.text header.laws) ->
+            report state Unknown_member state.spans.(law.id)
+              (Printf.sprintf "`%s` has no law `%s`." (Types.show_trait trait) law.text)
+        | _ -> ());
+        let arity_matches =
+          match for_type with
+          | Types.Named { path; _ } -> (
+              match Names.generics_of lookups.names path with
+              | Some expected -> List.length expected = List.length generics
+              | None -> true)
+          | _ -> true
+        in
+        if arity_matches && not (Types.is_error for_type) then
+          match implements state for_type trait with
+          | None ->
+              report state No_impl state.spans.(type_.id)
+                (Printf.sprintf "`%s` does not implement `%s`, so it has no law of it to keep."
+                   (Types.show for_type) (Types.show_trait trait))
+          | Some (Impls.From_impl { impl; _ }) ->
+              Option.iter
+                (check_proof_bounds state type_ generics)
+                (Impls.impl_interface lookups impl)
+          | Some _ -> ())
+    | None, Type_definition { name; generics; body; clauses }, Type_interface interface ->
+        check_no_capability_parameter state "the type" name generics;
+        (match body with
+        | Fields fields -> check_duplicates state "field" (field_names fields)
+        | Variants variants ->
+            check_duplicates state "variant"
+              (List.map (fun (variant : variant) -> variant.name) variants);
+            List.iter
+              (fun (variant : variant) ->
+                Option.iter
+                  (fun fields -> check_duplicates state "field" (field_names fields))
+                  variant.fields)
+              variants
+        | Type_todo -> ());
+        check_derives state interface clauses resolved;
+        if definition.visibility = Public then
+          check_private_in_public state ~visibility:definition.visibility
+            (match interface.shape with
+            | Record fields -> List.map (fun (field : Types.field) -> field.field_type) fields
+            | Sum variants ->
+                List.concat_map
+                  (fun (variant : Types.variant) ->
+                    List.map
+                      (fun (field : Types.field) -> field.field_type)
+                      (Option.value ~default:[] variant.fields))
+                  variants
+            | _ -> [])
+            state.spans.(name.id)
+    | None, Trait { name; generics; requires; _ }, Trait_interface trait ->
+        check_no_capability_parameter state "the trait" name generics;
+        check_trait_cycle state requires;
+        check_private_in_public state ~visibility:definition.visibility
+          (List.map (fun (bound : Types.trait_reference) -> Types.Any bound) trait.requires)
+          state.spans.(name.id)
+    | None, Constant { name = Plain_name name; _ }, Constant_interface constant ->
+        check_private_in_public state ~visibility:definition.visibility [ constant.constant_type ]
+          state.spans.(name.id)
+    | None, Impl { trait_; members; _ }, Impl_interface impl -> check_impl state members impl trait_
+    | None, Constant { name = Member_name (head, _); _ }, _ -> check_method_location state head
+    | None, _, _ -> ()
 
 let diagnostics (lookups : Lookups.t) key =
-  match lookups.lowered_interface key with
-  | Some lowered ->
-      let state =
-        {
-          lookups;
-          key;
-          definition = lookups.names.definition key;
-          lowered;
-          spans = lookups.names.spans key;
-          diagnostics = [];
-        }
-      in
-      check state;
-      List.sort
-        (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
-          compare (left.span, left.code) (right.span, right.code))
-        state.diagnostics
-  | None -> []
+  let state =
+    {
+      lookups;
+      key;
+      definition = lookups.names.definition key;
+      lowered = lookups.lowered_interface key;
+      spans = lookups.names.spans key;
+      diagnostics = [];
+    }
+  in
+  check state;
+  List.sort
+    (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
+      compare (left.span, left.code) (right.span, right.code))
+    state.diagnostics

@@ -429,28 +429,26 @@ let check_associated_types (lookups : Lookups.t) ~contained (declaration : Names
     impl.implements.associated
 
 let instantiation_edges (lookups : Lookups.t) (key : Names.key) =
-  match lookups.core key with
-  | None -> []
-  | Some form ->
-      let grows = function
-        | Types.Type (Types.Named { arguments; _ }) ->
-            let mentions =
-              Types.exists (function
-                | Types.Parameter { owner; _ } -> Path.equal owner key.path
-                | _ -> false)
-            in
-            List.exists (function Types.Type type_ -> mentions type_ | _ -> false) arguments
-        | _ -> false
-      in
-      let edges = ref [] in
-      Core_walk.definition
-        (Core_walk.callees (function
-          | Function { path; type_arguments }
-            when Path.package path = key.module_.package && type_arguments <> [] ->
-              edges := (path, List.exists grows type_arguments) :: !edges
-          | _ -> ()))
-        form.definition;
-      List.rev !edges
+  let form = lookups.core key in
+  let grows = function
+    | Types.Type (Types.Named { arguments; _ }) ->
+        let mentions =
+          Types.exists (function
+            | Types.Parameter { owner; _ } -> Path.equal owner key.path
+            | _ -> false)
+        in
+        List.exists (function Types.Type type_ -> mentions type_ | _ -> false) arguments
+    | _ -> false
+  in
+  let edges = ref [] in
+  Core_walk.definition
+    (Core_walk.callees (function
+      | Function { path; type_arguments }
+        when Path.package path = key.module_.package && type_arguments <> [] ->
+          edges := (path, List.exists grows type_arguments) :: !edges
+      | _ -> ()))
+    form.definition;
+  List.rev !edges
 
 let check_instantiation (lookups : Lookups.t) (package : Path.package) =
   let generic =

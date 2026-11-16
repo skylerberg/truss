@@ -16,53 +16,49 @@ let implements_capability (lookups : Lookups.t) key =
       | None -> false)
   | None -> false
 
-let check (lookups : Lookups.t) (key : Resolve.Names.key) : result option =
-  match lookups.interface.lowered_interface key with
-  | Some lowered ->
-      let context : Context.context =
-        {
-          lookups;
-          bounds =
-            (fun parameter ->
-              Option.value ~default:[] (List.assoc_opt parameter lowered.scope.bounds));
-          spans = lazy (lookups.interface.names.spans key);
-          mode_keywords = Hashtbl.create 8;
-          names = Hashtbl.create 32;
-          binding_modes = Hashtbl.create 32;
-          types = Hashtbl.create 32;
-          parameters = [];
-          implements_capability = implements_capability lookups key;
-          mutable_locals = [];
-          diagnostics = [];
-          must_be_disjoint = [];
-        }
+let check (lookups : Lookups.t) (key : Resolve.Names.key) : result =
+  let lowered = lookups.interface.lowered_interface key in
+  let context : Context.context =
+    {
+      lookups;
+      bounds =
+        (fun parameter -> Option.value ~default:[] (List.assoc_opt parameter lowered.scope.bounds));
+      spans = lazy (lookups.interface.names.spans key);
+      mode_keywords = Hashtbl.create 8;
+      names = Hashtbl.create 32;
+      binding_modes = Hashtbl.create 32;
+      types = Hashtbl.create 32;
+      parameters = [];
+      implements_capability = implements_capability lookups key;
+      mutable_locals = [];
+      diagnostics = [];
+      must_be_disjoint = [];
+    }
+  in
+  let mir =
+    if Interface.Environment.is_specification lowered.interface then None else lookups.graph key
+  in
+  Option.iter
+    (fun (mir : Mir.Graph.t) ->
+      Context.collect context mir;
+      let returns_to_caller =
+        match lowered.interface with Function_interface _ -> true | _ -> false
       in
-      let mir =
-        if Interface.Environment.is_specification lowered.interface then None else lookups.graph key
+      let move_analyses =
+        List.map
+          (fun body -> (body, Move_rules.analyse context body))
+          (mir.body :: Array.to_list mir.lambdas)
       in
-      Option.iter
-        (fun (mir : Mir.Graph.t) ->
-          Context.collect context mir;
-          let returns_to_caller =
-            match lowered.interface with Function_interface _ -> true | _ -> false
-          in
-          let move_analyses =
-            List.map
-              (fun body -> (body, Move_rules.analyse context body))
-              (mir.body :: Array.to_list mir.lambdas)
-          in
-          let moves body = List.assq body move_analyses in
-          Move_rules.check context mir ~moves ~returns_to_caller;
-          Borrows.check context ~moves ~returns_to_caller mir;
-          Task_loops.check context mir)
-        mir;
-      Some
-        {
-          diagnostics =
-            List.sort
-              (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
-                compare (left.span, left.message) (right.span, right.message))
-              context.diagnostics;
-          must_be_disjoint = List.sort_uniq compare context.must_be_disjoint;
-        }
-  | _ -> None
+      let moves body = List.assq body move_analyses in
+      Move_rules.check context mir ~moves ~returns_to_caller;
+      Borrows.check context ~moves ~returns_to_caller mir;
+      Task_loops.check context mir)
+    mir;
+  {
+    diagnostics =
+      List.sort
+        (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
+          compare (left.span, left.message) (right.span, right.message))
+        context.diagnostics;
+    must_be_disjoint = List.sort_uniq compare context.must_be_disjoint;
+  }

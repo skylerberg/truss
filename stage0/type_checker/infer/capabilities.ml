@@ -557,8 +557,8 @@ let check (state : state) (lowered : Environment.lowered_interface) (form : Core
   | Function { body; _ }, (Function _ | Method_declaration _), Function_interface signature ->
       let implemented_capability =
         Option.bind (state.lookups.interface.names.container state.key) (fun container ->
-            match state.lookups.interface.lowered_interface container with
-            | Some { interface = Impl_interface impl; _ }
+            match (state.lookups.interface.lowered_interface container).interface with
+            | Impl_interface impl
               when Resolve.Names.kind_of state.lookups.interface.names impl.implements.trait
                    = Some Capability ->
                 Some (Types.Capability impl.implements.trait)
