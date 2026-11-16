@@ -2093,7 +2093,8 @@ input:
 
 | Result | Key |
 |---|---|
-| A solver answer | The query's text, whose symbols are numbered in order of appearance |
+| A solver answer: proven, unknown, or a model and the cardinality bound it was found at | The query's text, whose symbols are numbered in order of appearance |
+| The values of a counterexample | The query's text and the terms whose values are requested |
 | An object file | The C text, the C compiler, and its flags |
 | A test result | The test's key: the code generator's version, the target system, the flags, and a hash of the code the test reaches, in which each reference is numbered |
 | The database of the standard library or of a registry package | The package's content hash, the content hashes of the versions selected for its dependencies, and the compiler |

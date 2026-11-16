@@ -235,32 +235,7 @@ let show_float bits =
 
 let is_opaque atom = String.contains atom '!'
 
-let is_opaque_value text =
-  is_opaque text && not (String.exists (fun character -> character = '(') text)
-
-let show_truss_value members text =
-  let tokens =
-    let buffer = Buffer.create 16 and tokens = ref [] in
-    let flush () =
-      if Buffer.length buffer > 0 then begin
-        tokens := `Atom (Buffer.contents buffer) :: !tokens;
-        Buffer.clear buffer
-      end
-    in
-    String.iter
-      (function
-        | '(' ->
-            flush ();
-            tokens := `Open :: !tokens
-        | ')' ->
-            flush ();
-            tokens := `Close :: !tokens
-        | ' ' | '\n' | '\t' | '\r' -> flush ()
-        | character -> Buffer.add_char buffer character)
-      text;
-    flush ();
-    List.rev !tokens
-  in
+let show_truss_value members value =
   let show_constructor : Logic.symbol -> string = function
     | Constructor { variant = Some variant; _ } -> variant
     | Constructor { type_ = Named { path = Top { name; _ }; _ }; variant = None } -> name
@@ -284,59 +259,48 @@ let show_truss_value members text =
                 (List.of_seq (String.to_seq digits))))
     | _ -> None
   in
-  let rec parse_one = function
-    | `Open :: `Atom "fp" :: `Atom sign :: `Atom exponent :: `Atom fraction :: `Close :: rest -> (
+  let rec show : Solver.sexp -> string = function
+    | List [ Atom "fp"; Atom sign; Atom exponent; Atom fraction ] -> (
         match (parse_bits sign, parse_bits exponent, parse_bits fraction) with
-        | Some sign, Some exponent, Some fraction -> (show_float (sign ^ exponent ^ fraction), rest)
-        | _ -> ("a float", rest))
-    | `Open :: `Atom "_" :: `Atom special :: `Atom _ :: `Atom _ :: `Close :: rest ->
-        ( (match special with
-          | "+zero" -> "0.0"
-          | "-zero" -> "-0.0"
-          | "+oo" -> "infinity"
-          | "-oo" -> "-infinity"
-          | _ -> "NaN"),
-          rest )
-    | `Atom atom :: rest when is_opaque atom -> ("a value the prover knows nothing more about", rest)
-    | `Atom atom :: rest -> (
+        | Some sign, Some exponent, Some fraction -> show_float (sign ^ exponent ^ fraction)
+        | _ -> "a float")
+    | List [ Atom "_"; Atom special; Atom _; Atom _ ] -> (
+        match special with
+        | "+zero" -> "0.0"
+        | "-zero" -> "-0.0"
+        | "+oo" -> "infinity"
+        | "-oo" -> "-infinity"
+        | _ -> "NaN")
+    | Atom atom when is_opaque atom -> "a value the prover knows nothing more about"
+    | Atom atom -> (
         match List.assoc_opt atom members with
-        | Some (internal, _) -> (show_constructor internal, rest)
-        | None -> (atom, rest))
-    | `Open :: `Atom "-" :: `Atom number :: `Close :: rest -> ("-" ^ number, rest)
-    | `Open :: `Atom head :: rest ->
-        let rec parse_arguments acc = function
-          | `Close :: rest -> (List.rev acc, rest)
-          | [] -> (List.rev acc, [])
-          | tokens ->
-              let argument, rest = parse_one tokens in
-              parse_arguments (argument :: acc) rest
-        in
-        let items, rest = parse_arguments [] rest in
-        let shown =
-          match List.assoc_opt head members with
-          | Some (internal, fields) when List.length fields = List.length items ->
-              show_constructor internal ^ "("
-              ^ String.concat ", "
-                  (List.map2 (fun selector item -> show_field selector ^ ": " ^ item) fields items)
-              ^ ")"
-          | Some (internal, _) -> show_constructor internal ^ "(" ^ String.concat ", " items ^ ")"
-          | None -> head ^ "(" ^ String.concat ", " items ^ ")"
-        in
-        (shown, rest)
-    | `Open :: rest -> parse_one rest
-    | `Close :: rest -> parse_one rest
-    | [] -> ("", [])
+        | Some (internal, _) -> show_constructor internal
+        | None -> atom)
+    | List [ Atom "-"; Atom number ] -> "-" ^ number
+    | List (Atom head :: arguments) -> (
+        let items = List.map show arguments in
+        match List.assoc_opt head members with
+        | Some (internal, fields) when List.length fields = List.length items ->
+            show_constructor internal ^ "("
+            ^ String.concat ", "
+                (List.map2 (fun selector item -> show_field selector ^ ": " ^ item) fields items)
+            ^ ")"
+        | Some (internal, _) -> show_constructor internal ^ "(" ^ String.concat ", " items ^ ")"
+        | None -> head ^ "(" ^ String.concat ", " items ^ ")")
+    | List (head :: arguments) ->
+        show head ^ "(" ^ String.concat ", " (List.map show arguments) ^ ")"
+    | List [] -> ""
   in
-  fst (parse_one tokens)
+  show value
 
 let show_counterexample members (obligation : State.obligation) answer_values =
   let shown =
     List.filter_map
       (fun (symbol, name) ->
         match List.assoc_opt symbol answer_values with
-        | Some value when not (is_opaque_value value) ->
-            Some (Printf.sprintf "`%s` is %s" name (show_truss_value members value))
-        | Some _ | None -> None)
+        | Some (Solver.Atom atom) when is_opaque atom -> None
+        | Some value -> Some (Printf.sprintf "`%s` is %s" name (show_truss_value members value))
+        | None -> None)
       (List.rev obligation.values
       @ List.rev_map (fun (term, name) -> (Logic.Symbol.Named_term term, name)) obligation.locals)
   in
@@ -348,8 +312,8 @@ let show_counterexample members (obligation : State.obligation) answer_values =
              ( List.assoc_opt (Logic.Symbol.Reached index) answer_values,
                List.assoc_opt (Logic.Symbol.Condition index) answer_values )
            with
-           | Some "true", Some "true" -> Some holding
-           | Some "true", Some "false" -> failing
+           | Some (Solver.Atom "true"), Some (Solver.Atom "true") -> Some holding
+           | Some (Solver.Atom "true"), Some (Solver.Atom "false") -> failing
            | _ -> None)
          obligation.decisions)
   in
@@ -501,37 +465,17 @@ let list_definition_states (lookups : Lookups.t) (key : Resolve.Names.key) proof
             obligation.cited ))
         outcome.obligations answers
 
-let request ~with_locals (obligation : State.obligation) =
+let request (obligation : State.obligation) =
   let terms =
-    if with_locals then
-      List.map (fun (term, _) -> (Logic.Symbol.Named_term term, term)) obligation.locals
-      @ List.concat
-          (List.mapi
-             (fun index (_, _, reached, condition) ->
-               [ (Logic.Symbol.Reached index, reached); (Logic.Symbol.Condition index, condition) ])
-             obligation.decisions)
-    else []
+    List.map (fun (term, _) -> (Logic.Symbol.Named_term term, term)) obligation.locals
+    @ List.concat
+        (List.mapi
+           (fun index (_, _, reached, condition) ->
+             [ (Logic.Symbol.Reached index, reached); (Logic.Symbol.Condition index, condition) ])
+           obligation.decisions)
   in
   ( Solver.request ~symbols:(List.map fst obligation.values) ~terms obligation.query,
     obligation.query )
-
-let solve solver requests =
-  let distinct = Hashtbl.create 64 in
-  List.iter
-    (fun ((request, _) as asked) ->
-      if not (Hashtbl.mem distinct (Solver.request_key request)) then
-        Hashtbl.replace distinct (Solver.request_key request) asked)
-    requests;
-  let distinct_requests =
-    Hashtbl.fold (fun _ asked distinct_requests -> asked :: distinct_requests) distinct []
-  in
-  let answers = Hashtbl.create (List.length distinct_requests) in
-  List.iter2
-    (fun (request, _) canonical ->
-      Hashtbl.replace answers (Solver.request_key request) (Solver.read request canonical))
-    distinct_requests
-    (Solver.solve_all solver distinct_requests);
-  fun request -> Hashtbl.find answers (Solver.request_key request)
 
 type question = Decided of answer | Asked of (Solver.request * Logic.query)
 
@@ -549,7 +493,7 @@ let decide ~runs lookups solver proofs =
   let make_question (obligation : State.obligation) =
     match Option.bind obligation.template_clause (run_answer runs) with
     | Some answer -> Decided answer
-    | None -> Asked (request ~with_locals:false obligation)
+    | None -> Asked (request obligation)
   in
   let questions =
     List.map
@@ -559,61 +503,30 @@ let decide ~runs lookups solver proofs =
           | Obligations (outcome : State.outcome) -> outcome.obligations
           | Unsupported _ | Not_proven_here -> []
         in
-        (key, proof, List.map (fun obligation -> (obligation, make_question obligation)) obligations))
+        (key, proof, List.map make_question obligations))
       proofs
   in
-  let await_plain_answer =
-    solve solver
-      (List.concat_map
-         (fun (_, _, questions) ->
-           List.filter_map
-             (function _, Asked asked -> Some asked | _, Decided _ -> None)
-             questions)
-         questions)
-  in
-  let local_questions =
-    List.map
-      (fun (key, proof, questions) ->
-        ( key,
-          proof,
-          List.map
-            (fun ((obligation : State.obligation), question) ->
-              let local_request =
-                match question with
-                | Asked (plain_request, _)
-                  when (obligation.locals <> [] || obligation.decisions <> [])
-                       &&
-                       match await_plain_answer plain_request with
-                       | Counterexample _ -> true
-                       | Proven | Unknown -> false ->
-                    Some (request ~with_locals:true obligation)
-                | Asked _ | Decided _ -> None
-              in
-              (question, local_request))
-            questions ))
-      questions
-  in
-  let await_local_answer =
-    solve solver
-      (List.concat_map (fun (_, _, questions) -> List.filter_map snd questions) local_questions)
+  let solved =
+    Queue.of_seq
+      (List.to_seq
+         (Solver.solve_all solver
+            (List.concat_map
+               (fun (_, _, questions) ->
+                 List.filter_map
+                   (function Asked asked -> Some asked | Decided _ -> None)
+                   questions)
+               questions)))
   in
   let verdicts = Key_table.create (List.length proofs) in
   List.iter
     (fun (key, proof, questions) ->
       let answers =
         List.map
-          (fun (question, local_request) ->
-            match (question, local_request) with
-            | Decided answer, _ -> answer
-            | Asked (plain_request, _), None -> Solved (await_plain_answer plain_request)
-            | Asked (plain_request, _), Some (local_request, _) -> (
-                match await_local_answer local_request with
-                | Counterexample _ as answer -> Solved answer
-                | Proven | Unknown -> Solved (await_plain_answer plain_request)))
+          (function Decided answer -> answer | Asked _ -> Solved (Queue.pop solved))
           questions
       in
       Key_table.replace verdicts key (list_definition_states lookups key proof answers))
-    local_questions;
+    questions;
   { lookups; verdicts }
 
 let list_file_states { lookups; verdicts } file =

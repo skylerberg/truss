@@ -1483,19 +1483,36 @@ let () =
       let cache =
         {
           Solver.find =
-            (fun key -> if key = Solver.request_key request then Some "proven\n" else None);
+            (fun key -> if key = Solver.For_testing.hash_query query then Some "proven\n" else None);
           add = (fun _ _ -> Harness.fail "kept an answer the cache already had");
         }
       in
       match Solver.find ~cache () with
       | Error message -> Harness.fail "%s" message
       | Ok solver ->
-          if
-            Solver.read request (List.hd (Solver.solve_all solver [ (request, query) ]))
-            <> Solver.Proven
-          then Harness.fail "expected the cached answer";
+          if List.hd (Solver.solve_all solver [ (request, query) ]) <> Solver.Proven then
+            Harness.fail "expected the cached answer";
           if Solver.count_queries_run solver <> 0 then Harness.fail "ran the solver");
-  Harness.test "a solved answer is added to the cache under its request's key" (fun () ->
+  Harness.test "a proven answer in the cache is read whatever values the request asks for"
+    (fun () ->
+      let query = make_self_comparison ">=" in
+      let request =
+        Solver.request ~symbols:[ Logic.Symbol.Variable { label = "compared"; numbers = [] } ] query
+      in
+      let cache =
+        {
+          Solver.find =
+            (fun key -> if key = Solver.For_testing.hash_query query then Some "proven\n" else None);
+          add = (fun _ _ -> Harness.fail "kept an answer the cache already had");
+        }
+      in
+      match Solver.find ~cache () with
+      | Error message -> Harness.fail "%s" message
+      | Ok solver ->
+          if List.hd (Solver.solve_all solver [ (request, query) ]) <> Solver.Proven then
+            Harness.fail "expected the cached answer";
+          if Solver.count_queries_run solver <> 0 then Harness.fail "ran the solver");
+  Harness.test "a solved answer is added to the cache under its query's key" (fun () ->
       let query = make_self_comparison "<=" in
       let request = Solver.request query in
       let cached_answers = Hashtbl.create 1 in
@@ -1507,8 +1524,9 @@ let () =
       | Ok solver ->
           ignore (Solver.solve_all solver [ (request, query) ]);
           if Solver.count_queries_run solver <> 1 then Harness.fail "did not run the solver";
-          if Hashtbl.find_opt cached_answers (Solver.request_key request) <> Some "proven\n" then
-            Harness.fail "the cache does not have the answer");
+          if
+            Hashtbl.find_opt cached_answers (Solver.For_testing.hash_query query) <> Some "proven\n"
+          then Harness.fail "the cache does not have the answer");
   let find_obligation_query text code =
     let packages = Support.setup [ ("app::main", text) ] in
     let key = List.hd (Support.list_declarations packages (Support.parse_module "app::main")) in
@@ -1524,13 +1542,32 @@ let () =
     | Unsupported _ | Not_proven_here -> None
   in
   Harness.test "an unknown answer without an uninterpreted sort is not searched further" (fun () ->
-      match (find_obligation_query Fixtures.Prover.sum_of_two_cubes Ensures, Solver.find ()) with
-      | None, _ -> Harness.fail "no obligation of the `ensures`"
-      | _, Error message -> Harness.fail "%s" message
-      | Some query, Ok solver ->
+      let make_variable label = Logic.Symbol.Variable { label; numbers = [] } in
+      let first = make_variable "first"
+      and second = make_variable "second"
+      and sum = make_variable "sum" in
+      let cube variable =
+        Logic.Operation
+          ("*", [ Logic.Symbol variable; Logic.Symbol variable; Logic.Symbol variable ])
+      in
+      let query =
+        {
+          Logic.declarations =
+            List.map (fun variable -> Logic.Constant (variable, Logic.Int)) [ first; second; sum ];
+          facts =
+            List.map
+              (fun variable -> Logic.Operation (">", [ Logic.Symbol variable; Logic.int 0 ]))
+              [ first; second; sum ];
+          goal =
+            Logic.not_ (Logic.equal (Logic.Operation ("+", [ cube first; cube second ])) (cube sum));
+        }
+      in
+      match Solver.find () with
+      | Error message -> Harness.fail "%s" message
+      | Ok solver ->
           let request = Solver.request query in
-          if Solver.read request (List.hd (Solver.solve_all solver [ (request, query) ])) <> Unknown
-          then Harness.fail "expected an unknown answer";
+          if List.hd (Solver.solve_all solver [ (request, query) ]) <> Unknown then
+            Harness.fail "expected an unknown answer";
           if Solver.count_queries_run solver <> 1 then
             Harness.fail "ran %d queries" (Solver.count_queries_run solver));
   Harness.test "a second request for a query solved in a small model runs one query" (fun () ->
@@ -1542,7 +1579,7 @@ let () =
       | Some query, Ok solver -> (
           let first = Solver.request query
           and second = Solver.request ~terms:[ (Logic.Symbol.Reached 0, Logic.int 1) ] query in
-          match Solver.read first (List.hd (Solver.solve_all solver [ (first, query) ])) with
+          match List.hd (Solver.solve_all solver [ (first, query) ]) with
           | Proven | Unknown -> Harness.fail "expected a counterexample"
           | Counterexample _ ->
               let queries_before = Solver.count_queries_run solver in
