@@ -153,9 +153,9 @@ let execute ?input ?on_output ~deadline program arguments =
 let run ?input ?on_output program arguments =
   snd (execute ?input ?on_output ~deadline:Unlimited program arguments)
 
-let run_with_time_limit ?input ?on_output ~time_limit_ms program arguments =
+let run_with_time_limit ?input ~time_limit_ms program arguments =
   let deadline = Until (Unix.gettimeofday () +. (Float.of_int time_limit_ms /. 1000.)) in
-  match execute ?input ?on_output ~deadline program arguments with
+  match execute ?input ~deadline program arguments with
   | Passed, _ -> None
   | (Unlimited | Until _), result -> Some result
 

@@ -200,7 +200,7 @@ let () =
     (fun () ->
       let started = Unix.gettimeofday () in
       (match
-         (Workspace.call ~program:"/usr/bin/false" ~key:(Harness.scratch "unserved")
+         (Workspace.For_testing.call ~program:"/usr/bin/false" ~key:(Harness.scratch "unserved")
             ~progress:ignore 0
            : (int, string) result)
        with
