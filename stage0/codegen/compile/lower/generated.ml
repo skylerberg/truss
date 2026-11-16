@@ -24,7 +24,7 @@ let build_entry context (key : Instance.key) (impl_method : Instance.impl_method
   let substitution = Definitions.bind method_signature.generics type_arguments in
   let st = make_generated_state context ~key ~definition:impl ~substitution in
   let builder = st.builder in
-  let evidence = Emit_c.Builder.allocate_local builder ~name:"evidence" Convention.evidence in
+  let evidence = Emit_c.Builder.allocate_local builder Convention.evidence in
   Lowering.set_result_slot st result;
   let parameter_places =
     List.map
@@ -94,7 +94,7 @@ let build_locked_entry context (key : Instance.key) ~capability ~name : Emit_c.B
   let c_signature, result = Targets.make_entry_signature context capability_signature in
   let st = make_generated_state context ~key ~definition:capability ~substitution:[] in
   let builder = st.builder in
-  let evidence = Emit_c.Builder.allocate_local builder ~name:"evidence" Convention.evidence in
+  let evidence = Emit_c.Builder.allocate_local builder Convention.evidence in
   Lowering.set_result_slot st result;
   let parameter_places =
     List.map
@@ -133,7 +133,7 @@ let build_locked_entry context (key : Instance.key) ~capability ~name : Emit_c.B
        });
   let mutex =
     Lowered.make_local_place
-      (Emit_c.Builder.allocate_local builder ~name:"mutex" (Value (Ground.make_builtin UInt64)))
+      (Emit_c.Builder.allocate_local builder (Value (Ground.make_builtin UInt64)))
   in
   Emit_c.Builder.emit builder
     (Assign (mutex, Convert (Copy (Lowered.make_local_place address), Integer UInt64)));
@@ -261,10 +261,8 @@ let text_copied_from = Well_known.make_path Text_copied_from
 let build_program_main context (key : Instance.key) main_path : Emit_c.Builder.instance =
   let st = make_generated_state context ~key ~definition:main_path ~substitution:[] in
   let builder = st.builder in
-  let count = Emit_c.Builder.allocate_local builder ~name:"count" (Raw (Integer Int32)) in
-  let arguments_pointer =
-    Emit_c.Builder.allocate_local builder ~name:"arguments" (Raw (Pointer Opaque))
-  in
+  let count = Emit_c.Builder.allocate_local builder (Raw (Integer Int32)) in
+  let arguments_pointer = Emit_c.Builder.allocate_local builder (Raw (Pointer Opaque)) in
   Lowering.set_result_slot st (Returned (Raw (Integer Int32)));
   Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
   let signature = Definitions.read_signature context main_path in
@@ -353,9 +351,7 @@ let build_adapter context (key : Instance.key) ~(function_ : Path.t) ~type_argum
   let substitution = Definitions.bind signature.generics type_arguments in
   let st = make_generated_state context ~key ~definition:function_ ~substitution in
   let builder = st.builder in
-  let environment =
-    Emit_c.Builder.allocate_local builder ~name:"environment" (Raw (Nullable_pointer Opaque))
-  in
+  let environment = Emit_c.Builder.allocate_local builder (Raw (Nullable_pointer Opaque)) in
   Lowering.set_result_slot st (Convention.classify_result context.env ty.result);
   let parameter_places =
     List.map
@@ -392,7 +388,7 @@ let build_any_entry context (key : Instance.key) (impl_method : Instance.impl_me
   in
   let st = make_generated_state context ~key ~definition:impl ~substitution in
   let builder = st.builder in
-  let value = Emit_c.Builder.allocate_local builder ~name:"value" (Raw (Pointer Opaque)) in
+  let value = Emit_c.Builder.allocate_local builder (Raw (Pointer Opaque)) in
   Lowering.set_result_slot st result;
   let parameter_places =
     List.map
@@ -408,7 +404,7 @@ let build_any_entry context (key : Instance.key) (impl_method : Instance.impl_me
   let evidence = Lowering.list_evidence_parameters st capabilities in
   let lending =
     List.map
-      (fun ty -> Emit_c.Builder.allocate_local builder ~name:"lend" ty)
+      (fun ty -> Emit_c.Builder.allocate_local builder ty)
       (Definitions.list_lending_parameters context substitution method_signature.output)
   in
   Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);

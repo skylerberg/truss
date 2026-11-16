@@ -98,12 +98,13 @@ val require_written : state -> Definitions.written
 val quote_span : state -> Source.Definition_span.t -> string
 val lookup_innermost_scope : state -> scope
 val allocate_temporary : state -> Ground.ty -> Lowered.place
-val allocate_binding : state -> ?name:string -> Ground.ty -> Lowered.place
+val allocate_binding : state -> Ground.ty -> Lowered.place
 val allocate_flagged_binding : state -> Ground.ty -> flag:Lowered.place -> Lowered.place
 
 val allocate_parameter :
   state ->
   ?in_scope:bool ->
+  ?name:string ->
   owned:bool ->
   Ground.mode ->
   Ground.ty ->

@@ -179,6 +179,31 @@ let () =
         names)
 
 let () =
+  Codegen_support.test "a C local is named after the Truss local it holds, and no other is named"
+    (fun () ->
+      let sum : Instance.key =
+        Code { path = Top { module_ = Codegen_support.example; name = "sum" }; type_arguments = [] }
+      in
+      let _, compile =
+        Codegen_support.load ~roots:[ sum ]
+          "fn sum(items: List[Int64]) -> Int64 {\n\
+          \  var total: Int64 = 0\n\
+          \  for item in items {\n\
+          \    total += item\n\
+          \  }\n\
+          \  total\n\
+           }\n"
+      in
+      let c = Emit_c.For_testing.render_c (Compile.For_testing.compile_fragment compile sum) in
+      List.iter
+        (fun name ->
+          if not (String.includes ~affix:name c) then Codegen_support.fail "no %s in:\n%s" name c)
+        [ "_items"; "_total"; "_item" ];
+      List.iter
+        (fun name -> if String.includes ~affix:name c then Codegen_support.fail "%s in:\n%s" name c)
+        [ "_binding"; "_index"; "_position" ])
+
+let () =
   Codegen_support.test "negating the least value of a signed type panics, where the checks are on"
     (fun () ->
       Codegen_support.expect_output Fixtures.Source.flip_of_an_int8

@@ -39,6 +39,8 @@ let find_core_local st local =
   | Source { local; _ } -> Some local
   | Temporary | Lent _ -> None
 
+let find_local_name st local = Option.bind (find_core_local st local) Mir.find_local_name
+
 let bind_local st local place =
   Hashtbl.replace (require_mir_frame st).places local place;
   if find_core_local st local = Some Self then st.frame.self_place <- Some place
@@ -57,8 +59,7 @@ let rec locate_local st local : Lowered.place =
 
 and allocate_place st local : Lowered.place =
   let ty = Lowering.ground st (lookup_local_info st local).type_ in
-  let name = match find_core_local st local with Some _ -> Some "binding" | None -> None in
-  let place = Lowering.allocate_local st ?name (Value ty) in
+  let place = Lowering.allocate_local st ?name:(find_local_name st local) (Value ty) in
   bind_local st local place;
   place
 
@@ -191,7 +192,7 @@ let make_body_frame (st : Lowering.state) ?owner ?returns_into ?lending
         (fun (path : Moves.path) ->
           ( path,
             Lowered.make_local_place
-              (Emit_c.Builder.allocate_local st.builder ~name:"owned" ~is_zeroed:true (Raw Bool)) ))
+              (Emit_c.Builder.allocate_local st.builder ~is_zeroed:true (Raw Bool)) ))
         (Moves.list_flagged moves);
     state = Moves.copy_entry_state moves 0;
     lending;
@@ -812,7 +813,7 @@ let with_group st (f : Lowered.place -> unit) =
   let scope = Lowering.open_scope st Statement in
   let group =
     Lowered.make_local_place
-      (Emit_c.Builder.allocate_local st.builder ~name:"group" (Value (Ground.make_builtin UInt64)))
+      (Emit_c.Builder.allocate_local st.builder (Value (Ground.make_builtin UInt64)))
   in
   Emit_c.Builder.emit st.builder (make_tasks_call st "open" ~result:group []);
   let join = make_tasks_call st "join" [ group ] in
@@ -855,7 +856,7 @@ let lock_evidence (st : Lowering.state) ~(tasks : Lowered.operand)
     (evidence : (Path.t * Lowered.operand) list) =
   let mutex =
     Lowered.make_local_place
-      (Emit_c.Builder.allocate_local st.builder ~name:"mutex" (Value (Ground.make_builtin UInt64)))
+      (Emit_c.Builder.allocate_local st.builder (Value (Ground.make_builtin UInt64)))
   in
   Emit_c.Builder.emit st.builder (Assign (mutex, Use (Lowering.make_int_constant UInt64 Z.zero)));
   List.map
@@ -912,9 +913,7 @@ let cancel (st : Lowering.state) ~(task : Mir.task) ~winner ~number ~value =
 
 let spawn_iteration (st : Lowering.state) (loop : Lowering.spawn_loop)
     ~(on_not_spawned : unit -> unit) (f : unit -> unit) =
-  let function_value =
-    Emit_c.Builder.allocate_local st.builder ~name:"task" (compute_task_function_type st)
-  in
+  let function_value = Emit_c.Builder.allocate_local st.builder (compute_task_function_type st) in
   Emit_c.Builder.emit st.builder
     (Assign
        ( Lowered.make_local_place function_value,
@@ -1003,7 +1002,7 @@ let lend_record (st : Lowering.state) : Lowered.operand =
           {
             place =
               Lowered.make_local_place
-                (Emit_c.Builder.allocate_local st.builder ~name:"lend" ~is_zeroed:true Lend);
+                (Emit_c.Builder.allocate_local st.builder ~is_zeroed:true Lend);
             writable = true;
           }
       in
@@ -1019,7 +1018,7 @@ let obtain_lent_call st part : Lowering.lent_call =
         {
           Lowering.mark =
             Lowered.make_local_place
-              (Emit_c.Builder.allocate_local st.builder ~name:"lent" ~is_zeroed:true Lend_mark);
+              (Emit_c.Builder.allocate_local st.builder ~is_zeroed:true Lend_mark);
           record = lend_record st;
         }
       in
@@ -1170,8 +1169,7 @@ and lower_concurrent_block st region ~fork ~(branches : Mir.Graph.branch list) ~
       List.iter
         (fun code ->
           let function_value =
-            Lowered.make_local_place
-              (Emit_c.Builder.allocate_local st.builder ~name:"task" function_type)
+            Lowered.make_local_place (Emit_c.Builder.allocate_local st.builder function_type)
           in
           Emit_c.Builder.emit st.builder (Assign (function_value, code));
           ignore
@@ -1356,7 +1354,8 @@ and alias st local (source : Lowered.place) ~writable =
           { root = Local pointer; projections = [ Deref; Field field ] }
       | _ ->
           let pointer =
-            Lowering.allocate_local st ~name:"binding" (Pointer { target = Value ty; writable })
+            Lowering.allocate_local st ?name:(find_local_name st local)
+              (Pointer { target = Value ty; writable })
           in
           bind_local st local (Lowered.project pointer Deref);
           pointer
@@ -1368,7 +1367,7 @@ and alias st local (source : Lowered.place) ~writable =
     && (match (Memory_layout.of_type st.context.env ty).form with Scalar _ -> true | _ -> false)
     && match (lookup_local_info st local).kind with Source _ -> true | Temporary | Lent _ -> false
   then begin
-    let copy = Lowering.allocate_local st ~name:"binding" (Value ty) in
+    let copy = Lowering.allocate_local st ?name:(find_local_name st local) (Value ty) in
     Emit_c.Builder.emit st.builder (Assign (copy, Use (Copy source)));
     bind_local st local copy
   end
@@ -1734,12 +1733,7 @@ and lend ?(forwards = 0) st part (call : Mir.call) ~origin =
                when is_forwarded_whole frame part && own = part_ty ->
                  Lowered.Copy slot
              | Some _ when List.mem part frame.ended_after_lend -> Constant Null
-             | _ ->
-                 Address
-                   {
-                     place = Lowering.allocate_local st ~name:"lent" (Value part_ty);
-                     writable = true;
-                   });
+             | _ -> Address { place = Lowering.allocate_local st (Value part_ty); writable = true });
            ])
         @ [
             lent.record;
@@ -1759,8 +1753,7 @@ and lend ?(forwards = 0) st part (call : Mir.call) ~origin =
         end
         else begin
           let pointer =
-            Lowering.allocate_local st ~name:"part"
-              (Pointer { target = Value part_ty; writable = mode = Mut })
+            Lowering.allocate_local st (Pointer { target = Value part_ty; writable = mode = Mut })
           in
           emit_call ~lending:(list_lent_operands part_ty) pointer;
           Lowered.project pointer Deref
@@ -1998,8 +1991,7 @@ and lower_terminator st region (ending : Mir.Graph.terminator) ~origin =
           (fun (returned, slot) ->
             let ty = Lowering.ground st (lookup_local_info st slot).type_ in
             let value =
-              Lowered.make_local_place
-                (Emit_c.Builder.allocate_local st.builder ~name:"returned" (Value ty))
+              Lowered.make_local_place (Emit_c.Builder.allocate_local st.builder (Value ty))
             in
             write_operand st returned value;
             (value, ty, slot))
@@ -2077,9 +2069,7 @@ and lower_for_loop st region ~(iteration : Mir.iteration) ~part ~body ~(loop : M
             {
               Lowering.origin;
               group;
-              item =
-                Emit_c.Builder.allocate_local st.builder ~name:"item"
-                  (Value (Ground.make_builtin UInt64));
+              item = Emit_c.Builder.allocate_local st.builder (Value (Ground.make_builtin UInt64));
               element = Lowering.ground st (lookup_local_info st part).type_;
             }
           in
@@ -2134,7 +2124,7 @@ and lower_range_loop st ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~in
   | Chunked ->
       let wide = Lowered.Raw (Integer UInt64) in
       let one = Lowering.make_int_constant UInt64 Z.one in
-      let first_value = Lowering.allocate_binding st ~name:"start" element in
+      let first_value = Lowering.allocate_binding st element in
       let last_value = Lowering.allocate_binding st element in
       Emit_c.Builder.emit st.builder (Assign (first_value, Use (lower_operand st low)));
       Emit_c.Builder.emit st.builder (Assign (last_value, Use (lower_operand st high)));
@@ -2148,8 +2138,8 @@ and lower_range_loop st ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~in
       let depth = List.length st.scopes in
       Emit_c.Builder.branch st.builder (Copy (Lowered.make_local_place going)) ~yes:inside ~no:after;
       Emit_c.Builder.start st.builder inside;
-      let first = Emit_c.Builder.allocate_local st.builder ~name:"first" wide
-      and last = Emit_c.Builder.allocate_local st.builder ~name:"last" wide in
+      let first = Emit_c.Builder.allocate_local st.builder wide
+      and last = Emit_c.Builder.allocate_local st.builder wide in
       let low_wide = Emit_c.Builder.allocate_local st.builder wide
       and high_wide = Emit_c.Builder.allocate_local st.builder wide in
       Emit_c.Builder.emit st.builder
@@ -2185,7 +2175,7 @@ and lower_range_loop st ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~in
                        Lowering.make_int_constant UInt64 (Z.of_int 0x800) ) )));
       let body, environment =
         Lowering.outline st ~parts:[ first; last ] (fun () ->
-            let index = Emit_c.Builder.allocate_local st.builder ~name:"index" wide in
+            let index = Emit_c.Builder.allocate_local st.builder wide in
             Emit_c.Builder.emit st.builder
               (Assign (Lowered.make_local_place index, Use (Copy (Lowered.make_local_place first))));
             let again = Emit_c.Builder.allocate_block st.builder
@@ -2243,8 +2233,8 @@ and lower_range_loop st ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~in
       Emit_c.Builder.finish st.builder (Goto after);
       Emit_c.Builder.start st.builder after
   | Sequential | Spawned _ ->
-      let allocate_loop_value ?name () = Lowering.allocate_binding st ?name element in
-      let index = allocate_loop_value ~name:"index" () in
+      let allocate_loop_value () = Lowering.allocate_binding st element in
+      let index = allocate_loop_value () in
       let stop = allocate_loop_value () in
       Emit_c.Builder.emit st.builder (Assign (index, Use (lower_operand st low)));
       Emit_c.Builder.emit st.builder (Assign (stop, Use (lower_operand st high)));
