@@ -699,8 +699,8 @@ let () =
       one_diagnostic Fixtures.Infer.uint8_let_of_minus_one "types.negated_unsigned");
   Harness.test "explicit type arguments give exactly the function's own" (fun () ->
       one_diagnostic Fixtures.Infer.pick_with_one_type_argument "types.arity");
-  Harness.test "a type given too few arguments is one error, and its fields are not read" (fun () ->
-      one_diagnostic Fixtures.Infer.field_of_a_pair_given_one_argument "types.arity");
+  Harness.test "a type given too few arguments is one error, not a mismatch for each field"
+    (fun () -> one_diagnostic Fixtures.Infer.pair_built_with_one_type_argument "types.arity");
   Harness.test "an associated type that a supertrait fixes to Self is Self" (fun () ->
       no_diagnostics [ ("app::main", Fixtures.Infer.output_of_a_fixed_width_integer) ]);
   Harness.test "an associated type of a generic supertrait takes the supertrait's arguments"
