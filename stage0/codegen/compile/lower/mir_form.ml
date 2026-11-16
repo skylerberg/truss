@@ -1035,14 +1035,14 @@ let make_owned_locals st =
       then ignore (local_place st local))
     frame.body.locals
 
-let rec lower_body ?enclosing (st : Lowering.state) (frame : Lowering.mir_frame) =
+let rec lower_body (st : Lowering.state) (frame : Lowering.mir_frame) =
   st.frame <- { st.frame with mir = Some frame };
   List.iter
     (fun path ->
       Emit_c.Builder.emit st.builder
         (Assign (List.assoc path frame.flags, Use (Constant (Bool true)))))
     (Moves.held_at_entry frame.moves);
-  run_region st (new_region ?enclosing st) ~entry:(0, 0)
+  run_region st (new_region st) ~entry:(0, 0)
 
 and run_region st region ~entry:(block, index) =
   let caller = st.frame in

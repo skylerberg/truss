@@ -1,5 +1,5 @@
 let manifest_name = "truss.toml"
-let write_file = File_system.write_atomically ~durable:false
+let write_file = File_system.write_atomically
 
 let load directory =
   let directory = Shown_path.real directory in

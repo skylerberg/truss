@@ -153,7 +153,7 @@ let owned_local st ?name (scope : scope) ty =
   if not (is_trivial st ty) then scope.owned <- Drop_value place :: scope.owned;
   place
 
-let temporary st ?name ty = owned_local st ?name (innermost_scope st) ty
+let temporary st ty = owned_local st (innermost_scope st) ty
 let binding st ?name ty = owned_local st ?name (binding_scope st.scopes) ty
 
 let flagged_binding st ty ~flag =
@@ -164,10 +164,9 @@ let flagged_binding st ty ~flag =
   end;
   place
 
-let parameter st ?how ?(in_scope = true) ~owned (mode : Ground.mode) ty =
-  let how = Option.value how ~default:(Convention.parameter st.context.env) in
+let parameter st ?(in_scope = true) ~owned (mode : Ground.mode) ty =
   let own place = if in_scope && owned && not (is_trivial st ty) then own_in_scope st place in
-  match how mode ty with
+  match Convention.parameter st.context.env mode ty with
   | None -> (None, temporary st ty)
   | Some (Lowered.Pointer _ as pointer) ->
       let arrives = Emit_c.Builder.local st.builder pointer in
