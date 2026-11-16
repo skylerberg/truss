@@ -13,7 +13,7 @@ val request :
 val request_key : request -> string
 val solve_all : t -> (request * Logic.query) list -> canonical list
 val read : request -> canonical -> answer
-val queries_run : t -> int
+val count_queries_run : t -> int
 
 module For_testing : sig
   val key : Logic.query -> string

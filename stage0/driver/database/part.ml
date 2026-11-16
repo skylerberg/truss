@@ -48,7 +48,6 @@ type computed =
   | Patterns of Resolve.Names.key
   | Usage of Resolve.Names.key
   | Ownership of Resolve.Names.key
-  | Used_packages of Resolve.Names.key
   | Import_check of Path.file
   | Package_check of Path.package * Package_checks.check
   | Call_edges of Path.t * Path.package
@@ -93,7 +92,6 @@ let package : computed -> Path.package = function
   | Patterns key
   | Usage key
   | Ownership key
-  | Used_packages key
   | Proof key ->
       key.module_.package
   | Constant_value path
@@ -183,7 +181,6 @@ let show_computed part =
   | Patterns declared -> "patterns " ^ show_key declared
   | Usage declared -> "usage " ^ show_key declared
   | Ownership declared -> "ownership " ^ show_key declared
-  | Used_packages declared -> "used packages " ^ show_key declared
   | Import_check file -> "import check " ^ Path.show_file file
   | Package_check (package, check) ->
       Printf.sprintf "package check %s %s" (Path.show_package package)
@@ -256,7 +253,6 @@ let computed_definition = function
   | Patterns key
   | Usage key
   | Ownership key
-  | Used_packages key
   | Proof key
   | Package_check (_, (Sealed key | Impl key | Type key | Constant key)) ->
       Some key.path
@@ -318,7 +314,6 @@ let computed_kind_name = function
   | Patterns _ -> "pattern check"
   | Usage _ -> "usage check"
   | Ownership _ -> "ownership check"
-  | Used_packages _ -> "used packages"
   | Import_check _ -> "import check"
   | Package_check _ -> "package check"
   | Call_edges _ -> "call edges"

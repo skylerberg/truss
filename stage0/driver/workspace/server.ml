@@ -257,9 +257,8 @@ let connect_or_start ~program ~key directory server_path path =
                       Option.to_result ~none:"Cannot reach the background process; try --no-server."
                         (connect path))))
 
-let call ?program ?(start_server = true) ~key ~progress request =
+let call_starting ~program ?(start_server = true) ~key ~progress request =
   Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
-  let program = Option.value program ~default:(executable ()) in
   let ( let* ) = Result.bind in
   let* directory, server_path, path = server_paths (executable_identity ()) key in
   let* socket =
@@ -287,3 +286,10 @@ let call ?program ?(start_server = true) ~key ~progress request =
       Error
         "the background process ended while answering; see its log in the cache's servers \
          directory."
+
+let call ?start_server ~key ~progress request =
+  call_starting ~program:(executable ()) ?start_server ~key ~progress request
+
+module For_testing = struct
+  let call = call_starting
+end

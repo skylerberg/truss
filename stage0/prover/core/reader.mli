@@ -1,4 +1,4 @@
-val formula_term :
+val read_formula :
   State.context ->
   State.frame ->
   Mir.formula ->

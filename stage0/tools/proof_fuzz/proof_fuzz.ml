@@ -81,7 +81,7 @@ let runnable database =
             List.map
               (fun (requirement : Mir.requirement) ->
                 "("
-                ^ Prover.Facts.quoted
+                ^ Prover.Facts.quote_span
                     (lookups.interface.names.text key)
                     (Source.Definition_span.locate
                        (lookups.interface.names.spans key)

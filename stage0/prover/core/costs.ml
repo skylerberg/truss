@@ -142,23 +142,26 @@ type polarity = Grows | Shrinks | Both
 
 let flip = function Grows -> Shrinks | Shrinks -> Grows | Both -> Both
 
-let rec choices_as_most = function
+let rec rewrite_choices_as_most = function
   | Logic.Operation ("ite", [ _; left; right ]) ->
-      Logic.Apply (Logic.Symbol.Cost_most, [ choices_as_most left; choices_as_most right ])
-  | Logic.Apply (name, arguments) -> Logic.Apply (name, List.map choices_as_most arguments)
-  | Logic.Operation (name, arguments) -> Logic.Operation (name, List.map choices_as_most arguments)
-  | Logic.Is (constructor, argument) -> Logic.Is (constructor, choices_as_most argument)
+      Logic.Apply
+        (Logic.Symbol.Cost_most, [ rewrite_choices_as_most left; rewrite_choices_as_most right ])
+  | Logic.Apply (name, arguments) -> Logic.Apply (name, List.map rewrite_choices_as_most arguments)
+  | Logic.Operation (name, arguments) ->
+      Logic.Operation (name, List.map rewrite_choices_as_most arguments)
+  | Logic.Is (constructor, argument) -> Logic.Is (constructor, rewrite_choices_as_most argument)
   | other -> other
 
-let rec most_as_choices = function
+let rec rewrite_most_as_choices = function
   | Logic.Apply (Logic.Symbol.Cost_most, [ left; right ]) ->
-      larger (most_as_choices left) (most_as_choices right)
-  | Logic.Apply (name, arguments) -> Logic.Apply (name, List.map most_as_choices arguments)
-  | Logic.Operation (name, arguments) -> Logic.Operation (name, List.map most_as_choices arguments)
-  | Logic.Is (constructor, argument) -> Logic.Is (constructor, most_as_choices argument)
+      larger (rewrite_most_as_choices left) (rewrite_most_as_choices right)
+  | Logic.Apply (name, arguments) -> Logic.Apply (name, List.map rewrite_most_as_choices arguments)
+  | Logic.Operation (name, arguments) ->
+      Logic.Operation (name, List.map rewrite_most_as_choices arguments)
+  | Logic.Is (constructor, argument) -> Logic.Is (constructor, rewrite_most_as_choices argument)
   | other -> other
 
-let varying_parts varies term =
+let list_varying_parts varies term =
   let parts = ref [] in
   let add part polarity =
     match List.assoc_opt part !parts with
@@ -192,10 +195,10 @@ let varying_parts varies term =
   walk Grows term;
   !parts
 
-let rec comparisons fact =
+let rec list_comparisons fact =
   match fact with
-  | Logic.Operation ("and", parts) -> List.concat_map comparisons parts
-  | Logic.Operation ("=>", [ _; conclusion ]) -> comparisons conclusion
+  | Logic.Operation ("and", parts) -> List.concat_map list_comparisons parts
+  | Logic.Operation ("=>", [ _; conclusion ]) -> list_comparisons conclusion
   | Logic.Operation (("<=" | "<"), [ left; right ]) -> [ (left, right) ]
   | Logic.Operation ((">=" | ">"), [ left; right ]) -> [ (right, left) ]
   | Logic.Operation ("=", [ left; right ]) -> [ (left, right); (right, left) ]
@@ -213,7 +216,7 @@ let is_type_end = function
       || Z.equal value (Z.of_int 0x10FFFF)
   | _ -> false
 
-let bound_of ~varies ~facts part polarity =
+let find_part_bound ~varies ~facts part polarity =
   let candidates =
     List.filter_map
       (fun (smaller, larger) ->
@@ -221,27 +224,29 @@ let bound_of ~varies ~facts part polarity =
         | Grows when smaller = part && larger <> part -> Some larger
         | Shrinks when larger = part && smaller <> part -> Some smaller
         | _ -> None)
-      (List.concat_map comparisons facts)
+      (List.concat_map list_comparisons facts)
   in
   let rank candidate = if varies candidate then 2 else if is_type_end candidate then 1 else 0 in
   match List.stable_sort (fun left right -> compare (rank left) (rank right)) candidates with
   | best :: _ -> Some best
   | [] -> None
 
-let bound_on ~varies ~facts cost =
+let find_cost_bound ~varies ~facts cost =
   let rec bound_within_depth depth cost =
     if not (varies cost) then Some cost
     else if depth = 0 then None
     else
-      let parts = varying_parts varies cost in
+      let parts = list_varying_parts varies cost in
       let replaced =
         List.find_map
           (fun (part, polarity) ->
             if polarity = Both then None
             else
-              match bound_of ~varies ~facts part polarity with
+              match find_part_bound ~varies ~facts part polarity with
               | Some bound ->
-                  Some (normalize (Logic.replace ~from:part ~into:(choices_as_most bound) cost))
+                  Some
+                    (normalize
+                       (Logic.replace ~from:part ~into:(rewrite_choices_as_most bound) cost))
               | None -> None)
           parts
       in
@@ -249,9 +254,10 @@ let bound_on ~varies ~facts cost =
       | Some next when next <> cost -> bound_within_depth (depth - 1) next
       | _ -> None
   in
-  Option.map most_as_choices (bound_within_depth 12 (normalize (choices_as_most cost)))
+  Option.map rewrite_most_as_choices
+    (bound_within_depth 12 (normalize (rewrite_choices_as_most cost)))
 
-let upper_bounds ~varies ~facts term =
+let list_upper_bounds ~varies ~facts term =
   List.filter_map
     (fun (smaller, larger) -> if smaller = term && not (varies larger) then Some larger else None)
-    (List.concat_map comparisons facts)
+    (List.concat_map list_comparisons facts)

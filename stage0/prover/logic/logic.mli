@@ -82,14 +82,14 @@ val disjunction : term list -> term
 val truncated_divide : term -> term -> term
 val truncated_remainder : term -> term -> term
 val mentions : symbol list -> term -> bool
-val free_constants : term -> symbol list
+val list_free_constants : term -> symbol list
 val has_quantifier : term -> bool
 val forall : ?trigger:term list -> (symbol * sort) list * term -> term
 val substitute : (symbol * term) list -> term -> term
 val replace : from:term -> into:term -> term -> term
 val has_untriggered_fact : query -> bool
 val prune : query -> query
-val text : query -> string
+val show_query : query -> string
 
 type rendering
 
@@ -97,6 +97,6 @@ val render : query -> rendering
 val rendered_text : rendering -> string
 val term_text : rendering -> term -> string option
 val symbols : rendering -> (symbol * string) list
-val members : query -> (string * (symbol * symbol list)) list
+val list_members : query -> (string * (symbol * symbol list)) list
 val hash : string -> string
 val show_symbol : symbol -> string

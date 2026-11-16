@@ -1,4 +1,4 @@
-type checked = { form : Core.t; tables : Tables.published; evidence_packages : Path.package list }
+type checked = { form : Core.t; tables : Tables.published; used_packages : Path.package list }
 
 val check :
   Lookups.t ->

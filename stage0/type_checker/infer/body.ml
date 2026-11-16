@@ -1,4 +1,4 @@
-type checked = { form : Core.t; tables : Tables.published; evidence_packages : Path.package list }
+type checked = { form : Core.t; tables : Tables.published; used_packages : Path.package list }
 
 let no_output : State.env =
   {
@@ -654,6 +654,27 @@ let integer_literal_range bounds =
           | None, found | found, None -> found)
         None builtins)
 
+let list_used_packages (resolved : Resolve.resolved) ~evidence_packages (form : Core.t) =
+  let named =
+    List.filter_map
+      (function
+        | Some (Resolve.Definition (_, path) | Variant (path, _)) -> Some (Path.package path)
+        | Some (Module module_) -> Some module_.package
+        | _ -> None)
+      (Array.to_list resolved.names)
+  in
+  let called = ref evidence_packages in
+  Core_walk.definition
+    (Core_walk.callees (function
+      | Trait_method { trait; evidence; _ } ->
+          called :=
+            Path.package trait.trait
+            :: (match evidence with Impl { impl; _ } -> [ Path.package impl ] | _ -> [])
+            @ !called
+      | _ -> ()))
+    form.definition;
+  List.sort_uniq compare (named @ !called)
+
 let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
   let resolved =
     Resolve.merge
@@ -771,11 +792,13 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
   if has_capability_variables then finalize state;
   match checked with
   | Some form when is_clean () ->
+      let form = if has_capability_variables then build () else form in
       Ok
         {
-          form = (if has_capability_variables then build () else form);
+          form;
           tables = Tables.publish state.tables;
-          evidence_packages = List.sort_uniq compare state.evidence_packages;
+          used_packages =
+            list_used_packages resolved ~evidence_packages:state.evidence_packages form;
         }
   | _ ->
       Error

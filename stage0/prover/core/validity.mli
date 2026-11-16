@@ -1,17 +1,17 @@
 val note_place : State.context -> State.frame -> int -> State.place_value -> unit
 val without_costs : State.context -> (unit -> 'a) -> 'a
-val specification_value : State.context -> State.frame -> Mir.formula -> State.frame * Logic.term
-val selected : State.context -> Types.ty -> string option -> string -> Logic.term -> Logic.term
+val read_specification : State.context -> State.frame -> Mir.formula -> State.frame * Logic.term
+val select_field : State.context -> Types.ty -> string option -> string -> Logic.term -> Logic.term
 
-val type_frame :
+val make_type_frame :
   State.context -> State.frame -> State.source -> Types.ty -> self:Logic.term option -> State.frame
 
-val type_source : State.context -> Types.ty -> State.source option
-val type_clauses : State.context -> Types.ty -> (State.source * Mir.type_clauses) option
-val invariants : Mir.loop_clause list -> Mir.formula list
-val invariants_of : State.context -> Types.ty -> (State.source * Mir.formula list) option
+val find_type_source : State.context -> Types.ty -> State.source option
+val find_type_clauses : State.context -> Types.ty -> (State.source * Mir.type_clauses) option
+val list_invariants : Mir.loop_clause list -> Mir.formula list
+val find_invariants : State.context -> Types.ty -> (State.source * Mir.formula list) option
 
-val validity :
+val make_validity :
   State.context ->
   State.frame ->
   assuming:bool ->
@@ -23,16 +23,18 @@ val validity :
   Logic.term
 
 val assume_valid : State.context -> State.frame -> Types.ty -> Logic.term -> unit
-val callback_arguments : State.context -> State.frame -> ('a * Types.ty) list -> Logic.term list
 
-val callback_contract_frame :
+val declare_callback_arguments :
+  State.context -> State.frame -> ('a * Types.ty) list -> Logic.term list
+
+val make_callback_contract_frame :
   State.frame -> (Core.local * 'a) list -> Logic.term list -> State.frame
 
-val own_callback : State.context -> Core.local -> (string * Mir.callback) option
-val escaping_callback : State.context -> State.frame -> Core.local -> unit
+val find_own_callback : State.context -> Core.local -> (string * Mir.callback) option
+val check_escaping_callback : State.context -> State.frame -> Core.local -> unit
 val reading_callback : State.context -> (unit -> 'a) -> 'a
 
-val part_frame :
+val bind_part_arguments :
   State.frame ->
   State.part ->
   arguments:(int * Logic.term) list ->
@@ -48,7 +50,7 @@ val callback_facts :
   Logic.term list ->
   Logic.term list
 
-val parameter_type : State.context -> State.frame -> Invocation.t -> int -> Types.ty option
+val find_parameter_type : State.context -> State.frame -> Invocation.t -> int -> Types.ty option
 
 val check_forwarded_callback :
   State.context ->

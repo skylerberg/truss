@@ -4,9 +4,6 @@ type placed = { key : Resolve.Names.key; diagnostic : Diagnostic.in_definition }
 
 val describe_unused_dependency : package:Path.package -> Path.package -> string
 
-val list_used_packages :
-  Resolve.resolved -> evidence_packages:Path.package list -> Core.t -> Path.package list
-
 type check =
   | Sealed of Resolve.Names.key
   | Impl of Resolve.Names.key

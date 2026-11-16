@@ -1880,8 +1880,9 @@ its source tree and the facts derived from it: its header, which holds a type's
 or trait's generic parameters and bounds, the resolved names of its interface,
 of its contract, and of its body, its interface and its contract, its type
 facts, its checked body, its MIR and call edges, the checks of its
-body (patterns, usage, and ownership), the packages its body uses, its proof,
-its lowered code, and its test key. Each of these is a *part*. A stage
+body (patterns, usage, and ownership), its proof, its lowered code, and its
+test key. Each of these is a *part*. The checked body records the packages
+that the body uses. A stage
 computes each part from the definition's earlier parts and from parts of
 other definitions. A package has parts of its own: each of its package
 checks, such as an unused dependency, is one part, computed from its

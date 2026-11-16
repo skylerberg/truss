@@ -98,6 +98,7 @@ type package_database = {
   parsed : parsed File_table.t;
   mutable namespace : Resolve.Names.namespace option;
   resolved_names : Resolve.resolved part Key_section_table.t;
+  grants : Interface.Environment.grant Package_table.t;
   import_checks : Diagnostic.t list File_table.t;
   trait_headers : Resolve.trait_header part Key_table.t;
   constant_values : Z.t option part Path_table.t;
@@ -105,7 +106,6 @@ type package_database = {
   interfaces : Interface.Environment.elaborated_interface part Key_table.t;
   derived_interfaces : Types.impl_interface part Type_trait_table.t;
   type_facts : Interface.Environment.type_facts part Path_table.t;
-  grants : Interface.Environment.grant Package_table.t;
   signature_checks : unit part Key_table.t;
   contracts : Core.t part Key_table.t;
   checked_bodies : Infer.checked part Key_table.t;
@@ -117,7 +117,6 @@ type package_database = {
   patterns : unit part Key_table.t;
   usage : unit part Key_table.t;
   ownership : (Core.origin * Core.origin) list part Key_table.t;
-  used_packages : Path.package list part Key_table.t;
   package_checks : Package_checks.outcome part Check_table.t;
   recursion_groups : Path.t list part Path_table.t;
   proofs : Prover.proof part Key_table.t;
@@ -154,6 +153,7 @@ let make_empty_package_database name ~dependencies =
     parsed = File_table.create 64;
     namespace = None;
     resolved_names = Key_section_table.create 1024;
+    grants = Package_table.create 4;
     import_checks = File_table.create 64;
     trait_headers = Key_table.create 64;
     constant_values = Path_table.create 64;
@@ -161,7 +161,6 @@ let make_empty_package_database name ~dependencies =
     interfaces = Key_table.create 256;
     derived_interfaces = Type_trait_table.create 16;
     type_facts = Path_table.create 64;
-    grants = Package_table.create 4;
     signature_checks = Key_table.create 256;
     contracts = Key_table.create 256;
     checked_bodies = Key_table.create 256;
@@ -173,7 +172,6 @@ let make_empty_package_database name ~dependencies =
     patterns = Key_table.create 64;
     usage = Key_table.create 64;
     ownership = Key_table.create 64;
-    used_packages = Key_table.create 64;
     package_checks = Check_table.create 64;
     recursion_groups = Path_table.create 64;
     proofs = Key_table.create 64;
@@ -283,6 +281,7 @@ let copy_package_database (package_database : package_database) =
     parsed = File_table.copy package_database.parsed;
     namespace = package_database.namespace;
     resolved_names = Key_section_table.copy package_database.resolved_names;
+    grants = Package_table.copy package_database.grants;
     import_checks = File_table.copy package_database.import_checks;
     trait_headers = Key_table.copy package_database.trait_headers;
     constant_values = Path_table.copy package_database.constant_values;
@@ -290,7 +289,6 @@ let copy_package_database (package_database : package_database) =
     interfaces = Key_table.copy package_database.interfaces;
     derived_interfaces = Type_trait_table.copy package_database.derived_interfaces;
     type_facts = Path_table.copy package_database.type_facts;
-    grants = Package_table.copy package_database.grants;
     signature_checks = Key_table.copy package_database.signature_checks;
     contracts = Key_table.copy package_database.contracts;
     checked_bodies = Key_table.copy package_database.checked_bodies;
@@ -302,7 +300,6 @@ let copy_package_database (package_database : package_database) =
     patterns = Key_table.copy package_database.patterns;
     usage = Key_table.copy package_database.usage;
     ownership = Key_table.copy package_database.ownership;
-    used_packages = Key_table.copy package_database.used_packages;
     package_checks = Check_table.copy package_database.package_checks;
     recursion_groups = Path_table.copy package_database.recursion_groups;
     proofs = Key_table.copy package_database.proofs;
@@ -706,7 +703,6 @@ let list_package_parts database (names : Resolve.Names.lookups) package : Part.c
         Patterns key;
         Usage key;
         Ownership key;
-        Used_packages key;
         Proof key;
       ]
     @ (match declaration.kind with
@@ -814,18 +810,11 @@ let make_recording_ownership_lookups database note : Ownership.Lookups.t =
     interface = make_recording_interface_lookups database note ~is_checked:true;
   }
 
-let list_used_packages database note (key : Resolve.Names.key) =
-  let { Infer.form; evidence_packages; _ } = read_checked database note key in
-  Package_checks.list_used_packages
-    (read_whole_resolution database note key)
-    ~evidence_packages form
-
 let make_recording_package_checks_lookups database note : Package_checks.Lookups.t =
   {
     interface = make_recording_interface_lookups database note ~is_checked:true;
     core = read_checked_form database note;
-    used_packages =
-      read_part database note (fun key -> Part.Used_packages key) (fun owner -> owner.used_packages);
+    used_packages = (fun key -> (read_checked database note key).used_packages);
   }
 
 let list_used_imports database note file =
@@ -993,6 +982,9 @@ let make_stored database (part : Part.stored) =
             (Key_section_table.make_access
                (fun package_database -> package_database.resolved_names)
                (key, section))
+      | Grant (_, dependency) ->
+          keyed ~is_failed:never
+            (Package_table.make_access (fun package_database -> package_database.grants) dependency)
       | Import_check file ->
           keyed ~is_failed:never
             (File_table.make_access (fun package_database -> package_database.import_checks) file)
@@ -1016,9 +1008,6 @@ let make_stored database (part : Part.stored) =
       | Type_facts path ->
           keyed ~is_failed:failed
             (Path_table.make_access (fun package_database -> package_database.type_facts) path)
-      | Grant (_, dependency) ->
-          keyed ~is_failed:never
-            (Package_table.make_access (fun package_database -> package_database.grants) dependency)
       | Signature_check key ->
           keyed ~is_failed:failed
             (Key_table.make_access (fun package_database -> package_database.signature_checks) key)
@@ -1052,9 +1041,6 @@ let make_stored database (part : Part.stored) =
       | Ownership key ->
           keyed ~is_failed:failed
             (Key_table.make_access (fun package_database -> package_database.ownership) key)
-      | Used_packages key ->
-          keyed ~is_failed:failed
-            (Key_table.make_access (fun package_database -> package_database.used_packages) key)
       | Package_check (_, check) ->
           keyed ~is_failed:failed
             (Check_table.make_access
@@ -1395,6 +1381,18 @@ let compute_part database (part : Part.computed) =
             | Some (Ok resolved) -> Value resolved
             | Some (Error diagnostics) -> Failed diagnostics
             | None -> Blocked))
+  | Grant (package, dependency) ->
+      let entry =
+        List.find
+          (fun (entry : Manifest.dependency) -> entry.package = dependency)
+          package_database.dependencies
+      in
+      into (Package_table.make_slot package_database.grants dependency) (fun note ->
+          note (Input (Dependencies package));
+          Some
+            (Interface.Grants.resolve_grant
+               (make_recording_name_lookups database note)
+               ~package entry.capabilities))
   | Import_check file ->
       into (File_table.make_slot package_database.import_checks file) (fun note ->
           Some (list_import_diagnostics database note file))
@@ -1456,18 +1454,6 @@ let compute_part database (part : Part.computed) =
             | Value (Some interface) -> Value interface
             | Value None | Failed _ | Blocked -> Blocked))
   | Type_facts path -> compute_type_facts database [ path ]
-  | Grant (package, dependency) ->
-      let entry =
-        List.find
-          (fun (entry : Manifest.dependency) -> entry.package = dependency)
-          package_database.dependencies
-      in
-      into (Package_table.make_slot package_database.grants dependency) (fun note ->
-          note (Input (Dependencies package));
-          Some
-            (Interface.Grants.resolve_grant
-               (make_recording_interface_lookups database note ~is_checked:false)
-               ~package entry.capabilities))
   | Signature_check key ->
       into (Key_table.make_slot package_database.signature_checks key) (fun note ->
           read database note (Interface key);
@@ -1567,9 +1553,6 @@ let compute_part database (part : Part.computed) =
                  in
                  (result.diagnostics, result.must_be_disjoint))
                key))
-  | Used_packages key ->
-      into (Key_table.make_slot package_database.used_packages key) (fun note ->
-          Some (make_part (list_used_packages database note) key))
   | Package_check (package, check) ->
       into (Check_table.make_slot package_database.package_checks check) (fun note ->
           Some
@@ -1591,7 +1574,7 @@ let compute_part database (part : Part.computed) =
         (fun note -> Some (list_call_edges database note ~viewer path))
   | Proof key ->
       into (Key_table.make_slot package_database.proofs key) (fun note ->
-          Some (make_part (Prover.proof (make_recording_proof_lookups database note)) key));
+          Some (make_part (Prover.prove (make_recording_proof_lookups database note)) key));
       own_template_checks database key
   | Lowering (Lowered key) ->
       into (Instance_table.make_slot database.lowered key) (fun note ->
@@ -1915,6 +1898,8 @@ let list_stored_parts (package_database : package_database) : Part.stored list =
            File_table.list_keys package_database.parsed (fun file -> Part.Parsed file);
            Key_section_table.list_keys package_database.resolved_names (fun (key, section) ->
                Part.Resolved (key, section));
+           Package_table.list_keys package_database.grants (fun dependency ->
+               Part.Grant (package_database.name, dependency));
            File_table.list_keys package_database.import_checks (fun file -> Part.Import_check file);
            Key_table.list_keys package_database.trait_headers (fun key -> Part.Trait_header key);
            Path_table.list_keys package_database.constant_values (fun path ->
@@ -1924,8 +1909,6 @@ let list_stored_parts (package_database : package_database) : Part.stored list =
            Type_trait_table.list_keys package_database.derived_interfaces (fun (type_, trait) ->
                Part.Derived_interface { type_; trait });
            Path_table.list_keys package_database.type_facts (fun path -> Part.Type_facts path);
-           Package_table.list_keys package_database.grants (fun dependency ->
-               Part.Grant (package_database.name, dependency));
            Key_table.list_keys package_database.signature_checks (fun key ->
                Part.Signature_check key);
            Key_table.list_keys package_database.contracts (fun key -> Part.Contract key);
@@ -1940,7 +1923,6 @@ let list_stored_parts (package_database : package_database) : Part.stored list =
            Key_table.list_keys package_database.patterns (fun key -> Part.Patterns key);
            Key_table.list_keys package_database.usage (fun key -> Part.Usage key);
            Key_table.list_keys package_database.ownership (fun key -> Part.Ownership key);
-           Key_table.list_keys package_database.used_packages (fun key -> Part.Used_packages key);
            Check_table.list_keys package_database.package_checks (fun check ->
                Part.Package_check (package_database.name, check));
            Key_table.list_keys package_database.proofs (fun key -> Part.Proof key);
@@ -2329,17 +2311,17 @@ let list_manifest_problems database package =
       (list_package_outcomes database package)
 
 let list_code_packages database package =
-  drain database ~through:Body_checks [ package ];
-  let used_packages = (find_owner database package).used_packages in
+  drain database ~through:Checked_bodies [ package ];
+  let checked_bodies = (find_owner database package).checked_bodies in
   let read_used (declaration : Resolve.Names.declaration) =
     match declaration.path with
     | Test _ -> Some []
     | _ -> (
         let key = Resolve.Names.key_of declaration in
-        match Key_table.find_opt used_packages key with
-        | Some (Value used) -> Some used
+        match Key_table.find_opt checked_bodies key with
+        | Some (Value checked) -> Some checked.used_packages
         | Some (Failed _ | Blocked) -> None
-        | None -> report_uncomputed (Used_packages key))
+        | None -> report_uncomputed (Checked_body key))
   in
   let used =
     List.map read_used ((make_stored_name_lookups database).package_declarations package)
@@ -2580,13 +2562,13 @@ module For_testing = struct
     List.concat_map (list_checker_diagnostics database file) checkers
 
   let read_derived_form database path =
-    drain database ~through:Derived_forms [ Path.package path ];
+    drain database ~through:Checked_bodies [ Path.package path ];
     match Path_table.find_opt (find_owner database (Path.package path)).derived_forms path with
     | Some (Value form) -> Some form
     | Some (Failed _ | Blocked) | None -> None
 
   let read_core database path =
-    drain database ~through:Derived_forms [ Path.package path ];
+    drain database ~through:Checked_bodies [ Path.package path ];
     Option.bind (make_form_origin database ignore path) (fun (origin, substitution) ->
         Option.map
           (fun form -> (form, substitution))

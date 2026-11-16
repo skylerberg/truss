@@ -80,14 +80,14 @@ module Term_table = Hashtbl.Make (Structural_key.Make (struct
   type t = term
 end))
 
-let bits_text width value =
+let show_bits width value =
   "#b" ^ String.init width (fun index -> if Z.testbit value (width - 1 - index) then '1' else '0')
 
-let integer_text value =
+let show_integer value =
   if Z.sign value < 0 then Printf.sprintf "(- %s)" (Z.to_string (Z.neg value))
   else Z.to_string value
 
-let sort_text = function
+let show_sort = function
   | Int -> "Int"
   | Bool -> "Bool"
   | Float (exponent, significand) -> Printf.sprintf "Float%d_%d" exponent significand
@@ -115,7 +115,7 @@ let rec show_symbol : symbol -> string = function
   | Field { type_; variant; field } ->
       "field." ^ Types.show type_ ^ "." ^ variant_text variant ^ "." ^ field
   | Unit -> "Unit.unit"
-  | Apply sorts -> String.concat "." ("apply" :: List.map sort_text sorts)
+  | Apply sorts -> String.concat "." ("apply" :: List.map show_sort sorts)
   | Equal ty -> "equal." ^ Types.show ty
   | Valid ty -> "valid." ^ Types.show ty
   | Rank ty -> "rank." ^ Types.show ty
@@ -125,7 +125,7 @@ let rec show_symbol : symbol -> string = function
   | Potential ty -> "potential." ^ Types.show ty
   | Potential_measure ty -> "potential.measure." ^ Types.show ty
   | Block_bytes { type_; variant } -> "bytes." ^ Types.show type_ ^ "." ^ variant_text variant
-  | Time sort -> "time." ^ sort_text sort
+  | Time sort -> "time." ^ show_sort sort
   | Method_time { method_; trait_arguments; self_type } ->
       Printf.sprintf "time.method.%s%s[%s]" (Path.show method_) (instance_text trait_arguments)
         (Types.show self_type)
@@ -145,9 +145,9 @@ let rec show_symbol : symbol -> string = function
 and show_term term =
   let rec show = function
     | Symbol name -> show_symbol name
-    | Integer value -> integer_text value
+    | Integer value -> show_integer value
     | Boolean value -> if value then "true" else "false"
-    | Bits (width, value) -> bits_text width value
+    | Bits (width, value) -> show_bits width value
     | Apply (name, arguments) -> applied (show_symbol name) arguments
     | Operation (name, arguments) -> applied name arguments
     | Is (constructor, argument) ->
@@ -163,7 +163,7 @@ and show_term term =
       | Bool -> "Bool"
       | Float (exponent, significand) ->
           Printf.sprintf "(_ FloatingPoint %d %d)" exponent significand
-      | (Type_sort _ | Function_sort _) as sort -> sort_text sort
+      | (Type_sort _ | Function_sort _) as sort -> show_sort sort
     in
     Printf.sprintf "(%s (%s) %s)" word
       (String.concat " "
@@ -244,13 +244,13 @@ let rec mentions symbols = function
       let shadowed = List.map fst bound in
       mentions (List.filter (fun symbol -> not (List.mem symbol shadowed)) symbols) body
 
-let rec free_constants = function
+let rec list_free_constants = function
   | Symbol name -> [ name ]
   | Integer _ | Boolean _ | Bits _ -> []
-  | Apply (_, arguments) | Operation (_, arguments) -> List.concat_map free_constants arguments
-  | Is (_, argument) -> free_constants argument
+  | Apply (_, arguments) | Operation (_, arguments) -> List.concat_map list_free_constants arguments
+  | Is (_, argument) -> list_free_constants argument
   | Forall (bound, _, body) | Exists (bound, body) ->
-      List.filter (fun name -> not (List.mem_assoc name bound)) (free_constants body)
+      List.filter (fun name -> not (List.mem_assoc name bound)) (list_free_constants body)
 
 let rec has_quantifier = function
   | Forall _ | Exists _ -> true
@@ -280,14 +280,14 @@ let rec substitute substitution term =
   | Operation (name, arguments) -> Operation (name, List.map (substitute substitution) arguments)
   | Is (constructor, argument) -> Is (constructor, substitute substitution argument)
   | Forall (bound, trigger, body) ->
-      let inner = unbound bound substitution in
+      let inner = remove_bound bound substitution in
       Forall (bound, List.map (substitute inner) trigger, substitute inner body)
-  | Exists (bound, body) -> Exists (bound, substitute (unbound bound substitution) body)
+  | Exists (bound, body) -> Exists (bound, substitute (remove_bound bound substitution) body)
 
-and unbound bound substitution =
+and remove_bound bound substitution =
   List.filter (fun (name, _) -> not (List.mem_assoc name bound)) substitution
 
-let triggers ~triggering variables body =
+let list_triggers ~triggering variables body =
   let names = List.map fst variables in
   let rec is_trigger_term = function
     | Symbol _ | Integer _ | Boolean _ | Bits _ -> true
@@ -404,10 +404,10 @@ let triggers ~triggering variables body =
 let forall ?(trigger = []) (variables, body) =
   match variables with [] -> body | _ -> Forall (variables, trigger, body)
 
-let chosen_triggers ~triggering variables trigger body =
-  match trigger with [] -> triggers ~triggering variables body | terms -> [ terms ]
+let choose_triggers ~triggering variables trigger body =
+  match trigger with [] -> list_triggers ~triggering variables body | terms -> [ terms ]
 
-let triggering_in declarations =
+let make_triggering_test declarations =
   let functions = Symbol_table.create 64 in
   List.iter
     (function
@@ -423,15 +423,15 @@ let triggering_in declarations =
   Symbol_table.mem functions
 
 let has_untriggered_fact query =
-  let triggering = triggering_in query.declarations in
+  let triggering = make_triggering_test query.declarations in
   let rec without = function
     | Operation ("=>", [ _; inner ]) -> without inner
-    | Forall (variables, trigger, body) -> chosen_triggers ~triggering variables trigger body = []
+    | Forall (variables, trigger, body) -> choose_triggers ~triggering variables trigger body = []
     | _ -> false
   in
   List.exists without query.facts
 
-let declared_symbols declared term =
+let list_declared_symbols declared term =
   let symbols = ref [] in
   let rec walk bound = function
     | Symbol name ->
@@ -458,16 +458,16 @@ let prune query =
     query.declarations;
   let reached = Symbol_table.create 64 in
   let reach symbols = List.iter (fun symbol -> Symbol_table.replace reached symbol ()) symbols in
-  reach (declared_symbols declared query.goal);
-  let triggering = triggering_in query.declarations in
+  reach (list_declared_symbols declared query.goal);
+  let triggering = make_triggering_test query.declarations in
   let rec needs fact symbols =
     match fact with
     | Operation ("=>", [ _; (Forall _ as inner) ]) -> needs inner symbols
     | Forall (variables, trigger, body) -> (
-        match chosen_triggers ~triggering variables trigger body with
+        match choose_triggers ~triggering variables trigger body with
         | [] -> fun () -> List.exists (Symbol_table.mem reached) symbols
         | triggers ->
-            let triggers = List.map (List.concat_map (declared_symbols declared)) triggers in
+            let triggers = List.map (List.concat_map (list_declared_symbols declared)) triggers in
             fun () ->
               List.exists (fun trigger -> List.for_all (Symbol_table.mem reached) trigger) triggers)
     | _ -> fun () -> List.exists (Symbol_table.mem reached) symbols
@@ -486,7 +486,7 @@ let prune query =
     Array.of_list
       (List.map
          (fun fact ->
-           let symbols = declared_symbols declared fact in
+           let symbols = list_declared_symbols declared fact in
            (symbols, needs fact symbols))
          query.facts)
   in
@@ -516,7 +516,7 @@ type numbering = {
   sort_order : sort Dynarray.t;
 }
 
-let rec sort_name numbering = function
+let rec render_sort_name numbering = function
   | Int -> "Int"
   | Bool -> "Bool"
   | Float (exponent, significand) -> Printf.sprintf "(_ FloatingPoint %d %d)" exponent significand
@@ -531,12 +531,12 @@ let rec sort_name numbering = function
           | Some constructors ->
               List.iter
                 (fun (_, fields) ->
-                  List.iter (fun (_, sort) -> ignore (sort_name numbering sort)) fields)
+                  List.iter (fun (_, sort) -> ignore (render_sort_name numbering sort)) fields)
                 constructors
           | None -> ());
           canonical)
 
-let symbol_name numbering name =
+let render_symbol_name numbering name =
   match Symbol_table.find_opt numbering.symbol_names name with
   | Some canonical -> Some canonical
   | None -> (
@@ -547,23 +547,23 @@ let symbol_name numbering name =
           Symbol_table.replace numbering.symbol_names name canonical;
           Dynarray.add_last numbering.symbol_order name;
           (match declaration with
-          | Constant (_, sort) -> ignore (sort_name numbering sort)
+          | Constant (_, sort) -> ignore (render_sort_name numbering sort)
           | Function (_, inputs, output) ->
-              List.iter (fun sort -> ignore (sort_name numbering sort)) inputs;
-              ignore (sort_name numbering output)
+              List.iter (fun sort -> ignore (render_sort_name numbering sort)) inputs;
+              ignore (render_sort_name numbering output)
           | Datatype _ -> ());
           Some canonical)
 
-let member_name numbering name =
+let render_member_name numbering name =
   Option.map
-    (fun (datatype, suffix) -> sort_name numbering datatype ^ suffix)
+    (fun (datatype, suffix) -> render_sort_name numbering datatype ^ suffix)
     (Symbol_table.find_opt numbering.member_of name)
 
-let function_name numbering name =
-  match member_name numbering name with
+let render_function_name numbering name =
+  match render_member_name numbering name with
   | Some canonical -> canonical
   | None -> (
-      match symbol_name numbering name with
+      match render_symbol_name numbering name with
       | Some canonical -> canonical
       | None -> invalid_arg ("Logic.text: undeclared symbol " ^ show_symbol name))
 
@@ -573,22 +573,22 @@ let rec print numbering bound buffer term =
   | Symbol name -> (
       match List.assoc_opt name bound with
       | Some canonical -> add canonical
-      | None -> add (function_name numbering name))
-  | Integer value -> add (integer_text value)
+      | None -> add (render_function_name numbering name))
+  | Integer value -> add (show_integer value)
   | Boolean value -> add (if value then "true" else "false")
-  | Bits (width, value) -> add (bits_text width value)
+  | Bits (width, value) -> add (show_bits width value)
   | Apply (name, arguments) ->
-      application numbering bound buffer (function_name numbering name) arguments
-  | Operation (name, arguments) -> application numbering bound buffer name arguments
+      render_application numbering bound buffer (render_function_name numbering name) arguments
+  | Operation (name, arguments) -> render_application numbering bound buffer name arguments
   | Is (constructor, argument) ->
-      application numbering bound buffer
-        (Printf.sprintf "(_ is %s)" (function_name numbering constructor))
+      render_application numbering bound buffer
+        (Printf.sprintf "(_ is %s)" (render_function_name numbering constructor))
         [ argument ]
   | Forall (variables, trigger, body) ->
-      quantifier numbering bound buffer "forall" variables trigger body
-  | Exists (variables, body) -> quantifier numbering bound buffer "exists" variables [] body
+      render_quantifier numbering bound buffer "forall" variables trigger body
+  | Exists (variables, body) -> render_quantifier numbering bound buffer "exists" variables [] body
 
-and application numbering bound buffer head = function
+and render_application numbering bound buffer head = function
   | [] -> Buffer.add_string buffer head
   | arguments ->
       Buffer.add_string buffer "(";
@@ -600,7 +600,7 @@ and application numbering bound buffer head = function
         arguments;
       Buffer.add_string buffer ")"
 
-and quantifier numbering bound buffer word variables trigger body =
+and render_quantifier numbering bound buffer word variables trigger body =
   let add = Buffer.add_string buffer in
   let depth = List.length bound in
   let named =
@@ -614,11 +614,11 @@ and quantifier numbering bound buffer word variables trigger body =
   List.iteri
     (fun index (_, canonical, sort) ->
       if index > 0 then add " ";
-      add (Printf.sprintf "(%s %s)" canonical (sort_name numbering sort)))
+      add (Printf.sprintf "(%s %s)" canonical (render_sort_name numbering sort)))
     named;
   add ") ";
   let bound = List.map (fun (name, canonical, _) -> (name, canonical)) named @ bound in
-  match chosen_triggers ~triggering:numbering.triggering variables trigger body with
+  match choose_triggers ~triggering:numbering.triggering variables trigger body with
   | [] ->
       print numbering bound buffer body;
       add ")"
@@ -637,7 +637,7 @@ and quantifier numbering bound buffer word variables trigger body =
         triggers;
       add "))"
 
-let numbering query =
+let number_symbols query =
   let declared = Symbol_table.create 64 in
   let datatypes = Sort_table.create 8 in
   let member_of = Symbol_table.create 32 in
@@ -663,7 +663,7 @@ let numbering query =
     declared;
     datatypes;
     member_of;
-    triggering = triggering_in query.declarations;
+    triggering = make_triggering_test query.declarations;
     symbol_names = Symbol_table.create 64;
     symbol_order = Dynarray.create ();
     sort_names = Sort_table.create 8;
@@ -673,7 +673,7 @@ let numbering query =
 type rendering = { text : string; numbering : numbering }
 
 let render query =
-  let numbering = numbering query in
+  let numbering = number_symbols query in
   let assertion term =
     let buffer = Buffer.create 128 in
     Buffer.add_string buffer "(assert ";
@@ -689,11 +689,11 @@ let render query =
         let canonical = Symbol_table.find numbering.symbol_names name in
         match Symbol_table.find numbering.declared name with
         | Constant (_, sort) ->
-            Printf.sprintf "(declare-fun %s () %s)\n" canonical (sort_name numbering sort)
+            Printf.sprintf "(declare-fun %s () %s)\n" canonical (render_sort_name numbering sort)
         | Function (_, inputs, output) ->
             Printf.sprintf "(declare-fun %s (%s) %s)\n" canonical
-              (String.concat " " (List.map (sort_name numbering) inputs))
-              (sort_name numbering output)
+              (String.concat " " (List.map (render_sort_name numbering) inputs))
+              (render_sort_name numbering output)
         | Datatype _ -> "")
       (Dynarray.to_list numbering.symbol_order)
   in
@@ -726,7 +726,7 @@ let render query =
                   List.mapi
                     (fun field (_, field_sort) ->
                       Printf.sprintf " (%s_f%d %s)" constructor field
-                        (sort_name numbering field_sort))
+                        (render_sort_name numbering field_sort))
                     fields
                 in
                 "(" ^ constructor ^ String.concat "" fields ^ ")")
@@ -745,7 +745,7 @@ let render query =
   }
 
 let rendered_text rendering = rendering.text
-let text query = (render query).text
+let show_query query = (render query).text
 
 let term_text { numbering; _ } term =
   let rec named = function
@@ -771,7 +771,7 @@ let symbols { numbering; _ } =
     (fun name -> (name, Symbol_table.find numbering.symbol_names name))
     (Dynarray.to_list numbering.symbol_order)
 
-let members query =
+let list_members query =
   let { numbering; _ } = render query in
   Sort_table.fold
     (fun datatype constructors entries ->

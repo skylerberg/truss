@@ -1,4 +1,4 @@
-val function_ :
+val translate_function :
   ?proof:bool ->
   ?is_updating_helper:bool ->
   ?inherited:State.part * Types.substitution ->
@@ -8,7 +8,7 @@ val function_ :
   path:Path.t ->
   State.outcome
 
-val laws :
+val translate_laws :
   Lookups.t ->
   State.source ->
   impl:Path.t ->
@@ -18,7 +18,7 @@ val laws :
   at:State.location ->
   State.outcome
 
-val type_ : Lookups.t -> State.source -> path:Path.t -> State.outcome
+val translate_type : Lookups.t -> State.source -> path:Path.t -> State.outcome
 val test : Lookups.t -> State.source -> path:Path.t -> State.outcome
-val constant : Lookups.t -> State.source -> path:Path.t -> State.outcome
-val theorem : Lookups.t -> State.source -> path:Path.t -> State.outcome
+val translate_constant : Lookups.t -> State.source -> path:Path.t -> State.outcome
+val translate_theorem : Lookups.t -> State.source -> path:Path.t -> State.outcome

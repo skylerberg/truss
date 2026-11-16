@@ -38,7 +38,7 @@ let header =
     steps
 
 let key_of_text text = Logic.hash (Printf.sprintf "z3 %s\n%s%s" version header text)
-let key query = key_of_text (Logic.text query)
+let hash_query query = key_of_text (Logic.show_query query)
 
 type sexp = Atom of string | List of sexp list
 
@@ -96,7 +96,7 @@ type canonical = Proven_canonical | Values of (string * string) list | Out_of_st
 
 let answers : (string, canonical) Hashtbl.t = Hashtbl.create 256
 let lock = Mutex.create ()
-let locked work = Mutex.protect lock work
+let run_locked work = Mutex.protect lock work
 let request_key_of_text text value_arguments = key_of_text text ^ String.concat "," value_arguments
 
 let request ?(symbols = []) ?(terms = []) query =
@@ -161,8 +161,8 @@ let parse_canonical text =
               lines))
   | _ -> None
 
-let known_answer solver key =
-  locked (fun () ->
+let find_known_answer solver key =
+  run_locked (fun () ->
       match Hashtbl.find_opt answers key with
       | Some answer -> Some answer
       | None -> (
@@ -175,10 +175,10 @@ let known_answer solver key =
           | None -> None))
 
 let solve solver (request, query) =
-  match known_answer solver request.key with
+  match find_known_answer solver request.key with
   | Some answer -> answer
   | None ->
-      let text = Logic.text query in
+      let text = Logic.show_query query in
       if request_key_of_text text request.value_arguments <> request.key then
         bug "the query is not the one its request was made from";
       let input =
@@ -187,7 +187,7 @@ let solve solver (request, query) =
         if request.requested = [] then ""
         else Printf.sprintf "(get-value (%s))\n" (String.concat " " request.value_arguments)
       in
-      locked (fun () -> solver.queries_run <- solver.queries_run + 1);
+      run_locked (fun () -> solver.queries_run <- solver.queries_run + 1);
       let status, output, errors = Process.run ~input solver.program [ "-in"; "-smt2" ] in
       let answer =
         match parse_sexps output with
@@ -214,7 +214,7 @@ let solve solver (request, query) =
                to stderr"
               status (String.trim output) (String.trim errors)
       in
-      locked (fun () ->
+      run_locked (fun () ->
           Hashtbl.replace answers request.key answer;
           Option.iter (fun cache -> cache.add request.key (print_canonical answer)) solver.cache);
       answer
@@ -236,8 +236,8 @@ let solve_all solver requests =
   List.iter Domain.join domains;
   Array.to_list answers
 
-let queries_run solver = locked (fun () -> solver.queries_run)
+let count_queries_run solver = run_locked (fun () -> solver.queries_run)
 
 module For_testing = struct
-  let key = key
+  let key = hash_query
 end

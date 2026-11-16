@@ -30,7 +30,6 @@ val make_server_key : string -> string
 val serve : key:string -> handle:(progress:(string -> unit) -> 'request -> 'response) -> unit
 
 val call :
-  ?program:string ->
   ?start_server:bool ->
   key:string ->
   progress:(string -> unit) ->
@@ -48,5 +47,14 @@ module For_testing : sig
   val build_cold_database : snapshot -> Database.t
   val collect_cache : unit -> unit
   val listen : key:string -> (Unix.file_descr, string) result
+
+  val call :
+    program:string ->
+    ?start_server:bool ->
+    key:string ->
+    progress:(string -> unit) ->
+    'request ->
+    ('response, string) result
+
   val interrupt_commit : string -> unit
 end
