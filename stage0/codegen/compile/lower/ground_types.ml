@@ -458,41 +458,39 @@ let rec walk_key walk (key : Instance.key) =
   | Call_evaluation { function_; _ } ->
       walk_signature walk Constants.write_fully [];
       walk_signature walk function_ []
-  | Adapter { function_; ty } ->
+  | Generated (Adapter { function_; type_arguments; ty }) ->
       add walk (Function ty);
-      walk_key walk function_
-  | Entry method_key -> (
-      walk_key walk method_key;
-      match method_key with
-      | Code { path = Method { owner = impl; name; _ } as path; type_arguments } ->
-          let interface = impl_interface walk.context impl in
-          let substitution = bind (signature_of walk.context path).generics type_arguments in
-          add_type walk substitution interface.for_type;
-          let _, capability_signature =
-            Targets.capability_method walk.context interface.implements.trait name
-          in
-          signature_types ~receiver:false walk [] capability_signature
-      | _ -> ())
-  | Any_entry method_key -> (
-      walk_key walk method_key;
-      match method_key with
-      | Code { path = Method { owner = impl; name; _ }; type_arguments } ->
-          walk_any_methods walk impl type_arguments ~only:(Some name)
-      | _ -> ())
-  | Program_main path ->
+      walk_key walk (Code { path = function_; type_arguments })
+  | Generated (Entry ({ impl; name; type_arguments; _ } as impl_method)) ->
+      walk_key walk (Instance.make_method_code impl_method);
+      let interface = impl_interface walk.context impl in
+      let substitution =
+        bind (signature_of walk.context (Instance.make_method_path impl_method)).generics
+          type_arguments
+      in
+      add_type walk substitution interface.for_type;
+      let _, capability_signature =
+        Targets.capability_method walk.context interface.implements.trait name
+      in
+      signature_types ~receiver:false walk [] capability_signature
+  | Generated (Any_entry ({ impl; name; type_arguments; _ } as impl_method)) ->
+      walk_key walk (Instance.make_method_code impl_method);
+      walk_any_methods walk impl type_arguments ~only:(Some name)
+  | Generated (Program_main path) ->
       walk_signature walk path [];
       walk_real walk
         (evidence_for walk.context []
            (Option.fold ~none:Types.no_capabilities
               ~some:(fun (signature : Types.signature) -> signature.uses)
               (Interface.Impls.signature walk.context.lookups.interface path)))
-  | Locked_entry { capability; name } ->
+  | Generated (Locked_entry { capability; name }) ->
       let _, signature = Targets.capability_method walk.context capability name in
       signature_types ~receiver:false walk [] signature
-  | Table { impl; _ } ->
+  | Table (Impl_table { impl; _ }) ->
       walk_capability_methods walk (impl_interface walk.context impl).implements.trait
-  | Locked_table capability -> walk_capability_methods walk capability
-  | Any_table { impl; type_arguments } -> walk_any_methods walk impl type_arguments ~only:None
+  | Table (Locked_table capability) -> walk_capability_methods walk capability
+  | Table (Any_table { impl; type_arguments }) ->
+      walk_any_methods walk impl type_arguments ~only:None
 
 and walk_any_methods walk impl type_arguments ~only =
   let interface = impl_interface walk.context impl in

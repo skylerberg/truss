@@ -157,8 +157,7 @@ and constant_c context : Lowered.constant -> string * Lowered.ty = function
       let symbol = Instance.symbol key in
       declare_prototype context symbol
         (match key with
-        | Table _ | Any_table _ | Locked_table _ ->
-            Printf.sprintf "extern const void *const %s[];\n" symbol
+        | Table _ -> Printf.sprintf "extern const void *const %s[];\n" symbol
         | Any_drop _ -> Printf.sprintf "void %s(void *);\n" symbol
         | _ -> Printf.sprintf "extern const struct t_evidence %s;\n" symbol);
       ("((void *)&" ^ symbol ^ ")", Raw (Pointer Opaque))

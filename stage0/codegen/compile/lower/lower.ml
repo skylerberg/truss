@@ -2,7 +2,6 @@ open Emit_c.Builder
 open Definitions
 open Lowering
 open Targets
-open Generated
 
 type unsupported = Lowering.unsupported = { construct : string; at : Lowered.site option }
 
@@ -33,11 +32,10 @@ let test_key = Definitions.test_key
 
 type constant = Constants.constant = Folded of Lowered.data | Run of Ground.ty
 
-let constant = Constants.constant
-let evaluator = Constants.evaluator
-let table = Generated.table
-let locked_table = Generated.locked_table
-let any_table = Generated.any_table
+let lower_constant = Constants.constant
+let lower_evaluator = Constants.evaluator
+let lower_generated = Generated.lower
+let lower_table = Generated.lower_table
 
 let bind_parameters st (body : Mir.Graph.body) ~(defaults : (int * Mir.Graph.t) list) =
   let filled = ref 0 in
@@ -84,8 +82,8 @@ let code_state context ~key path =
   let code = code_of context path [] in
   (enter context ~builder:(create context.env ~key) (frame_of code), code)
 
-let template_check context (key : Instance.key) ~from_template ~literals ~clauses :
-    Emit_c.Builder.instance =
+let lower_template_check context ~from_template ~literals ~clauses : Emit_c.Builder.instance =
+  let key = Instance.Template_check { from_template; literals; clauses } in
   let st, _ = code_state context ~key from_template in
   let template_type =
     match interface_parameters (signature_of context from_template) with
@@ -111,7 +109,8 @@ let template_check context (key : Instance.key) ~from_template ~literals ~clause
       Constants.write_output st output);
   finish_instance st ~rest:[] ()
 
-let call_evaluation context (key : Instance.key) ~function_ ~arguments : Emit_c.Builder.instance =
+let lower_call_evaluation context ~function_ ~arguments : Emit_c.Builder.instance =
+  let key = Instance.Call_evaluation { function_; arguments } in
   let st, _ = code_state context ~key function_ in
   start st.builder (block st.builder);
   let signature = signature_of context function_ in
@@ -147,7 +146,8 @@ let call_evaluation context (key : Instance.key) ~function_ ~arguments : Emit_c.
       Constants.write_output st output);
   finish_instance st ~rest:[] ()
 
-let source_code context key ~path ~type_arguments : Emit_c.Builder.instance =
+let lower_source_code context ~path ~type_arguments : Emit_c.Builder.instance =
+  let key = Instance.Code { path; type_arguments } in
   let code = code_of context path type_arguments in
   let body = (Mir_form.mir_of context path).body in
   let st = enter context ~builder:(create context.env ~key) (frame_of code) in
@@ -175,13 +175,3 @@ let source_code context key ~path ~type_arguments : Emit_c.Builder.instance =
   in
   Mir_form.lower_code st path ~parameters:places ?lending ();
   finish_instance st ~returns ~rest:(parameter_locals @ lending_locals) ()
-
-let instance context (key : Instance.key) : Emit_c.Builder.instance =
-  match key with
-  | Entry method_key -> entry context key method_key
-  | Any_entry method_key -> any_entry context key method_key
-  | Locked_entry { capability; name } -> Generated.locked_entry context key ~capability ~name
-  | Adapter { function_; ty } -> adapter context key ~function_ ~ty
-  | Program_main main -> program_main context key main
-  | Code { path; type_arguments } -> source_code context key ~path ~type_arguments
-  | _ -> bug "%s is not code from source" (Instance.to_string key)

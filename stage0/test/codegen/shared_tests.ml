@@ -18,7 +18,7 @@ let loaded =
          ]
      in
      Database.For_testing.root database
-       (Program_main (Top { module_ = probe.module_; name = "main" }));
+       (Generated (Program_main (Top { module_ = probe.module_; name = "main" })));
      let text = Source.create ~path:(Path.show_file probe) source in
      (match diagnostics database probe with
      | [] -> ()

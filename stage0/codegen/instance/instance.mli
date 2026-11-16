@@ -10,15 +10,34 @@ type key =
   | Evaluator of Path.t
   | Template_check of { from_template : Path.t; literals : string list; clauses : int list }
   | Call_evaluation of { function_ : Path.t; arguments : Z.t list }
-  | Adapter of { function_ : key; ty : Ground.function_type }
-  | Entry of key
-  | Table of { impl : Path.t; type_arguments : Ground.argument list }
-  | Program_main of Path.t
-  | Any_entry of key
-  | Any_table of { impl : Path.t; type_arguments : Ground.argument list }
+  | Generated of generated
+  | Table of table
+
+and generated =
+  | Entry of impl_method
+  | Any_entry of impl_method
   | Locked_entry of { capability : Path.t; name : string }
+  | Adapter of {
+      function_ : Path.t;
+      type_arguments : Ground.argument list;
+      ty : Ground.function_type;
+    }
+  | Program_main of Path.t
+
+and table =
+  | Impl_table of { impl : Path.t; type_arguments : Ground.argument list }
+  | Any_table of { impl : Path.t; type_arguments : Ground.argument list }
   | Locked_table of Path.t
 
+and impl_method = {
+  impl : Path.t;
+  name : string;
+  receiver : Path.receiver;
+  type_arguments : Ground.argument list;
+}
+
+val make_method_path : impl_method -> Path.t
+val make_method_code : impl_method -> key
 val compare : key -> key -> int
 val equal : key -> key -> bool
 val symbol : key -> string

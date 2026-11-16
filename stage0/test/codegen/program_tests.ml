@@ -550,7 +550,7 @@ let () =
       let _, compile = load Fixtures.Program.console_a_program_is_given_is_a_value_its_start in
       let fragment =
         Compile.For_testing.compiled compile
-          (Program_main (Top { module_ = example; name = "main" }))
+          (Generated (Program_main (Top { module_ = example; name = "main" })))
       in
       let is_console_drop : Instance.key -> bool = function
         | Drop (Named { path = Top { name = "SystemConsole"; _ }; _ }) -> true

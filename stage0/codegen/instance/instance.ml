@@ -10,14 +10,36 @@ type key =
   | Evaluator of Path.t
   | Template_check of { from_template : Path.t; literals : string list; clauses : int list }
   | Call_evaluation of { function_ : Path.t; arguments : Z.t list }
-  | Adapter of { function_ : key; ty : Ground.function_type }
-  | Entry of key
-  | Table of { impl : Path.t; type_arguments : Ground.argument list }
-  | Program_main of Path.t
-  | Any_entry of key
-  | Any_table of { impl : Path.t; type_arguments : Ground.argument list }
+  | Generated of generated
+  | Table of table
+
+and generated =
+  | Entry of impl_method
+  | Any_entry of impl_method
   | Locked_entry of { capability : Path.t; name : string }
+  | Adapter of {
+      function_ : Path.t;
+      type_arguments : Ground.argument list;
+      ty : Ground.function_type;
+    }
+  | Program_main of Path.t
+
+and table =
+  | Impl_table of { impl : Path.t; type_arguments : Ground.argument list }
+  | Any_table of { impl : Path.t; type_arguments : Ground.argument list }
   | Locked_table of Path.t
+
+and impl_method = {
+  impl : Path.t;
+  name : string;
+  receiver : Path.receiver;
+  type_arguments : Ground.argument list;
+}
+
+let make_method_path { impl; name; receiver; _ } = Path.Method { owner = impl; name; receiver }
+
+let make_method_code (impl_method : impl_method) =
+  Code { path = make_method_path impl_method; type_arguments = impl_method.type_arguments }
 
 let compare = Stdlib.compare
 let equal = ( = )
@@ -139,17 +161,20 @@ let rec mangle = function
       ^ String.concat ""
           (List.map (fun number -> marker "Value" ^ text (Z.to_string number)) arguments)
       ^ marker "End"
-  | Adapter { function_; ty } ->
-      marker "Adapter" ^ mangle function_ ^ marker "As" ^ mangle_ty (Function ty)
-  | Any_entry key -> marker "Dynamic" ^ mangle key
-  | Any_table { impl; type_arguments } ->
-      marker "Vtable" ^ path impl ^ mangle_arguments type_arguments
-  | Locked_entry { capability; name } ->
+  | Generated (Adapter { function_; type_arguments; ty }) ->
+      marker "Adapter"
+      ^ mangle (Code { path = function_; type_arguments })
+      ^ marker "As" ^ mangle_ty (Function ty)
+  | Generated (Any_entry impl_method) -> marker "Dynamic" ^ mangle (make_method_code impl_method)
+  | Generated (Locked_entry { capability; name }) ->
       marker "LockedEntry" ^ path capability ^ marker "Method" ^ text name
-  | Locked_table capability -> marker "LockedTable" ^ path capability
-  | Entry key -> marker "Entry" ^ mangle key
-  | Table { impl; type_arguments } -> marker "Table" ^ path impl ^ mangle_arguments type_arguments
-  | Program_main main -> marker "Program" ^ path main
+  | Generated (Entry impl_method) -> marker "Entry" ^ mangle (make_method_code impl_method)
+  | Generated (Program_main main) -> marker "Program" ^ path main
+  | Table (Any_table { impl; type_arguments }) ->
+      marker "Vtable" ^ path impl ^ mangle_arguments type_arguments
+  | Table (Locked_table capability) -> marker "LockedTable" ^ path capability
+  | Table (Impl_table { impl; type_arguments }) ->
+      marker "Table" ^ path impl ^ mangle_arguments type_arguments
 
 let limit = 200
 let prefix_length = 180
@@ -181,15 +206,18 @@ let rec to_string = function
       "evaluation " ^ Path.show function_ ^ "("
       ^ String.concat ", " (List.map Z.to_string arguments)
       ^ ")"
-  | Adapter { function_; _ } -> "adapter " ^ to_string function_
-  | Any_entry key -> "any entry " ^ to_string key
-  | Any_table { impl; type_arguments } ->
+  | Generated (Adapter { function_; type_arguments; _ }) ->
+      "adapter " ^ to_string (Code { path = function_; type_arguments })
+  | Generated (Any_entry impl_method) -> "any entry " ^ to_string (make_method_code impl_method)
+  | Generated (Locked_entry { capability; name }) ->
+      "locked entry " ^ Path.show capability ^ "." ^ name
+  | Generated (Entry impl_method) -> "entry " ^ to_string (make_method_code impl_method)
+  | Generated (Program_main main) -> "program " ^ Path.show main
+  | Table (Any_table { impl; type_arguments }) ->
       "any table " ^ Path.show impl ^ arguments_to_string type_arguments
-  | Locked_entry { capability; name } -> "locked entry " ^ Path.show capability ^ "." ^ name
-  | Locked_table capability -> "locked table " ^ Path.show capability
-  | Entry key -> "entry " ^ to_string key
-  | Table { impl; type_arguments } -> "table " ^ Path.show impl ^ arguments_to_string type_arguments
-  | Program_main main -> "program " ^ Path.show main
+  | Table (Locked_table capability) -> "locked table " ^ Path.show capability
+  | Table (Impl_table { impl; type_arguments }) ->
+      "table " ^ Path.show impl ^ arguments_to_string type_arguments
 
 and arguments_to_string = function
   | [] -> ""
