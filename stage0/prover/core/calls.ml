@@ -963,7 +963,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
             if part.inherited then trait_substitution else own_substitution
           in
           with_contract ~substitution_of:compute_substitution
-            ~instance:(Types.Type self_type :: arguments)
+            ~instance:(Facts.list_method_instance ~self_type arguments)
             path
             (Contracts.find_method_contract context.lookups trait name receiver evidence))
   | Indirect () ->

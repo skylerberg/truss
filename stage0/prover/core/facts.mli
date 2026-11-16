@@ -11,6 +11,7 @@ exception Unsupported of unsupported
 val raise_unsupported : State.location -> ('a, unit, string, 'b) format4 -> 'a
 val run_in_source : State.context -> State.source -> (unit -> 'a) -> 'a
 val raise_bug : ('a, unit, string, 'b) format4 -> 'a
+val list_method_instance : self_type:Types.ty -> Types.argument list -> Types.argument list
 val is_in_recursion_group : State.context -> Path.t -> bool
 val has_method_in_recursion_group : State.context -> Path.t -> bool
 val list_clauses : Mir.requirement list -> Mir.formula list

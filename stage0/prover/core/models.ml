@@ -143,17 +143,31 @@ let compute_model_function (context : State.context) (ty : Types.ty) ~(model : T
   let model_trait : Types.trait_reference =
     { trait = Well_known.make_path Model; trait_arguments = []; associated = [] }
   in
-  let declared_model =
-    Interface.Impls.normalize interface ~list_bounds:Interface.Impls.list_no_bounds
-      (Projection { base = ty; trait = model_trait; name = "Value" })
-  in
   match
     Interface.Impls.find_evidence interface ~list_bounds:Interface.Impls.list_no_bounds
       ~checks_conditions:false ty model_trait
   with
-  | Some (Interface.Impls.From_impl { impl; _ }) when Types.equal declared_model model ->
+  | Some (Interface.Impls.From_impl { impl; substitution }) ->
+      let declared_model =
+        match
+          List.assoc_opt "Value"
+            (Interface.Definition.read_impl_interface interface impl).implements.associated
+        with
+        | Some value ->
+            Interface.Impls.normalize interface ~list_bounds:Interface.Impls.list_no_bounds
+              (Types.substitute substitution value)
+        | None ->
+            Facts.raise_bug "the implementation of `Model` for `%s` declares no `Value`"
+              (Types.show ty)
+      in
+      if not (Types.equal declared_model model) then
+        Facts.raise_bug "the model of `%s` is `%s`, not the `%s` asked for" (Types.show ty)
+          (Types.show declared_model) (Types.show model);
       let path = Path.Method { owner = impl; name = "model"; receiver = Read } in
-      let symbol = Logic.Symbol.Function { callee = path; instance = [ Types.Type ty ] } in
+      let symbol =
+        Logic.Symbol.Function
+          { callee = path; instance = Facts.list_method_instance ~self_type:ty [] }
+      in
       Facts.declare context
         (Logic.Function (symbol, [ Facts.declare_sort context ty ], Facts.declare_sort context model));
       rank_model context ty ~model ~impl symbol;
@@ -171,7 +185,7 @@ let compute_model_function (context : State.context) (ty : Types.ty) ~(model : T
                        (substitute_value_term context count) )))
       | _ -> ());
       Some (fun term -> Logic.Apply (symbol, [ term ]))
-  | _ -> None
+  | Some (From_bound | From_any | Built_in | Accepted _) | None -> None
 
 let find_model_function (context : State.context) (ty : Types.ty) ~(model : Types.ty) =
   let key = (ty, model) in

@@ -22,6 +22,7 @@ let run_in_source (context : State.context) (source : State.source) read =
     raise (Unsupported { unsupported with foreign_definition = Some source.name })
 
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Prover" format
+let list_method_instance ~self_type arguments = Types.Type self_type :: arguments
 
 let is_in_recursion_group (context : State.context) path =
   List.exists (Path.equal path) (context.lookups.list_recursion_group context.current)
