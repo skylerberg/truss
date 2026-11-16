@@ -168,6 +168,33 @@ let () =
       if status <> 2 || not (String.includes ~affix:"use --all" output) then
         fail "exited with %d: %s" status output)
 
+let with_fresh_cache work =
+  let cache = Harness.make_scratch_directory "cleaned-cache" in
+  Workspace.reset ();
+  Unix.putenv "TRUSS_CACHE" cache;
+  Fun.protect ~finally:Workspace.reset (fun () -> work cache)
+
+let () =
+  test "the help lists clean" (fun () ->
+      let status, output = capture (fun () -> Cli.Main.run_client [ "truss"; "--help=plain" ]) in
+      if status <> 0 || not (String.includes ~affix:"clean" output) then
+        fail "exited with %d: %s" status output);
+  test "clean --help shows the cache directory and deletes nothing" (fun () ->
+      with_fresh_cache (fun cache ->
+          let status, output =
+            capture (fun () -> Cli.Main.run_client [ "truss"; "clean"; "--help=plain" ])
+          in
+          if status <> 0 || not (String.includes ~affix:"TRUSS_CACHE" output) then
+            fail "exited with %d: %s" status output;
+          if not (Sys.file_exists cache) then fail "deleted the cache directory"));
+  test "clean ends the background processes and deletes the cache directory" (fun () ->
+      with_fresh_cache (fun cache ->
+          let root = make_package_served_by_other_build () in
+          let status, output = capture (fun () -> Cli.Main.run_client [ "truss"; "clean" ]) in
+          if status <> 0 then fail "exited with %d: %s" status output;
+          if is_database_open_elsewhere root then fail "the background process still runs";
+          if Sys.file_exists cache then fail "the cache directory is still there"))
+
 let list_server_files () =
   let directory = Filename.concat (Sys.getenv "TRUSS_CACHE") "servers" in
   List.filter (( <> ) "server.log")
