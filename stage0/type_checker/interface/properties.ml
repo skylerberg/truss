@@ -8,17 +8,23 @@ let trait_substitution (interface : Types.trait_interface) ~self (reference : Ty
   :: Option.value ~default:[]
        (Types.substitution_of interface.trait_generics reference.trait_arguments)
 
-let rec bound_closure lookups ?(seen = []) ~self (bound : Types.trait_reference) =
-  if List.exists (fun (other : Types.trait_reference) -> Path.equal other.trait bound.trait) seen
-  then []
-  else
-    let required =
+let bound_closure lookups ~self (bound : Types.trait_reference) =
+  let closure = ref [] in
+  let rec visit ancestors (bound : Types.trait_reference) =
+    if not (List.exists (Path.equal bound.trait) ancestors || List.mem bound !closure) then begin
+      closure := bound :: !closure;
       match Definition.trait_interface lookups bound.trait with
       | Some trait ->
-          List.map (Types.substitute_trait (trait_substitution trait ~self bound)) trait.requires
-      | None -> []
-    in
-    bound :: List.concat_map (bound_closure lookups ~seen:(bound :: seen) ~self) required
+          List.iter
+            (fun required ->
+              visit (bound.trait :: ancestors)
+                (Types.substitute_trait (trait_substitution trait ~self bound) required))
+            trait.requires
+      | None -> ()
+    end
+  in
+  visit [] bound;
+  List.rev !closure
 
 let associated_bounds lookups ~base (trait : Types.trait_reference) name =
   match Definition.trait_interface lookups trait.trait with
