@@ -879,6 +879,15 @@ and lower_block builder (body : Core.block) : Tree.operand option =
   | Some value -> lower_expression builder value
   | None -> if Emitter.reaches builder then Some Emitter.unit_value else None
 
+and lower_body builder (body : Core.block) ~returns =
+  let return_ value = Emitter.return_ builder (if returns then Some value else None) 0 in
+  List.iter (lower_statement builder) body.statements;
+  match body.value with
+  | Some value ->
+      Emitter.run_in_statement builder value.origin (fun () ->
+          Option.iter return_ (lower_expression builder value))
+  | None -> if Emitter.reaches builder then return_ Emitter.unit_value
+
 and lower_scrutinee builder (matched : Core.operand) : Tree.place option =
   match matched with
   | Place written -> lower_place builder written
@@ -1508,7 +1517,7 @@ and lower_lambda builder (parameters : Core.pattern list) (captures : Core.captu
             | Bind _ -> ()
             | _ -> bind inner pattern (Emitter.make_local_place local))
           parameters locals;
-        Option.iter (fun value -> Emitter.return_ inner (Some value) 0) (lower_block inner body);
+        lower_body inner body ~returns:true;
         locals)
   in
   let rec compute_unconverted_type (value : Core.expression) =
@@ -1528,10 +1537,7 @@ and compute_block_type (body : Core.block) =
 
 and of_proof ~entry_locals (written : Core.block) =
   let builder = Emitter.create ~is_specification:true ~entry_locals ~takes_free_locals:true () in
-  Emitter.run_in_scope builder 0 (fun () ->
-      Option.iter
-        (fun value -> Emitter.return_ builder (Some value) 0)
-        (lower_block builder written));
+  Emitter.run_in_scope builder 0 (fun () -> lower_body builder written ~returns:true);
   let body = Emitter.finish builder ~parameters:(Emitter.free_locals builder) in
   { body; lambdas = Emitter.lambdas builder }
 
@@ -1620,9 +1626,6 @@ let of_definition ~is_specification (definition : Core.definition) =
               parameter.type_ 0)
           parameters
       in
-      Emitter.run_in_scope builder 0 (fun () ->
-          Option.iter
-            (fun value -> Emitter.return_ builder (if returns then Some value else None) 0)
-            (lower_block builder body));
+      Emitter.run_in_scope builder 0 (fun () -> lower_body builder body ~returns);
       { Tree.body = Emitter.finish builder ~parameters:locals; lambdas = Emitter.lambdas builder })
     code
