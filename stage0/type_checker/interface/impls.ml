@@ -178,7 +178,13 @@ let rec implements lookups ~(bounds : bounds) ?(depth = 0) ?(checks_conditions =
     | Some (Error_interface report) -> Some report
     | _ -> None
   in
-  if depth > 32 then None
+  if depth > Properties.recursion_limit then
+    raise
+      (Properties.Recursion_limit
+         (Printf.sprintf
+            "Deciding whether `%s` implements `%s` needs more than %d nested impls. The compiler \
+             stops there: bounds that ask for ever larger types never finish."
+            (Types.show type_) (Types.show_trait wanted) Properties.recursion_limit))
   else if Option.is_some broken_trait then
     Option.map (fun report -> Accepted (Types.Error report)) broken_trait
   else if Well_known.is Copyable wanted.trait || Well_known.is Plain wanted.trait then
@@ -309,7 +315,14 @@ and project_capability_set lookups ~bounds ?(depth = 0) type_ (trait : Types.tra
   let projection =
     Types.make_capability_set [ Types.Capability_projection { base = type_; trait; name } ]
   in
-  if depth > 32 then projection
+  if depth > Properties.recursion_limit then
+    raise
+      (Properties.Recursion_limit
+         (Printf.sprintf
+            "Finding the capabilities in `%s` needs more than %d nested capability sets. The \
+             compiler stops there: capability sets defined from each other never finish."
+            (Types.show_capability (Capability_projection { base = type_; trait; name }))
+            Properties.recursion_limit))
   else
     match implements lookups ~bounds ~checks_conditions:false type_ trait with
     | Some (From_impl { impl; substitution }) -> (

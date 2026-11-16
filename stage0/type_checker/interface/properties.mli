@@ -1,3 +1,7 @@
+exception Recursion_limit of string
+
+val recursion_limit : int
+
 val make_trait_substitution :
   Types.trait_interface -> self:Types.ty -> Types.trait_reference -> Types.substitution
 

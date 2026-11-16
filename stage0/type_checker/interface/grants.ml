@@ -59,9 +59,9 @@ let describe_missing ~subject ~of_ capability =
      for `%s` in `truss.toml`."
     subject (show_as_written capability) of_ (show_as_written capability) of_
 
-let rec list_evidence_uses lookups ~bounds ?(depth = 0) (evidence : Impls.evidence) =
+let rec list_evidence_uses lookups ~bounds (evidence : Impls.evidence) =
   match evidence with
-  | From_impl { impl; substitution } when depth < 16 -> (
+  | From_impl { impl; substitution } -> (
       match Definition.read_impl_interface lookups impl with
       | None -> []
       | Some interface ->
@@ -76,7 +76,7 @@ let rec list_evidence_uses lookups ~bounds ?(depth = 0) (evidence : Impls.eviden
           :: List.concat_map
                (fun (argument, bound) ->
                  match Impls.implements lookups ~bounds argument bound with
-                 | Some nested -> list_evidence_uses lookups ~bounds ~depth:(depth + 1) nested
+                 | Some nested -> list_evidence_uses lookups ~bounds nested
                  | None -> [])
                (Impls.list_required_bounds interface.impl_generics substitution))
   | _ -> []

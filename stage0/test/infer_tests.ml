@@ -637,6 +637,19 @@ let () =
         "types.mismatch");
   test "a pattern must match every field or write .." (fun () ->
       one_diagnostic Fixtures.Infer.pattern_must_match_every_field_or_write "types.missing_argument");
+  (let comparison depth =
+     "type Box[Value](value: Value)\n  derives Equal\n\nfn same(value: "
+     ^ String.concat "" (List.init depth (fun _ -> "Box["))
+     ^ "Int64" ^ String.make depth ']' ^ ") -> Bool {\n  value == value\n}\n"
+   in
+   test "a type nested 40 deep implements a trait through 40 nested impls" (fun () ->
+       fine (comparison 40));
+   test "a type nested 70 deep reaches the recursion limit of the impls that it needs" (fun () ->
+       one_diagnostic (comparison 70) "types.recursion_limit"
+         ~says:"needs more than 64 nested impls"));
+  test "an associated type that grows a type reaches the recursion limit" (fun () ->
+      one_diagnostic Fixtures.Infer.associated_type_that_grows_a_type_reaches_the_recursion_limit
+        "types.recursion_limit" ~says:"needs more than 64 nested types");
   test "an opaque type cannot be matched outside its package" (fun () ->
       one_diagnostic Fixtures.Infer.opaque_type_cannot_be_matched_outside_its_package
         "types.private_field");

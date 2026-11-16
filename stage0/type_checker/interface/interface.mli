@@ -35,6 +35,8 @@ module Constants = Constants
 module Definition = Definition
 
 module Properties : sig
+  exception Recursion_limit of string
+
   val make_trait_substitution :
     Types.trait_interface -> self:Types.ty -> Types.trait_reference -> Types.substitution
 
