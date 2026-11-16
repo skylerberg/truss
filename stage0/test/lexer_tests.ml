@@ -63,8 +63,6 @@ let interpolation_tokens text index =
   | Some literal -> shown (Token.interpolations literal).(index).tokens
   | None -> []
 
-let find text part ~occurrence = Option.get (Substring.For_testing.find ~occurrence text part)
-
 let error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
   match snd (lex text) with
   | [ diagnostic ] -> (
@@ -72,7 +70,7 @@ let error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
         Harness.fail "expected %s, got %s"
           (Diagnostic.Code.name (Lexer code))
           (Diagnostic.Code.name diagnostic.code);
-      let expected = find text at ~occurrence in
+      let expected = Support.find_occurrence ~sub:at ~occurrence text in
       if diagnostic.span.start <> expected then
         Harness.fail "expected the error at %d (%S), got %d" expected at diagnostic.span.start;
       let results = List.map (Diagnostic.apply_fix text) diagnostic.fixes in
@@ -414,7 +412,7 @@ let () =
       let text = lines [ "fn f() {"; {|  let s = """|}; "    text"; "}"; "fn g() {}" ] in
       error text ~code:Unterminated_string ~at:{|"""|};
       match snd (lex text) with
-      | [ { notes = [ (span, _) ]; _ } ] when span.start = find text "}" ~occurrence:1 -> ()
+      | [ { notes = [ (span, _) ]; _ } ] when span.start = String.index text '}' -> ()
       | _ -> Harness.fail "expected a note at the line where the string seems to end")
 
 let () =
@@ -757,9 +755,9 @@ let block_after = Documents.block_after
 let words = Documents.words
 
 let between text first second =
-  let start = Option.get (Substring.For_testing.find text first) + String.length first in
-  let rest = String.sub text start (String.length text - start) in
-  String.sub rest 0 (Option.get (Substring.For_testing.find rest second))
+  let start = Option.get (String.find_first ~sub:first text) + String.length first in
+  let stop = Option.get (String.find_first ~sub:second ~start text) in
+  String.sub text start (stop - start)
   |> String.split_on_char '\n' |> List.map String.trim |> String.concat " "
 
 let backticked text =

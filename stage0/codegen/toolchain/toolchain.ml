@@ -40,7 +40,7 @@ let required_flags =
 type optimization = O1 | O2
 
 let link_time_optimization toolchain =
-  if Substring.contains toolchain.identity "clang" then [ "-flto=thin" ] else [ "-flto" ]
+  if String.includes ~affix:"clang" toolchain.identity then [ "-flto=thin" ] else [ "-flto" ]
 
 let show_optimization_flag = function O1 -> "-O1" | O2 -> "-O2"
 

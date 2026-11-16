@@ -2,7 +2,6 @@ val test : string -> (unit -> unit) -> unit
 val diagnostics : Database.t -> Path.file -> Diagnostic.t list
 val fail : ('a, unit, string, unit) format4 -> 'a
 val expect_string : expected:String.t -> String.t -> unit
-val contains : string -> string -> bool
 val expect_int : expected:int -> int -> unit
 val render_records : Compile.record list -> string
 val definition : string -> Path.t

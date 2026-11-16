@@ -10,7 +10,8 @@ let select snapshot database packages ~paths ~match_ =
           match declaration.path with
           | Test { name; _ }
             when declaration.ordinal = 0
-                 && match match_ with Some text -> Substring.contains name text | None -> true ->
+                 && match match_ with Some text -> String.includes ~affix:text name | None -> true
+            ->
               let line =
                 fst (Source.position source (names.place (Resolve.Names.make_key declaration)).base)
               in

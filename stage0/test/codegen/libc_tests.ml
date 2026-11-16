@@ -94,9 +94,7 @@ let () =
       | Error _ -> ());
   Codegen_support.test
     "a function that only macOS has is held to its headers, and to no other system's" (fun () ->
-      let checked system =
-        Codegen_support.contains (Libc.For_testing.check system) "proc_pidpath"
-      in
+      let checked system = String.includes ~affix:"proc_pidpath" (Libc.For_testing.check system) in
       if not (checked { os = Macos; architecture = Arm64 }) then
         Codegen_support.fail "the check for macOS leaves out proc_pidpath";
       if checked linux then Codegen_support.fail "the check for Linux looks for proc_pidpath");
@@ -129,9 +127,9 @@ let () =
           }
       in
       let c = Emit_c.For_testing.c (Emit_c.make_fragment env (Code built)) in
-      if not (Codegen_support.contains c "t_runtime_panic(") then
+      if not (String.includes ~affix:"t_runtime_panic(" c) then
         Codegen_support.fail "the call does not stop the program:\n%s" c;
-      if Codegen_support.contains c "proc_pidpath(" then
+      if String.includes ~affix:"proc_pidpath(" c then
         Codegen_support.fail "the function is called:\n%s" c);
   Codegen_support.test "a function that takes a structure is declared with no header" (fun () ->
       Codegen_support.expect_string
@@ -730,7 +728,7 @@ let checked builder ?destination ?(type_arguments = []) operation arguments =
 let expect_panic ~saying instances =
   let status, _, errors = Codegen_support.run_program ~extra instances in
   if status <> 101 then Codegen_support.fail "expected a panic, got status %d (%s)" status errors;
-  if not (Codegen_support.contains errors saying) then
+  if not (String.includes ~affix:saying errors) then
     Codegen_support.fail "expected %S in %S" saying errors
 
 let () =
@@ -846,6 +844,6 @@ let () =
       let status, _, errors =
         Codegen_support.run_program ~extra [ built_entry (fun builder -> convert builder 1.0e30) ]
       in
-      if status <> 101 || not (Codegen_support.contains errors "conversion out of range") then
+      if status <> 101 || not (String.includes ~affix:"conversion out of range" errors) then
         Codegen_support.fail "expected a panic about the conversion, got status %d (%s)" status
           errors)

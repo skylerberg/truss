@@ -34,7 +34,7 @@ let truss_blocks text =
 let block_after document marker =
   let rec after_marker = function
     | [] -> []
-    | line :: rest -> if Substring.contains line marker then rest else after_marker rest
+    | line :: rest -> if String.includes ~affix:marker line then rest else after_marker rest
   in
   let rec after_fence = function
     | [] -> []

@@ -225,13 +225,7 @@ let hash_raw_string cursor ~start =
         in
         let quotes = max 3 (longest_run text_start 0 + 1) in
         let delimiter = String.make quotes '"' in
-        let interpolates =
-          let rec search index =
-            index + 1 < String.length value
-            && ((value.[index] = '$' && value.[index + 1] = '{') || search (index + 1))
-          in
-          search 0
-        in
+        let interpolates = String.includes ~affix:"${" value in
         let stop = text_stop + 1 + hashes in
         Cursor.report cursor ~code:String_prefix
           ~fixes:
@@ -311,16 +305,14 @@ let quoted_string (cursor : Cursor.t) ~scan ~nesting ~delimiter =
 let curly_quoted_string (cursor : Cursor.t) ~opening_length ~closing =
   let start = cursor.position in
   let text_start = start + opening_length in
-  let line_end = Cursor.end_of_line cursor text_start in
-  let rec close position =
-    if position + String.length closing > line_end then None
-    else if String.sub cursor.text position (String.length closing) = closing then Some position
-    else close (position + 1)
+  let rest_of_line =
+    String.sub cursor.text text_start (Cursor.end_of_line cursor text_start - text_start)
   in
-  match close text_start with
+  match String.find_first ~sub:closing rest_of_line with
   | None -> None
-  | Some text_stop ->
-      let value = String.sub cursor.text text_start (text_stop - text_start) in
+  | Some value_length ->
+      let value = String.sub rest_of_line 0 value_length in
+      let text_stop = text_start + value_length in
       let stop = text_stop + String.length closing in
       let reads_differently =
         String.exists
