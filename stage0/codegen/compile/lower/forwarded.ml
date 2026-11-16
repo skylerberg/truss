@@ -70,10 +70,10 @@ let substitute_trait substitution (trait : Types.trait_reference) : Types.trait_
   }
 
 let substitute_callee substitution (callee : Mir.callee) : Mir.callee option =
-  let arguments = List.map (Types.substitute_argument substitution) in
+  let substitute_arguments = List.map (Types.substitute_argument substitution) in
   match callee with
   | Function { path; type_arguments } ->
-      Some (Function { path; type_arguments = arguments type_arguments })
+      Some (Function { path; type_arguments = substitute_arguments type_arguments })
   | Trait_method method_ ->
       Some
         (Trait_method
@@ -81,7 +81,7 @@ let substitute_callee substitution (callee : Mir.callee) : Mir.callee option =
              method_ with
              trait = substitute_trait substitution method_.trait;
              self_type = Types.substitute substitution method_.self_type;
-             type_arguments = arguments method_.type_arguments;
+             type_arguments = substitute_arguments method_.type_arguments;
              evidence =
                (match method_.evidence with
                | Impl { impl; arguments = impl_arguments } ->
@@ -97,10 +97,10 @@ let substitute_callee substitution (callee : Mir.callee) : Mir.callee option =
                | (Bound | Dynamic) as evidence -> evidence);
            })
   | Intrinsic { operation; type_arguments } ->
-      Some (Intrinsic { operation; type_arguments = arguments type_arguments })
+      Some (Intrinsic { operation; type_arguments = substitute_arguments type_arguments })
   | Capability_method _ | Indirect _ -> None
 
-let forward_call ~(substitution : Types.substitution) ~(fresh : unit -> Mir.local)
+let forward_call ~(substitution : Types.substitution) ~(make_fresh_local : unit -> Mir.local)
     (mir : Mir.Graph.t) (outer : Mir.call) : t option =
   let body = mir.body in
   let ( let* ) = Option.bind in
@@ -115,14 +115,14 @@ let forward_call ~(substitution : Types.substitution) ~(fresh : unit -> Mir.loca
     if List.for_all Option.is_some outer_arguments then Some (List.map Option.get outer_arguments)
     else None
   in
-  let parameter local =
+  let find_parameter local =
     Option.bind
       (List.find_index (Int.equal local) body.parameters)
       (fun position -> List.nth_opt outer_values position)
   in
-  let renamed = List.map (fun (local, _) -> (local, fresh ())) computed in
-  let rec forwarded (value : Mir.operand) : Mir.operand option =
-    let projected (written : Mir.place) type_ ~(of_place : Mir.place -> Mir.operand) =
+  let renamed = List.map (fun (local, _) -> (local, make_fresh_local ())) computed in
+  let rec find_forwarded (value : Mir.operand) : Mir.operand option =
+    let find_projected (written : Mir.place) type_ ~(of_place : Mir.place -> Mir.operand) =
       match written.root with
       | Constant _ | Literal _ -> Some value
       | Local local -> (
@@ -139,8 +139,8 @@ let forward_call ~(substitution : Types.substitution) ~(fresh : unit -> Mir.loca
           | None -> (
               let stands_for =
                 match List.assoc_opt local held with
-                | Some operand -> forwarded operand
-                | None -> parameter local
+                | Some operand -> find_forwarded operand
+                | None -> find_parameter local
               in
               match (stands_for, written.projections) with
               | Some whole, [] -> Some whole
@@ -151,7 +151,7 @@ let forward_call ~(substitution : Types.substitution) ~(fresh : unit -> Mir.loca
     match value with
     | Constant _ -> Some value
     | Borrow borrow ->
-        projected borrow.place borrow.type_ ~of_place:(fun place ->
+        find_projected borrow.place borrow.type_ ~of_place:(fun place ->
             Borrow
               {
                 borrow with
@@ -160,11 +160,11 @@ let forward_call ~(substitution : Types.substitution) ~(fresh : unit -> Mir.loca
                 origin = outer.origin;
               })
     | Use use ->
-        projected use.place use.type_ ~of_place:(fun place ->
+        find_projected use.place use.type_ ~of_place:(fun place ->
             Use { place; type_ = Types.substitute substitution use.type_; origin = outer.origin })
     | Take _ -> None
   in
-  let forwarded_call (inner : Mir.call) : Mir.call option =
+  let find_forwarded_call (inner : Mir.call) : Mir.call option =
     let* callee = substitute_callee substitution inner.callee in
     let* arguments =
       List.fold_right
@@ -172,7 +172,7 @@ let forward_call ~(substitution : Types.substitution) ~(fresh : unit -> Mir.loca
           let* arguments = arguments in
           match argument with
           | Passed passed ->
-              let* value = forwarded passed.value in
+              let* value = find_forwarded passed.value in
               Some (Mir.Passed { passed with value } :: arguments)
           | Default -> None)
         inner.arguments (Some [])
@@ -185,11 +185,11 @@ let forward_call ~(substitution : Types.substitution) ~(fresh : unit -> Mir.loca
     List.fold_right
       (fun (local, inner) setup ->
         let* setup = setup in
-        let* call = forwarded_call inner in
+        let* call = find_forwarded_call inner in
         Some
           ((List.assoc local renamed, Types.substitute substitution body.locals.(local).type_, call)
           :: setup))
       computed (Some [])
   in
-  let* call = forwarded_call lending in
+  let* call = find_forwarded_call lending in
   Some { setup; call }

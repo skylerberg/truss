@@ -42,7 +42,7 @@ let resolve_target snapshot database packages from_ =
     match List.rev names with
     | last :: rest when module_exists snapshot packages { package; modules = List.rev rest } ->
         let module_ : Path.module_ = { package; modules = List.rev rest } in
-        let declared path =
+        let is_declared path =
           List.exists
             (fun (declaration : Resolve.Names.declaration) ->
               match (declaration.path, path) with
@@ -58,20 +58,20 @@ let resolve_target snapshot database packages from_ =
           | None -> Top { module_; name = last }
           | Some name -> Method { owner = Top { module_; name = last }; name; receiver = Static }
         in
-        if declared path then Definition path
+        if is_declared path then Definition path
         else Outcome.raise_cannot_run "Nothing named `%s` is defined in %s." from_ package_name
     | _ -> Outcome.raise_cannot_run "Nothing named `%s` is defined in %s." from_ package_name
 
-let new_name ~from_ to_ =
+let compute_new_name ~from_ to_ =
   let written = Path_argument.parse to_ and old = Path_argument.parse from_ in
-  let owner_and_name (argument : Path_argument.t) =
+  let split_owner_and_name (argument : Path_argument.t) =
     match argument.member with Some member -> (argument.last, member) | None -> ("", argument.last)
   in
-  let from_owner, _ = owner_and_name old in
+  let from_owner, _ = split_owner_and_name old in
   if written.prefix <> [] && written.prefix <> old.prefix then
     Outcome.raise_cannot_run
       "A rename keeps a definition in its module, and `%s` is in another one than `%s`." to_ from_;
-  let owner, name = owner_and_name written in
+  let owner, name = split_owner_and_name written in
   if written.member <> None && owner <> from_owner then
     Outcome.raise_cannot_run "A rename keeps a method with its type, and `%s` is not under `%s`."
       to_ from_owner;
@@ -148,8 +148,8 @@ let plan_module database snapshot packages (old_module : Path.module_) to_ =
           List.filter_map
             (fun (module_, span) ->
               if module_ = old_module then Some (file, Diagnostic.replace span full) else None)
-            (Inspect.References.uses
-               ~used_module:
+            (Inspect.References.list_uses
+               ~resolve_module:
                  (Resolve.Names.resolve_used_module
                     (Database.make_name_lookups database packages)
                     ~from:file.module_)
@@ -182,12 +182,12 @@ let locate_path snapshot packages (file : Path.file) =
   Filename.concat (locate_directory snapshot packages file.module_) (file.name ^ ".truss")
 
 let make_trial_snapshot snapshot after =
-  let path file = Workspace.locate_file snapshot file in
-  let written = List.map (fun (_, file, text) -> (path file, Some text)) after in
+  let locate_file file = Workspace.locate_file snapshot file in
+  let written = List.map (fun (_, file, text) -> (locate_file file, Some text)) after in
   let removed =
     List.filter_map
       (fun (old_file, _, _) ->
-        let old_path = path old_file in
+        let old_path = locate_file old_file in
         if List.mem_assoc old_path written then None else Some (old_path, None))
       after
   in
@@ -217,7 +217,8 @@ let run ~from_ ~to_ =
   if not (Report.clean report) then raise (Report.Errors report);
   let plan =
     match resolve_target snapshot database packages from_ with
-    | Definition path -> plan_definition database snapshot packages path (new_name ~from_ to_)
+    | Definition path ->
+        plan_definition database snapshot packages path (compute_new_name ~from_ to_)
     | Module module_ -> plan_module database snapshot packages module_ to_
   in
   let after = apply_plan snapshot packages plan in
@@ -269,11 +270,12 @@ let run ~from_ ~to_ =
                ( "moved",
                  match plan.moved with
                  | Some (old_m, new_m) ->
-                     let directory module_ =
+                     let encode_directory module_ =
                        Json.String
                          (Shown_path.show_path (locate_directory snapshot packages module_))
                      in
-                     Json.Object [ ("from", directory old_m); ("to", directory new_m) ]
+                     Json.Object
+                       [ ("from", encode_directory old_m); ("to", encode_directory new_m) ]
                  | None -> Json.Null );
              ])
       else

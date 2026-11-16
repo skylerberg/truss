@@ -15,10 +15,10 @@ let loaded =
            };
          ]
      in
-     Database.For_testing.root database
+     Database.For_testing.add_root database
        (Generated (Program_main (Top { module_ = probe.module_; name = "main" })));
      let text = Source.create ~path:(Path.show_file probe) source in
-     (match Codegen_support.diagnostics database probe with
+     (match Codegen_support.list_diagnostics database probe with
      | [] -> ()
      | diagnostics ->
          Codegen_support.fail "the source has diagnostics:\n%s"
@@ -35,7 +35,7 @@ let () =
       let database, compile = Lazy.force loaded in
       match
         Compile.run_tests compile ~time_limit_ms:2000
-          (Codegen_support.tests_in database probe.module_)
+          (Codegen_support.list_tests_in database probe.module_)
       with
       | Ok records ->
           Codegen_support.expect_string
@@ -86,7 +86,7 @@ let () =
             ( Diagnostic.Code.name diagnostic.code,
               String.sub text diagnostic.span.start (diagnostic.span.stop - diagnostic.span.start)
             ))
-          (Codegen_support.diagnostics database checks)
+          (Codegen_support.list_diagnostics database checks)
       in
       let expected =
         [

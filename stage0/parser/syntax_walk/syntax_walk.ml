@@ -45,9 +45,8 @@ and visit_loop_clause on_expression (clause : Syntax.loop_clause) =
 and visit_string_literal on_expression (literal : Syntax.string_literal) =
   List.iter (fun (value, _) -> on_expression value) literal.rest
 
-let visit_expression_parts ~expression:on_expression ~statement:on_statement
-    (value : Syntax.expression) =
-  let block (block : Syntax.block) = List.iter on_statement block.statements in
+let visit_expression_parts ~on_expression ~on_statement (value : Syntax.expression) =
+  let visit_block (block : Syntax.block) = List.iter on_statement block.statements in
   match value.kind with
   | Integer _ | Float _ | True | False | Todo | Unreachable | Break | Continue | Self_value
   | Self_type_value | Name _ | Expression_error ->
@@ -99,12 +98,12 @@ let visit_expression_parts ~expression:on_expression ~statement:on_statement
           on_expression key;
           on_expression value)
         entries
-  | Lambda { body; _ } -> block body
+  | Lambda { body; _ } -> visit_block body
   | If { condition; then_; else_ } -> (
       on_expression condition;
-      block then_;
+      visit_block then_;
       match else_ with
-      | Some (Else body) -> block body
+      | Some (Else body) -> visit_block body
       | Some (Else_if value) -> on_expression value
       | None -> ())
   | Match { scrutinees; arms } ->
@@ -116,17 +115,16 @@ let visit_expression_parts ~expression:on_expression ~statement:on_statement
         arms
   | Provide { implementations; body } ->
       List.iter on_expression implementations;
-      block body
-  | Block body -> block body
+      visit_block body
+  | Block body -> visit_block body
 
-let visit_statement_parts ~expression:on_expression ~statement:on_statement
-    (parent : Syntax.statement) =
-  let block (block : Syntax.block) = List.iter on_statement block.statements in
+let visit_statement_parts ~on_expression ~on_statement (parent : Syntax.statement) =
+  let visit_block (block : Syntax.block) = List.iter on_statement block.statements in
   match parent.kind with
   | Let { annotation; value; else_; _ } ->
       Option.iter (visit_type_expression on_expression) annotation;
       on_expression value;
-      Option.iter block else_
+      Option.iter visit_block else_
   | Expression value | Assert { value; _ } -> on_expression value
   | Assignment { target; value; _ } ->
       on_expression target;
@@ -135,34 +133,37 @@ let visit_statement_parts ~expression:on_expression ~statement:on_statement
       Option.iter (visit_type_expression on_expression) annotation;
       on_expression iterable;
       List.iter (visit_loop_clause on_expression) clauses;
-      block body
+      visit_block body
   | While { condition; clauses; body } ->
       on_expression condition;
       List.iter (visit_loop_clause on_expression) clauses;
-      block body
-  | Parallel body | Concurrent body | Proof body -> block body
+      visit_block body
+  | Parallel body | Concurrent body | Proof body -> visit_block body
   | Statement_error -> ()
 
 let rec visit_statement on_expression (parent : Syntax.statement) =
-  visit_statement_parts ~expression:on_expression ~statement:(visit_statement on_expression) parent
+  visit_statement_parts ~on_expression ~on_statement:(visit_statement on_expression) parent
 
 let visit_block on_expression (block : Syntax.block) =
   List.iter (visit_statement on_expression) block.statements
 
 let visit_children on_expression value =
-  visit_expression_parts ~expression:on_expression ~statement:(visit_statement on_expression) value
+  visit_expression_parts ~on_expression ~on_statement:(visit_statement on_expression) value
 
 let contains_break (body : Syntax.block) =
   let has_break = ref false in
   let rec search_statement (statement : Syntax.statement) =
     match statement.kind with
     | For _ | While _ -> ()
-    | _ -> visit_statement_parts ~expression:search_expression ~statement:search_statement statement
+    | _ ->
+        visit_statement_parts ~on_expression:search_expression ~on_statement:search_statement
+          statement
   and search_expression (value : Syntax.expression) =
     match value.kind with
     | Break -> has_break := true
     | Lambda _ -> ()
-    | _ -> visit_expression_parts ~expression:search_expression ~statement:search_statement value
+    | _ ->
+        visit_expression_parts ~on_expression:search_expression ~on_statement:search_statement value
   in
   List.iter search_statement body.statements;
   !has_break
@@ -196,7 +197,7 @@ let visit_signature on_expression (signature : Syntax.signature) =
   | None -> ());
   List.iter (visit_clause on_expression) signature.clauses
 
-let visit_function_definition ?statement:visit on_expression
+let visit_function_definition ?on_statement:visit on_expression
     (definition : Syntax.function_definition) =
   visit_signature on_expression definition.signature;
   match visit with
@@ -210,14 +211,14 @@ let visit_field on_expression (field : Syntax.field) =
       Option.iter on_expression default
   | Field_error -> ()
 
-let visit_definition ?statement:visit on_expression (definition : Syntax.definition) =
+let visit_definition ?on_statement:visit on_expression (definition : Syntax.definition) =
   let walk_block (body : Syntax.block) =
     match visit with
     | Some visit -> List.iter visit body.statements
     | None -> visit_block on_expression body
   in
   match definition.kind with
-  | Function function_ -> visit_function_definition ?statement:visit on_expression function_
+  | Function function_ -> visit_function_definition ?on_statement:visit on_expression function_
   | Method_declaration declared -> visit_signature on_expression declared
   | Type_definition { generics; body; clauses; _ } ->
       List.iter (visit_generic_parameter on_expression) generics;
@@ -395,7 +396,7 @@ let walk_names ~on_name (definition : Syntax.definition) =
                 on_name name;
                 walk_type type_)
           items
-    | _ -> visit_expression_parts ~expression:walk_expression ~statement:walk_statement value
+    | _ -> visit_expression_parts ~on_expression:walk_expression ~on_statement:walk_statement value
   and walk_statement (statement : Syntax.statement) =
     match statement.kind with
     | Let { pattern = bound; annotation; value; else_; _ } ->
@@ -409,7 +410,8 @@ let walk_names ~on_name (definition : Syntax.definition) =
         walk_pattern bound;
         List.iter (visit_loop_clause walk_expression) clauses;
         walk_block body
-    | _ -> visit_statement_parts ~expression:walk_expression ~statement:walk_statement statement
+    | _ ->
+        visit_statement_parts ~on_expression:walk_expression ~on_statement:walk_statement statement
   and walk_block (block : Syntax.block) = List.iter walk_statement block.statements
   and walk_pattern (pattern : Syntax.pattern) =
     match pattern.kind with

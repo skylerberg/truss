@@ -15,5 +15,5 @@ val make_string_literal :
   start:int ->
   modules:Syntax.name list ->
   Token.string_literal ->
-  interpolation:(Token.interpolation -> Syntax.expression) ->
+  parse_interpolation:(Token.interpolation -> Syntax.expression) ->
   Syntax.string_literal

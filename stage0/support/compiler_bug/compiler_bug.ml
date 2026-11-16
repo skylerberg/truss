@@ -6,15 +6,15 @@ let raise_bug ~stage format =
   Printf.ksprintf (fun message -> raise (Bug { stage; message; doing = [] })) format
 
 let run_while_doing ~stage doing work =
-  let broken message = raise (Bug { stage; message; doing = [ doing ] }) in
+  let raise_broken message = raise (Bug { stage; message; doing = [ doing ] }) in
   try work () with
   | Bug bug -> raise (Bug { bug with doing = bug.doing @ [ doing ] })
-  | Invalid_argument message -> broken ("Invalid_argument: " ^ message)
-  | Failure message -> broken ("Failure: " ^ message)
-  | Not_found -> broken "Not_found"
-  | Division_by_zero -> broken "Division_by_zero"
+  | Invalid_argument message -> raise_broken ("Invalid_argument: " ^ message)
+  | Failure message -> raise_broken ("Failure: " ^ message)
+  | Not_found -> raise_broken "Not_found"
+  | Division_by_zero -> raise_broken "Division_by_zero"
   | Assert_failure (file, line, column) ->
-      broken (Printf.sprintf "Assert_failure at %s:%d:%d" file line column)
+      raise_broken (Printf.sprintf "Assert_failure at %s:%d:%d" file line column)
 
 let to_string bug =
   String.concat ""

@@ -6,7 +6,7 @@ module type Node = sig
   val compare : t -> t -> int
 end
 
-let list_components (type node) (module Node : Node with type t = node) ~successors roots =
+let list_components (type node) (module Node : Node with type t = node) ~list_successors roots =
   let module Table = Hashtbl.Make (Node) in
   let index = Table.create 256 and low_link = Table.create 256 and on_stack = Table.create 256 in
   let stack = ref [] and next_index = ref 0 and components = ref [] in
@@ -17,7 +17,7 @@ let list_components (type node) (module Node : Node with type t = node) ~success
     incr next_index;
     stack := node :: !stack;
     Table.replace on_stack node ();
-    Stack.push (node, ref (successors node)) frames
+    Stack.push (node, ref (list_successors node)) frames
   in
   let lower_link node bound =
     if bound < Table.find low_link node then Table.replace low_link node bound

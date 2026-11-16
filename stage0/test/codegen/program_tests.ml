@@ -8,7 +8,9 @@ let () =
       in
       let run text =
         let database, compile = Codegen_support.load ~results text in
-        match Compile.run_tests compile ~time_limit_ms:2000 (Codegen_support.tests_of database) with
+        match
+          Compile.run_tests compile ~time_limit_ms:2000 (Codegen_support.list_tests database)
+        with
         | Ok records ->
             ( (if List.for_all (fun (record : Compile.record) -> record.outcome = Passed) records
                then 0
@@ -16,16 +18,16 @@ let () =
               Codegen_support.render_records records )
         | Error message -> failwith message
       in
-      let stored_count () = Hashtbl.length table in
+      let count_stored () = Hashtbl.length table in
       let source = Fixtures.Program.passing_tests in
       let first = run source in
-      Codegen_support.expect_int ~expected:1 (stored_count ());
+      Codegen_support.expect_int ~expected:1 (count_stored ());
       let second = run source in
       if first <> second then
         Codegen_support.fail "the report changed when kept:\n%s\n%s" (snd first) (snd second);
       Codegen_support.expect_int ~expected:1 (fst second);
       let _ = run Fixtures.Program.passing_test_of_two_plus_two in
-      Codegen_support.expect_int ~expected:2 (stored_count ()))
+      Codegen_support.expect_int ~expected:2 (count_stored ()))
 
 let () =
   Codegen_support.test
@@ -38,7 +40,9 @@ let () =
         Codegen_support.load ~results Fixtures.Program.test_reading_the_clock
       in
       let run () =
-        match Compile.run_tests compile ~time_limit_ms:2000 (Codegen_support.tests_of database) with
+        match
+          Compile.run_tests compile ~time_limit_ms:2000 (Codegen_support.list_tests database)
+        with
         | Ok records -> records
         | Error message -> failwith message
       in
@@ -317,7 +321,7 @@ let () =
         let path = Filename.concat directory name in
         (path, fun () -> In_channel.with_open_text path In_channel.input_all)
       in
-      let path, in_terminal = report "terminal-report.txt" in
+      let path, read_terminal_report = report "terminal-report.txt" in
       let status, _, errors =
         Process.run ~input:"" "script"
           (match Codegen_support.host.os with
@@ -338,11 +342,11 @@ let () =
                "after false false false";
                "";
              ])
-        (in_terminal ());
+        (read_terminal_report ());
       match Unix.openfile "/dev/tty" [ O_RDWR ] 0 with
       | terminal -> Unix.close terminal
       | exception Unix.Unix_error _ ->
-          let path, without = report "no-terminal-report.txt" in
+          let path, read_plain_report = report "no-terminal-report.txt" in
           let status, _, _ = Process.run ~input:"" program [ path ] in
           Codegen_support.expect_int ~expected:0 status;
           Codegen_support.expect_string
@@ -358,7 +362,7 @@ let () =
                    "after false false false";
                    "";
                  ])
-            (without ()))
+            (read_plain_report ()))
 
 let () =
   Codegen_support.test "a program waits for the signals it is sent" (fun () ->
@@ -574,7 +578,7 @@ let () =
     (fun () ->
       let _, compile = Codegen_support.load Fixtures.Program.main_using_the_console in
       let fragment =
-        Compile.For_testing.compiled compile
+        Compile.For_testing.compile_fragment compile
           (Generated (Program_main (Top { module_ = Codegen_support.example; name = "main" })))
       in
       let is_console_drop : Instance.key -> bool = function
@@ -582,7 +586,7 @@ let () =
         | _ -> false
       in
       if not (List.exists is_console_drop (Emit_c.references fragment)) then
-        Codegen_support.fail "no drop of the console:\n%s" (Emit_c.For_testing.c fragment))
+        Codegen_support.fail "no drop of the console:\n%s" (Emit_c.For_testing.render_c fragment))
 
 let () =
   Codegen_support.test
@@ -595,21 +599,23 @@ let () =
       Codegen_support.expect_string ~expected:"inside\nnamed\nkept\n" output)
 
 let () =
-  Harness.markdown_documents ()
+  Harness.list_markdown_documents ()
   |> List.iter (fun name ->
       List.iteri
         (fun index text ->
-          let packages = Codegen_support.example_package [ (Codegen_support.example_file, text) ] in
+          let packages =
+            Codegen_support.make_example_package [ (Codegen_support.example_file, text) ]
+          in
           if
-            Codegen_support.diagnostics
-              (Codegen_support.database packages)
+            Codegen_support.list_diagnostics
+              (Codegen_support.make_database packages)
               Codegen_support.example_file
             = []
           then
             Codegen_support.test
               (Printf.sprintf "%s block %d lowers, and its tests pass" name (index + 1))
               (fun () ->
-                let checked = Codegen_support.database packages in
+                let checked = Codegen_support.make_database packages in
                 let interface =
                   Database.make_interface_lookups checked
                     [ Codegen_support.example_file.module_.package ]
@@ -628,8 +634,10 @@ let () =
                        .list_declarations Codegen_support.example)
                 in
                 let database, compile = Codegen_support.load ~roots:functions text in
-                List.iter (fun key -> ignore (Compile.For_testing.compiled compile key)) functions;
-                match Codegen_support.tests_of database with
+                List.iter
+                  (fun key -> ignore (Compile.For_testing.compile_fragment compile key))
+                  functions;
+                match Codegen_support.list_tests database with
                 | [] -> ()
                 | tests ->
                     String.split_on_char '\n'
@@ -641,7 +649,7 @@ let () =
                         | [ "test"; _; ("passed" | "incomplete") ] | [ "test"; _ ] -> ()
                         | [ "test"; _; outcome ] -> Codegen_support.fail "a test %s" outcome
                         | _ -> ())))
-        (Documents.truss_blocks (File_system.read (Harness.workspace_path name))))
+        (Documents.list_truss_blocks (File_system.read (Harness.make_workspace_path name))))
 
 let () =
   Codegen_support.test "a function value whose type uses Panic is called without evidence for Panic"

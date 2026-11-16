@@ -10,14 +10,14 @@ let find () =
   let candidates =
     match Sys.getenv_opt "TRUSS_CC" with Some cc when cc <> "" -> [ cc ] | _ -> [ "clang"; "cc" ]
   in
-  let rec first errors = function
+  let rec identify_first errors = function
     | [] -> Error ("no C compiler found: " ^ String.concat "; " (List.rev errors))
     | candidate :: rest -> (
         match identify candidate with
         | Ok toolchain -> Ok toolchain
-        | Error error -> first (error :: errors) rest)
+        | Error error -> identify_first (error :: errors) rest)
   in
-  first [] candidates
+  identify_first [] candidates
 
 let added_flags_variable = "TRUSS_CFLAGS"
 let split_flags text = List.filter (( <> ) "") (String.split_on_char ' ' text)

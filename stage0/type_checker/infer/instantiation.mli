@@ -8,7 +8,7 @@ val require :
   at:Source.Definition_span.t ->
   Types.ty ->
   Types.trait_reference ->
-  unmet:(Types.ty -> (string * Types.ty) option -> unit) ->
+  on_unmet:(Types.ty -> (string * Types.ty) option -> unit) ->
   unit
 
 val make_fresh_generic_arguments : State.state -> Types.generic list -> Types.argument list

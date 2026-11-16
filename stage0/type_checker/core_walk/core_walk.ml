@@ -239,15 +239,16 @@ let walk_definition visit core_definition =
 
 type tasks_use = Uses_tasks | Through_parameter | No_tasks
 
-let compute_tasks_use ?(solved = fun (_ : int) : Types.capability_set -> Types.no_capabilities)
+let compute_tasks_use ?(read_solved = fun (_ : int) : Types.capability_set -> Types.no_capabilities)
     (body : Core.block) : tasks_use =
   let usage = ref No_tasks in
-  let rec used (capability : Types.capability) =
+  let rec mark_used (capability : Types.capability) =
     match capability with
     | Capability path -> if Path.equal path (Well_known.make_path Tasks) then usage := Uses_tasks
     | Capability_parameter _ | Capability_projection _ ->
         if !usage = No_tasks then usage := Through_parameter
-    | Capability_variable variable -> List.iter used (solved variable :> Types.capability list)
+    | Capability_variable variable ->
+        List.iter mark_used (read_solved variable :> Types.capability list)
     | Capability_error _ ->
         Compiler_bug.raise_bug ~stage:"Core_walk" "a core form uses a capability with an error"
   in
@@ -258,7 +259,7 @@ let compute_tasks_use ?(solved = fun (_ : int) : Types.capability_set -> Types.n
          expression =
            (fun node ->
              match node.kind with
-             | Call call -> List.iter used (call.uses :> Types.capability list)
+             | Call call -> List.iter mark_used (call.uses :> Types.capability list)
              | _ -> ());
          statement =
            (fun node ->
@@ -288,9 +289,9 @@ module For_testing = struct
     type t = Core.local
   end))
 
-  let local_names core_definition =
+  let collect_local_names core_definition =
     let names = Local_table.create 16 in
-    let parameter (declared : Core.parameter) =
+    let visit_parameter (declared : Core.parameter) =
       Local_table.replace names declared.local declared.name;
       Option.iter
         (fun (contract : Core.callback_contract) ->
@@ -299,8 +300,9 @@ module For_testing = struct
     in
     (match core_definition with
     | Core.Function { parameters; _ } | Law_proof { parameters; _ } ->
-        List.iter parameter parameters
-    | Trait laws -> List.iter (fun (law : Core.law) -> List.iter parameter law.parameters) laws
+        List.iter visit_parameter parameters
+    | Trait laws ->
+        List.iter (fun (law : Core.law) -> List.iter visit_parameter law.parameters) laws
     | Type _ | Constant _ | Test _ | Empty -> ());
     walk_definition
       {
@@ -322,10 +324,10 @@ module For_testing = struct
 
   exception Found
 
-  let expression_exists predicate node =
+  let expression_exists is_wanted node =
     let visit =
       make_deep_visitor
-        { ignore_all with expression = (fun node -> if predicate node then raise Found) }
+        { ignore_all with expression = (fun node -> if is_wanted node then raise Found) }
     in
     match visit.expression node with () -> false | exception Found -> true
 end

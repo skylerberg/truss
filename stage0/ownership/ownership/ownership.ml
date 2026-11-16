@@ -53,9 +53,9 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) : result =
           (fun body -> (body, Move_rules.analyse context body))
           (mir.body :: Array.to_list mir.lambdas)
       in
-      let moves body = List.assq body move_analyses in
-      Move_rules.check context mir ~moves ~returns_to_caller;
-      Borrows.check context ~moves ~returns_to_caller mir;
+      let read_moves body = List.assq body move_analyses in
+      Move_rules.check context mir ~read_moves ~returns_to_caller;
+      Borrows.check context ~read_moves ~returns_to_caller mir;
       Task_loops.check context mir)
     mir;
   {

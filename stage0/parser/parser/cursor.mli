@@ -52,6 +52,9 @@ val group : t -> Token.t array
 val parse_separated : t -> separator:Token.punctuation -> (t -> 'a) -> 'a list
 val skip_piece : t -> Split.piece
 val is_after_inserted_closer : t -> bool
-val parse_bracketed : t -> item:(t -> 'a) -> recover:(Source.Definition_span.t -> 'a) -> 'a list
-val parse_lines : t -> item:(t -> 'a) -> recover:(Source.Definition_span.t -> 'a) -> 'a list
+
+val parse_bracketed :
+  t -> parse_item:(t -> 'a) -> recover:(Source.Definition_span.t -> 'a) -> 'a list
+
+val parse_lines : t -> parse_item:(t -> 'a) -> recover:(Source.Definition_span.t -> 'a) -> 'a list
 val collect_positions : t -> Syntax.positions

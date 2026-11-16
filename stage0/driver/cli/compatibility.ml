@@ -30,13 +30,15 @@ let gains ~equal ~before ~after =
 let compare_contracts ~before:(before_parameters, (before : Core.contract))
     ~after:(after_parameters, (after : Core.contract)) =
   let parameters = (before_parameters, after_parameters) in
-  let differ equal before after = (loses ~equal ~before ~after, gains ~equal ~before ~after) in
+  let compute_difference equal before after =
+    (loses ~equal ~before ~after, gains ~equal ~before ~after)
+  in
   let lost_requires, gained_requires =
-    differ (Core_equivalence.equal_condition ~parameters) before.requires after.requires
+    compute_difference (Core_equivalence.equal_condition ~parameters) before.requires after.requires
   and lost_ensures, gained_ensures =
-    differ (Core_equivalence.equal_expression ~parameters) before.ensures after.ensures
+    compute_difference (Core_equivalence.equal_expression ~parameters) before.ensures after.ensures
   and lost_costs, gained_costs =
-    differ (Core_equivalence.equal_cost ~parameters) before.costs after.costs
+    compute_difference (Core_equivalence.equal_cost ~parameters) before.costs after.costs
   in
   List.concat
     [
@@ -51,7 +53,7 @@ let compare_contracts ~before:(before_parameters, (before : Core.contract))
        else []);
     ]
 
-let uses_more : Types.capability -> change = function
+let make_uses_more : Types.capability -> change = function
   | Capability path -> Breaks (Printf.sprintf "now uses `%s`" (Path.show path))
   | (Capability_parameter _ | Capability_projection _) as capability ->
       Breaks (Printf.sprintf "now uses `%s`" (Types.show_capability capability))
@@ -92,7 +94,7 @@ let compare_signatures ~(before : Types.signature) ~(after : Types.signature) =
          [ Breaks "no longer promises to terminate" ]
        else if after.terminates && not before.terminates then [ Grows "promises to terminate" ]
        else []);
-      List.map uses_more (more :> Types.capability list);
+      List.map make_uses_more (more :> Types.capability list);
       (if fewer <> Types.no_capabilities then [ Grows "uses fewer capabilities" ] else []);
       (if gained_default then [ Grows "gained a default" ] else []);
     ]
@@ -140,28 +142,30 @@ let has_changed_laws ~before ~after =
   || not (List.for_all (fun was -> List.exists (Core_equivalence.equal_law was) after) before)
 
 let compare_traits ~(before : Types.trait_interface) ~(after : Types.trait_interface) ~before_laws
-    ~after_laws ~signature_before ~signature_after ~contract_before ~contract_after =
-  let same (was : Types.trait_method) (now : Types.trait_method) =
+    ~after_laws ~read_signature_before ~read_signature_after ~read_contract_before
+    ~read_contract_after =
+  let is_same (was : Types.trait_method) (now : Types.trait_method) =
     was.method_name = now.method_name && was.method_receiver = now.method_receiver
   in
   let methods =
     List.concat_map
       (fun (was : Types.trait_method) ->
-        let named change =
+        let name_change change =
           match change with
           | Breaks description ->
               Breaks (Printf.sprintf "its method `%s` %s" was.method_name description)
           | Grows description ->
               Grows (Printf.sprintf "its method `%s` %s" was.method_name description)
         in
-        match List.find_opt (same was) after.methods with
+        match List.find_opt (is_same was) after.methods with
         | None -> [ Breaks (Printf.sprintf "no longer has the method `%s`" was.method_name) ]
         | Some now ->
-            List.map named
-              (compare_signatures ~before:(signature_before was) ~after:(signature_after now)
+            List.map name_change
+              (compare_signatures ~before:(read_signature_before was)
+                 ~after:(read_signature_after now)
               @ compare_contracts
-                  ~before:(contract_before was.method_name was.method_receiver)
-                  ~after:(contract_after now.method_name now.method_receiver)
+                  ~before:(read_contract_before was.method_name was.method_receiver)
+                  ~after:(read_contract_after now.method_name now.method_receiver)
               @ if was.provided && not now.provided then [ Breaks "lost its default body" ] else []
               ))
       before.methods
@@ -169,7 +173,7 @@ let compare_traits ~(before : Types.trait_interface) ~(after : Types.trait_inter
   let gained =
     List.filter_map
       (fun (now : Types.trait_method) ->
-        if List.exists (fun was -> same was now) before.methods then None
+        if List.exists (fun was -> is_same was now) before.methods then None
         else if now.provided then
           Some (Grows (Printf.sprintf "gained the method `%s`" now.method_name))
         else
@@ -242,7 +246,7 @@ let compare ~before ~after package =
   and after = { database = after; lookups = Database.make_interface_lookups after [ package ] } in
   let old = List.filter (is_public before) (list_declarations before package) in
   let now = List.filter (is_public after) (list_declarations after package) in
-  let public_change path change = { path; change } in
+  let make_public_change path change = { path; change } in
   let definitions =
     List.concat_map
       (fun (was : Resolve.Names.declaration) ->
@@ -250,12 +254,12 @@ let compare ~before ~after package =
         match
           List.find_opt (fun (other : Resolve.Names.declaration) -> Path.equal other.path path) now
         with
-        | None -> [ public_change path (Breaks "was removed or is no longer public") ]
+        | None -> [ make_public_change path (Breaks "was removed or is no longer public") ]
         | Some is when is.kind <> was.kind ->
-            [ public_change path (Breaks "became another kind of definition") ]
+            [ make_public_change path (Breaks "became another kind of definition") ]
         | Some is ->
             let before_key = Resolve.Names.make_key was and after_key = Resolve.Names.make_key is in
-            List.map (public_change path)
+            List.map (make_public_change path)
               (match
                  ( Interface.Definition.read_interface before.lookups path,
                    Interface.Definition.read_interface after.lookups path )
@@ -273,12 +277,12 @@ let compare ~before ~after package =
                   compare_traits ~before:old_trait ~after:new_trait
                     ~before_laws:(read_laws before before_key)
                     ~after_laws:(read_laws after after_key)
-                    ~signature_before:
+                    ~read_signature_before:
                       (Interface.Definition.read_method_signature before.lookups ~owner:path)
-                    ~signature_after:
+                    ~read_signature_after:
                       (Interface.Definition.read_method_signature after.lookups ~owner:path)
-                    ~contract_before:(read_method_contract before path)
-                    ~contract_after:(read_method_contract after path)
+                    ~read_contract_before:(read_method_contract before path)
+                    ~read_contract_after:(read_method_contract after path)
               | Some (Constant_interface old_constant), Some (Constant_interface new_constant) ->
                   (if old_constant.constant_type <> new_constant.constant_type then
                      [ Breaks "changed its type" ]
@@ -295,7 +299,7 @@ let compare ~before ~after package =
       (fun (is : Resolve.Names.declaration) ->
         if List.exists (fun (was : Resolve.Names.declaration) -> Path.equal was.path is.path) old
         then None
-        else Some (public_change is.path (Grows "is new")))
+        else Some (make_public_change is.path (Grows "is new")))
       now
   in
   let old_impls = list_impls before package and new_impls = list_impls after package in
@@ -303,7 +307,7 @@ let compare ~before ~after package =
     List.concat_map
       (fun (path, shown, old_sets) ->
         match List.find_opt (fun (other, _, _) -> is_same_impl path other) new_impls with
-        | None -> [ public_change path (Breaks (Printf.sprintf "was removed: %s" shown)) ]
+        | None -> [ make_public_change path (Breaks (Printf.sprintf "was removed: %s" shown)) ]
         | Some (_, _, new_sets) ->
             let set name sets =
               Option.value ~default:Types.no_capabilities (List.assoc_opt name sets)
@@ -313,7 +317,7 @@ let compare ~before ~after package =
                 let was = set name old_sets and is = set name new_sets in
                 List.map
                   (fun capability ->
-                    public_change path
+                    make_public_change path
                       (Breaks
                          (Printf.sprintf "added `%s` to its `%s`: %s"
                             (Types.show_capability capability)
@@ -322,7 +326,7 @@ let compare ~before ~after package =
                 @
                 if Types.subtract_capabilities was is <> Types.no_capabilities then
                   [
-                    public_change path
+                    make_public_change path
                       (Grows (Printf.sprintf "removed capabilities from its `%s`: %s" name shown));
                   ]
                 else [])
@@ -331,7 +335,7 @@ let compare ~before ~after package =
     @ List.filter_map
         (fun (path, shown, _) ->
           if List.exists (fun (other, _, _) -> is_same_impl other path) old_impls then None
-          else Some (public_change path (Grows (Printf.sprintf "is new: %s" shown))))
+          else Some (make_public_change path (Grows (Printf.sprintf "is new: %s" shown))))
         new_impls
   in
   definitions @ added @ impl_changes

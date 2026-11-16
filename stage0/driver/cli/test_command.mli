@@ -12,7 +12,7 @@ val label_test : test -> string
 
 val run_tests :
   ?rerun:bool ->
-  ?progress:(Compile.progress -> unit) ->
+  ?report_progress:(Compile.progress -> unit) ->
   Database.t ->
   Workspace.snapshot ->
   Path.package list ->
@@ -22,5 +22,5 @@ val run_tests :
 val run : paths:string list -> match_:string option -> timings:bool -> rerun:bool -> int
 
 module For_testing : sig
-  val duration : int -> string
+  val show_duration : int -> string
 end

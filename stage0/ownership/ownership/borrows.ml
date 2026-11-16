@@ -84,7 +84,7 @@ let check_disjoint (context : Context.context) first second ~on_overlap =
 
 let check_body context (actions : Actions.t) moves =
   let states = Dataflow.forward context actions in
-  let live_after = Moves.compute_live_after moves actions.body in
+  let is_live_after = Moves.compute_live_after moves actions.body in
   let mir_local = Context.Local_table.create 16 in
   Array.iteri
     (fun local (info : Mir.local_info) ->
@@ -94,12 +94,14 @@ let check_body context (actions : Actions.t) moves =
     actions.body.locals;
   let is_live_after ({ block; index } : Actions.position) core =
     match Context.Local_table.find_opt mir_local core with
-    | Some local -> live_after block index local
+    | Some local -> is_live_after block index local
     | None -> false
   in
   let resolve = Dataflow.resolve context in
-  let viewed_places here views = List.map Actions.extract_viewed_place (resolve here.views views) in
-  let each_step positions check_step =
+  let list_viewed_places here views =
+    List.map Actions.extract_viewed_place (resolve here.views views)
+  in
+  let check_each_step positions check_step =
     List.iter
       (fun ({ block; index } as position : Actions.position) ->
         match states.(block) with
@@ -126,14 +128,14 @@ let check_body context (actions : Actions.t) moves =
            List.init (Array.length positions) (fun index : Actions.position -> { block; index }))
          (Array.to_list actions.steps))
   in
-  let covering (here : here) (place : Place.t) =
+  let list_covering_loans (here : here) (place : Place.t) =
     List.filter_map
       (fun (loan : Actions.loan) ->
         if Place.classify_overlap loan.borrowed place <> Disjoint then Some (loan, false)
         else if
           List.exists
             (fun viewed -> Place.classify_overlap viewed place <> Disjoint)
-            (viewed_places here [ Borrow_of loan.borrowed ])
+            (list_viewed_places here [ Borrow_of loan.borrowed ])
         then Some (loan, true)
         else None)
       here.loans
@@ -141,7 +143,7 @@ let check_body context (actions : Actions.t) moves =
   let is_mut ((loan : Actions.loan), _) = loan.mode = Mut in
   let reported_owners = Hashtbl.create 4 in
   let check_use (here : here) (place : Place.t) =
-    match List.find_opt is_mut (covering here place) with
+    match List.find_opt is_mut (list_covering_loans here place) with
     | Some (loan, is_through_view) ->
         Context.report context Conflicting_loan
           (Context.locate_origin context here.origin)
@@ -150,7 +152,7 @@ let check_body context (actions : Actions.t) moves =
   in
   let check_mutation (here : here) (place : Place.t) ~verb =
     let at = Context.locate_origin context here.origin in
-    let covering = covering here place in
+    let covering = list_covering_loans here place in
     match (List.find_opt is_mut covering, covering) with
     | Some (loan, is_through_view), _ ->
         Context.report context Conflicting_loan at
@@ -180,7 +182,7 @@ let check_body context (actions : Actions.t) moves =
                    (Context.show_root context holder)))
           here.views
   in
-  each_step all_positions (fun here (step : Actions.step) ->
+  check_each_step all_positions (fun here (step : Actions.step) ->
       let at = Context.locate_origin context here.origin in
       match step.action with
       | Read place -> check_use here place
@@ -225,7 +227,7 @@ let check_body context (actions : Actions.t) moves =
             borrowed_arguments;
           List.iter
             (fun (argument : Actions.view_argument) ->
-              let viewed = viewed_places here argument.views in
+              let viewed = list_viewed_places here argument.views in
               List.iter
                 (fun (passed : Actions.borrowed_argument) ->
                   if passed.position <> argument.position && passed.mode = Mut then
@@ -301,7 +303,7 @@ let check_body context (actions : Actions.t) moves =
                 | Environment -> true
                 | Temporary _ | Constant _ -> false
                 | Local _ -> Context.classify_binding_mode context viewed.root <> Own)
-              (viewed_places here views)
+              (list_viewed_places here views)
           with
           | Some { root = Environment; _ } ->
               Context.report context View_escapes at
@@ -390,7 +392,7 @@ let check_body context (actions : Actions.t) moves =
                        parameter parameter)
               | None, false, None -> ())
       | Write_through slice -> (
-          let mutable_root (root : Place.root) =
+          let is_mutable_root (root : Place.root) =
             match root with
             | Temporary _ -> true
             | Constant _ | Environment -> false
@@ -411,8 +413,8 @@ let check_body context (actions : Actions.t) moves =
           | _ -> (
               match
                 List.find_opt
-                  (fun (viewed : Place.t) -> viewed <> slice && not (mutable_root viewed.root))
-                  (viewed_places here [ Copy_of_view_in slice ])
+                  (fun (viewed : Place.t) -> viewed <> slice && not (is_mutable_root viewed.root))
+                  (list_viewed_places here [ Copy_of_view_in slice ])
               with
               | Some viewed ->
                   Context.report context Read_only_view at
@@ -470,17 +472,18 @@ let check_body context (actions : Actions.t) moves =
                    (Context.show_root context root) (Context.show_root context root))
           | _ -> ())
       | Bind _ | Bind_views _ | Start_loan _ | End_loans _ -> ());
-  let effects positions =
+  let list_effects positions =
     let mutations = ref [] and uses = ref [] in
-    each_step positions (fun here (step : Actions.step) ->
-        let viewed place = viewed_places here [ Copy_of_view_in place ] in
+    check_each_step positions (fun here (step : Actions.step) ->
+        let list_viewed place = list_viewed_places here [ Copy_of_view_in place ] in
         match step.action with
-        | Read place -> uses := (place :: viewed place) @ !uses
+        | Read place -> uses := (place :: list_viewed place) @ !uses
         | Mutate place ->
-            uses := (place :: viewed place) @ !uses;
+            uses := (place :: list_viewed place) @ !uses;
             mutations := (place, here.origin) :: !mutations
         | Write_through place ->
-            mutations := List.map (fun viewed -> (viewed, here.origin)) (viewed place) @ !mutations
+            mutations :=
+              List.map (fun viewed -> (viewed, here.origin)) (list_viewed place) @ !mutations
         | Assign place -> mutations := (place, here.origin) :: !mutations
         | Move { place; type_; is_returned; is_captured } -> (
             uses := place :: !uses;
@@ -495,7 +498,7 @@ let check_body context (actions : Actions.t) moves =
   in
   List.iter
     (fun ({ keyword; branches } : Actions.fork_join_block) ->
-      let branches = List.map effects branches in
+      let branches = List.map list_effects branches in
       List.iteri
         (fun index (mutations, _) ->
           List.iteri
@@ -521,7 +524,7 @@ let check_body context (actions : Actions.t) moves =
   List.iter
     (fun ({ keyword; body; pattern_locals; temporaries } : Actions.fork_join_loop) ->
       let iteration_locals = ref pattern_locals in
-      each_step body (fun _ (step : Actions.step) ->
+      check_each_step body (fun _ (step : Actions.step) ->
           match step.action with
           | Bind locals -> iteration_locals := locals @ !iteration_locals
           | _ -> ());
@@ -540,12 +543,12 @@ let check_body context (actions : Actions.t) moves =
                  "Data race: the iterations of a `%s for` run at the same time, so the body can \
                   mutate only its own element and its own locals."
                  keyword))
-        (fst (effects body)))
+        (fst (list_effects body)))
     actions.fork_join_loops
 
-let check context ~moves ~returns_to_caller (mir : Mir.Graph.t) =
+let check context ~read_moves ~returns_to_caller (mir : Mir.Graph.t) =
   let check_one body ~returns_to_caller =
-    let moves = moves body in
+    let moves = read_moves body in
     check_body context (Actions.of_body context moves body ~returns_to_caller) moves
   in
   check_one mir.body ~returns_to_caller;

@@ -29,8 +29,8 @@ val site_struct : string
 
 type position = { file : string; line : int; column : int }
 
-val render_sites_file : position:(Lowered.site -> position) -> fragment list -> string
+val render_sites_file : resolve_position:(Lowered.site -> position) -> fragment list -> string
 
 module For_testing : sig
-  val c : fragment -> string
+  val render_c : fragment -> string
 end

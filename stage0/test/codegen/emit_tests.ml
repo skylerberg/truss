@@ -1,7 +1,8 @@
-let c_file env instances =
+let render_c_file env instances =
   Emit_c.render_file env Development
     (List.map
-       (fun (instance, linkage) -> (Emit_c.make_fragment env (Code (instance env)), linkage))
+       (fun (make_instance, linkage) ->
+         (Emit_c.make_fragment env (Code (make_instance env)), linkage))
        instances)
 
 let () =
@@ -284,7 +285,7 @@ let () =
             ];
         ]);
   Codegen_support.test "a mut parameter is a restrict pointer in C" (fun () ->
-      let c_file = c_file (Codegen_support.shape_env ()) [ (bump, External) ] in
+      let c_file = render_c_file (Codegen_support.make_shape_env ()) [ (bump, External) ] in
       let expected = "void t_test__bump(int32_t *restrict l0_count)" in
       if not (String.includes ~affix:expected c_file) then
         Codegen_support.fail "no %S in:\n%s" expected c_file);
@@ -326,7 +327,7 @@ let () =
           ]
       in
       let signature =
-        Convention.make_function_value_signature (Codegen_support.shape_env ()) callback
+        Convention.make_function_value_signature (Codegen_support.make_shape_env ()) callback
       in
       Codegen_support.expect_status 6
         [
@@ -494,7 +495,7 @@ let () =
           ]
       in
       let c_file =
-        c_file (Codegen_support.shape_env ()) [ (caller, External); (callee, Internal) ]
+        render_c_file (Codegen_support.make_shape_env ()) [ (caller, External); (callee, Internal) ]
       in
       let copy = "static inline int32_t t_test__callee(int32_t l0) {" in
       if not (String.includes ~affix:copy c_file) then
@@ -534,7 +535,9 @@ let () =
              ])
       in
       let c_file =
-        c_file (Codegen_support.shape_env ~extra:[ pair_shape ] ()) [ (holder, External) ]
+        render_c_file
+          (Codegen_support.make_shape_env ~extra:[ pair_shape ] ())
+          [ (holder, External) ]
       in
       let expected =
         "_Static_assert(sizeof(t_test__Pair) == 16 && _Alignof(t_test__Pair) == 8, \"layout\");"
@@ -544,8 +547,8 @@ let () =
   Codegen_support.test "emitting the same instances twice gives the same C" (fun () ->
       let instances = [ (bump, Emit_c.External) ] in
       Codegen_support.expect_string
-        ~expected:(c_file (Codegen_support.shape_env ()) instances)
-        (c_file (Codegen_support.shape_env ()) instances));
+        ~expected:(render_c_file (Codegen_support.make_shape_env ()) instances)
+        (render_c_file (Codegen_support.make_shape_env ()) instances));
   Codegen_support.test "the C has the blocks the entry reaches and the locals their code names"
     (fun () ->
       let entry =
@@ -571,7 +574,7 @@ let () =
                  (Goto 1);
              ])
       in
-      let c_file = c_file (Codegen_support.shape_env ()) [ (entry, External) ] in
+      let c_file = render_c_file (Codegen_support.make_shape_env ()) [ (entry, External) ] in
       List.iter
         (fun name ->
           if not (String.includes ~affix:name c_file) then
@@ -594,42 +597,45 @@ let () =
       in
       Codegen_support.expect_string ~expected:"t_standard__list__List_each_Of_test__Int64_End_"
         (Instance.make_symbol key));
-  let function_in package modules =
+  let render_function_symbol package modules =
     Instance.make_symbol
       (Instance.Code
          { path = Top { module_ = { package; modules }; name = "length" }; type_arguments = [] })
   in
   Codegen_support.test "a symbol marks a package's owner apart from its modules" (fun () ->
       Codegen_support.expect_string ~expected:"t_acme_Owns_geometry__vector__length"
-        (function_in { owner = Some "acme"; name = "geometry" } [ "vector" ]);
+        (render_function_symbol { owner = Some "acme"; name = "geometry" } [ "vector" ]);
       if
-        function_in { owner = Some "acme"; name = "geometry" } [ "vector" ]
-        = function_in { owner = None; name = "acme" } [ "geometry"; "vector" ]
+        render_function_symbol { owner = Some "acme"; name = "geometry" } [ "vector" ]
+        = render_function_symbol { owner = None; name = "acme" } [ "geometry"; "vector" ]
       then
         Codegen_support.fail
           "a package with an owner and a module of the same names have one symbol");
   Codegen_support.test "a long symbol keeps its start and ends with a hash" (fun () ->
-      let long name = Instance.make_symbol (Codegen_support.key (String.make 300 name)) in
-      let left = long 'a' and right = long 'b' in
+      let make_long_symbol name =
+        Instance.make_symbol (Codegen_support.key (String.make 300 name))
+      in
+      let left = make_long_symbol 'a' and right = make_long_symbol 'b' in
       Codegen_support.expect_int ~expected:(180 + 6 + 32) (String.length left);
       if left = right then Codegen_support.fail "two long names give one symbol")
 
 let intrinsic_types : Compile.For_testing.Intrinsics.types =
   { uint64 = Codegen_support.uint64; string_slice = Codegen_support.named "StringSlice" }
 
-let built_entry body : Codegen_support.instance =
+let build_entry build_body : Codegen_support.instance =
  fun env ->
   let builder = Emit_c.Builder.create env ~key:(Codegen_support.key "entry") in
   Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
-  let result = body builder in
+  let result = build_body builder in
   Emit_c.Builder.finish builder (Return (Some (Copy (Lowered.make_local_place result))));
   Emit_c.Builder.build builder
     { parameters = []; result = Some (Codegen_support.value Codegen_support.int32); returns = true }
 
 let operate builder ?destination ?(type_arguments = [ Codegen_support.int32 ]) ?value_arguments
     operation arguments =
-  Compile.For_testing.Intrinsics.lower ?value_arguments (Codegen_support.shape_env ()) builder
-    intrinsic_types operation ~type_arguments arguments ~destination
+  Compile.For_testing.Intrinsics.lower ?value_arguments
+    (Codegen_support.make_shape_env ())
+    builder intrinsic_types operation ~type_arguments arguments ~destination
     ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
 
 let () =
@@ -641,7 +647,7 @@ let () =
       in
       Codegen_support.expect_status 171
         [
-          built_entry (fun builder ->
+          build_entry (fun builder ->
               let storage =
                 Emit_c.Builder.allocate_local builder ~name:"storage"
                   (Codegen_support.value storage_ty)
@@ -698,7 +704,7 @@ let () =
               ignore
                 (operate builder ~destination:(Lowered.make_local_place popped) Storage_pop
                    [ Place (Lowered.make_local_place storage) ]);
-              let element index weight =
+              let make_element index weight =
                 match
                   operate builder Storage_at
                     [
@@ -719,7 +725,7 @@ let () =
                       (Codegen_support.value Codegen_support.int32)
                   in
                   Emit_c.Builder.emit builder
-                    (Assign (Lowered.make_local_place term, element index weight));
+                    (Assign (Lowered.make_local_place term, make_element index weight));
                   Emit_c.Builder.emit builder
                     (Assign
                        ( Lowered.make_local_place sum,
@@ -779,7 +785,7 @@ let () =
       in
       Codegen_support.expect_status 165
         [
-          built_entry (fun builder ->
+          build_entry (fun builder ->
               let array =
                 Emit_c.Builder.allocate_local builder ~name:"array" (Codegen_support.value array_ty)
               in
@@ -878,14 +884,14 @@ let () =
       let operate builder ?destination operation arguments =
         Compile.For_testing.Intrinsics.lower
           ~value_arguments:[ Z.of_int 3 ]
-          (Codegen_support.shape_env ~extra ())
+          (Codegen_support.make_shape_env ~extra ())
           builder intrinsic_types operation ~type_arguments:[ Codegen_support.int32 ] arguments
           ~destination
           ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
       in
       Codegen_support.expect_status ~extra 53
         [
-          built_entry (fun builder ->
+          build_entry (fun builder ->
               let array =
                 Emit_c.Builder.allocate_local builder ~name:"array" (Codegen_support.value array_ty)
               in
@@ -963,13 +969,14 @@ let () =
       let operate builder ?destination operation arguments =
         Compile.For_testing.Intrinsics.lower ~checks:true
           ~value_arguments:[ Z.of_int 3 ]
-          (Codegen_support.shape_env ()) builder intrinsic_types operation
-          ~type_arguments:[ Codegen_support.int32 ] arguments ~destination
+          (Codegen_support.make_shape_env ())
+          builder intrinsic_types operation ~type_arguments:[ Codegen_support.int32 ] arguments
+          ~destination
           ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
       in
-      let program_with pushed =
+      let make_program_with pushed =
         [
-          built_entry (fun builder ->
+          build_entry (fun builder ->
               let storage =
                 Emit_c.Builder.allocate_local builder (Codegen_support.value storage_ty)
               in
@@ -1015,15 +1022,15 @@ let () =
               status);
         ]
       in
-      Codegen_support.expect_status 46 (program_with [ 40; 5; 6 ]);
-      Codegen_support.expect_status 101 (program_with [ 40; 5 ]));
+      Codegen_support.expect_status 46 (make_program_with [ 40; 5; 6 ]);
+      Codegen_support.expect_status 101 (make_program_with [ 40; 5 ]));
   Codegen_support.test "a float fits an integer type where the whole number it is cut down to does"
     (fun () ->
-      let all_right cases =
+      let expect_all_right cases =
         Codegen_support.expect_status
           ((1 lsl List.length cases) - 1)
           [
-            built_entry (fun builder ->
+            build_entry (fun builder ->
                 let status =
                   Emit_c.Builder.allocate_local builder
                     (Codegen_support.value Codegen_support.int32)
@@ -1071,7 +1078,7 @@ let () =
                 status);
           ]
       in
-      all_right
+      expect_all_right
         [
           (9223372036854774784., Codegen_support.int64, true);
           (9223372036854775808., Codegen_support.int64, false);
@@ -1081,7 +1088,7 @@ let () =
           (Float.infinity, Codegen_support.int64, false);
           (Float.neg_infinity, Codegen_support.int64, false);
         ];
-      all_right
+      expect_all_right
         [
           (255.9, Codegen_support.uint8, true);
           (256., Codegen_support.uint8, false);
@@ -1091,33 +1098,35 @@ let () =
         ]);
   Codegen_support.test "a storage is shortened in place and keeps its room" (fun () ->
       let storage_ty = Storage.make_storage_type Codegen_support.uint8 in
-      let checked builder ?destination operation arguments =
-        Compile.For_testing.Intrinsics.lower ~checks:true (Codegen_support.shape_env ()) builder
-          intrinsic_types operation ~type_arguments:[ Codegen_support.uint8 ] arguments ~destination
+      let operate_checked builder ?destination operation arguments =
+        Compile.For_testing.Intrinsics.lower ~checks:true
+          (Codegen_support.make_shape_env ())
+          builder intrinsic_types operation ~type_arguments:[ Codegen_support.uint8 ] arguments
+          ~destination
           ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
       in
-      let shortened ~to_ =
+      let make_shortened ~to_ =
         [
-          built_entry (fun builder ->
+          build_entry (fun builder ->
               let storage =
                 Emit_c.Builder.allocate_local builder (Codegen_support.value storage_ty)
               in
               ignore
-                (checked builder
+                (operate_checked builder
                    ~destination:(Lowered.make_local_place storage)
                    Storage_with_capacity
                    [ Value (Lowered.make_uint64_constant 8) ]);
               String.iter
                 (fun byte ->
                   ignore
-                    (checked builder Storage_push
+                    (operate_checked builder Storage_push
                        [
                          Place (Lowered.make_local_place storage);
                          Value (Constant (Integer (UInt8, Z.of_int (Char.code byte))));
                        ]))
                 "abcde";
               ignore
-                (checked builder Storage_shorten
+                (operate_checked builder Storage_shorten
                    [
                      Place (Lowered.make_local_place storage);
                      Value (Lowered.make_uint64_constant to_);
@@ -1125,7 +1134,7 @@ let () =
               let status =
                 Emit_c.Builder.allocate_local builder (Codegen_support.value Codegen_support.int32)
               in
-              let part place =
+              let read_part place =
                 let read =
                   Emit_c.Builder.allocate_local builder
                     (Codegen_support.value Codegen_support.int32)
@@ -1142,17 +1151,17 @@ let () =
               in
               Emit_c.Builder.emit builder
                 (Assign (Lowered.make_local_place status, Use (Codegen_support.constant_int32 0)));
-              part (Lowered.project (Lowered.make_local_place storage) (Field "length"));
-              part (Lowered.project (Lowered.make_local_place storage) (Field "capacity"));
-              part
+              read_part (Lowered.project (Lowered.make_local_place storage) (Field "length"));
+              read_part (Lowered.project (Lowered.make_local_place storage) (Field "capacity"));
+              read_part
                 (Lowered.project
                    (Lowered.project (Lowered.make_local_place storage) (Field "buffer"))
                    (Index (Lowered.make_uint64_constant (to_ - 1))));
               status);
         ]
       in
-      Codegen_support.expect_status (2 + 8 + Char.code 'b') (shortened ~to_:2);
-      Codegen_support.expect_status 101 (shortened ~to_:6);
+      Codegen_support.expect_status (2 + 8 + Char.code 'b') (make_shortened ~to_:2);
+      Codegen_support.expect_status 101 (make_shortened ~to_:6);
       match (Intrinsic_signatures.make_signature Storage_shorten).generics with
       | [ { kind = Type_generic [ { trait = Top { name = "Plain"; _ }; _ } ]; _ } ] -> ()
       | _ -> Codegen_support.fail "storage_shorten takes elements that are not known to be Plain");
@@ -1170,39 +1179,39 @@ let () =
           );
         ]
       in
-      let checked builder ?destination operation arguments =
+      let operate_checked builder ?destination operation arguments =
         ignore
           (Compile.For_testing.Intrinsics.lower ~checks:true
-             (Codegen_support.shape_env ~extra ())
+             (Codegen_support.make_shape_env ~extra ())
              builder intrinsic_types operation ~type_arguments:[ Codegen_support.uint8 ] arguments
              ~destination
              ~site:{ definition = Codegen_support.definition "entry"; offset = 0 })
       in
       let byte : Lowered.operand = Constant (Integer (UInt8, Z.of_int 1)) in
-      let stops saying operation =
+      let expect_stop saying run_operation =
         let status, _, errors =
           Codegen_support.run_program ~extra
             [
-              built_entry (fun builder ->
+              build_entry (fun builder ->
                   let storage =
                     Emit_c.Builder.allocate_local builder (Codegen_support.value storage_ty)
                   in
-                  checked builder
+                  operate_checked builder
                     ~destination:(Lowered.make_local_place storage)
                     Storage_with_capacity
                     [ Value (Lowered.make_uint64_constant 3) ];
                   List.iter
                     (fun _ ->
-                      checked builder Storage_push
+                      operate_checked builder Storage_push
                         [ Place (Lowered.make_local_place storage); Value byte ])
                     [ 'a'; 'b'; 'c' ];
                   let view =
                     Emit_c.Builder.allocate_local builder ~name:"view"
                       (Codegen_support.value view_ty)
                   in
-                  checked builder ~destination:(Lowered.make_local_place view) Storage_view
+                  operate_checked builder ~destination:(Lowered.make_local_place view) Storage_view
                     [ Place (Lowered.make_local_place storage) ];
-                  operation builder ~storage ~view;
+                  run_operation builder ~storage ~view;
                   let status =
                     Emit_c.Builder.allocate_local builder
                       (Codegen_support.value Codegen_support.int32)
@@ -1216,85 +1225,88 @@ let () =
           Codegen_support.fail "expected a panic saying %S, got status %d (%s)" saying status errors
       in
       let index = "index out of bounds" and slice = "slice out of bounds" in
-      stops "an element pushed to a storage that has no room" (fun builder ~storage ~view:_ ->
-          checked builder Storage_push [ Place (Lowered.make_local_place storage); Value byte ]);
-      stops "an element inserted into a storage that has no room" (fun builder ~storage ~view:_ ->
-          checked builder Storage_insert
+      expect_stop "an element pushed to a storage that has no room" (fun builder ~storage ~view:_ ->
+          operate_checked builder Storage_push
+            [ Place (Lowered.make_local_place storage); Value byte ]);
+      expect_stop "an element inserted into a storage that has no room"
+        (fun builder ~storage ~view:_ ->
+          operate_checked builder Storage_insert
             [
               Place (Lowered.make_local_place storage);
               Value (Lowered.make_uint64_constant 1);
               Value byte;
             ]);
-      stops index (fun builder ~storage ~view:_ ->
-          checked builder Storage_insert
+      expect_stop index (fun builder ~storage ~view:_ ->
+          operate_checked builder Storage_insert
             [
               Place (Lowered.make_local_place storage);
               Value (Lowered.make_uint64_constant 9);
               Value byte;
             ]);
-      stops "a storage lengthened to more than its capacity" (fun builder ~storage ~view:_ ->
-          checked builder Storage_lengthen
+      expect_stop "a storage lengthened to more than its capacity" (fun builder ~storage ~view:_ ->
+          operate_checked builder Storage_lengthen
             [ Place (Lowered.make_local_place storage); Value (Lowered.make_uint64_constant 1) ]);
-      stops "a storage's capacity set to less than its length" (fun builder ~storage ~view:_ ->
-          checked builder Storage_set_capacity
+      expect_stop "a storage's capacity set to less than its length"
+        (fun builder ~storage ~view:_ ->
+          operate_checked builder Storage_set_capacity
             [ Place (Lowered.make_local_place storage); Value (Lowered.make_uint64_constant 2) ]);
-      stops index (fun builder ~storage ~view:_ ->
+      expect_stop index (fun builder ~storage ~view:_ ->
           let removed =
             Emit_c.Builder.allocate_local builder (Codegen_support.value Codegen_support.uint8)
           in
-          checked builder
+          operate_checked builder
             ~destination:(Lowered.make_local_place removed)
             Storage_remove
             [ Place (Lowered.make_local_place storage); Value (Lowered.make_uint64_constant 3) ]);
-      stops index (fun builder ~storage ~view:_ ->
-          checked builder Storage_swap
+      expect_stop index (fun builder ~storage ~view:_ ->
+          operate_checked builder Storage_swap
             [
               Place (Lowered.make_local_place storage);
               Value (Lowered.make_uint64_constant 0);
               Value (Lowered.make_uint64_constant 3);
             ]);
-      stops index (fun builder ~storage ~view:_ ->
-          checked builder Storage_at
+      expect_stop index (fun builder ~storage ~view:_ ->
+          operate_checked builder Storage_at
             [ Place (Lowered.make_local_place storage); Value (Lowered.make_uint64_constant 3) ]);
-      stops index (fun builder ~storage:_ ~view ->
-          checked builder View_at
+      expect_stop index (fun builder ~storage:_ ~view ->
+          operate_checked builder View_at
             [ Place (Lowered.make_local_place view); Value (Lowered.make_uint64_constant 3) ]);
-      stops index (fun builder ~storage:_ ~view ->
-          checked builder View_swap
+      expect_stop index (fun builder ~storage:_ ~view ->
+          operate_checked builder View_swap
             [
               Place (Lowered.make_local_place view);
               Value (Lowered.make_uint64_constant 3);
               Value (Lowered.make_uint64_constant 0);
             ]);
-      stops slice (fun builder ~storage:_ ~view ->
+      expect_stop slice (fun builder ~storage:_ ~view ->
           let part = Emit_c.Builder.allocate_local builder (Codegen_support.value view_ty) in
-          checked builder ~destination:(Lowered.make_local_place part) View_slice
+          operate_checked builder ~destination:(Lowered.make_local_place part) View_slice
             [
               Place (Lowered.make_local_place view);
               Value (Lowered.make_uint64_constant 1);
               Value (Lowered.make_uint64_constant 4);
             ]);
-      stops slice (fun builder ~storage:_ ~view ->
+      expect_stop slice (fun builder ~storage:_ ~view ->
           let part = Emit_c.Builder.allocate_local builder (Codegen_support.value view_ty) in
-          checked builder ~destination:(Lowered.make_local_place part) View_slice
+          operate_checked builder ~destination:(Lowered.make_local_place part) View_slice
             [
               Place (Lowered.make_local_place view);
               Value (Lowered.make_uint64_constant 2);
               Value (Lowered.make_uint64_constant 1);
             ]);
-      stops "an element popped from an empty storage" (fun builder ~storage ~view:_ ->
-          checked builder Storage_shorten
+      expect_stop "an element popped from an empty storage" (fun builder ~storage ~view:_ ->
+          operate_checked builder Storage_shorten
             [ Place (Lowered.make_local_place storage); Value (Lowered.make_uint64_constant 0) ];
           let popped =
             Emit_c.Builder.allocate_local builder (Codegen_support.value Codegen_support.uint8)
           in
-          checked builder ~destination:(Lowered.make_local_place popped) Storage_pop
+          operate_checked builder ~destination:(Lowered.make_local_place popped) Storage_pop
             [ Place (Lowered.make_local_place storage) ]))
 
 let () =
   Codegen_support.test
     "a small read-only value is passed by value unless it holds an array's elements" (fun () ->
-      let array_of count : Ground.ty =
+      let make_array_type count : Ground.ty =
         Named
           {
             path = Intrinsic.make_builtin_path Array;
@@ -1303,10 +1315,10 @@ let () =
       in
       let pair = Codegen_support.named "Pair" in
       let extra =
-        [ ("Pair", Memory_layout.Record [ Codegen_support.field "cells" (array_of 2) ]) ]
+        [ ("Pair", Memory_layout.Record [ Codegen_support.field "cells" (make_array_type 2) ]) ]
       in
-      let env = Codegen_support.shape_env ~extra () in
-      let by_value ty =
+      let env = Codegen_support.make_shape_env ~extra () in
+      let is_by_value ty =
         match Convention.classify_parameter env Read ty with
         | Some (Value _) -> true
         | Some _ -> false
@@ -1314,11 +1326,12 @@ let () =
             Codegen_support.fail "a parameter with a size is not passed";
             false
       in
-      if not (by_value Codegen_support.int64) then
+      if not (is_by_value Codegen_support.int64) then
         Codegen_support.fail "a number is passed by address";
-      if by_value (array_of 4) then Codegen_support.fail "a small array is passed by value";
-      if by_value pair then
+      if is_by_value (make_array_type 4) then
+        Codegen_support.fail "a small array is passed by value";
+      if is_by_value pair then
         Codegen_support.fail "a small record that holds an array is passed by value";
-      match Convention.classify_parameter env Own (array_of 4) with
+      match Convention.classify_parameter env Own (make_array_type 4) with
       | Some (Value _) -> ()
       | _ -> Codegen_support.fail "a small array that is given away is passed by address")

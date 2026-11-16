@@ -7,7 +7,7 @@ module Definition_span : sig
   type t = private { start : int; stop : int }
 
   val make : int -> int -> t
-  val zero_width : int -> t
+  val make_zero_width : int -> t
   val to_file : base:int -> t -> span
   val of_file : base:int -> span -> t
   val locate : t array -> int -> t

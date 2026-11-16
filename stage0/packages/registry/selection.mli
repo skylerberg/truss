@@ -19,7 +19,7 @@ val read_manifest_and_record :
 val choose :
   lock:Lock.t ->
   roots:(Path.package * Path.package) list ->
-  local:(Path.package -> bool) ->
+  is_local:(Path.package -> bool) ->
   load:(Path.package -> Version.t -> hash:string -> (Manifest.package * Lock.t, string) result) ->
   package list * problem list
 
@@ -27,5 +27,6 @@ val lock : project:Manifest.dependency list -> package list -> Lock.t
 val list_differences : written:Lock.t -> current:Lock.t -> string list
 
 module For_testing : sig
-  val holds : project:Manifest.dependency list -> package list -> (Path.package * string list) list
+  val list_holds :
+    project:Manifest.dependency list -> package list -> (Path.package * string list) list
 end

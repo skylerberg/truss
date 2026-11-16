@@ -322,7 +322,7 @@ let report_as_conversion cursor ~(value : Syntax.expression) ~(as_token : Token.
   | Some target_spelling ->
       let value = Cursor.read_file_span cursor value.id
       and target = Cursor.read_file_span cursor target.id in
-      let conversion name =
+      let make_conversion_fix name =
         Diagnostic.fix
           (Printf.sprintf "Write `%s.%s(...)`" target_spelling name)
           [
@@ -337,7 +337,7 @@ let report_as_conversion cursor ~(value : Syntax.expression) ~(as_token : Token.
            "Truss has no `as`; write `%s.from(x)`, or `%s.try_from(x)` when the conversion can \
             lose information."
            target_spelling target_spelling)
-        ~fixes:[ conversion "from"; conversion "try_from" ]
+        ~fixes:[ make_conversion_fix "from"; make_conversion_fix "try_from" ]
   | None ->
       Cursor.report cursor As_conversion as_token.span
         "Truss has no `as`; call the target type's `from`, or its `try_from` when the conversion \

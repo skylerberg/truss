@@ -146,7 +146,7 @@ let report_unknown state (name : Syntax.name) ~expected candidates =
 let find_module_item state text = state.lookups.find state.key.module_ text
 
 let resolve_module_names state (first : Syntax.name) (rest : Syntax.name list) =
-  let failed report =
+  let make_failure report =
     set_target state first (Unknown report);
     Error report
   in
@@ -164,21 +164,21 @@ let resolve_module_names state (first : Syntax.name) (rest : Syntax.name list) =
   with
   | Found_module (module_, `Package)
     when module_ = Intrinsic.module_ && state.key.module_.package <> Path.standard_package ->
-      failed
+      make_failure
         (add_diagnostic state Intrinsic_import (read_span state first.id)
            "Only the `standard` package can use `standard::intrinsic`.")
   | Found_module (module_, _) ->
       set_target state first (Module module_);
       Ok module_
   | Ambiguous_module (imported, package) ->
-      failed
+      make_failure
         (add_diagnostic state Ambiguous_module (read_span state first.id)
            (Printf.sprintf
               "`%s` could be the imported module `%s` or the module `%s`. Write the imported one's \
                full path, or remove its `use`."
               first.text (Path.show_module imported) (Path.show_module package)))
   | No_module text ->
-      failed
+      make_failure
         (add_diagnostic state Unknown_module (read_span state first.id)
            (Printf.sprintf "No module `%s` is imported or exists." text))
   end
@@ -441,18 +441,19 @@ and resolve_bracket state scope (value : Syntax.expression) base items =
     items
 
 and check_place state (written : Syntax.expression) (inner : Syntax.expression) =
-  let rec head (value : Syntax.expression) =
+  let rec classify_head (value : Syntax.expression) =
     match value.kind with
-    | Member (base, _) -> head base
-    | Parenthesized inner -> head inner
+    | Member (base, _) -> classify_head base
+    | Parenthesized inner -> classify_head inner
     | Bracket (base, _) -> (
         match (lookup_current_names state).brackets.(value.id) with
-        | Some (Index | Method_bracket) -> head base
+        | Some (Index | Method_bracket) -> classify_head base
         | _ -> `Not_a_place value)
     | Call ({ kind = Member (base, _); _ }, _)
     | Call ({ kind = Bracket ({ kind = Member (base, _); _ }, _); _ }, _) -> (
-        match head base with `Place _ -> `Place true | other -> other)
-    | Try base -> ( match head base with `Place false -> `Not_a_place value | other -> other)
+        match classify_head base with `Place _ -> `Place true | other -> other)
+    | Try base -> (
+        match classify_head base with `Place false -> `Not_a_place value | other -> other)
     | Self_value -> `Place false
     | Name path -> (
         match find_target state path.last with
@@ -462,7 +463,7 @@ and check_place state (written : Syntax.expression) (inner : Syntax.expression) 
         | _ -> `Not_a_place value)
     | _ -> `Not_a_place value
   in
-  match head inner with
+  match classify_head inner with
   | `Place _ | `Unknown -> ()
   | `Not_a_place _ ->
       let keyword_end = (read_span state inner.id).start in
@@ -601,13 +602,13 @@ and resolve_arm state scope (arm_ : Syntax.arm) =
   ignore (resolve_statement state guarded arm_.body)
 
 and declare_value state scope (name : Syntax.name) =
-  let shadows existing =
+  let check_shadowing existing =
     report state Shadowed_name (read_span state name.id)
       (Printf.sprintf "`%s` is already %s, and a name cannot shadow another. Choose another name."
          name.text existing)
   in
   (match String_map.find_opt name.text scope.values with
-  | Some (_, existing) -> shadows existing
+  | Some (_, existing) -> check_shadowing existing
   | None -> ());
   set_target state name Binding;
   {
@@ -651,20 +652,20 @@ and resolve_pattern state scope bound (pattern_ : Syntax.pattern) =
       | [] -> ()
       | (_, first) :: rest ->
           bound := List.rev_append first !bound;
-          let texts names =
+          let list_texts names =
             List.sort compare (List.map (fun (name : Syntax.name) -> name.text) names)
           in
           List.iter
             (fun ((alternative : Syntax.pattern), names) ->
-              if texts names <> texts first then
+              if list_texts names <> list_texts first then
                 report state Alternative_bindings (read_span state alternative.id)
                   (Printf.sprintf
                      "Every alternative of a pattern must bind the same names. The first binds %s, \
                       and this one binds %s."
-                     (match texts first with
+                     (match list_texts first with
                      | [] -> "none"
                      | names -> "`" ^ String.concat "`, `" names ^ "`")
-                     (match texts names with
+                     (match list_texts names with
                      | [] -> "none"
                      | names -> "`" ^ String.concat "`, `" names ^ "`"))
               else
@@ -789,37 +790,37 @@ and resolve_loop_clause ?(for_loop = false) ?(elements = []) state scope
   | Loop_cost cost -> resolve_clause state scope { kind = Cost cost; id = written.id }
 
 let declare_type state scope (name : Syntax.name) target =
-  let shadows existing =
+  let check_shadowing existing =
     report state Shadowed_name (read_span state name.id)
       (Printf.sprintf "`%s` is already %s, and a name cannot shadow another. Choose another name."
          name.text existing)
   in
-  (if String_map.mem name.text scope.types then shadows "a generic parameter here"
+  (if String_map.mem name.text scope.types then check_shadowing "a generic parameter here"
    else
      match find_module_item state name.text with
      | Some item when Names.is_type_kind item.kind ->
-         shadows (Names.show_kind (Names.kind_of_named item.kind) ^ " of this module")
-     | _ -> if List.mem name.text Prelude.names then shadows "a name in the prelude");
+         check_shadowing (Names.show_kind (Names.kind_of_named item.kind) ^ " of this module")
+     | _ -> if List.mem name.text Prelude.names then check_shadowing "a name in the prelude");
   set_target state name Binding;
   { scope with types = String_map.add name.text target scope.types }
 
 let resolve_generics state scope ~(owner : Path.t) (generics : Syntax.generic_parameter list) =
-  let parameter (name : Syntax.name) : Types.parameter = { owner; name = name.text } in
+  let make_parameter (name : Syntax.name) : Types.parameter = { owner; name = name.text } in
   let scope =
     List.fold_left
       (fun scope (generic : Syntax.generic_parameter) ->
         match generic.kind with
         | Type_parameter (name, _) ->
-            declare_type state scope name (Type_parameter (parameter name))
+            declare_type state scope name (Type_parameter (make_parameter name))
         | Capability_parameter name ->
-            declare_type state scope name (Capability_parameter (parameter name))
+            declare_type state scope name (Capability_parameter (make_parameter name))
         | Value_parameter (name, _) ->
             let scope = declare_value state scope name in
             {
               scope with
               values =
                 String_map.add name.text
-                  (Value_generic (parameter name), "a generic parameter")
+                  (Value_generic (make_parameter name), "a generic parameter")
                   scope.values;
             }
         | Generic_error -> scope)
@@ -912,19 +913,19 @@ let list_field_names (fields_ : Syntax.field list) =
 let resolve_inherited scope ~(owner : Path.t) (generics : Syntax.generic_parameter list) =
   List.fold_left
     (fun scope (generic : Syntax.generic_parameter) ->
-      let parameter (name : Syntax.name) : Types.parameter = { owner; name = name.text } in
-      let type_ (name : Syntax.name) (target : target) =
+      let make_parameter (name : Syntax.name) : Types.parameter = { owner; name = name.text } in
+      let add_type (name : Syntax.name) (target : target) =
         { scope with types = String_map.add name.text target scope.types }
       in
       match generic.kind with
-      | Type_parameter (name, _) -> type_ name (Type_parameter (parameter name))
-      | Capability_parameter name -> type_ name (Capability_parameter (parameter name))
+      | Type_parameter (name, _) -> add_type name (Type_parameter (make_parameter name))
+      | Capability_parameter name -> add_type name (Capability_parameter (make_parameter name))
       | Value_parameter (name, _) ->
           {
             scope with
             values =
               String_map.add name.text
-                (Value_generic (parameter name), "a generic parameter")
+                (Value_generic (make_parameter name), "a generic parameter")
                 scope.values;
           }
       | Generic_error -> scope)
@@ -932,8 +933,8 @@ let resolve_inherited scope ~(owner : Path.t) (generics : Syntax.generic_paramet
 
 let resolve_definition state ~(path : Path.t) ?(container : (Path.t * Syntax.definition) option)
     (definition_ : Syntax.definition) =
-  let broken part = Names.is_broken state.lookups state.key part in
-  let header_broken = broken Header and body_broken = broken Body in
+  let is_broken part = Names.is_broken state.lookups state.key part in
+  let header_broken = is_broken Header and body_broken = is_broken Body in
   let scope =
     match container with
     | Some (owner, { kind = Trait { generics = generics_; _ }; _ }) ->
@@ -994,7 +995,7 @@ let resolve_definition state ~(path : Path.t) ?(container : (Path.t * Syntax.def
         List.iter (resolve_path_type state scope) requires;
         List.iteri
           (fun index (line : Syntax.trait_member Syntax.node) ->
-            if not (broken (Member_header index)) then
+            if not (is_broken (Member_header index)) then
               match line.kind with
               | Associated_type (_, bounds) -> List.iter (resolve_path_type state scope) bounds
               | Law { parameters = parameters_; requires; body; _ } ->
@@ -1005,7 +1006,7 @@ let resolve_definition state ~(path : Path.t) ?(container : (Path.t * Syntax.def
                   in
                   run_in_section state Contract (fun () ->
                       List.iter (resolve_expression state inner) requires;
-                      if not (broken (Member_body index)) then resolve_block state inner body)
+                      if not (is_broken (Member_body index)) then resolve_block state inner body)
               | Associated_capability _ | Trait_member_error -> ())
           members
       end
@@ -1017,7 +1018,7 @@ let resolve_definition state ~(path : Path.t) ?(container : (Path.t * Syntax.def
         List.iter (resolve_capability_reference state scope) uses;
         List.iteri
           (fun index (line : Syntax.impl_member Syntax.node) ->
-            if not (broken (Member_header index)) then
+            if not (is_broken (Member_header index)) then
               match line.kind with
               | Associated_definition (_, type_) -> resolve_type_expression state scope type_
               | Capability_definition (_, capabilities) ->

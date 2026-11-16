@@ -386,9 +386,9 @@ let compute_and_record database parts compute =
   record database parts reads;
   result
 
-let mark_readers ?(only = fun _ -> true) database part =
+let mark_readers ?(is_selected = fun _ -> true) database part =
   Option.iter
-    (Computed_table.iter (fun reader () -> if only reader then mark_stale database reader))
+    (Computed_table.iter (fun reader () -> if is_selected reader then mark_stale database reader))
     (Part_table.find_opt database.readers part)
 
 let store database part slot value =
@@ -490,8 +490,8 @@ let read_namespace database package =
   | Some namespace -> namespace
   | None -> report_uncomputed (Namespace package)
 
-let make_name_lookups_over database ~namespace =
-  Resolve.Names.of_namespaces ~namespace
+let make_name_lookups_over database ~read_namespace =
+  Resolve.Names.of_namespaces ~read_namespace
     ~module_exists:(fun (module_ : Path.module_) ->
       module_ = Intrinsic.module_ || List.mem module_ (list_modules database module_.package))
     ~split_module:
@@ -499,26 +499,26 @@ let make_name_lookups_over database ~namespace =
     ~list_dependency_names:(list_dependency_names database)
 
 let make_stored_name_lookups database =
-  make_name_lookups_over database ~namespace:(read_namespace database)
+  make_name_lookups_over database ~read_namespace:(read_namespace database)
 
 let add_recording (names : Resolve.Names.lookups) (note : Part.t -> unit) : Resolve.Names.lookups =
-  let noting (part : Part.name) read =
+  let note_name_read (part : Part.name) read =
     note (Name part);
     read
   in
-  let noting_input (part : Part.input) read =
+  let note_input_read (part : Part.input) read =
     note (Input part);
     read
   in
   {
-    find = (fun module_ name -> noting (Entry (module_, name)) (names.find module_ name));
-    list_entries = (fun module_ -> noting (Entries module_) (names.list_entries module_));
-    list_imports = (fun key -> noting (Imports key) (names.list_imports key));
+    find = (fun module_ name -> note_name_read (Entry (module_, name)) (names.find module_ name));
+    list_entries = (fun module_ -> note_name_read (Entries module_) (names.list_entries module_));
+    list_imports = (fun key -> note_name_read (Imports key) (names.list_imports key));
     module_exists =
-      (fun module_ -> noting_input (Modules module_.package) (names.module_exists module_));
-    split_module = (fun parts -> noting_input Packages (names.split_module parts));
+      (fun module_ -> note_input_read (Modules module_.package) (names.module_exists module_));
+    split_module = (fun parts -> note_input_read Packages (names.split_module parts));
     list_dependency_names =
-      (fun package -> noting_input (Dependencies package) (names.list_dependency_names package));
+      (fun package -> note_input_read (Dependencies package) (names.list_dependency_names package));
     find_key =
       (fun path ->
         (match path with
@@ -529,35 +529,37 @@ let add_recording (names : Resolve.Names.lookups) (note : Part.t -> unit) : Reso
             note (Name (Members (owner, name)))
         | Derived _ | Unresolved _ -> ());
         names.find_key path);
-    read_declaration = (fun key -> noting (Declaration key) (names.read_declaration key));
+    read_declaration = (fun key -> note_name_read (Declaration key) (names.read_declaration key));
     list_declarations =
-      (fun module_ -> noting (Module_declarations module_) (names.list_declarations module_));
+      (fun module_ ->
+        note_name_read (Module_declarations module_) (names.list_declarations module_));
     list_declarations_in =
-      (fun file -> noting (File_declarations file) (names.list_declarations_in file));
+      (fun file -> note_name_read (File_declarations file) (names.list_declarations_in file));
     list_package_declarations =
       (fun package ->
-        noting (Package_declarations package) (names.list_package_declarations package));
-    read_definition = (fun key -> noting (Tree key) (names.read_definition key));
-    read_text = (fun key -> noting (Text key) (names.read_text key));
-    read_spans = (fun key -> noting (Tree key) (names.read_spans key));
-    list_recovered = (fun key -> noting (Tree key) (names.list_recovered key));
-    read_place = (fun key -> noting (Place key) (names.read_place key));
-    find_container = (fun key -> noting (Container key) (names.find_container key));
-    list_contained = (fun key -> noting (Contained key) (names.list_contained key));
+        note_name_read (Package_declarations package) (names.list_package_declarations package));
+    read_definition = (fun key -> note_name_read (Tree key) (names.read_definition key));
+    read_text = (fun key -> note_name_read (Text key) (names.read_text key));
+    read_spans = (fun key -> note_name_read (Tree key) (names.read_spans key));
+    list_recovered = (fun key -> note_name_read (Tree key) (names.list_recovered key));
+    read_place = (fun key -> note_name_read (Place key) (names.read_place key));
+    find_container = (fun key -> note_name_read (Container key) (names.find_container key));
+    list_contained = (fun key -> note_name_read (Contained key) (names.list_contained key));
     list_members =
-      (fun owner name -> noting (Members (owner, name)) (names.list_members owner name));
+      (fun owner name -> note_name_read (Members (owner, name)) (names.list_members owner name));
     list_traits_declaring =
       (fun package name ->
-        noting (Traits_declaring (package, name)) (names.list_traits_declaring package name));
-    list_impls = (fun package -> noting (Impl_index package) (names.list_impls package));
+        note_name_read (Traits_declaring (package, name)) (names.list_traits_declaring package name));
+    list_impls = (fun package -> note_name_read (Impl_index package) (names.list_impls package));
     list_impls_of_type =
       (fun package type_ ->
-        noting (Impls_of_type (package, type_)) (names.list_impls_of_type package type_));
+        note_name_read (Impls_of_type (package, type_)) (names.list_impls_of_type package type_));
     list_impls_of_trait =
       (fun package trait ->
-        noting (Impls_of_trait (package, trait)) (names.list_impls_of_trait package trait));
+        note_name_read (Impls_of_trait (package, trait)) (names.list_impls_of_trait package trait));
     list_law_proofs =
-      (fun package name -> noting (Law_proofs (package, name)) (names.list_law_proofs package name));
+      (fun package name ->
+        note_name_read (Law_proofs (package, name)) (names.list_law_proofs package name));
   }
 
 let make_recording_name_lookups database note =
@@ -911,14 +913,14 @@ let compute_test_keys database keys =
     compute_and_record database
       (List.map (fun key -> Part.Lowering (Test_key key)) keys)
       (fun note ->
-        let supported = function
+        let require_supported = function
           | Ok value -> value
           | Error unsupported -> raise (Reaches_unsupported unsupported)
         in
         match
           Compile.derive_test_keys
-            ~lowered:(fun key -> supported (read_lowered database note key))
-            ~known:(fun key -> supported (read_test_key database note key))
+            ~read_lowered:(fun key -> require_supported (read_lowered database note key))
+            ~read_known_key:(fun key -> require_supported (read_test_key database note key))
             keys
         with
         | test_keys -> Value (Ok test_keys)
@@ -955,30 +957,33 @@ let make_stored database (part : Part.stored) =
     | Recursion_group path -> Path.locate_package path
   in
   let package_database = obtain_owner database package in
-  let failed = function Failed _ -> true | Value _ | Blocked -> false in
-  let never _ = false in
-  let in_owner ~is_failed ~owner access =
-    let current = owner database in
+  let is_failed = function Failed _ -> true | Value _ | Blocked -> false in
+  let is_never _ = false in
+  let make_stored_in_owner ~is_failed ~select_owner access =
+    let current = select_owner database in
     {
       is_failed = Option.fold ~none:false ~some:is_failed (access current).stored;
       remove = (fun () -> (access current).remove ());
-      is_equal_in = (fun other -> compare (access (owner other)).stored (access current).stored = 0);
+      is_equal_in =
+        (fun other -> compare (access (select_owner other)).stored (access current).stored = 0);
       marshal = (fun () -> Option.map marshal (access current).stored);
       restore = (fun bytes -> (access current).replace (Marshal.from_string bytes 0));
     }
   in
-  let keyed ~is_failed access =
-    in_owner ~is_failed ~owner:(fun database -> obtain_owner database package) access
+  let make_keyed_stored ~is_failed access =
+    make_stored_in_owner ~is_failed
+      ~select_owner:(fun database -> obtain_owner database package)
+      access
   in
-  let of_database access = in_owner ~is_failed:failed ~owner:Fun.id access in
+  let of_database access = make_stored_in_owner ~is_failed ~select_owner:Fun.id access in
   match part with
   | Recursion_group path ->
-      keyed ~is_failed:failed
+      make_keyed_stored ~is_failed
         (Path_table.make_access (fun package_database -> package_database.recursion_groups) path)
   | Computed part -> (
       match part with
       | Parsed file ->
-          keyed ~is_failed:never
+          make_keyed_stored ~is_failed:is_never
             (File_table.make_access (fun package_database -> package_database.parsed) file)
       | Namespace _ ->
           {
@@ -991,85 +996,86 @@ let make_stored database (part : Part.stored) =
             restore = ignore;
           }
       | Resolved (key, section) ->
-          keyed ~is_failed:failed
+          make_keyed_stored ~is_failed
             (Key_section_table.make_access
                (fun package_database -> package_database.resolved_names)
                (key, section))
       | Grant (_, dependency) ->
-          keyed ~is_failed:never
+          make_keyed_stored ~is_failed:is_never
             (Package_table.make_access (fun package_database -> package_database.grants) dependency)
       | Import_check file ->
-          keyed ~is_failed:never
+          make_keyed_stored ~is_failed:is_never
             (File_table.make_access (fun package_database -> package_database.import_checks) file)
       | Trait_header key ->
-          keyed ~is_failed:failed
+          make_keyed_stored ~is_failed
             (Key_table.make_access (fun package_database -> package_database.trait_headers) key)
       | Constant_value path ->
-          keyed ~is_failed:failed
+          make_keyed_stored ~is_failed
             (Path_table.make_access (fun package_database -> package_database.constant_values) path)
       | Header key ->
-          keyed ~is_failed:failed
+          make_keyed_stored ~is_failed
             (Key_table.make_access (fun package_database -> package_database.headers) key)
       | Interface key ->
-          keyed ~is_failed:failed
+          make_keyed_stored ~is_failed
             (Key_table.make_access (fun package_database -> package_database.interfaces) key)
       | Derived_interface { type_; trait } ->
-          keyed ~is_failed:failed
+          make_keyed_stored ~is_failed
             (Type_trait_table.make_access
                (fun package_database -> package_database.derived_interfaces)
                (type_, trait))
       | Type_facts path ->
-          keyed ~is_failed:failed
+          make_keyed_stored ~is_failed
             (Path_table.make_access (fun package_database -> package_database.type_facts) path)
       | Signature_check key ->
-          keyed ~is_failed:failed
+          make_keyed_stored ~is_failed
             (Key_table.make_access (fun package_database -> package_database.signature_checks) key)
       | Contract key ->
-          keyed ~is_failed:failed
+          make_keyed_stored ~is_failed
             (Key_table.make_access (fun package_database -> package_database.contracts) key)
       | Checked_body key ->
-          keyed ~is_failed:failed
+          make_keyed_stored ~is_failed
             (Key_table.make_access (fun package_database -> package_database.checked_bodies) key)
       | Derived_form path ->
-          keyed ~is_failed:failed
+          make_keyed_stored ~is_failed
             (Path_table.make_access (fun package_database -> package_database.derived_forms) path)
       | Body_mir key ->
-          keyed ~is_failed:failed
+          make_keyed_stored ~is_failed
             (Key_table.make_access (fun package_database -> package_database.body_parts) key)
       | Contract_mir key ->
-          keyed ~is_failed:failed
+          make_keyed_stored ~is_failed
             (Key_table.make_access (fun package_database -> package_database.contract_parts) key)
       | Generated_mir path ->
-          keyed ~is_failed:failed
+          make_keyed_stored ~is_failed
             (Path_table.make_access (fun package_database -> package_database.generated_parts) path)
       | Mir_call_edges path ->
-          keyed ~is_failed:failed
+          make_keyed_stored ~is_failed
             (Path_table.make_access (fun package_database -> package_database.mir_call_edges) path)
       | Patterns key ->
-          keyed ~is_failed:failed
+          make_keyed_stored ~is_failed
             (Key_table.make_access (fun package_database -> package_database.patterns) key)
       | Usage key ->
-          keyed ~is_failed:failed
+          make_keyed_stored ~is_failed
             (Key_table.make_access (fun package_database -> package_database.usage) key)
       | Ownership key ->
-          keyed ~is_failed:failed
+          make_keyed_stored ~is_failed
             (Key_table.make_access (fun package_database -> package_database.ownership) key)
       | Package_check (_, check) ->
-          keyed ~is_failed:failed
+          make_keyed_stored ~is_failed
             (Check_table.make_access
                (fun package_database -> package_database.package_checks)
                check)
       | Call_edges (path, viewer) ->
-          let call_edges database =
+          let find_viewer_successors database =
             Option.bind (Package_table.find_opt database.graphs viewer) (fun graph ->
-                Call_graph.successors graph path)
+                Call_graph.find_successors graph path)
           in
           {
             is_failed = false;
             remove =
               (fun () -> Call_graph.remove_successors (obtain_call_graph database viewer) path);
-            is_equal_in = (fun other -> call_edges other = call_edges database);
-            marshal = (fun () -> Option.map marshal (call_edges database));
+            is_equal_in =
+              (fun other -> find_viewer_successors other = find_viewer_successors database);
+            marshal = (fun () -> Option.map marshal (find_viewer_successors database));
             restore =
               (fun bytes ->
                 ignore
@@ -1078,7 +1084,7 @@ let make_stored database (part : Part.stored) =
                      path (Marshal.from_string bytes 0)));
           }
       | Proof key ->
-          keyed ~is_failed:failed
+          make_keyed_stored ~is_failed
             (Key_table.make_access (fun package_database -> package_database.proofs) key)
       | Lowering (Lowered key) ->
           of_database (Instance_table.make_access (fun database -> database.lowered) key)
@@ -1126,7 +1132,7 @@ let rec forget database parts =
       discard database part)
     parts;
   let is_kept reader = not (Computed_table.mem removed reader) in
-  List.iter (fun part -> mark_readers ~only:is_kept database (Stored (Computed part))) parts;
+  List.iter (fun part -> mark_readers ~is_selected:is_kept database (Stored (Computed part))) parts;
   List.iter
     (function
       | Part.Proof _ as owner -> own_roots database (Part.Stored (Computed owner)) [] | _ -> ())
@@ -1139,10 +1145,12 @@ and own_roots database owner roots =
     if roots = [] then Part_table.remove database.owned owner
     else Part_table.replace database.owned owner roots;
     mark_unsaved database (Owned owner);
-    let owners root = Option.value (Instance_table.find_opt database.owners root) ~default:[] in
+    let list_owners root =
+      Option.value (Instance_table.find_opt database.owners root) ~default:[]
+    in
     List.iter
       (fun root ->
-        match List.filter (fun other -> other <> owner) (owners root) with
+        match List.filter (fun other -> other <> owner) (list_owners root) with
         | [] ->
             Instance_table.remove database.owners root;
             References.remove_root database.references root
@@ -1150,7 +1158,7 @@ and own_roots database owner roots =
       (subtract_sorted Instance.compare before roots);
     List.iter
       (fun root ->
-        Instance_table.replace database.owners root (owner :: owners root);
+        Instance_table.replace database.owners root (owner :: list_owners root);
         if References.add_root database.references root then create_instance database root)
       (subtract_sorted Instance.compare roots before);
     settle_references database
@@ -1175,7 +1183,7 @@ let list_instance_edges database key =
 
 let update_references database key =
   let edges = list_instance_edges database key in
-  if References.successors database.references key <> Some (Some edges) then begin
+  if References.find_successors database.references key <> Some (Some edges) then begin
     List.iter (create_instance database)
       (References.set_successors database.references key (Some edges));
     settle_references database
@@ -1284,7 +1292,7 @@ let mark_change database package (change : Resolve.Names.change) =
     | Law_proofs name -> Law_proofs (package, name)
   in
   match change with
-  | Positions _ -> mark_readers ~only:(holds_position database) database (Name part)
+  | Positions _ -> mark_readers ~is_selected:(holds_position database) database (Name part)
   | _ -> mark_readers database (Name part)
 
 let is_own_namespace_part package (part : Part.t) =
@@ -1300,7 +1308,7 @@ let compute_namespace_and_implied database (package_database : package_database)
         let note part = if not (is_own_namespace_part package part) then note part in
         let own_namespace = make_namespace database note package_database in
         let names =
-          make_name_lookups_over database ~namespace:(fun name ->
+          make_name_lookups_over database ~read_namespace:(fun name ->
               if name = package then own_namespace else read_namespace database name)
         in
         (own_namespace, list_package_parts database (add_recording names note) package))
@@ -1314,12 +1322,13 @@ let compute_namespace database (package_database : package_database) =
   let before = Option.value package_database.namespace ~default:Resolve.Names.empty_namespace in
   let implied_before = Option.value ~default:[] (Package_table.find_opt database.implied package) in
   let after, implied = compute_namespace_and_implied database package_database in
-  let membership parts =
+  let make_membership_test parts =
     let members = Computed_table.create 256 in
     List.iter (fun part -> Computed_table.replace members part ()) parts;
     Computed_table.mem members
   in
-  let was_implied = membership implied_before and is_implied = membership implied in
+  let was_implied = make_membership_test implied_before
+  and is_implied = make_membership_test implied in
   let graph = obtain_call_graph database package in
   List.iter
     (function
@@ -1372,10 +1381,10 @@ let compute_type_facts database paths =
 let compute_part database (part : Part.computed) =
   database.observe (Recomputed (Computed part));
   let package_database = obtain_owner database (Part.locate_package part) in
-  let into slot compute = compute_into database part slot compute in
+  let compute_into_slot slot compute = compute_into database part slot compute in
   match part with
   | Parsed file ->
-      into (File_table.make_slot package_database.parsed file) (fun note ->
+      compute_into_slot (File_table.make_slot package_database.parsed file) (fun note ->
           note (Input (Source file));
           let source = read_source database file in
           let tokens, lexer_diagnostics = Lexer.lex source in
@@ -1388,7 +1397,7 @@ let compute_part database (part : Part.computed) =
             })
   | Namespace _ -> compute_namespace database package_database
   | Resolved (key, section) ->
-      into
+      compute_into_slot
         (Key_section_table.make_slot package_database.resolved_names (key, section))
         (fun note ->
           Some
@@ -1402,17 +1411,17 @@ let compute_part database (part : Part.computed) =
           (fun (entry : Manifest.dependency) -> entry.package = dependency)
           package_database.dependencies
       in
-      into (Package_table.make_slot package_database.grants dependency) (fun note ->
+      compute_into_slot (Package_table.make_slot package_database.grants dependency) (fun note ->
           note (Input (Dependencies package));
           Some
             (Interface.Grants.resolve_grant
                (make_recording_name_lookups database note)
                ~package entry.capabilities))
   | Import_check file ->
-      into (File_table.make_slot package_database.import_checks file) (fun note ->
+      compute_into_slot (File_table.make_slot package_database.import_checks file) (fun note ->
           Some (list_import_diagnostics database note file))
   | Trait_header key ->
-      into (Key_table.make_slot package_database.trait_headers key) (fun note ->
+      compute_into_slot (Key_table.make_slot package_database.trait_headers key) (fun note ->
           Some
             (match
                ( (make_recording_name_lookups database note).read_definition key,
@@ -1424,14 +1433,14 @@ let compute_part database (part : Part.computed) =
                 | None -> Blocked)
             | _, (Failed _ | Blocked) -> Blocked))
   | Constant_value path ->
-      into (Path_table.make_slot package_database.constant_values path) (fun note ->
+      compute_into_slot (Path_table.make_slot package_database.constant_values path) (fun note ->
           Some
             (make_part
                (Interface.Constants.evaluate_constant
                   (make_recording_interface_lookups database note ~is_checked:false))
                path))
   | Header key ->
-      into (Key_table.make_slot package_database.headers key) (fun note ->
+      compute_into_slot (Key_table.make_slot package_database.headers key) (fun note ->
           Some
             (match
                make_part
@@ -1443,7 +1452,7 @@ let compute_part database (part : Part.computed) =
             | Value (Error (_ :: _ as diagnostics)) -> Failed diagnostics
             | Value (Error []) | Failed _ | Blocked -> Blocked))
   | Interface key ->
-      into (Key_table.make_slot package_database.interfaces key) (fun note ->
+      compute_into_slot (Key_table.make_slot package_database.interfaces key) (fun note ->
           Some
             (match
                make_part
@@ -1454,7 +1463,7 @@ let compute_part database (part : Part.computed) =
             | Value elaborated -> make_interface_part elaborated
             | Failed _ | Blocked -> Blocked))
   | Derived_interface { type_; trait } ->
-      into
+      compute_into_slot
         (Type_trait_table.make_slot package_database.derived_interfaces (type_, trait))
         (fun note ->
           Some
@@ -1470,7 +1479,7 @@ let compute_part database (part : Part.computed) =
             | Value None | Failed _ | Blocked -> Blocked))
   | Type_facts path -> compute_type_facts database [ path ]
   | Signature_check key ->
-      into (Key_table.make_slot package_database.signature_checks key) (fun note ->
+      compute_into_slot (Key_table.make_slot package_database.signature_checks key) (fun note ->
           read database note (Interface key);
           Some
             (match Key_table.find_opt package_database.interfaces key with
@@ -1485,7 +1494,7 @@ let compute_part database (part : Part.computed) =
             | Some (Failed _ | Blocked) -> Blocked
             | None -> report_uncomputed (Interface key)))
   | Contract key ->
-      into (Key_table.make_slot package_database.contracts key) (fun note ->
+      compute_into_slot (Key_table.make_slot package_database.contracts key) (fun note ->
           Some
             (match
                type_check Infer.check_contract (make_recording_infer_lookups database note) key
@@ -1494,16 +1503,16 @@ let compute_part database (part : Part.computed) =
             | Failed diagnostics -> Failed diagnostics
             | Blocked -> Blocked))
   | Checked_body key ->
-      into (Key_table.make_slot package_database.checked_bodies key) (fun note ->
+      compute_into_slot (Key_table.make_slot package_database.checked_bodies key) (fun note ->
           Some (type_check Infer.check_body (make_recording_infer_lookups database note) key))
   | Derived_form path ->
-      into (Path_table.make_slot package_database.derived_forms path) (fun note ->
+      compute_into_slot (Path_table.make_slot package_database.derived_forms path) (fun note ->
           match Infer.derive_form (make_recording_infer_lookups database note) path with
           | Some form -> Some (Value form)
           | None -> None
           | exception Reads_failed_part -> Some Blocked)
   | Body_mir key ->
-      into (Key_table.make_slot package_database.body_parts key) (fun note ->
+      compute_into_slot (Key_table.make_slot package_database.body_parts key) (fun note ->
           read database note (Checked_body key);
           Some
             (match Key_table.find_opt package_database.checked_bodies key with
@@ -1515,21 +1524,21 @@ let compute_part database (part : Part.computed) =
             | Some (Failed _ | Blocked) -> Blocked
             | None -> report_uncomputed (Checked_body key)))
   | Contract_mir key ->
-      into (Key_table.make_slot package_database.contract_parts key) (fun note ->
+      compute_into_slot (Key_table.make_slot package_database.contract_parts key) (fun note ->
           read database note (Contract key);
           Some
             (match Key_table.find_opt package_database.contracts key with
             | Some (Value form) ->
                 Value
                   (Mir.make_contract_part
-                     ~type_interface:
+                     ~find_type_interface:
                        (Interface.Definition.read_type_interface
                           (make_recording_interface_lookups database note ~is_checked:true))
                      key.path form)
             | Some (Failed _ | Blocked) -> Blocked
             | None -> report_uncomputed (Contract key)))
   | Generated_mir path ->
-      into (Path_table.make_slot package_database.generated_parts path) (fun note ->
+      compute_into_slot (Path_table.make_slot package_database.generated_parts path) (fun note ->
           read database note (Derived_form path);
           Option.map
             (function
@@ -1537,32 +1546,32 @@ let compute_part database (part : Part.computed) =
                   Value
                     ( Mir.make_body_part form,
                       Mir.make_contract_part
-                        ~type_interface:
+                        ~find_type_interface:
                           (Interface.Definition.read_type_interface
                              (make_recording_interface_lookups database note ~is_checked:true))
                         path form )
               | Failed _ | Blocked -> Blocked)
             (Path_table.find_opt package_database.derived_forms path))
   | Mir_call_edges path ->
-      into (Path_table.make_slot package_database.mir_call_edges path) (fun note ->
+      compute_into_slot (Path_table.make_slot package_database.mir_call_edges path) (fun note ->
           Some
             (make_part
                (Mir.Call_edges.list_path_edges (make_recording_call_edge_lookups database note))
                path))
   | Patterns key ->
-      into (Key_table.make_slot package_database.patterns key) (fun note ->
+      compute_into_slot (Key_table.make_slot package_database.patterns key) (fun note ->
           Some
             (make_checked_part
                (fun key -> (Patterns.check (make_recording_patterns_lookups database note) key, ()))
                key))
   | Usage key ->
-      into (Key_table.make_slot package_database.usage key) (fun note ->
+      compute_into_slot (Key_table.make_slot package_database.usage key) (fun note ->
           Some
             (make_checked_part
                (fun key -> (Usage.check (make_recording_usage_lookups database note) key, ()))
                key))
   | Ownership key ->
-      into (Key_table.make_slot package_database.ownership key) (fun note ->
+      compute_into_slot (Key_table.make_slot package_database.ownership key) (fun note ->
           Some
             (make_checked_part
                (fun key ->
@@ -1572,16 +1581,16 @@ let compute_part database (part : Part.computed) =
                  (result.diagnostics, result.must_be_disjoint))
                key))
   | Package_check (package, check) ->
-      into (Check_table.make_slot package_database.package_checks check) (fun note ->
+      compute_into_slot (Check_table.make_slot package_database.package_checks check) (fun note ->
           Some
             (make_part
                (Package_checks.run (make_recording_package_checks_lookups database note) package)
                check))
   | Call_edges (path, viewer) ->
       let graph = obtain_call_graph database viewer in
-      into
+      compute_into_slot
         {
-          stored = Call_graph.successors graph path;
+          stored = Call_graph.find_successors graph path;
           replace =
             (fun call_edges ->
               List.iter
@@ -1591,11 +1600,11 @@ let compute_part database (part : Part.computed) =
         }
         (fun note -> Some (find_call_edges database note ~viewer path))
   | Proof key ->
-      into (Key_table.make_slot package_database.proofs key) (fun note ->
+      compute_into_slot (Key_table.make_slot package_database.proofs key) (fun note ->
           Some (make_part (Prover.prove (make_recording_proof_lookups database note)) key));
       own_template_checks database key
   | Lowering (Lowered key) ->
-      into (Instance_table.make_slot database.lowered key) (fun note ->
+      compute_into_slot (Instance_table.make_slot database.lowered key) (fun note ->
           Some
             (match
                Compile.lower (read_lowering_settings database)
@@ -1641,7 +1650,7 @@ let list_components database (stage : Stage.t) package parts =
         (fun paths -> Type_fact_component paths)
         (Strongly_connected.list_components
            (module Path)
-           ~successors:(fun path ->
+           ~list_successors:(fun path ->
              match find_type_interface lookups path with
              | Some interface ->
                  List.filter (Path_table.mem in_closure)
@@ -1659,7 +1668,7 @@ let list_test_key_components database parts =
     (fun keys -> Test_key_component keys)
     (Strongly_connected.list_components
        (module Instance)
-       ~successors:(fun key ->
+       ~list_successors:(fun key ->
          match Instance_table.find_opt database.lowered key with
          | Some (Value (Ok lowered)) ->
              List.filter (Instance_table.mem in_closure) (Compile.list_references lowered)
@@ -1676,13 +1685,13 @@ let update_groups database package =
           mark_unsaved database (Value (Computed part));
           discard database part)
         removed;
-      let groups = Path_table.make_slot (obtain_owner database package).recursion_groups in
+      let make_group_slot = Path_table.make_slot (obtain_owner database package).recursion_groups in
       let is_own node = Path.locate_package node = package in
       List.iter
         (fun node ->
           if is_own node then begin
             database.observe (Recomputed (Recursion_group node));
-            store database (Recursion_group node) (groups node)
+            store database (Recursion_group node) (make_group_slot node)
               (match Call_graph.group graph node with
               | Blocked -> Some Blocked
               | Members [] -> None
@@ -1690,7 +1699,8 @@ let update_groups database package =
           end)
         touched;
       List.iter
-        (fun node -> if is_own node then store database (Recursion_group node) (groups node) None)
+        (fun node ->
+          if is_own node then store database (Recursion_group node) (make_group_slot node) None)
         removed
   | Some _ | None -> ()
 
@@ -1739,21 +1749,21 @@ let drain_stage database ~is_drained ~on_raise (stage : Stage.t) packages =
                   on_raise parts raised
             end)
       in
-      let parts_where keep =
+      let list_parts_where is_kept =
         Computed_table.fold
-          (fun part () parts -> if keep part then part :: parts else parts)
+          (fun part () parts -> if is_kept part then part :: parts else parts)
           closure []
       in
-      let all_parts () = parts_where (fun _ -> true) in
+      let list_all_parts () = list_parts_where (fun _ -> true) in
       match stage with
-      | Lowered_code -> compute_components (List.map (fun part -> Single part) (all_parts ()))
-      | Test_keys -> compute_components (list_test_key_components database (all_parts ()))
+      | Lowered_code -> compute_components (List.map (fun part -> Single part) (list_all_parts ()))
+      | Test_keys -> compute_components (list_test_key_components database (list_all_parts ()))
       | stage ->
           List.iter
             (fun package ->
               compute_components
                 (list_components database stage package
-                   (parts_where (fun part -> Part.locate_package part = package))))
+                   (list_parts_where (fun part -> Part.locate_package part = package))))
             packages)
 
 let drain_where ?on_bug database ~drains requested =
@@ -1766,7 +1776,7 @@ let drain_where ?on_bug database ~drains requested =
         on_bug bug
     | _ -> raise raised
   in
-  let rec next () =
+  let rec drain_next () =
     let ready = lazy (collect_ready_instances database) in
     let is_drained part = is_drained ~ready part && not (Computed_table.mem broken part) in
     let has_drained_work stage =
@@ -1780,10 +1790,10 @@ let drain_where ?on_bug database ~drains requested =
     match List.find_opt (fun stage -> drains stage && has_drained_work stage) Stage.all with
     | Some stage ->
         drain_stage database ~is_drained ~on_raise stage packages;
-        next ()
+        drain_next ()
     | None -> ()
   in
-  next ()
+  drain_next ()
 
 let drain database ~through requested =
   drain_where database ~drains:(Stage.drains ~through) requested
@@ -1951,29 +1961,34 @@ let list_stored_parts (package_database : package_database) : Part.stored list =
 
 let mark_differences database name ~(before : package_database option)
     ~(after : package_database option) =
-  let empty () =
+  let make_empty () =
     let package_database = make_empty_package_database name ~dependencies:[] in
     package_database.namespace <- Some Resolve.Names.empty_namespace;
     package_database
   in
-  let before = match before with Some package_database -> package_database | None -> empty () in
-  let after = match after with Some package_database -> package_database | None -> empty () in
-  let namespace (package_database : package_database) =
+  let before =
+    match before with Some package_database -> package_database | None -> make_empty ()
+  in
+  let after =
+    match after with Some package_database -> package_database | None -> make_empty ()
+  in
+  let read_package_namespace (package_database : package_database) =
     Option.value package_database.namespace ~default:Resolve.Names.empty_namespace
   in
   List.iter (mark_change database name)
-    (Resolve.Names.list_changes (namespace before) (namespace after));
-  let text (package_database : package_database) file =
+    (Resolve.Names.list_changes (read_package_namespace before) (read_package_namespace after));
+  let find_text (package_database : package_database) file =
     Option.map Source.text (File_table.find_opt package_database.sources file)
   in
   List.iter
     (fun file ->
-      if text before file <> text after file then mark_readers database (Input (Source file)))
+      if find_text before file <> find_text after file then
+        mark_readers database (Input (Source file)))
     (List.sort_uniq compare (before.files @ after.files));
   if before.modules <> after.modules then mark_readers database (Input (Modules name));
   if before.dependencies <> after.dependencies then
     mark_readers database (Input (Dependencies name));
-  let view (package_database : package_database) =
+  let make_view (package_database : package_database) =
     let package_databases = Package_table.create 1 in
     Package_table.replace package_databases name package_database;
     { database with package_databases }
@@ -1984,7 +1999,7 @@ let mark_differences database name ~(before : package_database option)
     (list_stored_parts before @ list_stored_parts after);
   Stored_table.iter
     (fun part () ->
-      if not ((make_stored (view before) part).is_equal_in (view after)) then
+      if not ((make_stored (make_view before) part).is_equal_in (make_view after)) then
         mark_readers database (Stored part))
     parts
 
@@ -2020,7 +2035,7 @@ let retire database (package_database : package_database) =
 
 let relayout database ~(loaded : package_database list) (packages : Project.package list) =
   let project = List.map (fun (package : Project.package) -> package.name) packages in
-  let loaded_as name =
+  let find_loaded name =
     List.find_opt (fun (package_database : package_database) -> package_database.name = name) loaded
   in
   let names_before =
@@ -2032,12 +2047,12 @@ let relayout database ~(loaded : package_database list) (packages : Project.pack
       let is_kept =
         if List.mem name database.project then List.mem name project
         else
-          match loaded_as name with
+          match find_loaded name with
           | Some package_database -> package_database == before
           | None -> false
       in
       if not is_kept then begin
-        let after = if List.mem name project then None else loaded_as name in
+        let after = if List.mem name project then None else find_loaded name in
         mark_differences database name ~before:(Some before) ~after;
         retire database before;
         Option.iter (Package_table.replace database.package_databases name) after
@@ -2130,7 +2145,7 @@ let list_unsaved database =
 
 let mark_saved database = Entry_table.reset database.unsaved
 
-let restore_packages database ~texts entries =
+let restore_packages database ~find_text entries =
   let files = Package_table.create 64 in
   List.iter
     (function
@@ -2149,7 +2164,7 @@ let restore_packages database ~texts entries =
           let listed = Option.value ~default:[] (Package_table.find_opt files name) in
           List.iter
             (fun (file, saved) ->
-              match texts file with
+              match find_text file with
               | Some text when String.equal (fingerprint text) saved ->
                   File_table.replace package_database.sources file (make_source file text)
               | Some _ | None -> ())
@@ -2210,12 +2225,12 @@ let restore_references database =
     instances;
   settle_references database
 
-let restore ~loaded ~texts entries =
+let restore ~loaded ~find_text entries =
   let database = create ~loaded [] in
   let entries =
     List.map (fun (key, value) -> ((Marshal.from_string key 0 : Entry.t), value)) entries
   in
-  restore_packages database ~texts entries;
+  restore_packages database ~find_text entries;
   restore_parts database entries;
   restore_namespaces database;
   restore_references database;
@@ -2271,7 +2286,7 @@ let list_package_outcomes database package =
 let list_checker_diagnostics database (file : Path.file) checker =
   let names = make_stored_name_lookups database in
   let package_database = obtain_owner database file.module_.package in
-  let placed key diagnostics =
+  let place_diagnostics key diagnostics =
     let ({ file = home; base } : Resolve.Names.place) = names.read_place key in
     if home = file then
       List.map (Diagnostic.map_spans (Source.Definition_span.to_file ~base)) diagnostics
@@ -2279,7 +2294,7 @@ let list_checker_diagnostics database (file : Path.file) checker =
   in
   let of_definitions () =
     List.concat_map
-      (fun key -> placed key (list_definition_diagnostics database key checker))
+      (fun key -> place_diagnostics key (list_definition_diagnostics database key checker))
       (list_file_keys database file)
   in
   sort_by_span_and_code
@@ -2293,7 +2308,7 @@ let list_checker_diagnostics database (file : Path.file) checker =
             | Package_checks.Placed diagnostics ->
                 List.concat_map
                   (fun (diagnostic : Package_checks.placed) ->
-                    placed diagnostic.key [ diagnostic.diagnostic ])
+                    place_diagnostics diagnostic.key [ diagnostic.diagnostic ])
                   diagnostics
             | Unused_dependencies _ -> [])
           (list_package_outcomes database file.module_.package)
@@ -2452,11 +2467,11 @@ let read_resolved database (key : Resolve.Names.key) =
   | [] -> None
   | parts -> Some (Resolve.merge parts)
 
-let request database packages ~through ~needs keys =
+let request database packages ~through ~list_needs keys =
   drain database ~through packages;
   List.iter
     (fun key ->
-      if not (List.for_all (is_current database) (needs key)) then
+      if not (List.for_all (is_current database) (list_needs key)) then
         Compiler_bug.raise_bug ~stage:"Database"
           "%s is requested, and no root of lowering reaches it" (Instance.to_string key))
     keys
@@ -2480,7 +2495,7 @@ let check_calls database interface viewers key = function
           Option.iter
             (fun graph ->
               Compile.check_calls interface
-                ~find_call_edges:(fun path -> Option.join (Call_graph.successors graph path))
+                ~find_call_edges:(fun path -> Option.join (Call_graph.find_successors graph path))
                 key lowered)
             (Package_table.find_opt database.graphs viewer))
         viewers
@@ -2531,7 +2546,9 @@ let make_lowering_requests database packages : Compile.requests =
     mir = make_recording_mir_lookups database ignore;
     find_lowered =
       (fun key ->
-        request database packages ~through:Lowered_code ~needs:(fun key -> [ Lowered key ]) [ key ];
+        request database packages ~through:Lowered_code
+          ~list_needs:(fun key -> [ Lowered key ])
+          [ key ];
         match Instance_table.find_opt database.lowered key with
         | Some (Value lowered) ->
             check_calls database interface packages key lowered;
@@ -2540,11 +2557,15 @@ let make_lowering_requests database packages : Compile.requests =
         | None -> report_uncomputed (Lowering (Lowered key)));
     read_test_key =
       (fun key ->
-        request database packages ~through:Test_keys ~needs:(fun key -> [ Test_key key ]) [ key ];
+        request database packages ~through:Test_keys
+          ~list_needs:(fun key -> [ Test_key key ])
+          [ key ];
         read_requested database.test_keys (Test_key key) key);
     list_reached_todo_types =
       (fun key ->
-        request database packages ~through:Test_keys ~needs:(fun key -> [ Test_key key ]) [ key ];
+        request database packages ~through:Test_keys
+          ~list_needs:(fun key -> [ Test_key key ])
+          [ key ];
         list_reached_todo_types database key);
   }
 
@@ -2630,7 +2651,7 @@ module For_testing = struct
               package_database.recursion_groups)
           database.package_databases)
       [ hot; cold ];
-    let reads database (part : Part.stored) =
+    let find_reads database (part : Part.stored) =
       match part with
       | Computed part ->
           Option.map (List.sort compare) (Computed_table.find_opt database.reads part)
@@ -2639,7 +2660,9 @@ module For_testing = struct
     List.sort compare
       (Stored_table.fold
          (fun part () differences ->
-           if reads hot part <> reads cold part || not ((make_stored hot part).is_equal_in cold)
+           if
+             find_reads hot part <> find_reads cold part
+             || not ((make_stored hot part).is_equal_in cold)
            then Part.show (Stored part) :: differences
            else differences)
          parts [])
@@ -2658,7 +2681,7 @@ module For_testing = struct
       collected = List.sort_uniq compare !collected;
     }
 
-  let root database key =
+  let add_root database key =
     own_roots database (Input Packages)
       (key :: Option.value (Part_table.find_opt database.owned (Input Packages)) ~default:[])
 

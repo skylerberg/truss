@@ -167,7 +167,7 @@ and check_variant_value state (value : Syntax.expression) type_path variant ~arg
         (Printf.sprintf "`%s` has no variants." (Types.show type_))
 
 and check_field state (value : Syntax.expression) base_type (member : Syntax.name) =
-  let unknown candidates =
+  let report_unknown candidates =
     State.make_error_type state Unknown_member (State.read_span state member.id)
       ~fixes:
         (match Diagnostic.find_closest member.text candidates with
@@ -205,13 +205,15 @@ and check_field state (value : Syntax.expression) base_type (member : Syntax.nam
                   (Printf.sprintf "`%s` is a method, so it is called: `%s()`." member.text
                      member.text)
               end
-              else unknown (List.map (fun (written : Types.field) -> written.field_name) fields))
+              else
+                report_unknown (List.map (fun (written : Types.field) -> written.field_name) fields)
+          )
       | None ->
           if Members.list_own_methods state.lookups path member.text <> [] then
             State.make_error_type state Not_a_value (State.read_span state member.id)
               (Printf.sprintf "`%s` is a method, so it is called: `%s()`." member.text member.text)
-          else unknown [])
-  | _ -> unknown []
+          else report_unknown [])
+  | _ -> report_unknown []
 
 and check_function_value state (value : Syntax.expression) (signature : Types.signature) =
   match Types.make_function_type signature with
@@ -366,7 +368,7 @@ and list_trait_static_methods (state : State.state) path name receiver =
               let reference = Instantiation.make_fresh_trait_reference state trait in
               if
                 Option.is_some
-                  (State.implements state
+                  (State.find_evidence state
                      (Types.Named
                         { path; arguments = Instantiation.make_fresh_arguments state path })
                      reference)
@@ -386,7 +388,7 @@ and resolve_evidence state (value : Syntax.expression) self_type (reference : Ty
         || List.exists Types.is_unsolved_argument reference.trait_arguments
       then false
       else begin
-        (match State.implements state self_type reference with
+        (match State.find_evidence state self_type reference with
         | Some evidence -> (
             match state.tables.calls.(value.id) with
             | Some ({ callee = Trait_method method_; _ } as call) ->
@@ -426,7 +428,7 @@ and list_trait_candidates (state : State.state) receiver_type name =
       List.filter_map with_method
         (merge_bounds_by_trait state
            (Interface.Properties.list_known_bounds state.lookups.interface
-              ~bounds:(State.lookup_bounds state) (Types.Parameter parameter)))
+              ~list_bounds:(State.lookup_bounds state) (Types.Parameter parameter)))
   | Types.Any trait ->
       List.filter_map with_method
         (merge_bounds_by_trait state
@@ -438,7 +440,7 @@ and list_trait_candidates (state : State.state) receiver_type name =
           List.filter_map
             (fun trait ->
               let reference = Instantiation.make_fresh_trait_reference state trait in
-              if Option.is_some (State.implements state receiver_type reference) then
+              if Option.is_some (State.find_evidence state receiver_type reference) then
                 with_method reference
               else None)
             (state.lookups.interface.names.list_traits_declaring package name))
@@ -468,9 +470,9 @@ and is_one_family (state : State.state) (traits : Types.trait_reference list) =
          ~self:(Types.Parameter (Types.make_self_parameter first.trait))
          first)
   in
-  let related first second = requires first second || requires second first in
+  let are_related first second = requires first second || requires second first in
   let rec grow reached left =
-    match List.partition (fun trait -> List.exists (related trait) reached) left with
+    match List.partition (fun trait -> List.exists (are_related trait) reached) left with
     | [], [] -> true
     | [], _ -> false
     | more, left -> grow (more @ reached) left
@@ -542,7 +544,7 @@ and find_method_version state (span : Source.Definition_span.t) type_ name
                 | Types.Any _ -> Dynamic
                 | Types.Parameter _ -> Bound
                 | _ -> (
-                    match State.implements state type_ trait with
+                    match State.find_evidence state type_ trait with
                     | Some evidence -> State.convert_evidence evidence
                     | None -> Built_in));
             },
@@ -581,7 +583,7 @@ and find_consuming_cursor state (span : Source.Definition_span.t) type_ =
   | Some (callee, ({ parameters = []; output = Returns cursor; _ } as signature)) -> (
       let cursor = State.normalize state cursor in
       let trait = State.make_trait_reference ~arguments:[] (Well_known.make_path Cursor) in
-      match State.implements state cursor trait with
+      match State.find_evidence state cursor trait with
       | Some _ ->
           Some
             ( Tables.Pulled

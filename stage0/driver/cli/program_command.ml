@@ -38,8 +38,8 @@ let refuse_unshippable snapshot packages compile main proofs =
   match List.sort_uniq compare (in_code @ in_proofs) with
   | [] -> ()
   | refusals ->
-      let kind = function `Todo -> "todo" | `Echo -> "echo" | `Proof_hole -> "proof hole" in
-      let shown = function
+      let show_kind = function `Todo -> "todo" | `Echo -> "echo" | `Proof_hole -> "proof hole" in
+      let show_hole_kind = function
         | `Todo -> "`todo`"
         | `Echo -> "`echo`"
         | `Proof_hole -> "`todo` in a proof"
@@ -54,7 +54,7 @@ let refuse_unshippable snapshot packages compile main proofs =
                       (fun (file, line, column, failure, way) ->
                         Json.Object
                           [
-                            ("kind", Json.String (kind failure));
+                            ("kind", Json.String (show_kind failure));
                             ("file", Json.String file);
                             ("line", Json.Int line);
                             ("column", Json.Int column);
@@ -68,7 +68,7 @@ let refuse_unshippable snapshot packages compile main proofs =
           (fun (file, line, column, failure, way) ->
             Output.eprintf
               "%s:%d:%d: %s can be reached from `main`, so the program cannot be built.\n    %s\n"
-              file line column (shown failure)
+              file line column (show_hole_kind failure)
               (String.concat " -> " (List.map Path.show way)))
           refusals;
       raise (Outcome.Stop 1)

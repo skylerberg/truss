@@ -95,14 +95,14 @@ and match_arguments state (value : Syntax.expression) (parameters : Types.parame
   let named =
     List.mapi (fun index (parameter : Types.parameter_info) -> (parameter.name, index)) parameters
   in
-  let bare_name (argument : Syntax.argument) =
-    let rec name_of (expression : Syntax.expression) =
+  let find_bare_name (argument : Syntax.argument) =
+    let rec find_name (expression : Syntax.expression) =
       match expression.kind with
       | Name { modules = []; last } -> Some last.text
-      | Mode (_, inner) -> name_of inner
+      | Mode (_, inner) -> find_name inner
       | _ -> None
     in
-    name_of argument.value
+    find_name argument.value
   in
   let assigned = Hashtbl.create 8 in
   let matched =
@@ -127,7 +127,9 @@ and match_arguments state (value : Syntax.expression) (parameters : Types.parame
                     (Printf.sprintf "No parameter is named `%s`." label.text);
                   None)
           | None -> (
-              match Option.bind (bare_name argument) (fun name -> List.assoc_opt name named) with
+              match
+                Option.bind (find_bare_name argument) (fun name -> List.assoc_opt name named)
+              with
               | Some index -> Some index
               | None ->
                   if position = 0 && (not record) && parameters <> [] then Some 0
@@ -142,7 +144,7 @@ and match_arguments state (value : Syntax.expression) (parameters : Types.parame
                              | Some label -> Option.to_list (List.assoc_opt label.text named)
                              | None -> (
                                  match
-                                   Option.bind (bare_name other) (fun name ->
+                                   Option.bind (find_bare_name other) (fun name ->
                                        List.assoc_opt name named)
                                  with
                                  | Some index -> [ index ]
@@ -155,7 +157,7 @@ and match_arguments state (value : Syntax.expression) (parameters : Types.parame
                            (fun position (other : Syntax.argument) ->
                              other.label = None
                              && Option.is_none
-                                  (Option.bind (bare_name other) (fun name ->
+                                  (Option.bind (find_bare_name other) (fun name ->
                                        List.assoc_opt name named))
                              && (position > 0 || record))
                            arguments)
@@ -212,7 +214,7 @@ and match_arguments state (value : Syntax.expression) (parameters : Types.parame
                   (fun (_, left) (_, right) -> compare left right)
                   (List.map (fun (argument, index) -> (argument, Option.get index)) matched))
            in
-           let written (argument : Syntax.argument) =
+           let spell_written (argument : Syntax.argument) =
              let start =
                match argument.label with
                | Some label -> (State.read_span state label.id).start
@@ -233,7 +235,7 @@ and match_arguments state (value : Syntax.expression) (parameters : Types.parame
                    [
                      State.replace
                        (Source.Definition_span.make start (State.read_span state last.value.id).stop)
-                       (String.concat ", " (List.map written ordered));
+                       (String.concat ", " (List.map spell_written ordered));
                    ];
                ]
              "The arguments must come in the order of the parameters."
@@ -315,7 +317,7 @@ and construct state env ?expected ?type_arguments (value : Syntax.expression) ty
   in
   let type_ = Types.Named { path = type_path; arguments = type_arguments } in
   (match expected with Some expected -> State.unify_as_hint state type_ expected | None -> ());
-  let unknown_variant variant =
+  let report_unknown_variant variant =
     Error
       (State.make_error_type state Unknown_variant (State.read_span state value.id)
          (Printf.sprintf "`%s` has no variant `%s`." (State.show state type_) variant))
@@ -343,8 +345,8 @@ and construct state env ?expected ?type_arguments (value : Syntax.expression) ty
                 Error
                   (State.make_error_type state Too_many_arguments (State.read_span state value.id)
                      (Printf.sprintf "`%s` has no fields." variant))
-            | None -> unknown_variant variant)
-        | None -> unknown_variant variant)
+            | None -> report_unknown_variant variant)
+        | None -> report_unknown_variant variant)
   in
   if not (Members.are_fields_visible state.lookups ~package:state.package type_path) then
     State.report state Private_field (State.read_span state value.id)

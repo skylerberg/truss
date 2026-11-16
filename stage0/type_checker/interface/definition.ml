@@ -22,14 +22,16 @@ let list_declared_fields (lookups : Lookups.t) path =
         variants
   | _ -> []
 
-let sort_in_declared_order lookups path ~variant ~name fields =
+let sort_in_declared_order lookups path ~variant ~name_of fields =
   match List.assoc_opt variant (list_declared_fields lookups path) with
   | Some declared ->
-      let find_position field =
+      let locate_position field =
         Option.value ~default:(List.length declared)
-          (List.find_index (fun declared_name -> declared_name = name field) declared)
+          (List.find_index (fun declared_name -> declared_name = name_of field) declared)
       in
-      List.stable_sort (fun left right -> compare (find_position left) (find_position right)) fields
+      List.stable_sort
+        (fun left right -> compare (locate_position left) (locate_position right))
+        fields
   | None -> fields
 
 let make_builtin_shape builtin : Types.type_interface =

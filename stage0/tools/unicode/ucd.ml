@@ -6,20 +6,20 @@ let strip_byte_order_mark line =
 
 let strip_comment line = String.take_first_while (fun character -> character <> '#') line
 
-let records directory name =
+let read_records directory name =
   read_lines directory name
   |> List.filter_map (fun line ->
       let line = strip_comment (strip_byte_order_mark line) in
       if String.trim line = "" then None
       else Some (List.map String.trim (String.split_on_char ';' line)))
 
-let code_point text = int_of_string ("0x" ^ text)
+let parse_code_point text = int_of_string ("0x" ^ text)
 
-let code_point_range text =
+let parse_code_point_range text =
   match String.split_first ~sep:".." text with
-  | Some (first, last) -> (code_point first, code_point last)
+  | Some (first, last) -> (parse_code_point first, parse_code_point last)
   | None ->
-      let value = code_point text in
+      let value = parse_code_point text in
       (value, value)
 
 let merge ranges =

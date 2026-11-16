@@ -1,61 +1,62 @@
-let hex bytes = Blake3.to_hex bytes
+let encode_hex bytes = Blake3.to_hex bytes
 
-let encodes name value expected =
+let expect_encoding name value expected =
   Harness.test name (fun () ->
-      let actual = hex (Cbor.encode value) in
+      let actual = encode_hex (Cbor.encode value) in
       if actual <> expected then Harness.fail "expected %s, got %s" expected actual)
 
 let () =
-  encodes "zero is one byte" (Cbor.int 0) "00";
-  encodes "23 is the largest one-byte integer" (Cbor.int 23) "17";
-  encodes "24 takes a one-byte argument" (Cbor.int 24) "1818";
-  encodes "1000 takes a two-byte argument" (Cbor.int 1000) "1903e8";
-  encodes "1000000 takes a four-byte argument" (Cbor.int 1000000) "1a000f4240";
-  encodes "a trillion takes an eight-byte argument"
+  expect_encoding "zero is one byte" (Cbor.int 0) "00";
+  expect_encoding "23 is the largest one-byte integer" (Cbor.int 23) "17";
+  expect_encoding "24 takes a one-byte argument" (Cbor.int 24) "1818";
+  expect_encoding "1000 takes a two-byte argument" (Cbor.int 1000) "1903e8";
+  expect_encoding "1000000 takes a four-byte argument" (Cbor.int 1000000) "1a000f4240";
+  expect_encoding "a trillion takes an eight-byte argument"
     (Cbor.Integer (Z.of_string "1000000000000"))
     "1b000000e8d4a51000";
-  encodes "the largest 64-bit integer is not a bignum"
+  expect_encoding "the largest 64-bit integer is not a bignum"
     (Cbor.Integer (Z.of_string "18446744073709551615"))
     "1bffffffffffffffff";
-  encodes "2^64 is a positive bignum"
+  expect_encoding "2^64 is a positive bignum"
     (Cbor.Integer (Z.of_string "18446744073709551616"))
     "c249010000000000000000";
-  encodes "-1 is major type 1" (Cbor.int (-1)) "20";
-  encodes "-1000" (Cbor.int (-1000)) "3903e7";
-  encodes "-2^64 is not a bignum"
+  expect_encoding "-1 is major type 1" (Cbor.int (-1)) "20";
+  expect_encoding "-1000" (Cbor.int (-1000)) "3903e7";
+  expect_encoding "-2^64 is not a bignum"
     (Cbor.Integer (Z.of_string "-18446744073709551616"))
     "3bffffffffffffffff";
-  encodes "-2^64 - 1 is a negative bignum"
+  expect_encoding "-2^64 - 1 is a negative bignum"
     (Cbor.Integer (Z.of_string "-18446744073709551617"))
     "c349010000000000000000";
-  encodes "0.0 is a half float" (Cbor.Float 0.0) "f90000";
-  encodes "-0.0 keeps its sign" (Cbor.Float (-0.0)) "f98000";
-  encodes "1.5 is a half float" (Cbor.Float 1.5) "f93e00";
-  encodes "65504.0 is the largest half float" (Cbor.Float 65504.0) "f97bff";
-  encodes "the smallest half subnormal" (Cbor.Float 5.960464477539063e-8) "f90001";
-  encodes "the smallest normal half float" (Cbor.Float (Float.ldexp 1.0 (-14))) "f90400";
-  encodes "the largest half subnormal" (Cbor.Float (Float.ldexp 1023.0 (-24))) "f903ff";
-  encodes "2^-25 is below every half float, so a single"
+  expect_encoding "0.0 is a half float" (Cbor.Float 0.0) "f90000";
+  expect_encoding "-0.0 keeps its sign" (Cbor.Float (-0.0)) "f98000";
+  expect_encoding "1.5 is a half float" (Cbor.Float 1.5) "f93e00";
+  expect_encoding "65504.0 is the largest half float" (Cbor.Float 65504.0) "f97bff";
+  expect_encoding "the smallest half subnormal" (Cbor.Float 5.960464477539063e-8) "f90001";
+  expect_encoding "the smallest normal half float" (Cbor.Float (Float.ldexp 1.0 (-14))) "f90400";
+  expect_encoding "the largest half subnormal" (Cbor.Float (Float.ldexp 1023.0 (-24))) "f903ff";
+  expect_encoding "2^-25 is below every half float, so a single"
     (Cbor.Float (Float.ldexp 1.0 (-25)))
     "fa33000000";
-  encodes "65520.0 rounds to infinity as a half, so a single" (Cbor.Float 65520.0) "fa477ff000";
-  encodes "the smallest single subnormal" (Cbor.Float (Float.ldexp 1.0 (-149))) "fa00000001";
-  encodes "2^-150 is below every single float, so a double"
+  expect_encoding "65520.0 rounds to infinity as a half, so a single" (Cbor.Float 65520.0)
+    "fa477ff000";
+  expect_encoding "the smallest single subnormal" (Cbor.Float (Float.ldexp 1.0 (-149))) "fa00000001";
+  expect_encoding "2^-150 is below every single float, so a double"
     (Cbor.Float (Float.ldexp 1.0 (-150)))
     "fb3690000000000000";
-  encodes "100000.0 is a single float" (Cbor.Float 100000.0) "fa47c35000";
-  encodes "1.1 needs a double" (Cbor.Float 1.1) "fb3ff199999999999a";
-  encodes "infinity is a half float" (Cbor.Float Float.infinity) "f97c00";
-  encodes "every NaN is one encoding" (Cbor.Float (Float.of_string "-nan")) "f97e00";
-  encodes "false" (Cbor.Bool false) "f4";
-  encodes "null" Cbor.Null "f6";
-  encodes "text is major type 3" (Cbor.Text "IETF") "6449455446";
-  encodes "bytes are major type 2" (Cbor.Bytes "\x01\x02\x03\x04") "4401020304";
-  encodes "arrays nest"
+  expect_encoding "100000.0 is a single float" (Cbor.Float 100000.0) "fa47c35000";
+  expect_encoding "1.1 needs a double" (Cbor.Float 1.1) "fb3ff199999999999a";
+  expect_encoding "infinity is a half float" (Cbor.Float Float.infinity) "f97c00";
+  expect_encoding "every NaN is one encoding" (Cbor.Float (Float.of_string "-nan")) "f97e00";
+  expect_encoding "false" (Cbor.Bool false) "f4";
+  expect_encoding "null" Cbor.Null "f6";
+  expect_encoding "text is major type 3" (Cbor.Text "IETF") "6449455446";
+  expect_encoding "bytes are major type 2" (Cbor.Bytes "\x01\x02\x03\x04") "4401020304";
+  expect_encoding "arrays nest"
     (Cbor.Array [ Cbor.int 1; Cbor.Array [ Cbor.int 2; Cbor.int 3 ] ])
     "8201820203";
-  encodes "a tag" (Cbor.Tag (1, Cbor.int 1363896240)) "c11a514b67b0";
-  encodes "map keys are sorted by their encoding, whatever order they are given in"
+  expect_encoding "a tag" (Cbor.Tag (1, Cbor.int 1363896240)) "c11a514b67b0";
+  expect_encoding "map keys are sorted by their encoding, whatever order they are given in"
     (Cbor.Map
        [ (Cbor.Text "b", Cbor.int 2); (Cbor.int 10, Cbor.int 1); (Cbor.Text "a", Cbor.int 3) ])
     "a30a01616103616202";
@@ -128,12 +129,12 @@ let () =
       let input = String.init length (fun index -> Char.chr (index mod 251)) in
       Harness.test (Printf.sprintf "BLAKE3 of the BLAKE3 repository's %d-byte test vector" length)
         (fun () ->
-          let actual = hex (Blake3.For_testing.hash input) in
+          let actual = encode_hex (Blake3.For_testing.hash input) in
           if actual <> expected_hash then Harness.fail "expected %s, got %s" expected_hash actual);
       Harness.test
         (Printf.sprintf "BLAKE3 derive-key of the BLAKE3 repository's %d-byte test vector" length)
         (fun () ->
-          let actual = hex (Blake3.derive_key ~context:blake3_repository_context input) in
+          let actual = encode_hex (Blake3.derive_key ~context:blake3_repository_context input) in
           if actual <> expected_derived then
             Harness.fail "expected %s, got %s" expected_derived actual))
     blake3_repository_vectors

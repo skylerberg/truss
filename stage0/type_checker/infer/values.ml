@@ -66,7 +66,7 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
                 let display =
                   State.make_trait_reference ~arguments:[] (Well_known.make_path Display)
                 in
-                (match State.implements state part_type display with
+                (match State.find_evidence state part_type display with
                 | Some evidence ->
                     set_part index
                       (trait_call display "display" Path.Read part_type evidence [ part ] Types.unit)
@@ -116,7 +116,7 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
               let tag_type = State.normalize state tag_type in
               if Types.contains_unsolved tag_type then false
               else begin
-                (match State.implements state tag_type template_trait with
+                (match State.find_evidence state tag_type template_trait with
                 | Some evidence ->
                     (match state.tables.templates.(literal.id) with
                     | Some template ->
@@ -143,7 +143,7 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
                             State.make_trait_reference ~arguments:[ Types.Type part_type ]
                               (Well_known.make_path From)
                           in
-                          match State.implements state part from with
+                          match State.find_evidence state part from with
                           | Some evidence ->
                               set_part index
                                 (trait_call ~mode:Own from "from" Path.Static part evidence
@@ -234,7 +234,7 @@ and check_lambda (state : State.state) env ?expected (value : Syntax.expression)
   let locals_read_before = state.locals_read in
   state.lambdas <- State.read_span state value.id :: state.lambdas;
   let expected = Option.map (State.normalize state) expected in
-  let untyped unknown =
+  let make_untyped unknown =
     List.iter
       (fun written -> Pattern_typing.check_pattern state env written unknown ~mode:Types.Read)
       parameters;
@@ -255,33 +255,33 @@ and check_lambda (state : State.state) env ?expected (value : Syntax.expression)
           (State.read_span state body.id) ~actual:body_type ~expected:output;
         Types.Function function_type
     | Some (Types.Function function_type) ->
-        untyped
+        make_untyped
           (State.make_error_type state Mismatch (State.read_span state value.id)
              (Printf.sprintf "This lambda takes %d parameters, and `%s` takes %d."
                 (List.length parameters)
                 (Types.show (Types.Function function_type))
                 (List.length function_type.inputs)))
-    | Some ((Types.Error _ | Types.Hole) as unknown) -> untyped unknown
+    | Some ((Types.Error _ | Types.Hole) as unknown) -> make_untyped unknown
     | _ ->
-        untyped
+        make_untyped
           (State.make_error_type state Lambda_needs_type (State.read_span state value.id)
              "A lambda's parameter types come from where it is used, and nothing here gives them. \
               Give the `let` a function type, or the call type arguments.")
   in
   state.lambdas <- List.tl state.lambdas;
-  let rec newer acc list =
+  let rec list_newer acc list =
     if list == locals_read_before then acc
-    else match list with [] -> acc | id :: rest -> newer (id :: acc) rest
+    else match list with [] -> acc | id :: rest -> list_newer (id :: acc) rest
   in
-  let read = newer [] state.locals_read in
+  let read = list_newer [] state.locals_read in
   let inside = State.read_span state value.id in
-  let outer id =
+  let is_outer id =
     let binding = State.read_span state id in
     binding.start < inside.start || binding.start >= inside.stop
   in
   let captures =
     List.fold_left
-      (fun acc id -> if outer id && not (List.mem id acc) then acc @ [ id ] else acc)
+      (fun acc id -> if is_outer id && not (List.mem id acc) then acc @ [ id ] else acc)
       [] read
   in
   State.register_expression state value (fun () ->

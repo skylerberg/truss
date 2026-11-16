@@ -1,21 +1,22 @@
 let data_directory = ref ""
 let read_lines name = Ucd.read_lines !data_directory name
-let records name = Ucd.records !data_directory name
-let code_point = Ucd.code_point
-let code_point_range = Ucd.code_point_range
+let read_records name = Ucd.read_records !data_directory name
+let parse_code_point = Ucd.parse_code_point
+let parse_code_point_range = Ucd.parse_code_point_range
 let merge = Ucd.merge
 
-let property_ranges file property =
-  records file
+let list_property_ranges file property =
+  read_records file
   |> List.filter_map (function
-    | range :: name :: _ when name = property -> Some (code_point_range range)
+    | range :: name :: _ when name = property -> Some (parse_code_point_range range)
     | _ -> None)
   |> merge
 
-let general_category_ranges categories =
-  records "DerivedGeneralCategory.txt"
+let list_general_category_ranges categories =
+  read_records "DerivedGeneralCategory.txt"
   |> List.filter_map (function
-    | range :: category :: _ when List.mem category categories -> Some (code_point_range range)
+    | range :: category :: _ when List.mem category categories ->
+        Some (parse_code_point_range range)
     | _ -> None)
   |> merge
 
@@ -35,7 +36,7 @@ let subtract ranges removed =
 
 let output = Buffer.create (1 lsl 20)
 
-let line text =
+let write_line text =
   Buffer.add_string output text;
   Buffer.add_char output '\n'
 
@@ -46,7 +47,7 @@ let emit_ints name values =
       if index mod 8 = 0 then Buffer.add_string output "\n ";
       Buffer.add_string output (Printf.sprintf " 0x%X;" value))
     values;
-  line "\n|]\n"
+  write_line "\n|]\n"
 
 let emit_ranges name ranges =
   emit_ints name (List.concat_map (fun (first, last) -> [ first; last ]) ranges)
@@ -54,16 +55,16 @@ let emit_ranges name ranges =
 let emit_strings name values =
   Buffer.add_string output (Printf.sprintf "let %s = [|" name);
   List.iter (fun value -> Buffer.add_string output (Printf.sprintf "\n  %S;" value)) values;
-  line "\n|]\n"
+  write_line "\n|]\n"
 
 let characters =
   lazy
-    (records "UnicodeData.txt"
+    (read_records "UnicodeData.txt"
     |> List.map (function
-      | value :: name :: _ -> (code_point value, name)
+      | value :: name :: _ -> (parse_code_point value, name)
       | _ -> failwith "UnicodeData.txt: unexpected line"))
 
-let unicode_version () =
+let read_unicode_version () =
   match read_lines "DerivedCoreProperties.txt" with
   | first :: _ ->
       let prefix = "# DerivedCoreProperties-" in
@@ -74,17 +75,17 @@ let unicode_version () =
 let () =
   data_directory := Sys.argv.(1);
   let characters = Lazy.force characters in
-  line (Printf.sprintf "let unicode_version = %S\n" (unicode_version ()));
+  write_line (Printf.sprintf "let unicode_version = %S\n" (read_unicode_version ()));
 
-  emit_ranges "xid_start" (property_ranges "DerivedCoreProperties.txt" "XID_Start");
-  emit_ranges "xid_continue" (property_ranges "DerivedCoreProperties.txt" "XID_Continue");
+  emit_ranges "xid_start" (list_property_ranges "DerivedCoreProperties.txt" "XID_Start");
+  emit_ranges "xid_continue" (list_property_ranges "DerivedCoreProperties.txt" "XID_Continue");
 
-  let bidi_control = property_ranges "PropList.txt" "Bidi_Control" in
-  let control = general_category_ranges [ "Cc" ] in
+  let bidi_control = list_property_ranges "PropList.txt" "Bidi_Control" in
+  let control = list_general_category_ranges [ "Cc" ] in
   let ignorable =
     subtract
-      (property_ranges "DerivedCoreProperties.txt" "Default_Ignorable_Code_Point")
-      ([ (0x200C, 0x200D) ] @ property_ranges "PropList.txt" "Variation_Selector")
+      (list_property_ranges "DerivedCoreProperties.txt" "Default_Ignorable_Code_Point")
+      ([ (0x200C, 0x200D) ] @ list_property_ranges "PropList.txt" "Variation_Selector")
   in
   let forbidden =
     merge (bidi_control @ subtract control [ (0x09, 0x0A); (0x0D, 0x0D) ] @ ignorable)
@@ -93,11 +94,12 @@ let () =
   emit_ranges "bidi_control" bidi_control;
   emit_ranges "control" control;
 
-  let aliases = records "NameAliases.txt" in
-  let alias value kind =
+  let aliases = read_records "NameAliases.txt" in
+  let find_alias value kind =
     List.find_map
       (function
-        | [ code; name; alias_kind ] when code_point code = value && alias_kind = kind -> Some name
+        | [ code; name; alias_kind ] when parse_code_point code = value && alias_kind = kind ->
+            Some name
         | _ -> None)
       aliases
   in
@@ -107,7 +109,7 @@ let () =
         if not (contains forbidden value) then None
         else
           let name =
-            match List.find_map (alias value) [ "correction"; "control"; "figment" ] with
+            match List.find_map (find_alias value) [ "correction"; "control"; "figment" ] with
             | Some name -> Some name
             | None -> if name.[0] = '<' then None else Some name
           in

@@ -56,5 +56,5 @@ val read_loop_head : body -> block -> loop_head
 val list_block_successors : body -> block -> block list
 
 module For_testing : sig
-  val successors : terminator -> block list
+  val list_successors : terminator -> block list
 end

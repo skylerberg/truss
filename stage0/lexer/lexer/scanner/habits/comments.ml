@@ -72,30 +72,30 @@ let lex_attribute (cursor : Cursor.t) =
 let scan (cursor : Cursor.t) ~inline =
   let start = cursor.position in
   let is offset character = Cursor.is_at cursor (start + offset) character in
-  let rejected ~code length message =
+  let reject ~code length message =
     Source_text.reject ~code cursor ~length message;
     true
   in
   if is 0 '/' && (is 1 '/' || is 1 '*') then
-    if inline then rejected ~code:Comment 2 comment_message
+    if inline then reject ~code:Comment 2 comment_message
     else begin
       if is 1 '/' then lex_line_comment cursor else lex_block_comment cursor;
       true
     end
   else if is 0 '#' && (is 1 '[' || (is 1 '!' && is 2 '[')) then
-    if inline then rejected ~code:Attribute 1 "Truss has no attributes."
+    if inline then reject ~code:Attribute 1 "Truss has no attributes."
     else begin
       lex_attribute cursor;
       true
     end
   else if is 0 '#' then
-    if inline then rejected ~code:Comment 1 comment_message
+    if inline then reject ~code:Comment 1 comment_message
     else begin
       lex_line_comment cursor;
       true
     end
   else if is 0 ';' then
-    if inline then rejected ~code:Semicolon 1 "Truss has no `;`."
+    if inline then reject ~code:Semicolon 1 "Truss has no `;`."
     else begin
       record_semicolon cursor;
       true

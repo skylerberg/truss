@@ -155,8 +155,8 @@ type 'response message = Progress of string | Final of 'response
 let stopping = ref false
 let stop () = stopping := true
 
-let serve_on ~key ~identity ~is_alive ~collect ~watcher_descriptors ~propagate ~handle ~save ~close
-    server_path path socket =
+let serve_on ~key ~identity ~is_alive ~collect ~list_watcher_descriptors ~propagate ~handle ~save
+    ~close server_path path socket =
   let lock = Unix.openfile (server_path ^ ".lock") [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644 in
   Unix.lockf lock F_LOCK 0;
   served := Some key;
@@ -166,7 +166,7 @@ let serve_on ~key ~identity ~is_alive ~collect ~watcher_descriptors ~propagate ~
   while
     (not !stopping) && Unix.time () -. !last < idle_limit && is_alive () && Sys.file_exists path
   do
-    match Unix.select (socket :: watcher_descriptors ()) [] [] 1.0 with
+    match Unix.select (socket :: list_watcher_descriptors ()) [] [] 1.0 with
     | exception Unix.Unix_error (EINTR, _, _) -> ()
     | [], _, _ ->
         let now = Unix.time () in
@@ -185,8 +185,8 @@ let serve_on ~key ~identity ~is_alive ~collect ~watcher_descriptors ~propagate ~
             let output = Unix.out_channel_of_descr client in
             (try
                let request = Marshal.from_channel input in
-               let progress text = send output (Progress text) in
-               send output (Final (handle ~progress request))
+               let report_progress text = send output (Progress text) in
+               send output (Final (handle ~report_progress request))
              with _ -> ());
             (try Unix.close client with Unix.Unix_error _ -> ());
             try save () with failure -> prerr_endline (Printexc.to_string failure)))
@@ -207,14 +207,14 @@ let find_inherited_socket () =
       Some socket
   | _ | (exception Unix.Unix_error _) -> None
 
-let serve ~key ~is_alive ~collect ~watcher_descriptors ~propagate ~handle ~save ~close =
+let serve ~key ~is_alive ~collect ~list_watcher_descriptors ~propagate ~handle ~save ~close =
   Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
   let identity = compute_executable_identity () in
   match (make_server_paths identity key, find_inherited_socket ()) with
   | Error message, _ -> prerr_endline message
   | Ok _, None -> prerr_endline "The background process was started without its socket."
   | Ok (_, server_path, path), Some socket ->
-      serve_on ~key ~identity ~is_alive ~collect ~watcher_descriptors ~propagate ~handle ~save
+      serve_on ~key ~identity ~is_alive ~collect ~list_watcher_descriptors ~propagate ~handle ~save
         ~close server_path path socket
 
 let start directory program key socket =
@@ -262,7 +262,7 @@ let connect_or_start ~program ~key directory server_path path =
                       Option.to_result ~none:"Cannot reach the background process; try --no-server."
                         (connect path))))
 
-let call_starting ~program ?(start_server = true) ~key ~progress request =
+let call_starting ~program ?(start_server = true) ~key ~report_progress request =
   Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
   let ( let* ) = Result.bind in
   let* directory, server_path, path = make_server_paths (compute_executable_identity ()) key in
@@ -275,7 +275,7 @@ let call_starting ~program ?(start_server = true) ~key ~progress request =
   let rec receive () =
     match Marshal.from_channel input with
     | Progress text ->
-        progress text;
+        report_progress text;
         receive ()
     | Final response -> response
   in
@@ -292,9 +292,9 @@ let call_starting ~program ?(start_server = true) ~key ~progress request =
         "the background process ended while answering; see its log in the cache's servers \
          directory."
 
-let call ?start_server ~key ~progress request =
-  call_starting ~program:(locate_executable ()) ?start_server ~key ~progress request
+let call ?start_server ~key ~report_progress request =
+  call_starting ~program:(locate_executable ()) ?start_server ~key ~report_progress request
 
 module For_testing = struct
-  let call = call_starting
+  let call_starting = call_starting
 end

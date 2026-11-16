@@ -17,7 +17,7 @@ let check_bit_vector_names state (value : Core.expression) =
     value
 
 let rec check_block_value state env ?expected (written : Syntax.block) =
-  let rec statements_value = function
+  let rec infer_statements_value = function
     | [] -> Types.unit
     | [ (last : Syntax.statement) ] -> (
         match last.kind with
@@ -29,9 +29,9 @@ let rec check_block_value state env ?expected (written : Syntax.block) =
         ignore
           (State.run_in_statement state env (State.read_span state first.id) (fun () ->
                check_statement state env first ~last:false));
-        statements_value rest
+        infer_statements_value rest
   in
-  statements_value written.statements
+  infer_statements_value written.statements
 
 and check_statement state env (written : Syntax.statement) ~last : unit =
   match written.kind with
@@ -253,29 +253,30 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
       let base_type = State.normalize state (Hooks.check_expression state env base) in
       let trait = State.make_trait_reference ~arguments:[] (Well_known.make_path Index_assign) in
       match
-        ( State.implements state base_type trait,
+        ( State.find_evidence state base_type trait,
           Members.find_trait_method state.lookups trait.trait "assign" Mut )
       with
       | ( Some ((Interface.Impls.From_impl _ | From_bound | From_any) as evidence_source),
           Some method_ ) ->
           let index = State.make_trait_reference ~arguments:[] (Well_known.make_path Index) in
-          let parameter name type_ : Types.parameter_info =
+          let make_parameter name type_ : Types.parameter_info =
             { name; mode = Own; type_; has_default = false }
           in
           Modes.mutate state env ~by:Assignment base;
           ignore
             (Calls.check_argument state env key
-               (parameter "key"
+               (make_parameter "key"
                   (State.resolve_associated_type state base_type index "Key"
                      ~at:(State.read_span state key.id))));
           ignore
             (Calls.check_argument state env value
-               (parameter "value"
+               (make_parameter "value"
                   (State.resolve_associated_type state base_type index "Output"
                      ~at:(State.read_span state value.id))));
           let call : Syntax.expression = { kind = Expression_error; id = written.id } in
           State.record state call Types.unit;
-          let argument (argument_expression : Syntax.expression) position mode : Tables.argument =
+          let make_argument (argument_expression : Syntax.expression) position mode :
+              Tables.argument =
             {
               expression = argument_expression.id;
               core_argument_index = position;
@@ -296,7 +297,8 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
                       type_arguments = [];
                       evidence = State.convert_evidence evidence_source;
                     };
-                arguments = [ argument base 0 Mut; argument key 1 Own; argument value 2 Own ];
+                arguments =
+                  [ make_argument base 0 Mut; make_argument key 1 Own; make_argument value 2 Own ];
                 omitted_defaults = [];
                 uses = (Members.read_method_signature state.lookups trait.trait method_).uses;
                 callee_result = Types.unit;
@@ -365,7 +367,7 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
               Name_lookup.find_consuming_cursor state (State.read_span state iterable.id) type_
             else None
           in
-          match (by_position, consumed, State.implements state type_ cursor) with
+          match (by_position, consumed, State.find_evidence state type_ cursor) with
           | Some (loop, element, lends), _, _ ->
               state.tables.loops.(written.id) <- Some loop;
               (element, lends)

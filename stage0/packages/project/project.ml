@@ -78,7 +78,7 @@ let report_manifest_problem problems directory format =
 let lay_out (files_in : files) root =
   let files = list_files files_in root in
   let problems = ref [] in
-  let problem directory = report_manifest_problem problems directory in
+  let report_problem directory = report_manifest_problem problems directory in
   let manifests =
     List.filter_map
       (fun path ->
@@ -94,15 +94,15 @@ let lay_out (files_in : files) root =
     | None -> false
   in
   let root_is_project = is_project "" in
-  let rec in_another_project directory =
+  let rec is_in_another_project directory =
     directory <> ""
     && ((Hashtbl.mem directories directory && ((not root_is_project) || is_project directory))
-       || in_another_project (compute_parent directory))
+       || is_in_another_project (compute_parent directory))
   in
   let parsed =
     List.filter_map
       (fun (directory, text) ->
-        if in_another_project directory then None
+        if is_in_another_project directory then None
         else
           match Manifest.parse text with
           | manifest -> Some (directory, manifest)
@@ -118,7 +118,7 @@ let lay_out (files_in : files) root =
         match manifest.time_limit_seconds with
         | Some seconds when directory = "" -> seconds
         | Some _ ->
-            problem directory
+            report_problem directory
               "A test's time limit is its project's. Write `[test]` in the project's manifest, \
                `truss.toml` at its root.";
             limit
@@ -132,12 +132,12 @@ let lay_out (files_in : files) root =
         match manifest.package with
         | None -> None
         | Some package when root = Project && package.name = Path.standard_package ->
-            problem directory "The package name `standard` is the standard library's.";
+            report_problem directory "The package name `standard` is the standard library's.";
             None
         | Some package -> (
             match Package_table.find_opt seen package.name with
             | Some other ->
-                problem directory "The package name `%s` is already used by %s."
+                report_problem directory "The package name `%s` is already used by %s."
                   (Path.show_package package.name) (make_manifest_path other);
                 None
             | None ->
@@ -171,7 +171,9 @@ type selection = {
 
 let select_packages (files : files) (own : layout) =
   let packages = List.map snd own.packages in
-  let named name = List.exists (fun (package : Manifest.package) -> package.name = name) packages in
+  let is_named name =
+    List.exists (fun (package : Manifest.package) -> package.name = name) packages
+  in
   let problems = ref [] in
   let lock_problem format =
     Printf.ksprintf
@@ -213,7 +215,7 @@ let select_packages (files : files) (own : layout) =
                  | None -> None)
                package.dependencies)
            packages)
-      ~local:named ~load
+      ~is_local:is_named ~load
   in
   let missing = List.sort_uniq compare !missing in
   let is_build_fetched = missing = [] in
@@ -262,14 +264,14 @@ let select_packages (files : files) (own : layout) =
 
 type place = { root : root; directory : string; manifest : Manifest.package }
 
-let place_packages ~layout ~(selection : selection) =
+let place_packages ~lay_out_root ~(selection : selection) =
   let by_name = Package_table.create 16 in
   let add root =
     List.iter
       (fun (directory, (manifest : Manifest.package)) ->
         if not (Package_table.mem by_name manifest.name) then
           Package_table.replace by_name manifest.name { root; directory; manifest })
-      (layout root).packages
+      (lay_out_root root).packages
   in
   add Project;
   List.iter
@@ -279,7 +281,7 @@ let place_packages ~layout ~(selection : selection) =
     (fun (left, _) (right, _) -> Path.compare_package left right)
     (Package_table.fold (fun name place packages -> (name, place) :: packages) by_name [])
 
-let make_package (files : files) ~(layout : root -> layout) { root; directory; manifest } =
+let make_package (files : files) ~(lay_out_root : root -> layout) { root; directory; manifest } =
   {
     name = manifest.name;
     dependencies = manifest.dependencies;
@@ -289,11 +291,11 @@ let make_package (files : files) ~(layout : root -> layout) { root; directory; m
           if source.directory = directory then
             Option.map (fun text -> (source.file, text)) (files.find_text root source.path)
           else None)
-        (layout root).files;
+        (lay_out_root root).files;
   }
 
 let find_dependency_cycle (places : (Path.package * place) list) =
-  let dependencies name =
+  let list_dependencies name =
     match List.assoc_opt name places with
     | Some place ->
         List.map
@@ -302,22 +304,22 @@ let find_dependency_cycle (places : (Path.package * place) list) =
     | None -> []
   in
   let visited = Package_table.create 8 in
-  let rec reaches target name =
+  let rec find_reach_path target name =
     if Package_table.mem visited name then None
     else begin
       Package_table.replace visited name ();
       List.find_map
         (fun next ->
           if next = target then Some [ name; target ]
-          else Option.map (fun rest -> name :: rest) (reaches target next))
-        (dependencies name)
+          else Option.map (fun rest -> name :: rest) (find_reach_path target next))
+        (list_dependencies name)
     end
   in
   let own, registry = List.partition (fun (_, place) -> place.root = Project) places in
   List.find_map
     (fun (name, place) ->
       Package_table.reset visited;
-      Option.map (fun cycle -> (place, cycle)) (reaches name name))
+      Option.map (fun cycle -> (place, cycle)) (find_reach_path name name))
     (own @ registry)
 
 let make_cycle_problem ((place : place), cycle) =
@@ -339,19 +341,19 @@ let make_cycle_problem ((place : place), cycle) =
 let list_problems (own : layout) (chosen : selection) =
   let packages = own.packages in
   let problems = ref [] in
-  let problem directory = report_manifest_problem problems directory in
-  let named name =
+  let report_problem directory = report_manifest_problem problems directory in
+  let find_named name =
     List.find_opt (fun (_, (package : Manifest.package)) -> package.name = name) packages
   in
   List.iter
     (fun (directory, (package : Manifest.package)) ->
       (match package.truss with
       | None ->
-          problem directory
+          report_problem directory
             "`[package]` needs `truss = \"%s\"`, the version of Truss the package is written for."
             Manifest.truss_version
       | Some version when not (Manifest.toolchain_builds version) ->
-          problem directory "`%s` is written for Truss %s, and this toolchain is Truss %s."
+          report_problem directory "`%s` is written for Truss %s, and this toolchain is Truss %s."
             (Path.show_package package.name) version Manifest.truss_version
       | Some _ -> ());
       (match package.name with
@@ -359,7 +361,7 @@ let list_problems (own : layout) (chosen : selection) =
           List.iter
             (fun (other : Path.package) ->
               if other.owner = Some name then
-                problem directory
+                report_problem directory
                   "The package name `%s` is the owner in `%s`, so a path that starts with it could \
                    be read two ways. Give one of them another name."
                   name (Path.show_package other))
@@ -374,8 +376,8 @@ let list_problems (own : layout) (chosen : selection) =
       | { owner = Some _; _ } -> ());
       List.iter
         (fun (dependency : Manifest.dependency) ->
-          if dependency.package.owner = None && named dependency.package = None then
-            problem directory "`%s` is not a package of this project."
+          if dependency.package.owner = None && find_named dependency.package = None then
+            report_problem directory "`%s` is not a package of this project."
               (Path.show_package dependency.package))
         package.dependencies)
     packages;
@@ -391,7 +393,7 @@ type t = {
 
 let of_files files =
   let layouts = Root_table.create 4 in
-  let layout root =
+  let lay_out_root root =
     match Root_table.find_opt layouts root with
     | Some layout -> layout
     | None ->
@@ -399,15 +401,15 @@ let of_files files =
         Root_table.replace layouts root computed;
         computed
   in
-  let own = layout Project in
+  let own = lay_out_root Project in
   let selection = select_packages files own in
-  let places = place_packages ~layout ~selection in
+  let places = place_packages ~lay_out_root ~selection in
   let cycle = Option.map make_cycle_problem (find_dependency_cycle places) in
   let places = if Option.is_some cycle then [] else places in
   {
     own;
     selection;
     places;
-    packages = List.map (fun (_, place) -> make_package files ~layout place) places;
+    packages = List.map (fun (_, place) -> make_package files ~lay_out_root place) places;
     problems = list_problems own selection @ Option.to_list cycle;
   }

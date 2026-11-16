@@ -33,13 +33,13 @@ let list_files directory (record : Registry.Lock.t) =
 let record database snapshot registry (package : Path.package) =
   let root = Workspace.locate_root snapshot in
   let built = Workspace.list_registry_packages snapshot in
-  let directory_of name =
+  let find_directory name =
     Option.map
       (fun (relative, _) -> if relative = "" then root else Filename.concat root relative)
       (List.find_opt (fun (_, other) -> other = name) (Workspace.list_packages snapshot))
   in
-  let in_registry name = List.find_opt (fun (other, _, _) -> other = name) built in
-  let dependencies ~code name =
+  let find_in_registry name = List.find_opt (fun (other, _, _) -> other = name) built in
+  let list_dependencies ~code name =
     let used =
       if code then Option.value ~default:[] (Database.find_code_packages database name) else []
     in
@@ -48,7 +48,7 @@ let record database snapshot registry (package : Path.package) =
       (Workspace.list_dependency_names snapshot name)
   in
   let problems = ref [] in
-  let rec closure name : Registry.Lock.t =
+  let rec compute_closure name : Registry.Lock.t =
     let seen = Package_table.create 16 and entries = ref [] in
     let add name version hash =
       entries := { Registry.Lock.name; version; hash; holds = [] } :: !entries
@@ -56,17 +56,18 @@ let record database snapshot registry (package : Path.package) =
     let rec visit name =
       if not (Package_table.mem seen name) then begin
         Package_table.replace seen name ();
-        match (in_registry name, directory_of name) with
+        match (find_in_registry name, find_directory name) with
         | Some (_, version, hash), _ ->
             add name version hash;
             List.iter
-              (fun next -> if in_registry next <> None || directory_of next <> None then visit next)
-              (dependencies ~code:false name)
+              (fun next ->
+                if find_in_registry next <> None || find_directory next <> None then visit next)
+              (list_dependencies ~code:false name)
         | None, Some directory -> (
-            match published_as name directory with
+            match find_published_version name directory with
             | Some (version, hash) ->
                 add name version hash;
-                List.iter visit (dependencies ~code:true name)
+                List.iter visit (list_dependencies ~code:true name)
             | None ->
                 problems :=
                   Printf.sprintf
@@ -78,17 +79,17 @@ let record database snapshot registry (package : Path.package) =
         | None, None -> ()
       end
     in
-    List.iter visit (dependencies ~code:true name);
+    List.iter visit (list_dependencies ~code:true name);
     List.sort
       (fun (left : Registry.Lock.entry) right -> Path.compare_package left.name right.name)
       !entries
-  and published_as name directory =
-    let hash = Registry.Content.hash (list_files directory (closure name)) in
+  and find_published_version name directory =
+    let hash = Registry.Content.hash (list_files directory (compute_closure name)) in
     List.find_map
       (fun (version, version_hash) -> if version_hash = hash then Some (version, hash) else None)
       (Registry.Index.list_versions registry name)
   in
-  let entries = closure package in
+  let entries = compute_closure package in
   (entries, List.sort_uniq compare !problems)
 
 let list_failed_tests database snapshot packages =

@@ -131,24 +131,24 @@ let list_unknowns unifier (type_ : Types.ty) =
     match resolve unifier type_ with
     | Variable index -> unknowns := Unknown_type index :: !unknowns
     | Literal (kind, index) -> unknowns := Unknown_literal (kind, index) :: !unknowns
-    | Named { arguments; _ } -> List.iter argument arguments
+    | Named { arguments; _ } -> List.iter collect_argument arguments
     | Projection { base; trait = reference; _ } ->
         collect base;
-        trait reference
+        collect_trait reference
     | Function { inputs; output; _ } ->
         List.iter (fun (_, type_) -> collect type_) inputs;
         collect output
-    | Any reference -> trait reference
+    | Any reference -> collect_trait reference
     | Parameter _ | Never | Integer | Hole | Error _ -> ()
-  and argument = function
+  and collect_argument = function
     | Types.Type type_ -> collect type_
     | Types.Value value -> (
         match resolve_value unifier value with
         | Value_variable index -> unknowns := Unknown_value index :: !unknowns
         | _ -> ())
     | Types.Capabilities _ -> ()
-  and trait (reference : Types.trait_reference) =
-    List.iter argument reference.trait_arguments;
+  and collect_trait (reference : Types.trait_reference) =
+    List.iter collect_argument reference.trait_arguments;
     List.iter (fun (_, type_) -> collect type_) reference.associated
   in
   collect type_;

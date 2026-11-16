@@ -49,14 +49,14 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
           in
           let index = State.make_trait_reference ~arguments:[] (Well_known.make_path Index) in
           let evidence =
-            match State.implements state parts index with
+            match State.find_evidence state parts index with
             | Some evidence -> Form.convert_evidence (State.convert_evidence evidence)
             | None -> State.raise_bug "`Sequence` does not implement `Index`"
           in
           state.tables.resolutions.(value.id) <- Some Specification_value;
           State.register_expression state value (fun () ->
               let make = State.make_synthetic_expression state ~origin:value.id in
-              let passed = Operands.build_argument Read in
+              let build_read_argument = Operands.build_argument Read in
               let first =
                 make part
                   (Call
@@ -73,7 +73,8 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
                            };
                        arguments =
                          [
-                           passed (make parts Yielded); passed (make Types.Integer (Integer Z.zero));
+                           build_read_argument (make parts Yielded);
+                           build_read_argument (make Types.Integer (Integer Z.zero));
                          ];
                        lends = Some Read;
                        uses = Types.no_capabilities;
@@ -176,7 +177,7 @@ and check_method_time state (value : Syntax.expression) (type_ : Types.ty) (memb
           (Members.list_trait_methods state.lookups bound.trait member.text))
       []
       (Interface.Properties.list_known_bounds state.lookups.interface
-         ~bounds:(State.lookup_bounds state) type_)
+         ~list_bounds:(State.lookup_bounds state) type_)
   in
   let chosen =
     match overloads with
@@ -217,7 +218,7 @@ and check_method_time state (value : Syntax.expression) (type_ : Types.ty) (memb
 
 and check_static_call state env ?expected (value : Syntax.expression) type_ (member : Syntax.name)
     arguments =
-  let ambiguous (traits : Types.trait_reference list) =
+  let report_ambiguous (traits : Types.trait_reference list) =
     Calls.check_arguments_alone state env arguments
       (State.make_error_type state Ambiguous_method (State.read_span state member.id)
          (Printf.sprintf
@@ -226,7 +227,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
             (State.show state type_) member.text
             (String.concat ", " (List.map (fun trait -> "`" ^ Types.show_trait trait ^ "`") traits))))
   in
-  let wrong_receiver () =
+  let report_wrong_receiver () =
     Calls.check_arguments_alone state env arguments
       (State.make_error_type state Wrong_receiver (State.read_span state member.id)
          (Printf.sprintf
@@ -280,10 +281,10 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
           | [ (trait, method_) ] ->
               check_trait_method_through_type state env ?expected value type_ trait method_
                 arguments
-          | _ :: _ :: _ as several -> ambiguous (List.map fst several)
+          | _ :: _ :: _ as several -> report_ambiguous (List.map fst several)
           | [] -> (
               match Name_lookup.resolve_overloads state type_ member.text with
-              | Error traits -> ambiguous traits
+              | Error traits -> report_ambiguous traits
               | Ok overloads -> (
                   match (arguments, List.assoc_opt wanted overloads) with
                   | receiver :: rest, Some (Type_overload method_path) ->
@@ -311,7 +312,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                   | _ :: _, Some (Trait_overload (trait, method_)) ->
                       check_trait_method_through_type state env ?expected value type_ trait method_
                         arguments
-                  | _ :: _, None when overloads <> [] -> wrong_receiver ()
+                  | _ :: _, None when overloads <> [] -> report_wrong_receiver ()
                   | [], _ when overloads <> [] ->
                       State.make_error_type state Missing_argument (State.read_span state value.id)
                         "A method written in full takes its receiver as its first argument."
@@ -336,20 +337,20 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
             | _ -> methods)
           []
           (Interface.Properties.list_known_bounds state.lookups.interface
-             ~bounds:(State.lookup_bounds state) (Types.Parameter parameter))
+             ~list_bounds:(State.lookup_bounds state) (Types.Parameter parameter))
       in
       match (without_self, Name_lookup.resolve_overloads state type_ member.text) with
       | [ (trait, method_) ], _ ->
           check_trait_method_through_type state env ?expected value type_ trait method_ arguments
-      | (_ :: _ :: _ as several), _ -> ambiguous (List.map fst several)
-      | [], Error traits -> ambiguous traits
+      | (_ :: _ :: _ as several), _ -> report_ambiguous (List.map fst several)
+      | [], Error traits -> report_ambiguous traits
       | [], Ok overloads -> (
           match List.assoc_opt wanted overloads with
           | Some (Trait_overload (trait, method_)) ->
               check_trait_method_through_type state env ?expected value type_ trait method_
                 arguments
           | Some (Type_overload _) -> State.raise_bug "a generic parameter has a method of its own"
-          | None when overloads <> [] -> wrong_receiver ()
+          | None when overloads <> [] -> report_wrong_receiver ()
           | None ->
               State.make_error_type state Unknown_member (State.read_span state member.id)
                 (Printf.sprintf "`%s` has no method `%s`." parameter.name member.text)))
@@ -458,8 +459,10 @@ and check_trait_call_in_full state env (value : Syntax.expression) trait ~trait_
     | receiver :: _ -> Name_lookup.classify_receiver receiver.value
     | [] -> Read
   in
-  let overload = Members.find_trait_method state.lookups trait member.text in
-  match match overload Static with None -> overload wanted | trait_method -> trait_method with
+  let find_overload = Members.find_trait_method state.lookups trait member.text in
+  match
+    match find_overload Static with None -> find_overload wanted | trait_method -> trait_method
+  with
   | Some method_ ->
       check_trait_method_through_type state env ?trait_arguments value (State.make_fresh_type state)
         (Instantiation.make_fresh_trait_reference state trait)
@@ -543,14 +546,14 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
     (match chosen with Some (Path.Mut, _) -> Modes.mutate state env ~by:Passed_mut base | _ -> ());
     chosen
   in
-  let wrong_receiver overloads =
+  let report_wrong_receiver overloads =
     State.make_error_type state Wrong_receiver (State.read_span state member.id)
       (Printf.sprintf "`%s` has no overload that takes %s here; it has %s." member.text
          (Path.show_receiver wanted)
          (String.concat ", "
             (List.map (fun (receiver, _) -> Path.show_receiver receiver) overloads)))
   in
-  let missing_receiver_mode : 'a. (Path.receiver * 'a) list -> Types.ty =
+  let report_missing_receiver_mode : 'a. (Path.receiver * 'a) list -> Types.ty =
    fun overloads ->
     let has receiver = List.exists (fun (overload, _) -> overload = receiver) overloads in
     if (not has_mode_keyword) && place && (has Path.Mut || has Path.Own) then begin
@@ -565,7 +568,7 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
         (Printf.sprintf "`%s` takes `%s self`, so the call site passes its receiver `%s`."
            member.text keyword keyword)
     end
-    else wrong_receiver (List.map (fun (receiver, _) -> (receiver, ())) overloads)
+    else report_wrong_receiver (List.map (fun (receiver, _) -> (receiver, ())) overloads)
   in
   match receiver_type with
   | Types.Error _ | Types.Hole ->
@@ -600,7 +603,7 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
                   member.text))
       | Ok overloads -> (
           match choose_temporary overloads with
-          | None -> missing_receiver_mode overloads
+          | None -> report_missing_receiver_mode overloads
           | Some (_, Type_overload method_path) ->
               check_method_with_receiver state env ?expected ~type_arguments value ~receiver:base
                 ~receiver_type method_path arguments

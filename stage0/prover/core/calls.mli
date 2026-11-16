@@ -1,4 +1,4 @@
-val contract_call :
+val call_contract :
   State.context ->
   State.frame ->
   Invocation.site ->
@@ -15,7 +15,7 @@ val contract_call :
 val make_time_term : State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term
 
 val apply_call :
-  ?lent_final:(Logic.term -> Logic.term) ->
+  ?leave_lent:(Logic.term -> Logic.term) ->
   State.context ->
   State.frame ->
   Invocation.site ->

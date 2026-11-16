@@ -86,7 +86,7 @@ let rec use_mutable_indexes (state : State.state) ~(report_with : Diagnostic.Cod
           let index_mut =
             State.make_trait_reference ~arguments:[] (Well_known.make_path Index_mut)
           in
-          match State.implements state self_type index_mut with
+          match State.find_evidence state self_type index_mut with
           | Some evidence ->
               state.tables.calls.(value.id) <-
                 Some
@@ -113,7 +113,7 @@ let rec use_mutable_indexes (state : State.state) ~(report_with : Diagnostic.Cod
                 (fun code ->
                   let assigns =
                     Option.is_some
-                      (State.implements state self_type
+                      (State.find_evidence state self_type
                          (State.make_trait_reference ~arguments:[]
                             (Well_known.make_path Index_assign)))
                   in
@@ -324,7 +324,7 @@ let check_mode state env (value : Syntax.expression) (parameter : Types.paramete
   | (Mut | Own), With_mode (Read, _) -> ()
 
 let check_lent_value (state : State.state) env (operand : Syntax.expression) =
-  let rec fields ~variant (value : Syntax.expression) =
+  let rec check_fields ~variant (value : Syntax.expression) =
     match (value.kind, state.tables.calls.(value.id)) with
     | ( Call (_, arguments),
         Some { callee = Constructor { variant = constructed; _ }; arguments = checked; _ } ) ->
@@ -352,11 +352,11 @@ let check_lent_value (state : State.state) env (operand : Syntax.expression) =
                            variant)
                       :: state.diagnostics
                 | _ -> ())
-            | _ -> fields ~variant argument.value)
+            | _ -> check_fields ~variant argument.value)
           arguments
     | _ -> ()
   in
-  fields ~variant:None operand
+  check_fields ~variant:None operand
 
 let check_owned state env (value : Syntax.expression) type_ =
   if State.runs env then

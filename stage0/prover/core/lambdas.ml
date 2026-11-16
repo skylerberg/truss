@@ -116,7 +116,7 @@ let remove_temporaries locals =
     (fun key _ -> match key with Locals.Mir_local _ -> false | Core_local _ -> true)
     locals
 
-let run_lambda_body ?(entering = Fun.id) (context : State.context) (frame : State.frame)
+let run_lambda_body ?(enter = Fun.id) (context : State.context) (frame : State.frame)
     ~(lambdas : Mir.body array) (body : Mir.body) ~type_ =
   let is_foreign = frame.source.key <> Some context.home in
   let saved_returns = context.returns in
@@ -125,7 +125,7 @@ let run_lambda_body ?(entering = Fun.id) (context : State.context) (frame : Stat
     ~finally:(fun () -> context.returns <- saved_returns)
     (fun () ->
       let inside =
-        entering { frame with locals = remove_temporaries frame.locals; panic = Undeclarable }
+        enter { frame with locals = remove_temporaries frame.locals; panic = Undeclarable }
       in
       (try context.run_body inside ~lambdas body
        with Facts.Unsupported (_, message) when is_foreign ->
@@ -135,16 +135,16 @@ let run_lambda_body ?(entering = Fun.id) (context : State.context) (frame : Stat
       | Some (_, None) | None -> None)
 
 let compute_returned_type context frame (body : Mir.body) =
-  let rec returned (block : Mir.block) =
+  let rec find_returned_type (block : Mir.block) =
     List.find_map
       (fun (statement : Mir.statement) ->
         match statement.kind with
         | Jump (Return (Some value)) ->
             Some (Facts.substitute_type context frame (Mir.extract_operand_type value))
-        | _ -> List.find_map returned (Mir.list_nested_blocks statement))
+        | _ -> List.find_map find_returned_type (Mir.list_nested_blocks statement))
       block.statements
   in
-  Option.value ~default:Types.unit (returned body.code)
+  Option.value ~default:Types.unit (find_returned_type body.code)
 
 let list_captured_locals (written : State.lambda_code) =
   List.filter_map
@@ -180,7 +180,7 @@ let canonicalize_binders term =
   in
   walk [] term
 
-let lambda_definition context frame (function_type : Types.function_type)
+let find_lambda_definition context frame (function_type : Types.function_type)
     (written : State.lambda_code) =
   match written.code.is_functional with
   | true when is_in_the_logic function_type -> (
@@ -193,7 +193,7 @@ let lambda_definition context frame (function_type : Types.function_type)
           ~finally:(fun () -> context.counters <- saved_counters)
           (fun () ->
             try
-              let entering inside =
+              let enter inside =
                 List.fold_left2
                   (fun inside parameter (name, _) ->
                     let info = written.code.locals.(parameter) in
@@ -204,7 +204,7 @@ let lambda_definition context frame (function_type : Types.function_type)
                   inside written.code.parameters bound
               in
               match
-                run_lambda_body ~entering context
+                run_lambda_body ~enter context
                   {
                     frame with
                     bound = List.map fst bound @ frame.bound;
@@ -320,7 +320,7 @@ let list_facts_since (context : State.context) count =
   take (List.length context.facts - count) context.facts
 
 let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : Invocation.site)
-    (written : State.lambda_code) ~facts =
+    (written : State.lambda_code) ~list_facts =
   let location = Facts.locate context frame.source site.origin in
   let ty = Facts.substitute_type context frame site.type_ in
   let function_type =
@@ -344,7 +344,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
         argument)
       function_type.inputs
   in
-  List.iter (Facts.assume context inside) (facts arguments);
+  List.iter (Facts.assume context inside) (list_facts arguments);
   let promised =
     List.filter_map
       (fun (cost : Types.cost) ->
@@ -445,14 +445,14 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
                 | _ -> ())
               written.code.parameters function_type.inputs)
           !ended;
-        let spent_of (exit_ : State.frame) counter =
+        let compute_spent (exit_ : State.frame) counter =
           match List.assoc_opt counter exit_.spent with Some term -> term | None -> Costs.zero
         in
         List.iter
           (fun (exit_ : State.frame) ->
             List.iter
               (fun (counter, (bound : Types.cost_bound)) ->
-                let spent = spent_of exit_ counter in
+                let spent = compute_spent exit_ counter in
                 let goal =
                   match bound with
                   | Order_of -> Costs.at_most spent (Costs.bound (Logic.int 1))
@@ -470,7 +470,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
               promised)
           exits;
         if counts_time && not times_by_type then
-          let spent = List.map (fun exit_ -> spent_of exit_ time_units) exits in
+          let spent = List.map (fun exit_ -> compute_spent exit_ time_units) exits in
           let most =
             match spent with
             | [] -> Costs.zero
@@ -502,7 +502,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   in
   let end_fresh = context.fresh in
   let term =
-    match lambda_definition context frame function_type written with
+    match find_lambda_definition context frame function_type written with
     | Some term -> term
     | None ->
         let term = Facts.arrive context frame "lambda" ty in
@@ -519,16 +519,16 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   | None -> ());
   (frame, term)
 
-let lambda context (frame : State.frame) ~(site : Invocation.site) (written : State.lambda_code)
-    ~facts =
-  let captured (local : Core.local) =
+let translate_lambda context (frame : State.frame) ~(site : Invocation.site)
+    (written : State.lambda_code) ~list_facts =
+  let find_captured (local : Core.local) =
     match local with Self -> frame.self | local -> Locals.find_opt (Core_local local) frame.locals
   in
   if
     frame.bound <> []
     && List.for_all
          (fun capture ->
-           match captured capture with
+           match find_captured capture with
            | Some term -> not (Logic.mentions frame.bound term)
            | None -> false)
          (list_captured_locals written)
@@ -536,10 +536,10 @@ let lambda context (frame : State.frame) ~(site : Invocation.site) (written : St
     let _, term =
       read_lambda ~capture_free:true context
         { frame with binders = []; condition = Logic.Boolean true }
-        ~site written ~facts
+        ~site written ~list_facts
     in
     (frame, term)
-  else read_lambda context frame ~site written ~facts
+  else read_lambda context frame ~site written ~list_facts
 
 let make_passed_values context frame (invocation : Invocation.t)
     (arguments : State.call_argument list) =
@@ -555,8 +555,8 @@ let make_passed_values context frame (invocation : Invocation.t)
       | State.Value_argument passed -> passed
       | Lambda_argument { position; mode; site; lambda = written } ->
           let _, term =
-            lambda context frame ~site written
-              ~facts:(Validity.callback_facts context frame invocation position known)
+            translate_lambda context frame ~site written
+              ~list_facts:(Validity.list_callback_facts context frame invocation position known)
           in
           {
             position;

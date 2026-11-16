@@ -57,12 +57,12 @@ let make_next_input kind start stop ~ending =
     }
 
 let ends_in_closer cursor ~text_start stop =
-  let rec last position =
+  let rec locate_last position =
     if position > text_start && Cursor.is_space (Cursor.lookup_char cursor (position - 1)) then
-      last (position - 1)
+      locate_last (position - 1)
     else position - 1
   in
-  let index = last stop in
+  let index = locate_last stop in
   index >= text_start && String.contains ")]}" (Cursor.lookup_char cursor index)
 
 let rec scan_interpolation (cursor : Cursor.t) ~scan ~nesting ~delimiter_length =
@@ -94,7 +94,7 @@ let rec scan_interpolation (cursor : Cursor.t) ~scan ~nesting ~delimiter_length 
     cursor.previous <- None;
     let braces = ref 0 and count = ref 0 in
     let finished = ref false and closed = ref false and ending = ref Cursor.Closed in
-    let end_of_input position =
+    let make_end_of_input position =
       Layout.End
         {
           position;
@@ -103,8 +103,8 @@ let rec scan_interpolation (cursor : Cursor.t) ~scan ~nesting ~delimiter_length 
           ends_unterminated = !ending = Unterminated;
         }
     in
-    let next_input () =
-      if !finished then end_of_input cursor.position
+    let read_next_input () =
+      if !finished then make_end_of_input cursor.position
       else
         match scan cursor ~inline:true ~nesting:(nesting + 1) with
         | Cursor.Line_end | End ->
@@ -114,11 +114,11 @@ let rec scan_interpolation (cursor : Cursor.t) ~scan ~nesting ~delimiter_length 
                before the string.";
             finished := true;
             ending := Unterminated;
-            end_of_input cursor.position
+            make_end_of_input cursor.position
         | Token { kind = Punctuation (Close Curly); start = brace; _ } when !braces = 0 ->
             finished := true;
             closed := true;
-            end_of_input brace
+            make_end_of_input brace
         | Token token ->
             (match token.kind with
             | Punctuation (Open Curly) -> incr braces
@@ -132,7 +132,7 @@ let rec scan_interpolation (cursor : Cursor.t) ~scan ~nesting ~delimiter_length 
             make_next_input token.kind token.start token.stop ~ending:token.ending
     in
     let tokens =
-      Layout.lex_interpolation ~source:cursor.source ~diagnostics:cursor.diagnostics next_input
+      Layout.lex_interpolation ~source:cursor.source ~diagnostics:cursor.diagnostics read_next_input
     in
     let interpolation_span = Source.make_span start cursor.position in
     if !closed && !count = 0 then begin
@@ -179,7 +179,7 @@ and scan_ordinary ?(closing = '"') cursor ~scan ~tag ~nesting =
   cursor.position <- open_quote + 1;
   let builder = make_builder cursor.position in
   let rec loop () =
-    Source_text.copy_plain cursor builder.buffer ~special:(fun character ->
+    Source_text.copy_plain cursor builder.buffer ~is_special:(fun character ->
         is_ordinary_special character || character = closing);
     let position = cursor.position in
     if Cursor.is_end_of_line cursor position then begin
@@ -235,17 +235,17 @@ and scan_ordinary ?(closing = '"') cursor ~scan ~tag ~nesting =
 
 and scan_escape cursor buffer =
   let start = cursor.position in
-  let simple value =
+  let append_simple value =
     Buffer.add_char buffer value;
     cursor.position <- start + 2;
     `Continue
   in
-  let problem stop message =
+  let report_problem stop message =
     Cursor.report cursor ~code:Invalid_escape (Source.make_span start stop) message;
     cursor.position <- stop;
     `Continue
   in
-  let unknown () =
+  let report_unknown () =
     let decoded = Cursor.decode cursor (start + 1) in
     let is_valid = Uchar.utf_decode_is_valid decoded in
     let length = if is_valid then Uchar.utf_decode_length decoded else 1 in
@@ -254,7 +254,7 @@ and scan_escape cursor buffer =
         Printf.sprintf "`\\` followed by %s" (Cursor.show_character cursor (start + 1))
       else Printf.sprintf "`%s`" (String.sub cursor.text start (1 + length))
     in
-    problem
+    report_problem
       (start + 1 + length)
       (Printf.sprintf
          "%s is not an escape. The escapes are `\\n`, `\\t`, `\\r`, `\\0`, `\\\\`, `\\\"`, `\\${`, \
@@ -272,12 +272,12 @@ and scan_escape cursor buffer =
   end
   else
     match Cursor.lookup_char cursor (start + 1) with
-    | 'n' -> simple '\n'
-    | 't' -> simple '\t'
-    | 'r' -> simple '\r'
-    | '0' -> simple '\000'
-    | '\\' -> simple '\\'
-    | '"' -> simple '"'
+    | 'n' -> append_simple '\n'
+    | 't' -> append_simple '\t'
+    | 'r' -> append_simple '\r'
+    | '0' -> append_simple '\000'
+    | '\\' -> append_simple '\\'
+    | '"' -> append_simple '"'
     | '$' when Cursor.is_at cursor (start + 2) '{' ->
         Buffer.add_string buffer "${";
         cursor.position <- start + 3;
@@ -285,23 +285,24 @@ and scan_escape cursor buffer =
     | 'u' ->
         let form = "A Unicode escape is written `\\u{...}`, with 1 to 6 hexadecimal digits." in
         if not (Cursor.is_at cursor (start + 2) '{') then
-          if cursor.scan_foreign_escape cursor buffer then `Continue else problem (start + 2) form
+          if cursor.scan_foreign_escape cursor buffer then `Continue
+          else report_problem (start + 2) form
         else
           let digits_start = start + 3 in
-          let rec digits_end position =
+          let rec locate_digits_end position =
             if Cursor.satisfies cursor position Cursor.is_hexadecimal_digit then
-              digits_end (position + 1)
+              locate_digits_end (position + 1)
             else position
           in
-          let stop = digits_end digits_start in
+          let stop = locate_digits_end digits_start in
           let count = stop - digits_start in
-          if not (Cursor.is_at cursor stop '}') then problem stop form
-          else if count = 0 || count > 6 then problem (stop + 1) form
+          if not (Cursor.is_at cursor stop '}') then report_problem stop form
+          else if count = 0 || count > 6 then report_problem (stop + 1) form
           else
             let digits = String.sub cursor.text digits_start count in
             let value = int_of_string ("0x" ^ digits) in
             if not (Uchar.is_valid value) then
-              problem (stop + 1)
+              report_problem (stop + 1)
                 (Printf.sprintf
                    "`\\u{%s}` is not a Unicode scalar value: surrogates and values above 10FFFF \
                     have no character."
@@ -311,7 +312,7 @@ and scan_escape cursor buffer =
               cursor.position <- stop + 1;
               `Continue
             end
-    | _ -> if cursor.scan_foreign_escape cursor buffer then `Continue else unknown ()
+    | _ -> if cursor.scan_foreign_escape cursor buffer then `Continue else report_unknown ()
 
 and scan_raw cursor ~scan ~tag ~nesting ~dollars ~quotes =
   let delimiter_start = cursor.position in
@@ -371,7 +372,7 @@ and scan_one_line_raw cursor ~scan ~tag ~form ~nesting ~literal_start ~dollars ~
   let builder = make_builder cursor.position in
   let delimiter = String.make quotes '"' in
   let rec loop () =
-    Source_text.copy_plain cursor builder.buffer ~special:is_raw_special;
+    Source_text.copy_plain cursor builder.buffer ~is_special:is_raw_special;
     let position = cursor.position in
     if Cursor.is_end_of_line cursor position then begin
       let fixes =
@@ -459,7 +460,7 @@ and read_raw_lines cursor ~scan ~dollars ~quotes ~line_end =
   cursor.position <- line_end;
   if cursor.position < cursor.length then ignore (Source_text.consume_line_break cursor);
   let lines = ref [] in
-  let rec line () =
+  let rec scan_line () =
     let line_start = cursor.position in
     if line_start >= cursor.length then `Unterminated (List.rev !lines)
     else
@@ -476,15 +477,15 @@ and read_raw_lines cursor ~scan ~dollars ~quotes ~line_end =
       else
         let builder = make_builder line_start in
         let record stop = lines := finish builder stop :: !lines in
-        let rec content () =
-          Source_text.copy_plain cursor builder.buffer ~special:is_raw_special;
+        let rec scan_content () =
+          Source_text.copy_plain cursor builder.buffer ~is_special:is_raw_special;
           let position = cursor.position in
           if Cursor.is_end_of_line cursor position then begin
             record position;
             if Cursor.is_at_end cursor position then `Unterminated (List.rev !lines)
             else begin
               ignore (Source_text.consume_line_break cursor);
-              line ()
+              scan_line ()
             end
           end
           else if Cursor.is_at cursor position '"' then begin
@@ -498,28 +499,28 @@ and read_raw_lines cursor ~scan ~dollars ~quotes ~line_end =
               if run > quotes then
                 report_too_many_quotes cursor ~start:position ~run ~quotes ~multi_line:true;
               Buffer.add_string builder.buffer (String.make run '"');
-              content ()
+              scan_content ()
             end
           end
           else if Cursor.is_at cursor position '$' then begin
             ignore (lex_raw_dollars cursor builder ~scan ~dollars ~nesting:0);
-            content ()
+            scan_content ()
           end
           else begin
             Source_text.read_character cursor builder.buffer ~context:Raw_string;
-            content ()
+            scan_content ()
           end
         in
-        content ()
+        scan_content ()
   in
-  line ()
+  scan_line ()
 
 and find_leading_whitespace ((first : Token.text), rest) =
   let whitespace = String.take_first_while Char.Ascii.is_blank first.value in
   if whitespace = first.value && Array.length rest = 0 then None else Some whitespace
 
 and compute_common_indentation lines =
-  let common first second =
+  let compute_common_prefix first second =
     let length = min (String.length first) (String.length second) in
     let rec loop index =
       if index < length && first.[index] = second.[index] then loop (index + 1) else index
@@ -531,7 +532,7 @@ and compute_common_indentation lines =
       match (find_leading_whitespace line, so_far) with
       | None, _ -> so_far
       | Some prefix, None -> Some prefix
-      | Some prefix, Some so_far -> Some (common prefix so_far))
+      | Some prefix, Some so_far -> Some (compute_common_prefix prefix so_far))
     None lines
   |> Option.value ~default:""
 
@@ -574,7 +575,7 @@ and build_multi_line cursor ~tag ~form ~quotes ~delimiter_stop lines closing =
   let describe_whitespace whitespace =
     if whitespace = "" then "no indentation"
     else
-      let rec groups index =
+      let rec list_groups index =
         if index >= String.length whitespace then []
         else
           let character = whitespace.[index] in
@@ -588,9 +589,9 @@ and build_multi_line cursor ~tag ~form ~quotes ~delimiter_stop lines closing =
           Printf.sprintf "%d %s%s" count
             (if character = '\t' then "tab" else "space")
             (if count = 1 then "" else "s")
-          :: groups next
+          :: list_groups next
       in
-      String.concat " then " (groups 0)
+      String.concat " then " (list_groups 0)
   in
   let joined = make_builder delimiter_stop in
   List.iteri
@@ -603,20 +604,21 @@ and build_multi_line cursor ~tag ~form ~quotes ~delimiter_stop lines closing =
             (String.length value - String.length indentation)
         else if find_leading_whitespace line = None then ""
         else begin
-          let first_difference text =
+          let locate_first_difference text =
             let length = min (String.length text) (String.length indentation) in
-            let rec differs index =
-              if index < length && text.[index] = indentation.[index] then differs (index + 1)
+            let rec locate_difference index =
+              if index < length && text.[index] = indentation.[index] then
+                locate_difference (index + 1)
               else index
             in
-            differs 0
+            locate_difference 0
           in
-          let at = first_difference value in
+          let at = locate_first_difference value in
           let line_whitespace = Option.value (find_leading_whitespace line) ~default:"" in
           let whitespace_stop = Cursor.skip_spaces cursor first.span.start in
           let source_at =
             first.span.start
-            + first_difference
+            + locate_first_difference
                 (String.sub cursor.text first.span.start (whitespace_stop - first.span.start))
           in
           Cursor.report cursor ~code:Raw_string_indentation

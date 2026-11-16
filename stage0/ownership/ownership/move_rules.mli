@@ -18,6 +18,6 @@ val analyse : Context.context -> Mir.Graph.body -> Moves.t
 val check :
   Context.context ->
   Mir.Graph.t ->
-  moves:(Mir.Graph.body -> Moves.t) ->
+  read_moves:(Mir.Graph.body -> Moves.t) ->
   returns_to_caller:bool ->
   unit

@@ -6,20 +6,20 @@ type overlap = Disjoint | Overlapping | Maybe_disjoint of Core.origin * Core.ori
 let classify_overlap left right =
   if left.root <> right.root then Disjoint
   else
-    let rec steps_overlap left right =
+    let rec classify_steps left right =
       match (left, right) with
       | [], _ | _, [] -> Overlapping
       | Field first :: left, Field second :: right ->
-          if first = second then steps_overlap left right else Disjoint
+          if first = second then classify_steps left right else Disjoint
       | Element first :: left, Element second :: right -> (
-          if first.node = second.node then steps_overlap left right
+          if first.node = second.node then classify_steps left right
           else
-            match steps_overlap left right with
+            match classify_steps left right with
             | Disjoint -> Disjoint
             | _ -> Maybe_disjoint (first.origin, second.origin))
-      | _ :: left, _ :: right -> steps_overlap left right
+      | _ :: left, _ :: right -> classify_steps left right
     in
-    steps_overlap left.steps right.steps
+    classify_steps left.steps right.steps
 
 let is_slice_type type_ = Types.is_well_known Slice type_ || Types.is_well_known String_slice type_
 

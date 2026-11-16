@@ -19,7 +19,7 @@ val check_valid :
 val remove_temporaries : 'a Locals.t -> 'a Locals.t
 
 val run_lambda_body :
-  ?entering:(State.frame -> State.frame) ->
+  ?enter:(State.frame -> State.frame) ->
   State.context ->
   State.frame ->
   lambdas:Mir.body array ->
@@ -31,12 +31,12 @@ val classify_counting : Mir.cost -> Costs.counting
 val list_loop_counters : Logic.term Locals.t -> Mir.body -> Costs.counter list
 val list_facts_since : State.context -> int -> Logic.term list
 
-val lambda :
+val translate_lambda :
   State.context ->
   State.frame ->
   site:Invocation.site ->
   State.lambda_code ->
-  facts:(Logic.term list -> Logic.term list) ->
+  list_facts:(Logic.term list -> Logic.term list) ->
   State.frame * Logic.term
 
 val make_passed_values :

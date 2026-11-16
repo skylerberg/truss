@@ -170,14 +170,14 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
           let quantifier : Core.quantifier =
             match quantifier with Forall -> Forall | Exists -> Exists
           in
-          let quantified binder : Core.kind =
+          let make_quantified binder : Core.kind =
             Quantified { quantifier; binder; body = State.build_expression state body }
           in
           match (binder, state.tables.loops.(value.id)) with
           | Binder_in (written, collection), Some (Elements { count; element; lends }) ->
               let pattern = State.build_pattern state written in
               Form.quantify_over_elements state collection ~count ~element ~lends ~origin:value.id
-                (fun elements -> quantified (Over_elements { pattern; elements }))
+                (fun elements -> make_quantified (Over_elements { pattern; elements }))
           | _ ->
               let binder : Core.binder =
                 match binder with
@@ -201,7 +201,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
                     Over_collection
                       { pattern; collection = State.build_expression state collection }
               in
-              quantified binder);
+              make_quantified binder);
       Types.bool
   | Echo inner ->
       let type_ = check_expression state env ?expected inner in
@@ -366,13 +366,13 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
             let index_trait =
               State.make_trait_reference ~arguments:[] (Well_known.make_path Index)
             in
-            match State.implements state base_type index_trait with
+            match State.find_evidence state base_type index_trait with
             | Some evidence ->
-                let associated name =
+                let resolve_associated name =
                   State.resolve_associated_type state base_type index_trait name
                     ~at:(State.read_span state value.id)
                 in
-                let key_type = associated "Key" and output = associated "Output" in
+                let key_type = resolve_associated "Key" and output = resolve_associated "Output" in
                 let actual = check_expression state env ~expected:key_type key in
                 Name_lookup.coerce state env ~argument:Read key ~actual ~expected:key_type;
                 state.tables.calls.(value.id) <-

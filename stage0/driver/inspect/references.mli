@@ -11,8 +11,8 @@ val list_occurrences :
   Infer.tables option ->
   occurrence list
 
-val uses :
-  used_module:(Syntax.path -> Path.module_) ->
+val list_uses :
+  resolve_module:(Syntax.path -> Path.module_) ->
   Syntax.path Syntax.item list ->
   (Path.module_ * Source.span) list
 

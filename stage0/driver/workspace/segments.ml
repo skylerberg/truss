@@ -77,21 +77,21 @@ exception Damaged
 
 let parse_records text =
   let length = String.length text in
-  let length_at position =
+  let read_length_at position =
     if position + 4 > length then raise Damaged
     else Int32.to_int (String.get_int32_le text position)
   in
-  let bytes_at position size =
+  let read_bytes_at position size =
     if size < 0 || position + size > length then raise Damaged else String.sub text position size
   in
   let rec read position records =
     if position = length then List.rev records
     else
-      let key_length = length_at position in
-      let key = bytes_at (position + 4) key_length in
-      let kind = bytes_at (position + 4 + key_length) 1 in
-      let value_length = length_at (position + 5 + key_length) in
-      let value = bytes_at (position + 9 + key_length) value_length in
+      let key_length = read_length_at position in
+      let key = read_bytes_at (position + 4) key_length in
+      let kind = read_bytes_at (position + 4 + key_length) 1 in
+      let value_length = read_length_at (position + 5 + key_length) in
+      let value = read_bytes_at (position + 9 + key_length) value_length in
       let next = position + 9 + key_length + value_length in
       match kind with
       | "v" -> read next ((key, Some value) :: records)
@@ -215,5 +215,5 @@ let discard t =
 let close t = Unix.close t.lock
 
 module For_testing = struct
-  let interrupted_commit t ~header entries = ignore (prepare_commit t ~header entries)
+  let interrupt_commit t ~header entries = ignore (prepare_commit t ~header entries)
 end

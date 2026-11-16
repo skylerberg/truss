@@ -5,18 +5,18 @@ let directory =
       prerr_endline "usage: library_tables.exe DIRECTORY";
       exit 2
 
-let records = Ucd.records directory
-let code_point = Ucd.code_point
+let read_records = Ucd.read_records directory
+let parse_code_point = Ucd.parse_code_point
 
-let code_points text =
-  List.map code_point (List.filter (fun part -> part <> "") (String.split_on_char ' ' text))
+let parse_code_points text =
+  List.map parse_code_point (List.filter (fun part -> part <> "") (String.split_on_char ' ' text))
 
-let property rows name =
+let select_property rows name =
   Ucd.merge
     (List.filter_map
        (function
          | range :: property_name :: _ when property_name = name ->
-             Some (Ucd.code_point_range range)
+             Some (Ucd.parse_code_point_range range)
          | _ -> None)
        rows)
 
@@ -35,8 +35,8 @@ let characters =
       (fun (first, characters) fields ->
         match fields with
         | code_text :: name :: category :: _ ->
-            let code = code_point code_text in
-            let field index = List.nth fields index in
+            let code = parse_code_point code_text in
+            let read_field index = List.nth fields index in
             if String.ends_with ~suffix:", First>" name then (Some code, characters)
             else if String.ends_with ~suffix:", Last>" name then
               let start = Option.value first ~default:code in
@@ -59,25 +59,25 @@ let characters =
                 {
                   code;
                   category;
-                  combining = int_of_string (field 3);
-                  decomposition = field 5;
-                  upper = field 12;
-                  lower = field 13;
+                  combining = int_of_string (read_field 3);
+                  decomposition = read_field 5;
+                  upper = read_field 12;
+                  lower = read_field 13;
                 }
                 :: characters )
         | _ -> (first, characters))
-      (None, []) (records "UnicodeData.txt")
+      (None, []) (read_records "UnicodeData.txt")
   in
   List.sort (fun left right -> compare left.code right.code) characters
 
-let in_categories names =
+let list_in_categories names =
   Ucd.merge
     (List.filter_map
        (fun character ->
          if List.mem character.category names then Some (character.code, character.code) else None)
        characters)
 
-let category_number category =
+let number_category category =
   match category with
   | "Cc" -> 6
   | "Cf" -> 7
@@ -97,7 +97,7 @@ let category_number category =
 let category_ranges =
   List.fold_left
     (fun runs character ->
-      let number = category_number character.category in
+      let number = number_category character.category in
       match runs with
       | (first, last, earlier) :: rest when last = character.code - 1 && earlier = number ->
           (first, character.code, number) :: rest
@@ -105,45 +105,48 @@ let category_ranges =
     [] characters
   |> List.rev
 
-let simple_mappings mapped =
+let list_simple_mappings select_mapping =
   List.concat_map
     (fun character ->
-      match mapped character with "" -> [] | text -> [ character.code; code_point text ])
+      match select_mapping character with
+      | "" -> []
+      | text -> [ character.code; parse_code_point text ])
     characters
 
-let expansion code mapped =
+let expand code mapped =
   match mapped with
   | [ first; second ] -> [ code; first; second; 0 ]
   | [ first; second; third ] -> [ code; first; second; third ]
   | _ -> failwith "an expansion has two or three code points"
 
-let special_casing column =
+let list_special_casing column =
   List.concat_map
     (fun fields ->
       match fields with
       | code_text :: lower :: _title :: upper :: rest
         when List.for_all (fun field -> field = "") rest -> (
-          match code_points (if column = `Upper then upper else lower) with
+          match parse_code_points (if column = `Upper then upper else lower) with
           | [] | [ _ ] -> []
-          | mapped -> [ expansion (code_point code_text) mapped ])
+          | mapped -> [ expand (parse_code_point code_text) mapped ])
       | _ -> [])
-    (records "SpecialCasing.txt")
+    (read_records "SpecialCasing.txt")
   |> List.sort compare |> List.concat
 
-let case_folding = records "CaseFolding.txt"
+let case_folding = read_records "CaseFolding.txt"
 
 let fold_mappings =
   List.concat_map
     (function
       | [ code_text; "C"; mapped; _ ] | [ code_text; "C"; mapped ] ->
-          [ code_point code_text; code_point mapped ]
+          [ parse_code_point code_text; parse_code_point mapped ]
       | _ -> [])
     case_folding
 
 let fold_expansions =
   List.concat_map
     (function
-      | code_text :: "F" :: mapped :: _ -> [ expansion (code_point code_text) (code_points mapped) ]
+      | code_text :: "F" :: mapped :: _ ->
+          [ expand (parse_code_point code_text) (parse_code_points mapped) ]
       | _ -> [])
     case_folding
   |> List.sort compare |> List.concat
@@ -170,16 +173,16 @@ let decomposition_steps =
       with
       | [] -> ()
       | tag :: parts when tag.[0] = '<' ->
-          Hashtbl.replace steps character.code (`Compatibility, List.map code_point parts)
-      | parts -> Hashtbl.replace steps character.code (`Canonical, List.map code_point parts))
+          Hashtbl.replace steps character.code (`Compatibility, List.map parse_code_point parts)
+      | parts -> Hashtbl.replace steps character.code (`Canonical, List.map parse_code_point parts))
     characters;
   steps
 
-let rec full_decomposition ~compatibility code =
+let rec decompose_fully ~compatibility code =
   match Hashtbl.find_opt decomposition_steps code with
-  | Some (`Canonical, parts) -> List.concat_map (full_decomposition ~compatibility) parts
+  | Some (`Canonical, parts) -> List.concat_map (decompose_fully ~compatibility) parts
   | Some (`Compatibility, parts) when compatibility ->
-      List.concat_map (full_decomposition ~compatibility) parts
+      List.concat_map (decompose_fully ~compatibility) parts
   | _ -> [ code ]
 
 let canonical_decompositions =
@@ -187,19 +190,19 @@ let canonical_decompositions =
     (fun character ->
       match Hashtbl.find_opt decomposition_steps character.code with
       | Some (`Canonical, _) ->
-          Some (character.code, full_decomposition ~compatibility:false character.code)
+          Some (character.code, decompose_fully ~compatibility:false character.code)
       | _ -> None)
     characters
 
 let compatibility_decompositions =
   List.filter_map
     (fun character ->
-      let whole = full_decomposition ~compatibility:true character.code in
-      if whole = full_decomposition ~compatibility:false character.code then None
+      let whole = decompose_fully ~compatibility:true character.code in
+      if whole = decompose_fully ~compatibility:false character.code then None
       else Some (character.code, whole))
     characters
 
-let index_and_pool decompositions =
+let pool_decompositions decompositions =
   let index, pool, _ =
     List.fold_left
       (fun (index, pool, start) (code, parts) ->
@@ -209,7 +212,7 @@ let index_and_pool decompositions =
   in
   (List.rev index, List.rev pool)
 
-let composition_pairs excluded =
+let list_composition_pairs excluded =
   let is_excluded code =
     List.exists (fun (first, last) -> first <= code && code <= last) excluded
   in
@@ -222,7 +225,7 @@ let composition_pairs excluded =
     characters
   |> List.sort compare |> List.concat
 
-let grapheme_ranges ~breaks ~core ~emoji =
+let list_grapheme_ranges ~breaks ~core ~emoji =
   let properties = Hashtbl.create 16384 in
   let add number ranges =
     List.iter
@@ -234,7 +237,7 @@ let grapheme_ranges ~breaks ~core ~emoji =
       ranges
   in
   List.iteri
-    (fun index name -> add (index + 1) (property breaks name))
+    (fun index name -> add (index + 1) (select_property breaks name))
     [
       "CR";
       "LF";
@@ -248,18 +251,18 @@ let grapheme_ranges ~breaks ~core ~emoji =
       "V";
       "T";
     ];
-  let conjunct name =
+  let list_conjunct name =
     List.filter_map
       (function
         | range :: "InCB" :: property_name :: _ when property_name = name ->
-            Some (Ucd.code_point_range range)
+            Some (Ucd.parse_code_point_range range)
         | _ -> None)
       core
   in
   List.iteri
-    (fun index name -> add (16 * (index + 1)) (conjunct name))
+    (fun index name -> add (16 * (index + 1)) (list_conjunct name))
     [ "Consonant"; "Extend"; "Linker" ];
-  add 64 (property emoji "Extended_Pictographic");
+  add 64 (select_property emoji "Extended_Pictographic");
   Hashtbl.fold (fun code property_bits all -> (code, property_bits) :: all) properties []
   |> List.sort compare
   |> List.fold_left
@@ -272,43 +275,43 @@ let grapheme_ranges ~breaks ~core ~emoji =
   |> List.rev
   |> List.concat_map (fun (first, last, property_bits) -> [ first; last; property_bits ])
 
-let flat ranges = List.concat_map (fun (first, last) -> [ first; last ]) ranges
+let flatten ranges = List.concat_map (fun (first, last) -> [ first; last ]) ranges
 
 let print_table name numbers =
   Printf.printf "internal let %s: Array[UInt32, %d] = [\n" name (List.length numbers);
-  let rec rows = function
+  let rec write_rows = function
     | [] -> ()
     | numbers ->
         let row = List.take 12 numbers in
         Printf.printf "  %s,\n" (String.concat ", " (List.map string_of_int row));
-        rows (List.drop 12 numbers)
+        write_rows (List.drop 12 numbers)
   in
-  rows numbers;
+  write_rows numbers;
   print_string "]\n"
 
 let () =
-  let core = records "DerivedCoreProperties.txt" in
-  let width = records "EastAsianWidth.txt" in
-  let normalization = records "DerivedNormalizationProps.txt" in
-  let breaks = records "GraphemeBreakProperty.txt" in
-  let emoji = records "emoji-data.txt" in
-  let canonical_index, canonical_pool = index_and_pool canonical_decompositions in
-  let compatibility_index, compatibility_pool = index_and_pool compatibility_decompositions in
+  let core = read_records "DerivedCoreProperties.txt" in
+  let width = read_records "EastAsianWidth.txt" in
+  let normalization = read_records "DerivedNormalizationProps.txt" in
+  let breaks = read_records "GraphemeBreakProperty.txt" in
+  let emoji = read_records "emoji-data.txt" in
+  let canonical_index, canonical_pool = pool_decompositions canonical_decompositions in
+  let compatibility_index, compatibility_pool = pool_decompositions compatibility_decompositions in
   let tables =
     [
-      ("alphabetic_ranges", flat (property core "Alphabetic"));
-      ("numeric_ranges", flat (in_categories [ "Nd"; "Nl"; "No" ]));
-      ("uppercase_ranges", flat (property core "Uppercase"));
-      ("lowercase_ranges", flat (property core "Lowercase"));
-      ("cased_ranges", flat (property core "Cased"));
-      ("case_ignorable_ranges", flat (property core "Case_Ignorable"));
-      ("wide_ranges", flat (Ucd.merge (property width "W" @ property width "F")));
-      ("zero_width_ranges", flat (in_categories [ "Mn"; "Me"; "Cf"; "Cc" ]));
-      ("uppercase_mappings", simple_mappings (fun character -> character.upper));
-      ("lowercase_mappings", simple_mappings (fun character -> character.lower));
+      ("alphabetic_ranges", flatten (select_property core "Alphabetic"));
+      ("numeric_ranges", flatten (list_in_categories [ "Nd"; "Nl"; "No" ]));
+      ("uppercase_ranges", flatten (select_property core "Uppercase"));
+      ("lowercase_ranges", flatten (select_property core "Lowercase"));
+      ("cased_ranges", flatten (select_property core "Cased"));
+      ("case_ignorable_ranges", flatten (select_property core "Case_Ignorable"));
+      ("wide_ranges", flatten (Ucd.merge (select_property width "W" @ select_property width "F")));
+      ("zero_width_ranges", flatten (list_in_categories [ "Mn"; "Me"; "Cf"; "Cc" ]));
+      ("uppercase_mappings", list_simple_mappings (fun character -> character.upper));
+      ("lowercase_mappings", list_simple_mappings (fun character -> character.lower));
       ("fold_mappings", fold_mappings);
-      ("uppercase_expansions", special_casing `Upper);
-      ("lowercase_expansions", special_casing `Lower);
+      ("uppercase_expansions", list_special_casing `Upper);
+      ("lowercase_expansions", list_special_casing `Lower);
       ("fold_expansions", fold_expansions);
       ( "category_ranges",
         List.concat_map (fun (first, last, number) -> [ first; last; number ]) category_ranges );
@@ -320,8 +323,9 @@ let () =
       ("canonical_decomposition_pool", canonical_pool);
       ("compatibility_decomposition_index", compatibility_index);
       ("compatibility_decomposition_pool", compatibility_pool);
-      ("composition_pairs", composition_pairs (property normalization "Full_Composition_Exclusion"));
-      ("grapheme_ranges", grapheme_ranges ~breaks ~core ~emoji);
+      ( "composition_pairs",
+        list_composition_pairs (select_property normalization "Full_Composition_Exclusion") );
+      ("grapheme_ranges", list_grapheme_ranges ~breaks ~core ~emoji);
     ]
   in
   List.iteri

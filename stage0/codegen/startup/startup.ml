@@ -2080,5 +2080,5 @@ let render_program_start entry =
     (Printf.sprintf "program->status = %s(program->count, program->arguments)" entry)
 
 module For_testing = struct
-  let main_calling = render_main_start
+  let render_main_start = render_main_start
 end

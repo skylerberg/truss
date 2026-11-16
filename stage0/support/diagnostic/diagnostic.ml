@@ -250,7 +250,7 @@ module Code = struct
     | Prover of prover
     | Too_many_diagnostics
 
-  let lexer_name code =
+  let name_lexer_code code =
     match code with
     | Invalid_utf8 -> "invalid_utf8"
     | Carriage_return -> "carriage_return"
@@ -289,7 +289,7 @@ module Code = struct
     | Unclosed_bracket -> "unclosed_bracket"
     | Unmatched_closing_bracket -> "unmatched_closing_bracket"
 
-  let parser_name code =
+  let name_parser_code code =
     match code with
     | Unexpected_token -> "unexpected_token"
     | Needs_parentheses -> "needs_parentheses"
@@ -365,7 +365,7 @@ module Code = struct
     | Not_a_generic_parameter -> "not_a_generic_parameter"
     | Null -> "null"
 
-  let types_name code =
+  let name_types_code code =
     match code with
     | Character_scalar_count -> "character_scalar_count"
     | Misplaced_self_type -> "misplaced_self_type"
@@ -434,17 +434,17 @@ module Code = struct
     | Unknown_associated_capability -> "unknown_associated_capability"
     | Associated_type_not_fixed -> "associated_type_not_fixed"
 
-  let patterns_name code =
+  let name_patterns_code code =
     match code with
     | Not_covered -> "not_covered"
     | Unreachable_arm -> "unreachable_arm"
     | Unreachable_alternative -> "unreachable_alternative"
     | Refutable -> "refutable"
 
-  let usage_name code =
+  let name_usage_code code =
     match code with Unused_variable -> "unused_variable" | Unreachable_code -> "unreachable_code"
 
-  let ownership_name code =
+  let name_ownership_code code =
     match code with
     | Views_temporary -> "views_temporary"
     | Use_after_move -> "use_after_move"
@@ -463,7 +463,7 @@ module Code = struct
     | Lent_mut_in_variant -> "lent_mut_in_variant"
     | Task_outlives_view -> "task_outlives_view"
 
-  let capabilities_name code =
+  let name_capabilities_code code =
     match code with
     | Not_available -> "not_available"
     | Lambda_uses -> "lambda_uses"
@@ -473,7 +473,7 @@ module Code = struct
     | Callback_may_deadlock -> "callback_may_deadlock"
     | Monitor_needs_tasks -> "monitor_needs_tasks"
 
-  let package_name code =
+  let name_package_code code =
     match code with
     | Impl_location -> "impl_location"
     | Sealed_trait_impl -> "sealed_trait_impl"
@@ -486,7 +486,7 @@ module Code = struct
     | Constant_cycle -> "constant_cycle"
     | Duplicate_test -> "duplicate_test"
 
-  let prover_name code =
+  let name_prover_code code =
     match code with
     | Overflow -> "overflow"
     | Division -> "division"
@@ -504,16 +504,16 @@ module Code = struct
     | Unsupported -> "unsupported"
 
   let name = function
-    | Lexer code -> "lexer." ^ lexer_name code
-    | Parser code -> "parser." ^ parser_name code
+    | Lexer code -> "lexer." ^ name_lexer_code code
+    | Parser code -> "parser." ^ name_parser_code code
     | Resolve code -> "resolve." ^ resolve_name code
-    | Types code -> "types." ^ types_name code
-    | Patterns code -> "patterns." ^ patterns_name code
-    | Usage code -> "usage." ^ usage_name code
-    | Ownership code -> "ownership." ^ ownership_name code
-    | Capabilities code -> "capabilities." ^ capabilities_name code
-    | Package code -> "package." ^ package_name code
-    | Prover code -> "prover." ^ prover_name code
+    | Types code -> "types." ^ name_types_code code
+    | Patterns code -> "patterns." ^ name_patterns_code code
+    | Usage code -> "usage." ^ name_usage_code code
+    | Ownership code -> "ownership." ^ name_ownership_code code
+    | Capabilities code -> "capabilities." ^ name_capabilities_code code
+    | Package code -> "package." ^ name_package_code code
+    | Prover code -> "prover." ^ name_prover_code code
     | Too_many_diagnostics -> "too_many_diagnostics"
 end
 
@@ -666,17 +666,17 @@ let show_location source offset =
   let line, column = Source.compute_position source offset in
   Printf.sprintf "%s:%d:%d" (Source.path source) line column
 
-let iter_utf8 text ~valid ~invalid =
+let iter_utf8 text ~on_valid ~on_invalid =
   let rec loop index =
     if index < String.length text then begin
       let decoded = String.get_utf_8_uchar text index in
       if not (Uchar.utf_decode_is_valid decoded) then begin
-        invalid text.[index];
+        on_invalid text.[index];
         loop (index + 1)
       end
       else begin
         let length = Uchar.utf_decode_length decoded in
-        valid (String.sub text index length);
+        on_valid (String.sub text index length);
         loop (index + length)
       end
     end
@@ -687,7 +687,7 @@ let quote text =
   let buffer = Buffer.create (String.length text + 2) in
   Buffer.add_char buffer '"';
   iter_utf8 text
-    ~valid:(fun character ->
+    ~on_valid:(fun character ->
       match character with
       | "\"" -> Buffer.add_string buffer "\\\""
       | "\\" -> Buffer.add_string buffer "\\\\"
@@ -698,7 +698,7 @@ let quote text =
         ->
           Printf.bprintf buffer "\\x%02X" (Char.code scalar.[0])
       | scalar -> Buffer.add_string buffer scalar)
-    ~invalid:(fun byte -> Printf.bprintf buffer "\\x%02X" (Char.code byte));
+    ~on_invalid:(fun byte -> Printf.bprintf buffer "\\x%02X" (Char.code byte));
   Buffer.add_char buffer '"';
   Buffer.contents buffer
 
@@ -718,7 +718,7 @@ let render source (diagnostic : t) =
     String.for_all (fun character -> character = '\t' || Char.code character >= 0x20) line
     &&
     let valid = ref true in
-    iter_utf8 line ~valid:ignore ~invalid:(fun _ -> valid := false);
+    iter_utf8 line ~on_valid:ignore ~on_invalid:(fun _ -> valid := false);
     !valid
   in
   if is_printable && String.length line <= 200 then begin
@@ -756,7 +756,7 @@ let encode_json_string value =
   let buffer = Buffer.create (String.length value + 2) in
   Buffer.add_char buffer '"';
   iter_utf8 value
-    ~valid:(fun character ->
+    ~on_valid:(fun character ->
       match character with
       | "\"" -> Buffer.add_string buffer "\\\""
       | "\\" -> Buffer.add_string buffer "\\\\"
@@ -768,7 +768,7 @@ let encode_json_string value =
         ->
           Printf.bprintf buffer "\\u%04x" (Char.code scalar.[0])
       | scalar -> Buffer.add_string buffer scalar)
-    ~invalid:(fun _ -> Buffer.add_string buffer "\xEF\xBF\xBD");
+    ~on_invalid:(fun _ -> Buffer.add_string buffer "\xEF\xBF\xBD");
   Buffer.add_char buffer '"';
   Buffer.contents buffer
 

@@ -308,15 +308,16 @@ let run_in_loop st ~continue_ ~break_ ~depth body =
   st.loops <- List.tl st.loops
 
 let find_place_type st (place : Lowered.place) =
-  let environment _ =
+  let raise_environment_place _ =
     Definitions.raise_bug "a place in an environment, whose type lowering does not track"
   in
-  let rec projected (ty : Lowered.ty) = function
+  let rec find_projected_type (ty : Lowered.ty) = function
     | [] -> Some ty
     | _ :: _ when match ty with Environment _ | Evidence _ -> true | _ -> false -> None
     | projection :: rest ->
-        Option.bind (Lowered.find_projection_type st.context.env ~environment ty projection)
-          (fun ty -> projected ty rest)
+        Option.bind
+          (Lowered.find_projection_type st.context.env ~list_environment:raise_environment_place ty
+             projection) (fun ty -> find_projected_type ty rest)
   in
   match place with
   | _ ->
@@ -325,7 +326,8 @@ let find_place_type st (place : Lowered.place) =
         | Local local -> Emit_c.Builder.lookup_local_type st.builder local
         | Static { ty; _ } -> Value ty
       in
-      if Lowered.is_erased st.context.env root then None else projected root place.projections
+      if Lowered.is_erased st.context.env root then None
+      else find_projected_type root place.projections
 
 let make_int_constant integer value = Lowered.Constant (Integer (integer, value))
 

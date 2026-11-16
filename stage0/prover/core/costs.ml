@@ -49,25 +49,26 @@ let larger left right =
 let units amount = plus (at_least_zero amount) (Logic.int 1)
 
 let rec normalize term =
-  let rec linear coefficient term (sums, constant) =
+  let rec linearize coefficient term (sums, constant) =
     match term with
     | Logic.Integer value -> (sums, Z.add constant (Z.mul coefficient value))
     | Logic.Operation ("+", arguments) ->
         List.fold_left
-          (fun sums_and_constant argument -> linear coefficient argument sums_and_constant)
+          (fun sums_and_constant argument -> linearize coefficient argument sums_and_constant)
           (sums, constant) arguments
-    | Logic.Operation ("-", [ inner ]) -> linear (Z.neg coefficient) inner (sums, constant)
+    | Logic.Operation ("-", [ inner ]) -> linearize (Z.neg coefficient) inner (sums, constant)
     | Logic.Operation ("-", first :: rest) ->
         List.fold_left
-          (fun sums_and_constant argument -> linear (Z.neg coefficient) argument sums_and_constant)
-          (linear coefficient first (sums, constant))
+          (fun sums_and_constant argument ->
+            linearize (Z.neg coefficient) argument sums_and_constant)
+          (linearize coefficient first (sums, constant))
           rest
     | Logic.Operation ("*", [ Logic.Integer factor; inner ])
     | Logic.Operation ("*", [ inner; Logic.Integer factor ]) ->
-        linear (Z.mul coefficient factor) inner (sums, constant)
+        linearize (Z.mul coefficient factor) inner (sums, constant)
     | other -> (
-        match inner other with
-        | Logic.Operation ("+", _) as sum -> linear coefficient sum (sums, constant)
+        match normalize_node other with
+        | Logic.Operation ("+", _) as sum -> linearize coefficient sum (sums, constant)
         | other -> add_atom coefficient other (sums, constant))
   and add_atom coefficient other (sums, constant) =
     let rec add = function
@@ -77,21 +78,24 @@ let rec normalize term =
       | entry :: rest -> entry :: add rest
     in
     (add sums, constant)
-  and inner = function
+  and normalize_node = function
     | Logic.Apply (Logic.Symbol.Cost_most, [ left; right ]) -> (
         let left = normalize left and right = normalize right in
-        let rec summands coefficient = function
-          | Logic.Operation ("+", parts) -> List.concat_map (summands coefficient) parts
-          | Logic.Operation ("-", [ inner ]) -> summands (Z.neg coefficient) inner
+        let rec list_summands coefficient = function
+          | Logic.Operation ("+", parts) -> List.concat_map (list_summands coefficient) parts
+          | Logic.Operation ("-", [ inner ]) -> list_summands (Z.neg coefficient) inner
           | Logic.Operation ("-", first :: rest) ->
-              summands coefficient first @ List.concat_map (summands (Z.neg coefficient)) rest
+              list_summands coefficient first
+              @ List.concat_map (list_summands (Z.neg coefficient)) rest
           | Logic.Operation ("*", [ Logic.Integer factor; inner ]) ->
-              summands (Z.mul coefficient factor) inner
+              list_summands (Z.mul coefficient factor) inner
           | Logic.Integer _ -> []
           | other -> [ (other, coefficient) ]
         in
         match
-          List.filter (fun part -> List.mem part (summands Z.one right)) (summands Z.one left)
+          List.filter
+            (fun part -> List.mem part (list_summands Z.one right))
+            (list_summands Z.one left)
         with
         | [] -> Logic.Apply (Logic.Symbol.Cost_most, [ left; right ])
         | common ->
@@ -115,9 +119,9 @@ let rec normalize term =
         Logic.Operation (name, List.map normalize arguments)
     | other -> other
   in
-  let sums, constant = linear Z.one term ([], Z.zero) in
+  let sums, constant = linearize Z.one term ([], Z.zero) in
   let sums = List.filter (fun (_, sum_coefficient) -> not (Z.equal sum_coefficient Z.zero)) sums in
-  let scaled (atom, sum_coefficient) = times (Logic.Integer sum_coefficient) atom in
+  let scale (atom, sum_coefficient) = times (Logic.Integer sum_coefficient) atom in
   let positive = List.filter (fun (_, sum_coefficient) -> Z.sign sum_coefficient > 0) sums in
   let negative =
     List.filter_map
@@ -125,12 +129,12 @@ let rec normalize term =
         if Z.sign sum_coefficient < 0 then Some (atom, Z.neg sum_coefficient) else None)
       sums
   in
-  let total = List.fold_left (fun total entry -> plus total (scaled entry)) zero positive in
+  let total = List.fold_left (fun total entry -> plus total (scale entry)) zero positive in
   let total =
     if Z.sign constant >= 0 then plus total (Logic.Integer constant)
     else minus total (Logic.Integer (Z.neg constant))
   in
-  List.fold_left (fun total entry -> minus total (scaled entry)) total negative
+  List.fold_left (fun total entry -> minus total (scale entry)) total negative
 
 let rec since ~start total =
   match total with
@@ -232,7 +236,7 @@ let find_part_bound ~varies ~facts part polarity =
   | [] -> None
 
 let find_cost_bound ~varies ~facts cost =
-  let rec bound_within_depth depth cost =
+  let rec find_bound_within_depth depth cost =
     if not (varies cost) then Some cost
     else if depth = 0 then None
     else
@@ -251,11 +255,11 @@ let find_cost_bound ~varies ~facts cost =
           parts
       in
       match replaced with
-      | Some next when next <> cost -> bound_within_depth (depth - 1) next
+      | Some next when next <> cost -> find_bound_within_depth (depth - 1) next
       | _ -> None
   in
   Option.map rewrite_most_as_choices
-    (bound_within_depth 12 (normalize (rewrite_choices_as_most cost)))
+    (find_bound_within_depth 12 (normalize (rewrite_choices_as_most cost)))
 
 let list_upper_bounds ~varies ~facts term =
   List.filter_map

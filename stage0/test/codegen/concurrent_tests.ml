@@ -7,7 +7,7 @@ let expect_main ~expected text =
   if status <> 0 then Codegen_support.fail "ended with status %d: %s" status errors;
   Codegen_support.expect_string ~expected output
 
-let passes_in_order name ~count source =
+let expect_pass_in_order name ~count source =
   Codegen_support.test name (fun () ->
       Codegen_support.expect_output (source ^ in_order)
         (String.concat "" (List.init count (Printf.sprintf "test %d passed\n"))))
@@ -97,19 +97,21 @@ let () =
         Fixtures.Concurrent.bag_of_integers_lent_to_tasks)
 
 let () =
-  passes_in_order "a task borrows an element that a collection lends from a read-only parameter"
-    ~count:3 Fixtures.Concurrent.bag_of_strings_lent_to_tasks;
-  passes_in_order "a task owns a value that a cursor computes, and copies a plain one" ~count:2
+  expect_pass_in_order
+    "a task borrows an element that a collection lends from a read-only parameter" ~count:3
+    Fixtures.Concurrent.bag_of_strings_lent_to_tasks;
+  expect_pass_in_order "a task owns a value that a cursor computes, and copies a plain one" ~count:2
     Fixtures.Concurrent.labels_cursor_owned_by_tasks
 
 let () =
-  passes_in_order "a task owns its item, and an item whose task is not spawned is dropped" ~count:2
-    Fixtures.Concurrent.longest_owned_word;
-  passes_in_order "a value returned through two nested tasks is neither leaked nor dropped twice"
-    ~count:1 Fixtures.Concurrent.nested_concurrent_for_returning_a_list
+  expect_pass_in_order "a task owns its item, and an item whose task is not spawned is dropped"
+    ~count:2 Fixtures.Concurrent.longest_owned_word;
+  expect_pass_in_order
+    "a value returned through two nested tasks is neither leaked nor dropped twice" ~count:1
+    Fixtures.Concurrent.nested_concurrent_for_returning_a_list
 
 let () =
-  Codegen_support.passes "a return value that loses the cancel is dropped"
+  Codegen_support.expect_pass "a return value that loses the cancel is dropped"
     Fixtures.Concurrent.spawns_when_cancelled
 
 let expect_threaded ~expected text =

@@ -513,7 +513,7 @@ let check_match context (node : Core.expression) scrutinees (arms : Core.arm lis
                 Diagnostic.fix "Add an arm for each missing case."
                   [
                     Diagnostic.replace
-                      (Source.Definition_span.zero_width last.stop)
+                      (Source.Definition_span.make_zero_width last.stop)
                       (String.concat ""
                          (List.map
                             (fun witness ->

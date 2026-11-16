@@ -8,7 +8,7 @@ type quantified_range =
       location : State.location;
     }
 
-val under_binder :
+val run_under_binder :
   State.context ->
   State.frame ->
   Logic.symbol ->
@@ -40,7 +40,7 @@ val find_model_function :
 
 val find_model : State.context -> Types.ty -> Logic.term -> element:Types.ty -> Logic.term option
 
-val quantified_over :
+val quantify_over :
   State.context ->
   State.frame ->
   Core.quantifier ->

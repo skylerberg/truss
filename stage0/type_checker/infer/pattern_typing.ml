@@ -8,7 +8,7 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode 
   let type_ = State.normalize state type_ in
   state.tables.scrutinee_types.(written.id) <- Some type_;
   let recurse = check_pattern_with state env ~is_var ~mode in
-  let unknown type_ = check_unknown_pattern state env written type_ ~is_var ~mode in
+  let check_unknown type_ = check_unknown_pattern state env written type_ ~is_var ~mode in
   let binds id (bound : Syntax.name) =
     State.register_pattern state written (fun () ->
         Bind { local = Named id; name = bound.text; is_var; mode })
@@ -125,7 +125,7 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode 
                           fields = Form.build_pattern_fields state declared matched;
                         })
               | None ->
-                  unknown
+                  check_unknown
                   @@ State.make_error_type state Unknown_variant
                        (State.read_span state variant_name.id)
                        ~fixes:
@@ -145,13 +145,13 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode 
                        (Printf.sprintf "`%s` has no variant `%s`." (Types.show type_)
                           variant_name.text))
           | None ->
-              unknown
+              check_unknown
                 (State.make_error_type state Unknown_variant
                    (State.read_span state written.id)
                    (Printf.sprintf "`%s` has no variants." (Types.show type_))))
-      | Types.Error _ | Types.Hole -> unknown type_
+      | Types.Error _ | Types.Hole -> check_unknown type_
       | _ ->
-          unknown
+          check_unknown
             (State.make_error_type state Unknown_variant
                (State.read_span state written.id)
                (Printf.sprintf "`%s` has no variants." (State.show state type_))))
@@ -172,13 +172,13 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode 
               State.register_pattern state written (fun () ->
                   Record (Form.build_pattern_fields state record_fields matched))
           | None ->
-              unknown
+              check_unknown
                 (State.make_error_type state Not_a_record
                    (State.read_span state written.id)
                    (Printf.sprintf "`%s` is not a record." (State.show state type_))))
-      | Types.Error _ | Types.Hole -> unknown type_
+      | Types.Error _ | Types.Hole -> check_unknown type_
       | _ ->
-          unknown
+          check_unknown
             (State.make_error_type state Not_a_record
                (State.read_span state written.id)
                (Printf.sprintf "`%s` is not a record." (State.show state type_))))
@@ -189,7 +189,7 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode 
 
 and check_pattern_fields state env (written : Syntax.pattern) (fields : Types.field list)
     (written_fields : Syntax.pattern_field list) ~is_var ~mode =
-  let bare_name (inner : Syntax.pattern) =
+  let find_bare_name (inner : Syntax.pattern) =
     match inner.kind with Binding name -> Some name.text | _ -> None
   in
   let named =
@@ -198,7 +198,7 @@ and check_pattern_fields state env (written : Syntax.pattern) (fields : Types.fi
         match field.kind with
         | Named_field (name, _) -> Some name.text
         | Field inner -> (
-            match bare_name inner with
+            match find_bare_name inner with
             | Some name
               when List.exists (fun (declared : Types.field) -> declared.field_name = name) fields
               ->
@@ -257,7 +257,7 @@ and check_pattern_fields state env (written : Syntax.pattern) (fields : Types.fi
               None)
       | Field inner -> (
           let named =
-            Option.bind (bare_name inner) (fun name ->
+            Option.bind (find_bare_name inner) (fun name ->
                 List.find_opt (fun (declared : Types.field) -> declared.field_name = name) fields)
           in
           match (named, fields) with
@@ -330,7 +330,7 @@ and is_structural ?(seen = []) state (type_ : Types.ty) =
               List.exists (fun derived -> Well_known.is Equal derived) interface.derives
             in
             let substitution = Types.make_substitution interface.type_generics arguments in
-            let fields_structural (fields : Types.field list) =
+            let are_fields_structural (fields : Types.field list) =
               List.for_all
                 (fun (field : Types.field) ->
                   is_structural ~seen:(type_ :: seen) state
@@ -339,12 +339,12 @@ and is_structural ?(seen = []) state (type_ : Types.ty) =
             in
             derives_equal
             && begin match interface.shape with
-            | Record fields -> fields_structural fields
+            | Record fields -> are_fields_structural fields
             | Sum variants ->
                 List.for_all
                   (fun (variant : Types.variant) ->
                     match variant.fields with
-                    | Some fields -> fields_structural fields
+                    | Some fields -> are_fields_structural fields
                     | None -> true)
                   variants
             | Todo_type | Builtin_type _ -> false

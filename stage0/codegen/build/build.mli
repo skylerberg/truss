@@ -5,9 +5,9 @@ val make_cache : string -> cache
 type settings = { build : Emit_c.build; optimization : Toolchain.optimization; extra : string list }
 
 val build_program :
-  ?progress:(int -> int -> unit) ->
+  ?report_progress:(int -> int -> unit) ->
   ?tests:bool ->
-  ?copied:(Emit_c.fragment -> Emit_c.fragment list) ->
+  ?list_copied:(Emit_c.fragment -> Emit_c.fragment list) ->
   Toolchain.t ->
   cache ->
   Memory_layout.env ->
@@ -18,8 +18,8 @@ val build_program :
   (unit, string) result
 
 module For_testing : sig
-  val objects :
-    ?progress:(int -> int -> unit) ->
+  val compile_objects :
+    ?report_progress:(int -> int -> unit) ->
     Toolchain.t ->
     cache ->
     settings ->

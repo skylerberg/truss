@@ -28,21 +28,21 @@ let rec iter_names visit (tokens : Token.t array) =
 let remove_colliding_renames text (tokens : Token.t array) (diagnostics : Diagnostic.t list) =
   let written = Hashtbl.create 64 in
   iter_names (fun name -> Hashtbl.replace written name ()) tokens;
-  let rename (diagnostic : Diagnostic.t) =
+  let find_rename (diagnostic : Diagnostic.t) =
     match (diagnostic.code, diagnostic.fixes) with
     | Lexer Name_case, [ { edits = [ edit ]; _ } ] ->
         let span = diagnostic.span in
         Some (String.sub text span.start (span.stop - span.start), edit.replacement)
     | _ -> None
   in
-  let renames = List.filter_map rename diagnostics in
+  let renames = List.filter_map find_rename diagnostics in
   let collides (spelling, renamed) =
     Hashtbl.mem written renamed
     || List.exists (fun (other, again) -> again = renamed && other <> spelling) renames
   in
   List.map
     (fun (diagnostic : Diagnostic.t) ->
-      match rename diagnostic with
+      match find_rename diagnostic with
       | Some rename when collides rename -> { diagnostic with fixes = [] }
       | _ -> diagnostic)
     diagnostics
@@ -85,7 +85,7 @@ let map_original_offset (placed : placed array) ~is_stop offset =
       else edit.original.start
 
 let rec map_original_token placed (token : Token.t) =
-  let span (span : Source.span) =
+  let shift_span (span : Source.span) =
     let stop = map_original_offset placed ~is_stop:true span.stop in
     if span.start = span.stop then Source.make_zero_width stop
     else Source.make_span (map_original_offset placed ~is_stop:false span.start) stop
@@ -93,26 +93,26 @@ let rec map_original_token placed (token : Token.t) =
   let kind : Token.kind =
     match token.kind with
     | String literal ->
-        let text (piece : Token.text) = { piece with span = span piece.span } in
+        let shift_text (piece : Token.text) = { piece with span = shift_span piece.span } in
         String
           {
             literal with
-            tag = Option.map (fun (tag, tag_span) -> (tag, span tag_span)) literal.tag;
-            first = text literal.first;
+            tag = Option.map (fun (tag, tag_span) -> (tag, shift_span tag_span)) literal.tag;
+            first = shift_text literal.first;
             rest =
               Array.map
                 (fun ((interpolation : Token.interpolation), piece) ->
                   ( {
                       interpolation with
                       tokens = Array.map (map_original_token placed) interpolation.tokens;
-                      span = span interpolation.span;
+                      span = shift_span interpolation.span;
                     },
-                    text piece ))
+                    shift_text piece ))
                 literal.rest;
           }
     | kind -> kind
   in
-  { token with kind; span = span token.span }
+  { token with kind; span = shift_span token.span }
 
 let map_to_original edits tokens = Array.map (map_original_token (place_edits edits)) tokens
 

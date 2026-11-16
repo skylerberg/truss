@@ -6,10 +6,10 @@ let expect_bug ~saying work =
       if not (String.includes ~affix:saying text) then
         Codegen_support.fail "expected %S in %S" saying text
 
-let env = Codegen_support.shape_env ()
-let emit env instance = ignore (Emit_c.make_fragment env (Code (instance env)))
+let env = Codegen_support.make_shape_env ()
+let emit env make_instance = ignore (Emit_c.make_fragment env (Code (make_instance env)))
 
-let caller arguments =
+let make_caller arguments =
   Codegen_support.entry
     [ Codegen_support.local (Codegen_support.value Codegen_support.int32) ]
     [
@@ -27,14 +27,14 @@ let () =
   Codegen_support.test "a call that passes fewer arguments than its target takes is a bug"
     (fun () ->
       expect_bug ~saying:"passes 0 arguments to a target that takes 1" (fun () ->
-          emit env (caller [])));
+          emit env (make_caller [])));
   Codegen_support.test "a return of nothing from a function with a result is a bug" (fun () ->
       expect_bug ~saying:"a return of nothing from a function with a result" (fun () ->
           emit env (Codegen_support.entry [] [ Codegen_support.block [] (Return None) ])));
   Codegen_support.test "a value built with a field its type does not have is a bug" (fun () ->
       expect_bug ~saying:"built with a field third, which it does not have" (fun () ->
           emit
-            (Codegen_support.shape_env ~extra:Codegen_support.drop_shapes ())
+            (Codegen_support.make_shape_env ~extra:Codegen_support.drop_shapes ())
             (Codegen_support.entry
                [ Codegen_support.local (Codegen_support.value Codegen_support.pair) ]
                [
@@ -77,7 +77,7 @@ let () =
       in
       expect_bug ~saying:"writes its result to a place it is also given" (fun () ->
           emit
-            (Codegen_support.shape_env ~extra:[ ("Quad", four) ] ())
+            (Codegen_support.make_shape_env ~extra:[ ("Quad", four) ] ())
             (Codegen_support.entry
                [ Codegen_support.local (Codegen_support.value quad) ]
                [
@@ -95,7 +95,7 @@ let () =
       in
       expect_bug ~saying:"a move out of test::words, which is static data" (fun () ->
           emit
-            (Codegen_support.shape_env ~extra:Codegen_support.drop_shapes ())
+            (Codegen_support.make_shape_env ~extra:Codegen_support.drop_shapes ())
             (Codegen_support.entry
                [ Codegen_support.local (Codegen_support.value Codegen_support.text) ]
                [
@@ -104,7 +104,7 @@ let () =
                    (Return (Some (Codegen_support.constant_int32 0)));
                ])));
   Codegen_support.test "an instance whose calls fit their targets passes" (fun () ->
-      emit env (caller [ Codegen_support.constant_int32 1 ]))
+      emit env (make_caller [ Codegen_support.constant_int32 1 ]))
 
 let () =
   Codegen_support.test "a compiler bug says which instance was being lowered" (fun () ->
@@ -114,4 +114,4 @@ let () =
       in
       let _, compile = Codegen_support.load ~roots:[ not_code ] "type Point(x: Int64)\n" in
       expect_bug ~saying:"while lowering example::Point" (fun () ->
-          ignore (Compile.For_testing.compiled compile not_code)))
+          ignore (Compile.For_testing.compile_fragment compile not_code)))

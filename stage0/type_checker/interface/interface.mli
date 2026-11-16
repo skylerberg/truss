@@ -35,7 +35,7 @@ module Properties : sig
 
   val list_known_bounds :
     Lookups.t ->
-    bounds:(Types.parameter -> Types.trait_reference list) ->
+    list_bounds:(Types.parameter -> Types.trait_reference list) ->
     Types.ty ->
     Types.trait_reference list
 

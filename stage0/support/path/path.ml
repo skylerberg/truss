@@ -10,12 +10,12 @@ let package_of_parts = function
   | _ -> None
 
 let parse_names text =
-  let rec names = function
+  let rec split_names = function
     | [ last ] when last <> "" -> Some [ last ]
-    | name :: "" :: rest when name <> "" -> Option.map (fun rest -> name :: rest) (names rest)
+    | name :: "" :: rest when name <> "" -> Option.map (fun rest -> name :: rest) (split_names rest)
     | _ -> None
   in
-  names (String.split_on_char ':' text)
+  split_names (String.split_on_char ':' text)
 
 let parse_package text = Option.bind (parse_names text) package_of_parts
 

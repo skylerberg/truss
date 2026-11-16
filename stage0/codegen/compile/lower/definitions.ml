@@ -13,9 +13,9 @@ type context = {
 let make_monomorphic_context (interface : Interface.Lookups.t) : Monomorphic.context =
   {
     find_type_interface = Interface.Definition.read_type_interface interface;
-    normalize = Interface.Impls.normalize interface ~bounds:Interface.Impls.no_bounds;
+    normalize = Interface.Impls.normalize interface ~list_bounds:Interface.Impls.list_no_bounds;
     normalize_capabilities =
-      Interface.Impls.normalize_capabilities interface ~bounds:Interface.Impls.no_bounds;
+      Interface.Impls.normalize_capabilities interface ~list_bounds:Interface.Impls.list_no_bounds;
   }
 
 let uint64 = Ground.make_builtin UInt64
@@ -87,7 +87,7 @@ let read_signature context (path : Path.t) =
   | None -> raise_bug "no signature for %s" (Path.show path)
 
 let make_code context (path : Path.t) type_arguments : code =
-  let function_code ~enclosing_impl (key : Resolve.Names.key) ~(interface : Types.signature)
+  let make_function_code ~enclosing_impl (key : Resolve.Names.key) ~(interface : Types.signature)
       ~substitution =
     {
       definition = key.path;
@@ -128,7 +128,7 @@ let make_code context (path : Path.t) type_arguments : code =
         | _ -> None
       in
       match (context.lookups.mir.find_form_origin path, path) with
-      | Some (Written key, _), _ -> function_code ~enclosing_impl key ~interface ~substitution
+      | Some (Written key, _), _ -> make_function_code ~enclosing_impl key ~interface ~substitution
       | Some (Derived type_key, _), _ ->
           {
             (make_unwritten_code ~definition:type_key.path ~substitution ~result:interface.output) with
@@ -151,7 +151,7 @@ let make_code context (path : Path.t) type_arguments : code =
               trait_signature.generics
           in
           let own = List.drop count type_arguments in
-          function_code ~enclosing_impl provided ~interface:trait_signature
+          make_function_code ~enclosing_impl provided ~interface:trait_signature
             ~substitution:(of_trait @ bind own_generics own @ substitution)
       | Some (Inherited _, _), _ ->
           raise_bug "%s inherits a method outside an impl" (Path.show path)

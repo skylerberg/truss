@@ -112,22 +112,22 @@ let lookup_local_type builder local = (Dynarray.get builder.locals local).ty
 let lookup_current_function builder = Dynarray.get builder.functions builder.function_
 let render_token local = Printf.sprintf "\001%d\002" local
 
-let make_function_context builder (function_ : function_) ~name =
+let make_function_context builder (function_ : function_) ~note_mention =
   {
     C_values.symbol = Instance.make_symbol function_.code.key;
     render_local =
       (fun local ->
-        name local;
+        note_mention local;
         (render_token local, lookup_local_type builder local));
   }
 
 let make_block_context builder function_ =
-  make_function_context builder function_ ~name:(fun local ->
+  make_function_context builder function_ ~note_mention:(fun local ->
       Dynarray.set builder.mentions builder.current
         (Locals.add local (Dynarray.get builder.mentions builder.current)))
 
 let make_prologue_context builder (function_ : function_) =
-  make_function_context builder function_ ~name:(fun local ->
+  make_function_context builder function_ ~note_mention:(fun local ->
       function_.mentioned <- Locals.add local function_.mentioned)
 
 let start builder block =
@@ -204,13 +204,13 @@ let emit_when builder condition then_ =
   start builder after
 
 let emit_loop builder ?(integer = Memory_layout.UInt64) ~count body =
-  let constant number = Lowered.Constant (Integer (integer, Z.of_int number)) in
+  let make_constant number = Lowered.Constant (Integer (integer, Z.of_int number)) in
   let index = allocate_local builder ~name:"index" (Raw (Integer integer)) in
   let going = allocate_local builder (Raw Bool) in
   let test = allocate_block builder in
   let inside = allocate_block builder in
   let after = allocate_block builder in
-  emit builder (Assign (Lowered.make_local_place index, Use (constant 0)));
+  emit builder (Assign (Lowered.make_local_place index, Use (make_constant 0)));
   finish builder (Goto test);
   start builder test;
   emit builder
@@ -222,7 +222,7 @@ let emit_loop builder ?(integer = Memory_layout.UInt64) ~count body =
   emit builder
     (Assign
        ( Lowered.make_local_place index,
-         Binary (Add, Copy (Lowered.make_local_place index), constant 1) ));
+         Binary (Add, Copy (Lowered.make_local_place index), make_constant 1) ));
   finish builder (Goto test);
   start builder after
 
@@ -318,19 +318,22 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
     reached;
   let own = functions.(0) in
   own.mentioned <- List.fold_left (fun set local -> Locals.add local set) own.mentioned parameters;
-  let parameters_of number =
+  let list_parameters number =
     match functions.(number).role with Own -> parameters | Outlined { parts; _ } -> parts
   in
-  let parent number =
+  let read_parent number =
     match functions.(number).role with Own -> number | Outlined { parent; _ } -> parent
   in
-  let rec depth number =
-    match functions.(number).role with Own -> 0 | Outlined { parent; _ } -> 1 + depth parent
+  let rec compute_depth number =
+    match functions.(number).role with
+    | Own -> 0
+    | Outlined { parent; _ } -> 1 + compute_depth parent
   in
-  let rec enclosing first second =
+  let rec compute_enclosing first second =
     if first = second then first
-    else if depth first >= depth second then enclosing (parent first) second
-    else enclosing first (parent second)
+    else if compute_depth first >= compute_depth second then
+      compute_enclosing (read_parent first) second
+    else compute_enclosing first (read_parent second)
   in
   let home = Hashtbl.create 64 in
   Array.iteri
@@ -342,12 +345,12 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
           | Own | Outlined _ ->
               Hashtbl.replace home local
                 (match Hashtbl.find_opt home local with
-                | Some other -> enclosing number other
+                | Some other -> compute_enclosing number other
                 | None -> number))
         function_.mentioned)
     functions;
   let is_own number local =
-    List.mem local (parameters_of number)
+    List.mem local (list_parameters number)
     || Hashtbl.find_opt home local = Some number
     || Lowered.is_erased builder.env (lookup_local_type builder local)
   in
@@ -369,7 +372,7 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
             reach number)
         function_.mentioned)
     functions;
-  let captures number =
+  let list_captures number =
     List.mapi
       (fun position local -> (local, Printf.sprintf "capture%d" position))
       (Locals.elements captured.(number))
@@ -387,7 +390,7 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
                    ( field,
                      Lowered.Pointer { target = lookup_local_type builder local; writable = true }
                    ))
-                 (captures number))
+                 (list_captures number))
               context.environments
       | Own -> ())
     functions;
@@ -405,7 +408,7 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
                 (Assign
                    ( { root = Local holder; projections = [ Field field ] },
                      Use (Address { place = Lowered.make_local_place local; writable = true }) )))
-            (captures number)
+            (list_captures number)
       | Own -> ())
     functions;
   Array.mapi
@@ -419,7 +422,7 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
           | _ -> ())
         function_.returns;
       let context = function_.code.context in
-      let captures = captures number in
+      let captures = list_captures number in
       let name local =
         if is_own number local then
           C_values.render_local_name local (Dynarray.get builder.locals local).name
@@ -438,7 +441,7 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
       List.iter
         (fun local ->
           let ty = lookup_local_type builder local in
-          if (not (List.mem local (parameters_of number))) && not (C_values.is_erased context ty)
+          if (not (List.mem local (list_parameters number))) && not (C_values.is_erased context ty)
           then
             let initializer_ =
               if not (Dynarray.get builder.locals local).is_zeroed then ""
@@ -479,7 +482,7 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
         | Outlined { index; _ } -> render_nested_symbol function_.code index
         | Own -> own_symbol
       in
-      let parameters = parameters_of number in
+      let parameters = list_parameters number in
       let header =
         C_values.render_prototype context
           (Instance.make_symbol function_.code.key)
@@ -518,14 +521,14 @@ let build builder prototype : instance =
     weight = own.size;
   }
 
-let build_nested parent ~index ~environment body =
+let build_nested parent ~index ~environment build_body =
   let code = (lookup_current_function parent).code in
   code.context.environments <-
     C_types.Keys.add
       (Environment (Instance.make_symbol code.key, index))
       environment code.context.environments;
   let builder = start_function (make_builder parent.env) ~code in
-  let prototype = body builder in
+  let prototype = build_body builder in
   code.nested <-
     (index, write_functions builder ~own_symbol:(render_nested_symbol code index) prototype)
     :: code.nested

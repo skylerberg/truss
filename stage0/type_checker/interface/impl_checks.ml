@@ -55,17 +55,17 @@ let compiler_implements (impl : Types.impl_interface) =
   || Well_known.is Plain impl.implements.trait
   || Well_known.is Storable impl.implements.trait
 
-let make_conformance lookups ~bounds ~(trait_span : Source.Definition_span.t)
+let make_conformance lookups ~list_bounds ~(trait_span : Source.Definition_span.t)
     (impl : Types.impl_interface) (trait_path : Syntax.path_type) =
   let shown_trait = Elaborator.show_path trait_path.path in
-  let impl_bounds parameter =
+  let list_impl_bounds parameter =
     match
       List.find_opt
         (fun (generic : Types.generic) -> generic.generic = parameter)
         impl.impl_generics
     with
     | Some { kind = Type_generic bounds; _ } -> bounds
-    | _ -> bounds parameter
+    | _ -> list_bounds parameter
   in
   if Well_known.is Panic impl.implements.trait || compiler_implements impl then None
   else
@@ -101,8 +101,8 @@ let make_conformance lookups ~bounds ~(trait_span : Source.Definition_span.t)
                   | None, Some missing when is_declared_by_impl ->
                       Some (Types.Error (Diagnostic.make_reported missing))
                   | _ ->
-                      Impls.project_associated_type lookups ~bounds:impl_bounds impl.for_type
-                        projected name)
+                      Impls.project_associated_type lookups ~list_bounds:list_impl_bounds
+                        impl.for_type projected name)
               | _ -> None)
             (Types.substitute substitution type_)
         in
@@ -119,7 +119,7 @@ let make_conformance lookups ~bounds ~(trait_span : Source.Definition_span.t)
                     Option.value ~default:Types.no_capabilities
                       (List.assoc_opt name impl.capability_sets)
                 | capability ->
-                    Impls.normalize_capabilities lookups ~bounds:impl_bounds
+                    Impls.normalize_capabilities lookups ~list_bounds:list_impl_bounds
                       (Types.make_capability_set [ capability ])
               in
               (set :> Types.capability list))
@@ -129,7 +129,7 @@ let make_conformance lookups ~bounds ~(trait_span : Source.Definition_span.t)
           trait;
           shown_trait;
           substitution;
-          list_impl_bounds = impl_bounds;
+          list_impl_bounds;
           normalize;
           normalize_capabilities;
           missing_associated;
@@ -149,26 +149,18 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
          (Elaborator.show_path trait_path.path))
   else
     match
-      make_conformance lookups ~bounds:(Checking.list_bounds state)
+      make_conformance lookups ~list_bounds:(Checking.list_bounds state)
         ~trait_span:state.spans.(trait_path.id) impl trait_path
     with
     | None -> ()
-    | Some
-        {
-          trait;
-          shown_trait;
-          substitution;
-          list_impl_bounds = impl_bounds;
-          normalize;
-          missing_associated;
-          _;
-        } ->
+    | Some { trait; shown_trait; substitution; list_impl_bounds; normalize; missing_associated; _ }
+      ->
         let check_evidence_grants (span : Source.Definition_span.t) evidence =
           state.diagnostics :=
             List.map
               (Diagnostic.make ~code:(Capabilities Not_granted) span)
               (Grants.describe_missing_in_evidence lookups ~package:state.key.module_.package
-                 ~bounds:impl_bounds evidence)
+                 ~list_bounds:list_impl_bounds evidence)
             @ !(state.diagnostics)
         in
         state.diagnostics := List.map snd missing_associated @ !(state.diagnostics);
@@ -205,7 +197,9 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
                 List.iter
                   (fun bound ->
                     let bound = Types.substitute_trait substitution bound in
-                    match Impls.implements lookups ~bounds:impl_bounds chosen bound with
+                    match
+                      Impls.find_evidence lookups ~list_bounds:list_impl_bounds chosen bound
+                    with
                     | None ->
                         Checking.report state Unsatisfied_bound state.spans.(trait_path.id)
                           (Printf.sprintf "`%s` declares `type %s: %s`, and `%s` is not one."
@@ -247,7 +241,9 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
         List.iter
           (fun (required : Types.trait_reference) ->
             let required = Types.substitute_trait substitution required in
-            match Impls.implements lookups ~bounds:impl_bounds impl.for_type required with
+            match
+              Impls.find_evidence lookups ~list_bounds:list_impl_bounds impl.for_type required
+            with
             | None ->
                 Checking.report state Missing_required_impl state.spans.(trait_path.id)
                   (Printf.sprintf "`%s` requires `%s`, which `%s` does not implement." shown_trait
@@ -263,7 +259,8 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
     (written : Types.signature) (impl : Types.impl_interface) ~trait_span
     (trait_path : Syntax.path_type) =
   match
-    make_conformance state.lookups ~bounds:(Checking.list_bounds state) ~trait_span impl trait_path
+    make_conformance state.lookups ~list_bounds:(Checking.list_bounds state) ~trait_span impl
+      trait_path
   with
   | None -> ()
   | Some { trait; shown_trait; normalize; normalize_capabilities; _ } -> (

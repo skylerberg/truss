@@ -1,7 +1,7 @@
 let check packages =
   Database.For_testing.list_diagnostics
     [ Resolve; Interface; Infer; Patterns; Usage; Ownership ]
-    (Support.database packages)
+    (Support.make_database packages)
 
 let helpers = Fixtures.Ownership_matrix.helpers
 
@@ -23,7 +23,8 @@ let of_place place =
     ("an assignment to an element", [ Printf.sprintf "%s[0] = 5" place ]);
   ]
 
-let moved place = ("a move", [ Printf.sprintf "keep(own %s)" place; Printf.sprintf "%s = []" place ])
+let make_move_case place =
+  ("a move", [ Printf.sprintf "keep(own %s)" place; Printf.sprintf "%s = []" place ])
 
 let sources =
   [
@@ -32,7 +33,7 @@ let sources =
       header = Printf.sprintf "fn %s(flag: Bool) {";
       declare = [ "var data: List[Int64] = [1, 2, 3]" ];
       place = "data";
-      invalidations = moved "data" :: of_place "data";
+      invalidations = make_move_case "data" :: of_place "data";
     };
     {
       source = "a field of a local";
@@ -40,7 +41,7 @@ let sources =
       declare = [ "var holder = Holder(items: [1, 2, 3], count: 0)" ];
       place = "holder.items";
       invalidations =
-        moved "holder.items"
+        make_move_case "holder.items"
         :: ("an assignment to the whole", [ "holder = Holder(items: [], count: 1)" ])
         :: ("a mut method of the whole", [ "mut holder.reset()" ])
         :: of_place "holder.items";
@@ -50,7 +51,7 @@ let sources =
       header = Printf.sprintf "fn %s(flag: Bool, data: mut List[Int64]) {";
       declare = [];
       place = "data";
-      invalidations = moved "data" :: of_place "data";
+      invalidations = make_move_case "data" :: of_place "data";
     };
     {
       source = "a field of mut self";
@@ -58,7 +59,7 @@ let sources =
       declare = [];
       place = "self.items";
       invalidations =
-        moved "self.items"
+        make_move_case "self.items"
         :: ("a mut method of the whole", [ "mut self.reset()" ])
         :: of_place "self.items";
     };
@@ -127,30 +128,32 @@ type holder = {
 }
 
 let holders =
-  let simple holder hold = { holder; hold = (fun ~view ~other:_ ~type_:_ -> Some (hold view)) } in
-  let typed holder hold =
+  let make_simple_holder holder hold =
+    { holder; hold = (fun ~view ~other:_ ~type_:_ -> Some (hold view)) }
+  in
+  let make_typed_holder holder hold =
     { holder; hold = (fun ~view ~other:_ ~type_ -> Option.map (hold view) type_) }
   in
   let with_other holder hold =
     { holder; hold = (fun ~view ~other ~type_:_ -> Some (hold view (other ()))) }
   in
   [
-    simple "a name" (fun view -> [ "let held = " ^ view ]);
-    simple "a name bound to another name" (fun view ->
+    make_simple_holder "a name" (fun view -> [ "let held = " ^ view ]);
+    make_simple_holder "a name bound to another name" (fun view ->
         [ "let first = " ^ view; "let held = first" ]);
-    simple "a field" (fun view -> [ Printf.sprintf "let held = Held(view: %s)" view ]);
-    simple "a field of a field" (fun view ->
+    make_simple_holder "a field" (fun view -> [ Printf.sprintf "let held = Held(view: %s)" view ]);
+    make_simple_holder "a field of a field" (fun view ->
         [ Printf.sprintf "let held = Held(view: Held(view: %s))" view ]);
-    simple "an Option" (fun view -> [ Printf.sprintf "let held = Some(%s)" view ]);
-    simple "a list literal" (fun view -> [ Printf.sprintf "let held = [%s]" view ]);
-    typed "a list pushed to" (fun view type_ ->
+    make_simple_holder "an Option" (fun view -> [ Printf.sprintf "let held = Some(%s)" view ]);
+    make_simple_holder "a list literal" (fun view -> [ Printf.sprintf "let held = [%s]" view ]);
+    make_typed_holder "a list pushed to" (fun view type_ ->
         [ Printf.sprintf "var held: List[%s] = []" type_; Printf.sprintf "mut held.push(%s)" view ]);
-    typed "a list that a function pushes to" (fun view type_ ->
+    make_typed_holder "a list that a function pushes to" (fun view type_ ->
         [
           Printf.sprintf "var held: List[%s] = []" type_;
           Printf.sprintf "put(mut held, value: %s)" view;
         ]);
-    simple "the result of a function given it" (fun view ->
+    make_simple_holder "the result of a function given it" (fun view ->
         [ Printf.sprintf "let held = same(%s)" view ]);
     with_other "a name assigned later" (fun view other ->
         [ "var held = " ^ other; "held = " ^ view ]);
@@ -160,7 +163,7 @@ let holders =
         [ Printf.sprintf "let held = if flag { %s } else { %s }" view other ]);
     with_other "the value of a match" (fun view other ->
         [ "let held = match flag {"; "  true => " ^ view; "  false => " ^ other; "}" ]);
-    typed "a lambda that captures it" (fun view _ ->
+    make_typed_holder "a lambda that captures it" (fun view _ ->
         [ "let inner = " ^ view; "let held: fn() -> Unit = fn() { look(inner) }" ]);
   ]
 
@@ -250,36 +253,36 @@ let () =
         (fun () ->
           let text, functions = generate maker in
           let packages = Support.setup [ ("app::main", text) ] in
-          let file = Support.file_of "app::main" in
+          let file = Support.parse_file "app::main" in
           (match Support.parse_errors packages file with
           | [] -> ()
           | errors ->
               Harness.fail "the generated module does not parse: %s" (String.concat " " errors));
           let diagnostics = check packages file in
-          let verdict_of (generated : generated) =
+          let check_generated (generated : generated) =
             List.filter
               (fun (diagnostic : Diagnostic.t) ->
                 generated.start <= diagnostic.span.start && diagnostic.span.start < generated.stop)
               diagnostics
           in
           let shown = ref 0 in
-          let wrong (generated : generated) problem =
+          let report_wrong (generated : generated) problem =
             incr shown;
             if !shown <= 5 then
               Harness.fail "%s: %s\n%s" generated.description problem generated.text
           in
           List.iter
             (fun (generated : generated) ->
-              let actual = verdict_of generated in
+              let actual = check_generated generated in
               match List.filter (fun diagnostic -> not (is_ownership diagnostic)) actual with
               | (other : Diagnostic.t) :: _ ->
-                  wrong generated
+                  report_wrong generated
                     (Printf.sprintf "the generated function is wrong: %s %s"
                        (Diagnostic.Code.name other.code) other.message)
               | [] ->
-                  if generated.rejected && actual = [] then wrong generated "accepted"
+                  if generated.rejected && actual = [] then report_wrong generated "accepted"
                   else if (not generated.rejected) && actual <> [] then
-                    wrong generated
+                    report_wrong generated
                       (String.concat "; "
                          (List.map
                             (fun (diagnostic : Diagnostic.t) ->

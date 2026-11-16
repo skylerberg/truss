@@ -119,35 +119,35 @@ let allocate_node_id state =
 let make_synthetic_expression state ~origin type_ kind : Core.expression =
   { id = allocate_node_id state; origin; type_; kind }
 
-let register_expression state (value : Syntax.expression) kind =
+let register_expression state (value : Syntax.expression) make_kind =
   state.form.expression_builders.(value.id) <-
     Some
       (fun () ->
         let id = allocate_node_id state in
         match state.tables.types.(value.id) with
-        | Some type_ -> { Core.id; origin = value.id; type_; kind = kind () }
+        | Some type_ -> { Core.id; origin = value.id; type_; kind = make_kind () }
         | None ->
             raise_bug "`%s` has a node and no type" (quote_span state (read_span state value.id)))
 
-let was_hole state (table : Tables.t -> Types.ty option array) (id : Syntax.id) =
+let was_hole state (select_table : Tables.t -> Types.ty option array) (id : Syntax.id) =
   match state.form.tables_with_holes with
-  | Some tables -> (table tables).(id) = Some Types.Hole
+  | Some tables -> (select_table tables).(id) = Some Types.Hole
   | None -> false
 
 let rec list_operands state (value : Syntax.expression) : Syntax.expression list =
-  let checked (part : Syntax.expression) =
+  let list_checked (part : Syntax.expression) =
     if Option.is_some state.form.expression_builders.(part.id) then [ part ]
     else list_operands state part
   in
   match value.kind with
-  | Match { scrutinees; _ } -> List.concat_map checked scrutinees
-  | Quantified { binder = Binder_in (_, collection); _ } -> checked collection
+  | Match { scrutinees; _ } -> List.concat_map list_checked scrutinees
+  | Quantified { binder = Binder_in (_, collection); _ } -> list_checked collection
   | Quantified { binder = Binder_type _; _ } -> []
   | If _ | Parenthesized _ | Mode _ -> []
   | _ ->
       let checked_parts = ref [] in
-      Syntax_walk.visit_expression_parts ~statement:ignore value ~expression:(fun part ->
-          checked_parts := checked part :: !checked_parts);
+      Syntax_walk.visit_expression_parts ~on_statement:ignore value ~on_expression:(fun part ->
+          checked_parts := list_checked part :: !checked_parts);
       List.concat (List.rev !checked_parts)
 
 let rec build_expression state (value : Syntax.expression) : Core.expression =
@@ -194,24 +194,24 @@ let rec build_expression state (value : Syntax.expression) : Core.expression =
     | None ->
         raise_bug "`%s` has no node in the core form" (quote_span state (read_span state value.id))
 
-let register_statement state (written : Syntax.statement) kind =
+let register_statement state (written : Syntax.statement) make_kind =
   state.form.statement_builders.(written.id) <-
-    Some (fun () -> { Core.id = allocate_node_id state; origin = written.id; kind = kind () })
+    Some (fun () -> { Core.id = allocate_node_id state; origin = written.id; kind = make_kind () })
 
 let build_statement state (written : Syntax.statement) : Core.statement =
-  let rec without_mode_keyword (value : Syntax.expression) =
+  let rec strip_mode_keyword (value : Syntax.expression) =
     match value.kind with
-    | Mode (_, inner) | Parenthesized inner -> without_mode_keyword inner
+    | Mode (_, inner) | Parenthesized inner -> strip_mode_keyword inner
     | _ -> value
   in
-  let hole (value : Syntax.expression) =
-    let value = without_mode_keyword value in
+  let find_hole (value : Syntax.expression) =
+    let value = strip_mode_keyword value in
     if was_hole state (fun tables -> tables.types) value.id then Some value else None
   in
   match
     match written.kind with
-    | For { iterable; _ } -> hole iterable
-    | Assignment { target; _ } -> hole target
+    | For { iterable; _ } -> find_hole iterable
+    | Assignment { target; _ } -> find_hole target
     | _ -> None
   with
   | Some value ->
@@ -227,13 +227,13 @@ let build_statement state (written : Syntax.statement) : Core.statement =
           raise_bug "`%s` has no node in the core form"
             (quote_span state (read_span state written.id)))
 
-let register_pattern state (written : Syntax.pattern) kind =
+let register_pattern state (written : Syntax.pattern) make_kind =
   state.form.pattern_builders.(written.id) <-
     Some
       (fun () ->
         let id = allocate_node_id state in
         match state.tables.scrutinee_types.(written.id) with
-        | Some type_ -> { Core.id; origin = written.id; type_; kind = kind () }
+        | Some type_ -> { Core.id; origin = written.id; type_; kind = make_kind () }
         | None ->
             raise_bug "`%s` has a node and no type" (quote_span state (read_span state written.id)))
 
@@ -282,7 +282,7 @@ let allocate_synthetic_local state : Core.local =
 
 let fix title edits = Diagnostic.fix title edits
 let replace = Diagnostic.replace
-let insert position text = Diagnostic.insert (Source.Definition_span.zero_width position) text
+let insert position text = Diagnostic.insert (Source.Definition_span.make_zero_width position) text
 let find_current_frame state = match state.frames with frame :: _ -> Some frame | [] -> None
 
 let record state (value : Syntax.expression) type_ =
@@ -380,7 +380,8 @@ let is_signed_type state (type_ : Types.ty) =
 let lookup_bounds state parameter = Interface.Elaborator.list_bounds state.context parameter
 
 let normalize state type_ =
-  Interface.Impls.normalize state.lookups.interface ~bounds:(lookup_bounds state) (zonk state type_)
+  Interface.Impls.normalize state.lookups.interface ~list_bounds:(lookup_bounds state)
+    (zonk state type_)
 
 let make_unsolved_type state =
   match state.unsolved with
@@ -409,7 +410,7 @@ let resolve_capabilities state (capabilities : Types.capability_set) =
   | _ -> capabilities
 
 let rec finalize_type state type_ =
-  Types.map ~capabilities:(finalize_capabilities state)
+  Types.map ~map_capabilities:(finalize_capabilities state)
     (function
       | Types.Variable _ | Types.Literal _ -> Some (make_unsolved_type state)
       | Types.Hole when Option.is_some state.form.tables_with_holes -> Some Types.Never
@@ -418,7 +419,8 @@ let rec finalize_type state type_ =
 
 and finalize_capabilities state capabilities =
   resolve_capabilities state
-    (Interface.Impls.normalize_capabilities state.lookups.interface ~bounds:(lookup_bounds state)
+    (Interface.Impls.normalize_capabilities state.lookups.interface
+       ~list_bounds:(lookup_bounds state)
        (Types.flat_map_capabilities
           (function
             | Types.Capability_projection { base; trait; name } ->
@@ -436,7 +438,7 @@ let finalize_argument state = function
 
 let unify state left right =
   let normalize type_ =
-    Interface.Impls.normalize state.lookups.interface ~bounds:(lookup_bounds state)
+    Interface.Impls.normalize state.lookups.interface ~list_bounds:(lookup_bounds state)
       (Unify.zonk state.unifier type_)
   in
   Unify.unify state.unifier (normalize left) (normalize right)
@@ -456,8 +458,8 @@ let normalize_trait state (trait : Types.trait_reference) : Types.trait_referenc
     associated = List.map (fun (name, type_) -> (name, normalize state type_)) trait.associated;
   }
 
-let implements state type_ trait =
-  Interface.Impls.implements state.lookups.interface ~bounds:(lookup_bounds state)
+let find_evidence state type_ trait =
+  Interface.Impls.find_evidence state.lookups.interface ~list_bounds:(lookup_bounds state)
     (normalize state type_) (normalize_trait state trait)
 
 let solve_trait_arguments state type_ (trait : Types.trait_reference) =
@@ -471,7 +473,7 @@ let solve_trait_arguments state type_ (trait : Types.trait_reference) =
           (List.map
              (fun (bound : Types.trait_reference) -> bound.trait_arguments)
              (Interface.Impls.list_matching_bounds state.lookups.interface
-                ~bounds:(lookup_bounds state) bounded normalized))
+                ~list_bounds:(lookup_bounds state) bounded normalized))
       with
       | [ arguments ] ->
           if Unify.unify_arguments state.unifier normalized.trait_arguments arguments then
@@ -483,21 +485,23 @@ let solve_trait_arguments state type_ (trait : Types.trait_reference) =
   | _ -> trait
 
 let is_copyable state type_ =
-  Interface.Impls.is_copyable state.lookups.interface ~bounds:(lookup_bounds state)
+  Interface.Impls.is_copyable state.lookups.interface ~list_bounds:(lookup_bounds state)
     (zonk state type_)
 
 let is_plain state type_ =
-  Interface.Impls.is_plain state.lookups.interface ~bounds:(lookup_bounds state) (zonk state type_)
+  Interface.Impls.is_plain state.lookups.interface ~list_bounds:(lookup_bounds state)
+    (zonk state type_)
 
 let is_view state type_ =
-  Interface.Impls.is_view state.lookups.interface ~bounds:(lookup_bounds state) (zonk state type_)
+  Interface.Impls.is_view state.lookups.interface ~list_bounds:(lookup_bounds state)
+    (zonk state type_)
 
 let resolve_associated_type state type_ (trait : Types.trait_reference) name
     ~(at : Source.Definition_span.t) =
   let type_ = normalize state type_ and trait = normalize_trait state trait in
   match
-    Interface.Impls.project_associated_type state.lookups.interface ~bounds:(lookup_bounds state)
-      type_ trait name
+    Interface.Impls.project_associated_type state.lookups.interface
+      ~list_bounds:(lookup_bounds state) type_ trait name
   with
   | Some associated_type -> associated_type
   | None ->
@@ -565,12 +569,12 @@ let settle state frame =
   run_pending ();
   let parent = match state.frames with _ :: parent :: _ -> Some parent | _ -> None in
   decide_literals state ~at:frame.span ~is_default:false;
-  let types_of ids table = List.filter_map (fun id -> table.(id)) ids in
-  let all_types () =
-    types_of frame.recorded_expressions state.tables.types
-    @ types_of frame.bindings state.tables.local_types
+  let list_types ids table = List.filter_map (fun id -> table.(id)) ids in
+  let list_all_types () =
+    list_types frame.recorded_expressions state.tables.types
+    @ list_types frame.bindings state.tables.local_types
   in
-  let call_arguments () =
+  let list_call_arguments () =
     List.concat_map
       (fun id ->
         match state.tables.calls.(id) with
@@ -588,9 +592,9 @@ let settle state frame =
         | _ -> [])
       frame.recorded_expressions
   in
-  let unknowns () =
-    List.concat_map (Unify.list_unknowns state.unifier) (all_types ())
-    @ List.concat_map (Unify.list_argument_unknowns state.unifier) (call_arguments ())
+  let list_unknowns () =
+    List.concat_map (Unify.list_unknowns state.unifier) (list_all_types ())
+    @ List.concat_map (Unify.list_argument_unknowns state.unifier) (list_call_arguments ())
   in
   (match parent with
   | Some parent when parent.frame_specification = frame.frame_specification ->
@@ -630,14 +634,14 @@ let settle state frame =
                 if frame.frame_specification then Types.Integer else Types.make_builtin Int64
             | Float_literal -> Types.make_builtin Float64)
       | _ -> ())
-    (unknowns ());
+    (list_unknowns ());
   run_pending ();
   let unsolved =
     List.filter
       (function
         | Unify.Unknown_type index | Unknown_value index -> index >= frame.first_variable
         | Unknown_literal (_, index) -> index >= frame.first_variable && not (is_undecided index))
-      (unknowns ())
+      (list_unknowns ())
   in
   state.undecided <-
     List.filter (fun (undecided : undecided_literal) -> undecided.owner != frame) state.undecided;
@@ -698,7 +702,7 @@ let settle state frame =
         match table.(id) with
         | Some type_ -> (
             let type_ =
-              Interface.Impls.normalize state.lookups.interface ~bounds:(lookup_bounds state)
+              Interface.Impls.normalize state.lookups.interface ~list_bounds:(lookup_bounds state)
                 (zonk state type_)
             in
             table.(id) <- Some type_;
@@ -929,7 +933,7 @@ let rec find_call_with_mode_keyword state (value : Syntax.expression) =
   | _ -> None
 
 let check_resource state (resource : Syntax.resource) =
-  let capability (path : Syntax.path_type) (method_ : Syntax.name option) =
+  let check_capability (path : Syntax.path_type) (method_ : Syntax.name option) =
     let shown = Interface.Elaborator.show_path path.path in
     match find_target state path.path.last with
     | Some (Definition (Capability, capability)) -> (
@@ -946,8 +950,8 @@ let check_resource state (resource : Syntax.resource) =
   in
   match resource with
   | Time | Allocations | Allocated_bytes -> ()
-  | Calls (Call_capability path) -> capability path None
-  | Calls (Call_method (path, method_)) -> capability path (Some method_)
+  | Calls (Call_capability path) -> check_capability path None
+  | Calls (Call_method (path, method_)) -> check_capability path (Some method_)
   | Calls (Call_parameter name) -> (
       match find_target state name with
       | Some (Local id) -> (
@@ -977,13 +981,14 @@ let make_slice state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.
     | Types.Named { path; arguments } -> (path, arguments)
     | type_ -> raise_bug "a slice of `%s`" (Types.show type_)
   in
-  let callee name : Core.callee =
+  let make_callee name : Core.callee =
     Function { path = Method { owner = path; name; receiver = Read }; type_arguments }
   in
-  let bound = Operands.build_argument Read in
+  let build_read_argument = Operands.build_argument Read in
   let start = match start with Some start -> start | None -> make uint64 (Integer Z.zero) in
   match stop with
-  | None -> Slice { base; callee = callee "slice_from"; bounds = [ bound start ] }
+  | None ->
+      Slice { base; callee = make_callee "slice_from"; bounds = [ build_read_argument start ] }
   | Some stop ->
       let stop =
         if inclusive then
@@ -991,13 +996,18 @@ let make_slice state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.
             (Operator { operation = Add; arguments = [ stop; make uint64 (Integer Z.one) ] })
         else stop
       in
-      Slice { base; callee = callee "slice_range"; bounds = [ bound start; bound stop ] }
+      Slice
+        {
+          base;
+          callee = make_callee "slice_range";
+          bounds = [ build_read_argument start; build_read_argument stop ];
+        }
 
 type conversion = From_never | Owned_to_view | Function_widening | To_integer | From_integer
 
 let convert state env ?argument ?expression (span : Source.Definition_span.t) ~actual ~expected =
   let is_argument = Option.is_some argument in
-  let converted (conversion : conversion option) =
+  let record_conversion (conversion : conversion option) =
     match (conversion, expression) with
     | Some conversion, Some id ->
         let before = state.form.expression_builders.(id) in
@@ -1043,10 +1053,10 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
             before
     | _ -> ()
   in
-  converted
+  record_conversion
   @@
   let actual_type = normalize state actual and wanted = normalize state expected in
-  let refused () =
+  let refuse () =
     report_mismatch state span ~expected ~actual;
     None
   in
@@ -1105,5 +1115,5 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
             :: state.capability_constraints;
         Some Function_widening
       end
-      else refused ()
-  | _ -> if Unify.unify state.unifier wanted actual_type then None else refused ()
+      else refuse ()
+  | _ -> if Unify.unify state.unifier wanted actual_type then None else refuse ()

@@ -105,7 +105,7 @@ let is_identifier_start character =
 let is_identifier_part character =
   is_identifier_start character || (character >= '0' && character <= '9')
 
-let iter_identifiers text ~identifier ~other =
+let iter_identifiers text ~on_identifier ~on_other =
   let length = String.length text in
   let rec scan position =
     if position < length then
@@ -114,11 +114,11 @@ let iter_identifiers text ~identifier ~other =
         while !stop < length && is_identifier_part text.[!stop] do
           incr stop
         done;
-        identifier (String.sub text position (!stop - position));
+        on_identifier (String.sub text position (!stop - position));
         scan !stop
       end
       else begin
-        other text.[position];
+        on_other text.[position];
         scan (position + 1)
       end
   in
@@ -163,8 +163,8 @@ let render_fragment fragment =
   in
   let buffer = Buffer.create (String.length whole) in
   iter_identifiers whole
-    ~identifier:(fun identifier -> Buffer.add_string buffer (rename identifier))
-    ~other:(Buffer.add_char buffer);
+    ~on_identifier:(fun identifier -> Buffer.add_string buffer (rename identifier))
+    ~on_other:(Buffer.add_char buffer);
   Buffer.contents buffer
 
 module Builder = Builder
@@ -182,8 +182,8 @@ let name_bytes context ~texts =
   List.iter
     (fun text ->
       iter_identifiers text
-        ~identifier:(fun identifier -> Hashtbl.replace named identifier ())
-        ~other:ignore)
+        ~on_identifier:(fun identifier -> Hashtbl.replace named identifier ())
+        ~on_other:ignore)
     texts;
   Hashtbl.fold (fun text index entries -> (index, text) :: entries) context.bytes []
   |> List.sort compare
@@ -253,7 +253,7 @@ let render_file env build (fragments : (fragment * linkage) list) =
           List.iter (C_types.register context) defined.references)
         fragment.environments)
     fragments;
-  let linkage_text = function Internal -> "static inline " | External -> "" in
+  let render_linkage = function Internal -> "static inline " | External -> "" in
   let own =
     List.concat_map
       (fun ((fragment : fragment), linkage) ->
@@ -261,11 +261,11 @@ let render_file env build (fragments : (fragment * linkage) list) =
         List.mapi
           (fun position (header, body) ->
             let linkage = if position < count - 1 then Internal else linkage in
-            (linkage_text linkage ^ header, body))
+            (render_linkage linkage ^ header, body))
           fragment.functions)
       fragments
   in
-  let symbol_of header =
+  let render_symbol header =
     let before = String.sub header 0 (String.index header '(') in
     match String.split_last ~sep:" " before with Some (_, symbol) -> symbol | None -> before
   in
@@ -273,7 +273,7 @@ let render_file env build (fragments : (fragment * linkage) list) =
   let declarations = Buffer.create 4096 in
   List.iter
     (fun (header, _) ->
-      Hashtbl.replace declared (symbol_of header) ();
+      Hashtbl.replace declared (render_symbol header) ();
       Buffer.add_string declarations (header ^ ";\n"))
     own;
   List.iter
@@ -305,7 +305,7 @@ let render_file env build (fragments : (fragment * linkage) list) =
   in
   close ();
   let keys = List.rev context.order in
-  let defined key = C_types.Keys.find key !definitions in
+  let read_defined key = C_types.Keys.find key !definitions in
   let buffer = Buffer.create 4096 in
   Buffer.add_string buffer C_runtime.runtime_declarations;
   Buffer.add_string buffer
@@ -322,7 +322,7 @@ let render_file env build (fragments : (fragment * linkage) list) =
     C_runtime.helpers;
   List.iter
     (fun key ->
-      match (defined key).definition with
+      match (read_defined key).definition with
       | Struct _ ->
           Buffer.add_string buffer
             (Printf.sprintf "typedef struct %s %s;\n" (C_types.render_key_name key)
@@ -332,11 +332,11 @@ let render_file env build (fragments : (fragment * linkage) list) =
   let emitted = ref C_types.Keys.empty in
   let rec emit_typedef key =
     if not (C_types.Keys.mem key !emitted) then
-      match (defined key).definition with
+      match (read_defined key).definition with
       | Struct _ -> ()
       | (Typedef _ | Code_typedef _) as definition ->
           emitted := C_types.Keys.add key () !emitted;
-          List.iter emit_typedef (defined key).references;
+          List.iter emit_typedef (read_defined key).references;
           Buffer.add_string buffer
             (match definition with
             | Typedef c_type ->
@@ -348,7 +348,7 @@ let render_file env build (fragments : (fragment * linkage) list) =
   let rec emit key =
     if not (C_types.Keys.mem key !emitted) then begin
       emitted := C_types.Keys.add key () !emitted;
-      match (defined key).definition with
+      match (read_defined key).definition with
       | Struct { body; holds } ->
           List.iter emit holds;
           Buffer.add_string buffer
@@ -391,7 +391,7 @@ let render_file env build (fragments : (fragment * linkage) list) =
 
 type position = { file : string; line : int; column : int }
 
-let render_sites_file ~position:resolve fragments =
+let render_sites_file ~resolve_position:resolve fragments =
   let positions =
     List.map
       (fun site -> (site, resolve site))
@@ -414,7 +414,7 @@ let render_sites_file ~position:resolve fragments =
         positions)
 
 module For_testing = struct
-  let c fragment =
+  let render_c fragment =
     String.concat ""
       (List.map (fun (header, body) -> header ^ body) fragment.functions @ [ fragment.definition ])
 end

@@ -90,7 +90,7 @@ and check_record_update state env (value : Syntax.expression) (base : Syntax.exp
     (fun (update : Syntax.update) ->
       match update.kind with
       | Update { field = first; path = rest; value = new_value } -> (
-          let rec field_type type_ (names : Syntax.name list) =
+          let rec find_field_type type_ (names : Syntax.name list) =
             match (names, State.normalize state type_) with
             | [], type_ -> Some type_
             | (name : Syntax.name) :: rest, (Types.Named { path; arguments } as record_type) -> (
@@ -101,7 +101,7 @@ and check_record_update state env (value : Syntax.expression) (base : Syntax.exp
                         (fun (written : Types.field) -> written.field_name = name.text)
                         fields
                     with
-                    | Some written -> field_type written.field_type rest
+                    | Some written -> find_field_type written.field_type rest
                     | None ->
                         State.report state Unknown_member (State.read_span state name.id)
                           (Printf.sprintf "`%s` has no field `%s`." (State.show state record_type)
@@ -114,7 +114,7 @@ and check_record_update state env (value : Syntax.expression) (base : Syntax.exp
                     None)
             | _, _ -> None
           in
-          match field_type base_type (first :: rest) with
+          match find_field_type base_type (first :: rest) with
           | Some type_ -> (
               match new_value with
               | Some new_value -> Hooks.check state env new_value type_
@@ -268,7 +268,7 @@ and check_operator_call ~operands state (value : Syntax.expression) ~trait ~meth
              reference.trait_arguments
       then false
       else begin
-        (match State.implements state left reference with
+        (match State.find_evidence state left reference with
         | Some evidence ->
             let output =
               State.resolve_associated_type state left reference "Output"
@@ -400,7 +400,7 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
       let left_type = Option.get state.tables.types.(left.id) in
       let right_type = Option.get state.tables.types.(right.id) in
       check_literal_operands state ~left:left_type ~right:right_type;
-      let integers type_ =
+      let are_integers type_ =
         let type_ = State.normalize state type_ in
         State.is_integer_type state type_ || type_ = Types.Integer
         ||
@@ -408,7 +408,7 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
         | Types.Literal (Integer_literal, _) -> true
         | _ -> false
       in
-      if env.specification && integers left_type && integers right_type then begin
+      if env.specification && are_integers left_type && are_integers right_type then begin
         State.register_expression state value (fun () ->
             Form.build_built_in_comparison state comparison left right);
         Types.bool
@@ -471,7 +471,7 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
       let right_type = Option.get state.tables.types.(right.id) in
       check_literal_operands state ~left:left_type ~right:right_type;
       if arithmetic = Add && (is_string state left_type || is_string state right_type) then begin
-        let piece (side : Syntax.expression) =
+        let spell_piece (side : Syntax.expression) =
           match side.kind with
           | String { tag = None; form = Ordinary; first; rest = []; _ } ->
               Some (State.quote_span state (State.read_span state first.id))
@@ -479,7 +479,7 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
           | _ -> Some ("${" ^ State.quote_span state (State.read_span state side.id) ^ "}")
         in
         let fixes =
-          match (piece left, piece right) with
+          match (spell_piece left, spell_piece right) with
           | Some left, Some right ->
               [
                 State.fix "Join them with interpolation."
@@ -494,7 +494,7 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
           "Strings have no `+`. Join them with interpolation, or with methods such as `push`."
       end
       else begin
-        let integers type_ =
+        let are_integers type_ =
           let type_ = State.normalize state type_ in
           State.is_integer_type state type_ || type_ = Types.Integer
           ||
@@ -502,7 +502,7 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
           | Types.Literal (Integer_literal, _) -> true
           | _ -> false
         in
-        if env.specification && integers left_type && integers right_type then begin
+        if env.specification && are_integers left_type && are_integers right_type then begin
           ignore
             (match State.resolve state left_type with
             | Types.Literal _ -> State.unify state left_type Types.Integer
@@ -569,7 +569,7 @@ and add_operand_mismatch state (value : Syntax.expression) (left : Syntax.expres
       State.make_trait_reference ~arguments:[ Types.Type right_type ] (Well_known.make_path From)
     in
     let fixes =
-      if Option.is_some (State.implements state left_type from) then
+      if Option.is_some (State.find_evidence state left_type from) then
         [
           State.fix
             (Printf.sprintf "Convert the right side to `%s`." (Types.show left_type))
@@ -581,7 +581,7 @@ and add_operand_mismatch state (value : Syntax.expression) (left : Syntax.expres
         ]
       else if
         Option.is_some
-          (State.implements state right_type
+          (State.find_evidence state right_type
              (State.make_trait_reference ~arguments:[ Types.Type left_type ]
                 (Well_known.make_path From)))
       then
@@ -611,7 +611,7 @@ and check_any state env ?expected (value : Syntax.expression) (inner : Syntax.ex
       let inner_type = Hooks.check_expression state env inner in
       State.register_expression state value (fun () ->
           let inner = State.build_expression state inner in
-          match (Form.read_type state value, State.implements state inner.type_ trait) with
+          match (Form.read_type state value, State.find_evidence state inner.type_ trait) with
           | Types.Any trait, Some implementation ->
               To_any
                 {
@@ -621,7 +621,7 @@ and check_any state env ?expected (value : Syntax.expression) (inner : Syntax.ex
                 }
           | _ -> State.raise_bug "`any` of a value whose type does not implement the trait");
       Instantiation.require state ~at:(State.read_span state value.id) inner_type trait
-        ~unmet:(fun inner_type other ->
+        ~on_unmet:(fun inner_type other ->
           State.report state No_impl (State.read_span state value.id)
             (match other with
             | None ->
@@ -635,7 +635,7 @@ and check_any state env ?expected (value : Syntax.expression) (inner : Syntax.ex
           let inner_type = State.normalize state inner_type in
           Unify.list_unknowns state.unifier inner_type = []
           && begin
-            if Option.is_some (State.implements state inner_type trait) then
+            if Option.is_some (State.find_evidence state inner_type trait) then
               List.iter
                 (fun (bound : Types.trait_reference) ->
                   match
@@ -646,7 +646,7 @@ and check_any state env ?expected (value : Syntax.expression) (inner : Syntax.ex
                         (fun name ->
                           match
                             (Interface.Impls.project_capability_set state.lookups.interface
-                               ~bounds:(State.lookup_bounds state) inner_type
+                               ~list_bounds:(State.lookup_bounds state) inner_type
                                { bound with associated = [] } name
                               :> Types.capability list)
                           with

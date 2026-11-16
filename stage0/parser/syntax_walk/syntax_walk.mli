@@ -1,12 +1,12 @@
 val visit_expression_parts :
-  expression:(Syntax.expression -> unit) ->
-  statement:(Syntax.statement -> unit) ->
+  on_expression:(Syntax.expression -> unit) ->
+  on_statement:(Syntax.statement -> unit) ->
   Syntax.expression ->
   unit
 
 val visit_statement_parts :
-  expression:(Syntax.expression -> unit) ->
-  statement:(Syntax.statement -> unit) ->
+  on_expression:(Syntax.expression -> unit) ->
+  on_statement:(Syntax.statement -> unit) ->
   Syntax.statement ->
   unit
 
@@ -21,6 +21,9 @@ val visit_definition_name : (Syntax.expression -> unit) -> Syntax.definition_nam
 val visit_signature : (Syntax.expression -> unit) -> Syntax.signature -> unit
 
 val visit_definition :
-  ?statement:(Syntax.statement -> unit) -> (Syntax.expression -> unit) -> Syntax.definition -> unit
+  ?on_statement:(Syntax.statement -> unit) ->
+  (Syntax.expression -> unit) ->
+  Syntax.definition ->
+  unit
 
 val collect_names : Source.Definition_span.t array -> Syntax.definition -> Syntax.name list

@@ -1,12 +1,12 @@
 type t = int * int * int
 
 let parse text =
-  let number part =
+  let parse_number part =
     if part <> "" && String.for_all (function '0' .. '9' -> true | _ -> false) part then
       int_of_string_opt part
     else None
   in
-  match List.map number (String.split_on_char '.' text) with
+  match List.map parse_number (String.split_on_char '.' text) with
   | [ Some major; Some minor; Some patch ] -> Some (major, minor, patch)
   | _ -> None
 

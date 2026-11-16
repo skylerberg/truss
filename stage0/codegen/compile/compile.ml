@@ -24,28 +24,29 @@ let raise_bug format = Compiler_bug.raise_bug ~stage:"Compile" format
 
 let make (context : Lower.context) (key : Instance.key) : lowered =
   let env = Lower.env context in
-  let emitted compiled = Compiled (Emit_c.make_fragment env compiled) in
+  let emit compiled = Compiled (Emit_c.make_fragment env compiled) in
   let drop_and_copy = Lower.drop_and_copy context in
-  let code instance = emitted (Code instance) in
+  let emit_code instance = emit (Code instance) in
   match key with
-  | Code { path; type_arguments } -> code (Lower.lower_source_code context ~path ~type_arguments)
-  | Generated generated -> code (Lower.lower_generated context generated)
-  | Table table -> emitted (Table (Lower.lower_table context table))
+  | Code { path; type_arguments } ->
+      emit_code (Lower.lower_source_code context ~path ~type_arguments)
+  | Generated generated -> emit_code (Lower.lower_generated context generated)
+  | Table table -> emit (Table (Lower.lower_table context table))
   | Constant path -> (
       match Lower.lower_constant context path with
       | Folded data -> Folded (data, Emit_c.make_fragment env (Data data))
       | Run ty -> Evaluate (path, ty))
-  | Drop ty -> code (Drop_and_copy.drop drop_and_copy ty)
-  | Copy ty -> code (Drop_and_copy.copy drop_and_copy ty)
-  | Any_drop ty -> code (Drop_and_copy.build_any_drop drop_and_copy ty)
-  | Any_copy ty -> code (Drop_and_copy.build_any_copy drop_and_copy ty)
-  | Debug ty -> code (Debug_output.build_debug env ty)
-  | Encode ty -> code (Encoding.encode env ty)
-  | Evaluator path -> code (Lower.lower_evaluator context path)
+  | Drop ty -> emit_code (Drop_and_copy.drop drop_and_copy ty)
+  | Copy ty -> emit_code (Drop_and_copy.copy drop_and_copy ty)
+  | Any_drop ty -> emit_code (Drop_and_copy.build_any_drop drop_and_copy ty)
+  | Any_copy ty -> emit_code (Drop_and_copy.build_any_copy drop_and_copy ty)
+  | Debug ty -> emit_code (Debug_output.build_debug env ty)
+  | Encode ty -> emit_code (Encoding.encode env ty)
+  | Evaluator path -> emit_code (Lower.lower_evaluator context path)
   | Template_check { from_template; literals; clauses } ->
-      code (Lower.lower_template_check context ~from_template ~literals ~clauses)
+      emit_code (Lower.lower_template_check context ~from_template ~literals ~clauses)
   | Call_evaluation { function_; arguments } ->
-      code (Lower.lower_call_evaluation context ~function_ ~arguments)
+      emit_code (Lower.lower_call_evaluation context ~function_ ~arguments)
 
 let lower (settings : Lookups.settings) (lookups : Lookups.t) key =
   let env =
@@ -86,12 +87,12 @@ let is_runtime_call (path : Path.t) =
 let list_bound_methods (interface : Interface.Lookups.t) path type_arguments =
   match Interface.Impls.read_signature interface path with
   | Some (signature : Types.signature) ->
-      let rec pairs (generics : Types.generic list) (arguments : Ground.argument list) =
+      let rec pair_generics (generics : Types.generic list) (arguments : Ground.argument list) =
         match (generics, arguments) with
         | ( { kind = Type_generic bounds; _ } :: generics,
             Type (Named { path = head; _ }) :: arguments ) ->
-            (bounds, head) :: pairs generics arguments
-        | _ :: generics, _ :: arguments -> pairs generics arguments
+            (bounds, head) :: pair_generics generics arguments
+        | _ :: generics, _ :: arguments -> pair_generics generics arguments
         | _ -> []
       in
       List.concat_map
@@ -110,7 +111,7 @@ let list_bound_methods (interface : Interface.Lookups.t) path type_arguments =
                    (Named { path = head; arguments = [] })))
             (List.sort_uniq Path.compare_package
                (Path.locate_package head :: List.map Path.locate_package traits)))
-        (pairs signature.generics type_arguments)
+        (pair_generics signature.generics type_arguments)
   | None -> []
 
 let check_calls (interface : Interface.Lookups.t) ~find_call_edges (key : Instance.key) lowered =
@@ -158,7 +159,7 @@ let hash_own = function
 let derive_test_key = Blake3.derive_key ~context:"truss 2026-11-12 reach key"
 let encode_test_key fields = derive_test_key (Cbor.encode (Cbor.Array fields))
 
-let derive_cycle_member_key ~known members start =
+let derive_cycle_member_key ~read_known_key members start =
   let visit_order = Instance_table.create 8 in
   let rec visit visited = function
     | [] -> List.rev visited
@@ -187,16 +188,16 @@ let derive_cycle_member_key ~known members start =
                         if Instance_table.mem members reference then
                           Cbor.Array
                             [ Text "in"; Cbor.int (Instance_table.find visit_order reference) ]
-                        else Cbor.Array [ Text "out"; Bytes (known reference) ])
+                        else Cbor.Array [ Text "out"; Bytes (read_known_key reference) ])
                       references);
                ])
            (visit [] [ start ]));
     ]
 
-let derive_test_keys ~lowered ~known component =
+let derive_test_keys ~read_lowered ~read_known_key component =
   match component with
   | [ key ] ->
-      let code = lowered key in
+      let code = read_lowered key in
       [
         ( key,
           encode_test_key
@@ -204,17 +205,21 @@ let derive_test_keys ~lowered ~known component =
               Text "unit";
               Bytes (hash_own code);
               Cbor.Array
-                (List.map (fun reference -> Cbor.Bytes (known reference)) (list_references code));
+                (List.map
+                   (fun reference -> Cbor.Bytes (read_known_key reference))
+                   (list_references code));
             ] );
       ]
   | component ->
       let members = Instance_table.create 8 in
       List.iter
         (fun member ->
-          let code = lowered member in
+          let code = read_lowered member in
           Instance_table.replace members member (hash_own code, list_references code))
         component;
-      List.map (fun member -> (member, derive_cycle_member_key ~known members member)) component
+      List.map
+        (fun member -> (member, derive_cycle_member_key ~read_known_key members member))
+        component
 
 type 'a ran = Ran of 'a | Ran_too_long | Stopped of string
 type results = { find : string -> string option; add : string -> string -> unit }
@@ -315,7 +320,7 @@ let list_roots ~tests ~mains =
   (if tests = [] then [] else test_runner :: List.map make_test_root tests)
   @ List.map (fun main -> Instance.Generated (Program_main main)) mains
 
-let rec build ?progress ?tests ?(supplied = []) compiler ~roots ~startup ~output =
+let rec build ?report_progress ?tests ?(supplied = []) compiler ~roots ~startup ~output =
   let lookup key =
     match List.find_opt (fun fragment -> Instance.equal (Emit_c.key fragment) key) supplied with
     | Some fragment -> fragment
@@ -328,17 +333,17 @@ let rec build ?progress ?tests ?(supplied = []) compiler ~roots ~startup ~output
   let sources =
     [
       ("startup", startup);
-      ("sites", Emit_c.render_sites_file ~position:(locate_site compiler) units);
+      ("sites", Emit_c.render_sites_file ~resolve_position:(locate_site compiler) units);
     ]
   in
   let find key = Instance_table.find_opt units_by_key key in
-  let copied =
+  let list_copied =
     match compiler.settings.build with
     | Development -> list_small_callees ~find ~is_worked_on:compiler.is_worked_on
     | Release -> fun _ -> []
   in
   match
-    Build.build_program ?progress ?tests ~copied compiler.toolchain compiler.cache
+    Build.build_program ?report_progress ?tests ~list_copied compiler.toolchain compiler.cache
       (make_env compiler) compiler.settings
       ~files:(List.map (fun unit -> [ unit ]) units)
       ~sources ~output
@@ -346,8 +351,8 @@ let rec build ?progress ?tests ?(supplied = []) compiler ~roots ~startup ~output
   | Ok () -> ()
   | Error message -> raise (Cannot_build message)
 
-and build_test_program ?progress ?supplied compiler ~time_limit_ms ~roots ~output =
-  build ?progress ?supplied compiler ~tests:true ~roots:(test_runner :: roots)
+and build_test_program ?report_progress ?supplied compiler ~time_limit_ms ~roots ~output =
+  build ?report_progress ?supplied compiler ~tests:true ~roots:(test_runner :: roots)
     ~startup:
       (Startup.render_tests_start ~time_limit_ms
          ~runner:(Instance.make_symbol test_runner)
@@ -399,7 +404,7 @@ and run_while_compiling : 'value. t -> Instance.key -> read:(string -> 'value) -
   | Stopped report -> Stopped report
 
 and compile_fragment compiler key =
-  let data (data : Lowered.data) = Emit_c.make_fragment (make_env compiler) (Data data) in
+  let emit_data (data : Lowered.data) = Emit_c.make_fragment (make_env compiler) (Data data) in
   let compiled =
     match read_lowered compiler key with
     | Compiled fragment | Folded (_, fragment) -> fragment
@@ -408,7 +413,7 @@ and compile_fragment compiler key =
           run_while_compiling compiler (Instance.Evaluator path) ~read:(fun encoded ->
               Encoding.decode (make_env compiler) ty encoded)
         with
-        | Ran value -> data { data_key = Constant path; ty; value }
+        | Ran value -> emit_data { data_key = Constant path; ty; value }
         | Ran_too_long ->
             raise_cannot_build "Evaluating %s ran past the time limit of %d ms." (Path.show path)
               compiler.evaluation_time_limit_ms
@@ -576,12 +581,12 @@ let make_incomplete_record compiler todo_types =
     cached = false;
   }
 
-let run_tests ?(rerun = false) ?(progress = ignore) compiler ~time_limit_ms tests =
+let run_tests ?(rerun = false) ?(report_progress = ignore) compiler ~time_limit_ms tests =
   capture_failure compiler @@ fun () ->
   let results = compiler.results in
   let roots = List.map make_test_root tests in
-  progress Lowering;
-  let keyed test = results <> None && not (is_external_test compiler test) in
+  report_progress Lowering;
+  let is_keyed test = results <> None && not (is_external_test compiler test) in
   let known =
     List.mapi
       (fun index (test, root) ->
@@ -589,7 +594,7 @@ let run_tests ?(rerun = false) ?(progress = ignore) compiler ~time_limit_ms test
         | _ :: _ as todo_types ->
             (index, root, None, Some (make_incomplete_record compiler todo_types))
         | [] ->
-            let key = if keyed test then Some (make_result_key compiler root) else None in
+            let key = if is_keyed test then Some (make_result_key compiler root) else None in
             let known_record =
               match (results, key) with
               | Some results, Some key when not rerun -> find_stored results key
@@ -600,7 +605,7 @@ let run_tests ?(rerun = false) ?(progress = ignore) compiler ~time_limit_ms test
   in
   List.iter
     (fun (index, _, _, known_record) ->
-      Option.iter (fun record -> progress (Ended { test = index; record })) known_record)
+      Option.iter (fun record -> report_progress (Ended { test = index; record })) known_record)
     known;
   let missing =
     Array.of_list (List.filter (fun (_, _, _, known_record) -> known_record = None) known)
@@ -609,10 +614,10 @@ let run_tests ?(rerun = false) ?(progress = ignore) compiler ~time_limit_ms test
   if Array.length missing > 0 then begin
     let roots = Array.to_list (Array.map (fun (_, root, _, _) -> root) missing) in
     let output = make_program_path compiler in
-    build_test_program compiler ~time_limit_ms ~roots ~output ~progress:(fun compiled total ->
-        progress (Compiling { compiled; total }));
-    progress (Running { tests = Array.length missing });
-    let index_of number =
+    build_test_program compiler ~time_limit_ms ~roots ~output
+      ~report_progress:(fun compiled total -> report_progress (Compiling { compiled; total }));
+    report_progress (Running { tests = Array.length missing });
+    let read_test_index number =
       if number < 0 || number >= Array.length missing then
         raise_malformed_report (Printf.sprintf "a test numbered %d" number);
       let index, _, _, _ = missing.(number) in
@@ -620,15 +625,15 @@ let run_tests ?(rerun = false) ?(progress = ignore) compiler ~time_limit_ms test
     in
     let reader =
       make_reader
-        ~on_start:(fun number -> progress (Started { test = index_of number }))
+        ~on_start:(fun number -> report_progress (Started { test = read_test_index number }))
         (fun number record ->
-          let index = index_of number in
+          let index = read_test_index number in
           let _, _, key, _ = missing.(number) in
           fresh.(number) <- Some record;
           (match (results, key) with
           | Some results, Some key when is_cacheable record -> store results key record
           | _ -> ());
-          progress (Ended { test = index; record }))
+          report_progress (Ended { test = index; record }))
     in
     let _, report, errors =
       Fun.protect
@@ -654,7 +659,7 @@ let run_tests ?(rerun = false) ?(progress = ignore) compiler ~time_limit_ms test
 let build_supplied_tests compiler ~time_limit_ms supplied ~output =
   capture_failure compiler @@ fun () ->
   let supplied_env = make_env compiler in
-  let supplied = List.map (fun instance -> instance supplied_env) supplied in
+  let supplied = List.map (fun make_instance -> make_instance supplied_env) supplied in
   build_test_program compiler
     ~supplied:
       (List.map (fun instance -> Emit_c.make_fragment supplied_env (Code instance)) supplied)
@@ -695,7 +700,7 @@ let list_reached_definitions compiler root =
 let list_unshippable compiler ~main =
   let reached = trace_root compiler main in
   begin
-    let definitions keys =
+    let list_definitions keys =
       List.fold_left
         (fun acc (key : Instance.key) ->
           match key with
@@ -721,7 +726,7 @@ let list_unshippable compiler ~main =
                   file;
                   line;
                   column;
-                  way = definitions keys;
+                  way = list_definitions keys;
                 })
               (Emit_c.failures compiled))
           reached
@@ -835,7 +840,7 @@ module For_testing = struct
 
   let parse_report = parse_report
   let build_supplied_tests = build_supplied_tests
-  let compiled = compile_fragment
+  let compile_fragment = compile_fragment
   let run_program = run_program
   let evaluate_call = evaluate_call
   let drop_and_copy = Drop_and_copy.create

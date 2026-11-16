@@ -152,7 +152,7 @@ let show_name = function
         (Path.show type_head)
 
 let show_computed part =
-  let section : Resolve.section -> string = function
+  let show_section : Resolve.section -> string = function
     | Interface -> "interface"
     | Contract -> "contract"
     | Body -> "body"
@@ -160,7 +160,8 @@ let show_computed part =
   match part with
   | Parsed file -> "parsed " ^ Path.show_file file
   | Namespace package -> "namespace " ^ Path.show_package package
-  | Resolved (declared, part) -> Printf.sprintf "resolved %s %s" (section part) (show_key declared)
+  | Resolved (declared, part) ->
+      Printf.sprintf "resolved %s %s" (show_section part) (show_key declared)
   | Trait_header declared -> "trait header " ^ show_key declared
   | Constant_value path -> "constant value " ^ Path.show path
   | Header declared -> "header " ^ show_key declared

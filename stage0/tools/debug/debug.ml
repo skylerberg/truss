@@ -69,13 +69,13 @@ let read file =
   end;
   Source.read_file file
 
-let tokens ~file ~json =
+let run_tokens_command ~file ~json =
   let source = read file in
   let tokens, diagnostics = Lexer.lex source in
   if not json then print_tokens source tokens;
   show_diagnostics ~json source diagnostics
 
-let tree ~file ~json =
+let run_tree_command ~file ~json =
   let source = read file in
   let tokens, lexer_diagnostics = Lexer.lex source in
   let file, parser_diagnostics = Parser.parse tokens ~lexer_diagnostics in
@@ -84,15 +84,17 @@ let tree ~file ~json =
       (fun (left : Diagnostic.t) (right : Diagnostic.t) -> compare left.span.start right.span.start)
       (lexer_diagnostics @ parser_diagnostics)
   in
-  if not json then print_endline (Syntax_print.file file);
+  if not json then print_endline (Syntax_print.show_file file);
   show_diagnostics ~json source diagnostics
 
 let () =
   match List.tl (Array.to_list Sys.argv) with
-  | [ "tokens"; file ] -> exit (tokens ~file ~json:false)
-  | [ "tokens"; "--json"; file ] | [ "tokens"; file; "--json" ] -> exit (tokens ~file ~json:true)
-  | [ "tree"; file ] -> exit (tree ~file ~json:false)
-  | [ "tree"; "--json"; file ] | [ "tree"; file; "--json" ] -> exit (tree ~file ~json:true)
+  | [ "tokens"; file ] -> exit (run_tokens_command ~file ~json:false)
+  | [ "tokens"; "--json"; file ] | [ "tokens"; file; "--json" ] ->
+      exit (run_tokens_command ~file ~json:true)
+  | [ "tree"; file ] -> exit (run_tree_command ~file ~json:false)
+  | [ "tree"; "--json"; file ] | [ "tree"; file; "--json" ] ->
+      exit (run_tree_command ~file ~json:true)
   | _ ->
       prerr_endline "usage: debug tokens|tree [--json] FILE";
       exit 2

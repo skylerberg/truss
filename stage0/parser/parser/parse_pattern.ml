@@ -5,12 +5,12 @@ let range_bound = "a literal or a constant with its module or type, such as `htt
 
 let parse_string_literal cursor ~start ~modules literal =
   let string = Cursor.peek cursor in
-  let interpolation (_ : Token.interpolation) =
+  let reject_interpolation (_ : Token.interpolation) =
     Cursor.report cursor Interpolation_not_allowed string.span
       "A string in a pattern cannot have interpolations.";
     raise Cursor.Failed
   in
-  Atoms.make_string_literal cursor ~start ~modules literal ~interpolation
+  Atoms.make_string_literal cursor ~start ~modules literal ~parse_interpolation:reject_interpolation
 
 let parse_literal cursor : Syntax.literal option =
   let start = Cursor.index cursor in
@@ -121,16 +121,16 @@ and parse_name_pattern cursor start =
   | _ -> Cursor.fail cursor "a name after `::`"
 
 and parse_unqualified_variant cursor start (path : Syntax.path) =
-  let rec last_name (qualified : Token.t option) =
+  let rec find_last_name (qualified : Token.t option) =
     match (Cursor.peek_kind cursor, Cursor.lookup_token cursor (Cursor.index cursor + 1)) with
     | Punctuation (Dot | Colon_colon), ({ kind = Upper _; _ } as variant) ->
         Cursor.advance cursor;
         Cursor.advance cursor;
-        last_name (Some variant)
+        find_last_name (Some variant)
     | _ -> qualified
   in
   let qualifier_start = (Cursor.lookup_token cursor start).span.start in
-  match last_name None with
+  match find_last_name None with
   | Some ({ kind = Upper text; _ } as variant) ->
       let variant = Atoms.make_name cursor variant text in
       Habits.report_qualified_variant cursor ~qualifier_start ~variant;
@@ -141,7 +141,7 @@ and parse_unqualified_variant cursor start (path : Syntax.path) =
   | _ -> path
 
 and parse_pattern_fields cursor =
-  let field cursor : Syntax.pattern_field =
+  let parse_field cursor : Syntax.pattern_field =
     let start = Cursor.index cursor in
     let kind =
       match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
@@ -157,7 +157,7 @@ and parse_pattern_fields cursor =
     { kind; id = Cursor.allocate_id_from cursor start }
   in
   let fields =
-    Cursor.parse_bracketed cursor ~item:field ~recover:(fun span ->
+    Cursor.parse_bracketed cursor ~parse_item:parse_field ~recover:(fun span ->
         {
           kind = Field { kind = Pattern_error; id = Cursor.allocate_id cursor span };
           id = Cursor.allocate_id cursor span;

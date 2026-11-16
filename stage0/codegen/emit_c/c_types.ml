@@ -134,7 +134,7 @@ let render_member_type context : Memory_layout.member -> string = function
   | Typed ty -> render_value_type context ty
   | Raw scalar -> render_scalar_type context scalar
 
-let holds_member context : Memory_layout.member -> key list = function
+let list_held_keys context : Memory_layout.member -> key list = function
   | Typed ty when is_struct context ty -> [ Type ty ]
   | Typed _ | Raw _ -> []
 
@@ -144,8 +144,9 @@ let render_field_declarations context (fields : Memory_layout.field list) =
          (fun (field : Memory_layout.field) ->
            Printf.sprintf "  %s f_%s;\n" (render_member_type context field.member) field.name)
          fields),
-    List.concat_map (fun (field : Memory_layout.field) -> holds_member context field.member) fields
-  )
+    List.concat_map
+      (fun (field : Memory_layout.field) -> list_held_keys context field.member)
+      fields )
 
 let render_signature_parameters context symbol (parameters : Lowered.ty list) names =
   match parameters with

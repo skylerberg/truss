@@ -1,7 +1,7 @@
 let check_evidence_grants (state : State.state) (span : Source.Definition_span.t) evidence =
   let impls =
-    Interface.Grants.list_evidence_uses state.lookups.interface ~bounds:(State.lookup_bounds state)
-      evidence
+    Interface.Grants.list_evidence_uses state.lookups.interface
+      ~list_bounds:(State.lookup_bounds state) evidence
   in
   state.evidence_packages <-
     List.map (fun (impl, _, _) -> Path.locate_package impl) impls @ state.evidence_packages;
@@ -21,24 +21,24 @@ type static_ =
   | Static_trait of Path.t * Types.argument list option
   | Static_capability of Path.t
 
-let require state ~(at : Source.Definition_span.t) type_ (bound : Types.trait_reference) ~unmet =
+let require state ~(at : Source.Definition_span.t) type_ (bound : Types.trait_reference) ~on_unmet =
   let trait = { bound with associated = [] } in
   State.defer state (fun () ->
       let type_ = State.normalize state type_ in
       if Unify.list_unknowns state.unifier type_ <> [] then false
       else begin
-        (match State.implements state type_ trait with
-        | None -> unmet type_ None
+        (match State.find_evidence state type_ trait with
+        | None -> on_unmet type_ None
         | Some evidence ->
             check_evidence_grants state at evidence;
             List.iter
               (fun (name, wanted) ->
                 match
                   Interface.Impls.project_associated_type state.lookups.interface
-                    ~bounds:(State.lookup_bounds state) type_ trait name
+                    ~list_bounds:(State.lookup_bounds state) type_ trait name
                 with
                 | Some associated_type when not (State.unify state associated_type wanted) ->
-                    unmet type_ (Some (name, associated_type))
+                    on_unmet type_ (Some (name, associated_type))
                 | _ -> ())
               bound.associated);
         true
@@ -47,7 +47,7 @@ let require state ~(at : Source.Definition_span.t) type_ (bound : Types.trait_re
 let require_bounds state (span : Source.Definition_span.t) ?of_type generics substitution =
   List.iter
     (fun (argument, bound) ->
-      require state ~at:span argument bound ~unmet:(fun argument other ->
+      require state ~at:span argument bound ~on_unmet:(fun argument other ->
           let bound = Unify.zonk_trait state.unifier bound in
           let reported =
             match State.find_current_frame state with
@@ -133,14 +133,14 @@ let rec find_static state (value : Syntax.expression) : static_ option =
   | _ -> None
 
 and check_named_type state (value : Syntax.expression) path type_arguments =
-  let type_ arguments =
+  let make_type arguments =
     match Intrinsic.builtin_of_path path with
     | Some Never -> Types.Never
     | Some Integer -> Types.Integer
     | _ -> Types.Named { path; arguments }
   in
   match type_arguments with
-  | None -> type_ (instantiate_type state (State.read_span state value.id) path)
+  | None -> make_type (instantiate_type state (State.read_span state value.id) path)
   | Some items -> (
       match check_written_arguments state items with
       | Error error -> error
@@ -156,7 +156,7 @@ and check_named_type state (value : Syntax.expression) path type_arguments =
                    (if List.length arguments = 1 then "is" else "are"))
           | _ ->
               require_type_bounds state (State.read_span state value.id) path arguments;
-              type_ arguments))
+              make_type arguments))
 
 and check_written_arguments state items : (Types.argument list, Types.ty) result =
   let arguments =

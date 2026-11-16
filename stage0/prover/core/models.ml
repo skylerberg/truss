@@ -8,7 +8,7 @@ type quantified_range =
       location : State.location;
     }
 
-let under_binder :
+let run_under_binder :
     'read.
     State.context ->
     State.frame ->
@@ -176,12 +176,12 @@ let rec find_model context (ty : Types.ty) term ~element =
 and find_model_as context (ty : Types.ty) term ~(model : Types.ty) =
   Option.map (fun model_of -> model_of term) (find_model_function context ty ~model)
 
-let quantified_over (context : State.context) (frame : State.frame) (quantifier : Core.quantifier)
+let quantify_over (context : State.context) (frame : State.frame) (quantifier : Core.quantifier)
     (range : quantified_range) ~bind ~read =
   let make ?count bound_symbol sort premise body_frame bound_value =
     let mark = context.fresh in
     let body_frame, (after, body_value), with_facts =
-      under_binder context body_frame bound_symbol sort premise (fun body_frame ->
+      run_under_binder context body_frame bound_symbol sort premise (fun body_frame ->
           read body_frame bound_value)
     in
     let bound = [ (bound_symbol, sort) ] in

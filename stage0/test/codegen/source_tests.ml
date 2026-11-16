@@ -9,60 +9,65 @@ let () =
         \  at example/main.truss:10:3\n")
 
 let () =
-  Codegen_support.passes "loops, variables, and comparisons run" Fixtures.Source.sum_to;
-  Codegen_support.passes "a counted for loop runs once per value" Fixtures.Source.sum_below;
-  Codegen_support.passes "records are built and read, and sums matched"
+  Codegen_support.expect_pass "loops, variables, and comparisons run" Fixtures.Source.sum_to;
+  Codegen_support.expect_pass "a counted for loop runs once per value" Fixtures.Source.sum_below;
+  Codegen_support.expect_pass "records are built and read, and sums matched"
     Fixtures.Source.records_and_sums;
-  Codegen_support.passes "an if is a value, and a return leaves early" Fixtures.Source.sign;
-  Codegen_support.passes "the standard library's Option methods run" Fixtures.Source.option_methods
+  Codegen_support.expect_pass "an if is a value, and a return leaves early" Fixtures.Source.sign;
+  Codegen_support.expect_pass "the standard library's Option methods run"
+    Fixtures.Source.option_methods
 
 let () =
-  Codegen_support.passes "lists are built, pushed onto, indexed, and looped over"
+  Codegen_support.expect_pass "lists are built, pushed onto, indexed, and looped over"
     Fixtures.Source.list_operations;
-  Codegen_support.passes "a question mark returns an error early"
+  Codegen_support.expect_pass "a question mark returns an error early"
     Fixtures.Source.check_with_a_question_mark
 
 let () =
-  Codegen_support.passes "a string interpolates its parts" Fixtures.Source.string_interpolation_test;
-  Codegen_support.passes "a record is updated with with" Fixtures.Source.point_updated_with_with;
-  Codegen_support.passes "a lambda reads its caller's locals" Fixtures.Source.lambda_reading_a_local
+  Codegen_support.expect_pass "a string interpolates its parts"
+    Fixtures.Source.string_interpolation_test;
+  Codegen_support.expect_pass "a record is updated with with"
+    Fixtures.Source.point_updated_with_with;
+  Codegen_support.expect_pass "a lambda reads its caller's locals"
+    Fixtures.Source.lambda_reading_a_local
 
 let () =
-  Codegen_support.passes "integers display in decimal, negative ones too"
+  Codegen_support.expect_pass "integers display in decimal, negative ones too"
     Fixtures.Source.integer_display_test;
-  Codegen_support.passes "strings compare, order, and trim" Fixtures.Source.string_comparisons_test
+  Codegen_support.expect_pass "strings compare, order, and trim"
+    Fixtures.Source.string_comparisons_test
 
 let () =
-  Codegen_support.passes "constants are static data, computed exactly"
+  Codegen_support.expect_pass "constants are static data, computed exactly"
     Fixtures.Source.constants_of_seconds_and_points
 
 let () =
-  Codegen_support.passes "a named function is passed as a function value"
+  Codegen_support.expect_pass "a named function is passed as a function value"
     Fixtures.Source.double_as_a_function_value;
-  Codegen_support.passes "a field left out takes its default"
+  Codegen_support.expect_pass "a field left out takes its default"
     Fixtures.Source.request_with_field_defaults;
-  Codegen_support.passes "a parameter left out takes its default"
+  Codegen_support.expect_pass "a parameter left out takes its default"
     Fixtures.Source.connect_with_parameter_defaults;
-  Codegen_support.passes "an any value calls its implementation's method"
+  Codegen_support.expect_pass "an any value calls its implementation's method"
     Fixtures.Source.shape_area_through_any
 
 let () =
-  Codegen_support.passes "a constant that compares constants is folded"
+  Codegen_support.expect_pass "a constant that compares constants is folded"
     Fixtures.Source.constant_comparing_constants;
-  Codegen_support.passes
+  Codegen_support.expect_pass
     "a constant made of one that is computed by running is computed by running too"
     Fixtures.Source.constant_list_of_a_map_constant;
   Codegen_support.test
     "a constant whose sum does not fit its type is an error before any code is run" (fun () ->
       let packages =
-        Codegen_support.example_package
+        Codegen_support.make_example_package
           [ (Codegen_support.example_file, "let big: Int8 = 100\nlet bigger: Int8 = big + big\n") ]
       in
       match
         List.map
           (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code)
-          (Codegen_support.diagnostics
-             (Codegen_support.database packages)
+          (Codegen_support.list_diagnostics
+             (Codegen_support.make_database packages)
              Codegen_support.example_file)
       with
       | [ "types.constant_overflow" ] -> ()
@@ -92,7 +97,7 @@ let () =
         Codegen_support.load ~roots:[ equal ]
           "type Both(first: Int64, second: Int64)\n  derives Equal\n"
       in
-      let c = Emit_c.For_testing.c (Compile.For_testing.compiled compile equal) in
+      let c = Emit_c.For_testing.render_c (Compile.For_testing.compile_fragment compile equal) in
       let branches =
         List.length
           (String.split_on_char '\n' c
@@ -160,7 +165,10 @@ let () =
       in
       List.iter
         (fun name ->
-          let c = Emit_c.For_testing.c (Compile.For_testing.compiled compile (function_ name)) in
+          let c =
+            Emit_c.For_testing.render_c
+              (Compile.For_testing.compile_fragment compile (function_ name))
+          in
           if String.includes ~affix:"t_lend" c then
             Codegen_support.fail "expected no lend record in `%s`:\n%s" name c)
         names)

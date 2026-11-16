@@ -27,12 +27,12 @@ val plan_lock :
   (lock_plan, string) result
 
 val make_server_key : string -> string
-val serve : key:string -> handle:(progress:(string -> unit) -> 'request -> 'response) -> unit
+val serve : key:string -> handle:(report_progress:(string -> unit) -> 'request -> 'response) -> unit
 
 val call :
   ?start_server:bool ->
   key:string ->
-  progress:(string -> unit) ->
+  report_progress:(string -> unit) ->
   'request ->
   ('response, string) result
 
@@ -51,11 +51,11 @@ module For_testing : sig
   val collect_cache : unit -> unit
   val listen : key:string -> (Unix.file_descr, string) result
 
-  val call :
+  val call_starting :
     program:string ->
     ?start_server:bool ->
     key:string ->
-    progress:(string -> unit) ->
+    report_progress:(string -> unit) ->
     'request ->
     ('response, string) result
 

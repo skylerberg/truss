@@ -45,7 +45,7 @@ let read_manifest_and_record ~read name =
   | _ ->
       Error (Printf.sprintf "its manifest does not name the package `%s`" (Path.show_package name))
 
-let choose ~lock ~roots ~local ~load =
+let choose ~lock ~roots ~is_local ~load =
   let chosen = Package_table.create 16 in
   List.iter
     (fun (entry : Lock.entry) ->
@@ -54,7 +54,7 @@ let choose ~lock ~roots ~local ~load =
   let rec pass () =
     let seen = Package_table.create 16 in
     let changed = ref false and selected = ref [] and problems = ref [] in
-    let problem new_problem =
+    let report_problem new_problem =
       if not (List.mem new_problem !problems) then problems := new_problem :: !problems
     in
     let record_of ~recorded_by (entry : Lock.entry) =
@@ -62,19 +62,19 @@ let choose ~lock ~roots ~local ~load =
       | Some (version, _) when Version.compare version entry.version > 0 -> ()
       | Some (version, hash) when Version.compare version entry.version = 0 ->
           if hash <> entry.hash then
-            problem (Two_contents { name = entry.name; version; recorded_by })
+            report_problem (Two_contents { name = entry.name; version; recorded_by })
       | _ ->
           Package_table.replace chosen entry.name (entry.version, entry.hash);
           changed := true
     in
     let rec visit wanted_by name =
-      if not (local name || Package_table.mem seen name) then begin
+      if not (is_local name || Package_table.mem seen name) then begin
         Package_table.replace seen name ();
         match Package_table.find_opt chosen name with
-        | None -> problem (No_version { name; wanted_by })
+        | None -> report_problem (No_version { name; wanted_by })
         | Some (version, hash) -> (
             match load name version ~hash with
-            | Error reason -> problem (Cannot_load { name; version; reason })
+            | Error reason -> report_problem (Cannot_load { name; version; reason })
             | Ok ((manifest : Manifest.package), record) ->
                 selected := { name; version; hash; manifest; record } :: !selected;
                 List.iter (record_of ~recorded_by:name) record;
@@ -93,12 +93,12 @@ let choose ~lock ~roots ~local ~load =
   in
   pass ()
 
-let holds ~project packages =
+let list_holds ~project packages =
   let held = Package_table.create 16 in
   let of_ name = Option.value ~default:[] (Package_table.find_opt held name) in
-  let in_build name = List.exists (fun package -> package.name = name) packages in
-  let grant ~holder (dependency : Manifest.dependency) =
-    in_build dependency.package
+  let is_in_build name = List.exists (fun package -> package.name = name) packages in
+  let is_granted ~holder (dependency : Manifest.dependency) =
+    is_in_build dependency.package
     &&
     let offered =
       match holder with
@@ -116,14 +116,14 @@ let holds ~project packages =
   let rec settle () =
     let changed =
       List.fold_left
-        (fun changed dependency -> grant ~holder:None dependency || changed)
+        (fun changed dependency -> is_granted ~holder:None dependency || changed)
         false project
     in
     let changed =
       List.fold_left
         (fun changed package ->
           List.fold_left
-            (fun changed dependency -> grant ~holder:(Some package.name) dependency || changed)
+            (fun changed dependency -> is_granted ~holder:(Some package.name) dependency || changed)
             changed package.manifest.dependencies)
         changed packages
     in
@@ -133,7 +133,7 @@ let holds ~project packages =
   List.map (fun package -> (package.name, of_ package.name)) packages
 
 let lock ~project packages : Lock.t =
-  let held = holds ~project packages in
+  let held = list_holds ~project packages in
   List.map
     (fun package ->
       {
@@ -145,7 +145,7 @@ let lock ~project packages : Lock.t =
     packages
 
 let list_differences ~(written : Lock.t) ~(current : Lock.t) =
-  let capabilities = function [] -> "nothing" | held -> String.concat ", " held in
+  let show_capabilities = function [] -> "nothing" | held -> String.concat ", " held in
   List.filter_map
     (fun (entry : Lock.entry) ->
       match Lock.find written entry.name with
@@ -165,7 +165,8 @@ let list_differences ~(written : Lock.t) ~(current : Lock.t) =
       | Some line when List.sort String.compare line.holds <> entry.holds ->
           Some
             (Printf.sprintf "`%s` is said to hold %s, and the manifests grant it %s."
-               (Path.show_package entry.name) (capabilities line.holds) (capabilities entry.holds))
+               (Path.show_package entry.name) (show_capabilities line.holds)
+               (show_capabilities entry.holds))
       | Some _ -> None)
     current
   @ List.filter_map
@@ -176,5 +177,5 @@ let list_differences ~(written : Lock.t) ~(current : Lock.t) =
       written
 
 module For_testing = struct
-  let holds = holds
+  let list_holds = list_holds
 end

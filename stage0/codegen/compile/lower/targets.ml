@@ -12,8 +12,8 @@ let resolve_impl (context : Definitions.context) substitution ~(trait : Types.tr
     | Bound -> (
         let self = context.monomorphic.normalize (substitute self_type) in
         match
-          Interface.Impls.implements context.lookups.interface ~bounds:Interface.Impls.no_bounds
-            self
+          Interface.Impls.find_evidence context.lookups.interface
+            ~list_bounds:Interface.Impls.list_no_bounds self
             (let trait = Types.substitute_trait substitution trait in
              {
                trait with
@@ -72,20 +72,21 @@ let pass st (mode : Types.mode) ty place =
   convert_operand st mode ty place
     (Convention.classify_parameter st.context.env (Monomorphic.ground_mode mode) ty)
 
-let lookup_method_slot (context : Definitions.context) ~owner ~missing
+let lookup_method_slot (context : Definitions.context) ~owner ~handle_missing
     (methods : Types.trait_method list) ~is_wanted =
   match List.find_index is_wanted methods with
   | Some index ->
       ( index,
         Interface.Definition.read_method_signature context.lookups.interface ~owner
           (List.nth methods index) )
-  | None -> missing ()
+  | None -> handle_missing ()
 
 let lookup_capability_method (context : Definitions.context) capability name =
   lookup_method_slot context ~owner:capability
     (Definitions.read_trait_interface context capability).methods
     ~is_wanted:(fun (declared : Types.trait_method) -> declared.method_name = name)
-    ~missing:(fun () -> Definitions.raise_bug "%s has no method %s" (Path.show capability) name)
+    ~handle_missing:(fun () ->
+      Definitions.raise_bug "%s has no method %s" (Path.show capability) name)
 
 let make_entry_signature context (signature : Types.signature) =
   let entry, result =
@@ -109,10 +110,10 @@ let lookup_dynamic_method context trait name receiver =
   lookup_method_slot context ~owner:trait (list_any_methods context trait)
     ~is_wanted:(fun (declared : Types.trait_method) ->
       declared.method_name = name && declared.method_receiver = receiver)
-    ~missing:(fun () -> Definitions.raise_bug "%s cannot be called through any" name)
+    ~handle_missing:(fun () -> Definitions.raise_bug "%s cannot be called through any" name)
 
 let is_copyable_any (context : Definitions.context) (any : Types.trait_reference) =
-  Interface.Impls.is_copyable context.lookups.interface ~bounds:Interface.Impls.no_bounds
+  Interface.Impls.is_copyable context.lookups.interface ~list_bounds:Interface.Impls.list_no_bounds
     (Types.Any any)
 
 let make_any_substitution (context : Definitions.context) ~(any : Types.trait_reference) trait :
@@ -174,7 +175,9 @@ let lookup_evidence (st : Lowering.state) capability =
   match List.find_opt (fun (path, _) -> Path.equal path capability) st.evidence with
   | Some (_, operand) -> operand
   | None -> (
-      let missing () = Definitions.raise_bug "no evidence for %s here" (Path.show capability) in
+      let raise_missing () =
+        Definitions.raise_bug "no evidence for %s here" (Path.show capability)
+      in
       match st.frame.code.enclosing_impl with
       | Some impl
         when Path.equal (Definitions.read_impl_interface st.context impl).implements.trait
@@ -187,7 +190,7 @@ let lookup_evidence (st : Lowering.state) capability =
             match st.frame.self_place with
             | _ when Memory_layout.has_zero_size st.context.env self_ty -> Lowered.Constant Null
             | Some self -> Lowered.Address { place = self; writable = true }
-            | None -> missing ()
+            | None -> raise_missing ()
           in
           let type_arguments =
             List.map
@@ -198,7 +201,7 @@ let lookup_evidence (st : Lowering.state) capability =
               interface.impl_generics
           in
           lower_implementation_evidence st ~impl ~type_arguments ~implementation
-      | _ -> missing ())
+      | _ -> raise_missing ())
 
 let lower_nested_function (st : Lowering.state) ~(function_type : Ground.function_type)
     ~(output : Types.result option) ~(captures : (Lowered.place * Ground.ty) list)
@@ -538,7 +541,7 @@ let lower_list_into (st : Lowering.state) ty destination ~site fills =
     fills
 
 let lower_template_value (st : Lowering.state) template_ty literals ~site ~parts =
-  let field_type ty name =
+  let read_field_type ty name =
     match Monomorphic.compute_shape st.context.monomorphic ty with
     | Record fields -> (
         match List.assoc_opt name fields with
@@ -546,14 +549,14 @@ let lower_template_value (st : Lowering.state) template_ty literals ~site ~parts
         | _ -> Definitions.raise_bug "%s has no field %s" (Ground.to_string ty) name)
     | _ -> Definitions.raise_bug "%s is not a record" (Ground.to_string ty)
   in
-  let element list_ty =
+  let read_element_type list_ty =
     let _, _, element = read_list_parts st.context.monomorphic list_ty in
     element
   in
-  let literals_ty = field_type template_ty "literals" in
-  let parts_ty = field_type template_ty "parts" in
-  let literal_ty = element literals_ty in
-  let slice_ty = field_type literal_ty "text" in
+  let literals_ty = read_field_type template_ty "literals" in
+  let parts_ty = read_field_type template_ty "parts" in
+  let literal_ty = read_element_type literals_ty in
+  let slice_ty = read_field_type literal_ty "text" in
   let built = Lowering.allocate_temporary st template_ty in
   lower_list_into st literals_ty
     (Lowered.project built (Field "literals"))
