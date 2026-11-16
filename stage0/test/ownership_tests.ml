@@ -875,12 +875,12 @@ let () =
   Harness.test "a part lent read-only is not passed `mut`" (fun () ->
       expect_one_diagnostic (grid ^ Fixtures.Ownership.grid_cell_passed_as_mut) "types.wrong_mode");
   Harness.test "a lent part cannot be moved" (fun () ->
-      expect_one_diagnostic (grid ^ Fixtures.Ownership.grid_cell_moved) "types.missing_mode");
+      expect_one_diagnostic (grid ^ Fixtures.Ownership.grid_cell_moved) "ownership.not_owned");
   Harness.test "a lent part cannot be the receiver of a method that takes `own self`, with a fix"
     (fun () ->
       expect_one_diagnostic
         (grid ^ Fixtures.Ownership.lent_receiver_moved)
-        "types.missing_mode"
+        "ownership.not_owned"
         ~fixed:(grid ^ Fixtures.Ownership.lent_receiver_copied));
   Harness.test "a lent part cannot be returned" (fun () ->
       expect_one_diagnostic (grid ^ Fixtures.Ownership.grid_cell_returned) "ownership.not_owned");

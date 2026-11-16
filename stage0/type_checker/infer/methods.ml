@@ -533,7 +533,7 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
       when (not has_mode_keyword)
            && ((not place)
               || State.is_plain state receiver_type
-              || (State.is_place state base && not (List.mem_assoc Path.Mut overloads))) -> (
+              || not (List.mem_assoc Path.Mut overloads)) -> (
         match List.assoc_opt Path.Own overloads with
         | Some method_path ->
             if State.is_place state base then Modes.note_place_without_own state env base;
@@ -561,26 +561,13 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
   in
   let report_missing_receiver_mode : 'a. (Path.receiver * 'a) list -> Types.ty =
    fun overloads ->
-    let has receiver = List.exists (fun (overload, _) -> overload = receiver) overloads in
-    if (not has_mode_keyword) && place && has Path.Mut then
+    if (not has_mode_keyword) && place && List.mem_assoc Path.Mut overloads then
       State.make_error_type state Missing_mode (State.read_span state base.id)
         ~fixes:
           [
             State.fix "Pass it `mut`." [ State.insert (State.read_span state base.id).start "mut " ];
           ]
         (Printf.sprintf "`%s` takes `mut self`, so the call site passes its receiver `mut`."
-           member.text)
-    else if (not has_mode_keyword) && place && has Path.Own then
-      State.make_error_type state Missing_mode (State.read_span state base.id)
-        ~fixes:
-          (if State.is_copyable state receiver_type then
-             [
-               State.fix "Pass a copy."
-                 [ State.insert (State.read_span state base.id).stop ".copy()" ];
-             ]
-           else [])
-        (Printf.sprintf
-           "`%s` takes `own self`, and a part that is lent cannot be moved. Pass a copy."
            member.text)
     else report_wrong_receiver (List.map (fun (receiver, _) -> (receiver, ())) overloads)
   in

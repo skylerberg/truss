@@ -239,20 +239,6 @@ let check_mode state env (value : Syntax.expression) (parameter : Types.paramete
            "`%s` may mutate its argument, and this part is lent read-only. Pass the place it is \
             lent from `mut`, so that it is lent `mut`."
            name)
-  | Own, Lent _ ->
-      if not (State.is_plain state type_) then
-        State.report state Missing_mode (State.read_span state value.id)
-          ~fixes:
-            (if State.is_copyable state type_ then
-               [
-                 State.fix "Pass a copy."
-                   [ State.insert (State.read_span state value.id).stop ".copy()" ];
-               ]
-             else [])
-          (Printf.sprintf
-             "`%s` takes ownership of its argument, and a part that is lent cannot be moved. Pass \
-              a copy."
-             name)
   | Mut, (Temporary | With_mode (Own, _)) ->
       State.report state Wrong_mode (State.read_span state value.id)
         (Printf.sprintf "`%s` mutates its argument in place, so it must be a place passed `mut`."
@@ -268,7 +254,7 @@ let check_mode state env (value : Syntax.expression) (parameter : Types.paramete
                 [ Diagnostic.delete (locate_mode_keyword state value inner) ];
             ]
           (Printf.sprintf "`%s` copies implicitly, so it needs no `own`." (State.show state type_))
-  | Own, Temporary -> ()
+  | Own, (Temporary | Lent _) -> ()
   | Own, Place when Hashtbl.find_opt state.yielded value.id = Some Mut ->
       if not (State.is_plain state type_) then
         State.report state Missing_mode (State.read_span state value.id)
