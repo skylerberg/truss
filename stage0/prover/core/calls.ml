@@ -47,7 +47,7 @@ let requires_fix (context : State.context) (frame : State.frame) (part : State.p
           requirement.names
       in
       if List.for_all Option.is_some replacements then
-        Facts.add_requires context
+        Facts.add_requires context frame
           [
             Substituted
               { key; clause = clause.origin; replacements = List.filter_map Fun.id replacements };
