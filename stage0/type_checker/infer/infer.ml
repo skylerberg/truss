@@ -35,6 +35,10 @@ let body (lookups : Lookups.t) key =
 let derived = Derived.form
 let show_resolution = Tables.show_resolution
 
+let statement_diverges (tables : tables) =
+  State.diverges ~is_never:(fun (value : Syntax.expression) ->
+      match tables.types.(value.id) with Some Types.Never -> true | _ -> false)
+
 type form_origin = Written of Resolve.Names.key | Generated | Inherited of Resolve.Names.key
 
 let form_origin (interface : Interface.Lookups.t) ~is_derived (path : Path.t) =

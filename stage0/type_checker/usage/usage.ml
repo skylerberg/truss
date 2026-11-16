@@ -105,38 +105,10 @@ let check_unused context (definition : definition) =
           (Printf.sprintf "`%s` is never used. Bind it to `_` instead." name.text))
     (pattern_bindings definition)
 
-let diverges context (value : expression) =
-  match context.tables.types.(value.id) with Some Types.Never -> true | _ -> false
-
-let rec statement_diverges context (written : statement) =
-  match written.kind with
-  | Parallel body | Concurrent body -> List.exists (statement_diverges context) body.statements
-  | Expression value -> diverges context value
-  | Let { value; _ } -> diverges context value
-  | Assignment { value; _ } -> diverges context value
-  | While { condition = { kind = True; _ }; body; _ } ->
-      let breaks (block : block) =
-        let has_break = ref false in
-        let rec statement (written : statement) =
-          match written.kind with
-          | For _ | While _ -> ()
-          | _ -> Syntax_walk.statement_parts ~expression ~statement written
-        and expression (value : expression) =
-          match value.kind with
-          | Break -> has_break := true
-          | Lambda _ -> ()
-          | _ -> Syntax_walk.expression_parts ~expression ~statement value
-        in
-        List.iter statement block.statements;
-        !has_break
-      in
-      not (breaks body)
-  | _ -> false
-
 let check_block context (written : block) =
   let rec check_statements = function
     | first :: (next :: _ as rest) ->
-        if statement_diverges context first then begin
+        if Infer.statement_diverges context.tables first then begin
           let last = List.nth rest (List.length rest - 1) in
           let unreachable = context.spans.(next.id) in
           let start = Source.fragment_line_start (Lazy.force context.text) unreachable.start in

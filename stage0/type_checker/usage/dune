@@ -1,4 +1,4 @@
 (library
  (name usage)
  (modules_without_implementation lookups)
- (libraries diagnostic source resolve syntax syntax_walk types infer))
+ (libraries diagnostic source resolve syntax syntax_walk infer))

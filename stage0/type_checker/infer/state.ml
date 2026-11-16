@@ -603,15 +603,18 @@ let in_statement state env (span : Source.Definition_span.t) body =
   state.frames <- List.tl state.frames;
   result
 
-let rec statement_diverges state (written : statement) =
+let rec diverges ~is_never (written : statement) =
   match written.kind with
-  | Expression value -> (
+  | Expression value | Let { value; _ } | Assignment { value; _ } -> is_never value
+  | While { condition = { kind = True; _ }; body; _ } -> not (Syntax_walk.contains_break body)
+  | Parallel body | Concurrent body -> List.exists (diverges ~is_never) body.statements
+  | _ -> false
+
+let statement_diverges state =
+  diverges ~is_never:(fun (value : expression) ->
       match state.tables.types.(value.id) with
       | Some type_ -> resolve state type_ = Types.Never
       | None -> false)
-  | While { condition = { kind = True; _ }; body; _ } -> not (Syntax_walk.contains_break body)
-  | Parallel body | Concurrent body -> List.exists (statement_diverges state) body.statements
-  | _ -> false
 
 let build_block state (written : block) : Core.block =
   let rec build_statements (statements : statement list) =

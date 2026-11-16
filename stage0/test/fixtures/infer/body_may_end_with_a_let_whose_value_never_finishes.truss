@@ -1,0 +1,7 @@
+fn f(flag: Bool) -> Int64 {
+  let count = if flag {
+    return 1
+  } else {
+    return 2
+  }
+}

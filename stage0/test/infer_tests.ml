@@ -336,6 +336,8 @@ let () =
       fine Fixtures.Infer.empty_list_takes_its_elements_type_from_the);
   test "a body's value must have the result type" (fun () ->
       one_diagnostic Fixtures.Infer.bodys_value_must_have_the_result_type "types.mismatch");
+  test "a body may end with a let whose value never finishes" (fun () ->
+      fine Fixtures.Infer.body_may_end_with_a_let_whose_value_never_finishes);
   test "an arm of type Never does not contribute to the type of the match" (fun () ->
       fine Fixtures.Infer.arm_of_type_never_does_not_contribute_to_the_type);
   test "? needs the function's error type" (fun () ->
