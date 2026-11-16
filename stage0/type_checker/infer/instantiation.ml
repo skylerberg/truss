@@ -1,6 +1,5 @@
 open Syntax
 open State
-module Environment = Interface.Environment
 
 let check_evidence_grants state (span : Source.Definition_span.t) evidence =
   let impls =

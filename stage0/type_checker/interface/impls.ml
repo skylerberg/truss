@@ -1,4 +1,3 @@
-module Names = Resolve.Names
 open Environment
 
 let find_head = function Types.Named { path; _ } -> Some path | _ -> None
