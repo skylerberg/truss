@@ -1,0 +1,5 @@
+fn bumped(start: Int64) -> Int64 {
+  var count = start
+  count += 1
+  count
+}
