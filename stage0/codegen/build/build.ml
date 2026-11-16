@@ -38,7 +38,7 @@ let compile_one toolchain cache settings (name, text) =
     let partial = base ^ ".o" in
     match
       Toolchain.compile toolchain ~optimization:settings.optimization ~extra:settings.extra ~source
-        ~output:partial ()
+        ~output:partial
     with
     | Ok () ->
         Sys.rename partial output;
@@ -126,7 +126,7 @@ let program ?progress ?(tests = false) ?(copied = fun _ -> []) toolchain cache e
   let runtime = ("the runtime", Startup.runtime ~tests) in
   match objects ?progress toolchain cache settings ((runtime :: emitted) @ sources) with
   | Error message -> Error message
-  | Ok objects -> Toolchain.link toolchain ~extra:settings.extra ~objects ~output ()
+  | Ok objects -> Toolchain.link toolchain ~extra:settings.extra ~objects ~output
 
 module For_testing = struct
   let objects = objects

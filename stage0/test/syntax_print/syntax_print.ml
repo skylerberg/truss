@@ -350,8 +350,6 @@ let signature (signature : Syntax.signature) =
   ]
   @ list clause signature.clauses
 
-let function_ written body = form "fn" (signature written @ [ optional block body ])
-
 let law ({ name; parameters; requires; body } : Syntax.law) =
   form "law"
     ([ name.text; form "" (list parameter parameters) ]
@@ -359,7 +357,7 @@ let law ({ name; parameters; requires; body } : Syntax.law) =
     @ [ block body ])
 
 let function_definition (definition : Syntax.function_definition) =
-  function_ definition.signature (Some definition.body)
+  form "fn" (signature definition.signature @ [ block definition.body ])
 
 let field (field : Syntax.field) =
   match field.kind with

@@ -37,7 +37,7 @@ let () =
                       Binary (Less_equal, Codegen_support.copy 1, Codegen_support.constant_int32 10)
                     );
                 ]
-                (Switch { value = Codegen_support.copy 2; cases = [ (Z.one, 2) ]; default = Some 3 });
+                (Switch { value = Codegen_support.copy 2; cases = [ (Z.one, 2) ]; default = 3 });
               Codegen_support.block
                 [
                   Assign

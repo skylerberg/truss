@@ -229,7 +229,7 @@ and prefix state env ?expected (value : Syntax.expression) operator (inner : Syn
               state value ~trait:(Well_known.path Negate) ~method_:"negate" ~left:type_ ~right:None
           end)
 
-and operator_call ?(operands = []) state (value : Syntax.expression) ~trait ~method_ ~left ~right =
+and operator_call ~operands state (value : Syntax.expression) ~trait ~method_ ~left ~right =
   let arguments = match right with Some right -> [ Types.Type right ] | None -> [] in
   let reference = State.trait_reference ~arguments trait in
   let result = State.fresh state in

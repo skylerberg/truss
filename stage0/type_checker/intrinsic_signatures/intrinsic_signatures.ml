@@ -41,7 +41,7 @@ let signature (operation : Intrinsic.operation) : Types.signature =
     make ~generics:[ "Value" ] ~output:(Returns output) [ input "left" value; input "right" value ]
   in
   let unary output = make ~generics:[ "Value" ] ~output:(Returns output) [ input "value" value ] in
-  let over_array ?(output = fun _ -> Types.Returns Types.unit) parameters =
+  let over_array ~output parameters =
     let count = parameter operation "count" in
     let array =
       Types.Named

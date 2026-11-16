@@ -1,4 +1,4 @@
-val of_definition : ?is_specification:bool -> Core.definition -> Tree.t option
+val of_definition : is_specification:bool -> Core.definition -> Tree.t option
 val of_expression : ?parameters:Core.parameter list -> Core.expression -> Tree.t
 
 val of_clause :

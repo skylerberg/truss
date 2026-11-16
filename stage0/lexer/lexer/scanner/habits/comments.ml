@@ -72,8 +72,8 @@ let attribute (cursor : Cursor.t) =
 let scan (cursor : Cursor.t) ~inline =
   let start = cursor.position in
   let is offset character = Cursor.is_at cursor (start + offset) character in
-  let rejected ?code length message =
-    Source_text.reject ?code cursor ~length message;
+  let rejected ~code length message =
+    Source_text.reject ~code cursor ~length message;
     true
   in
   if is 0 '/' && (is 1 '/' || is 1 '*') then

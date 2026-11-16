@@ -71,6 +71,6 @@ let projection_type env ~environment ty projection =
 
 let successors = function
   | Goto block -> [ block ]
-  | Switch { cases; default; _ } -> List.map snd cases @ Option.to_list default
+  | Switch { cases; default; _ } -> List.map snd cases @ [ default ]
   | Switch_variant { cases; default; _ } -> List.map snd cases @ Option.to_list default
   | Return _ | Unreachable | Fail _ -> []

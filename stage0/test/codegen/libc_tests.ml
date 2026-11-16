@@ -67,7 +67,7 @@ let compiles text =
     (Lazy.force Codegen_support.compiler)
     ~optimization:O1
     ~extra:(Lazy.force Codegen_support.strict)
-    ~source ~output:(source ^ ".o") ()
+    ~source ~output:(source ^ ".o")
 
 let linux : Libc.system = { os = Linux; architecture = X86_64 }
 
@@ -376,11 +376,12 @@ let () =
     (fun () ->
       let uint32 = Codegen_support.named "UInt32" in
       let extra = extra @ [ (Ground.to_string uint32, Memory_layout.Scalar (Integer UInt32)) ] in
-      let operate builder ?destination operation arguments =
+      let operate builder ~destination operation arguments =
         ignore
           (Intrinsics.lower
              (Codegen_support.shape_env ~extra ())
-             builder intrinsic_types operation ~type_arguments:[] arguments ~destination
+             builder intrinsic_types operation ~type_arguments:[] arguments
+             ~destination:(Some destination)
              ~site:{ definition = Codegen_support.definition "entry"; offset = 0 })
       in
       Codegen_support.expect_status ~extra 16
