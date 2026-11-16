@@ -704,6 +704,11 @@ let () =
         "ownership.use_after_move",
         Fixtures.Ownership.bag_copied_for_its_receiver_then_read );
     ];
+  Harness.test "a field of an element is part of an element, which cannot be moved, with a fix"
+    (fun () ->
+      expect_one_diagnostic ~says:"`rows[...].label` is part of an element"
+        Fixtures.Ownership.field_of_an_element_moved_into_a_var "ownership.not_owned"
+        ~fixed:Fixtures.Ownership.field_of_an_element_copied_into_a_var);
   Harness.test "an associated type that grows a type reaches the recursion limit" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.associated_type_that_grows_its_type
         "types.recursion_limit" ~says:"needs more than 64 nested types");
