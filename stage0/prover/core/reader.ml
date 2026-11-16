@@ -953,7 +953,7 @@ and read_statement context frame run (statement : Mir.statement) =
   let location = Facts.locate context frame.source statement.origin in
   match statement.kind with
   | Basic basic -> read_basic context frame run statement ~location basic
-  | Assert_by_bit_vector { condition; names; code } ->
+  | Assert_by_bit_vector { names; code; _ } ->
       let named =
         List.map
           (fun local ->
@@ -964,8 +964,7 @@ and read_statement context frame run (statement : Mir.statement) =
           names
       in
       let frame, term = read_value context frame run code in
-      Assertions.check_assertion context frame
-        ~origin:(Option.value (find_operand_origin condition) ~default:statement.origin)
+      Assertions.check_assertion context frame ~origin:statement.origin
         ~bit_vector:(Some (named, fun isolated -> snd (read_value context isolated run code)))
         term;
       Some frame
@@ -1318,9 +1317,7 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
         }
   | Lend { part; call } -> read_lend context frame run part call
   | Assert condition ->
-      Assertions.check_assertion context frame
-        ~origin:(Option.value (find_operand_origin condition) ~default:statement.origin)
-        ~bit_vector:None
+      Assertions.check_assertion context frame ~origin:statement.origin ~bit_vector:None
         (read_operand context frame run condition);
       Some frame
   | Ghost_assert { condition; by_bit_vector } ->
