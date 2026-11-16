@@ -325,9 +325,7 @@ and structural ?(seen = []) state (type_ : Types.ty) =
             let derives_equal =
               List.exists (fun derived -> Well_known.is Equal derived) interface.derives
             in
-            let substitution =
-              Option.value ~default:[] (Types.make_substitution interface.type_generics arguments)
-            in
+            let substitution = Types.make_substitution interface.type_generics arguments in
             let fields_structural (fields : Types.field list) =
               List.for_all
                 (fun (field : Types.field) ->

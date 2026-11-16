@@ -7,11 +7,11 @@ let list_bound_diagnostics lookups ~package ~bounds ~spans named =
       match type_ with
       | Named { path; arguments } -> (
           match
-            Option.bind (Definition.read_type_interface lookups path)
+            Option.map
               (fun (interface : Types.type_interface) ->
-                Option.map
-                  (Impls.list_required_bounds interface.type_generics)
+                Impls.list_required_bounds interface.type_generics
                   (Types.make_substitution interface.type_generics arguments))
+              (Definition.read_type_interface lookups path)
           with
           | Some required ->
               List.concat_map

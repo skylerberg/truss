@@ -58,12 +58,12 @@ let fits context ~expected ~found =
   | _ -> Types.equal (normal context expected) (normal context found)
 
 let substitution context generics arguments ~subject =
-  match Types.make_substitution generics arguments with
-  | Some substitution -> substitution
-  | None ->
-      context.wrong "%s has %d type arguments for %d generic parameters" subject
-        (List.length arguments) (List.length generics);
-      []
+  if List.length generics = List.length arguments then Types.make_substitution generics arguments
+  else begin
+    context.wrong "%s has %d type arguments for %d generic parameters" subject
+      (List.length arguments) (List.length generics);
+    []
+  end
 
 let instantiated context (callee : Core.callee) =
   let subject = "a call of `" ^ callee_name callee ^ "`" in
@@ -430,6 +430,16 @@ let check_semantics context (form : Core.t) =
 let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolve.Names.key option)
     (form : Core.t) =
   let module T = Types in
+  let bounds parameter =
+    let of_key key =
+      Option.value ~default:[]
+        (List.assoc_opt parameter (interface.elaborated_interface key).scope.bounds)
+    in
+    match key with
+    | Some key -> of_key key @ Option.fold ~none:[] ~some:of_key (interface.names.container key)
+    | None -> []
+  in
+  let normalize = Interface.Impls.normalize interface ~bounds in
   let at = ref None in
   let name = match key with Some key -> Resolve.Names.show_key key | None -> Path.show path in
   let source =
@@ -629,7 +639,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
     | Local { local; type_ = used; _ } -> (
         type_ "a local" used;
         match Hashtbl.find_opt local_types local with
-        | Some bound when not (T.equal bound used) ->
+        | Some bound when not (T.equal (normalize bound) (normalize used)) ->
             wrong "a local is used with the type `%s` and bound with the type `%s`" (T.show used)
               (T.show bound)
         | _ -> ())
@@ -828,15 +838,6 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
   if !current_targets <> !compound_assignments then
     wrong "`Current_target` appears %d times in %d compound assignments" !current_targets
       !compound_assignments;
-  let bounds parameter =
-    let of_key key =
-      Option.value ~default:[]
-        (List.assoc_opt parameter (interface.elaborated_interface key).scope.bounds)
-    in
-    match key with
-    | Some key -> of_key key @ Option.fold ~none:[] ~some:of_key (interface.names.container key)
-    | None -> []
-  in
   at := None;
   check_semantics { interface; wrong; at; bounds } form
 

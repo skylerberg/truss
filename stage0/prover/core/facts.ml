@@ -346,9 +346,7 @@ let visible_type (context : State.context) (ty : Types.ty) =
       match Interface.Definition.read_interface context.lookups.interface path with
       | Some (Interface.Environment.Type_interface interface)
         when (not interface.opaque) || Path.package path = Path.package context.current ->
-          let substitution =
-            Option.value ~default:[] (Types.make_substitution interface.type_generics arguments)
-          in
+          let substitution = Types.make_substitution interface.type_generics arguments in
           Some (interface, substitution)
       | _ -> None)
   | _ -> None

@@ -156,12 +156,7 @@ and elaborate_self_associated context (span : Source.Definition_span.t) (key : S
           | Some fixed -> fixed
           | None -> (
               match find_declaring_trait context trait.trait key.text with
-              | Some declaring_trait ->
-                  let trait =
-                    if Path.equal declaring_trait trait.trait then trait
-                    else { Types.trait = declaring_trait; trait_arguments = []; associated = [] }
-                  in
-                  Types.Projection { base = self; trait; name = key.text }
+              | Some _ -> Types.Projection { base = self; trait; name = key.text }
               | None ->
                   report_error_type context Unknown_associated_type context.spans.(key.id)
                     (Printf.sprintf "`%s` declares no associated type `%s`."
@@ -184,12 +179,7 @@ and elaborate_associated context base parameter (key : Syntax.name) =
         | Some fixed -> Some fixed
         | None -> (
             match find_declaring_trait context bound.trait key.text with
-            | Some declaring_trait ->
-                let trait =
-                  if Path.equal declaring_trait bound.trait then bound
-                  else { Types.trait = declaring_trait; trait_arguments = []; associated = [] }
-                in
-                Some (Types.Projection { base; trait; name = key.text })
+            | Some _ -> Some (Types.Projection { base; trait = bound; name = key.text })
             | None -> None))
       bounds
   in
@@ -230,24 +220,23 @@ and elaborate_count_name context (name : Syntax.name) : Types.argument =
   | Some (Unknown report) -> Types.Type (Types.Error report)
   | _ -> bug "`%s` is not resolved as a type argument" name.text
 
-and check_arity context (path : Syntax.path_type) shown expected =
+and check_arity context (path : Syntax.path_type) shown expected :
+    (unit, Diagnostic.reported) Stdlib.result =
   match expected with
-  | None -> ()
+  | None -> Ok ()
   | Some expected ->
-      let argument_count =
-        List.length
-          (List.filter (function Syntax.Constraint _ -> false | _ -> true) path.arguments)
+      let written =
+        List.filter (function Syntax.Constraint _ -> false | _ -> true) path.arguments
       in
+      let argument_count = List.length written in
       if argument_count <> List.length expected then
-        report context Arity context.spans.(path.id)
-          (Printf.sprintf "`%s` takes %d %s, and %d %s given." shown (List.length expected)
-             (if List.length expected = 1 then "argument" else "arguments")
-             argument_count
-             (if argument_count = 1 then "is" else "are"))
-      else
-        let written =
-          List.filter (function Syntax.Constraint _ -> false | _ -> true) path.arguments
-        in
+        Error
+          (record_diagnostic context.diagnostics Arity context.spans.(path.id)
+             (Printf.sprintf "`%s` takes %d %s, and %d %s given." shown (List.length expected)
+                (if List.length expected = 1 then "argument" else "arguments")
+                argument_count
+                (if argument_count = 1 then "is" else "are")))
+      else begin
         List.iter2
           (fun argument (name, kind) ->
             let is_value =
@@ -262,7 +251,9 @@ and check_arity context (path : Syntax.path_type) shown expected =
                 report context Argument_kind context.spans.(path.id)
                   (Printf.sprintf "`%s`'s parameter `%s` is a type, not a value." shown name)
             | _ -> ())
-          written expected
+          written expected;
+        Ok ()
+      end
 
 and elaborate_path_type context (path : Syntax.path_type) : Types.ty =
   let shown = show_path path.path in
@@ -280,13 +271,16 @@ and elaborate_path_type context (path : Syntax.path_type) : Types.ty =
       match Intrinsic.builtin_of_path definition_path with
       | Some Never -> Types.Never
       | Some Integer -> Types.Integer
-      | Some _ | None ->
-          check_arity context path shown (Names.generics_of context.lookups.names definition_path);
-          let type_ =
-            Types.Named { path = definition_path; arguments = elaborate_arguments context path }
-          in
-          context.named := (path.id, type_) :: !(context.named);
-          type_)
+      | Some _ | None -> (
+          let arguments = elaborate_arguments context path in
+          match
+            check_arity context path shown (Names.generics_of context.lookups.names definition_path)
+          with
+          | Error report -> Types.Error report
+          | Ok () ->
+              let type_ = Types.Named { path = definition_path; arguments } in
+              context.named := (path.id, type_) :: !(context.named);
+              type_))
   | Some (Definition (Trait, _)) ->
       report_error_type context Not_a_type context.spans.(path.id)
         (Printf.sprintf "`%s` is a trait, not a type. A value of any type with it is `any %s`."
@@ -301,7 +295,6 @@ and elaborate_trait_reference ?(capability = false) context (path : Syntax.path_
     (Types.trait_reference, Diagnostic.reported) Stdlib.result =
   let shown = show_path path.path in
   let trait_reference_of trait : (Types.trait_reference, Diagnostic.reported) Stdlib.result =
-    check_arity context path shown (Names.generics_of context.lookups.names trait);
     let associated =
       List.sort compare
         (List.filter_map
@@ -310,7 +303,10 @@ and elaborate_trait_reference ?(capability = false) context (path : Syntax.path_
              | Type_argument _ | Count _ | Count_name _ -> None)
            path.arguments)
     in
-    Ok { trait; trait_arguments = elaborate_arguments context path; associated }
+    let trait_arguments = elaborate_arguments context path in
+    match check_arity context path shown (Names.generics_of context.lookups.names trait) with
+    | Error report -> Error report
+    | Ok () -> Ok { trait; trait_arguments; associated }
   in
   match find_target context path.path.last with
   | Some (Definition (Trait, trait)) -> trait_reference_of trait
@@ -351,12 +347,9 @@ and find_capability_projection context base traits (key : Syntax.name) =
   List.find_map
     (fun (bound : Types.trait_reference) ->
       Option.map
-        (fun declaring_trait ->
-          let trait =
-            if Path.equal declaring_trait bound.trait then { bound with associated = [] }
-            else { Types.trait = declaring_trait; trait_arguments = []; associated = [] }
-          in
-          Types.Capability_projection { base; trait; name = key.text })
+        (fun _ ->
+          Types.Capability_projection
+            { base; trait = { bound with associated = [] }; name = key.text })
         (find_declaring_trait ~capability:true context bound.trait key.text))
     traits
 
@@ -581,20 +574,20 @@ let elaborate_type_head context owner (head : Syntax.type_head) =
   let generics = elaborate_generics context owner head.generics in
   match find_target context head.path.last with
   | Some (Definition (Type, type_path)) ->
-      (match Names.generics_of context.lookups.names type_path with
-      | Some expected when List.length expected <> List.length generics ->
-          report context Arity context.spans.(head.id)
-            (Printf.sprintf "`%s` takes %d generic %s, and this head names %d."
-               (show_path head.path) (List.length expected)
-               (if List.length expected = 1 then "parameter" else "parameters")
-               (List.length generics))
-      | _ -> ());
-      let arguments = Types.list_generic_arguments generics in
       let type_ =
-        match Intrinsic.builtin_of_path type_path with
-        | Some Never -> Types.Never
-        | Some Integer -> Types.Integer
-        | _ -> Types.Named { path = type_path; arguments }
+        match Names.generics_of context.lookups.names type_path with
+        | Some expected when List.length expected <> List.length generics ->
+            report_error_type context Arity context.spans.(head.id)
+              (Printf.sprintf "`%s` takes %d generic %s, and this head names %d."
+                 (show_path head.path) (List.length expected)
+                 (if List.length expected = 1 then "parameter" else "parameters")
+                 (List.length generics))
+        | _ -> (
+            match Intrinsic.builtin_of_path type_path with
+            | Some Never -> Types.Never
+            | Some Integer -> Types.Integer
+            | _ ->
+                Types.Named { path = type_path; arguments = Types.list_generic_arguments generics })
       in
       (generics, type_)
   | Some (Definition (((Trait | Capability) as kind), _)) ->
@@ -730,8 +723,11 @@ let elaborate_container (context : t) (path : Path.t) (definition : Syntax.defin
                       elaborate_capabilities { context with self_capabilities = sets } written
                     in
                     let is_defined_by_this_impl = function
-                      | Types.Capability_projection { base; trait; _ } ->
-                          Types.equal base for_type && Path.equal trait.trait implements.trait
+                      | Types.Capability_projection { base; trait; name } ->
+                          Types.equal base for_type
+                          && Option.equal Path.equal
+                               (find_declaring_trait ~capability:true context trait.trait name)
+                               (Some implements.trait)
                       | _ -> false
                     in
                     if List.exists is_defined_by_this_impl (set :> Types.capability list) then begin

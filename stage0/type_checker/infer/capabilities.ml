@@ -164,8 +164,7 @@ let require_callee_uses checking scope (origin : Core.origin) (callee : Core.cal
               ~bounds:(State.bounds state)
               (Types.substitute_capabilities
                  (Interface.Properties.make_trait_substitution interface ~self:self_type trait
-                 @ Option.value ~default:[]
-                     (Types.make_substitution signature.generics type_arguments))
+                 @ Types.make_substitution signature.generics type_arguments)
                  signature.uses)
         | _ -> Types.no_capabilities)
   | Capability_method { capability; _ } ->

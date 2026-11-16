@@ -1,0 +1,11 @@
+trait Combine[Right] {
+  type Output
+
+  fn combine(self, right: Right) -> Self.Output
+}
+
+trait Joinable: Combine[Self] {}
+
+fn join[Value: Joinable](left: Value, right: Value) -> Value.Output {
+  left.combine(right)
+}

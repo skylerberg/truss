@@ -44,21 +44,21 @@ let impl_laws (lookups : Lookups.t) (key : Names.key) source =
 
 let is_specification_module (key : Names.key) = key.module_ = Well_known.specification
 
-let integer_implementors (bounds : Types.trait_reference list) =
+let integer_implementors (traits : Path.t list) =
   let signed = [ Intrinsic.Int8; Int16; Int32; Int64 ]
   and unsigned = [ Intrinsic.UInt8; UInt16; UInt32; UInt64 ] in
   List.fold_left
-    (fun found (bound : Types.trait_reference) ->
+    (fun found trait ->
       let these =
-        if Well_known.is Signed_integer bound.trait then Some signed
-        else if Well_known.is Unsigned_integer bound.trait then Some unsigned
-        else if Well_known.is Fixed_width_integer bound.trait then Some (signed @ unsigned)
+        if Well_known.is Signed_integer trait then Some signed
+        else if Well_known.is Unsigned_integer trait then Some unsigned
+        else if Well_known.is Fixed_width_integer trait then Some (signed @ unsigned)
         else None
       in
       match (found, these) with
       | Some found, Some these -> Some (List.filter (fun builtin -> List.mem builtin these) found)
       | None, these | these, None -> these)
-    None bounds
+    None traits
 
 let integer_instances (lookups : Lookups.t) (path : Path.t) =
   let generics =
@@ -67,23 +67,22 @@ let integer_instances (lookups : Lookups.t) (path : Path.t) =
         List.filter_map
           (fun (generic : Types.generic) ->
             match generic.kind with
-            | Type_generic bounds -> Some (generic.generic, bounds)
+            | Type_generic bounds ->
+                Some
+                  ( generic.generic,
+                    List.map (fun (bound : Types.trait_reference) -> bound.trait) bounds )
             | Value_generic | Capability_generic -> None)
           signature.generics
     | None -> []
   in
   let self =
     match path with
-    | Method { owner; _ } ->
-        [
-          ( Types.make_self_parameter owner,
-            [ { Types.trait = owner; trait_arguments = []; associated = [] } ] );
-        ]
+    | Method { owner; _ } -> [ (Types.make_self_parameter owner, [ owner ]) ]
     | _ -> []
   in
   List.fold_left
-    (fun instances ((parameter : Types.parameter), bounds) ->
-      match integer_implementors bounds with
+    (fun instances ((parameter : Types.parameter), traits) ->
+      match integer_implementors traits with
       | None -> instances
       | Some builtins ->
           List.concat_map

@@ -49,6 +49,12 @@ val implements :
   Types.trait_reference ->
   evidence option
 
+val find_declaring_type_trait :
+  Lookups.t -> base:Types.ty -> Types.trait_reference -> string -> Types.trait_reference
+
+val find_declaring_capability_trait :
+  Lookups.t -> base:Types.ty -> Types.trait_reference -> string -> Types.trait_reference
+
 val project_associated_type :
   Lookups.t ->
   bounds:bounds ->

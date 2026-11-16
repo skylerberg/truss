@@ -8,6 +8,12 @@ val make_trait_substitution :
 val list_bound_closure :
   Lookups.t -> self:Types.ty -> Types.trait_reference -> Types.trait_reference list
 
+val find_trait_declaring_type :
+  Lookups.t -> base:Types.ty -> Types.trait_reference -> string -> Types.trait_reference option
+
+val find_trait_declaring_capability_set :
+  Lookups.t -> base:Types.ty -> Types.trait_reference -> string -> Types.trait_reference option
+
 val list_known_bounds :
   Lookups.t ->
   bounds:(Types.parameter -> Types.trait_reference list) ->

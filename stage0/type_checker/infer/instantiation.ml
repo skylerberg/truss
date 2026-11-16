@@ -90,10 +90,9 @@ let fresh_arguments (state : State.state) (path : Path.t) =
 let require_type_bounds (state : State.state) span path arguments =
   match Interface.Definition.read_type_interface state.lookups.interface path with
   | Some interface ->
-      Option.iter
-        (require_bounds state span
-           ~of_type:(Types.Named { path; arguments })
-           interface.type_generics)
+      require_bounds state span
+        ~of_type:(Types.Named { path; arguments })
+        interface.type_generics
         (Types.make_substitution interface.type_generics arguments)
   | None -> ()
 
@@ -127,19 +126,20 @@ and named_type state (value : Syntax.expression) path type_arguments =
   in
   match type_arguments with
   | None -> type_ (instantiate_type state (State.read_span state value.id) path)
-  | Some items ->
+  | Some items -> (
       let arguments = written_arguments state items in
-      (match Resolve.Names.generics_of state.lookups.interface.names path with
+      match Resolve.Names.generics_of state.lookups.interface.names path with
       | Some expected when List.length expected <> List.length arguments ->
-          State.report state Arity (State.read_span state value.id)
+          State.error state Arity (State.read_span state value.id)
             (Printf.sprintf "`%s` takes %d %s, and %d %s given."
                (Types.show (Named { path; arguments = [] }))
                (List.length expected)
                (if List.length expected = 1 then "argument" else "arguments")
                (List.length arguments)
                (if List.length arguments = 1 then "is" else "are"))
-      | _ -> require_type_bounds state (State.read_span state value.id) path arguments);
-      type_ arguments
+      | _ ->
+          require_type_bounds state (State.read_span state value.id) path arguments;
+          type_ arguments)
 
 and written_arguments state items =
   List.filter_map

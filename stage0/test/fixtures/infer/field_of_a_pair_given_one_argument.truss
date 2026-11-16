@@ -1,0 +1,5 @@
+type Pair[First, Second](first: First, second: Second)
+
+fn first_of(pair: Pair[Int64]) -> Int64 {
+  pair.first
+}
