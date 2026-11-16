@@ -35,7 +35,6 @@
   project
   diagnostic
   file_system
-  process
   standard_library
   database
   registry

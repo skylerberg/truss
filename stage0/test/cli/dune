@@ -2,7 +2,6 @@
  (name cli_tests)
  (libraries
   harness
-  process
   substring
   unix
   cli

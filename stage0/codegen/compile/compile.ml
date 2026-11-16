@@ -511,19 +511,6 @@ let external_test compiler test =
   | Some uses -> uses <> Types.no_capabilities
   | None -> false
 
-let result_key compiler test =
-  match compiler.requests.reached_todo_types (Lower.test_key test) with
-  | _ :: _ -> None
-  | [] -> (
-      match test_key compiler test with key -> Some key | exception Lower.Unsupported _ -> None)
-
-let is_cached compiler test =
-  match compiler.results with
-  | Some results ->
-      (not (external_test compiler test))
-      && Option.is_some (Option.bind (result_key compiler test) (stored results))
-  | None -> false
-
 let incomplete_record compiler todo_types =
   {
     outcome = Incomplete;

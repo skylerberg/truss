@@ -1915,7 +1915,7 @@ The database stores three relationships:
 
 | Relationship | Recorded by | Followed by |
 |---|---|---|
-| A part read a part of another definition | The lookup that answered the read | Propagation, when the part read changes. The tools that list a definition's dependents and dependencies, and the overlap of two changes. The tests and `main` that a type defined as `todo` blocks. |
+| A part read a part of another definition | The lookup that answered the read | Propagation, when the part read changes. The tools that list a definition's dependents and dependencies. The tests and `main` that a type defined as `todo` blocks. |
 | A definition's lowered code refers to an instance | The stage that lowered it, in its output | Test keys, which hash the code a test reaches |
 | A function's MIR calls a function, names it as a value, passes an `impl` to a bound, or runs a field default or an invariant that does | The stage that built the MIR, in its output | Recursion groups, lowering's check of each call it emits, and the tests and `main` that a `todo` in a body blocks |
 
@@ -2091,7 +2091,7 @@ reachable by the other:
 | The paths a database holds are relative to the project's root. | A copy then refers to its own worktree's files. |
 | A database records its compiler and the fingerprints of the files it was built from. | A copy finds the files that differ when it is first opened, and a different compiler rebuilds it. |
 | A change set commits by writing new segment files, then replacing, by rename, the file that lists them. | A crash during propagation leaves the state before the change set or after it. A copy taken during a commit holds one of those states, or finds a segment missing and is rebuilt. Neither holds a state that no version of the files holds. |
-| A trial, such as a rename's check, an editor's open buffers, an upgrade's new lock file, another commit, another worktree, or a merge of two, is a copy of the worktree's database in memory, propagated with the files that differ, and then discarded. The changes between two databases are the parts whose values differ. | The database is a function of the files, so the copy is a correct start, and a trial costs its change, not a cold build. The worktree's database is never in a trial's state. |
+| A trial, such as a rename's check, an editor's open buffers, or an upgrade's new lock file, is a copy of the worktree's database in memory, propagated with the files that differ, and then discarded. The changes between two databases are the parts whose values differ. | The database is a function of the files, so the copy is a correct start, and a trial costs its change, not a cold build. The worktree's database is never in a trial's state. |
 | One process owns a project's database, and handles one request or one change set at a time. | No request reads a change set that is half propagated. A request that arrives during a long propagation waits for it. |
 
 ## Omitted features
