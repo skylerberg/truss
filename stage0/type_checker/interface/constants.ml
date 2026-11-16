@@ -14,12 +14,14 @@ let rec expression lookups ~visiting resolved (value : expression) : Z.t option 
       match (recurse left, recurse right) with
       | Some left, Some right -> (
           match operator with
-          | Add -> Some (Z.add left right)
-          | Subtract -> Some (Z.sub left right)
-          | Multiply -> Some (Z.mul left right)
-          | Divide -> if Z.equal right Z.zero then None else Some (Z.div left right)
-          | Remainder -> if Z.equal right Z.zero then None else Some (Z.rem left right)
-          | _ -> None)
+          | Operation (Arithmetic Add) -> Some (Z.add left right)
+          | Operation (Arithmetic Subtract) -> Some (Z.sub left right)
+          | Operation (Arithmetic Multiply) -> Some (Z.mul left right)
+          | Operation (Arithmetic Divide) ->
+              if Z.equal right Z.zero then None else Some (Z.div left right)
+          | Operation (Arithmetic Remainder) ->
+              if Z.equal right Z.zero then None else Some (Z.rem left right)
+          | Operation (Bitwise _ | Shift _) | Comparison _ | Connective _ -> None)
       | _ -> None)
   | Name path -> (
       match (resolved : Resolve.resolved).names.(path.last.id) with

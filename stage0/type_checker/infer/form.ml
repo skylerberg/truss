@@ -642,19 +642,17 @@ let convert_to_integer state (node : Core.expression) : Core.expression =
     synthetic_expression state ~origin:node.origin Types.Integer
       (Convert { conversion = To_integer; value = node })
 
-let convert_to_operation : binary -> Intrinsic.operation = function
-  | Add -> Add
-  | Subtract -> Subtract
-  | Multiply -> Multiply
-  | Divide -> Divide
-  | Remainder -> Remainder
-  | Bit_and -> Bit_and
-  | Bit_or -> Bit_or
-  | Bit_xor -> Bit_xor
-  | Shift_left -> Shift_left
-  | Shift_right -> Shift_right
-  | Equal | Not_equal | Less | Less_equal | Greater | Greater_equal | And | Or | Implies ->
-      bug "this operator is not an arithmetic operation"
+let convert_to_operation : Syntax.operation -> Intrinsic.operation = function
+  | Arithmetic Add -> Add
+  | Arithmetic Subtract -> Subtract
+  | Arithmetic Multiply -> Multiply
+  | Arithmetic Divide -> Divide
+  | Arithmetic Remainder -> Remainder
+  | Bitwise Bit_and -> Bit_and
+  | Bitwise Bit_or -> Bit_or
+  | Bitwise Bit_xor -> Bit_xor
+  | Shift Shift_left -> Shift_left
+  | Shift Shift_right -> Shift_right
 
 let build_operator state (value : expression) operation (operands : expression list) : Core.kind =
   let arguments = List.map (build_expression state) operands in
@@ -666,30 +664,30 @@ let build_operator state (value : expression) operation (operands : expression l
          else arguments);
     }
 
-let convert_to_comparison : binary -> Core.comparison = function
+let convert_to_comparison : Syntax.comparison -> Core.comparison = function
   | Equal -> Equal
   | Not_equal -> Not_equal
   | Less -> Less
   | Less_equal -> Less_equal
   | Greater -> Greater
   | Greater_equal -> Greater_equal
-  | _ -> bug "this operator is not a comparison"
 
-let build_built_in_comparison state operator (left : expression) (right : expression) : Core.kind =
+let build_built_in_comparison state comparison (left : expression) (right : expression) : Core.kind
+    =
   let left = build_expression state left in
   let right = build_expression state right in
   let left, right =
     if Types.equal left.type_ right.type_ then (left, right)
     else (convert_to_integer state left, convert_to_integer state right)
   in
-  Compare { comparison = convert_to_comparison operator; left; right }
+  Compare { comparison = convert_to_comparison comparison; left; right }
 
-let build_comparison state (value : expression) operator (left : expression) (right : expression) :
-    Core.kind =
+let build_comparison state (value : expression) comparison (left : expression) (right : expression)
+    : Core.kind =
   let recorded = read_call state value.id in
   match recorded.callee with
   | Trait_method { self_type; _ } when is_built_in_scalar self_type ->
-      build_built_in_comparison state operator left right
+      build_built_in_comparison state comparison left right
   | _ -> (
       let call =
         synthetic_expression state ~origin:value.id recorded.callee_result
@@ -711,14 +709,13 @@ let build_comparison state (value : expression) operator (left : expression) (ri
       let make_not kind : Core.kind =
         Not (synthetic_expression state ~origin:value.id Types.bool kind)
       in
-      match operator with
+      match comparison with
       | Equal -> call.kind
       | Not_equal -> Not call
       | Less -> make_matches_variant "Less"
       | Less_equal -> make_not (make_matches_variant "Greater")
       | Greater -> make_matches_variant "Greater"
-      | Greater_equal -> make_not (make_matches_variant "Less")
-      | _ -> bug "this operator is not a comparison")
+      | Greater_equal -> make_not (make_matches_variant "Less"))
 
 let binds_lent_part state (condition : Core.expression) =
   let may_alias (pattern : Core.pattern) =
@@ -773,7 +770,7 @@ let is_executable state (condition : Core.expression) =
   !executable
 
 let build_compound_assign state (written : statement) (target : expression) (value : expression)
-    operator : Core.statement_kind =
+    operation : Core.statement_kind =
   let place = place_of (build_expression state target) in
   let target_type = read_type state target in
   let current = synthetic_expression state ~origin:written.id target_type Core.Current_target in
@@ -820,7 +817,7 @@ let build_compound_assign state (written : statement) (target : expression) (val
                 },
               build_operand (read_argument_mode 1) right ))
     | Some _ -> bug "a compound assignment's call is not a trait method call"
-    | None -> make_built_in (convert_to_operation operator)
+    | None -> make_built_in (convert_to_operation operation)
   in
   Compound_assign
     {

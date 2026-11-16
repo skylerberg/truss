@@ -44,7 +44,7 @@ let rec check_arithmetic state (value : expression) =
           report state Constant_overflow (read_span state value.id)
             (Printf.sprintf "This is %s, which does not fit in `%s`, which holds %s to %s."
                (Z.to_string constant) (Types.show type_) (Z.to_string low) (Z.to_string high))
-      | Some _, None, Binary { operator = Divide | Remainder; right; _ }
+      | Some _, None, Binary { operator = Operation (Arithmetic (Divide | Remainder)); right; _ }
         when worked_out right = Some Z.zero ->
           report state Constant_overflow (read_span state right.id) "This divides by zero."
       | _ -> ())

@@ -40,7 +40,8 @@ let rec expression cursor context (value : expression) =
             functions for specifications only. Quantify over a range or a collection, as in `%s i \
             in 0..count => ...`."
            (quantifier_word quantifier) (quantifier_word quantifier))
-  | Binary { operator = Implies; operator_id; _ } when not (may_be_specification context) ->
+  | Binary { operator = Connective Implies; operator_id; _ } when not (may_be_specification context)
+    ->
       report cursor Specification_only operator_id
         "`==>` is only for specifications and the bodies of functions for specifications only; in \
          code, write `!a || b`."

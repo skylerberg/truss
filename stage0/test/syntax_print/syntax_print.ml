@@ -17,39 +17,31 @@ let intended_keyword = function
   | Intended_capability -> "capability"
   | Intended_theorem -> "theorem"
 
-let binary = function
-  | Multiply -> "*"
-  | Divide -> "/"
-  | Remainder -> "%"
-  | Add -> "+"
-  | Subtract -> "-"
-  | Shift_left -> "<<"
-  | Shift_right -> ">>"
-  | Bit_and -> "&"
-  | Bit_xor -> "^"
-  | Bit_or -> "|"
-  | Equal -> "=="
-  | Not_equal -> "!="
-  | Less -> "<"
-  | Less_equal -> "<="
-  | Greater -> ">"
-  | Greater_equal -> ">="
-  | And -> "&&"
-  | Or -> "||"
-  | Implies -> "==>"
+let operation = function
+  | Arithmetic Multiply -> "*"
+  | Arithmetic Divide -> "/"
+  | Arithmetic Remainder -> "%"
+  | Arithmetic Add -> "+"
+  | Arithmetic Subtract -> "-"
+  | Shift Shift_left -> "<<"
+  | Shift Shift_right -> ">>"
+  | Bitwise Bit_and -> "&"
+  | Bitwise Bit_xor -> "^"
+  | Bitwise Bit_or -> "|"
 
-let assignment = function
-  | Assign -> "="
-  | Add_assign -> "+="
-  | Subtract_assign -> "-="
-  | Multiply_assign -> "*="
-  | Divide_assign -> "/="
-  | Remainder_assign -> "%="
-  | Bit_and_assign -> "&="
-  | Bit_or_assign -> "|="
-  | Bit_xor_assign -> "^="
-  | Shift_left_assign -> "<<="
-  | Shift_right_assign -> ">>="
+let binary = function
+  | Operation written -> operation written
+  | Comparison Equal -> "=="
+  | Comparison Not_equal -> "!="
+  | Comparison Less -> "<"
+  | Comparison Less_equal -> "<="
+  | Comparison Greater -> ">"
+  | Comparison Greater_equal -> ">="
+  | Connective And -> "&&"
+  | Connective Or -> "||"
+  | Connective Implies -> "==>"
+
+let assignment = function Assign -> "=" | Compound written -> operation written ^ "="
 
 let escape value =
   let buffer = Buffer.create (String.length value + 2) in
