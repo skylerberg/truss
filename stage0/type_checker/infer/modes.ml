@@ -174,10 +174,12 @@ let mutate state env ~(by : mutation) (value : Syntax.expression) =
       | None when not (State.is_formula env) -> Some code
       | _ -> None)
 
-let rec note_place_without_own (state : State.state) env (place : Syntax.expression) =
+let rec note_place_without_keyword (state : State.state) env (place : Syntax.expression) ~needs =
   match place.kind with
-  | Parenthesized inner -> note_place_without_own state env inner
-  | _ -> if State.runs env then state.places_without_own <- place.id :: state.places_without_own
+  | Parenthesized inner -> note_place_without_keyword state env inner ~needs
+  | _ ->
+      if State.runs env then
+        state.places_without_keyword <- (place.id, needs) :: state.places_without_keyword
 
 type argument_form =
   | With_mode of Types.mode * Syntax.expression
@@ -271,69 +273,15 @@ let check_mode state env (value : Syntax.expression) (parameter : Types.paramete
                  (String.capitalize_ascii (State.describe state type_))))
   | Own, (Temporary | Lent _) -> ()
   | Own, Place when Hashtbl.find_opt state.yielded value.id = Some Mut ->
-      run_once_solved state type_ (fun () ->
-          if is_known_not_plain state type_ then
-            State.report state Missing_mode (State.read_span state value.id)
-              ~fixes:
-                (State.fix "Lend it `mut`."
-                   [ State.insert (State.read_span state value.id).start "mut " ]
-                ::
-                (if
-                   State.decide_property state Interface.Properties.Copyable type_
-                   = Interface.Properties.Holds
-                 then
-                   [
-                     State.fix "Pass a copy."
-                       [ State.insert (State.read_span state value.id).stop ".copy()" ];
-                   ]
-                 else []))
-              (Printf.sprintf
-                 "`%s` is a field of a value that is lent `mut`. Pass the place `mut` to lend it \
-                  too, or pass a copy."
-                 name))
-  | Own, Place -> note_place_without_own state env value
+      note_place_without_keyword state env value ~needs:Mut
+  | Own, Place -> note_place_without_keyword state env value ~needs:Own
   | Own, With_mode (Mut, _) ->
       State.report state Wrong_mode (State.read_span state value.id)
         (Printf.sprintf "`%s` takes ownership of its argument, so it is passed `own`, not `mut`."
            name)
   | (Mut | Own), With_mode (Read, _) -> ()
 
-let check_lent_value (state : State.state) env (operand : Syntax.expression) =
-  let rec check_fields ~variant (value : Syntax.expression) =
-    match (value.kind, state.tables.calls.(value.id)) with
-    | ( Call (_, arguments),
-        Some { callee = Constructor { variant = constructed; _ }; arguments = checked; _ } ) ->
-        let variant = if Option.is_some constructed then constructed else variant in
-        List.iter
-          (fun (argument : Syntax.argument) ->
-            match
-              List.find_opt
-                (fun (checked_argument : Tables.argument) ->
-                  checked_argument.expression = argument.value.id)
-                checked
-            with
-            | Some { mode = Read; _ } -> ()
-            | Some { mode = Mut; _ } -> (
-                match variant with
-                | Some variant when State.runs env ->
-                    state.diagnostics <-
-                      Diagnostic.make ~code:(Ownership Lent_mut_in_variant)
-                        (State.read_span state argument.value.id)
-                        (Printf.sprintf
-                           "This place is lent `mut` inside the variant `%s`. The caller could \
-                            replace the variant, and the place would be left without a value. Lend \
-                            the place itself, and give the caller another method that says whether \
-                            the place is there."
-                           variant)
-                      :: state.diagnostics
-                | _ -> ())
-            | _ -> check_fields ~variant argument.value)
-          arguments
-    | _ -> ()
-  in
-  check_fields ~variant:None operand
-
 let note_owned_value state env (value : Syntax.expression) =
   match classify_argument state value with
-  | Place -> note_place_without_own state env value
+  | Place -> note_place_without_keyword state env value ~needs:Own
   | With_mode _ | Lent _ | Temporary -> ()

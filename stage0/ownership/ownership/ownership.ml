@@ -25,7 +25,7 @@ let check_definition (lookups : Lookups.t) (key : Resolve.Names.key) : result =
           Option.value ~default:[] (List.assoc_opt parameter elaborated.scope.bounds));
       spans = lazy (lookups.interface.names.read_spans key);
       mode_keywords = Hashtbl.create 8;
-      places_without_own = Hashtbl.create 8;
+      places_without_keyword = Hashtbl.create 8;
       names = Context.Local_table.create 32;
       binding_modes = Context.Local_table.create 32;
       types = Context.Local_table.create 32;
@@ -44,8 +44,8 @@ let check_definition (lookups : Lookups.t) (key : Resolve.Names.key) : result =
     (fun (mir : Mir.Graph.t) ->
       Context.collect context mir ~mode_keywords:(lookups.list_mode_keywords key);
       List.iter
-        (fun origin -> Hashtbl.replace context.places_without_own origin ())
-        (lookups.list_places_without_own key);
+        (fun (origin, needs) -> Hashtbl.replace context.places_without_keyword origin needs)
+        (lookups.list_places_without_keyword key);
       let returns_to_caller =
         match elaborated.interface with Function_interface _ -> true | _ -> false
       in
@@ -57,7 +57,8 @@ let check_definition (lookups : Lookups.t) (key : Resolve.Names.key) : result =
       let read_moves body = List.assq body move_analyses in
       Move_rules.check context mir ~read_moves ~returns_to_caller;
       Borrows.check context ~read_moves ~returns_to_caller mir;
-      Task_loops.check context mir)
+      Task_loops.check context mir;
+      Lent_variants.check context mir)
     mir;
   {
     diagnostics =

@@ -19,7 +19,19 @@ let decide_move context (place : Place.t) ~origin ~type_ ~is_returned ~is_captur
   let root_mode : Types.mode =
     if is_captured then Read else Context.classify_binding_mode context place.root
   in
-  if is_returned && root_mode <> Own then
+  if Hashtbl.find_opt context.places_without_keyword origin = Some Mut then
+    Refused
+      (fun context at type_ ->
+        Context.report context Needs_lent_mut at
+          ~fixes:
+            (Diagnostic.fix "Lend it `mut`."
+               [ Diagnostic.insert (Source.Definition_span.make_zero_width at.start) "mut " ]
+            :: Context.copy_fix context "Pass a copy." type_ origin)
+          (Printf.sprintf
+             "`%s` is a place in a value that is lent `mut`, so the place is lent `mut` too. Pass \
+              it `mut`, or pass a copy."
+             shown))
+  else if is_returned && root_mode <> Own then
     if Context.is_view context type_ then Reads
     else
       Refused
@@ -47,7 +59,7 @@ let decide_move context (place : Place.t) ~origin ~type_ ~is_returned ~is_captur
         refuse
           (Printf.sprintf "`%s` is %s, so it cannot be moved. Copy it instead." shown
              (if place.steps = [] then "a view" else "part of a view"))
-    | (Own | Mut), _ when Hashtbl.mem context.places_without_own origin ->
+    | (Own | Mut), _ when Hashtbl.find_opt context.places_without_keyword origin = Some Own ->
         Refused
           (fun context at type_ ->
             Context.report context Needs_owned at
