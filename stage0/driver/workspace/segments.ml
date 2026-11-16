@@ -51,7 +51,7 @@ let parse_list text =
   | _ -> None
 
 let open_ directory ~stop_holder =
-  File_system.make_directory directory;
+  (try Unix.mkdir directory 0o755 with Unix.Unix_error (EEXIST, _, _) -> ());
   let ignored = Filename.concat directory ".gitignore" in
   if not (Sys.file_exists ignored) then File_system.write ignored "*\n";
   let lock =
@@ -166,7 +166,7 @@ let write_segment t entries =
     + List.fold_left max 0
         (list_segment_numbers t @ List.map (fun segment -> segment.number) t.segments)
   in
-  File_system.make_directory (make_segments_directory t);
+  (try Unix.mkdir (make_segments_directory t) 0o755 with Unix.Unix_error (EEXIST, _, _) -> ());
   write_durably (make_segment_path t number) text;
   { number; size = String.length text; digest = digest text }
 

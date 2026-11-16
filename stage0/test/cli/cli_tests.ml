@@ -84,7 +84,20 @@ let () =
           match Watcher.read_changes watcher with
           | Changed paths when List.mem "src/main.truss" paths -> ()
           | Changed paths -> fail "reported %s" (String.concat ", " paths)
-          | Overflow -> fail "reported an overflow"))
+          | Overflow -> fail "reported an overflow"
+          | Removed -> fail "reported a removal"));
+  test "a watcher reports that its cookie directory was removed" (fun () ->
+      let root = Harness.make_scratch_directory "unwatched" in
+      let watcher =
+        Watcher.start ~is_skipped_name:(fun _ -> false) ~cookie_directory:".truss" root
+      in
+      Fun.protect
+        ~finally:(fun () -> Watcher.stop watcher)
+        (fun () ->
+          Unix.rmdir (Filename.concat root ".truss");
+          match Watcher.read_changes watcher with
+          | Removed -> ()
+          | Changed _ | Overflow -> fail "did not report the removal"))
 
 let () =
   test "a second process reports that the project's database is open elsewhere" (fun () ->
@@ -142,6 +155,46 @@ let () =
       let status, output = capture (fun () -> Cli.Main.run_client [ "truss"; "stop" ]) in
       if status <> 0 then fail "exited with %d: %s" status output;
       if is_database_open_elsewhere root then fail "the background process still runs")
+
+let list_server_files () =
+  let directory = Filename.concat (Sys.getenv "TRUSS_CACHE") "servers" in
+  List.filter (( <> ) "server.log")
+    (Array.to_list (try Sys.readdir directory with Sys_error _ -> [||]))
+
+let list_server_files_added ~before =
+  List.sort compare (List.filter (fun name -> not (List.mem name before)) (list_server_files ()))
+
+let wait_until_deadline ~is_done =
+  let deadline = Unix.gettimeofday () +. 10. in
+  let rec wait () =
+    if (not (is_done ())) && Unix.gettimeofday () < deadline then begin
+      Unix.sleepf 0.1;
+      wait ()
+    end
+  in
+  wait ()
+
+let () =
+  test "a background process that stops leaves none of its files in the cache" (fun () ->
+      let before = list_server_files () in
+      ignore (make_package_served_by_other_build ());
+      ignore (capture (fun () -> Cli.Main.run_client [ "truss"; "stop" ]));
+      match list_server_files_added ~before with
+      | [] -> ()
+      | added -> fail "left %s" (String.concat ", " added));
+  test "a background process whose project is deleted ends, and does not make the project again"
+    (fun () ->
+      let before = list_server_files () in
+      let root = make_package_served_by_other_build () in
+      wait_until_deadline ~is_done:(fun () ->
+          match File_system.remove root with
+          | () -> true
+          | exception (Unix.Unix_error _ | Sys_error _) -> false);
+      wait_until_deadline ~is_done:(fun () -> list_server_files_added ~before = []);
+      (match list_server_files_added ~before with
+      | [] -> ()
+      | added -> fail "left %s" (String.concat ", " added));
+      if Sys.file_exists root then fail "made the project's directory again")
 
 let () =
   test "a command refuses a cache that other users can write, and exits with 2" (fun () ->
