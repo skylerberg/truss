@@ -27,20 +27,19 @@
   }
 }
 
-.area-0 { --area: #e5031a; --area-label: #ffffff; }
-.area-1 { --area: #98f608; --area-label: #000000; }
-.area-2 { --area: #9304fe; --area-label: #ffffff; }
-.area-3 { --area: #ffbf00; --area-label: #000000; }
-.area-4 { --area: #0159fe; --area-label: #ffffff; }
-.area-5 { --area: #fe5103; --area-label: #000000; }
-.area-6 { --area: #01a200; --area-label: #000000; }
-.area-7 { --area: #fc05df; --area-label: #000000; }
-.area-8 { --area: #fdf70a; --area-label: #000000; }
-.area-9 { --area: #3703f0; --area-label: #ffffff; }
-.area-10 { --area: #fc8820; --area-label: #000000; }
-.area-11 { --area: #038db3; --area-label: #000000; }
-.area-12 { --area: #808080; --area-label: #000000; }
-.area-13 { --area: #ffffff; --area-label: #000000; }
+.area-0 { --area: #e5031a; }
+.area-1 { --area: #98f608; }
+.area-2 { --area: #9304fe; }
+.area-3 { --area: #808080; }
+.area-4 { --area: #0159fe; }
+.area-5 { --area: #038db3; }
+.area-6 { --area: #01a200; }
+.area-7 { --area: #fc05df; }
+.area-8 { --area: #fdf70a; }
+.area-9 { --area: #3703f0; }
+.area-10 { --area: #fc8820; }
+.area-11 { --area: #fe5103; }
+.area-12 { --area: #ffbf00; }
 
 * {
   box-sizing: border-box;
@@ -256,12 +255,12 @@ main {
 
 #canvas .node path,
 #canvas .node polygon {
-  fill: var(--area);
-  stroke: color-mix(in srgb, var(--area) 60%, var(--ink));
+  fill: color-mix(in srgb, var(--area) 13%, var(--surface));
+  stroke: var(--area);
 }
 
 #canvas .node text {
-  fill: var(--area-label);
+  fill: var(--ink);
 }
 
 #canvas .node a {
@@ -314,7 +313,7 @@ body.areas-page #canvas svg.focused .edge text {
 #canvas .node.focus polygon,
 #canvas .node.member path,
 #canvas .node.member polygon {
-  stroke: var(--ink);
+  fill: color-mix(in srgb, var(--area) 35%, var(--surface));
   stroke-width: 2.6;
 }
 
