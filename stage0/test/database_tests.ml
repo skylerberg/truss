@@ -248,10 +248,12 @@ let () =
             Harness.fail "%s" message;
             -1
       in
+      let wait_for_first_periodic_work () = ignore (measure_served "two") in
       Fun.protect
         ~finally:(fun () -> ignore (Workspace.stop_servers ()))
         (fun () ->
           ignore (measure_served "one");
+          wait_for_first_periodic_work ();
           let servers = Filename.concat cache "servers" in
           let list_files () =
             List.sort compare
