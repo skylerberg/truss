@@ -196,7 +196,7 @@ let rec expression builder (node : Core.expression) : operand option =
         in
         hold (Operation { operation; type_arguments; operands })
     | Compare { comparison; left; right } ->
-        let* left, right = operand_pair builder left right in
+        let* left, right = evaluate_pair builder left right in
         hold (Compare { comparison; left; right })
     | Not inner ->
         let* inner = expression builder inner in
@@ -325,7 +325,7 @@ let rec expression builder (node : Core.expression) : operand option =
     | Yielded -> hold (Specification Yielded)
     | Old inner -> in_old builder (fun () -> expression builder inner)
     | Identical (first, second) ->
-        let* first, second = operand_pair builder first second in
+        let* first, second = evaluate_pair builder first second in
         hold (Specification (Identical (first, second)))
     | Specification_function { function_; arguments } ->
         let rec unconverted (argument : Core.expression) =
@@ -356,7 +356,7 @@ and hold_operand builder ~is_last loans value type_ origin =
       if not is_last then loans := start_loan builder value Read Operand_evaluation origin :: !loans);
   value
 
-and operand_pair builder (first : Core.expression) (second : Core.expression) =
+and evaluate_pair builder (first : Core.expression) (second : Core.expression) =
   let loans = ref [] in
   let hold_node (node : Core.expression) ~is_last =
     let* value = expression builder node in

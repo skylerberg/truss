@@ -18,16 +18,17 @@ type code = {
   mutable nested : (int * (string * string)) list;
 }
 
-type outline = {
-  index : int;
-  parent : int;
-  parts : Lowered.local list;
-  holder : Lowered.local;
-  environment : Lowered.local;
-}
+type role =
+  | Own
+  | Outlined of {
+      index : int;
+      parent : int;
+      parts : Lowered.local list;
+      holder : Lowered.local;
+      environment : Lowered.local;
+    }
 
-type role = Own | Outlined of outline
-type signature = { parameters : Lowered.local list; result : Lowered.ty option; returns : bool }
+type prototype = { parameters : Lowered.local list; result : Lowered.ty option; returns : bool }
 
 type function_ = {
   code : code;
@@ -234,23 +235,17 @@ let write_in builder number body =
   builder.current <- current;
   builder.pending <- pending
 
-let outline builder ~nested ~parts body =
+let outline builder ~index ~parts body =
   let code = (current_function builder).code in
-  let holder = local builder ~name:"environment" (Environment nested) in
+  let holder = local builder ~name:"environment" (Environment index) in
   let arrives = local builder ~name:"environment" (Raw (Nullable_pointer Opaque)) in
-  let environment = local builder (Pointer { target = Environment nested; writable = false }) in
+  let environment = local builder (Pointer { target = Environment index; writable = false }) in
   let entry = block builder in
   Dynarray.add_last builder.functions
     (new_function ~code
        ~role:
          (Outlined
-            {
-              index = nested;
-              parent = builder.function_;
-              parts = arrives :: parts;
-              holder;
-              environment;
-            })
+            { index; parent = builder.function_; parts = arrives :: parts; holder; environment })
        ~entry);
   let number = Dynarray.length builder.functions - 1 in
   let function_ = Dynarray.get builder.functions number in
@@ -487,9 +482,9 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
       (header, resolve (Buffer.contents body) name))
     functions
 
-let write_functions builder ~own_symbol signature =
+let write_functions builder ~own_symbol prototype =
   let functions = Dynarray.to_array builder.functions in
-  let texts = write_function_texts builder ~own_symbol signature in
+  let texts = write_function_texts builder ~own_symbol prototype in
   Array.iteri
     (fun number (function_ : function_) ->
       match function_.role with
@@ -499,22 +494,22 @@ let write_functions builder ~own_symbol signature =
     functions;
   texts.(0)
 
-let build builder signature : instance =
+let build builder prototype : instance =
   let own = Dynarray.get builder.functions 0 in
-  let main = write_functions builder ~own_symbol:(Instance.symbol own.code.key) signature in
+  let own_text = write_functions builder ~own_symbol:(Instance.symbol own.code.key) prototype in
   {
     key = own.code.key;
     context = own.code.context;
-    main;
+    own = own_text;
     nested = own.code.nested;
     weight = own.size;
   }
 
-let nested parent ~index ~environment body =
+let build_nested parent ~index ~environment body =
   let code = (current_function parent).code in
   code.context.environments <-
     Keys.add (Environment (Instance.symbol code.key, index)) environment code.context.environments;
   let builder = start_function (new_builder parent.env) ~code in
-  let signature = body builder in
+  let prototype = body builder in
   code.nested <-
-    (index, write_functions builder ~own_symbol:(nested_symbol code index) signature) :: code.nested
+    (index, write_functions builder ~own_symbol:(nested_symbol code index) prototype) :: code.nested

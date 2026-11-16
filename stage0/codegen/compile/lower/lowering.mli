@@ -125,7 +125,7 @@ val finish_function :
   first:Lowered.local list ->
   rest:Lowered.local list ->
   unit ->
-  Emit_c.Builder.signature
+  Emit_c.Builder.prototype
 
 val finish_instance :
   state -> ?returns:bool -> rest:Lowered.local list -> unit -> Emit_c.Builder.instance

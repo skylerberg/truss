@@ -127,14 +127,14 @@ let write builder (function_ : function_) =
       Builder.finish builder block.terminator)
     function_.blocks;
   ({ parameters = function_.parameters; result = function_.result; returns = function_.returns }
-    : Builder.signature)
+    : Builder.prototype)
 
 let instance ?(nested = []) name main : instance =
  fun env ->
   let builder = Emit_c.Builder.create env ~key:(key name) in
   List.iteri
     (fun index (function_ : function_) ->
-      Emit_c.Builder.nested builder ~index ~environment:function_.environment (fun nested ->
+      Emit_c.Builder.build_nested builder ~index ~environment:function_.environment (fun nested ->
           write nested function_))
     nested;
   Emit_c.Builder.build builder (write builder main)

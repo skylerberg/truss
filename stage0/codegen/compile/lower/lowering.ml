@@ -106,7 +106,7 @@ let outlined st ~parts body =
   incr st.nested;
   let enclosing = st.lend_record in
   st.lend_record <- None;
-  let holder = Emit_c.Builder.outline st.builder ~nested ~parts body in
+  let holder = Emit_c.Builder.outline st.builder ~index:nested ~parts body in
   st.lend_record <- enclosing;
   (nested, Lowered.Address { place = at holder; writable = false })
 
@@ -249,7 +249,7 @@ let with_scope st kind body =
 let in_scope st body = with_scope st Bindings body
 let in_statement st body = with_scope st Statement body
 
-let finish_function st ?(returns = true) ~first ~rest () : Emit_c.Builder.signature =
+let finish_function st ?(returns = true) ~first ~rest () : Emit_c.Builder.prototype =
   (match st.scopes with [ scope ] -> drop_scope st scope | _ -> bug "a function ended in a scope");
   finish st.builder (if returns then return_result st else Unreachable);
   let pointer = match st.result with Through pointer -> Some pointer | _ -> None in

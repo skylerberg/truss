@@ -153,7 +153,7 @@ let fragment env (compiled : compiled) =
     match compiled with
     | Code code ->
         let nested = List.sort compare code.nested in
-        ( List.map snd nested @ [ code.main ],
+        ( List.map snd nested @ [ code.own ],
           "",
           Functions { nested = List.length nested; weight = code.weight } )
     | Data data -> ([], data_c context data, Static_data)

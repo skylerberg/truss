@@ -76,14 +76,14 @@ let () =
       Emit_c.Builder.start builder (Emit_c.Builder.block builder);
       Emit_c.Builder.emit builder (Assign (at parameter, Use (constant_int32 5)));
       let first =
-        Emit_c.Builder.outline builder ~nested:0 ~parts:[] (fun () ->
+        Emit_c.Builder.outline builder ~index:0 ~parts:[] (fun () ->
             let own = Emit_c.Builder.local builder ~name:"own" int in
             Emit_c.Builder.emit builder (Assign (at own, add parameter parameter));
             Emit_c.Builder.emit builder (Assign (at sum, add own parameter));
             Emit_c.Builder.finish builder (Return None))
       in
       let second =
-        Emit_c.Builder.outline builder ~nested:1 ~parts:[] (fun () ->
+        Emit_c.Builder.outline builder ~index:1 ~parts:[] (fun () ->
             Emit_c.Builder.emit builder (Assign (at other, Use (copy parameter)));
             Emit_c.Builder.finish builder (Return None))
       in

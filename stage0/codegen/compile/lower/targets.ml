@@ -217,7 +217,7 @@ let nested_function st ~(function_type : Ground.function_type) ~(output : Types.
       (fun (name, _, ty) -> (name, Lowered.Pointer { target = Value ty; writable = false }))
       captured
   in
-  Emit_c.Builder.nested st.builder ~index ~environment (fun builder ->
+  Emit_c.Builder.build_nested st.builder ~index ~environment (fun builder ->
       let environment_local = at (local st.builder (Environment index)) in
       List.iter
         (fun (name, place, _) ->
