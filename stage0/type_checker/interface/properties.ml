@@ -370,13 +370,13 @@ let compute_component_facts (lookups : Lookups.t) interfaces =
   in
   Path.Map.bindings (settle (map_each (fun _ _ -> empty)))
 
-type answer = Holds | Fails | Unknown of Types.ty
+type decision = Holds | Fails | Depends_on of Types.ty
 
-let compute_answer ~is_conjunction conditions =
+let compute_decision ~is_conjunction conditions =
   match conditions with
   | Some [] -> if is_conjunction then Holds else Fails
   | None -> if is_conjunction then Fails else Holds
-  | Some (open_type :: _) -> Unknown open_type
+  | Some (open_type :: _) -> Depends_on open_type
 
 let decide_property (lookups : Lookups.t) ~list_bounds ~normalize property type_ =
   let compute_leaf type_ =
@@ -391,7 +391,7 @@ let decide_property (lookups : Lookups.t) ~list_bounds ~normalize property type_
     in
     if adds_nothing then Some [] else None
   in
-  compute_answer
+  compute_decision
     ~is_conjunction:
       (match property with Copyable | Plain -> true | View | Holds_function -> false)
     (compute_conditions lookups ~facts_of:lookups.read_type_facts ~resolve:normalize ~compute_leaf
@@ -401,7 +401,7 @@ let decide_storable (lookups : Lookups.t) ~list_bounds ~normalize type_ =
   let compute_leaf type_ =
     if has_bound lookups ~list_bounds type_ (Well_known.make_path Storable) then Some [] else None
   in
-  compute_answer ~is_conjunction:true
+  compute_decision ~is_conjunction:true
     (compute_conditions lookups ~facts_of:lookups.read_type_facts ~resolve:normalize ~compute_leaf
        View (normalize type_))
 
