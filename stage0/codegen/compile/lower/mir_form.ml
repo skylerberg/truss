@@ -17,7 +17,7 @@ let read_parameter_defaults (context : Definitions.context) path :
 
 let extract_parameter (body : Mir.Graph.body) local =
   match body.locals.(local) with
-  | { kind = Source { mode; name; _ }; type_; _ } -> (mode, name, type_)
+  | { kind = Source { local = core; mode; _ }; type_; _ } -> (mode, Mir.find_local_name core, type_)
   | _ -> Definitions.raise_bug "a parameter that is no source local"
 
 let read_spans st = (Lowering.require_written st).spans

@@ -197,7 +197,7 @@ and is_equivalent_capture renaming ({ local; type_ } : Core.capture) (after : Co
 
 and is_equivalent_binder renaming (before : Core.binder) (after : Core.binder) =
   match (before, after) with
-  | Over_type { local; name = _; type_ }, Over_type after ->
+  | Over_type { local; type_ }, Over_type after ->
       corresponds renaming local after.local && Types.equal type_ after.type_
   | Over_range { pattern = bound; start; stop; inclusive }, Over_range after ->
       is_equivalent_pattern renaming bound after.pattern
@@ -329,7 +329,7 @@ and is_equivalent_pattern renaming ({ id = _; origin = _; type_; kind = form } :
   &&
   match (form, after.kind) with
   | Wildcard, Wildcard -> true
-  | Bind { local; name = _; is_var; mode }, Bind after ->
+  | Bind { local; is_var; mode }, Bind after ->
       corresponds renaming local after.local && Bool.equal is_var after.is_var && mode = after.mode
   | Variant { variant; fields }, Variant after ->
       String.equal variant after.variant
@@ -369,16 +369,16 @@ and is_equivalent_range_bound (before : Core.range_bound) (after : Core.range_bo
 
 let is_equivalent_callback_contract renaming ({ inputs; requires } : Core.callback_contract)
     (after : Core.callback_contract) =
-  List.equal
-    (fun (local, _) (after_local, _) -> corresponds renaming local after_local)
-    inputs after.inputs
+  List.equal (corresponds renaming) inputs after.inputs
   && List.equal (is_equivalent_expression renaming) requires after.requires
 
 let is_equivalent_parameter renaming
-    ({ local; name; mode; type_; default; callback_contract = contract } : Core.parameter)
+    ({ local; mode; type_; default; callback_contract = contract } : Core.parameter)
     (after : Core.parameter) =
   corresponds renaming local after.local
-  && String.equal name after.name && mode = after.mode && Types.equal type_ after.type_
+  && Option.equal String.equal (Core_walk.find_local_name local)
+       (Core_walk.find_local_name after.local)
+  && mode = after.mode && Types.equal type_ after.type_
   && Option.equal (is_equivalent_expression renaming) default after.default
   && Option.equal (is_equivalent_callback_contract renaming) contract after.callback_contract
 

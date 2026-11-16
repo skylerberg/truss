@@ -95,8 +95,10 @@ let expand_place frame run (place : Mir.place) =
         "a name that the alternatives of a pattern bind `mut`, here"
 
 let describe_local : Mir.local_kind -> string = function
-  | Source { name = Some name; _ } -> Printf.sprintf "`%s`" name
-  | Source { name = None; _ } -> "an unnamed local"
+  | Source { local; _ } -> (
+      match Mir.find_local_name local with
+      | Some name -> Printf.sprintf "`%s`" name
+      | None -> "a local that the compiler introduces")
   | Temporary -> "a temporary"
   | Lent _ -> "a lent part"
 
@@ -1430,9 +1432,12 @@ and write_assignment context run (target : Mir.place) ~(copied : Mir.operand lis
   (match target.root with
   | Local local -> (
       match run.infos.(local).kind with
-      | Source { local = (Named _ | Synthetic _) as core; name = Some name; _ }
+      | Source { local = (Declared { name; _ } | Trait_parameter { name; _ }) as core; _ }
         when frame.source.key = Some context.home ->
           Tables.Local_table.replace context.local_names (Core_local core) name
+      | Source { local = Synthetic _ as core; _ } when frame.source.key = Some context.home ->
+          Tables.Local_table.replace context.local_origins (Core_local core)
+            run.infos.(local).origin
       | Source _ | Temporary | Lent _ -> ())
   | Constant _ | Literal _ -> ());
   let copied_slice =

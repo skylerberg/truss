@@ -6,9 +6,11 @@ type context = {
   lookups : Lookups.t;
   list_bounds : Types.parameter -> Types.trait_reference list;
   spans : Source.Definition_span.t array Lazy.t;
+  text : string Lazy.t;
   mode_keywords : (Core.origin, Core.mode_keyword) Hashtbl.t;
   places_without_keyword : (Core.origin, Types.mode) Hashtbl.t;
   names : string Local_table.t;
+  origins : Core.origin Local_table.t;
   binding_modes : Types.mode Local_table.t;
   types : Types.ty Local_table.t;
   mutable parameters : Core.local list;
@@ -81,7 +83,14 @@ let classify_binding_mode context (root : Place.root) : Types.mode =
 let show_root context (root : Place.root) =
   match root with
   | Local Self -> "self"
-  | Local local -> Option.value ~default:"this" (Local_table.find_opt context.names local)
+  | Local local -> (
+      match
+        (Local_table.find_opt context.names local, Local_table.find_opt context.origins local)
+      with
+      | Some name, _ -> name
+      | None, Some origin ->
+          Source.Definition_span.quote (Lazy.force context.text) (locate_origin context origin)
+      | None, None -> Compiler_bug.raise_bug ~stage:"Ownership" "a local that no body holds")
   | Temporary _ -> "temporary"
   | Constant (Top { name; _ } | Member_constant { name; _ }) -> name
   | Constant path -> Path.show path
@@ -100,10 +109,15 @@ let collect context (mir : Mir.Graph.t) ~mode_keywords =
   let visit_body (body : Mir.Graph.body) =
     Array.iteri
       (fun local (info : Mir.local_info) ->
+        (match info.kind with
+        | Source { local = core; _ } -> (
+            match Mir.find_local_name core with
+            | Some name -> Local_table.replace context.names core name
+            | None -> Local_table.replace context.origins core info.origin)
+        | Temporary | Lent _ -> ());
         match info.kind with
-        | Source { local = core; mode; name = Some name; is_var }
+        | Source { local = core; mode; is_var; is_binding = true }
           when not (List.mem local body.captures) ->
-            Local_table.replace context.names core name;
             Local_table.replace context.binding_modes core mode;
             Local_table.replace context.types core info.type_;
             if is_var then context.mutable_locals <- core :: context.mutable_locals

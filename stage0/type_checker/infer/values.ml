@@ -290,7 +290,12 @@ and check_lambda (state : State.state) env ?expected (value : Syntax.expression)
                 if id = state.definition.id then
                   Some { local = Self; type_ = Form.read_self_type state env }
                 else if State.was_hole state (fun tables -> tables.local_types) id then None
-                else Some { local = Named id; type_ = Form.read_local_type state id })
+                else
+                  Some
+                    {
+                      local = Form.build_declared_local state id;
+                      type_ = Form.read_local_type state id;
+                    })
               captures;
           body = State.build_block state body;
           result =

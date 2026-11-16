@@ -11,7 +11,7 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode 
   let check_unknown type_ = check_unknown_pattern state env written type_ ~is_var ~mode in
   let binds id (bound : Syntax.name) =
     State.register_pattern state written (fun () ->
-        Bind { local = Named id; name = bound.text; is_var; mode })
+        Bind { local = Declared { origin = id; name = bound.text }; is_var; mode })
   in
   match written.kind with
   | Wildcard | Pattern_error -> State.register_pattern state written (fun () -> Wildcard)

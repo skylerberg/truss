@@ -23,6 +23,11 @@ let run_in_source (context : State.context) (source : State.source) read =
 
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Prover" format
 
+let read_parameter_name (parameter : Mir.parameter) =
+  match Mir.find_local_name parameter.local with
+  | Some name -> name
+  | None -> raise_bug "a parameter that no definition names"
+
 let is_in_recursion_group (context : State.context) path =
   List.exists (Path.equal path) (context.lookups.list_recursion_group context.current)
 
@@ -311,9 +316,8 @@ and make_obligation ?template_clause (context : State.context) (frame : State.fr
        in
        Locals.fold
          (fun local term shown ->
-           match (local, Tables.Local_table.find_opt context.local_names local) with
-           | Core_local (Named _), Some name
-             when not (is_parameter term || List.mem_assoc term shown) ->
+           match Tables.Local_table.find_opt context.local_names local with
+           | Some name when not (is_parameter term || List.mem_assoc term shown) ->
                (term, name) :: shown
            | _ -> shown)
          frame.locals

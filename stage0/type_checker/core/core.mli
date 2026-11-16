@@ -1,7 +1,13 @@
 type id = int
 type origin = int
 type mode_keyword = { mode : Types.mode; written : origin; operand : origin; place : origin }
-type local = Named of origin | Self | Synthetic of int
+
+type local =
+  | Declared of { origin : origin; name : string }
+  | Trait_parameter of { index : int; name : string }
+  | Self
+  | Synthetic of int
+
 type quantifier = Forall | Exists
 type evidence = Impl of { impl : Path.t; arguments : Types.substitution } | Bound | Dynamic
 
@@ -105,7 +111,7 @@ and construction = Array | Specification_only
 and conversion = Widen | To_integer | From_integer
 
 and binder =
-  | Over_type of { local : local; name : string; type_ : Types.ty }
+  | Over_type of { local : local; type_ : Types.ty }
   | Over_range of { pattern : pattern; start : expression; stop : expression; inclusive : bool }
   | Over_elements of { pattern : pattern; elements : elements }
 
@@ -169,7 +175,7 @@ and pattern = { id : id; origin : origin; type_ : Types.ty; kind : pattern_kind 
 
 and pattern_kind =
   | Wildcard
-  | Bind of { local : local; name : string; is_var : bool; mode : Types.mode }
+  | Bind of { local : local; is_var : bool; mode : Types.mode }
   | Variant of { variant : string; fields : (string * pattern) list }
   | Record of (string * pattern) list
   | Literal of pattern_constant
@@ -179,14 +185,13 @@ and pattern_kind =
 
 type parameter = {
   local : local;
-  name : string;
   mode : Types.mode;
   type_ : Types.ty;
   default : expression option;
   callback_contract : callback_contract option;
 }
 
-and callback_contract = { inputs : (local * string) list; requires : expression list }
+and callback_contract = { inputs : local list; requires : expression list }
 
 type contract = {
   requires : condition list;

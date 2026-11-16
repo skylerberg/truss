@@ -145,7 +145,7 @@ let obtain_free_source builder (local : Core.local) ~type_ ~origin =
   | None when builder.takes_free_locals ->
       let free =
         allocate_local builder
-          (Source { local; mode = Read; name = None; is_var = false })
+          (Source { local; mode = Read; is_var = false; is_binding = false })
           type_ origin
       in
       Local_table.replace builder.sources local free;
@@ -165,12 +165,12 @@ let find_binding_scope builder =
 let register_binding builder local =
   Option.iter (fun scope -> scope.bound <- local :: scope.bound) (find_binding_scope builder)
 
-let bind_source ~name ?(is_var = false) builder (local : Core.local) mode type_ origin =
+let bind_source ?(is_var = false) builder (local : Core.local) mode type_ origin =
   match Local_table.find_opt builder.sources local with
   | Some bound -> bound
   | None ->
       let bound =
-        allocate_local builder (Source { local; mode; name = Some name; is_var }) type_ origin
+        allocate_local builder (Source { local; mode; is_var; is_binding = true }) type_ origin
       in
       Local_table.replace builder.sources local bound;
       (match builder.deferred with

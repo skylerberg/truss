@@ -185,8 +185,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
                 | Binder_type (bound, _) ->
                     Over_type
                       {
-                        local = Named bound.id;
-                        name = bound.text;
+                        local = Declared { origin = bound.id; name = bound.text };
                         type_ = Form.read_local_type state bound.id;
                       }
                 | Binder_in

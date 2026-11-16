@@ -197,7 +197,6 @@ let build_core_parameters state (written : Syntax.parameter list) (signature : T
             (fun ((receiver : Path.receiver), type_) : Core.parameter ->
               {
                 local = Self;
-                name = "self";
                 mode = (match receiver with Mut -> Mut | Own -> Own | Read | Static -> Read);
                 type_;
                 default = None;
@@ -209,8 +208,7 @@ let build_core_parameters state (written : Syntax.parameter list) (signature : T
             (fun (info : Types.parameter_info) : Core.parameter ->
               let default = Option.map (State.build_expression state) default in
               {
-                local = Named name.id;
-                name = name.text;
+                local = Declared { origin = name.id; name = name.text };
                 mode = info.mode;
                 type_ = info.type_;
                 default;
@@ -226,8 +224,8 @@ let build_core_parameters state (written : Syntax.parameter list) (signature : T
                             List.filter_map
                               (fun (input : Syntax.function_input) ->
                                 Option.map
-                                  (fun (input_name : Syntax.name) : (Core.local * string) ->
-                                    (Named input_name.id, input_name.text))
+                                  (fun (input_name : Syntax.name) : Core.local ->
+                                    Declared { origin = input_name.id; name = input_name.text })
                                   input.name)
                               inputs;
                           requires =
@@ -437,8 +435,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                                   | Named_parameter { name; _ } ->
                                       Some
                                         {
-                                          local = Named name.id;
-                                          name = name.text;
+                                          local = Declared { origin = name.id; name = name.text };
                                           mode = Read;
                                           type_ = Form.read_local_type state name.id;
                                           default = None;
@@ -542,8 +539,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                 List.mapi
                   (fun index (name, type_) : Core.parameter ->
                     {
-                      local = Synthetic index;
-                      name;
+                      local = Trait_parameter { index; name };
                       mode = Read;
                       type_ = State.finalize_type state type_;
                       default = None;
@@ -551,7 +547,6 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                     })
                   state.law_parameters
               in
-              state.form.next_synthetic_local <- List.length parameters;
               Law_proof
                 {
                   parameters;

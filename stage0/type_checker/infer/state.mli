@@ -1,4 +1,4 @@
-type local = { type_ : Types.ty; is_var : bool; mode : Types.mode }
+type local = { name : string; type_ : Types.ty; is_var : bool; mode : Types.mode }
 
 type env = {
   output : Types.result option;

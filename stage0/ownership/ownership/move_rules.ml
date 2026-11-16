@@ -76,7 +76,7 @@ let decide_move context (place : Place.t) ~origin ~type_ ~is_returned ~is_captur
 let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
   let find_place (path : Moves.path) : Place.t option =
     match body.locals.(path.local).kind with
-    | Source { local; name = Some _; _ } ->
+    | Source { local; is_binding = true; _ } ->
         Some
           {
             root = Local local;
@@ -85,7 +85,7 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
                 (function Mir.Field field | Variant_field { field; _ } -> Place.Field field)
                 path.projections;
           }
-    | Source { name = None; _ } | Temporary | Lent _ -> None
+    | Source { is_binding = false; _ } | Temporary | Lent _ -> None
   in
   let find_first_move state (path : Moves.path) =
     match List.sort compare (Moves.list_moved_at moves state path) with

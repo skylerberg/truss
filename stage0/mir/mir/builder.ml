@@ -991,9 +991,9 @@ and bind ?(owned = false) builder (pattern : Core.pattern) (scrutinee : Tree.pla
   let bind = bind ~owned ~scrutinee_origin in
   match pattern.kind with
   | Wildcard | Literal _ | Range _ | Equal_to _ -> ()
-  | Bind { local; mode; name; is_var } ->
+  | Bind { local; mode; is_var } ->
       let bound =
-        Emitter.bind_source ~name ~is_var builder local
+        Emitter.bind_source ~is_var builder local
           (if owned then Own else mode)
           pattern.type_ pattern.origin
       in
@@ -1108,8 +1108,8 @@ and lower_statement builder (node : Core.statement) =
           | Some right_value -> (
               let local =
                 Emitter.allocate_local builder
-                  (Source { local = bound; mode; name = None; is_var = false })
-                  (compute_core_operand_type right) origin
+                  (Source { local = bound; mode; is_var = false; is_binding = false })
+                  (compute_core_operand_type right) (compute_operand_origin right)
               in
               Emitter.add_source builder bound local;
               Emitter.add_temporary builder local;
@@ -1453,8 +1453,8 @@ and lower_quantified builder (node : Core.expression) (quantifier : Core.quantif
   let* range = range in
   let parameter, matches =
     match binder with
-    | Over_type { local; name; type_ } ->
-        ( Emitter.bind_source ~name builder local Own type_ origin,
+    | Over_type { local; type_ } ->
+        ( Emitter.bind_source builder local Own type_ origin,
           {
             Tree.statements = [];
             value = Some (Constant { value = Boolean true; type_ = Types.bool });
@@ -1489,18 +1489,18 @@ and lower_lambda builder (parameters : Core.pattern list) (captures : Core.captu
   let capture_locals =
     List.map
       (fun (capture : Core.capture) ->
-        let name =
+        let is_binding =
           match
             Option.map
               (Emitter.lookup_local_info builder)
               (Emitter.find_source builder capture.local)
           with
-          | Some { kind = Source { name; _ }; _ } -> name
-          | _ -> None
+          | Some { kind = Source { is_binding; _ }; _ } -> is_binding
+          | _ -> false
         in
         let local =
           Emitter.allocate_local inner
-            (Source { local = capture.local; mode = Read; name; is_var = false })
+            (Source { local = capture.local; mode = Read; is_var = false; is_binding })
             capture.type_ 0
         in
         Emitter.add_source inner capture.local local;
@@ -1511,8 +1511,8 @@ and lower_lambda builder (parameters : Core.pattern list) (captures : Core.captu
     List.map
       (fun (pattern : Core.pattern) ->
         match pattern.kind with
-        | Bind { local; mode; name; is_var } ->
-            Emitter.bind_source ~name ~is_var inner local mode pattern.type_ pattern.origin
+        | Bind { local; mode; is_var } ->
+            Emitter.bind_source ~is_var inner local mode pattern.type_ pattern.origin
         | _ -> Emitter.allocate_local inner Temporary pattern.type_ pattern.origin)
       parameters
   in
@@ -1598,8 +1598,7 @@ let of_clause ?(is_executable = false) ~(parameters : Core.parameter list)
   let locals =
     List.map
       (fun (parameter : Core.parameter) ->
-        Emitter.bind_source ~name:parameter.name builder parameter.local parameter.mode
-          parameter.type_ 0)
+        Emitter.bind_source builder parameter.local parameter.mode parameter.type_ 0)
       parameters
   in
   Emitter.build_formula builder ~origin:written.origin ~type_:written.type_ (fun () ->
@@ -1627,8 +1626,7 @@ let of_definition ~is_specification (definition : Core.definition) =
       let locals =
         List.map
           (fun (parameter : Core.parameter) ->
-            Emitter.bind_source ~name:parameter.name builder parameter.local parameter.mode
-              parameter.type_ 0)
+            Emitter.bind_source builder parameter.local parameter.mode parameter.type_ 0)
           parameters
       in
       Emitter.run_in_scope builder 0 (fun () -> lower_body builder body ~returns);

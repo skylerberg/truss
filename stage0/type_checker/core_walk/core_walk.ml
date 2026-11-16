@@ -281,44 +281,12 @@ let traverse_indirect (change : 'a -> 'b option) : 'a Core.target -> 'b Core.tar
   | Intrinsic { operation; type_arguments } -> Some (Intrinsic { operation; type_arguments })
   | Indirect value -> Option.map (fun value -> Core.Indirect value) (change value)
 
+let find_local_name : Core.local -> string option = function
+  | Declared { name; _ } | Trait_parameter { name; _ } -> Some name
+  | Self -> Some "self"
+  | Synthetic _ -> None
+
 module For_testing = struct
-  module Local_table = Hashtbl.Make (Structural_key.Make (struct
-    type t = Core.local
-  end))
-
-  let collect_local_names core_definition =
-    let names = Local_table.create 16 in
-    let visit_parameter (declared : Core.parameter) =
-      Local_table.replace names declared.local declared.name;
-      Option.iter
-        (fun (contract : Core.callback_contract) ->
-          List.iter (fun (input, name) -> Local_table.replace names input name) contract.inputs)
-        declared.callback_contract
-    in
-    (match core_definition with
-    | Core.Function { parameters; _ } | Law_proof { parameters; _ } ->
-        List.iter visit_parameter parameters
-    | Trait laws ->
-        List.iter (fun (law : Core.law) -> List.iter visit_parameter law.parameters) laws
-    | Type _ | Constant _ | Test _ | Empty -> ());
-    walk_definition
-      {
-        ignore_all with
-        pattern =
-          (fun (node : Core.pattern) ->
-            match node.kind with
-            | Bind { local; name; _ } -> Local_table.replace names local name
-            | _ -> ());
-        expression =
-          (fun (node : Core.expression) ->
-            match node.kind with
-            | Quantified { binder = Over_type { local; name; _ }; _ } ->
-                Local_table.replace names local name
-            | _ -> ());
-      }
-      core_definition;
-    names
-
   exception Found
 
   let expression_exists is_wanted node =

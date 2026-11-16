@@ -28,6 +28,7 @@ let make_context (lookups : Lookups.t) ~home ~current ~terminates ~measures ~inh
       fresh = 0;
       values = [];
       local_names = Tables.Local_table.create 16;
+      local_origins = Tables.Local_table.create 16;
       returns = [];
       lent_back = [];
       instantiating = [];
@@ -220,7 +221,8 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
     List.filter_map
       (fun (position, callback) ->
         Option.map
-          (fun (parameter : Mir.parameter) -> (parameter.local, parameter.name, callback))
+          (fun (parameter : Mir.parameter) ->
+            (parameter.local, Facts.read_parameter_name parameter, callback))
           (List.nth_opt parameters position))
       contract.callbacks;
   let own_requires = Facts.list_clauses contract.requires and own_ensures = contract.ensures in
@@ -243,10 +245,11 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
             { frame with self = Some self; self_type = Some self_type }
         | local ->
             let ty = Facts.substitute_type context frame parameter.type_ in
-            let term = Facts.arrive context frame ("parameter." ^ parameter.name) ty in
+            let name = Facts.read_parameter_name parameter in
+            let term = Facts.arrive context frame ("parameter." ^ name) ty in
             (match term with
             | Logic.Symbol symbol ->
-                context.values <- (symbol, parameter.name) :: context.values;
+                context.values <- (symbol, name) :: context.values;
                 context.entry <- symbol :: context.entry
             | _ -> ());
             Validity.assume_valid context frame ty term;
@@ -419,7 +422,9 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
           with
           | Some term, Some ty ->
               Lambdas.check_valid context frame Whole_definition ty term ~deep:true
-                ~when_:(Printf.sprintf "for `%s` when the function returns" parameter.name)
+                ~when_:
+                  (Printf.sprintf "for `%s` when the function returns"
+                     (Facts.read_parameter_name parameter))
           | _ -> ())
         mut_parameters;
       (match (mut_self, is_updating_helper, frame.self, frame.self_type) with
