@@ -607,10 +607,10 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
   (match Mir.read_type_clauses lookups.mir path with
   | Some { form = { invariants; potential }; _ } ->
       let ty =
-        match Interface.Definition.read_interface lookups.interface path with
+        match Interface.Definition.find_interface lookups.interface path with
         | Some (Interface.Environment.Type_interface interface) ->
             Types.Named { path; arguments = Types.list_generic_arguments interface.type_generics }
-        | _ -> Types.Named { path; arguments = [] }
+        | _ -> Facts.raise_bug "%s is not a type" (Path.show path)
       in
       let start = { (make_empty_frame source) with self_type = Some ty } in
       (match Mir.read_defaults lookups.mir path with
@@ -663,7 +663,7 @@ let translate_constant (lookups : Lookups.t) (source : State.source) ~path =
   | Some { form = code; _ } ->
       ignore
         (Amounts.run_code context (make_empty_frame source) code
-           ~type_:(Values.compute_constant_type context path))
+           ~type_:(Interface.Definition.read_constant_type context.lookups.interface path))
   | None -> Facts.raise_bug "the constant `%s` has no MIR" (Path.show path));
   make_outcome context
 

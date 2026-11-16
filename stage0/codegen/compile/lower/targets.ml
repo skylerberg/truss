@@ -30,11 +30,7 @@ let resolve_impl (context : Definitions.context) substitution ~(trait : Types.tr
             Definitions.raise_bug "no impl of %s for %s" (Types.show_trait trait) (Types.show self))
     | Dynamic -> Definitions.raise_bug "a call through any, which reaches no one instance"
   in
-  let impl_interface =
-    match Interface.Definition.read_impl_interface context.lookups.interface impl with
-    | Some position -> position
-    | None -> Definitions.raise_bug "no interface for %s" (Path.show impl)
-  in
+  let impl_interface = Definitions.read_impl_interface context impl in
   let impl_arguments =
     List.map
       (fun (generic : Types.generic) ->
@@ -355,11 +351,7 @@ let run_in_type_definition (st : Lowering.state) ~(source : Resolve.Names.key) (
     | Named { path; arguments } -> (path, arguments)
     | _ -> Definitions.raise_bug "defaults of %s" (Ground.to_string ty)
   in
-  let interface =
-    match Interface.Definition.read_type_interface st.context.lookups.interface path with
-    | Some position -> position
-    | None -> Definitions.raise_bug "no interface for %s" (Path.show path)
-  in
+  let interface = Interface.Definition.read_type_interface st.context.lookups.interface path in
   let caller = st.frame in
   st.frame <-
     {
@@ -507,10 +499,8 @@ let lower_literal_place st (ty : Ground.ty) text =
   build ty (Build { ty; variant = None; fields = [ (field, Copy part) ] })
 
 let lower_static_constant (st : Lowering.state) path : Lowered.place =
-  match Interface.Definition.read_constant_type st.context.lookups.interface path with
-  | Some ty ->
-      { root = Static { key = Constant path; ty = Lowering.ground st ty }; projections = [] }
-  | None -> Definitions.raise_bug "no type for the constant %s" (Path.show path)
+  let ty = Interface.Definition.read_constant_type st.context.lookups.interface path in
+  { root = Static { key = Constant path; ty = Lowering.ground st ty }; projections = [] }
 
 let read_list_parts monomorphic ty =
   match Monomorphic.compute_shape monomorphic ty with

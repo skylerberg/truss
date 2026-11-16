@@ -482,11 +482,6 @@ let translate_global_value (context : State.context) frame (site : Invocation.si
         (Facts.locate context frame.source site.origin)
         "a function the prover cannot read, used as a value"
 
-let compute_constant_type (context : State.context) path =
-  match Interface.Definition.read_constant_type context.lookups.interface path with
-  | Some ty -> ty
-  | None -> Facts.raise_bug "the constant %s has no type" (Path.show path)
-
 let evaluate_constant (context : State.context) frame path =
   match
     (Contracts.find_source context.lookups path, Mir.read_initializer context.lookups.mir path)
@@ -507,7 +502,7 @@ let evaluate_constant (context : State.context) frame path =
         }
       in
       Facts.run_once context (Value_of symbol) (fun () ->
-          let ty = compute_constant_type context path in
+          let ty = Interface.Definition.read_constant_type context.lookups.interface path in
           Facts.declare context (Logic.Constant (symbol, Facts.declare_sort context ty));
           let _, defined_value =
             Validity.run_without_costs context (fun () ->
@@ -546,7 +541,7 @@ let check_built context frame (site : Invocation.site) ty term =
 let is_indirect (context : State.context) (ty : Types.ty) variant =
   match (ty, variant) with
   | Types.Named { path; _ }, Some variant -> (
-      match Interface.Definition.read_interface context.lookups.interface path with
+      match Interface.Definition.find_interface context.lookups.interface path with
       | Some (Interface.Environment.Type_interface { shape = Sum variants; _ }) ->
           List.exists
             (fun (written : Types.variant) -> written.variant_name = variant && written.indirect)

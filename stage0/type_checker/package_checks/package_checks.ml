@@ -133,7 +133,7 @@ let check_method_names (lookups : Lookups.t) (declaration : Resolve.Names.declar
     (definition : Syntax.definition) (impl : Types.impl_interface) =
   match
     ( impl.for_type,
-      Interface.Definition.read_trait_interface lookups.interface impl.implements.trait )
+      Interface.Definition.find_trait_interface lookups.interface impl.implements.trait )
   with
   | Types.Named { path; _ }, Some trait when not trait.is_capability ->
       List.filter_map
@@ -182,7 +182,7 @@ let check_method_names (lookups : Lookups.t) (declaration : Resolve.Names.declar
   | _ -> []
 
 let list_type_fields (lookups : Lookups.t) path =
-  match Interface.Definition.read_type_interface lookups.interface path with
+  match Interface.Definition.find_type_interface lookups.interface path with
   | Some interface ->
       let parameters =
         List.map (fun (generic : Types.generic) -> generic.generic) interface.type_generics
@@ -207,7 +207,7 @@ let list_type_arguments arguments =
 
 let list_contained_types (lookups : Lookups.t) path =
   let list_bounds =
-    match Interface.Definition.read_type_interface lookups.interface path with
+    match Interface.Definition.find_type_interface lookups.interface path with
     | Some interface -> Types.list_bounds interface.type_generics
     | None -> fun _ -> []
   in
@@ -566,14 +566,14 @@ let check_overlaps (lookups : Lookups.t) (declaration : Resolve.Names.declaratio
         List.filter
           (fun (other : Types.impl_interface) -> List.mem package (list_outer_packages other))
           (List.filter_map
-             (Interface.Definition.read_impl_interface lookups.interface)
+             (Interface.Definition.find_impl_interface lookups.interface)
              (list_before (lookups.interface.names.list_impls package)))
       in
       let dependencies =
         List.concat_map
           (fun name ->
             List.filter_map
-              (Interface.Definition.read_impl_interface lookups.interface)
+              (Interface.Definition.find_impl_interface lookups.interface)
               (Interface.Impls.list_impls_of_trait_for_type lookups.interface ~trait ~type_ name))
           (Resolve.Names.list_transitive_dependencies lookups.interface.names package)
       in
@@ -595,7 +595,7 @@ let check_overlaps (lookups : Lookups.t) (declaration : Resolve.Names.declaratio
 
 let check_impl (lookups : Lookups.t) ~list_contained (declaration : Resolve.Names.declaration) =
   match
-    ( Interface.Definition.read_impl_interface lookups.interface declaration.path,
+    ( Interface.Definition.find_impl_interface lookups.interface declaration.path,
       read_definition lookups declaration )
   with
   | Some impl, (definition, spans) ->

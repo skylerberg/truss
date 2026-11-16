@@ -108,7 +108,7 @@ let convert_to_any context frame (site : Invocation.site) =
 
 let compute_current_bounds (context : State.context) : Interface.Impls.bounds =
   let list_impl_generics path =
-    match Interface.Definition.read_impl_interface context.lookups.interface path with
+    match Interface.Definition.find_impl_interface context.lookups.interface path with
     | Some interface -> interface.impl_generics
     | None -> []
   in
@@ -142,31 +142,29 @@ let find_concrete_impl (context : State.context) (trait : Types.trait_reference)
         (fun package ->
           List.find_map
             (fun impl ->
-              match Interface.Definition.read_impl_interface context.lookups.interface impl with
-              | Some interface -> (
-                  let variables =
-                    List.map
-                      (fun (generic : Types.generic) -> generic.generic)
-                      interface.impl_generics
-                  in
-                  match
-                    Option.bind (Interface.Impls.match_type ~variables [] interface.for_type ty)
-                      (fun arguments ->
-                        Interface.Impls.match_arguments ~variables arguments
-                          interface.implements.trait_arguments trait.trait_arguments)
-                  with
-                  | Some arguments
-                    when is_own impl
-                         || List.for_all
-                              (fun (argument, bound) ->
-                                Option.is_some
-                                  (Interface.Impls.find_evidence context.lookups.interface
-                                     ~list_bounds argument bound))
-                              (Interface.Impls.list_required_bounds interface.impl_generics
-                                 arguments) ->
-                      Some (impl, arguments)
-                  | _ -> None)
-              | None -> None)
+              let interface =
+                Interface.Definition.read_impl_interface context.lookups.interface impl
+              in
+              let variables =
+                List.map (fun (generic : Types.generic) -> generic.generic) interface.impl_generics
+              in
+              match
+                Option.bind (Interface.Impls.match_type ~variables [] interface.for_type ty)
+                  (fun arguments ->
+                    Interface.Impls.match_arguments ~variables arguments
+                      interface.implements.trait_arguments trait.trait_arguments)
+              with
+              | Some arguments
+                when is_own impl
+                     || List.for_all
+                          (fun (argument, bound) ->
+                            Option.is_some
+                              (Interface.Impls.find_evidence context.lookups.interface ~list_bounds
+                                 argument bound))
+                          (Interface.Impls.list_required_bounds interface.impl_generics arguments)
+                ->
+                  Some (impl, arguments)
+              | _ -> None)
             (Interface.Impls.list_impls_of_trait_for_type context.lookups.interface
                ~trait:trait.trait ~type_:path package))
         packages

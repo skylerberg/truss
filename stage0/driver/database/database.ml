@@ -687,7 +687,7 @@ let make_interface_part (elaborated : Interface.Environment.elaborated_interface
   | diagnostics, _ -> Failed diagnostics
 
 let find_type_interface lookups path =
-  match make_part (Interface.Definition.read_type_interface lookups) path with
+  match make_part (Interface.Definition.find_type_interface lookups) path with
   | Value interface -> interface
   | Failed _ | Blocked -> None
 
@@ -1546,7 +1546,7 @@ let compute_part database (part : Part.computed) =
                 Value
                   (Mir.make_contract_part
                      ~find_type_interface:
-                       (Interface.Definition.read_type_interface
+                       (Interface.Definition.find_type_interface
                           (make_recording_interface_lookups database note ~is_checked:true))
                      key.path form)
             | Some (Failed _ | Blocked) -> Blocked
@@ -1561,7 +1561,7 @@ let compute_part database (part : Part.computed) =
                     ( Mir.make_body_part form,
                       Mir.make_contract_part
                         ~find_type_interface:
-                          (Interface.Definition.read_type_interface
+                          (Interface.Definition.find_type_interface
                              (make_recording_interface_lookups database note ~is_checked:true))
                         path form )
               | Failed _ | Blocked -> Blocked)

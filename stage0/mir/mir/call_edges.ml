@@ -10,14 +10,11 @@ type lookups = { interface : Interface.Lookups.t; mir : Parts.lookups }
 let find_head (ty : Types.ty) = match ty with Named { path; _ } -> Some path | _ -> None
 
 let rec list_traits_with_required interface (trait : Path.t) =
-  match Interface.Definition.read_interface interface trait with
-  | Some (Interface.Environment.Trait_interface trait_interface) ->
-      trait
-      :: List.concat_map
-           (fun (required : Types.trait_reference) ->
-             list_traits_with_required interface required.trait)
-           trait_interface.requires
-  | _ -> [ trait ]
+  trait
+  :: List.concat_map
+       (fun (required : Types.trait_reference) ->
+         list_traits_with_required interface required.trait)
+       (Interface.Definition.read_trait_interface interface trait).requires
 
 let list_written_methods (names : Resolve.Names.lookups) impl =
   match names.find_key impl with
@@ -26,20 +23,16 @@ let list_written_methods (names : Resolve.Names.lookups) impl =
   | None -> []
 
 let list_impl_methods (interface : Interface.Lookups.t) impl =
-  match Interface.Definition.read_impl_interface interface impl with
-  | Some implementation -> (
-      let trait = implementation.implements.trait in
-      match Interface.Definition.read_trait_interface interface trait with
-      | Some trait_interface ->
-          List.map
-            (fun (declared : Types.trait_method) ->
-              let name = declared.method_name in
-              match Types.find_implementing_receiver trait_interface implementation declared with
-              | Some receiver -> Path.Method { owner = impl; name; receiver }
-              | None -> Path.Method { owner = trait; name; receiver = declared.method_receiver })
-            trait_interface.methods
-      | None -> list_written_methods interface.names impl)
-  | None -> list_written_methods interface.names impl
+  let implementation = Interface.Definition.read_impl_interface interface impl in
+  let trait = implementation.implements.trait in
+  let trait_interface = Interface.Definition.read_trait_interface interface trait in
+  List.map
+    (fun (declared : Types.trait_method) ->
+      let name = declared.method_name in
+      match Types.find_implementing_receiver trait_interface implementation declared with
+      | Some receiver -> Path.Method { owner = impl; name; receiver }
+      | None -> Path.Method { owner = trait; name; receiver = declared.method_receiver })
+    trait_interface.methods
 
 let writes (lookups : lookups) impl method_ =
   List.exists (Path.equal method_) (list_written_methods lookups.interface.names impl)
@@ -256,7 +249,7 @@ let list_path_edges (lookups : lookups) path =
 let list_implementations (lookups : lookups) ~viewer (path : Path.t) =
   match path with
   | Method { owner; name; receiver } -> (
-      match Interface.Definition.read_interface lookups.interface owner with
+      match Interface.Definition.find_interface lookups.interface owner with
       | Some (Interface.Environment.Trait_interface _) ->
           List.concat_map
             (fun package ->

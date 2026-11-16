@@ -639,7 +639,7 @@ and check_any state env ?expected (value : Syntax.expression) (inner : Syntax.ex
               List.iter
                 (fun (bound : Types.trait_reference) ->
                   match
-                    Interface.Definition.read_trait_interface state.lookups.interface bound.trait
+                    Interface.Definition.find_trait_interface state.lookups.interface bound.trait
                   with
                   | Some interface ->
                       List.iter

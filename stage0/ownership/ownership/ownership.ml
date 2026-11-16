@@ -8,13 +8,10 @@ type result = {
 let implements_capability (lookups : Lookups.t) key =
   match lookups.interface.names.find_container key with
   | Some (container : Resolve.Names.key) -> (
-      match Interface.Definition.read_impl_interface lookups.interface container.path with
-      | Some impl -> (
-          match
-            Interface.Definition.read_trait_interface lookups.interface impl.implements.trait
-          with
-          | Some trait -> trait.is_capability
-          | None -> false)
+      match Interface.Definition.find_impl_interface lookups.interface container.path with
+      | Some impl ->
+          (Interface.Definition.read_trait_interface lookups.interface impl.implements.trait)
+            .is_capability
       | None -> false)
   | None -> false
 

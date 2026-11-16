@@ -364,7 +364,7 @@ and check_trait_method_through_type state env ?expected:_ ?trait_arguments
     (value : Syntax.expression) self_type (trait : Types.trait_reference)
     (method_ : Types.trait_method) arguments =
   let trait_generics =
-    match Interface.Definition.read_trait_interface state.lookups.interface trait.trait with
+    match Interface.Definition.find_trait_interface state.lookups.interface trait.trait with
     | Some interface -> interface.trait_generics
     | None -> []
   in
@@ -695,7 +695,7 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
     ~(receiver : Syntax.expression) ~receiver_type (trait : Types.trait_reference)
     (method_ : Types.trait_method) ~type_arguments arguments =
   let trait_generics =
-    match Interface.Definition.read_trait_interface state.lookups.interface trait.trait with
+    match Interface.Definition.find_trait_interface state.lookups.interface trait.trait with
     | Some interface -> interface.trait_generics
     | None -> []
   in
