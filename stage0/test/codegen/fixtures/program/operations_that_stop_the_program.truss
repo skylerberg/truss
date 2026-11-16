@@ -1,0 +1,32 @@
+fn total(items: Slice[Int64]) -> Int64
+  uses Panic
+{
+  var sum = 0
+  for item in items {
+    sum += item
+  }
+  sum
+}
+
+fn port(ports: Map[String, UInt16], name: String) -> UInt16
+  uses Panic
+{
+  ports[name]
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, Panic
+{
+  let numbers = [9223372036854775807, 0]
+  let count = arguments.length()
+  match arguments[1].slice() {
+    "overflow" => Console.print_line("${total([9223372036854775807, 1])}")
+    "division" => Console.print_line("${100 / (Int64.try_from(count).unwrap_or(0) - 2)}")
+    "shift" => Console.print_line("${count << (count * 32)}")
+    "index" => Console.print_line("${numbers[count]}")
+    "slice" => Console.print_line("${numbers[count + 1..].length()}")
+    "key" => Console.print_line("${port(["http": 80], name: "https")}")
+    _ => Console.print_line("${total(numbers)} ${numbers[1]} ${numbers[1..].length()}")
+  }
+  ExitCode.success
+}

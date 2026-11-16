@@ -221,7 +221,9 @@ let expect_status ?extra expected instances =
 let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [] }
 let example_file : Path.file = { module_ = example; name = "main" }
 let standard_package_database = lazy (Workspace.For_testing.load_standard_package_database ())
-let database packages = Database.create ~loaded:[ Lazy.force standard_package_database ] packages
+
+let database ?checks packages =
+  Database.create ?checks ~loaded:[ Lazy.force standard_package_database ] packages
 
 let example_package files : Project.package list =
   [ { name = { owner = None; name = "example" }; dependencies = []; files } ]
@@ -231,9 +233,9 @@ let compile ?results ?evaluation_time_limit_ms database =
     (Database.make_lowering_requests database [ example.package ])
     (Lazy.force compiler) (Lazy.force cache) (Lazy.force settings)
 
-let load_files ?results ?(roots = []) files =
+let load_files ?results ?(roots = []) ?checks files =
   let packages = example_package files in
-  let database = database packages in
+  let database = database ?checks packages in
   List.iter (Database.For_testing.root database) roots;
   List.iter
     (fun ((file : Path.file), text) ->
@@ -254,7 +256,7 @@ let load_files ?results ?(roots = []) files =
     files;
   (database, compile ?results database)
 
-let load ?results ?roots text = load_files ?results ?roots [ (example_file, text) ]
+let load ?results ?roots ?checks text = load_files ?results ?roots ?checks [ (example_file, text) ]
 
 let tests_in database (module_ : Path.module_) =
   List.filter_map
@@ -273,8 +275,8 @@ let run_source text =
 let expect_output text expected = expect_string ~expected (run_source text)
 let passes name source = test name (fun () -> expect_output source "test 0 passed\n")
 
-let run_main ?(arguments = []) ?input text =
-  let _, compile = load text in
+let run_main ?(arguments = []) ?input ?checks text =
+  let _, compile = load ?checks text in
   match
     Compile.For_testing.run_program ?input compile
       ~main:(Top { module_ = example; name = "main" })

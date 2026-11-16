@@ -1,0 +1,41 @@
+fn sum(left: Int64, right: Int64) -> Int64
+  uses Panic
+{
+  left + right
+}
+
+fn quotient(left: Int64, right: Int64) -> Int64
+  uses Panic
+{
+  left / right
+}
+
+fn shifted(value: UInt64, amount: UInt64) -> UInt64
+  uses Panic
+{
+  value << amount
+}
+
+fn negated(value: Int64) -> Int64
+  uses Panic
+{
+  -value
+}
+
+fn second(items: Slice[Int64]) -> Int64
+  uses Panic
+{
+  items[1]
+}
+
+fn tail(items: Slice[Int64]) -> Slice[Int64]
+  uses Panic
+{
+  items[1..]
+}
+
+fn port(ports: Map[String, UInt16], name: String) -> UInt16
+  uses Panic
+{
+  ports[name]
+}

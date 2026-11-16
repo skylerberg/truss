@@ -1,5 +1,5 @@
 let apply_slice context (frame : State.frame) (site : Invocation.site) ~(base_type : Types.ty)
-    ~collection ~low ~high =
+    ~collection ~low ~high ~is_checked =
   let location = Facts.locate context frame.source site.origin in
   let element =
     match base_type with
@@ -19,7 +19,8 @@ let apply_slice context (frame : State.frame) (site : Invocation.site) ~(base_ty
         Facts.assume context frame (Operation ("<=", [ Logic.int 0; length ]));
         length
   in
-  Facts.oblige context frame Requires location
+  (if is_checked then Facts.oblige_safe_operation context else Facts.oblige context)
+    frame Requires location
     [ Text "`"; Facts.quote frame.source site.origin; Text "` may not be within the collection." ]
     Logic.(
       Operation ("<=", [ int 0; low ])
@@ -99,7 +100,7 @@ let slice_place context (site : Invocation.site) ~(owner : State.passed_place) ~
         let frame = { frame with makes_obligations = false } in
         let _, viewed, _, _ =
           apply_slice context frame site ~base_type:(owner_type frame)
-            ~collection:(owner.read frame) ~low ~high:(Some high)
+            ~collection:(owner.read frame) ~low ~high:(Some high) ~is_checked:false
         in
         viewed);
     write =

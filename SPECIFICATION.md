@@ -1620,6 +1620,22 @@ is an error, and one of these makes it compile:
 
 `unreachable` admits only the first.
 
+In the body of a function that declares `uses Panic`, an operation that is
+not proven safe is checked when it runs, in every build, and panics when it
+fails. The check prevents the out-of-bounds read or the wrapped result that
+the unchecked operation would give.
+
+- An overflow, a division by zero, and a shift that is too large are checked
+  where they happen.
+- An index runs the `requires` of the `impl`'s own `at` before the call, and
+  a slice runs the `requires` of its slicing method. An index through a
+  trait bound or `any`, an assignment through `IndexAssign`, and an `at`
+  that states no `requires` or one that cannot be evaluated at run time
+  (see [Deriving](#deriving)) are proven.
+- A lambda in that body, a `proof` block, and every clause are proven. A
+  lambda's capabilities are inferred from its body, not declared, and a
+  `proof` block and a clause do not run.
+
 `Panic` is a built-in capability. `Panic.crash(message)` prints its message
 and location to standard error and ends the process with a nonzero exit
 code, and no Truss code runs afterward. No code can `provide` `Panic`, so a

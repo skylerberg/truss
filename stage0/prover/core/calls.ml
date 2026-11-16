@@ -257,6 +257,9 @@ let contract_call context (frame : State.frame) (site : Invocation.site) (invoca
     | own :: others -> if own.requires <> [] || others = [] then [ own ] else others
     | [] -> []
   in
+  let is_checked =
+    Mir.is_index_call invocation.callee && Mir.list_checked_requires context.lookups.mir path <> []
+  in
   let required =
     List.concat_map
       (fun (part : State.part) ->
@@ -265,15 +268,18 @@ let contract_call context (frame : State.frame) (site : Invocation.site) (invoca
           (fun (requirement : Mir.requirement) ->
             let clause = requirement.clause in
             let _, term = Validity.read_specification context entry clause in
-            Facts.oblige context frame Requires location
-              ?cited:(Option.map (fun key -> (key, clause.origin)) part.callee.key)
-              ~fixes:(requires_fix context frame part requirement term values)
+            let cited = Option.map (fun key -> (key, clause.origin)) part.callee.key in
+            let fixes = requires_fix context frame part requirement term values in
+            let message : State.message =
               [
                 Text "`";
                 Facts.quote part.callee clause.origin;
                 Text (Printf.sprintf "` may not hold for this call to `%s`." (Path.show path));
               ]
-              term;
+            in
+            if is_checked then
+              Facts.oblige_safe_operation context frame Requires location ?cited ~fixes message term
+            else Facts.oblige context frame Requires location ?cited ~fixes message term;
             term)
           part.requires)
       requiring

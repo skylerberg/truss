@@ -1376,8 +1376,14 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
       in
       let base_type = Facts.substitute_type context frame base_type in
       let collection = read_place context frame run base in
+      let is_checked =
+        match call.callee with
+        | Function { path; _ } -> Mir.list_checked_requires context.lookups.mir path <> []
+        | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _ -> false
+      in
       let frame, viewed, low, high =
         Intrinsics.apply_slice context frame site ~base_type ~collection ~low ~high:(argument 2)
+          ~is_checked
       in
       let collection = expand_place frame run base in
       let written = write_place context frame run destination viewed in
@@ -1487,6 +1493,7 @@ let read_formula context (frame : State.frame) (formula : Mir.formula) ~argument
       aliases = Locals.empty;
       slices = Locals.empty;
       lends = Locals.empty;
+      panic = Undeclarable;
     }
   in
   let inside =
