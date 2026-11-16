@@ -900,7 +900,7 @@ let check_resource state (resource : Syntax.resource) =
                 capability, and `%s` is neither."
                name.text))
 
-let slice state ~origin ~viewed (base : Core.place) ~start ~stop ~inclusive : Core.kind =
+let slice state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.kind =
   let make = synthetic_expression state ~origin in
   let uint64 = Types.builtin UInt64 in
   let path, type_arguments =
@@ -908,22 +908,13 @@ let slice state ~origin ~viewed (base : Core.place) ~start ~stop ~inclusive : Co
     | Types.Named { path; arguments } -> (path, arguments)
     | type_ -> bug "a slice of `%s`" (Types.show type_)
   in
-  let call name (arguments : Core.argument list) result =
-    make result
-      (Call
-         {
-           callee =
-             Function { path = Method { owner = path; name; receiver = Read }; type_arguments };
-           arguments;
-           lends = None;
-           uses = Types.no_capabilities;
-         })
+  let callee name : Core.callee =
+    Function { path = Method { owner = path; name; receiver = Read }; type_arguments }
   in
-  let receiver : Core.argument = Passed { mode = Read; value = Place base; mode_keyword = None } in
   let bound = Operands.build_argument Read in
   let start = match start with Some start -> start | None -> make uint64 (Integer Z.zero) in
   match stop with
-  | None -> Slice { call = call "slice_from" [ receiver; bound start ] viewed }
+  | None -> Slice { base; callee = callee "slice_from"; bounds = [ bound start ] }
   | Some stop ->
       let stop =
         if inclusive then
@@ -931,7 +922,7 @@ let slice state ~origin ~viewed (base : Core.place) ~start ~stop ~inclusive : Co
             (Operator { operation = Add; arguments = [ stop; make uint64 (Integer Z.one) ] })
         else stop
       in
-      Slice { call = call "slice_range" [ receiver; bound start; bound stop ] viewed }
+      Slice { base; callee = callee "slice_range"; bounds = [ bound start; bound stop ] }
 
 type conversion = From_never | Owned_to_view | Function_widening | To_integer | From_integer
 
@@ -962,8 +953,7 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
                     match inner.kind with Use place -> place | _ -> Temporary inner
                   in
                   synthetic_expression state ~origin:id expected
-                    (slice state ~origin:id ~viewed:expected base ~start:None ~stop:None
-                       ~inclusive:false)
+                    (slice state ~origin:id base ~start:None ~stop:None ~inclusive:false)
               | Owned_to_view -> (
                   match inner.type_ with
                   | Types.Named { path; arguments } ->

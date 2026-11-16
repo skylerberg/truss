@@ -71,7 +71,7 @@ and kind =
   | Collection_literal of { elements : expression list; construction : construction }
   | Map_literal of { entries : (expression * expression) list }
   | Record_update of { base : expression; updates : (string list * expression) list }
-  | Slice of { call : expression }
+  | Slice of { base : place; callee : callee; bounds : argument list }
   | Call of call
   | Operator of { operation : Intrinsic.operation; arguments : expression list }
   | Compare of { comparison : comparison; left : expression; right : expression }

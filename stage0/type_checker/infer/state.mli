@@ -196,7 +196,6 @@ val check_resource : state -> Syntax.resource -> unit
 val slice :
   state ->
   origin:Core.origin ->
-  viewed:Types.ty ->
   Core.place ->
   start:Core.expression option ->
   stop:Core.expression option ->
