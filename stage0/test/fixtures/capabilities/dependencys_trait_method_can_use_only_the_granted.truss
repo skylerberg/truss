@@ -1,7 +1,0 @@
-use clock_library::time
-
-fn f(wall: time::Wall) -> Instant
-  uses Clock
-{
-  wall.stamp()
-}

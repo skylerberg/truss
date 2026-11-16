@@ -1,3 +1,0 @@
-fn f(readings: mut Readings) {
-  readings[0] = 1
-}
