@@ -952,6 +952,28 @@ let () =
                (List.map
                   (fun (name, outcome, message) -> String.concat " " [ name; outcome; message ])
                   outcomes)));
+  test "truss test shows a failed test's output, and --json gives each test's output" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.tests_printing_to_the_console) ] in
+      let status, output = run_truss [ "test"; "-C"; root ] in
+      if status <> 1 then fail "status %d: %s" status output;
+      if
+        (not (String.includes ~affix:"    output:\n      printed by a failing test\n" output))
+        || String.includes ~affix:"printed by a passing test" output
+      then fail "%s" output;
+      let outputs =
+        List.map
+          (fun test -> (encode_text_field "name" test, encode_text_field "output" test))
+          (list_objects (Cli.Json.lookup_field "tests" (run_json [ "test"; "-C"; root ])))
+      in
+      match outputs with
+      | [
+       ("prints and passes", "printed by a passing test\n");
+       ("prints and fails", "printed by a failing test\n");
+      ] ->
+          ()
+      | _ ->
+          fail "%s"
+            (String.concat "; " (List.map (fun (name, output) -> name ^ " " ^ output) outputs)));
   test "build refuses a program whose main can reach a type defined as todo" (fun () ->
       let status, output =
         run_truss [ "build"; "-C"; make_package [ ("main.truss", Fixtures.unfinished_type) ] ]

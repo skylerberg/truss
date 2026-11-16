@@ -39,10 +39,11 @@ let show_duration microseconds =
 let show_seconds microseconds = Printf.sprintf "%.1fs" (float microseconds /. 1e6)
 let read_microseconds () = int_of_float (Unix.gettimeofday () *. 1e6)
 
-let print_indented text =
+let print_indented ?(indent = 4) text =
+  let prefix = String.make indent ' ' in
   String.split_on_char '\n' text
   |> List.filter (( <> ) "")
-  |> List.iter (fun line -> Output.print_line ("    " ^ line))
+  |> List.iter (fun line -> Output.print_line (prefix ^ line))
 
 let summarize (records : Compile.record list) =
   let count outcome =
@@ -70,7 +71,12 @@ let print_report tests (records : Compile.record list) ~timings:show_timings tim
       if record.outcome <> Passed then begin
         Output.printf "%s: %s\n" (label_test test) (Compile.show_outcome record.outcome);
         Option.iter print_indented record.message;
-        Option.iter print_indented record.echo
+        Option.iter print_indented record.echo;
+        Option.iter
+          (fun output ->
+            Output.print_line "    output:";
+            print_indented ~indent:6 output)
+          record.output
       end)
     tests records;
   if List.exists (fun (record : Compile.record) -> record.outcome <> Passed) records then
@@ -109,6 +115,7 @@ let test_json test (record : Compile.record) =
       ("microseconds", Json.Int record.microseconds);
       ("message", Json.encode_option (fun message -> Json.String message) record.message);
       ("echo", Json.encode_option (fun echo -> Json.String echo) record.echo);
+      ("output", Json.encode_option (fun output -> Json.String output) record.output);
     ]
 
 let encode_timings timings =

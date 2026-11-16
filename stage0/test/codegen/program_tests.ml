@@ -54,6 +54,45 @@ let () =
 
 let () =
   Codegen_support.test
+    "a test's standard output and standard error come back whole in its own record" (fun () ->
+      let database, compile = Codegen_support.load Fixtures.Program.tests_writing_to_the_console in
+      let tests = Codegen_support.list_tests database in
+      match Compile.run_tests compile ~time_limit_ms:2000 tests with
+      | Error message -> Codegen_support.fail "%s" message
+      | Ok records -> (
+          let results_by_name =
+            List.map2
+              (fun (test : Path.t) (record : Compile.record) ->
+                match test with
+                | Test { name; _ } -> (name, (record.outcome, record.output))
+                | _ -> failwith "list_tests gave a path that is not a test")
+              tests records
+          in
+          let expected_long_output =
+            String.concat "" (List.init 10000 (Printf.sprintf "line %d\n"))
+          in
+          match
+            List.map
+              (fun name -> List.assoc_opt name results_by_name)
+              [
+                "writes to standard output and standard error";
+                "writes more than a pipe's capacity";
+                "writes nothing";
+              ]
+          with
+          | [
+           Some (Passed, Some both_streams); Some (Passed, Some long_output); Some (Passed, None);
+          ] ->
+              Codegen_support.expect_string ~expected:"to standard output\nto standard error\n"
+                both_streams;
+              if long_output <> expected_long_output then
+                Codegen_support.fail "%d of %d bytes of the long output came back"
+                  (String.length long_output)
+                  (String.length expected_long_output)
+          | _ -> Codegen_support.fail "%s" (Codegen_support.render_records records)))
+
+let () =
+  Codegen_support.test
     "a build checks each primitive operation that could fail, and evaluates no requires clause"
     (fun () ->
       let output = Codegen_support.run_source Fixtures.Program.pick_and_primitive_operations in

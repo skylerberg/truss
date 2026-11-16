@@ -199,6 +199,7 @@ type function_ =
   | Read
   | Open
   | Close
+  | Dup2
   | Errno
   | Clock_gettime
   | Getentropy
@@ -285,6 +286,7 @@ let functions =
     Read;
     Open;
     Close;
+    Dup2;
     Errno;
     Clock_gettime;
     Getentropy;
@@ -371,6 +373,7 @@ let show_function = function
   | Read -> "read"
   | Open -> "open"
   | Close -> "close"
+  | Dup2 -> "dup2"
   | Errno -> "errno"
   | Clock_gettime -> "clock_gettime"
   | Getentropy -> "getentropy"
@@ -522,6 +525,16 @@ let describe function_ =
         (Returns Int32)
         [ ("descriptor", Value Int32, make_portable_type (Named "int32_t")) ]
         ~symbol:(make_portable_type "t_runtime_close")
+        ~headers:[]
+  | Dup2 ->
+      make_row
+        (make_portable_type (Named "int32_t"))
+        (Returns Int32)
+        [
+          ("descriptor", Value Int32, make_portable_type (Named "int32_t"));
+          ("onto", Value Int32, make_portable_type (Named "int32_t"));
+        ]
+        ~symbol:(make_portable_type "t_runtime_dup2")
         ~headers:[]
   | Errno ->
       make_row
@@ -1372,8 +1385,8 @@ let is_available system function_ = (describe function_).on system.os
 
 let is_blocking = function
   | Write | Read | Pread | Pwrite | Open | Fsync | Waitpid | Poll | Addresses_of_host -> true
-  | Connect | Accept | Sendto | Recvfrom | Close | Errno | Clock_gettime | Getentropy | Getenv
-  | Posix_spawnp | Snprintf | Strtod | Strtof | Fork | Pipe | Kill | Sysconf | Exit | Lseek
+  | Connect | Accept | Sendto | Recvfrom | Close | Dup2 | Errno | Clock_gettime | Getentropy
+  | Getenv | Posix_spawnp | Snprintf | Strtod | Strtof | Fork | Pipe | Kill | Sysconf | Exit | Lseek
   | Ftruncate | Fstat | Stat | Lstat | Mkdir | Remove | Rename | Symlink | Link | Chmod | Utimensat
   | Readlink | Realpath | Getcwd | Gethostname | Getpid | Proc_pidpath | Fcntl_dupfd_cloexec
   | Fcntl_setfd_cloexec | Posix_spawn_file_actions_init | Posix_spawn_file_actions_destroy
