@@ -276,7 +276,7 @@ let () =
       expect_codes ~expected:[] (packages, actual);
       if problems packages <> [] then Harness.fail "a dependency is reported unused";
       match
-        Database.list_code_packages (Support.database packages) { owner = None; name = "app" }
+        Database.find_code_packages (Support.database packages) { owner = None; name = "app" }
       with
       | Some code_packages when List.mem shapes code_packages && not (List.mem limits code_packages)
         ->

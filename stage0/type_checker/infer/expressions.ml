@@ -245,8 +245,8 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
       let type_ = check_expression state env ?expected inner in
       State.alias_expression state value inner;
       type_
-  | List items -> Values.list_literal state env ?expected value items
-  | Map entries -> Values.map_literal state env ?expected value entries
+  | List items -> Values.check_list_literal state env ?expected value items
+  | Map entries -> Values.check_map_literal state env ?expected value entries
   | Lambda { parameters; body } -> Values.check_lambda state env ?expected value parameters body
   | If { condition = test; then_; else_ } ->
       Values.check_if state env ?expected value test then_ else_

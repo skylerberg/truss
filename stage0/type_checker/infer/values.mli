@@ -6,7 +6,7 @@ val check_string_literal :
   Syntax.string_literal ->
   Types.ty
 
-val list_literal :
+val check_list_literal :
   State.state ->
   State.env ->
   ?expected:Types.ty ->
@@ -14,7 +14,7 @@ val list_literal :
   Syntax.expression list ->
   Types.ty
 
-val map_literal :
+val check_map_literal :
   State.state ->
   State.env ->
   ?expected:Types.ty ->

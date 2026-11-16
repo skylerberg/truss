@@ -286,13 +286,13 @@ let list_tagged_values tag variants =
   ( { at = [ Tag ]; integer = tag },
     List.map (fun (variant : variant) -> (variant.name, Z.of_int variant.index)) variants )
 
-let find_tag_value values name =
+let read_tag_value values name =
   match List.assoc_opt name values with
   | Some value -> value
   | None -> raise_bug "no variant %s" name
 
 let compute_discriminant layout name =
-  let tag_value (tag, values) = Tag_value { tag; value = find_tag_value values name } in
+  let tag_value (tag, values) = Tag_value { tag; value = read_tag_value values name } in
   match layout.form with
   | Zero_size -> Only
   | Tag_only { tag; variants } -> tag_value (list_tag_only_values tag variants)
@@ -310,7 +310,7 @@ let compute_discriminant layout name =
 
 let dispatch layout cases =
   let switch (tag, values) =
-    Switch { tag; cases = List.map (fun (name, case) -> (find_tag_value values name, case)) cases }
+    Switch { tag; cases = List.map (fun (name, case) -> (read_tag_value values name, case)) cases }
   in
   match layout.form with
   | Tag_only { tag; variants } -> switch (list_tag_only_values tag variants)

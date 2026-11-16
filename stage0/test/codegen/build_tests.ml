@@ -32,7 +32,7 @@ let references program key = Emit_c.references (lookup program key)
 module Instance_table = Hashtbl.Make (Instance)
 
 let find_components program root =
-  Strongly_connected.find_components (module Instance) ~successors:(references program) [ root ]
+  Strongly_connected.list_components (module Instance) ~successors:(references program) [ root ]
 
 let derive_component_keys program ~known component =
   Compile.derive_test_keys

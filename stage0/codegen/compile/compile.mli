@@ -86,7 +86,7 @@ val list_references : lowered -> Instance.key list
 
 val check_calls :
   Interface.Lookups.t ->
-  list_call_edges:(Path.t -> Path.t list option) ->
+  find_call_edges:(Path.t -> Path.t list option) ->
   Instance.key ->
   lowered ->
   unit

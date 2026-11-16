@@ -113,19 +113,19 @@ let list_bound_methods (interface : Interface.Lookups.t) path type_arguments =
         (pairs signature.generics type_arguments)
   | None -> []
 
-let check_calls (interface : Interface.Lookups.t) ~list_call_edges (key : Instance.key) lowered =
+let check_calls (interface : Interface.Lookups.t) ~find_call_edges (key : Instance.key) lowered =
   match (key, lowered) with
   | Code { path = caller; type_arguments }, Compiled fragment -> (
       match caller with
       | Method { owner = Derived _; _ } -> ()
       | _ -> (
-          match list_call_edges (resolve_call_node interface caller) with
+          match find_call_edges (resolve_call_node interface caller) with
           | None -> ()
           | Some call_edges ->
               let allowed =
                 call_edges
                 @ List.concat_map
-                    (fun callee -> Option.value (list_call_edges callee) ~default:[])
+                    (fun callee -> Option.value (find_call_edges callee) ~default:[])
                     call_edges
                 @ list_bound_methods interface caller type_arguments
               in

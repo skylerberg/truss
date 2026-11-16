@@ -279,7 +279,7 @@ let build_range_record state (value : Syntax.expression) start stop ~inclusive :
       build_record [ ("start", start); ("stop", stop); ("inclusive", inclusive) ]
   | _ -> State.raise_bug "a range without both bounds is valid only inside a slice"
 
-let find_capability_impls (state : State.state) (type_ : Types.ty) =
+let list_capability_impls (state : State.state) (type_ : Types.ty) =
   match type_ with
   | Types.Named { path; _ } ->
       List.filter_map
@@ -311,7 +311,7 @@ let build_provide state (implementations : Syntax.expression list) (body : Synta
           mode;
           value = Operands.build mode node;
           type_ = node.type_;
-          provides = List.map fst (find_capability_impls state node.type_);
+          provides = List.map fst (list_capability_impls state node.type_);
         })
       implementations
   in

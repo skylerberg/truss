@@ -23,7 +23,7 @@ type manifest_problem =
   | Unused_dependency of Path.package
 
 val list_manifest_problems : t -> Path.package -> manifest_problem list
-val list_code_packages : t -> Path.package -> Path.package list option
+val find_code_packages : t -> Path.package -> Path.package list option
 val read_checked_body : t -> Resolve.Names.key -> Infer.checked option
 val read_parsed : t -> Path.file -> Syntax.file
 val make_name_lookups : t -> Path.package list -> Resolve.Names.lookups

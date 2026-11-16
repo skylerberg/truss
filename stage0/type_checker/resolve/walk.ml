@@ -185,7 +185,7 @@ let resolve_module_names state (first : Syntax.name) (rest : Syntax.name list) =
 
 let find_in_module state module_ (name : Syntax.name) ~types =
   let is_kind = if types then Names.is_type_kind else Names.is_value_kind in
-  match Names.find_in state.lookups ~from:state.key.module_ module_ name.text ~is_kind with
+  match Names.lookup_in state.lookups ~from:state.key.module_ module_ name.text ~is_kind with
   | Found_name (item, path) ->
       set_target state name (Definition (item.kind, path));
       Some (path, item)

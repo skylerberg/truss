@@ -170,7 +170,7 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
             (State.read_span state tag.last.id)
             "A string's tag is a type.")
 
-and list_literal state env ?expected (value : Syntax.expression) items =
+and check_list_literal state env ?expected (value : Syntax.expression) items =
   let expected = Option.map (State.normalize state) expected in
   let element, make =
     match expected with
@@ -200,7 +200,7 @@ and list_literal state env ?expected (value : Syntax.expression) items =
       Form.build_collection_literal state value (List.map (State.build_expression state) items));
   make element
 
-and map_literal state env ?expected (value : Syntax.expression) entries =
+and check_map_literal state env ?expected (value : Syntax.expression) entries =
   let key, value_type =
     match Option.map (State.normalize state) expected with
     | Some (Types.Named { path; arguments = [ Types.Type key; Types.Type value_type ] })

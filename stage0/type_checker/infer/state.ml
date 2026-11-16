@@ -1020,7 +1020,7 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
   | Types.Function actual_function, Types.Function wanted_function, _
     when not (Types.has_same_clauses actual_function wanted_function) ->
       let unlisted =
-        Types.list_missing_capabilities ~required:actual_function.uses
+        Types.compute_missing_capabilities ~required:actual_function.uses
           ~available:wanted_function.uses
       in
       let unknown =

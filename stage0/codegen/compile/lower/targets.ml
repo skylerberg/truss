@@ -515,7 +515,7 @@ let lower_static_constant (st : Lowering.state) path : Lowered.place =
       { root = Static { key = Constant path; ty = Lowering.ground st ty }; projections = [] }
   | None -> Definitions.raise_bug "no type for the constant %s" (Path.show path)
 
-let list_parts monomorphic ty =
+let read_list_parts monomorphic ty =
   match Monomorphic.compute_shape monomorphic ty with
   | Record [ (field, Typed storage) ] -> (
       match Storage.match_storage_element storage with
@@ -523,8 +523,8 @@ let list_parts monomorphic ty =
       | None -> Definitions.raise_bug "%s is not a list" (Ground.to_string ty))
   | _ -> Definitions.raise_bug "%s is not a list" (Ground.to_string ty)
 
-let list_of (st : Lowering.state) ty destination ~site fills =
-  let field, _, element = list_parts st.context.monomorphic ty in
+let lower_list_into (st : Lowering.state) ty destination ~site fills =
+  let field, _, element = read_list_parts st.context.monomorphic ty in
   let storage_place = Lowered.project destination (Field field) in
   let lower operation arguments destination =
     ignore
@@ -553,7 +553,7 @@ let lower_template_value (st : Lowering.state) template_ty literals ~site ~parts
     | _ -> Definitions.raise_bug "%s is not a record" (Ground.to_string ty)
   in
   let element list_ty =
-    let _, _, element = list_parts st.context.monomorphic list_ty in
+    let _, _, element = read_list_parts st.context.monomorphic list_ty in
     element
   in
   let literals_ty = field_type template_ty "literals" in
@@ -561,7 +561,7 @@ let lower_template_value (st : Lowering.state) template_ty literals ~site ~parts
   let literal_ty = element literals_ty in
   let slice_ty = field_type literal_ty "text" in
   let built = Lowering.allocate_temporary st template_ty in
-  list_of st literals_ty
+  lower_list_into st literals_ty
     (Lowered.project built (Field "literals"))
     ~site
     (List.map
@@ -576,7 +576,7 @@ let lower_template_value (st : Lowering.state) template_ty literals ~site ~parts
                     fields = [ ("text", Copy (lower_literal_place st slice_ty text)) ];
                   } )))
        literals);
-  list_of st parts_ty (Lowered.project built (Field "parts")) ~site parts;
+  lower_list_into st parts_ty (Lowered.project built (Field "parts")) ~site parts;
   built
 
 let pull_loop st ~(option : Ground.ty) ~(call_next : Lowered.place -> unit)

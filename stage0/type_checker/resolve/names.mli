@@ -103,7 +103,7 @@ val find_generics : lookups -> Path.t -> (string * generic_kind) list option
 
 type name_lookup = Found_name of entry * Path.t | Hidden_name of entry | No_name
 
-val find_in :
+val lookup_in :
   lookups -> from:Path.module_ -> Path.module_ -> string -> is_kind:(named -> bool) -> name_lookup
 
 val find_bare_type : lookups -> from:Path.module_ -> string -> (entry * Path.t) option

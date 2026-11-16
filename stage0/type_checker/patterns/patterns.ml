@@ -171,7 +171,7 @@ and build_constructed_space ?replace context type_ constructor
 
 type row = space list
 
-let list_constructors context type_ =
+let find_constructors context type_ =
   match type_ with
   | Types.Named { path; arguments } -> (
       match read_shape context path with
@@ -245,7 +245,7 @@ let rec build_default_matrix (rows : row list) =
 let compute_signature context type_ (column : space list) =
   match compute_integer_range type_ with
   | Some range -> Some (split_intervals range column)
-  | None -> list_constructors context type_
+  | None -> find_constructors context type_
 
 let rec find_witness context (types : Types.ty list) (rows : row list) : space list option =
   match types with
