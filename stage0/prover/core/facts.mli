@@ -19,6 +19,7 @@ val closed_over_binders : frame -> Logic.term -> Logic.term option
 val fact : context -> frame -> Logic.term -> unit
 val assume : context -> frame -> Logic.term -> unit
 val add_requires : context -> frame -> message -> fix list
+val truss_of_value : context -> Logic.term -> string option
 
 val oblige :
   ?template_clause:template_clause ->

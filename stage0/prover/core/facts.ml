@@ -166,39 +166,41 @@ let add_requires context frame required =
       [ { title = (Text "Add `requires " :: required) @ [ Text "`" ]; edits = [ edit ] } ]
   | None -> []
 
-let truss_of_goal context term =
-  let name symbol =
-    if List.mem symbol context.entry then
-      match List.assoc_opt symbol context.values with Some name -> Some name | None -> Some "self"
-    else None
-  in
-  let named = ref false in
-  let all printed = if List.mem None printed then None else Some (List.filter_map Fun.id printed) in
-  let rec atom = function
-    | Logic.Symbol symbol ->
-        let printed = name symbol in
-        if printed <> None then named := true;
-        printed
-    | Logic.Integer value -> Some (Z.to_string value)
-    | Logic.Boolean value -> Some (if value then "true" else "false")
-    | _ -> None
-  and value term = arithmetic 0 term
-  and arithmetic level = function
+let parameter_name context symbol =
+  if List.mem symbol context.entry then
+    match List.assoc_opt symbol context.values with Some name -> Some name | None -> Some "self"
+  else None
+
+let all_printed printed =
+  if List.mem None printed then None else Some (List.filter_map Fun.id printed)
+
+let truss_of_value context term =
+  let parenthesized level inner text = if inner < level then "(" ^ text ^ ")" else text in
+  let rec arithmetic level = function
     | Logic.Operation ((("+" | "*") as operator), (_ :: _ :: _ as parts)) ->
         let inner = if operator = "+" then 1 else 2 in
         Option.map
           (fun printed -> parenthesized level inner (String.concat (" " ^ operator ^ " ") printed))
-          (all (List.map (arithmetic inner) parts))
+          (all_printed (List.map (arithmetic inner) parts))
     | Logic.Operation ("-", [ left; right ]) ->
         Option.map
           (fun printed -> parenthesized level 1 (String.concat " - " printed))
-          (all [ arithmetic 1 left; arithmetic 2 right ])
+          (all_printed [ arithmetic 1 left; arithmetic 2 right ])
     | Logic.Operation ("-", [ inner ]) ->
         Option.map (fun printed -> parenthesized level 3 ("-" ^ printed)) (arithmetic 3 inner)
     | Logic.Integer value when Z.sign value < 0 && level > 0 -> Some ("(" ^ Z.to_string value ^ ")")
-    | term -> atom term
-  and parenthesized level inner text = if inner < level then "(" ^ text ^ ")" else text
-  and print = function
+    | Logic.Apply (Symbol.Field { field; variant = None; _ }, [ receiver ]) ->
+        Option.map (fun receiver -> receiver ^ "." ^ field) (arithmetic 4 receiver)
+    | Logic.Symbol symbol -> parameter_name context symbol
+    | Logic.Integer value -> Some (Z.to_string value)
+    | Logic.Boolean value -> Some (if value then "true" else "false")
+    | _ -> None
+  in
+  arithmetic 0 term
+
+let truss_of_goal context term =
+  let value = truss_of_value context in
+  let rec print = function
     | Logic.Operation ((("<" | "<=" | ">" | ">=" | "=") as operator), [ left; right ]) -> (
         match (value left, value right) with
         | Some left, Some right ->
@@ -211,21 +213,23 @@ let truss_of_goal context term =
         match (print premise, print conclusion) with
         | Some premise, Some conclusion -> Some (Printf.sprintf "(%s) ==> (%s)" premise conclusion)
         | _ -> None)
-    | term -> atom term
+    | term -> value term
   and joined separator parts =
     Option.map
       (fun printed -> "(" ^ String.concat separator printed ^ ")")
-      (all (List.map print parts))
+      (all_printed (List.map print parts))
   in
   let printed =
     match term with
     | Logic.Operation ("and", parts) ->
-        Option.map (String.concat " && ") (all (List.map print parts))
+        Option.map (String.concat " && ") (all_printed (List.map print parts))
     | Logic.Operation ("or", parts) ->
-        Option.map (String.concat " || ") (all (List.map print parts))
+        Option.map (String.concat " || ") (all_printed (List.map print parts))
     | term -> print term
   in
-  if !named then printed else None
+  if List.exists (fun symbol -> List.mem symbol context.entry) (Logic.free_constants term) then
+    printed
+  else None
 
 let rec oblige ?template_clause ?cited ?(fixes = []) context frame code span message goal =
   match

@@ -241,7 +241,7 @@ let opaque_operation context frame ty operation arguments =
   assume context frame (in_range ty term);
   term
 
-let parameter_operand context frame (operand : Core.origin) term =
+let parameter_spelling context frame term =
   if
     frame.source.key = Some context.home
     && (not (Logic.has_quantifier term))
@@ -249,23 +249,11 @@ let parameter_operand context frame (operand : Core.origin) term =
     match Logic.free_constants term with
     | _ :: _ as names -> List.for_all (fun name -> List.mem name context.entry) names
     | [] -> false
-  then
-    let text = text_of frame.source operand in
-    let plain =
-      String.for_all
-        (fun character ->
-          character = '_' || character = '.'
-          || (character >= 'a' && character <= 'z')
-          || (character >= 'A' && character <= 'Z')
-          || (character >= '0' && character <= '9'))
-        text
-    in
-    Some (if plain then text else "(" ^ text ^ ")")
+  then truss_of_value context term
   else None
 
-let overflow_fix context frame ty (operation : Intrinsic.operation) (operand : Core.origin) left
-    right =
-  match (bounds ty, right, parameter_operand context frame operand left) with
+let overflow_fix context frame ty (operation : Intrinsic.operation) left right =
+  match (bounds ty, right, parameter_spelling context frame left) with
   | Some (low, high), Logic.Integer limit, Some text -> (
       let clause relation limit =
         if Z.leq low limit && Z.leq limit high then
@@ -282,8 +270,8 @@ let overflow_fix context frame ty (operation : Intrinsic.operation) (operand : C
       | _ -> [])
   | _ -> []
 
-let arithmetic ?operand ?divisor context frame (site : Invocation.site) ty
-    (operation : Intrinsic.operation) left right =
+let arithmetic context frame (site : Invocation.site) ty (operation : Intrinsic.operation) left
+    right =
   let source = frame.source in
   let span = span_of frame.source site.origin in
   let exact =
@@ -298,9 +286,7 @@ let arithmetic ?operand ?divisor context frame (site : Invocation.site) ty
   | Divide | Remainder ->
       oblige context frame Division span
         ~fixes:
-          (match
-             Option.bind divisor (fun divisor -> parameter_operand context frame divisor right)
-           with
+          (match parameter_spelling context frame right with
           | Some text -> add_requires context frame [ Text (text ^ " != 0") ]
           | None -> [])
         [ Text "The divisor in `"; quote source site.origin; Text "` may be zero." ]
@@ -319,10 +305,7 @@ let arithmetic ?operand ?divisor context frame (site : Invocation.site) ty
   | Some (low, high) ->
       let unsigned = Z.sign low = 0 && not (Types.is_builtin Character ty) in
       oblige context frame Overflow span
-        ~fixes:
-          (match operand with
-          | Some operand -> overflow_fix context frame ty operation operand left right
-          | None -> [])
+        ~fixes:(overflow_fix context frame ty operation left right)
         [
           Text "`";
           quote source site.origin;
@@ -440,10 +423,7 @@ let primitive_operation context frame ~(site : Invocation.site) (operation : Int
   | Divide, _ :: _, [ left; right ] when is_float -> float_operation "fp.div" left right
   | Negate, _ :: _, [ value ] when is_float -> Logic.Operation ("fp.neg", [ value ])
   | (Add | Subtract | Multiply | Divide | Remainder), ty :: _, [ left; right ] when not is_float ->
-      let result =
-        arithmetic ?operand:(argument 0) ?divisor:(argument 1) context frame site ty operation left
-          right
-      in
+      let result = arithmetic context frame site ty operation left right in
       if bounds ty <> None then assume context frame (in_range ty result);
       result
   | Negate, ty :: _, [ inner ] when not is_float ->
@@ -467,7 +447,7 @@ let primitive_operation context frame ~(site : Invocation.site) (operation : Int
             | Some amount ->
                 ( span_of frame.source amount,
                   [ Text "The shift amount `"; quote source amount; Text "`" ],
-                  match parameter_operand context frame amount right with
+                  match parameter_spelling context frame right with
                   | Some text ->
                       add_requires context frame [ Text (Printf.sprintf "%s < %d" text bits) ]
                   | None -> [] )

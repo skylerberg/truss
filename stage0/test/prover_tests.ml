@@ -1132,6 +1132,14 @@ let () =
       match fix_titles Fixtures.Prover.failed_assert_with_arithmetic_offers_it_as_a with
       | [ "Add `requires low + 2 * high <= 100 - (high - low)`" ] -> ()
       | actual -> fail "%s" (String.concat "; " actual));
+  test "an overflow of a local offers the bound on the parameter it holds" (fun () ->
+      match fix_titles Fixtures.Prover.overflow_of_a_local_offers_the_bound_on_the_parameter with
+      | [ "Add `requires start <= 9223372036854775806`" ] -> ()
+      | actual -> fail "%s" (String.concat "; " actual));
+  test "a callee's requires through a local names the caller's parameter" (fun () ->
+      match fix_titles Fixtures.Prover.callees_requires_through_a_local_names_the_callers with
+      | [ "Add `requires total < 100`" ] -> ()
+      | actual -> fail "%s" (String.concat "; " actual));
   test "an unsigned sum that may overflow offers only its upper bound" (fun () ->
       match fix_titles Fixtures.Prover.unsigned_sum_that_may_overflow_offers_only_its with
       | [ "Add `requires count + other <= 255`" ] -> ()
