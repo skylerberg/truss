@@ -1200,7 +1200,8 @@ let list_proof_template_checks database (key : Names.key) =
             (fun (template_clause : Prover.State.template_clause) -> template_clause.check)
             obligation.template_clause)
         obligations
-  | Some (Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked) | None -> []
+  | Some (Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked) -> []
+  | None -> report_uncomputed (Proof key)
 
 let make_template_check_root ({ from_template; literals; clauses } : Prover.State.template_check) =
   Instance.Template_check { from_template; literals; clauses }
@@ -1335,7 +1336,11 @@ let compute_type_facts database paths =
         (Some
            (match facts with
            | Value facts -> (
-               match List.assoc_opt path facts with Some facts -> Value facts | None -> Blocked)
+               match List.assoc_opt path facts with
+               | Some facts -> Value facts
+               | None ->
+                   Compiler_bug.bug ~stage:"Database" "the type facts of a component omit %s"
+                     (Path.show path))
            | Failed _ | Blocked -> Blocked)))
     paths
 
@@ -2224,7 +2229,8 @@ let list_package_outcomes database package =
     (fun check ->
       match Hashtbl.find_opt package_checks check with
       | Some (Value outcome) -> Some outcome
-      | Some (Failed _ | Blocked) | None -> None)
+      | Some (Failed _ | Blocked) -> None
+      | None -> report_uncomputed (Package_check (package, check)))
     (Package_checks.list_checks ((make_stored_name_lookups database).package_declarations package))
 
 let list_checker_diagnostics database (file : Path.file) checker =
@@ -2265,7 +2271,8 @@ let read_checked_body database (key : Names.key) =
   drain database ~through:Checked_bodies [ key.module_.package ];
   match Hashtbl.find_opt (find_owner database key.module_.package).checked_bodies key with
   | Some (Value checked) -> Some checked
-  | Some (Failed _ | Blocked) | None -> None
+  | Some (Failed _ | Blocked) -> None
+  | None -> report_uncomputed (Checked_body key)
 
 let list_file_diagnostics database (file : Path.file) =
   drain database ~through:Package_checks [ file.module_.package ];
@@ -2380,7 +2387,8 @@ let list_proofs (proofs : proofs) =
     (fun key ->
       match read_proof proofs key with
       | Some (Value proof) -> Some (key, proof)
-      | Some (Failed _ | Blocked) | None -> None)
+      | Some (Failed _ | Blocked) -> None
+      | None -> report_uncomputed (Proof key))
     proofs.keys
 
 let make_proof_lookups database = make_recording_proof_lookups database ignore
@@ -2401,7 +2409,8 @@ let read_resolved database (key : Names.key) =
       (fun section ->
         match Hashtbl.find_opt owner.resolved_names (key, section) with
         | Some (Value resolved) -> Some resolved
-        | Some (Failed _ | Blocked) | None -> None)
+        | Some (Failed _ | Blocked) -> None
+        | None -> report_uncomputed (Resolved (key, section)))
       Resolve.sections
   with
   | [] -> None
