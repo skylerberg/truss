@@ -86,7 +86,7 @@ let runnable database =
                 ^ Prover.Facts.quote_span
                     (lookups.interface.names.read_text key)
                     (Source.Definition_span.locate
-                       (lookups.interface.names.list_spans key)
+                       (lookups.interface.names.read_spans key)
                        requirement.clause.origin)
                 ^ ")")
               requires

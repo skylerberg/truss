@@ -539,7 +539,7 @@ let add_recording (names : Resolve.Names.lookups) (note : Part.t -> unit) : Reso
         noting (Package_declarations package) (names.list_package_declarations package));
     read_definition = (fun key -> noting (Tree key) (names.read_definition key));
     read_text = (fun key -> noting (Text key) (names.read_text key));
-    list_spans = (fun key -> noting (Tree key) (names.list_spans key));
+    read_spans = (fun key -> noting (Tree key) (names.read_spans key));
     list_recovered = (fun key -> noting (Tree key) (names.list_recovered key));
     read_place = (fun key -> noting (Place key) (names.read_place key));
     find_container = (fun key -> noting (Container key) (names.find_container key));
@@ -942,7 +942,7 @@ type stored = {
   is_failed : bool;
   remove : unit -> unit;
   is_equal_in : t -> bool;
-  save : unit -> string option;
+  marshal : unit -> string option;
   restore : string -> unit;
 }
 
@@ -963,7 +963,7 @@ let make_stored database (part : Part.stored) =
       is_failed = Option.fold ~none:false ~some:is_failed (access current).stored;
       remove = (fun () -> (access current).remove ());
       is_equal_in = (fun other -> compare (access (owner other)).stored (access current).stored = 0);
-      save = (fun () -> Option.map marshal (access current).stored);
+      marshal = (fun () -> Option.map marshal (access current).stored);
       restore = (fun bytes -> (access current).replace (Marshal.from_string bytes 0));
     }
   in
@@ -987,7 +987,7 @@ let make_stored database (part : Part.stored) =
             is_equal_in =
               (fun other ->
                 compare (obtain_owner other package).namespace package_database.namespace = 0);
-            save = (fun () -> None);
+            marshal = (fun () -> None);
             restore = ignore;
           }
       | Resolved (key, section) ->
@@ -1069,7 +1069,7 @@ let make_stored database (part : Part.stored) =
             remove =
               (fun () -> Call_graph.remove_successors (obtain_call_graph database viewer) path);
             is_equal_in = (fun other -> call_edges other = call_edges database);
-            save = (fun () -> Option.map marshal (call_edges database));
+            marshal = (fun () -> Option.map marshal (call_edges database));
             restore =
               (fun bytes ->
                 ignore
@@ -2096,7 +2096,8 @@ let is_saved_part database (part : Part.stored) =
 
 let find_saved_value database (entry : Entry.t) =
   match entry with
-  | Value part -> if is_saved_part database part then (make_stored database part).save () else None
+  | Value part ->
+      if is_saved_part database part then (make_stored database part).marshal () else None
   | Reads part ->
       if is_saved_part database (Computed part) then
         Option.map marshal (Computed_table.find_opt database.reads part)

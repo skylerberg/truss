@@ -65,10 +65,10 @@ let render_signature (names : Resolve.Names.lookups) ~body ~opaque (key : Resolv
             (fun (span : Source.Definition_span.t) ->
               Source.Definition_span.of_file ~base
                 (Source.Definition_span.to_file ~base:member_base span))
-            (list_bodies ~opaque:false (names.list_spans member) (names.read_definition member)))
+            (list_bodies ~opaque:false (names.read_spans member) (names.read_definition member)))
         (names.list_contained key)
     in
-    cut text (list_bodies ~opaque (names.list_spans key) (names.read_definition key) @ contained)
+    cut text (list_bodies ~opaque (names.read_spans key) (names.read_definition key) @ contained)
 
 let show_kind : Resolve.Names.kind -> string = function
   | Function -> "function"

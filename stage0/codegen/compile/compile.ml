@@ -288,7 +288,7 @@ let show_position (position : Emit_c.position) =
 let locate_todo_type compiler (path : Path.t) =
   let names = compiler.requests.interface.names in
   match
-    Option.map (fun key -> (names.read_definition key, names.list_spans key)) (names.find_key path)
+    Option.map (fun key -> (names.read_definition key, names.read_spans key)) (names.find_key path)
   with
   | Some ({ kind = Type_definition { name; _ }; _ }, spans) ->
       locate_offset compiler path spans.(name.id).start

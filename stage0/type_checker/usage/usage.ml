@@ -183,7 +183,7 @@ let check (lookups : Lookups.t) key =
     {
       resolved = lookups.read_resolved key;
       tables = lookups.read_tables key;
-      spans = lookups.names.list_spans key;
+      spans = lookups.names.read_spans key;
       text = lazy (lookups.names.read_text key);
       diagnostics = [];
     }

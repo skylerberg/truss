@@ -26,7 +26,7 @@ let check lookups (key : Resolve.Names.key) ~checks_body =
         Error
           [
             Diagnostic.make ~code:(Types Recursion_limit)
-              (names.list_spans key).((names.read_definition key).id)
+              (names.read_spans key).((names.read_definition key).id)
               message;
           ])
 

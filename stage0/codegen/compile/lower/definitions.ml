@@ -60,7 +60,7 @@ let make_unwritten_code ~definition ~substitution ~result =
 
 let read_written context key =
   {
-    spans = context.lookups.interface.names.list_spans key;
+    spans = context.lookups.interface.names.read_spans key;
     text = context.lookups.interface.names.read_text key;
   }
 
