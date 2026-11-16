@@ -88,7 +88,9 @@ let spend (context : State.context) (frame : State.frame) (amount : Costs.counte
 
 let declare_unknown_amount context frame (counter : Costs.counter) =
   let amount = Facts.declare_fresh context frame "spent" Logic.Int in
-  let least = match counter.resource with Time -> 1 | _ -> 0 in
+  let least =
+    match counter.resource with Time -> 1 | Allocations | Allocated_bytes | Calls _ -> 0
+  in
   Facts.assume context frame (Logic.Operation ("<=", [ Logic.int least; amount ]));
   amount
 
@@ -336,26 +338,25 @@ let arithmetic context (frame : State.frame) (site : Invocation.site) ty
     (operation : Intrinsic.operation) left right =
   let source = frame.source in
   let location = Facts.locate context frame.source site.origin in
-  let exact =
+  let exact, is_division =
     match operation with
-    | Add -> Logic.Operation ("+", [ left; right ])
-    | Subtract -> Logic.Operation ("-", [ left; right ])
-    | Multiply -> Logic.Operation ("*", [ left; right ])
-    | Divide -> Logic.truncated_divide left right
-    | _ -> Logic.truncated_remainder left right
+    | Add -> (Logic.Operation ("+", [ left; right ]), false)
+    | Subtract -> (Logic.Operation ("-", [ left; right ]), false)
+    | Multiply -> (Logic.Operation ("*", [ left; right ]), false)
+    | Divide -> (Logic.truncated_divide left right, true)
+    | Remainder -> (Logic.truncated_remainder left right, true)
+    | _ -> Facts.bug "`%s` is not arithmetic" (Intrinsic.operation_name operation)
   in
-  (match operation with
-  | Divide | Remainder ->
-      Facts.oblige context frame Division location
-        ~fixes:
-          (match find_parameter_spelling context frame right with
-          | Some text -> Facts.add_requires context [ Text (text ^ " != 0") ]
-          | None -> [])
-        [ Text "The divisor in `"; Facts.quote source site.origin; Text "` may be zero." ]
-        (Logic.not_ (Logic.equal right (Logic.int 0)))
-  | _ -> ());
+  if is_division then
+    Facts.oblige context frame Division location
+      ~fixes:
+        (match find_parameter_spelling context frame right with
+        | Some text -> Facts.add_requires context [ Text (text ^ " != 0") ]
+        | None -> [])
+      [ Text "The divisor in `"; Facts.quote source site.origin; Text "` may be zero." ]
+      (Logic.not_ (Logic.equal right (Logic.int 0)));
   (match Facts.find_bounds ty with
-  | Some (low, _) when operation = Divide || operation = Remainder ->
+  | Some (low, _) when is_division ->
       if Z.sign low < 0 then
         Facts.oblige context frame Overflow location
           ~fixes:(make_division_overflow_fix context frame ty left right)
@@ -478,9 +479,10 @@ let primitive_operation context (frame : State.frame) ~(site : Invocation.site)
   let is_float = match types with ty :: _ -> Facts.find_float_format ty <> None | [] -> false in
   let exact operation left right =
     match (operation : Intrinsic.operation) with
-    | Add | Wrapping_add | Add_overflows -> Logic.Operation ("+", [ left; right ])
-    | Subtract | Wrapping_subtract | Subtract_overflows -> Logic.Operation ("-", [ left; right ])
-    | _ -> Logic.Operation ("*", [ left; right ])
+    | Wrapping_add | Add_overflows -> Logic.Operation ("+", [ left; right ])
+    | Wrapping_subtract | Subtract_overflows -> Logic.Operation ("-", [ left; right ])
+    | Wrapping_multiply | Multiply_overflows -> Logic.Operation ("*", [ left; right ])
+    | _ -> Facts.bug "`%s` has no exact integer result" (Intrinsic.operation_name operation)
   in
   match (operation, types, operands) with
   | Add, _ :: _, [ left; right ] when is_float -> make_float_operation "fp.add" left right

@@ -305,8 +305,10 @@ let flow_into analysis state (terminator : Mir.Graph.terminator) successor =
           let state = copy state in
           set_holds state (list_affected_by_local analysis local);
           state
-      | _ -> state)
-  | _ -> state
+      | Some { returned = None; _ } | None -> state)
+  | For _ | Goto _ | Branch _ | Fork _ | Join _ | Iteration_end _ | Yield _ | Return _ | Cancel _
+  | Unreachable | Written_unreachable | Todo ->
+      state
 
 let make_owner_test ?(passed = fun _ -> None) (body : Mir.Graph.body) =
   let parts =
@@ -370,7 +372,10 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.Gra
           List.iter
             (fun (exit : Mir.Graph.early_exit) -> Option.iter consider_local exit.returned)
             exits
-      | _ -> ())
+      | For { iteration = Range _; _ }
+      | Goto _ | Branch _ | Fork _ | Join _ | Iteration_end _ | Yield _ | Return _ | Cancel _
+      | Unreachable | Written_unreachable | Todo ->
+          ())
     body.blocks;
   let paths =
     Array.of_list
@@ -526,7 +531,9 @@ let analyse ?passed ?(moving = fun _ -> true) ~tracks:needs_drop (body : Mir.Gra
                 if path.projections = [] && owns path.local then
                   mark_needed_flags analysis state position)
               analysis.paths
-        | _ -> ()
+        | Goto _ | Branch _ | For _ | Fork _ | Join _ | Iteration_end _ | Cancel _ | Resume _
+        | Unreachable | Written_unreachable | Todo ->
+            ()
       end)
     body.blocks;
   analysis.flagged <- List.sort_uniq compare analysis.flagged;
