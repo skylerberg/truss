@@ -530,6 +530,13 @@ let () =
         (keep ^ Fixtures.Ownership.list_moved_then_read)
         "ownership.use_after_move"
         ~fixed:(keep ^ Fixtures.Ownership.list_copied_then_read));
+  Harness.test "a moved place whose type is not `Copyable` gets no fix that copies it" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.token_moved_then_read "ownership.use_after_move";
+      let packages = Support.setup [ ("app::main", Fixtures.Ownership.token_moved_then_read) ] in
+      List.iter
+        (fun (diagnostic : Diagnostic.t) ->
+          if diagnostic.fixes <> [] then Harness.fail "offered a fix that copies the token")
+        (check packages (Support.parse_file "app::main")));
   Harness.test "a `let` that reads a moved place is reported at the place" (fun () ->
       expect_one_diagnostic
         (keep ^ Fixtures.Ownership.list_moved_then_bound)
