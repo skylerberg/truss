@@ -38,6 +38,7 @@ and capability =
   | Capability_parameter of parameter
   | Capability_projection of { base : ty; trait : trait_reference; name : string }
   | Capability_variable of int
+  | Capability_error of Diagnostic.reported
 
 and capability_set = capability list
 and cost = { amortized : bool; resource : resource; bound : cost_bound }
@@ -56,11 +57,19 @@ let no_capabilities : capability_set = []
 let union_capabilities (left : capability_set) (right : capability_set) =
   make_capability_set (left @ right)
 
+let has_capability_error (capabilities : capability_set) =
+  List.exists (function Capability_error _ -> true | _ -> false) capabilities
+
 let is_capability_subset (smaller : capability_set) (larger : capability_set) =
-  List.for_all (fun capability -> List.mem capability larger) smaller
+  has_capability_error smaller || has_capability_error larger
+  || List.for_all (fun capability -> List.mem capability larger) smaller
 
 let subtract_capabilities (left : capability_set) (right : capability_set) =
   List.filter (fun capability -> not (List.mem capability right)) left
+
+let list_missing_capabilities ~(required : capability_set) ~(available : capability_set) =
+  if has_capability_error required || has_capability_error available then no_capabilities
+  else subtract_capabilities required available
 
 let flat_map_capabilities f (set : capability_set) = make_capability_set (List.concat_map f set)
 let make_builtin builtin = Named { path = Intrinsic.builtin_path builtin; arguments = [] }
@@ -177,7 +186,7 @@ and substitute_capabilities substitution capabilities =
                 name;
               };
           ]
-      | (Capability _ | Capability_variable _) as capability -> [ capability ])
+      | (Capability _ | Capability_variable _ | Capability_error _) as capability -> [ capability ])
     capabilities
 
 and substitute_trait substitution (trait : trait_reference) =
@@ -294,7 +303,7 @@ let has_unsolved_capabilities capabilities =
     (function
       | Capability_variable _ -> true
       | Capability_projection { base; _ } -> contains_unsolved base
-      | Capability _ | Capability_parameter _ -> false)
+      | Capability _ | Capability_parameter _ | Capability_error _ -> false)
     capabilities
 
 let terminates (function_type : function_type) =
@@ -337,7 +346,7 @@ let rec show_capability = function
   | Capability path -> show_path_name path
   | Capability_parameter { name; _ } -> name
   | Capability_projection { base; name; _ } -> show base ^ "." ^ name
-  | Capability_variable _ -> "_"
+  | Capability_variable _ | Capability_error _ -> "_"
 
 and show = function
   | Named { path; arguments = [] } -> show_path_name path

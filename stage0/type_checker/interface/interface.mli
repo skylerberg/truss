@@ -9,6 +9,7 @@ module Elaborator : sig
     lookups : Lookups.t;
     resolved : Resolve.resolved;
     bounds : Types.trait_reference list Parameter_table.t;
+    broken_parameters : Diagnostic.reported Parameter_table.t;
     self_type : Types.ty option;
     self_trait : Types.trait_reference option;
     self_associated : (string * Types.ty) list;

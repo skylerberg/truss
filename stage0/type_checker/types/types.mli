@@ -38,6 +38,7 @@ and capability =
   | Capability_parameter of parameter
   | Capability_projection of { base : ty; trait : trait_reference; name : string }
   | Capability_variable of int
+  | Capability_error of Diagnostic.reported
 
 and capability_set = private capability list
 and cost = { amortized : bool; resource : resource; bound : cost_bound }
@@ -71,6 +72,10 @@ val no_capabilities : capability_set
 val union_capabilities : capability_set -> capability_set -> capability_set
 val is_capability_subset : capability_set -> capability_set -> bool
 val subtract_capabilities : capability_set -> capability_set -> capability_set
+
+val list_missing_capabilities :
+  required:capability_set -> available:capability_set -> capability_set
+
 val flat_map_capabilities : (capability -> capability list) -> capability_set -> capability_set
 
 type substitution = (parameter * argument) list

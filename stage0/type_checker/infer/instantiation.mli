@@ -20,6 +20,9 @@ val named_type :
 
 val type_argument_of_expression : State.state -> Syntax.expression -> Types.argument
 
+val written_arguments :
+  State.state -> Syntax.bracket_item list -> (Types.argument list, Types.ty) result
+
 type instance = {
   signature : Types.signature;
   substitution : Types.substitution;

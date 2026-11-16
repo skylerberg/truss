@@ -1,11 +1,11 @@
 val select_arithmetic_trait : Syntax.arithmetic -> Path.t * string
-val check_bitwise_operand : State.state -> Source.Definition_span.t -> Types.ty -> unit
+val infer_bitwise_result : State.state -> Source.Definition_span.t -> Types.ty -> Types.ty
 
-val check_shift_operands :
+val infer_shift_result :
   State.state ->
   left:Source.Definition_span.t * Types.ty ->
   right:Source.Definition_span.t * Types.ty ->
-  unit
+  Types.ty
 
 val try_ : State.state -> State.env -> Syntax.expression -> Syntax.expression -> Types.ty
 

@@ -1,3 +1,3 @@
 (library
  (name core_walk)
- (libraries structural_key path types well_known core))
+ (libraries compiler_bug structural_key path types well_known core))

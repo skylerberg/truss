@@ -13,15 +13,13 @@ let rec function_value_call state env (value : Syntax.expression) (callee : Synt
     arguments =
   let callee_type = State.normalize state (Hooks.expression state env callee) in
   match callee_type with
+  | Types.Function function_type when List.length function_type.inputs <> List.length arguments ->
+      arguments_alone state env arguments
+        (State.error state Too_many_arguments (State.read_span state value.id)
+           (Printf.sprintf "This function takes %d arguments, and %d are given."
+              (List.length function_type.inputs)
+              (List.length arguments)))
   | Types.Function function_type ->
-      if List.length function_type.inputs <> List.length arguments then
-        State.report state Too_many_arguments (State.read_span state value.id)
-          (Printf.sprintf "This function takes %d arguments, and %d are given."
-             (List.length function_type.inputs)
-             (List.length arguments));
-      let pairs =
-        List.filteri (fun index _ -> index < List.length function_type.inputs) arguments
-      in
       let checked =
         List.mapi
           (fun index (argument : Syntax.argument) ->
@@ -51,7 +49,7 @@ let rec function_value_call state env (value : Syntax.expression) (callee : Synt
               mode;
               mode_keyword = mode_keyword_of argument.value;
             })
-          pairs
+          arguments
       in
       let result = function_type.output in
       state.tables.calls.(value.id) <-
@@ -291,20 +289,22 @@ and check_arguments state env (parameters : Types.parameter_info list) matched ~
 and named_call state env ?expected (value : Syntax.expression) path (signature : Types.signature)
     ~type_arguments arguments =
   let instance = Instantiation.instantiate state (State.read_span state value.id) signature in
-  Name_lookup.explicit_type_arguments state value instance type_arguments;
-  (match (expected, instance.signature.output) with
-  | Some expected, Returns output -> State.unify_as_hint state output expected
-  | _ -> ());
-  let matched, left_out =
-    match_arguments state value instance.signature.parameters arguments ~record:false
-  in
-  let checked = check_arguments state env instance.signature.parameters matched ~offset:0 in
-  let callee =
-    match Intrinsic.operation_of_path path with
-    | Some operation -> Tables.Intrinsic { operation; type_arguments = instance.type_arguments }
-    | None -> Tables.Function { path; type_arguments = instance.type_arguments }
-  in
-  Name_lookup.finish_call state env value path callee instance checked left_out
+  match Name_lookup.explicit_type_arguments state value instance type_arguments with
+  | Error error -> arguments_alone state env arguments error
+  | Ok () ->
+      (match (expected, instance.signature.output) with
+      | Some expected, Returns output -> State.unify_as_hint state output expected
+      | _ -> ());
+      let matched, left_out =
+        match_arguments state value instance.signature.parameters arguments ~record:false
+      in
+      let checked = check_arguments state env instance.signature.parameters matched ~offset:0 in
+      let callee =
+        match Intrinsic.operation_of_path path with
+        | Some operation -> Tables.Intrinsic { operation; type_arguments = instance.type_arguments }
+        | None -> Tables.Function { path; type_arguments = instance.type_arguments }
+      in
+      Name_lookup.finish_call state env value path callee instance checked left_out
 
 and construct state env ?expected ?type_arguments (value : Syntax.expression) type_path variant
     arguments =
@@ -315,16 +315,21 @@ and construct state env ?expected ?type_arguments (value : Syntax.expression) ty
   in
   let type_ = Types.Named { path = type_path; arguments = type_arguments } in
   (match expected with Some expected -> State.unify_as_hint state type_ expected | None -> ());
+  let unknown_variant variant =
+    Error
+      (State.error state Unknown_variant (State.read_span state value.id)
+         (Printf.sprintf "`%s` has no variant `%s`." (State.show state type_) variant))
+  in
   let fields =
     match variant with
     | None -> (
         match Members.fields state.lookups type_path type_arguments with
-        | Some fields -> Some fields
+        | Some fields -> Ok fields
         | None ->
-            State.report state Not_a_record (State.read_span state value.id)
-              (Printf.sprintf "`%s` is not a record, so it cannot be built this way."
-                 (State.show state type_));
-            None)
+            Error
+              (State.error state Not_a_record (State.read_span state value.id)
+                 (Printf.sprintf "`%s` is not a record, so it cannot be built this way."
+                    (State.show state type_))))
     | Some variant -> (
         match Members.variants state.lookups type_path type_arguments with
         | Some variants -> (
@@ -333,28 +338,21 @@ and construct state env ?expected ?type_arguments (value : Syntax.expression) ty
                 (fun (written : Types.variant) -> written.variant_name = variant)
                 variants
             with
-            | Some { fields = Some fields; _ } -> Some fields
+            | Some { fields = Some fields; _ } -> Ok fields
             | Some { fields = None; _ } ->
-                State.report state Too_many_arguments (State.read_span state value.id)
-                  (Printf.sprintf "`%s` has no fields." variant);
-                None
-            | None ->
-                State.report state Unknown_variant (State.read_span state value.id)
-                  (Printf.sprintf "`%s` has no variant `%s`." (State.show state type_) variant);
-                None)
-        | None -> None)
+                Error
+                  (State.error state Too_many_arguments (State.read_span state value.id)
+                     (Printf.sprintf "`%s` has no fields." variant))
+            | None -> unknown_variant variant)
+        | None -> unknown_variant variant)
   in
   if not (Members.fields_visible state.lookups ~package:state.package type_path) then
     State.report state Private_field (State.read_span state value.id)
       (Printf.sprintf "`%s` is opaque, so only its own package can build it."
          (State.show state type_));
   match fields with
-  | None ->
-      List.iter
-        (fun (argument : Syntax.argument) -> ignore (Hooks.expression state env argument.value))
-        arguments;
-      type_
-  | Some fields ->
+  | Error error -> arguments_alone state env arguments error
+  | Ok fields ->
       let parameters =
         List.map
           (fun (field : Types.field) ->

@@ -138,16 +138,18 @@ and statement state env (written : Syntax.statement) ~last : unit =
                 State.mismatch state (State.read_span state value.id) ~expected:target_type
                   ~actual:result
           | Shift _ ->
-              Operators.check_shift_operands state
-                ~left:(State.read_span state written_target.id, target_type)
-                ~right:(State.read_span state value.id, right_type)
+              ignore
+                (Operators.infer_shift_result state
+                   ~left:(State.read_span state written_target.id, target_type)
+                   ~right:(State.read_span state value.id, right_type))
           | Bitwise _ ->
               if not (State.unify state target_type right_type) then
                 State.mismatch state (State.read_span state value.id) ~expected:target_type
                   ~actual:right_type;
-              Operators.check_bitwise_operand state
-                (State.read_span state written_target.id)
-                target_type))
+              ignore
+                (Operators.infer_bitwise_result state
+                   (State.read_span state written_target.id)
+                   target_type)))
   | For { mode = running; pattern = written_pattern; annotation; iterable; clauses; body } ->
       State.reject_in_formula state env (State.read_span state written.id) "A `for` loop";
       let mode, inner =
