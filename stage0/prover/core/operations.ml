@@ -37,9 +37,33 @@ let check_widened location ~is_written actual expected =
       Facts.unsupported location "a function value's costs"
   | _ -> ()
 
+let find_parameter_spelling (context : State.context) (frame : State.frame) term =
+  if
+    frame.source.key = Some context.home
+    && (not (Logic.has_quantifier term))
+    &&
+    match Logic.list_free_constants term with
+    | _ :: _ as names -> List.for_all (fun name -> List.mem name context.entry) names
+    | [] -> false
+  then Facts.truss_of_value context term
+  else None
+
+let find_integer_limits ty =
+  if Types.is_builtin Character ty then None
+  else Option.map (fun (low, high) -> (Types.show ty, low, high)) (Facts.find_bounds ty)
+
+let make_range_fix context frame ty term =
+  match (find_integer_limits ty, find_parameter_spelling context frame term) with
+  | Some (name, low, _), Some text ->
+      let least = if Z.sign low = 0 then "0" else name ^ ".minimum" in
+      Facts.add_requires_under_condition context frame
+        (Printf.sprintf "%s <= %s && %s <= %s.maximum" least text text name)
+  | _ -> []
+
 let convert_from_integer context frame (site : Invocation.site) term =
   let ty = Facts.substitute_type context frame site.type_ in
   Facts.oblige context frame Out_of_range
+    ~fixes:(make_range_fix context frame ty term)
     (Facts.locate context frame.source site.origin)
     [
       Text "`";
@@ -247,33 +271,65 @@ let declare_opaque_operation context frame ty operation arguments =
   Facts.assume context frame (Facts.make_in_range ty term);
   term
 
-let find_parameter_spelling (context : State.context) (frame : State.frame) term =
-  if
-    frame.source.key = Some context.home
-    && (not (Logic.has_quantifier term))
-    &&
-    match Logic.list_free_constants term with
-    | _ :: _ as names -> List.for_all (fun name -> List.mem name context.entry) names
-    | [] -> false
-  then Facts.truss_of_value context term
-  else None
-
-let make_overflow_fix context frame ty (operation : Intrinsic.operation) left right =
-  match (Facts.find_bounds ty, right, find_parameter_spelling context frame left) with
-  | Some (low, high), Logic.Integer limit, Some text -> (
-      let clause relation limit =
-        if Z.leq low limit && Z.leq limit high then
-          Facts.add_requires context
-            [ Text (Printf.sprintf "%s %s %s" text relation (Z.to_string limit)) ]
-        else []
+let make_overflow_fix context frame ty (operation : Intrinsic.operation) left right exact =
+  match find_integer_limits ty with
+  | None -> []
+  | Some (name, low, high) -> (
+      let is_unsigned = Z.sign low = 0 in
+      let bound_on_left =
+        match (right, find_parameter_spelling context frame left) with
+        | Logic.Integer limit, Some text -> (
+            let magnitude = Z.to_string (Z.abs limit) in
+            let clause relation bound spelled =
+              if Z.leq low bound && Z.leq bound high then
+                Some (Printf.sprintf "%s %s %s" text relation spelled)
+              else None
+            in
+            match operation with
+            | Add when Z.sign limit > 0 ->
+                clause "<=" (Z.sub high limit) (name ^ ".maximum - " ^ magnitude)
+            | Add when Z.sign limit < 0 ->
+                clause ">=" (Z.sub low limit) (name ^ ".minimum + " ^ magnitude)
+            | Subtract when Z.sign limit > 0 && is_unsigned -> clause ">=" limit magnitude
+            | Subtract when Z.sign limit > 0 ->
+                clause ">=" (Z.add low limit) (name ^ ".minimum + " ^ magnitude)
+            | Subtract when Z.sign limit < 0 ->
+                clause "<=" (Z.add high limit) (name ^ ".maximum - " ^ magnitude)
+            | Multiply when Z.sign limit > 0 && is_unsigned ->
+                clause "<=" (Z.div high limit) (name ^ ".maximum / " ^ magnitude)
+            | _ -> None)
+        | _ -> None
       in
-      match operation with
-      | Add when Z.sign limit > 0 -> clause "<=" (Z.sub high limit)
-      | Add when Z.sign limit < 0 -> clause ">=" (Z.sub low limit)
-      | Subtract when Z.sign limit > 0 -> clause ">=" (Z.add low limit)
-      | Subtract when Z.sign limit < 0 -> clause "<=" (Z.add high limit)
-      | Multiply when Z.sign limit > 0 && Z.sign low = 0 -> clause "<=" (Z.div high limit)
-      | _ -> [])
+      match (bound_on_left, operation) with
+      | Some required, _ -> Facts.add_requires context [ Text required ]
+      | None, (Add | Multiply) when is_unsigned -> (
+          match find_parameter_spelling context frame exact with
+          | Some text ->
+              Facts.add_requires_under_condition context frame
+                (Printf.sprintf "%s <= %s.maximum" text name)
+          | None -> [])
+      | None, Subtract when is_unsigned -> []
+      | None, _ -> make_range_fix context frame ty exact)
+
+let make_division_overflow_fix context frame ty left right =
+  match (find_integer_limits ty, find_parameter_spelling context frame left) with
+  | Some (name, _, _), Some dividend -> (
+      let dividend_not_minimum = Printf.sprintf "%s != %s.minimum" dividend name in
+      match right with
+      | Logic.Integer divisor when Z.equal divisor Z.minus_one ->
+          Facts.add_requires_under_condition context frame dividend_not_minimum
+      | _ -> (
+          match find_parameter_spelling context frame right with
+          | Some divisor ->
+              Facts.add_requires_under_condition context frame
+                (Printf.sprintf "%s || %s != -1" dividend_not_minimum divisor)
+          | None -> []))
+  | _ -> []
+
+let make_negation_fix context frame ty inner =
+  match (find_integer_limits ty, find_parameter_spelling context frame inner) with
+  | Some (name, _, _), Some text ->
+      Facts.add_requires_under_condition context frame (Printf.sprintf "%s != %s.minimum" text name)
   | _ -> []
 
 let arithmetic context (frame : State.frame) (site : Invocation.site) ty
@@ -302,6 +358,7 @@ let arithmetic context (frame : State.frame) (site : Invocation.site) ty
   | Some (low, _) when operation = Divide || operation = Remainder ->
       if Z.sign low < 0 then
         Facts.oblige context frame Overflow location
+          ~fixes:(make_division_overflow_fix context frame ty left right)
           [
             Text "`";
             Facts.quote source site.origin;
@@ -311,7 +368,7 @@ let arithmetic context (frame : State.frame) (site : Invocation.site) ty
   | Some (low, high) ->
       let unsigned = Z.sign low = 0 && not (Types.is_builtin Character ty) in
       Facts.oblige context frame Overflow location
-        ~fixes:(make_overflow_fix context frame ty operation left right)
+        ~fixes:(make_overflow_fix context frame ty operation left right exact)
         [
           Text "`";
           Facts.quote source site.origin;
@@ -440,6 +497,7 @@ let primitive_operation context (frame : State.frame) ~(site : Invocation.site)
       let negated = Logic.Operation ("-", [ inner ]) in
       if Facts.find_bounds ty <> None then
         Facts.oblige context frame Overflow location
+          ~fixes:(make_negation_fix context frame ty inner)
           [
             Text "`";
             Facts.quote source site.origin;

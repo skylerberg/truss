@@ -1,0 +1,5 @@
+fn quotient(dividend: Int64, divisor: Int64) -> Int64
+  requires divisor != 0
+{
+  dividend / divisor
+}

@@ -197,6 +197,8 @@ let truss_of_value context term =
   in
   arithmetic 0 term
 
+let show_implication premise conclusion = Printf.sprintf "(%s) ==> (%s)" premise conclusion
+
 let truss_of_goal context term =
   let value = truss_of_value context in
   let rec print = function
@@ -210,7 +212,7 @@ let truss_of_goal context term =
     | Logic.Operation ("not", [ inner ]) -> Option.map (Printf.sprintf "!(%s)") (print inner)
     | Logic.Operation ("=>", [ premise; conclusion ]) -> (
         match (print premise, print conclusion) with
-        | Some premise, Some conclusion -> Some (Printf.sprintf "(%s) ==> (%s)" premise conclusion)
+        | Some premise, Some conclusion -> Some (show_implication premise conclusion)
         | _ -> None)
     | term -> value term
   and joined separator parts =
@@ -229,6 +231,14 @@ let truss_of_goal context term =
   if List.exists (fun symbol -> List.mem symbol context.entry) (Logic.list_free_constants term) then
     printed
   else None
+
+let add_requires_under_condition context (frame : State.frame) conclusion =
+  match frame.condition with
+  | Logic.Boolean true -> add_requires context [ Text conclusion ]
+  | condition -> (
+      match truss_of_goal context condition with
+      | Some premise -> add_requires context [ Text (show_implication premise conclusion) ]
+      | None -> [])
 
 let rec oblige ?template_clause ?cited ?(fixes = []) context (frame : State.frame) code location
     message goal =
