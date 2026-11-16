@@ -675,7 +675,7 @@ let () =
         List.filter_map
           (fun (node : Core.pattern) ->
             match node.kind with
-            | Range { start = { kind = Integer low; _ }; stop = { kind = Integer high; _ }; _ } ->
+            | Range { start = Integer_bound low; stop = Integer_bound high; _ } ->
                 Some (Z.to_int low, Z.to_int high)
             | _ -> None)
           (first_core_nodes Fixtures.Infer.range_pattern_has_the_values_of_its_two_bounds).patterns
@@ -688,6 +688,9 @@ let () =
   test "an integer range on a type that is not ordered is one error" (fun () ->
       one_diagnostic Fixtures.Infer.integer_range_on_a_type_that_is_not_ordered_is_one
         "types.mismatch");
+  test "a range pattern whose bounds infer its type as Bool is an error" (fun () ->
+      one_diagnostic Fixtures.Infer.range_pattern_whose_bounds_infer_its_type_as_bool
+        "types.mismatch" ~says:"not `Bool`");
   test "a range pattern on Character is fine" (fun () ->
       fine Fixtures.Infer.range_pattern_on_character_is_fine);
   test "a Character literal is a tagged string holding its scalar value" (fun () ->

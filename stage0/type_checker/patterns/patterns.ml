@@ -80,9 +80,9 @@ let arity context type_ constructor = List.length (fields_of context type_ const
 let rec space ?replace context (written : Core.pattern) : space =
   match written.kind with
   | Wildcard | Bind _ -> Wild
-  | Literal value | Equal_to { value; _ } -> compared context value
+  | Literal value | Equal_to { value; _ } -> evaluate_pattern_constant context value
   | Range { start; stop; inclusive } -> (
-      match (range_end context start, range_end context stop) with
+      match (evaluate_range_bound context start, evaluate_range_bound context stop) with
       | Ok low, Ok high ->
           let high = if inclusive then high else Z.pred high in
           if Z.gt low high then Alternatives [] else Constructed (Interval (low, high), [])
@@ -95,17 +95,12 @@ let rec space ?replace context (written : Core.pattern) : space =
       in
       Alternatives (List.map (space ?replace context) alternatives)
 
-and compared context (value : Core.expression) : space =
-  match value.kind with
-  | Use (Constant { path; _ }) -> constant context path
-  | _ -> Option.value ~default:(Constructed (Opaque "this value", [])) (literal value)
-
-and literal (value : Core.expression) : space option =
-  match value.kind with
-  | Boolean value -> Some (Constructed (Boolean value, []))
-  | Integer value -> Some (Constructed (Interval (value, value), []))
-  | String text -> Some (Constructed (Text text, []))
-  | _ -> None
+and evaluate_pattern_constant context (value : Core.pattern_constant) : space =
+  match value with
+  | Boolean_constant value -> Constructed (Boolean value, [])
+  | Integer_constant value -> Constructed (Interval (value, value), [])
+  | String_constant text -> Constructed (Text text, [])
+  | Named_constant path -> constant context path
 
 and constant ?(seen = []) context path =
   let opaque = Constructed (Opaque (Path.show path), []) in
@@ -140,16 +135,18 @@ and constant_value context seen (value : Core.expression) : space option =
              ( (match variant with Some name -> Variant name | None -> Record),
                List.map Option.get parts ))
       else None
-  | _ -> literal value
+  | Boolean value -> Some (Constructed (Boolean value, []))
+  | Integer value -> Some (Constructed (Interval (value, value), []))
+  | String text -> Some (Constructed (Text text, []))
+  | _ -> None
 
-and range_end context (value : Core.expression) =
-  match value.kind with
-  | Integer value -> Ok value
-  | Use (Constant { path; _ }) -> (
+and evaluate_range_bound context (bound : Core.range_bound) =
+  match bound with
+  | Integer_bound value -> Ok value
+  | Constant_bound path -> (
       match context.lookups.interface.constant_value path with
       | Some value -> Ok value
       | None -> Error (Path.show path))
-  | _ -> Error "this bound"
 
 and fielded ?replace context type_ constructor (written : (string * Core.pattern) list) =
   Constructed

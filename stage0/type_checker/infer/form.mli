@@ -30,13 +30,10 @@ val untagged_string : State.state -> origin:Core.origin -> Syntax.string_literal
 val tagged_string :
   State.state -> Syntax.expression -> Syntax.string_literal -> part:Types.ty -> Core.kind
 
-val pattern_type : State.state -> Syntax.id -> Types.ty
-
-val equal_to_pattern :
-  State.state -> origin:Core.origin -> Types.ty -> Core.kind -> Core.pattern_kind
-
-val pattern_constant : State.state -> Syntax.id -> Core.kind
-val pattern_literal : State.state -> Syntax.id -> Syntax.literal -> Core.kind
+val build_constant_pattern : State.state -> Syntax.id -> Core.pattern_constant -> Core.pattern_kind
+val build_named_constant : State.state -> Syntax.id -> Core.pattern_constant
+val build_literal_constant : State.state -> Syntax.id -> Syntax.literal -> Core.pattern_constant
+val build_range_bound : State.state -> Syntax.range_end -> Core.range_bound
 
 val pattern_fields :
   State.state -> Types.field list -> (string * Syntax.pattern) list -> (string * Core.pattern) list

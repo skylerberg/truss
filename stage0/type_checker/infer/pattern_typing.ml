@@ -19,12 +19,6 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
     register_pattern state written (fun () ->
         Bind { local = Named id; name = bound.text; is_var; mode })
   in
-  let constant () =
-    register_pattern state written (fun () ->
-        Form.equal_to_pattern state ~origin:written.id
-          (Form.pattern_type state written.id)
-          (Form.pattern_constant state written.id))
-  in
   match written.kind with
   | Wildcard | Pattern_error -> register_pattern state written (fun () -> Wildcard)
   | Binding bound -> (
@@ -45,40 +39,51 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
           | None -> ())
       | _ -> ())
   | Qualified_constant written_constant ->
-      constant ();
+      register_pattern state written (fun () ->
+          Form.build_constant_pattern state written.id (Form.build_named_constant state written.id));
       qualified_constant state written.id (read_span state written.id) written_constant type_
   | Literal literal ->
       register_pattern state written (fun () ->
-          Form.equal_to_pattern state ~origin:written.id
-            (Form.pattern_type state written.id)
-            (Form.pattern_literal state written.id literal));
+          Form.build_constant_pattern state written.id
+            (Form.build_literal_constant state written.id literal));
       literal_pattern state written.id (read_span state written.id) literal type_
-  | Pattern_range { start; stop; inclusive } -> (
+  | Pattern_range { start; stop; inclusive } ->
       register_pattern state written (fun () ->
-          let end_ (written_end : range_end) =
-            synthetic_expression state ~origin:written_end.id
-              (Form.pattern_type state written.id)
-              (match written_end.kind with
-              | End_literal literal -> Form.pattern_literal state written_end.id literal
-              | End_constant _ -> Form.pattern_constant state written_end.id)
-          in
-          let start = end_ start in
-          Range { start; stop = end_ stop; inclusive });
-      match resolve state type_ with
-      | (Types.Named _ | Types.Function _ | Types.Any _ | Types.Parameter _) as resolved
-        when not (integer_type state resolved || Types.is_builtin Character resolved) ->
-          report state Mismatch (read_span state written.id)
-            (Printf.sprintf "A range pattern matches an integer or a `Character`, not `%s`."
-               (show state resolved))
-      | _ ->
-          List.iter
-            (fun (end_ : range_end) ->
-              match end_.kind with
-              | End_literal literal ->
-                  literal_pattern state end_.id (read_span state end_.id) literal type_
-              | End_constant constant ->
-                  qualified_constant state end_.id (read_span state end_.id) constant type_)
-            [ start; stop ])
+          Range
+            {
+              start = Form.build_range_bound state start;
+              stop = Form.build_range_bound state stop;
+              inclusive;
+            });
+      let rejects_ranges (resolved : Types.ty) =
+        match resolved with
+        | Types.Named _ | Types.Function _ | Types.Any _ | Types.Parameter _ ->
+            not (integer_type state resolved || Types.is_builtin Character resolved)
+        | _ -> false
+      in
+      let report_not_range_type resolved =
+        report state Mismatch (read_span state written.id)
+          (Printf.sprintf "A range pattern matches an integer or a `Character`, not `%s`."
+             (show state resolved))
+      in
+      let resolved = resolve state type_ in
+      if rejects_ranges resolved then report_not_range_type resolved
+      else begin
+        List.iter
+          (fun (bound : range_end) ->
+            match bound.kind with
+            | End_literal literal ->
+                literal_pattern state bound.id (read_span state bound.id) literal type_
+            | End_constant constant ->
+                qualified_constant state bound.id (read_span state bound.id) constant type_)
+          [ start; stop ];
+        defer state (fun () ->
+            match resolve state type_ with
+            | Types.Literal _ | Types.Variable _ -> false
+            | resolved ->
+                if rejects_ranges resolved then report_not_range_type resolved;
+                true)
+      end
   | Variant { name = variant_name; fields } -> (
       match type_ with
       | Types.Named { path; arguments } -> (

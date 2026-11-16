@@ -174,16 +174,10 @@ let statement_children visit (node : statement) =
 
 let pattern_children visit (node : pattern) =
   match node.kind with
-  | Wildcard | Bind _ -> ()
+  | Wildcard | Bind _ | Literal _ | Range _ -> ()
   | Variant { fields; _ } | Record fields ->
       List.iter (fun (_, inner) -> visit.pattern inner) fields
-  | Literal value -> visit.expression value
-  | Range { start; stop; _ } ->
-      visit.expression start;
-      visit.expression stop
-  | Equal_to { value; equal } ->
-      visit.expression value;
-      visit.callee equal
+  | Equal_to { equal; _ } -> visit.callee equal
   | Alternatives alternatives -> List.iter visit.pattern alternatives
 
 let rec deep visit =

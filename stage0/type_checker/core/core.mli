@@ -4,6 +4,14 @@ type local = Named of origin | Self | Synthetic of int
 type quantifier = Forall | Exists
 type evidence = Impl of { impl : Path.t; arguments : Types.substitution } | Bound | Dynamic
 
+type pattern_constant =
+  | Boolean_constant of bool
+  | Integer_constant of Z.t
+  | String_constant of string
+  | Named_constant of Path.t
+
+type range_bound = Integer_bound of Z.t | Constant_bound of Path.t
+
 type 'indirect target =
   | Function of { path : Path.t; type_arguments : Types.argument list }
   | Trait_method of {
@@ -168,9 +176,9 @@ and pattern_kind =
   | Bind of { local : local; name : string; is_var : bool; mode : Types.mode }
   | Variant of { variant : string; fields : (string * pattern) list }
   | Record of (string * pattern) list
-  | Literal of expression
-  | Range of { start : expression; stop : expression; inclusive : bool }
-  | Equal_to of { value : expression; equal : callee }
+  | Literal of pattern_constant
+  | Range of { start : range_bound; stop : range_bound; inclusive : bool }
+  | Equal_to of { value : pattern_constant; equal : callee }
   | Alternatives of pattern list
 
 type parameter = {

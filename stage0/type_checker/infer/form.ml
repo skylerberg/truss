@@ -570,13 +570,13 @@ let tagged_string state (value : expression) (literal : string_literal) ~(part :
              });
     }
 
-let pattern_type state (id : id) =
+let read_pattern_type state (id : id) =
   match state.tables.scrutinee_types.(id) with
   | Some type_ -> type_
   | None -> bug "a pattern has no recorded type"
 
-let equal_to_pattern state ~origin type_ (value : Core.kind) : Core.pattern_kind =
-  let value = synthetic_expression state ~origin type_ value in
+let build_constant_pattern state (id : id) (value : Core.pattern_constant) : Core.pattern_kind =
+  let type_ = read_pattern_type state id in
   if is_built_in_scalar type_ then Literal value
   else
     let equal = trait_reference (Well_known.path Equal) in
@@ -599,18 +599,29 @@ let equal_to_pattern state ~origin type_ (value : Core.kind) : Core.pattern_kind
     | None ->
         bug "a pattern compares values of `%s`, which does not implement `Equal`" (Types.show type_)
 
-let pattern_constant state (id : id) : Core.kind =
+let read_constant_path state (id : id) =
   match state.tables.patterns.(id) with
-  | Some (Constant_pattern path) -> Use (constant_place state ~origin:id path)
+  | Some (Constant_pattern path) -> path
   | _ -> bug "a pattern names a constant that was not recorded"
 
-let pattern_literal state (id : id) (written : Syntax.literal) : Core.kind =
+let build_named_constant state (id : id) : Core.pattern_constant =
+  Named_constant (read_constant_path state id)
+
+let build_literal_constant state (id : id) (written : Syntax.literal) : Core.pattern_constant =
   match (written, state.tables.literals.(id)) with
-  | _, Some (Integer_value number) -> Integer number
-  | Literal_true, _ -> Boolean true
-  | Literal_false, _ -> Boolean false
-  | Literal_string text, _ -> String text.first.value
+  | _, Some (Integer_value number) -> Integer_constant number
+  | Literal_true, _ -> Boolean_constant true
+  | Literal_false, _ -> Boolean_constant false
+  | Literal_string text, _ -> String_constant text.first.value
   | Literal_integer _, _ -> bug "an integer pattern has no value"
+
+let build_range_bound state (bound : Syntax.range_end) : Core.range_bound =
+  match bound.kind with
+  | End_literal _ -> (
+      match state.tables.literals.(bound.id) with
+      | Some (Integer_value number) -> Integer_bound number
+      | Some (Float_value _) | None -> bug "a range bound has no integer value")
+  | End_constant _ -> Constant_bound (read_constant_path state bound.id)
 
 let pattern_fields state (fields : Types.field list) (matched : (string * pattern) list) =
   List.filter_map

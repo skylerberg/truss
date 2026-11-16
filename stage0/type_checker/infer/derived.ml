@@ -941,8 +941,7 @@ let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                       (fun (variant, fields) ->
                                         arm
                                           (pattern string_type
-                                             (Equal_to
-                                                { value = node string_type (String variant); equal }))
+                                             (Equal_to { value = String_constant variant; equal }))
                                           (fields_then_built (Some variant) fields "end_variant"))
                                       variants
                                     @ [ arm (pattern string_type Wildcard) (giving unknown) ];

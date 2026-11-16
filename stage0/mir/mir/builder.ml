@@ -119,6 +119,27 @@ let names_of (written : Core.expression) =
     written;
   List.rev !names
 
+let lower_pattern_constant (pattern : Core.pattern) (value : Core.pattern_constant) : operand =
+  let type_ = pattern.type_ in
+  match value with
+  | Boolean_constant value -> Constant { value = Boolean value; type_ }
+  | Integer_constant value -> Constant { value = Integer value; type_ }
+  | String_constant value -> Constant { value = String value; type_ }
+  | Named_constant path ->
+      Use
+        {
+          place = { root = Constant path; projections = [] };
+          type_;
+          node = pattern.id;
+          origin = pattern.origin;
+        }
+
+let lower_range_bound (pattern : Core.pattern) (bound : Core.range_bound) : operand =
+  lower_pattern_constant pattern
+    (match bound with
+    | Integer_bound value -> Integer_constant value
+    | Constant_bound path -> Named_constant path)
+
 let rec expression builder (node : Core.expression) : operand option =
   let origin = node.origin in
   let hold value = hold ~node:node.id builder node.type_ origin value in
@@ -814,31 +835,27 @@ and test builder (pattern : Core.pattern) (scrutinee : place) ~branch_on =
       List.iter
         (fun (field, inner) -> test builder inner (project scrutinee (Field field)) ~branch_on)
         fields
-  | Literal literal -> (
-      match expression builder literal with
-      | Some value ->
-          branch
-            (hold builder Types.bool origin
-               (Compare { comparison = Equal; left = read; right = value }))
-      | None -> ())
-  | Range { start = low; stop = high; inclusive } -> (
-      match (expression builder low, expression builder high) with
-      | Some low, Some high ->
-          branch
-            (hold builder Types.bool origin
-               (Compare { comparison = Greater_equal; left = read; right = low }));
-          branch
-            (hold builder Types.bool origin
-               (Compare
-                  {
-                    comparison = (if inclusive then Less_equal else Less);
-                    left = read;
-                    right = high;
-                  }))
-      | _ -> ())
+  | Literal value ->
+      branch
+        (hold builder Types.bool origin
+           (Compare
+              { comparison = Equal; left = read; right = lower_pattern_constant pattern value }))
+  | Range { start; stop; inclusive } ->
+      branch
+        (hold builder Types.bool origin
+           (Compare
+              { comparison = Greater_equal; left = read; right = lower_range_bound pattern start }));
+      branch
+        (hold builder Types.bool origin
+           (Compare
+              {
+                comparison = (if inclusive then Less_equal else Less);
+                left = read;
+                right = lower_range_bound pattern stop;
+              }))
   | Equal_to { value; equal } -> (
-      match (expression builder value, callee_of builder equal) with
-      | Some value, Some callee ->
+      match callee_of builder equal with
+      | Some callee when reaches builder ->
           let local = temporary builder Types.bool origin in
           emit builder
             (Call
@@ -863,7 +880,13 @@ and test builder (pattern : Core.pattern) (scrutinee : place) ~branch_on =
                              mode_keyword = None;
                              function_ = None;
                            };
-                         Passed { mode = Read; value; mode_keyword = None; function_ = None };
+                         Passed
+                           {
+                             mode = Read;
+                             value = lower_pattern_constant pattern value;
+                             mode_keyword = None;
+                             function_ = None;
+                           };
                        ];
                      uses = Types.no_capabilities;
                      node = pattern.id;

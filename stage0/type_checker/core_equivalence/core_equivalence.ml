@@ -304,13 +304,12 @@ and pattern renaming ({ id = _; origin = _; type_; kind = form } : pattern) (aft
   | Variant { variant; fields }, Variant after ->
       String.equal variant after.variant && List.equal (field_pattern renaming) fields after.fields
   | Record before, Record after -> List.equal (field_pattern renaming) before after
-  | Literal before, Literal after -> expression renaming before after
+  | Literal before, Literal after -> pattern_constant before after
   | Range { start; stop; inclusive }, Range after ->
-      expression renaming start after.start
-      && expression renaming stop after.stop
+      range_bound start after.start && range_bound stop after.stop
       && Bool.equal inclusive after.inclusive
   | Equal_to { value; equal }, Equal_to after ->
-      expression renaming value after.value && callee renaming equal after.equal
+      pattern_constant value after.value && callee renaming equal after.equal
   | Alternatives before, Alternatives after -> List.equal (pattern renaming) before after
   | ( (Wildcard | Bind _ | Variant _ | Record _ | Literal _ | Range _ | Equal_to _ | Alternatives _),
       _ ) ->
@@ -318,6 +317,20 @@ and pattern renaming ({ id = _; origin = _; type_; kind = form } : pattern) (aft
 
 and field_pattern renaming (name, bound) (after_name, after_bound) =
   String.equal name after_name && pattern renaming bound after_bound
+
+and pattern_constant (before : pattern_constant) (after : pattern_constant) =
+  match (before, after) with
+  | Boolean_constant before, Boolean_constant after -> Bool.equal before after
+  | Integer_constant before, Integer_constant after -> Z.equal before after
+  | String_constant before, String_constant after -> String.equal before after
+  | Named_constant before, Named_constant after -> Path.equal before after
+  | (Boolean_constant _ | Integer_constant _ | String_constant _ | Named_constant _), _ -> false
+
+and range_bound (before : range_bound) (after : range_bound) =
+  match (before, after) with
+  | Integer_bound before, Integer_bound after -> Z.equal before after
+  | Constant_bound before, Constant_bound after -> Path.equal before after
+  | (Integer_bound _ | Constant_bound _), _ -> false
 
 let callback_contract renaming ({ inputs; requires } : callback_contract)
     (after : callback_contract) =
