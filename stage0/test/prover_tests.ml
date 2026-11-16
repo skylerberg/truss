@@ -814,7 +814,11 @@ let () =
   Harness.test "a postcondition of a view's `mut` method holds of the `List` it was called on"
     (fun () -> expect_proven Fixtures.Prover.sort_of_a_list_sorts_it);
   Harness.test "a postcondition of a view's lending method holds of the `List` it was called on"
-    (fun () -> expect_proven Fixtures.Prover.first_of_a_list_is_some_when_it_has_elements)
+    (fun () -> expect_proven Fixtures.Prover.first_of_a_list_is_some_when_it_has_elements);
+  Harness.test "a postcondition of a view's `mut` method holds of the `Array` it was called on"
+    (fun () -> expect_proven Fixtures.Prover.sort_of_an_array_sorts_it);
+  Harness.test "a postcondition of a view's lending method holds of the `Array` it was called on"
+    (fun () -> expect_proven Fixtures.Prover.first_of_an_array_is_some)
 
 let swap = Fixtures.Prover.exchange
 

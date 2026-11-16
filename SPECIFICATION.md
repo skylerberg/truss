@@ -621,8 +621,9 @@ it. The compiler checks this within each function.
   long as `middle` can be used. A `let` keeps no other temporary, such as the
   receiver in `let part = make_list().slice()`. A view cannot be used after
   the temporary or the local that it views is dropped.
-- **The one implicit conversion** is a `List` passed to a `Slice` parameter,
-  or a `String` to a `StringSlice` parameter, which becomes a view of it.
+- **The one implicit conversion** is a `List` or an `Array` passed to a
+  `Slice` parameter, or a `String` to a `StringSlice` parameter, which
+  becomes a view of it.
   `self` is such a parameter, so `StringSlice.trim(name)` takes a `String`.
 
 ## Constants
@@ -2045,9 +2046,9 @@ type Priority =
 - A call with a dot finds the type's own methods, and the methods of the
   traits it implements from the standard library, the calling package, and
   the packages the calling package's manifest lists. No trait is imported.
-- A `String` has the methods of `StringSlice` too, and a `List` those of
-  `Slice`, in each mode of `self` that its own methods and its traits'
-  methods do not take. The receiver becomes a view of itself, so
+- A `String` has the methods of `StringSlice` too, and a `List` and an
+  `Array` those of `Slice`, in each mode of `self` that its own methods and
+  its traits' methods do not take. The receiver becomes a view of itself, so
   `name.trim()` and `String.trim(name)` are `StringSlice.trim(name)`. A
   method as a value is named through the view: `StringSlice.trim`. In the
   rules below, the methods a type has from its view count as its own.

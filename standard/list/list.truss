@@ -444,14 +444,6 @@ public fn Slice[Element: Plain].cursor(self) -> SliceCursor[Element]
   SliceCursor(elements: self, offset: 0)
 }
 
-public fn Array[Element: Plain, count: UInt64].cursor(self) -> SliceCursor[Element]
-  ensures result.remaining() == count
-  cost time O(1)
-  cost allocations == 0
-{
-  self.slice().cursor()
-}
-
 public fn Slice[Element].length(self) -> UInt64
   ensures result == self.model().length()
   cost time O(1)

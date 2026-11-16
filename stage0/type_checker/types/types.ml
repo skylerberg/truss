@@ -97,6 +97,8 @@ let find_view = function
       Some (Named { path = Well_known.make_path Slice; arguments })
   | Named { path; arguments = [] } when Well_known.is String path ->
       Some (Named { path = Well_known.make_path String_slice; arguments = [] })
+  | Named { arguments = element :: _; _ } as array when is_builtin Array array ->
+      Some (Named { path = Well_known.make_path Slice; arguments = [ element ] })
   | _ -> None
 
 let signed_integer_types : Intrinsic.builtin list = [ Int8; Int16; Int32; Int64 ]

@@ -1,0 +1,5 @@
+fn f(values: Array[Int64, 3]) -> Bool
+  ensures result
+{
+  values.first() is Some(_)
+}

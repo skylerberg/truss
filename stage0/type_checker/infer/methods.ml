@@ -665,8 +665,8 @@ and check_method_with_receiver state env ?expected ?(type_arguments = [])
       match
         Name_lookup.check_explicit_type_arguments
           ~head:
-            (match receiver_type with
-            | Types.Named { arguments; _ } -> List.length arguments
+            (match instance.signature.receiver with
+            | Some (_, Types.Named { arguments; _ }) -> List.length arguments
             | _ -> 0)
           state value instance type_arguments
       with
