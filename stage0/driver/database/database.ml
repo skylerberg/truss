@@ -134,10 +134,14 @@ type t = {
   owners : Part.t list Instance_table.t;
   owned : Instance.key list Part_table.t;
   unsaved : unit Entry_table.t;
-  mutable observe : observation -> unit;
 }
 
-and observation = Recomputed of Part.stored | Collected of Part.lowering
+type observation =
+  | Computation of { parts : Part.stored list; reads : int; distinct_reads : int }
+  | Store of { part : Part.stored; is_changed : bool }
+  | Removal of Part.computed
+
+let observer : (observation -> unit) ref = ref ignore
 
 let make_empty_package_database name ~dependencies =
   {
@@ -254,7 +258,6 @@ let create ?(loaded = []) ?(checks = true) (packages : Project.package list) =
       owners = Instance_table.create 64;
       owned = Part_table.create 64;
       unsaved = Entry_table.create 4096;
-      observe = ignore;
     }
   in
   List.iter
@@ -333,7 +336,6 @@ let copy database =
     owners = Instance_table.copy database.owners;
     owned = Part_table.copy database.owned;
     unsaved = Entry_table.create 64;
-    observe = ignore;
   }
 
 let add_reads database part read_parts =
@@ -382,8 +384,20 @@ let record database parts reads =
 
 let compute_and_record database parts compute =
   let reads = Part_table.create 16 in
-  let result = compute (fun part -> Part_table.replace reads part ()) in
+  let read_count = ref 0 in
+  let result =
+    compute (fun part ->
+        incr read_count;
+        Part_table.replace reads part ())
+  in
   record database parts reads;
+  !observer
+    (Computation
+       {
+         parts = List.map (fun part -> Part.Computed part) parts;
+         reads = !read_count;
+         distinct_reads = Part_table.length reads;
+       });
   result
 
 let mark_readers ?(is_selected = fun _ -> true) database part =
@@ -398,6 +412,7 @@ let store database part slot value =
     | None, None -> false
     | Some _, None | None, Some _ -> true
   in
+  !observer (Store { part; is_changed });
   if is_changed then begin
     (match value with Some value -> slot.replace value | None -> slot.remove ());
     mark_unsaved database (Value part);
@@ -930,7 +945,6 @@ let compute_test_keys database keys =
   List.iter
     (fun key ->
       let part = Part.Lowering (Test_key key) in
-      database.observe (Recomputed (Computed part));
       store database (Computed part)
         (Instance_table.make_slot database.test_keys key)
         (Some
@@ -1092,6 +1106,7 @@ let make_stored database (part : Part.stored) =
           of_database (Instance_table.make_access (fun database -> database.test_keys) key))
 
 let discard database part =
+  if Computed_table.mem database.reads part then !observer (Removal part);
   unmark database part;
   record database [ part ] (Part_table.create 0);
   Computed_table.remove database.reads part;
@@ -1169,9 +1184,8 @@ and settle_references database =
     collect database (References.update database.references).removed
 
 and collect database keys =
-  let parts = List.concat_map list_instance_parts keys in
-  List.iter (fun part -> database.observe (Collected part)) parts;
-  forget database (List.map (fun part -> Part.Lowering part) parts)
+  forget database
+    (List.map (fun part -> Part.Lowering part) (List.concat_map list_instance_parts keys))
 
 let list_lowered_references database key =
   match Instance_table.find_opt database.lowered key with
@@ -1342,7 +1356,9 @@ let compute_namespace database (package_database : package_database) =
           ignore (Call_graph.add_root graph root)
       | _ -> ())
     implied;
-  List.iter (mark_change database package) (Resolve.Names.list_changes before after);
+  let changes = Resolve.Names.list_changes before after in
+  !observer (Store { part = Computed (Namespace package); is_changed = changes <> [] });
+  List.iter (mark_change database package) changes;
   List.iter (fun part -> if not (was_implied part) then mark_stale database part) implied;
   forget database (List.filter (fun part -> not (is_implied part)) implied_before);
   own_lowering_roots database (make_stored_name_lookups database) package
@@ -1364,7 +1380,6 @@ let compute_type_facts database paths =
   in
   List.iter
     (fun path ->
-      database.observe (Recomputed (Computed (Type_facts path)));
       store database (Computed (Type_facts path))
         (Path_table.make_slot (obtain_owner database (Path.locate_package path)).type_facts path)
         (Some
@@ -1379,7 +1394,6 @@ let compute_type_facts database paths =
     paths
 
 let compute_part database (part : Part.computed) =
-  database.observe (Recomputed (Computed part));
   let package_database = obtain_owner database (Part.locate_package part) in
   let compute_into_slot slot compute = compute_into database part slot compute in
   match part with
@@ -1690,7 +1704,8 @@ let update_groups database package =
       List.iter
         (fun node ->
           if is_own node then begin
-            database.observe (Recomputed (Recursion_group node));
+            !observer
+              (Computation { parts = [ Recursion_group node ]; reads = 0; distinct_reads = 0 });
             store database (Recursion_group node) (make_group_slot node)
               (match Call_graph.group graph node with
               | Blocked -> Some Blocked
@@ -1700,7 +1715,9 @@ let update_groups database package =
         touched;
       List.iter
         (fun node ->
-          if is_own node then store database (Recursion_group node) (make_group_slot node) None)
+          if is_own node then
+            let slot = make_group_slot node in
+            if Option.is_some slot.stored then store database (Recursion_group node) slot None)
         removed
   | Some _ | None -> ()
 
@@ -2196,6 +2213,7 @@ let restore_namespaces database =
           compute_namespace_and_implied database
             (Package_table.find database.package_databases name)
         in
+        !observer (Store { part = Computed (Namespace name); is_changed = true });
         let graph = obtain_call_graph database name in
         List.iter
           (function
@@ -2573,6 +2591,11 @@ let find_main database package =
   drain database ~through:Namespaces [ package ];
   find_entry_point (make_stored_name_lookups database) package
 
+let with_observer observe run =
+  let previous = !observer in
+  observer := observe;
+  Fun.protect ~finally:(fun () -> observer := previous) run
+
 module For_testing = struct
   type nonrec checker = checker =
     | Resolve
@@ -2669,13 +2692,15 @@ module For_testing = struct
 
   type observed = { recomputed : string list; collected : string list }
 
-  let observe database run =
+  let observe run =
     let recomputed = ref [] and collected = ref [] in
-    database.observe <-
+    with_observer
       (function
-      | Recomputed part -> recomputed := Part.show (Stored part) :: !recomputed
-      | Collected part -> collected := Part.show_computed (Lowering part) :: !collected);
-    Fun.protect ~finally:(fun () -> database.observe <- ignore) run;
+        | Computation { parts; _ } ->
+            recomputed := List.map (fun part -> Part.show (Stored part)) parts @ !recomputed
+        | Removal (Lowering part) -> collected := Part.show_computed (Lowering part) :: !collected
+        | Store _ | Removal _ -> ())
+      run;
     {
       recomputed = List.sort_uniq compare !recomputed;
       collected = List.sort_uniq compare !collected;
@@ -2692,3 +2717,59 @@ module For_testing = struct
     | Some part -> part
     | None -> report_uncomputed (Ownership key)
 end
+
+type counts = {
+  kind : string;
+  computed : int;
+  unchanged : int;
+  writes : int;
+  reads : int;
+  distinct_reads : int;
+}
+
+let locate_stage : Part.stored -> Stage.t = function
+  | Computed part -> Stage.of_part part
+  | Recursion_group _ -> Recursion_groups
+
+let count run =
+  let counts_by_kind = Hashtbl.create 32 in
+  let add (part : Part.stored) increment =
+    let kind = Part.show_kind (Stored part) and stage = locate_stage part in
+    let earliest, counts =
+      match Hashtbl.find_opt counts_by_kind kind with
+      | Some (earliest, counts) ->
+          ((if Stage.compare stage earliest < 0 then stage else earliest), counts)
+      | None ->
+          (stage, { kind; computed = 0; unchanged = 0; writes = 0; reads = 0; distinct_reads = 0 })
+    in
+    Hashtbl.replace counts_by_kind kind (earliest, increment counts)
+  in
+  let result =
+    with_observer
+      (function
+        | Computation { parts = []; _ } ->
+            Compiler_bug.raise_bug ~stage:"Database" "a computation computed no part"
+        | Computation { parts = first :: _ as parts; reads; distinct_reads } ->
+            add first (fun counts ->
+                {
+                  counts with
+                  computed = counts.computed + List.length parts;
+                  reads = counts.reads + reads;
+                  distinct_reads = counts.distinct_reads + distinct_reads;
+                })
+        | Store { part; is_changed = true } ->
+            add part (fun counts -> { counts with writes = counts.writes + 1 })
+        | Store { part; is_changed = false } ->
+            add part (fun counts -> { counts with unchanged = counts.unchanged + 1 })
+        | Removal part ->
+            add (Computed part) (fun counts -> { counts with writes = counts.writes + 1 }))
+      run
+  in
+  ( result,
+    List.map snd
+      (List.sort
+         (fun (stage, (counts : counts)) (other_stage, (other : counts)) ->
+           match Stage.compare stage other_stage with
+           | 0 -> String.compare counts.kind other.kind
+           | order -> order)
+         (Hashtbl.fold (fun _ entry entries -> entry :: entries) counts_by_kind [])) )
