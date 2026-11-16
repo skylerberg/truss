@@ -1,5 +1,4 @@
 type t =
-  | Input
   | Parse
   | Namespaces
   | Resolution
@@ -28,7 +27,6 @@ type t =
 
 let all =
   [
-    Input;
     Parse;
     Namespaces;
     Resolution;
@@ -65,8 +63,8 @@ let precedes earlier later = position earlier <= position later
 
 let is_lowering = function
   | Folded_constants | Lowered_code | Test_keys -> true
-  | Input | Parse | Namespaces | Resolution | Import_checks | Trait_headers | Constant_values
-  | Headers | Interfaces | Derived_interfaces | Type_facts | Grants | Signature_checks | Contracts
+  | Parse | Namespaces | Resolution | Import_checks | Trait_headers | Constant_values | Headers
+  | Interfaces | Derived_interfaces | Type_facts | Grants | Signature_checks | Contracts
   | Checked_bodies | Derived_forms | Mir | Call_edges | Body_checks | Package_checks | Callees
   | Recursion_groups | Proofs ->
       false
@@ -76,14 +74,9 @@ let drains ~through stage =
   && ((not (is_lowering through))
      || is_lowering stage || precedes stage Call_edges || stage = Callees)
 
-let of_part : Part.t -> t = function
-  | Source _ | Packages | Modules _ | Dependencies _ -> Input
+let of_part : Part.computed -> t = function
   | Parsed _ -> Parse
-  | Namespace _ | Entry _ | Entries _ | Imports _ | Declaration _ | Tree _ | Text _ | Place _
-  | Container _ | Contained _ | Module_declarations _ | File_declarations _ | Package_declarations _
-  | Members _ | Traits_declaring _ | Impl_index _ | Impls_of_type _ | Impls_of_trait _
-  | Law_proofs _ ->
-      Namespaces
+  | Namespace _ -> Namespaces
   | Resolved _ -> Resolution
   | Import_check _ -> Import_checks
   | Trait_header _ -> Trait_headers
@@ -102,8 +95,7 @@ let of_part : Part.t -> t = function
   | Patterns _ | Usage _ | Ownership _ | Used_packages _ -> Body_checks
   | Package_check _ -> Package_checks
   | Callees _ -> Callees
-  | Recursion_group _ -> Recursion_groups
   | Proof _ -> Proofs
-  | Folded_constants _ -> Folded_constants
-  | Lowered _ -> Lowered_code
-  | Test_key _ -> Test_keys
+  | Lowering (Folded_constants _) -> Folded_constants
+  | Lowering (Lowered _) -> Lowered_code
+  | Lowering (Test_key _) -> Test_keys

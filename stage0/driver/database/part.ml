@@ -1,10 +1,10 @@
-type t =
+type input =
   | Source of Path.file
-  | Parsed of Path.file
   | Packages
   | Modules of Path.package
   | Dependencies of Path.package
-  | Namespace of Path.package
+
+type name =
   | Entry of Path.module_ * string
   | Entries of Path.module_
   | Imports of Resolve.Names.key
@@ -23,12 +23,18 @@ type t =
   | Impls_of_type of Path.package * Path.t
   | Impls_of_trait of Path.package * Path.t
   | Law_proofs of Path.package * Resolve.Names.law_proof_name
+
+type lowering = Folded_constants of Path.t | Lowered of Instance.key | Test_key of Instance.key
+
+type computed =
+  | Parsed of Path.file
+  | Namespace of Path.package
   | Resolved of Resolve.Names.key * Resolve.section
   | Trait_header of Resolve.Names.key
   | Constant_value of Path.t
   | Header of Resolve.Names.key
   | Interface of Resolve.Names.key
-  | Derived_interface of Path.t
+  | Derived_interface of { type_ : Path.t; trait : Path.t }
   | Type_facts of Path.t
   | Grant of Path.package * Path.package
   | Signature_check of Resolve.Names.key
@@ -46,62 +52,11 @@ type t =
   | Import_check of Path.file
   | Package_check of Path.package * Package_checks.check
   | Callees of Path.t * Path.package
-  | Recursion_group of Path.t
   | Proof of Resolve.Names.key
-  | Folded_constants of Path.t
-  | Lowered of Instance.key
-  | Test_key of Instance.key
+  | Lowering of lowering
 
-let package_of_definition = function
-  | Source file | Parsed file | File_declarations file | Import_check file -> file.module_.package
-  | Packages -> Compiler_bug.bug ~stage:"Database" "the set of packages belongs to no package"
-  | Modules package
-  | Dependencies package
-  | Namespace package
-  | Package_declarations package
-  | Traits_declaring (package, _)
-  | Impl_index package
-  | Law_proofs (package, _)
-  | Impls_of_type (package, _)
-  | Impls_of_trait (package, _)
-  | Grant (package, _)
-  | Package_check (package, _)
-  | Callees (_, package) ->
-      package
-  | Entry (module_, _) | Entries module_ | Module_declarations module_ -> module_.package
-  | Imports key
-  | Declaration key
-  | Tree key
-  | Text key
-  | Place key
-  | Container key
-  | Contained key
-  | Resolved (key, _)
-  | Trait_header key
-  | Header key
-  | Interface key
-  | Signature_check key
-  | Contract key
-  | Checked_body key
-  | Body_mir key
-  | Contract_mir key
-  | Patterns key
-  | Usage key
-  | Ownership key
-  | Used_packages key
-  | Proof key ->
-      key.module_.package
-  | Members (path, _)
-  | Constant_value path
-  | Derived_interface path
-  | Type_facts path
-  | Derived_form path
-  | Generated_mir path
-  | Call_edges path
-  | Recursion_group path ->
-      Path.package path
-  | Folded_constants _ | Lowered _ | Test_key _ ->
-      Compiler_bug.bug ~stage:"Database" "a part of lowering belongs to the package of its instance"
+type stored = Computed of computed | Recursion_group of Path.t
+type t = Input of input | Name of name | Stored of stored
 
 let type_package : Ground.ty -> Path.package = function
   | Named { path; _ } -> Path.package path
@@ -122,38 +77,68 @@ let instance_package : Instance.key -> Path.package = function
   | Generated (Entry impl_method | Any_entry impl_method) ->
       Path.package (Instance.make_method_path impl_method)
 
-let package = function
-  | Folded_constants path -> Path.package path
-  | Lowered key | Test_key key -> instance_package key
-  | part -> package_of_definition part
+let package : computed -> Path.package = function
+  | Parsed file | Import_check file -> file.module_.package
+  | Namespace package | Grant (package, _) | Package_check (package, _) | Callees (_, package) ->
+      package
+  | Resolved (key, _)
+  | Trait_header key
+  | Header key
+  | Interface key
+  | Signature_check key
+  | Contract key
+  | Checked_body key
+  | Body_mir key
+  | Contract_mir key
+  | Patterns key
+  | Usage key
+  | Ownership key
+  | Used_packages key
+  | Proof key ->
+      key.module_.package
+  | Constant_value path
+  | Type_facts path
+  | Derived_form path
+  | Generated_mir path
+  | Call_edges path
+  | Derived_interface { type_ = path; _ }
+  | Lowering (Folded_constants path) ->
+      Path.package path
+  | Lowering (Lowered key | Test_key key) -> instance_package key
 
-let equal = ( = )
-let hash part = Hashtbl.hash_param 64 256 part
-let compare = Stdlib.compare
+let name_package : name -> Path.package = function
+  | File_declarations file -> file.module_.package
+  | Package_declarations package
+  | Traits_declaring (package, _)
+  | Impl_index package
+  | Impls_of_type (package, _)
+  | Impls_of_trait (package, _)
+  | Law_proofs (package, _) ->
+      package
+  | Entry (module_, _) | Entries module_ | Module_declarations module_ -> module_.package
+  | Imports key | Declaration key | Tree key | Text key | Place key | Container key | Contained key
+    ->
+      key.module_.package
+  | Members (path, _) -> Path.package path
 
-let show part =
-  let key = Resolve.Names.show_key in
-  let section : Resolve.section -> string = function
-    | Interface -> "interface"
-    | Contract -> "contract"
-    | Body -> "body"
-  in
-  match part with
+let show_key = Resolve.Names.show_key
+
+let show_input = function
   | Source file -> "source " ^ Path.show_file file
-  | Parsed file -> "parsed " ^ Path.show_file file
   | Packages -> "packages"
   | Modules package -> "modules " ^ Path.show_package package
   | Dependencies package -> "dependencies " ^ Path.show_package package
-  | Namespace package -> "namespace " ^ Path.show_package package
+
+let show_name = function
   | Entry (module_, name) -> Printf.sprintf "entry %s %s" (Path.show_module module_) name
   | Entries module_ -> "entries " ^ Path.show_module module_
-  | Imports declared -> "imports " ^ key declared
-  | Declaration declared -> "declaration " ^ key declared
-  | Tree declared -> "tree " ^ key declared
-  | Text declared -> "text " ^ key declared
-  | Place declared -> "place " ^ key declared
-  | Container declared -> "container " ^ key declared
-  | Contained declared -> "contained " ^ key declared
+  | Imports declared -> "imports " ^ show_key declared
+  | Declaration declared -> "declaration " ^ show_key declared
+  | Tree declared -> "tree " ^ show_key declared
+  | Text declared -> "text " ^ show_key declared
+  | Place declared -> "place " ^ show_key declared
+  | Container declared -> "container " ^ show_key declared
+  | Contained declared -> "contained " ^ show_key declared
   | Module_declarations module_ -> "module declarations " ^ Path.show_module module_
   | File_declarations file -> "file declarations " ^ Path.show_file file
   | Package_declarations package -> "package declarations " ^ Path.show_package package
@@ -168,44 +153,60 @@ let show part =
   | Law_proofs (package, { trait; law; type_head }) ->
       Printf.sprintf "law proofs %s %s.%s for %s" (Path.show_package package) (Path.show trait) law
         (Path.show type_head)
-  | Resolved (declared, part) -> Printf.sprintf "resolved %s %s" (section part) (key declared)
-  | Trait_header declared -> "trait header " ^ key declared
+
+let show_computed part =
+  let section : Resolve.section -> string = function
+    | Interface -> "interface"
+    | Contract -> "contract"
+    | Body -> "body"
+  in
+  match part with
+  | Parsed file -> "parsed " ^ Path.show_file file
+  | Namespace package -> "namespace " ^ Path.show_package package
+  | Resolved (declared, part) -> Printf.sprintf "resolved %s %s" (section part) (show_key declared)
+  | Trait_header declared -> "trait header " ^ show_key declared
   | Constant_value path -> "constant value " ^ Path.show path
-  | Header declared -> "header " ^ key declared
-  | Interface declared -> "interface " ^ key declared
-  | Derived_interface path -> "derived interface " ^ Path.show path
+  | Header declared -> "header " ^ show_key declared
+  | Interface declared -> "interface " ^ show_key declared
+  | Derived_interface { type_; trait } ->
+      "derived interface " ^ Path.show (Derived { type_; trait })
   | Type_facts path -> "type facts " ^ Path.show path
   | Grant (package, dependency) ->
       Printf.sprintf "grant %s %s" (Path.show_package package) (Path.show_package dependency)
-  | Signature_check declared -> "signature check " ^ key declared
-  | Contract declared -> "contract " ^ key declared
-  | Checked_body declared -> "checked body " ^ key declared
+  | Signature_check declared -> "signature check " ^ show_key declared
+  | Contract declared -> "contract " ^ show_key declared
+  | Checked_body declared -> "checked body " ^ show_key declared
   | Derived_form path -> "derived form " ^ Path.show path
-  | Body_mir declared -> "body mir " ^ key declared
-  | Contract_mir declared -> "contract mir " ^ key declared
+  | Body_mir declared -> "body mir " ^ show_key declared
+  | Contract_mir declared -> "contract mir " ^ show_key declared
   | Generated_mir path -> "generated mir " ^ Path.show path
   | Call_edges path -> "call edges " ^ Path.show path
-  | Patterns declared -> "patterns " ^ key declared
-  | Usage declared -> "usage " ^ key declared
-  | Ownership declared -> "ownership " ^ key declared
-  | Used_packages declared -> "used packages " ^ key declared
+  | Patterns declared -> "patterns " ^ show_key declared
+  | Usage declared -> "usage " ^ show_key declared
+  | Ownership declared -> "ownership " ^ show_key declared
+  | Used_packages declared -> "used packages " ^ show_key declared
   | Import_check file -> "import check " ^ Path.show_file file
   | Package_check (package, check) ->
       Printf.sprintf "package check %s %s" (Path.show_package package)
         (match check with
-        | Sealed declared -> "sealed " ^ key declared
-        | Impl declared -> "impl " ^ key declared
-        | Type declared -> "type " ^ key declared
+        | Sealed declared -> "sealed " ^ show_key declared
+        | Impl declared -> "impl " ^ show_key declared
+        | Type declared -> "type " ^ show_key declared
         | Instantiations -> "instantiations"
         | Tests -> "tests"
         | Dependencies -> "dependencies")
   | Callees (path, package) ->
       Printf.sprintf "callees %s %s" (Path.show_package package) (Path.show path)
-  | Recursion_group path -> "recursion group " ^ Path.show path
-  | Proof declared -> "proof " ^ key declared
-  | Folded_constants path -> "folded constants " ^ Path.show path
-  | Lowered instance -> "lowered " ^ Instance.to_string instance
-  | Test_key instance -> "test key " ^ Instance.to_string instance
+  | Proof declared -> "proof " ^ show_key declared
+  | Lowering (Folded_constants path) -> "folded constants " ^ Path.show path
+  | Lowering (Lowered instance) -> "lowered " ^ Instance.to_string instance
+  | Lowering (Test_key instance) -> "test key " ^ Instance.to_string instance
+
+let show = function
+  | Input part -> show_input part
+  | Name part -> show_name part
+  | Stored (Computed part) -> show_computed part
+  | Stored (Recursion_group path) -> "recursion group " ^ Path.show path
 
 let type_definition : Ground.ty -> Path.t option = function
   | Named { path; _ } -> Some path
@@ -226,20 +227,24 @@ let instance_definition : Instance.key -> Path.t option = function
   | Generated (Entry impl_method | Any_entry impl_method) ->
       Some (Instance.make_method_path impl_method)
 
-let definition = function
-  | Source _ | Parsed _ | Packages | Modules _ | Dependencies _ | Namespace _ | Entries _
-  | Module_declarations _ | File_declarations _ | Package_declarations _ | Traits_declaring _
-  | Impl_index _ | Grant _ | Import_check _
-  | Package_check (_, (Instantiations | Tests | Dependencies)) ->
+let name_definition = function
+  | Entries _ | Module_declarations _ | File_declarations _ | Package_declarations _
+  | Traits_declaring _ | Impl_index _ ->
       None
   | Entry (module_, name) -> Some (Path.Top { module_; name })
-  | Imports key
-  | Declaration key
-  | Tree key
-  | Text key
-  | Place key
-  | Container key
-  | Contained key
+  | Imports key | Declaration key | Tree key | Text key | Place key | Container key | Contained key
+    ->
+      Some key.path
+  | Members (path, _)
+  | Impls_of_type (_, path)
+  | Impls_of_trait (_, path)
+  | Law_proofs (_, { trait = path; _ }) ->
+      Some path
+
+let computed_definition = function
+  | Parsed _ | Namespace _ | Grant _ | Import_check _
+  | Package_check (_, (Instantiations | Tests | Dependencies)) ->
+      None
   | Resolved (key, _)
   | Trait_header key
   | Header key
@@ -256,29 +261,24 @@ let definition = function
   | Proof key
   | Package_check (_, (Sealed key | Impl key | Type key)) ->
       Some key.path
-  | Members (path, _)
-  | Impls_of_type (_, path)
-  | Impls_of_trait (_, path)
-  | Law_proofs (_, { trait = path; _ })
   | Constant_value path
-  | Derived_interface path
   | Type_facts path
   | Derived_form path
   | Generated_mir path
   | Call_edges path
   | Callees (path, _)
-  | Recursion_group path ->
+  | Lowering (Folded_constants path) ->
       Some path
-  | Folded_constants path -> Some path
-  | Lowered key | Test_key key -> instance_definition key
+  | Derived_interface { type_; trait } -> Some (Derived { type_; trait })
+  | Lowering (Lowered key | Test_key key) -> instance_definition key
 
-let kind_name = function
-  | Source _ -> "source"
-  | Parsed _ -> "parsed file"
-  | Packages -> "packages"
-  | Modules _ -> "modules"
-  | Dependencies _ -> "dependencies"
-  | Namespace _ -> "namespace"
+let definition = function
+  | Input _ -> None
+  | Name part -> name_definition part
+  | Stored (Computed part) -> computed_definition part
+  | Stored (Recursion_group path) -> Some path
+
+let name_kind_name = function
   | Entry _ -> "namespace entry"
   | Entries _ -> "namespace entries of its module"
   | Imports _ -> "imports"
@@ -298,6 +298,10 @@ let kind_name = function
   | Impls_of_trait _ -> "impls"
   | Law_proofs (_, { law; type_head; _ }) ->
       Printf.sprintf "proofs of the law %s for %s" law (Path.show type_head)
+
+let computed_kind_name = function
+  | Parsed _ -> "parsed file"
+  | Namespace _ -> "namespace"
   | Resolved (_, Interface) -> "resolved names of the interface"
   | Resolved (_, Contract) -> "resolved names of the contract"
   | Resolved (_, Body) -> "resolved names of the body"
@@ -320,8 +324,16 @@ let kind_name = function
   | Import_check _ -> "import check"
   | Package_check _ -> "package check"
   | Callees _ -> "callees"
-  | Recursion_group _ -> "recursion group"
   | Proof _ -> "proof"
-  | Folded_constants _ -> "folded constants"
-  | Lowered _ -> "lowered code"
-  | Test_key _ -> "test key"
+  | Lowering (Folded_constants _) -> "folded constants"
+  | Lowering (Lowered _) -> "lowered code"
+  | Lowering (Test_key _) -> "test key"
+
+let kind_name = function
+  | Input (Source _) -> "source"
+  | Input Packages -> "packages"
+  | Input (Modules _) -> "modules"
+  | Input (Dependencies _) -> "dependencies"
+  | Name part -> name_kind_name part
+  | Stored (Computed part) -> computed_kind_name part
+  | Stored (Recursion_group _) -> "recursion group"
