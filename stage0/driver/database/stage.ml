@@ -53,7 +53,8 @@ let rank_stage stage =
   | Some position -> position
   | None -> Compiler_bug.raise_bug ~stage:"Database" "a stage is missing from the order of stages"
 
-let precedes earlier later = rank_stage earlier <= rank_stage later
+let compare earlier later = Int.compare (rank_stage earlier) (rank_stage later)
+let precedes earlier later = compare earlier later <= 0
 
 let is_lowering = function
   | Lowered_code | Test_keys -> true

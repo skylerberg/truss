@@ -50,6 +50,17 @@ val list_template_checks : proofs -> Prover.State.template_check list
 val list_proofs : proofs -> (Resolve.Names.key * Prover.proof) list
 val make_proof_lookups : t -> Prover.Lookups.t
 
+type counts = {
+  kind : string;
+  computed : int;
+  unchanged : int;
+  writes : int;
+  reads : int;
+  distinct_reads : int;
+}
+
+val count : (unit -> 'a) -> 'a * counts list
+
 module For_testing : sig
   type checker = Resolve | Interface | Infer | Patterns | Usage | Ownership | Package_checks
 
@@ -65,6 +76,6 @@ module For_testing : sig
 
   type observed = { recomputed : string list; collected : string list }
 
-  val observe : t -> (unit -> unit) -> observed
+  val observe : (unit -> unit) -> observed
   val add_root : t -> Instance.key -> unit
 end

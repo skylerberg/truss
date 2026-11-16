@@ -896,6 +896,21 @@ let () =
           if status <> 0 then fail "%s: status %d: %s" name status output)
         [ "Square.area"; "demo::Square.area"; "Shape.area" ])
 
+let () =
+  test "TRUSS_DATABASE_COUNTS=1 writes the database's work during the command, by kind of part"
+    (fun () ->
+      ignore (Workspace.For_testing.load_standard_package_database ());
+      let root = make_package [ ("main.truss", Fixtures.doubling) ] in
+      Unix.putenv "TRUSS_DATABASE_COUNTS" "1";
+      let _, output = run_truss [ "check"; "--no-proofs"; "-C"; root ] in
+      let list_cells row = List.filter (( <> ) "") (String.split_on_char ' ' row) in
+      if
+        not
+          (List.mem
+             [ "parsed"; "file"; "1"; "0"; "1"; "1"; "1" ]
+             (List.map list_cells (String.split_on_char '\n' output)))
+      then fail "no row counts one parsed file, computed, written, and read once: %s" output)
+
 let list_holes root =
   list_objects (Cli.Json.lookup_field "holes" (run_json [ "holes"; "-C"; root ]))
 

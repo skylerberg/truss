@@ -249,6 +249,8 @@ let stop =
           Outcome.Exit 0)
       $ common)
 
+let database_counts_variable = "TRUSS_DATABASE_COUNTS"
+
 let version =
   Printf.sprintf "stage0 (Truss %s, code generation %d, Unicode %s)" Manifest.truss_version
     Emit_c.version Unicode.version
@@ -262,6 +264,15 @@ let truss =
            `P
              "$(b,TRUSS_NO_SERVER=1), or $(b,--no-server) before or after the command, runs the \
               command in its own process, and not in the background process.";
+           `P
+             ("$(b," ^ database_counts_variable
+            ^ "=1) writes a table to standard error after the command. The table has a row for \
+               each kind of part that the database computed or wrote during the command. A row \
+               counts the parts computed, the computed parts whose value came out unchanged, the \
+               writes, the reads that the computations made, and the distinct parts that each \
+               computation read. A write is a changed value or a removed part. The table omits the \
+               work that the background process did before the command, such as propagating a \
+               saved file.");
          ]
        ~doc:"Check, test, build, and change Truss code.")
     [
@@ -283,6 +294,56 @@ let truss =
       stop;
     ]
 
+let print_database_counts (counts : Database.counts list) =
+  let total =
+    List.fold_left
+      (fun (total : Database.counts) (counts : Database.counts) ->
+        {
+          total with
+          computed = total.computed + counts.computed;
+          unchanged = total.unchanged + counts.unchanged;
+          writes = total.writes + counts.writes;
+          reads = total.reads + counts.reads;
+          distinct_reads = total.distinct_reads + counts.distinct_reads;
+        })
+      { kind = "total"; computed = 0; unchanged = 0; writes = 0; reads = 0; distinct_reads = 0 }
+      counts
+  in
+  let rows =
+    List.map
+      (fun (counts : Database.counts) ->
+        ( counts.kind,
+          List.map string_of_int
+            [
+              counts.computed; counts.unchanged; counts.writes; counts.reads; counts.distinct_reads;
+            ] ))
+      (counts @ [ total ])
+  in
+  let heading = ("kind", [ "computed"; "unchanged"; "writes"; "reads"; "distinct reads" ]) in
+  let kind_width, cell_widths =
+    List.fold_left
+      (fun (kind_width, cell_widths) (kind, cells) ->
+        ( max kind_width (String.length kind),
+          List.map2 (fun width cell -> max width (String.length cell)) cell_widths cells ))
+      (0, List.map (fun _ -> 0) (snd heading))
+      (heading :: rows)
+  in
+  List.iter
+    (fun (kind, cells) ->
+      Output.eprint_line
+        (String.concat "  "
+           (Printf.sprintf "%-*s" kind_width kind
+           :: List.map2 (fun width cell -> Printf.sprintf "%*s" width cell) cell_widths cells)))
+    (heading :: rows)
+
+let with_database_counts run =
+  if Sys.getenv_opt database_counts_variable = Some "1" then begin
+    let outcome, counts = Database.count run in
+    print_database_counts counts;
+    outcome
+  end
+  else run ()
+
 let evaluate arguments =
   Output.set_json false;
   let buffer_out = Buffer.create 256 and buffer_err = Buffer.create 256 in
@@ -302,24 +363,26 @@ let evaluate arguments =
         | Error (`Parse | `Term | `Exn) -> Outcome.Exit 2)
   in
   let outcome =
-    match
-      Compiler_bug.run_while_doing ~stage:"Command"
-        ("running `truss " ^ String.concat " " arguments ^ "`")
-        run
-    with
-    | outcome -> outcome
-    | exception Outcome.Stop status -> Outcome.Exit status
-    | exception Report.Errors report ->
-        if Output.json () then Json.print (Report.make_document report []) else Report.print report;
-        Outcome.Exit 1
-    | exception (Outcome.Cannot_run message | Workspace.Unusable_cache message) ->
-        Output.eprint_line message;
-        Outcome.Exit 2
-    | exception Compiler_bug.Bug bug ->
-        Output.eprint_line
-          ("The compiler has a bug, and cannot continue. Please report it.\n  "
-         ^ Compiler_bug.to_string bug);
-        Outcome.Exit 2
+    with_database_counts (fun () ->
+        match
+          Compiler_bug.run_while_doing ~stage:"Command"
+            ("running `truss " ^ String.concat " " arguments ^ "`")
+            run
+        with
+        | outcome -> outcome
+        | exception Outcome.Stop status -> Outcome.Exit status
+        | exception Report.Errors report ->
+            if Output.json () then Json.print (Report.make_document report [])
+            else Report.print report;
+            Outcome.Exit 1
+        | exception (Outcome.Cannot_run message | Workspace.Unusable_cache message) ->
+            Output.eprint_line message;
+            Outcome.Exit 2
+        | exception Compiler_bug.Bug bug ->
+            Output.eprint_line
+              ("The compiler has a bug, and cannot continue. Please report it.\n  "
+             ^ Compiler_bug.to_string bug);
+            Outcome.Exit 2)
   in
   Format.pp_print_flush help ();
   Format.pp_print_flush err ();
@@ -348,6 +411,7 @@ let forwarded =
     "TRUSS_Z3";
     "TRUSS_CACHE_SIZE";
     "TRUSS_WORKERS";
+    database_counts_variable;
   ]
 
 type request = {

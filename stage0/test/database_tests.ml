@@ -44,7 +44,7 @@ let list_changes ~before ~after =
 
 let propagate ?roots hot ~before ~after =
   let observed =
-    Database.For_testing.observe hot (fun () ->
+    Database.For_testing.observe (fun () ->
         Database.update hot (list_changes ~before ~after);
         Database.propagate hot)
   in
@@ -89,7 +89,7 @@ let settle loaded packages =
 let lay_out_again ?(loaded = ([], [])) ~before ~after () =
   let hot = settle (fst loaded) before in
   let observed =
-    Database.For_testing.observe hot (fun () ->
+    Database.For_testing.observe (fun () ->
         Database.relayout hot ~loaded:(Lazy.force standard :: snd loaded) after;
         Database.propagate hot)
   in
@@ -134,7 +134,7 @@ let expect_cold ?roots database files =
 
 let observe_reopen ?roots log files =
   let database = reopen log files in
-  let observed = Database.For_testing.observe database (fun () -> Database.propagate database) in
+  let observed = Database.For_testing.observe (fun () -> Database.propagate database) in
   expect_cold ?roots database files;
   observed
 
@@ -699,7 +699,7 @@ let () =
       Database.check hot [ (Support.parse_module "app::main").package ];
       let log = commit log (list_saved hot) in
       let propagated =
-        (Database.For_testing.observe hot (fun () -> Database.propagate hot)).recomputed
+        (Database.For_testing.observe (fun () -> Database.propagate hot)).recomputed
       in
       expect_recomputed (observe_reopen log after).recomputed ~exactly:propagated);
   Harness.test "a database saved after a package is removed reopens without the package" (fun () ->
@@ -727,7 +727,7 @@ let open_workspace root =
 let settle_on_disk root =
   let snapshot = open_workspace root in
   let database = Workspace.open_database snapshot in
-  let observed = Database.For_testing.observe database (fun () -> Database.propagate database) in
+  let observed = Database.For_testing.observe (fun () -> Database.propagate database) in
   let cold = Workspace.For_testing.build_cold_database snapshot in
   Database.propagate cold;
   (match Database.For_testing.list_differences database cold with
@@ -805,7 +805,7 @@ let () =
       let trial = Workspace.make_trial snapshot [ ("main/main.truss", Some edited_body) ] in
       let database = Workspace.open_database trial in
       let recomputed =
-        (Database.For_testing.observe database (fun () -> Database.propagate database)).recomputed
+        (Database.For_testing.observe (fun () -> Database.propagate database)).recomputed
       in
       expect_included recomputed ~parts:[ "checked body app::main::callee" ];
       expect_untouched recomputed ~names:[ "app::main::caller" ];
@@ -827,3 +827,82 @@ let () =
       expect_cold database trial;
       expect_cold worktree snapshot;
       Workspace.flush ())
+
+let show_counts (counts : Database.counts) =
+  Printf.sprintf "%s: computed %d, unchanged %d, writes %d, reads %d, distinct reads %d" counts.kind
+    counts.computed counts.unchanged counts.writes counts.reads counts.distinct_reads
+
+let extract_counts counts kind =
+  Option.value
+    (List.find_opt (fun (counts : Database.counts) -> counts.kind = kind) counts)
+    ~default:{ kind; computed = 0; unchanged = 0; writes = 0; reads = 0; distinct_reads = 0 }
+
+let count_propagation hot ~before ~after =
+  snd
+    (Database.count (fun () ->
+         Database.update hot (list_changes ~before ~after);
+         Database.propagate hot))
+
+let count_cold_build files =
+  let database = Support.make_database (Support.setup files) in
+  snd (Database.count (fun () -> Database.propagate database))
+
+let () =
+  Harness.test "a propagation with no stale part counts no work" (fun () ->
+      let database = build [ ("app::main", callee_and_caller) ] in
+      match snd (Database.count (fun () -> Database.propagate database)) with
+      | [] -> ()
+      | counts -> Harness.fail "counted %s" (String.concat "; " (List.map show_counts counts)));
+  Harness.test
+    "a computed part whose value comes out unchanged is counted as unchanged, not written"
+    (fun () ->
+      let before = [ ("app::main", callee_and_caller) ] in
+      let after =
+        [
+          ( "app::main",
+            "fn callee(x: Int64) -> Int64 {\n  x + 1\n}\nfn caller() -> Int64 { callee(1) }\n" );
+        ]
+      in
+      let import_check =
+        extract_counts (count_propagation (build before) ~before ~after) "import check"
+      in
+      if (import_check.computed, import_check.unchanged, import_check.writes) <> (1, 1, 0) then
+        Harness.fail "counted %s" (show_counts import_check));
+  Harness.test "a lookup that a computation repeats is a read and not another distinct read"
+    (fun () ->
+      let count_checked_bodies caller_body =
+        extract_counts
+          (count_cold_build
+             [
+               ( "app::main",
+                 "fn callee(x: Int64) -> Int64 { x + 1 }\nfn caller() -> Int64 { " ^ caller_body
+                 ^ " }\n" );
+             ])
+          "checked body"
+      in
+      let once = count_checked_bodies "callee(1)"
+      and twice = count_checked_bodies "callee(callee(1))" in
+      if twice.distinct_reads <> once.distinct_reads || twice.reads <= once.reads then
+        Harness.fail "counted %s with one call and %s with two" (show_counts once)
+          (show_counts twice));
+  Harness.test "removing a definition counts the removal of its checked body as a write" (fun () ->
+      let before = [ ("app::main", "fn unused() -> Int64 { 1 }\nfn kept() -> Int64 { 2 }\n") ] in
+      let after = [ ("app::main", "fn kept() -> Int64 { 2 }\n") ] in
+      let checked_bodies =
+        extract_counts (count_propagation (build before) ~before ~after) "checked body"
+      in
+      if (checked_bodies.computed, checked_bodies.writes) <> (0, 1) then
+        Harness.fail "counted %s" (show_counts checked_bodies));
+  Harness.test "counting an operation counts the work of a database that the operation copies"
+    (fun () ->
+      let before = [ ("app::main", callee_and_caller) ] in
+      let after = [ ("app::main", edited_body) ] in
+      let hot = build before in
+      let _, counts =
+        Database.count (fun () ->
+            let trial = Database.copy hot in
+            Database.update trial (list_changes ~before ~after);
+            Database.propagate trial)
+      in
+      let checked_bodies = extract_counts counts "checked body" in
+      if checked_bodies.computed <> 1 then Harness.fail "counted %s" (show_counts checked_bodies))
