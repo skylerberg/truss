@@ -39,11 +39,11 @@ let check_widened location ~is_written actual expected =
 
 let find_parameter_spelling (context : State.context) (frame : State.frame) term =
   if
-    frame.source.key = Some context.home
+    frame.source.key = Some context.definition.home
     && (not (Logic.has_quantifier term))
     &&
     match Logic.list_free_constants term with
-    | _ :: _ as names -> List.for_all (fun name -> List.mem name context.entry) names
+    | _ :: _ as names -> List.for_all (fun name -> List.mem name context.report.entry) names
     | [] -> false
   then Facts.truss_of_value context term
   else None
@@ -87,8 +87,8 @@ let spend (context : State.context) (frame : State.frame) (amount_of : Costs.cou
           frame.spent;
     }
 
-let declare_unknown_amount context frame (counter : Costs.counter) =
-  let amount = Facts.declare_fresh context frame "spent" Logic.Int in
+let declare_unknown_amount (context : State.context) frame (counter : Costs.counter) =
+  let amount = Facts.declare_fresh context.query frame "spent" Logic.Int in
   let least =
     match counter.resource with Time -> 1 | Allocations | Allocated_bytes | Calls _ -> 0
   in
@@ -108,20 +108,23 @@ let convert_to_any context frame (site : Invocation.site) =
 
 let compute_current_bounds (context : State.context) : Interface.Impls.bounds =
   let list_impl_generics path =
-    match Interface.Definition.find_impl_interface context.lookups.interface path with
+    match Interface.Definition.find_impl_interface context.definition.lookups.interface path with
     | Some interface -> interface.impl_generics
     | None -> []
   in
   let generics =
-    match context.current with
+    match context.definition.current with
     | Method { owner; _ } -> (
         list_impl_generics owner
         @
-        match Interface.Impls.read_signature context.lookups.interface context.current with
+        match
+          Interface.Impls.read_signature context.definition.lookups.interface
+            context.definition.current
+        with
         | Some signature -> signature.generics
         | None -> [])
     | current -> (
-        match Interface.Impls.read_signature context.lookups.interface current with
+        match Interface.Impls.read_signature context.definition.lookups.interface current with
         | Some signature -> signature.generics
         | None -> list_impl_generics current)
   in
@@ -131,19 +134,23 @@ let find_concrete_impl (context : State.context) (trait : Types.trait_reference)
   match ty with
   | Types.Named { path; _ } ->
       let is_own impl =
-        Path.equal impl context.current
-        || match context.current with Method { owner; _ } -> Path.equal owner impl | _ -> false
+        Path.equal impl context.definition.current
+        ||
+        match context.definition.current with
+        | Method { owner; _ } -> Path.equal owner impl
+        | _ -> false
       in
       let list_bounds = compute_current_bounds context in
       let packages =
-        List.sort_uniq compare [ Path.locate_package context.current; Path.locate_package path ]
+        List.sort_uniq compare
+          [ Path.locate_package context.definition.current; Path.locate_package path ]
       in
       List.find_map
         (fun package ->
           List.find_map
             (fun impl ->
               let interface =
-                Interface.Definition.read_impl_interface context.lookups.interface impl
+                Interface.Definition.read_impl_interface context.definition.lookups.interface impl
               in
               let variables =
                 List.map (fun (generic : Types.generic) -> generic.generic) interface.impl_generics
@@ -159,13 +166,13 @@ let find_concrete_impl (context : State.context) (trait : Types.trait_reference)
                      || List.for_all
                           (fun (argument, bound) ->
                             Option.is_some
-                              (Interface.Impls.find_evidence context.lookups.interface ~list_bounds
-                                 argument bound))
+                              (Interface.Impls.find_evidence context.definition.lookups.interface
+                                 ~list_bounds argument bound))
                           (Interface.Impls.list_required_bounds interface.impl_generics arguments)
                 ->
                   Some (impl, arguments)
               | _ -> None)
-            (Interface.Impls.list_impls_of_trait_for_type context.lookups.interface
+            (Interface.Impls.list_impls_of_trait_for_type context.definition.lookups.interface
                ~trait:trait.trait ~type_:path package))
         packages
   | _ -> None
@@ -179,7 +186,7 @@ let find_written_equal context ty left right =
   | Some (((Impl _ : Path.t) as impl), arguments) -> (
       let evidence : Core.evidence = Impl { impl; arguments } in
       match
-        Contracts.find_method_contract context.lookups
+        Contracts.find_method_contract context.definition.lookups
           { trait = Facts.equal_trait; trait_arguments = []; associated = [] }
           "equal" Read evidence
       with
@@ -192,7 +199,7 @@ let find_written_equal context ty left right =
               }
           in
           let sort = Facts.declare_sort context ty in
-          Facts.declare context (Logic.Function (symbol, [ sort; sort ], Logic.Bool));
+          Facts.declare context.query (Logic.Function (symbol, [ sort; sort ], Logic.Bool));
           Some (Logic.Apply (symbol, [ left; right ]))
       | _ -> None)
   | _ -> None
@@ -200,14 +207,14 @@ let find_written_equal context ty left right =
 let make_derived_equal context (frame : State.frame) (ty : Types.ty) left right =
   let sort = Facts.declare_sort context ty in
   let symbol = Logic.Symbol.Equal ty in
-  Facts.declare context (Logic.Function (symbol, [ sort; sort ], Logic.Bool));
+  Facts.declare context.query (Logic.Function (symbol, [ sort; sort ], Logic.Bool));
   let equal = Logic.Apply (symbol, [ left; right ]) in
   (match (Facts.find_visible_type context ty, Facts.find_constructors context ty) with
   | Some (interface, _), Some shape
     when List.exists Facts.is_standard_equal interface.derives
-         && (not (List.mem equal context.equalities))
+         && (not (List.mem equal context.query.equalities))
          && not (Logic.mentions frame.bound equal) ->
-      context.equalities <- equal :: context.equalities;
+      context.query.equalities <- equal :: context.query.equalities;
       let fields_equal (variant, fields) =
         Logic.conjunction
           (List.map
@@ -222,7 +229,7 @@ let make_derived_equal context (frame : State.frame) (ty : Types.ty) left right 
                  | Some equal -> equal
                  | None ->
                      let symbol = Logic.Symbol.Equal field_type in
-                     Facts.declare context
+                     Facts.declare context.query
                        (Logic.Function
                           ( symbol,
                             [
@@ -260,7 +267,7 @@ let make_equality context frame (ty : Types.ty) left right =
 
 let find_width (ty : Types.ty) = Option.map fst (Types.find_integer_bits ty)
 
-let declare_opaque_operation context frame ty operation arguments =
+let declare_opaque_operation (context : State.context) frame ty operation arguments =
   let sorts = List.map (fun _ -> Logic.Int) arguments in
   let integer =
     Option.map
@@ -269,7 +276,7 @@ let declare_opaque_operation context frame ty operation arguments =
       (find_width ty)
   in
   let symbol = Logic.Symbol.Opaque_operation { operation; type_ = ty; integer } in
-  Facts.declare context (Logic.Function (symbol, sorts, Facts.declare_sort context ty));
+  Facts.declare context.query (Logic.Function (symbol, sorts, Facts.declare_sort context ty));
   let term = Logic.Apply (symbol, arguments) in
   Facts.assume context frame (Facts.make_in_range ty term);
   term
@@ -403,12 +410,12 @@ let find_innermost_axiom (context : State.context) (frame : State.frame) term =
   | _ -> None
 
 let rec map_each_value context (frame : State.frame) value make =
-  if not (Logic.mentions frame.bound value) then make frame value
+  if not (Logic.mentions frame.bound value) then make context frame value
   else
     match find_innermost_axiom context frame value with
     | Some axiom ->
         axiom.at_calls <-
-          (fun frame substitute -> map_each_value context frame (substitute value) make)
+          (fun context frame substitute -> map_each_value context frame (substitute value) make)
           :: axiom.at_calls
     | None -> ()
 
@@ -438,17 +445,17 @@ let make_power_order base left right =
         ==> Operation ("<=", [ power left; power right ])
         &&& (Operation ("<=", [ right; left ]) ==> Operation ("<=", [ power right; power left ]))))
 
-let declare_power context frame base exponent =
-  Facts.declare context
+let declare_power (context : State.context) frame base exponent =
+  Facts.declare context.query
     (Logic.Function (Logic.Symbol.Cost_power, [ Logic.Int; Logic.Int ], Logic.Int));
   let add exponent =
-    if not (List.mem (base, exponent) context.powers) then begin
+    if not (List.mem (base, exponent) context.query.powers) then begin
       List.iter
         (fun (other_base, other) ->
           if other_base = base then
             Facts.add_frame_fact context frame (make_power_order base exponent other))
-        context.powers;
-      context.powers <- (base, exponent) :: context.powers;
+        context.query.powers;
+      context.query.powers <- (base, exponent) :: context.query.powers;
       let facts, step = make_power_facts base exponent in
       List.iter (Facts.add_frame_fact context frame) facts;
       Some step
@@ -573,7 +580,7 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
                 Facts.assume context frame
                   Logic.(Operation ("<=", [ left; term ]) &&& Operation ("<=", [ right; term ]));
               Facts.assume context frame (at_most sum);
-              Facts.declare context
+              Facts.declare context.query
                 (Logic.Function (Logic.Symbol.Cost_power, [ Logic.Int; Logic.Int ], Logic.Int));
               let exponent = Logic.Symbol (Facts.make_variable "exponent") in
               let below value =
@@ -632,14 +639,14 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
       | Some bits ->
           let count counted value =
             let symbol = Logic.Symbol.Bit_count { count = counted; width = bits } in
-            Facts.declare context (Logic.Function (symbol, [ Logic.Int ], Logic.Int));
+            Facts.declare context.query (Logic.Function (symbol, [ Logic.Int ], Logic.Int));
             Logic.Apply (symbol, [ value ])
           in
           let term = count operation value in
           Facts.assume context frame
             Logic.(Operation ("<=", [ int 0; term ]) &&& Operation ("<=", [ term; int bits ]));
           (if Z.equal low Z.zero then
-             map_each_value context frame value @@ fun frame value ->
+             map_each_value context frame value @@ fun context frame value ->
              let leading = count Leading_zeros value
              and trailing = count Trailing_zeros value
              and ones = count Count_ones value in

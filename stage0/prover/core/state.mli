@@ -118,66 +118,92 @@ type stated = Tables.stated =
   | Ranked_model of Logic.symbol
   | Ranked_elements of Types.ty
 
-type context = {
+type definition = {
   lookups : Lookups.t;
+  home : Resolve.Names.key;
   current : Path.t;
-  mutable terminates : bool;
-  mutable callbacks : (Core.local * string * Mir.callback) list;
   measures : Mir.formula list;
+  disjoint : (int * int) list;
+  ranking : bool;
+  inherits_precondition : bool;
+  callbacks : (Core.local * string * Mir.callback) list;
+  yielded_part : Types.ty option;
+  yield_ensures : (Mir.formula list * Mir.formula list) option;
+}
+
+type query = {
   mutable declarations : Logic.declaration list;
   declared : unit Tables.Symbol_table.t;
   datatypes : unit Tables.Type_table.t;
   stated : unit Tables.Stated_table.t;
   mutable facts : Logic.term list;
-  mutable obligations : obligation list;
   mutable fresh : int;
-  mutable values : (Logic.symbol * string) list;
-  local_names : string Tables.Local_table.t;
-  mutable returns : (frame * Logic.term option) list;
-  mutable lent_back : (Types.ty * Logic.term * Logic.term) list;
-  mutable instantiating : Path.t list;
-  mutable axiomatizing : Logic.symbol list;
-  axiom_clauses : unit Tables.Axiom_clause_table.t;
-  mutable open_axioms : open_axiom list;
-  axioms_of : open_axiom Tables.Symbol_table.t;
-  disjoint : (int * int) list;
-  mutable indexes : (int * place_value) list;
-  mutable yielded_part : Types.ty option;
-  mutable yield_ensures : (Mir.formula list * Mir.formula list) option;
-  home : Resolve.Names.key;
-  mutable laws_assumed : (Types.trait_reference * Types.ty) list;
-  mutable counters : Costs.counter list;
-  mutable own_bounds : Costs.counter list;
   fresh_order : int Tables.Symbol_table.t;
-  mutable logs : (Logic.term * bool) list;
-  mutable powers : (Logic.term * Logic.term) list;
-  mutable lambda_times : (Logic.term * (Logic.term * obligation list)) list;
-  mutable lambda_captures : (Logic.term * Core.local list) list;
-  lambda_definitions : Logic.term Tables.Symbol_table.t;
-  mutable potentials : Logic.term list;
-  models : (Logic.term -> Logic.term) option Tables.Model_table.t;
-  holds_potential : bool Tables.Type_table.t;
-  buffers : (Types.ty * (Logic.term -> Logic.term)) option Tables.Type_table.t;
-  mutable equalities : Logic.term list;
-  mutable decisions : (string * string option * Logic.term * Logic.term) list;
-  mutable entry : Logic.symbol list;
-  mutable proving : bool;
-  inherits_precondition : bool;
-  mutable holes : (Resolve.Names.key * location) list;
-  mutable unfinished : Logic.term list;
-  mutable call_targets : (Logic.term * Core.local) list;
-  mutable reading_callback : bool;
-  ranking : bool;
-  mutable scopes : (Logic.symbol * Logic.term list ref) list;
   quantifier_facts : Logic.term list Tables.Term_table.t;
   mutable quantifier_symbols : Logic.symbol list;
-  mutable validating : Types.ty list;
-  run_body : frame -> lambdas:Mir.body array -> Mir.body -> unit;
-  read_formula : frame -> Mir.formula -> arguments:Logic.term list -> frame * Logic.term;
+  mutable equalities : Logic.term list;
+  mutable logs : (Logic.term * bool) list;
+  mutable powers : (Logic.term * Logic.term) list;
+  models : (Logic.term -> Logic.term) option Tables.Model_table.t;
+  lambda_definitions : Logic.term Tables.Symbol_table.t;
+  mutable indexes : (int * place_value) list;
+}
+
+type report = {
+  mutable obligations : obligation list;
+  mutable holes : (Resolve.Names.key * location) list;
+  mutable decisions : (string * string option * Logic.term * Logic.term) list;
+  mutable values : (Logic.symbol * string) list;
+  mutable entry : Logic.symbol list;
+  local_names : string Tables.Local_table.t;
+}
+
+type costs = {
+  mutable own_bounds : Costs.counter list;
+  mutable call_targets : (Logic.term * Core.local) list;
+  mutable potentials : Logic.term list;
+  holds_potential : bool Tables.Type_table.t;
+  buffers : (Types.ty * (Logic.term -> Logic.term)) option Tables.Type_table.t;
+  mutable lambda_times : (Logic.term * (Logic.term * obligation list)) list;
+  mutable lambda_captures : (Logic.term * Core.local list) list;
+  mutable lent_back : (Types.ty * Logic.term * Logic.term) list;
+}
+
+type body = { terminates : bool; mutable returns : (frame * Logic.term option) list }
+type ghost_run = { mutable unfinished : Logic.term list }
+type proving = Not_proving | Proving_theorem | Running_ghost_code of ghost_run
+
+type context = {
+  definition : definition;
+  query : query;
+  axioms : axioms;
+  report : report;
+  costs : costs;
+  body : body;
+  proving : proving;
+  is_reading_callback : bool;
+  counters : Costs.counter list;
+  validating : Types.ty list;
+  instantiating : Path.t list;
+  axiomatizing : Logic.symbol list;
+  scopes : (Logic.symbol * Logic.term list ref) list;
+  open_axioms : open_axiom list;
+  reader : reader;
+}
+
+and axioms = {
+  axiom_clauses : unit Tables.Axiom_clause_table.t;
+  axioms_of : open_axiom Tables.Symbol_table.t;
+  mutable laws_assumed : (Types.trait_reference * Types.ty) list;
+}
+
+and reader = {
+  run_body : context -> frame -> lambdas:Mir.body array -> Mir.body -> unit;
+  read_formula : context -> frame -> Mir.formula -> arguments:Logic.term list -> frame * Logic.term;
 }
 
 and open_axiom = {
   parameters : Logic.symbol list;
   mutable hypotheses : Logic.term list;
-  mutable at_calls : (frame -> (Logic.term -> Logic.term) -> unit) list;
+  mutable at_calls : (context -> frame -> (Logic.term -> Logic.term) -> unit) list;
 }

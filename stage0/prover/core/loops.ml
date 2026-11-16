@@ -35,7 +35,8 @@ type while_loop = {
   test : State.frame -> (State.frame * Logic.term) option;
   run_body : State.frame -> State.frame list * State.frame list;
   on_failure : State.frame -> State.frame option;
-  measure_operands : (Core.comparison * (State.frame -> Logic.term * Logic.term)) option;
+  measure_operands :
+    (Core.comparison * (State.context -> State.frame -> Logic.term * Logic.term)) option;
 }
 
 type iterable =
@@ -50,15 +51,16 @@ type for_loop = {
   lent_element : Types.ty option;
   invariant_count : (State.frame -> Logic.term) option;
   collection : (State.frame -> Types.ty * Logic.term) option;
-  element_call : (State.frame -> Logic.term) option;
-  bind_element : State.frame -> Logic.term -> State.frame;
+  element_call : (State.context -> State.frame -> Logic.term) option;
+  bind_element : State.context -> State.frame -> Logic.term -> State.frame;
   compute_changed_in : State.frame -> State.changed;
   compute_changed_by_body : State.frame -> State.changed;
   run_body : State.frame -> Logic.term -> State.frame list * State.frame list;
   bind_parts : State.frame -> State.frame;
 }
 
-let list_loop_costs context (frame : State.frame) (clauses : Mir.loop_clause list) ~held =
+let list_loop_costs (context : State.context) (frame : State.frame) (clauses : Mir.loop_clause list)
+    ~held =
   List.map
     (fun (counter : Costs.counter) ->
       let entry =
@@ -81,11 +83,11 @@ let list_loop_costs context (frame : State.frame) (clauses : Mir.loop_clause lis
         | None ->
             Per_iteration
               {
-                per = Facts.declare_fresh context frame "per" Logic.Int;
+                per = Facts.declare_fresh context.query frame "per" Logic.Int;
                 per_held =
                   Option.map
                     (fun measure_held ->
-                      (Facts.declare_fresh context frame "per" Logic.Int, measure_held frame))
+                      (Facts.declare_fresh context.query frame "per" Logic.Int, measure_held frame))
                     held;
               }
       in
@@ -98,7 +100,7 @@ let list_loop_costs context (frame : State.frame) (clauses : Mir.loop_clause lis
         gained_at_head =
           (match (rule, held) with
           | Clause_bound _, Some _ when counter.counting <> Exactly ->
-              Some (Facts.declare_fresh context frame "gained" Logic.Int)
+              Some (Facts.declare_fresh context.query frame "gained" Logic.Int)
           | _ -> None);
         counts_potential = false;
       })
@@ -129,14 +131,14 @@ let lookup_spent (frame : State.frame) key =
 let make_count_bound ~(counter : Costs.counter) ~at ~bound =
   if counter.counting = Exactly then Logic.equal at bound else Costs.at_most at bound
 
-let enter_loop_head context head costs ~iterations =
+let enter_loop_head (context : State.context) head costs ~iterations =
   let iterations = Option.value iterations ~default:Costs.zero in
   let head =
     {
       head with
       State.spent =
         List.map
-          (fun cost -> (cost.counter, Facts.declare_fresh context head "spent" Logic.Int))
+          (fun cost -> (cost.counter, Facts.declare_fresh context.query head "spent" Logic.Int))
           costs;
     }
   in
@@ -250,7 +252,9 @@ let check_loop_iterations context loop_at (head : State.frame) costs ~mark ~fact
             in
             Option.map
               (fun bound -> (per, spent, bound))
-              (Costs.find_cost_bound ~varies:(Facts.mentions_fresh_after context mark) ~facts most)
+              (Costs.find_cost_bound
+                 ~varies:(Facts.mentions_fresh_after context.query mark)
+                 ~facts most)
           in
           match List.find_map find_bounded (held_rule @ [ (per, measure_plain_spent) ]) with
           | Some (per, spent, bound) ->
@@ -393,7 +397,7 @@ let list_validity_obligations context (entry : State.frame) (changed : State.cha
       | Some ty, Some before ->
           find_obligation
             (Option.value
-               (Tables.Local_table.find_opt context.local_names local)
+               (Tables.Local_table.find_opt context.report.local_names local)
                ~default:"a local")
             ty before
             (fun (at : State.frame) -> Locals.find_opt local at.locals)
@@ -464,7 +468,7 @@ let enter_loop ?holds context frame ~entry clauses ~changed =
     list_loop_costs context frame clauses ~held:(compute_held_potential context frame holds)
   in
   check_loop_entry context entry costs;
-  let fresh_mark = context.fresh and facts_mark = List.length context.facts in
+  let fresh_mark = context.query.fresh and facts_mark = List.length context.query.facts in
   let preserved = list_validity_obligations context frame changed in
   let head = havoc context frame changed in
   assume_preserved_validity context head preserved;
@@ -489,14 +493,14 @@ let end_iterations context (frame : State.frame) loop_at clauses (start : loop_s
         start.preserved)
     ends
 
-let compute_iterations_so_far context head costs =
+let compute_iterations_so_far (context : State.context) head costs =
   if
     List.exists
       (fun (cost : loop_cost) ->
         match cost.rule with Per_iteration _ -> true | Clause_bound _ -> false)
       costs
   then begin
-    let iterations = Facts.declare_fresh context head "iterations" Logic.Int in
+    let iterations = Facts.declare_fresh context.query head "iterations" Logic.Int in
     Facts.assume context head (Logic.Operation ("<=", [ Logic.int 0; iterations ]));
     Some iterations
   end
@@ -507,9 +511,9 @@ let make_step_cost (counter : Costs.counter) =
   | Time -> Logic.int 1
   | Allocations | Allocated_bytes | Calls _ -> Costs.zero
 
-let declare_elements_so_far context (head : State.frame) ~element ~collection ~count yielded
-    find_element_at =
-  let symbol = Facts.make_fresh_name context "position" in
+let declare_elements_so_far (context : State.context) (head : State.frame) ~element ~collection
+    ~count yielded find_element_at =
+  let symbol = Facts.make_fresh_name context.query "position" in
   let position = Logic.Symbol symbol in
   let premise =
     Logic.(Operation ("<=", [ int 0; position ]) &&& Operation ("<", [ position; count ]))
@@ -520,7 +524,8 @@ let declare_elements_so_far context (head : State.frame) ~element ~collection ~c
         Models.run_under_binder context
           { head with bound = symbol :: head.bound; makes_obligations = false }
           symbol Logic.Int premise
-          (fun inner -> Option.map (Logic.equal earlier) (find_element_at inner position))
+          (fun context inner ->
+            Option.map (Logic.equal earlier) (find_element_at context inner position))
       in
       Option.iter
         (fun same ->
@@ -561,7 +566,7 @@ let prove_receiving_loop ~prove_iteration ~most ~(for_loop : for_loop) context f
     enter_loop_head context { head with yielded = Some before } costs ~iterations:(Some iterations)
   in
   assume_invariants context head clauses;
-  let ended_mark = List.length context.facts in
+  let ended_mark = List.length context.query.facts in
   let received = receive head before in
   let through = received.through in
   let inside = received.advance (Facts.restrict head received.has_another) in
@@ -572,7 +577,7 @@ let prove_receiving_loop ~prove_iteration ~most ~(for_loop : for_loop) context f
   end_iterations context frame for_loop.for_at clauses loop ~head ~inside ~ends ~breaks
     ~with_through;
   let ended = received.advance (Facts.restrict head (Logic.not_ received.has_another)) in
-  let varies = Facts.mentions_fresh_after context loop.fresh_mark in
+  let varies = Facts.mentions_fresh_after context.query loop.fresh_mark in
   let ended_facts =
     Lambdas.list_facts_since context ended_mark @ Lambdas.list_facts_since context loop.facts_mark
   in
@@ -601,9 +606,9 @@ let prove_receiving_loop ~prove_iteration ~most ~(for_loop : for_loop) context f
 let cursor_trait : Path.t = Well_known.make_path Cursor
 let option_path : Path.t = Well_known.make_path Option
 
-let declare_some_parts context frame element =
+let declare_some_parts (context : State.context) frame element =
   let parts =
-    Facts.declare_fresh context frame "parts"
+    Facts.declare_fresh context.query frame "parts"
       (Facts.declare_sort context (Models.make_sequence_type element))
   in
   Facts.assume context frame
@@ -634,7 +639,7 @@ let prove_own_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
     | _ -> Facts.raise_bug "a cursor's evidence is not an impl"
   in
   let contract =
-    match Contracts.find_method_contract context.lookups trait "next" Mut evidence with
+    match Contracts.find_method_contract context.definition.lookups trait "next" Mut evidence with
     | Some contract -> contract
     | None ->
         Facts.raise_unsupported location "a loop over `%s`, whose `next` the prover cannot read"
@@ -645,7 +650,7 @@ let prove_own_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
   let invocation : Invocation.t = { callee = next; lends = None; uses = Types.no_capabilities } in
   let pulling : Invocation.site = { origin = for_loop.for_at; type_ = option_type } in
   let measures = find_measures clauses in
-  if context.terminates && not (Laws.signature_terminates context path) then
+  if context.body.terminates && not (Laws.signature_terminates context path) then
     Facts.oblige context frame Termination location
       [
         Text
@@ -653,7 +658,7 @@ let prove_own_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
              (Types.show cursor_type));
       ]
       (Logic.Boolean false);
-  if context.terminates && measures = None then
+  if context.body.terminates && measures = None then
     Facts.oblige context frame Termination location
       [
         Text
@@ -668,7 +673,7 @@ let prove_own_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
       measures
   in
   let entry_measure =
-    if context.terminates then
+    if context.body.terminates then
       match find_measured frame with Some [ entry ] -> Some entry | _ -> None
     else None
   in
@@ -685,7 +690,7 @@ let prove_own_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
     ~changed:(for_loop.compute_changed_in frame)
     ~holds ~most:(Option.to_list entry_measure)
     ~prove_iteration:(fun ~head ~ends ->
-      if context.terminates then
+      if context.body.terminates then
         match find_measured head with
         | Some before ->
             List.iter
@@ -763,13 +768,15 @@ let run_for_loop context frame (for_loop : for_loop) =
           (Option.value for_loop.lent_element ~default:for_loop.element_type)
       in
       let over_positions = Option.is_some for_loop.lent_element in
-      let find_element_at (at : State.frame) position =
+      let find_element_at context (at : State.frame) position =
         Option.map
-          (fun element_of -> element_of (for_loop.bind_element at position))
+          (fun element_of -> element_of context (for_loop.bind_element context at position))
           for_loop.element_call
       in
       let outer_yielded = frame.yielded in
-      let bind_at_index (exit_frame : State.frame) next = for_loop.bind_element exit_frame next in
+      let bind_at_index (exit_frame : State.frame) next =
+        for_loop.bind_element context exit_frame next
+      in
       let entry =
         bind_at_index
           { frame with yielded = Some (Amounts.make_empty_parts context frame element) }
@@ -785,7 +792,7 @@ let run_for_loop context frame (for_loop : for_loop) =
           (if inclusive then Costs.plus (Costs.minus high low) (Logic.int 1)
            else Costs.minus high low)
       in
-      let iterations = Facts.declare_fresh context head "iterations" Logic.Int in
+      let iterations = Facts.declare_fresh context.query head "iterations" Logic.Int in
       Facts.assume context head
         Logic.(
           Operation ("<=", [ int 0; iterations ])
@@ -793,7 +800,7 @@ let run_for_loop context frame (for_loop : for_loop) =
       let before = declare_some_parts context head element in
       Facts.assume context head
         (Logic.equal (Models.make_sequence_length context element before) iterations);
-      (let position = Facts.make_fresh_name context "index" in
+      (let position = Facts.make_fresh_name context.query "index" in
        match
          if over_positions then None
          else Models.index_sequence context element before (Logic.Symbol position)
@@ -828,7 +835,7 @@ let run_for_loop context frame (for_loop : for_loop) =
       let through =
         Intrinsics.append_part context inside element before
           (if over_positions then
-             match find_element_at { inside with makes_obligations = false } index with
+             match find_element_at context { inside with makes_obligations = false } index with
              | Some lent -> lent
              | None -> Facts.arrive context inside "element" element
            else index)
@@ -904,7 +911,9 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
     match (find_measures clauses, loop.measure_operands) with
     | Some measures, _ -> Some (List.map read measures)
     | None, Some (comparison, read_operands) -> (
-        let left, right = Validity.run_without_costs context (fun () -> read_operands at) in
+        let left, right =
+          Validity.with_no_costs context (fun context -> read_operands context at)
+        in
         let distance from into = Logic.Operation ("-", [ into; from ]) in
         let through distance = Logic.Operation ("+", [ distance; Logic.int 1 ]) in
         match (comparison : Core.comparison) with
@@ -915,15 +924,15 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
         | Equal | Not_equal -> None)
     | None, None -> None
   in
-  let start_measures = if context.terminates then measure_terms inside else None in
-  if context.terminates && start_measures = None then
+  let start_measures = if context.body.terminates then measure_terms inside else None in
+  if context.body.terminates && start_measures = None then
     Facts.oblige context inside Termination location
       [ Text "This loop may not end: give it a `decreases` clause." ]
       (Logic.Boolean false);
   let most =
     match (start_measures, measure_terms frame, iterations) with
     | Some [ at_head ], Some [ on_entry ], Some iterations ->
-        let last = Facts.declare_fresh context head "last" Logic.Int in
+        let last = Facts.declare_fresh context.query head "last" Logic.Int in
         Facts.assume context head
           Logic.(
             equal iterations (int 0)

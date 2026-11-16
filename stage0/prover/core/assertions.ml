@@ -1,5 +1,5 @@
 let is_test (context : State.context) =
-  match context.current with Path.Test _ -> true | _ -> false
+  match context.definition.current with Path.Test _ -> true | _ -> false
 
 let bitwise_operations : Intrinsic.scalar list =
   [
@@ -111,10 +111,10 @@ let add_bitwise_definitions (query : Logic.query) =
 
 let assert_bit_vector (context : State.context) frame ~named ~origin
     ~(read : State.frame -> Logic.term) =
-  let saved_facts = context.facts and saved_decisions = context.decisions in
-  let saved_stated = Tables.Stated_table.copy context.stated in
-  context.facts <- [];
-  context.decisions <- [];
+  let saved_facts = context.query.facts and saved_decisions = context.report.decisions in
+  let saved_stated = Tables.Stated_table.copy context.query.stated in
+  context.query.facts <- [];
+  context.report.decisions <- [];
   let isolated =
     {
       frame with
@@ -128,7 +128,7 @@ let assert_bit_vector (context : State.context) frame ~named ~origin
     List.fold_left
       (fun (inside : State.frame) (local, ty) ->
         let symbol =
-          Facts.declare_fresh context inside "asserted" (Facts.declare_sort context ty)
+          Facts.declare_fresh context.query inside "asserted" (Facts.declare_sort context ty)
         in
         Facts.assume context inside (Facts.make_in_range ty symbol);
         match local with
@@ -151,16 +151,16 @@ let assert_bit_vector (context : State.context) frame ~named ~origin
   in
   let cited =
     match frame.source.key with
-    | Some key when key <> context.home -> Some (key, origin)
+    | Some key when key <> context.definition.home -> Some (key, origin)
     | Some _ | None -> None
   in
-  context.obligations <-
+  context.report.obligations <-
     { obligation with query = add_bitwise_definitions obligation.query; cited }
-    :: context.obligations;
-  context.facts <- saved_facts;
-  context.decisions <- saved_decisions;
-  Tables.Stated_table.reset context.stated;
-  Tables.Stated_table.iter (Tables.Stated_table.replace context.stated) saved_stated
+    :: context.report.obligations;
+  context.query.facts <- saved_facts;
+  context.report.decisions <- saved_decisions;
+  Tables.Stated_table.reset context.query.stated;
+  Tables.Stated_table.iter (Tables.Stated_table.replace context.query.stated) saved_stated
 
 let check_assertion context frame ~origin ~bit_vector term =
   (match bit_vector with

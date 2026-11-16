@@ -6,7 +6,8 @@ type while_loop = {
   test : State.frame -> (State.frame * Logic.term) option;
   run_body : State.frame -> State.frame list * State.frame list;
   on_failure : State.frame -> State.frame option;
-  measure_operands : (Core.comparison * (State.frame -> Logic.term * Logic.term)) option;
+  measure_operands :
+    (Core.comparison * (State.context -> State.frame -> Logic.term * Logic.term)) option;
 }
 
 type iterable =
@@ -21,8 +22,8 @@ type for_loop = {
   lent_element : Types.ty option;
   invariant_count : (State.frame -> Logic.term) option;
   collection : (State.frame -> Types.ty * Logic.term) option;
-  element_call : (State.frame -> Logic.term) option;
-  bind_element : State.frame -> Logic.term -> State.frame;
+  element_call : (State.context -> State.frame -> Logic.term) option;
+  bind_element : State.context -> State.frame -> Logic.term -> State.frame;
   compute_changed_in : State.frame -> State.changed;
   compute_changed_by_body : State.frame -> State.changed;
   run_body : State.frame -> Logic.term -> State.frame list * State.frame list;

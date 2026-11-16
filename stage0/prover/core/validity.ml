@@ -1,16 +1,20 @@
 let note_place (context : State.context) (frame : State.frame) origin place =
   if
-    frame.source.key = Some context.home
-    && List.exists (fun (first, second) -> first = origin || second = origin) context.disjoint
+    frame.source.key = Some context.definition.home
+    && List.exists
+         (fun (first, second) -> first = origin || second = origin)
+         context.definition.disjoint
   then begin
-    context.indexes <- (origin, place) :: context.indexes;
+    context.query.indexes <- (origin, place) :: context.query.indexes;
     let outside index start stop =
       Logic.(Operation ("<", [ index; start ]) ||| Operation ("<=", [ stop; index ]))
     in
     List.iter
       (fun (first, second) ->
         if first = origin || second = origin then
-          match (List.assoc_opt first context.indexes, List.assoc_opt second context.indexes) with
+          match
+            (List.assoc_opt first context.query.indexes, List.assoc_opt second context.query.indexes)
+          with
           | Some left, Some right ->
               let apart =
                 match (left, right) with
@@ -37,17 +41,15 @@ let note_place (context : State.context) (frame : State.frame) origin place =
                 ]
                 apart
           | _ -> ())
-      context.disjoint
+      context.definition.disjoint
   end
 
-let run_without_costs : 'a. _ -> (unit -> 'a) -> 'a =
- fun (context : State.context) read ->
-  let saved = context.counters in
-  context.counters <- [];
-  Fun.protect ~finally:(fun () -> context.counters <- saved) read
+let with_no_costs : 'a. State.context -> (State.context -> 'a) -> 'a =
+ fun context read -> read { context with counters = [] }
 
 let read_specification context frame (formula : Mir.formula) =
-  run_without_costs context (fun () -> context.read_formula frame formula ~arguments:[])
+  with_no_costs context (fun context ->
+      context.reader.read_formula context frame formula ~arguments:[])
 
 let select_field context ty variant field term =
   match (term, Facts.find_constructors context ty) with
@@ -80,8 +82,10 @@ let make_type_frame context frame source (ty : Types.ty) ~self =
 let find_type_source (context : State.context) (ty : Types.ty) =
   match ty with
   | Types.Named { path; _ }
-    when Resolve.Names.find_kind context.lookups.interface.names path = Some Type ->
-      Option.map (fun (source, _, _) -> source) (Contracts.find_source context.lookups path)
+    when Resolve.Names.find_kind context.definition.lookups.interface.names path = Some Type ->
+      Option.map
+        (fun (source, _, _) -> source)
+        (Contracts.find_source context.definition.lookups path)
   | _ -> None
 
 let find_type_clauses context (ty : Types.ty) =
@@ -89,7 +93,7 @@ let find_type_clauses context (ty : Types.ty) =
   | Types.Named { path; _ }, Some source ->
       Option.map
         (fun ({ form; _ } : Mir.type_clauses Mir.sourced) -> (source, form))
-        (Mir.read_type_clauses context.lookups.mir path)
+        (Mir.read_type_clauses context.definition.lookups.mir path)
   | _ -> None
 
 let list_invariants (clauses : Mir.loop_clause list) =
@@ -106,15 +110,13 @@ let rec make_validity (context : State.context) frame ~assuming ?(deep = true) ?
   if List.exists (Types.equal ty) seen || List.exists (Types.equal ty) context.validating then
     Logic.Boolean true
   else
-    let validating = context.validating in
-    context.validating <- ty :: validating;
-    Fun.protect ~finally:(fun () -> context.validating <- validating) @@ fun () ->
+    let context = { context with validating = ty :: context.validating } in
     let own =
       match find_invariants context ty with
       | _ when not own -> Logic.Boolean true
       | Some _ when Facts.find_constructors context ty = None ->
           let symbol = Logic.Symbol.Valid ty in
-          Facts.declare context
+          Facts.declare context.query
             (Logic.Function (symbol, [ Facts.declare_sort context ty ], Logic.Bool));
           Logic.Apply (symbol, [ term ])
       | Some (source, written) -> (
@@ -175,7 +177,7 @@ let make_callback_contract_frame (frame : State.frame) inputs arguments =
 let find_own_callback (context : State.context) local =
   List.find_map
     (fun (parameter, name, callback) -> if parameter = local then Some (name, callback) else None)
-    context.callbacks
+    context.definition.callbacks
 
 let check_callback_contract context frame location ~name inputs requires arguments ~promised ~why =
   let inside = make_callback_contract_frame frame inputs arguments in
@@ -204,11 +206,8 @@ let check_escaping_callback context frame local =
         ~why:"is used as a value whose type promises nothing of its arguments"
   | _ -> ()
 
-let run_reading_callback : 'a. _ -> (unit -> 'a) -> 'a =
- fun (context : State.context) read ->
-  let saved = context.reading_callback in
-  context.reading_callback <- true;
-  Fun.protect ~finally:(fun () -> context.reading_callback <- saved) read
+let with_reading_callback : 'a. State.context -> (State.context -> 'a) -> 'a =
+ fun context read -> read { context with is_reading_callback = true }
 
 let bind_part_arguments frame (part : State.part) ~arguments ~substitution =
   let locals, types, self =
@@ -247,14 +246,14 @@ let list_callback_facts (context : State.context) frame (invocation : Invocation
   match invocation.callee with
   | Function { path; type_arguments } -> (
       match
-        Option.bind (Contracts.find_source context.lookups path) (fun (callee, _, _) ->
-            Contracts.find_part context.lookups path callee)
+        Option.bind (Contracts.find_source context.definition.lookups path) (fun (callee, _, _) ->
+            Contracts.find_part context.definition.lookups path callee)
       with
       | Some part -> (
           match List.assoc_opt position part.callbacks with
           | Some { inputs; requires } when List.length inputs = List.length arguments ->
               let substitution =
-                match Interface.Impls.read_signature context.lookups.interface path with
+                match Interface.Impls.read_signature context.definition.lookups.interface path with
                 | Some (signature : Types.signature) ->
                     make_callee_substitution frame signature type_arguments
                 | None -> []
@@ -277,7 +276,7 @@ let list_callback_facts (context : State.context) frame (invocation : Invocation
 let find_parameter_type (context : State.context) frame (invocation : Invocation.t) index =
   match invocation.callee with
   | Function { path; type_arguments } -> (
-      match Interface.Impls.read_signature context.lookups.interface path with
+      match Interface.Impls.read_signature context.definition.lookups.interface path with
       | Some (signature : Types.signature) ->
           let types =
             (match signature.receiver with
