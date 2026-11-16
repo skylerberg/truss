@@ -99,7 +99,7 @@ let may_be_target (context : State.context) frame term ty target =
   else
     match List.assoc_opt target context.call_targets with
     | Some local -> (
-        match (ty, Facts.local_type context frame local) with
+        match (ty, Facts.local_type context frame (Core_local local)) with
         | Types.Function _, Some target_type
           when Facts.sort_of context ty = Facts.sort_of context target_type ->
             Logic.equal term target

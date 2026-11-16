@@ -325,7 +325,7 @@ let check_redeclared (state : Checking.state) (name : Syntax.name) (receiver : P
                   interface.methods
             | None -> [])
           (Properties.list_bound_closure state.lookups
-             ~self:(Types.Parameter { owner = trait_path; name = "Self" })
+             ~self:(Types.Parameter (Types.make_self_parameter trait_path))
              required))
       trait.requires
   in

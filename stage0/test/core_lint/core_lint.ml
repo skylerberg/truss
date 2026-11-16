@@ -145,8 +145,8 @@ let is_integer_trait path =
 let is_built_in context (ty : Types.ty) =
   match ty with
   | Integer | Never -> true
-  | Parameter ({ owner; name } as parameter) ->
-      (name = "Self" && is_integer_trait owner)
+  | Parameter ({ owner; _ } as parameter) ->
+      (Types.is_self_parameter parameter && is_integer_trait owner)
       || List.exists
            (fun (bound : Types.trait_reference) -> is_integer_trait bound.trait)
            (context.bounds parameter)
@@ -453,7 +453,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
           of_generics signature.generics
       | Some (Type_interface interface) -> of_generics interface.type_generics
       | Some (Trait_interface interface) ->
-          { T.owner = path; name = "Self" } :: of_generics interface.trait_generics
+          T.make_self_parameter path :: of_generics interface.trait_generics
       | Some (Impl_interface interface) -> of_generics interface.impl_generics
       | Some (Law_proof_interface interface) -> of_generics interface.generics
       | _ -> []

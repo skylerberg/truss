@@ -606,8 +606,6 @@ let elaborate_type_head context owner (head : Syntax.type_head) =
   | Some (Unknown report) -> (generics, Types.Error report)
   | _ -> bug "the type head `%s` is not resolved" (show_path head.path)
 
-let make_self_parameter trait : Types.parameter = { owner = trait; name = "Self" }
-
 let elaborate_fields context (written : Syntax.field list) =
   List.stable_sort
     (fun (left : Types.field) (right : Types.field) ->
@@ -641,7 +639,7 @@ let elaborate_container (context : t) (path : Path.t) (definition : Syntax.defin
   match definition.kind with
   | Trait { generics; requires; members; _ } ->
       let trait_generics = elaborate_generics context path generics in
-      let self_parameter = make_self_parameter path in
+      let self_parameter = Types.make_self_parameter path in
       let self_trait : Types.trait_reference =
         {
           trait = path;

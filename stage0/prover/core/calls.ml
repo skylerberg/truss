@@ -99,7 +99,8 @@ let structural_parameters context (frame : State.frame) (own : State.part) =
              | _ -> [])
          | local -> (
              match
-               (Locals.find_opt local frame.old_locals, Facts.local_type context frame local)
+               ( Locals.find_opt (Core_local local) frame.old_locals,
+                 Facts.local_type context frame (Core_local local) )
              with
              | Some entry, Some ty when is_datatype ty -> [ (ty, entry, index) ]
              | _ -> []))
@@ -154,7 +155,9 @@ let contract_call context (frame : State.frame) (site : Invocation.site) (invoca
         match (parameter.local, term) with
         | Self, Some term -> (locals, types, Some (term, parameter.type_))
         | local, Some term ->
-            (Locals.add local term locals, Locals.add local parameter.type_ types, self)
+            ( Locals.add (Core_local local) term locals,
+              Locals.add (Core_local local) parameter.type_ types,
+              self )
         | _, None -> (locals, types, self))
       (Locals.empty, Locals.empty, None)
       bindings

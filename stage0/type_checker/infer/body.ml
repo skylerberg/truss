@@ -407,7 +407,7 @@ let check_definition (state : State.state) (elaborated : Environment.elaborated_
               variants
         | _ -> ())
     | Trait { members; _ }, Trait_interface _ ->
-        let self = Types.Parameter { owner = state.key.path; name = "Self" } in
+        let self = Types.Parameter (Types.make_self_parameter state.key.path) in
         state.form.definition_builder <-
           Some
             (fun ~holds_body:_ ->

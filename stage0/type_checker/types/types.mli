@@ -53,6 +53,8 @@ and cost_bound = Finite_cost | Order_of | No_more_than of Z.t option | Exactly_c
 val unit : ty
 val bool : ty
 val make_builtin : Intrinsic.builtin -> ty
+val make_self_parameter : Path.t -> parameter
+val is_self_parameter : parameter -> bool
 val make_named : Path.t -> ty list -> ty
 val is_builtin : Intrinsic.builtin -> ty -> bool
 val find_builtin : ty -> Intrinsic.builtin option

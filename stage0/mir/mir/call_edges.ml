@@ -86,12 +86,8 @@ let dispatched (called : _ Core.target) =
   match called with
   | Trait_method { evidence = Dynamic; _ } -> true
   | Trait_method
-      {
-        evidence = Bound;
-        self_type =
-          Parameter { name = "Self"; _ } | Projection { base = Parameter { name = "Self"; _ }; _ };
-        _;
-      } ->
+      { evidence = Bound; self_type = Parameter self | Projection { base = Parameter self; _ }; _ }
+    when Types.is_self_parameter self ->
       true
   | _ -> false
 
@@ -113,15 +109,8 @@ let edges (lookups : lookups) ~package (code : Tree.t) =
              else Path.Method { owner = trait.trait; name; receiver });
           ]
     | Trait_method
-        {
-          trait;
-          name;
-          receiver;
-          evidence = Bound;
-          self_type = Parameter { owner; name = "Self" };
-          _;
-        }
-      when integer_trait owner -> (
+        { trait; name; receiver; evidence = Bound; self_type = Parameter ({ owner; _ } as self); _ }
+      when Types.is_self_parameter self && integer_trait owner -> (
         let own =
           List.concat_map
             (fun builtin ->

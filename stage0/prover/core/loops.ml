@@ -707,8 +707,7 @@ let own_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
           ]
           ~havoc_mut
           ~substitution_of:(fun _ ->
-            impl_arguments
-            @ [ ({ Types.owner = cursor_trait; name = "Self" }, Types.Type cursor_type) ])
+            impl_arguments @ [ (Types.make_self_parameter cursor_trait, Types.Type cursor_type) ])
           ~instance:[ Types.Type cursor_type ]
       in
       let has_another = Logic.Is (Facts.constructor_name option_type (Some "Some"), pulled) in

@@ -459,7 +459,7 @@ and one_family (state : State.state) (traits : Types.trait_reference list) =
     List.exists
       (fun (bound : Types.trait_reference) -> Path.equal bound.trait second.trait)
       (Interface.Properties.list_bound_closure state.lookups.interface
-         ~self:(Types.Parameter { owner = first.trait; name = "Self" })
+         ~self:(Types.Parameter (Types.make_self_parameter first.trait))
          first)
   in
   let related first second = requires first second || requires second first in
@@ -520,7 +520,7 @@ and method_version state (span : Source.Definition_span.t) type_ name (receiver 
   | Some (Trait_overload (trait, method_)) ->
       let instance =
         Instantiation.instantiate state span
-          ~extra:[ ({ owner = trait.trait; name = "Self" }, Types.Type type_) ]
+          ~extra:[ (Types.make_self_parameter trait.trait, Types.Type type_) ]
           (Members.method_signature state.lookups trait.trait method_)
       in
       Some

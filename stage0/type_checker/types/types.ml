@@ -66,6 +66,8 @@ let flat_map_capabilities f (set : capability_set) = make_capability_set (List.c
 let make_builtin builtin = Named { path = Intrinsic.builtin_path builtin; arguments = [] }
 let unit = make_builtin Unit
 let bool = make_builtin Bool
+let make_self_parameter trait = { owner = trait; name = "Self" }
+let is_self_parameter parameter = parameter.name = "Self"
 
 let make_named path arguments =
   Named { path; arguments = List.map (fun type_ -> Type type_) arguments }

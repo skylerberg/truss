@@ -76,7 +76,7 @@ let integer_instances (lookups : Lookups.t) (path : Path.t) =
     match path with
     | Method { owner; _ } ->
         [
-          ( { Types.owner; name = "Self" },
+          ( Types.make_self_parameter owner,
             [ { Types.trait = owner; trait_arguments = []; associated = [] } ] );
         ]
     | _ -> []

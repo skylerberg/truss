@@ -113,7 +113,7 @@ let parameters_of context (frame : State.frame) (function_type : Types.function_
 
 let without_temporaries locals =
   Locals.filter
-    (fun key _ -> match key with Core.Synthetic number -> number >= 0 | _ -> true)
+    (fun key _ -> match key with Locals.Mir_local _ -> false | Core_local _ -> true)
     locals
 
 let body_run ?(entering = Fun.id) (context : State.context) (frame : State.frame)
@@ -196,9 +196,7 @@ let lambda_definition context frame (function_type : Types.function_type)
                   (fun inside parameter (name, _) ->
                     let info = written.code.locals.(parameter) in
                     Facts.bind inside
-                      (match info.kind with
-                      | Source { local; _ } -> local
-                      | Temporary | Lent _ -> Core.Synthetic (-1 - parameter))
+                      (Locals.make_key written.code.locals parameter)
                       (Facts.substituted context inside info.type_)
                       (Logic.Symbol name))
                   inside written.code.parameters bound
@@ -396,23 +394,13 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
         context.counters <- saved_counters)
       (fun () ->
         let finished =
-          let inside =
-            {
-              inside with
-              locals =
-                Locals.filter
-                  (fun key _ -> match key with Core.Synthetic number -> number >= 0 | _ -> true)
-                  inside.locals;
-            }
-          in
+          let inside = { inside with locals = without_temporaries inside.locals } in
           let inside =
             List.fold_left2
               (fun inside parameter argument ->
                 let info = written.code.locals.(parameter) in
                 Facts.bind inside
-                  (match info.kind with
-                  | Source { local; _ } -> local
-                  | Temporary | Lent _ -> Core.Synthetic (-1 - parameter))
+                  (Locals.make_key written.code.locals parameter)
                   (Facts.substituted context inside info.type_)
                   argument)
               inside written.code.parameters arguments
@@ -439,7 +427,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
               (fun parameter (mode, input) ->
                 match (mode, written.code.locals.(parameter).kind) with
                 | Types.Mut, Source { local; _ } -> (
-                    match Locals.find_opt local exit_.locals with
+                    match Locals.find_opt (Core_local local) exit_.locals with
                     | Some term ->
                         check_valid context exit_ location
                           (Facts.substituted context frame input)
@@ -524,7 +512,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
 let lambda context (frame : State.frame) ~(site : Invocation.site) (written : State.lambda_code)
     ~facts =
   let captured (local : Core.local) =
-    match local with Self -> frame.self | local -> Locals.find_opt local frame.locals
+    match local with Self -> frame.self | local -> Locals.find_opt (Core_local local) frame.locals
   in
   if
     frame.bound <> []
