@@ -727,7 +727,7 @@ let lower_shared_update st ~shared ~input ~change ~destination =
 let lower_intrinsic st ?reported (operation : Intrinsic.operation) ~type_arguments
     (arguments : Mir.argument list) ~destination ~site =
   match (operation, arguments) with
-  | Shared_update, [ shared; input; change ] ->
+  | Runtime Shared_update, [ shared; input; change ] ->
       lower_shared_update st ~shared ~input ~change ~destination;
       None
   | _ ->
@@ -1392,8 +1392,8 @@ and lower_rvalue_into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.
       let type_arguments, value_arguments = split_arguments st type_arguments in
       ignore
         (Intrinsics.lower ~checks:(Lowering.checks_operations st) ~value_arguments
-           ?reported:(find_reported_site st) st.context.env st.builder st.context.types operation
-           ~type_arguments
+           ?reported:(find_reported_site st) st.context.env st.builder st.context.types
+           (Scalar operation) ~type_arguments
            (List.map
               (fun operand ->
                 let operand_ty = compute_operand_type st operand in
@@ -1535,7 +1535,7 @@ and lower_call_into ?failure st (call : Mir.call) destination ~origin =
             (Code { path; type_arguments })
             ~signature ~substitution ~arguments ~mask ~destination ()
       | Lends _ -> Definitions.raise_bug "a lending call that lends no part")
-  | None, Intrinsic { operation = Holds_invariant; _ } -> (
+  | None, Intrinsic { operation = Runtime Holds_invariant; _ } -> (
       match call.arguments with
       | [ value; clause ] -> check_invariant st ~value ~clause ~destination
       | _ -> Definitions.raise_bug "holds_invariant takes a value and a clause")
@@ -1560,7 +1560,7 @@ and lower_call_into ?failure st (call : Mir.call) destination ~origin =
         | [ (_, _, message) ] ->
             ignore
               (Intrinsics.lower ~checks:(Lowering.checks_operations st) st.context.env st.builder
-                 st.context.types Crash ~type_arguments:[] [ Intrinsics.Place message ]
+                 st.context.types (Runtime Crash) ~type_arguments:[] [ Intrinsics.Place message ]
                  ~destination:None ~site:(locate_site st origin))
         | _ -> Definitions.raise_bug "Panic.crash takes one message"
       else begin

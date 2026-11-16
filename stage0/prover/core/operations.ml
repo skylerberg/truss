@@ -276,7 +276,7 @@ let declare_opaque_operation context frame ty operation arguments =
   Facts.assume context frame (Facts.make_in_range ty term);
   term
 
-let make_overflow_fix context frame ty (operation : Intrinsic.operation) left right exact =
+let make_overflow_fix context frame ty (operation : Intrinsic.scalar) left right exact =
   match find_integer_limits ty with
   | None -> []
   | Some (name, low, high) -> (
@@ -338,7 +338,7 @@ let make_negation_fix context frame ty inner =
   | _ -> []
 
 let translate_arithmetic context (frame : State.frame) (site : Invocation.site) ty
-    (operation : Intrinsic.operation) left right =
+    (operation : Intrinsic.scalar) left right =
   let source = frame.source in
   let location = Facts.locate context frame.source site.origin in
   let exact, is_division =
@@ -348,7 +348,7 @@ let translate_arithmetic context (frame : State.frame) (site : Invocation.site) 
     | Multiply -> (Logic.Operation ("*", [ left; right ]), false)
     | Divide -> (Logic.truncated_divide left right, true)
     | Remainder -> (Logic.truncated_remainder left right, true)
-    | _ -> Facts.raise_bug "`%s` is not arithmetic" (Intrinsic.show_operation operation)
+    | _ -> Facts.raise_bug "`%s` is not arithmetic" (Intrinsic.show_operation (Scalar operation))
   in
   if is_division then
     Facts.oblige_safe_operation context frame Division location
@@ -474,18 +474,19 @@ let declare_power context frame base exponent =
   Logic.Apply (Logic.Symbol.Cost_power, [ base; exponent ])
 
 let translate_primitive_operation context (frame : State.frame) ~(site : Invocation.site)
-    (operation : Intrinsic.operation) types operands ~(arguments : Core.origin option list)
-    ~fallback =
+    (operation : Intrinsic.scalar) types operands ~(arguments : Core.origin option list) ~fallback =
   let source = frame.source in
   let location = Facts.locate context frame.source site.origin in
   let find_argument index = Option.join (List.nth_opt arguments index) in
   let is_float = match types with ty :: _ -> Facts.find_float_format ty <> None | [] -> false in
   let exact operation left right =
-    match (operation : Intrinsic.operation) with
+    match (operation : Intrinsic.scalar) with
     | Wrapping_add | Add_overflows -> Logic.Operation ("+", [ left; right ])
     | Wrapping_subtract | Subtract_overflows -> Logic.Operation ("-", [ left; right ])
     | Wrapping_multiply | Multiply_overflows -> Logic.Operation ("*", [ left; right ])
-    | _ -> Facts.raise_bug "`%s` has no exact integer result" (Intrinsic.show_operation operation)
+    | _ ->
+        Facts.raise_bug "`%s` has no exact integer result"
+          (Intrinsic.show_operation (Scalar operation))
   in
   match (operation, types, operands) with
   | Add, _ :: _, [ left; right ] when is_float -> make_float_operation "fp.add" left right

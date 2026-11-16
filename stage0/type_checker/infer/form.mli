@@ -34,10 +34,10 @@ val build_range_bound : State.state -> Syntax.range_end -> Core.range_bound
 val build_pattern_fields :
   State.state -> Types.field list -> (string * Syntax.pattern) list -> (string * Core.pattern) list
 
-val convert_to_operation : Syntax.operation -> Intrinsic.operation
+val convert_to_operation : Syntax.operation -> Intrinsic.scalar
 
 val build_operator :
-  State.state -> Syntax.expression -> Intrinsic.operation -> Syntax.expression list -> Core.kind
+  State.state -> Syntax.expression -> Intrinsic.scalar -> Syntax.expression list -> Core.kind
 
 val build_built_in_comparison :
   State.state -> Syntax.comparison -> Syntax.expression -> Syntax.expression -> Core.kind

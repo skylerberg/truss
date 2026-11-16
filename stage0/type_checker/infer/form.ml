@@ -54,7 +54,7 @@ let build_call state ~lends ?function_value (call : Tables.call) : Core.call =
     uses = call.uses;
   }
 
-let arithmetic_traits : (Well_known.t * string * Intrinsic.operation) list =
+let arithmetic_traits : (Well_known.t * string * Intrinsic.scalar) list =
   [
     (Add, "add", Add);
     (Subtract, "subtract", Subtract);
@@ -453,7 +453,7 @@ let build_list_literal state ~origin (element : Types.ty) (elements : Core.expre
              };
            value =
              Operands.build Own
-               (make_intrinsic_call Storage_with_capacity storage_type
+               (make_intrinsic_call (Buffer Storage_with_capacity) storage_type
                   [ Operands.build_argument Read capacity ]);
            else_ = None;
          })
@@ -463,7 +463,7 @@ let build_list_literal state ~origin (element : Types.ty) (elements : Core.expre
       (fun element ->
         make_statement
           (Evaluate
-             (make_intrinsic_call Storage_push Types.unit
+             (make_intrinsic_call (Buffer Storage_push) Types.unit
                 [
                   Passed
                     {
@@ -645,7 +645,7 @@ let convert_to_integer state (node : Core.expression) : Core.expression =
     State.make_synthetic_expression state ~origin:node.origin Types.Integer
       (Convert { conversion = To_integer; value = node })
 
-let convert_to_operation : Syntax.operation -> Intrinsic.operation = function
+let convert_to_operation : Syntax.operation -> Intrinsic.scalar = function
   | Arithmetic Add -> Add
   | Arithmetic Subtract -> Subtract
   | Arithmetic Multiply -> Multiply

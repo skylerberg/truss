@@ -528,14 +528,14 @@ let lower_list_into (st : Lowering.state) ty destination ~site fills =
       (Intrinsics.lower ~checks:(Lowering.checks_operations st) st.context.env st.builder
          st.context.types operation ~type_arguments:[ element ] arguments ~destination ~site)
   in
-  lower Storage_with_capacity
+  lower (Buffer Storage_with_capacity)
     [ Value (Lowered.make_uint64_constant (List.length fills)) ]
     (Some storage_place);
   List.iter
     (fun fill ->
       let value = Lowering.allocate_temporary st element in
       fill value;
-      lower Storage_push
+      lower (Buffer Storage_push)
         [ Place storage_place; Value (Lowering.make_owned_operand st value element) ]
         None)
     fills
