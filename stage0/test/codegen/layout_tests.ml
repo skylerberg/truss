@@ -32,6 +32,13 @@ let () =
       in
       expect_string ~expected:"1/1 tag(UInt8: Less Equal Greater) niche . 3+253"
         (describe ~extra (named "Ordering")));
+  test "a sum type with one variant offers no niche when its field's niche is full" (fun () ->
+      let full = Sum (List.init 256 (fun index -> variant (Printf.sprintf "V%d" index) [])) in
+      let extra =
+        [ ("Full", full); ("Wrapper", Sum [ variant "Only" [ field "full" (named "Full") ] ]) ]
+      in
+      expect_string ~expected:"1/1 niche-encoded(Only;  at nothing)"
+        (describe ~extra (named "Wrapper")));
   test "a tag is the smallest unsigned integer that numbers every variant" (fun () ->
       let many = Sum (List.init 300 (fun index -> variant (Printf.sprintf "V%d" index) [])) in
       expect_int ~expected:2 (layout ~extra:[ ("Many", many) ] (named "Many")).size);
@@ -105,11 +112,11 @@ let () =
   test "a variant's discriminant is its tag value or its niche value" (fun () ->
       let layout = layout (option bool) in
       (match discriminant layout "None" with
-      | Niche_value value when Z.equal value (Z.of_int 2) -> ()
+      | Niche_value { value; _ } when Z.equal value (Z.of_int 2) -> ()
       | _ -> fail "None is not stored as 2");
       match discriminant layout "Some" with
-      | Not_niche -> ()
-      | _ -> fail "Some is not the dataful variant")
+      | Not_niche { stop; _ } when Z.equal stop (Z.of_int 3) -> ()
+      | _ -> fail "Some is not the dataful variant, outside the niche values below 3")
 
 let () =
   let int64 = Ground.builtin Int64 in

@@ -18,7 +18,8 @@ val scalar_of : C_types.context -> Lowered.ty -> Memory_layout.scalar
 val bit_width : Memory_layout.scalar -> int
 val unsigned_of : C_types.context -> Memory_layout.scalar -> string
 val niche_value : C_types.context -> Memory_layout.niche -> Z.t -> string
-val is_variant_c : C_types.context -> string -> Ground.ty -> string -> string
+val path_c : string -> Memory_layout.step list -> string
+val discriminant_test_c : C_types.context -> string -> Memory_layout.discriminant -> string
 
 type built =
   | Expression of string

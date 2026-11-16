@@ -357,23 +357,19 @@ let terminator_c context fc buffer (terminator : Lowered.terminator) =
           | (_, block) :: _ -> line "goto b%d;" block
           | [] -> line "%s" (default otherwise))
       | Some (text, Value sum) -> (
-          let layout = layout context sum in
-          match layout.form with
-          | Tagged _ | Tag_only _ ->
-              line "switch (%s) {" (match layout.form with Tagged _ -> text ^ ".tag" | _ -> text);
+          match Memory_layout.dispatch (layout context sum) cases with
+          | Switch { tag; cases } ->
+              line "switch (%s) {" (path_c text tag.at);
               List.iter
-                (fun (variant, block) ->
-                  match Memory_layout.discriminant layout variant with
-                  | Tag_value value -> line "case %sULL: goto b%d;" (Z.to_string value) block
-                  | _ -> bug "a tag")
+                (fun (value, block) -> line "case %sULL: goto b%d;" (Z.to_string value) block)
                 cases;
               line "default: %s" (default otherwise);
               line "}"
-          | _ ->
+          | Tests tests ->
               List.iter
-                (fun (variant, block) ->
-                  line "if (%s) goto b%d;" (is_variant_c context text sum variant) block)
-                cases;
+                (fun (discriminant, block) ->
+                  line "if (%s) goto b%d;" (discriminant_test_c context text discriminant) block)
+                tests;
               line "%s" (default otherwise))
       | Some _ -> bug "a variant switch on a place that is not a value")
   | Return None -> line "return;"

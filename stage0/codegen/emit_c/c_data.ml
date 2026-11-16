@@ -86,27 +86,23 @@ let rec initializer_c context ty (value : Lowered.static_value) : string option 
                 (Printf.sprintf "{ .tag = %d, .payload.v_%s = %s }" variant.index name
                    (block_c name values))
           | _ -> bug "a payload"))
-  | Niche_encoded { dataful; others; encoding }, Static_variant (name, values) ->
+  | Niche_encoded { dataful; dataless }, Static_variant (name, values) ->
       if dataful.name = name then
         match dataful.payload.form with
         | Struct fields -> Some ("{ " ^ fields_c fields values "" ^ " }")
         | Scalar (Pointer (Block _)) -> Some (block_c name values)
         | _ -> bug "a payload"
       else
-        begin match (List.assoc_opt name others, encoding) with
-        | Some stored, Some niche -> (
-            let stored = niche_value context niche stored in
-            match niche.path with
-            | [] -> Some stored
-            | path ->
-                Some
-                  (Printf.sprintf "{ %s = %s }"
-                     (String.concat ""
-                        (List.map
-                           (function Memory_layout.Field name -> ".f_" ^ name | Tag -> ".tag")
-                           path))
-                     stored))
-        | _ -> bug "no variant %s" name
+        begin match dataless with
+        | Some { niche; niche_values } -> (
+            match List.assoc_opt name niche_values with
+            | None -> bug "no variant %s" name
+            | Some value -> (
+                let stored = niche_value context niche value in
+                match niche.path with
+                | [] -> Some stored
+                | path -> Some (Printf.sprintf "{ %s = %s }" (path_c "" path) stored)))
+        | None -> bug "no variant %s" name
         end
   | _ -> bug "static data that does not fit %s" (Ground.to_string ty)
 
