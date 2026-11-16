@@ -29,7 +29,6 @@ let make_storage_shape ~uint64 element : Memory_layout.shape =
 let make_view_shape ~uint64 element : Memory_layout.shape =
   Record [ (elements_field, Raw (Pointer (Data element))); (length_field, Typed uint64) ]
 
-let constant_uint64 number = Lowered.Constant (Integer (UInt64, Z.of_int number))
 let project_buffer storage = Lowered.project storage (Lowered.Field buffer_field)
 let project_length storage = Lowered.project storage (Lowered.Field length_field)
 let project_capacity storage = Lowered.project storage (Lowered.Field capacity_field)
@@ -39,7 +38,7 @@ let project_view_length view = Lowered.project view (Lowered.Field length_field)
 let index_view_element view index = Lowered.project (project_view_elements view) (Index index)
 
 let build_is_allocated storage : Lowered.rvalue =
-  Binary (Not_equal, Copy (project_capacity storage), constant_uint64 0)
+  Binary (Not_equal, Copy (project_capacity storage), Lowered.make_uint64_constant 0)
 
 let build_storage ty ~buffer ~length ~capacity : Lowered.rvalue =
   Build
@@ -50,8 +49,8 @@ let build_storage ty ~buffer ~length ~capacity : Lowered.rvalue =
     }
 
 let build_empty ty =
-  build_storage ty ~buffer:(Constant (Bytes "")) ~length:(constant_uint64 0)
-    ~capacity:(constant_uint64 0)
+  build_storage ty ~buffer:(Constant (Bytes "")) ~length:(Lowered.make_uint64_constant 0)
+    ~capacity:(Lowered.make_uint64_constant 0)
 
 let build_view ty ~elements ~length : Lowered.rvalue =
   Build { ty; variant = None; fields = [ (elements_field, elements); (length_field, length) ] }

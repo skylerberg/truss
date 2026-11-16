@@ -1,5 +1,3 @@
-module Names = Resolve.Names
-
 type hole = {
   definition : Path.t;
   file : string;
@@ -10,12 +8,12 @@ type hole = {
   blocks : string list;
 }
 
-let of_declaration snapshot packages database (names : Names.lookups)
-    (declaration : Names.declaration) =
-  let key = Names.key_of declaration in
+let of_declaration snapshot packages database (names : Resolve.Names.lookups)
+    (declaration : Resolve.Names.declaration) =
+  let key = Resolve.Names.key_of declaration in
   match Database.read_resolved database key with
   | Some resolved ->
-      let ({ file; base } : Names.place) = names.place key in
+      let ({ file; base } : Resolve.Names.place) = names.place key in
       let source = Command_packages.source snapshot packages file in
       List.map
         (fun (hole : Inspect.hole) ->
@@ -40,7 +38,7 @@ let gather snapshot packages database paths =
   List.concat_map
     (fun file ->
       List.concat_map
-        (fun (declaration : Names.declaration) ->
+        (fun (declaration : Resolve.Names.declaration) ->
           if declaration.ordinal = 0 then
             of_declaration snapshot packages database names declaration
           else [])

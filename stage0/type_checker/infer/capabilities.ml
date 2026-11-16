@@ -1,5 +1,3 @@
-module Environment = Interface.Environment
-
 let panic : Types.capability = Capability (Well_known.path Panic)
 let tasks : Types.capability = Capability (Well_known.path Tasks)
 
@@ -515,7 +513,8 @@ let check_monitor_callbacks checking implementations =
           (Form.find_capability_impls state implementation.type_))
     implementations
 
-let check (state : State.state) (elaborated : Environment.elaborated_interface) (form : Core.t) =
+let check (state : State.state) (elaborated : Interface.Environment.elaborated_interface)
+    (form : Core.t) =
   let checking = { state; provides = [] } in
   let function_body ?implemented_capability available =
     { available; kind = Function_body; implemented_capability }

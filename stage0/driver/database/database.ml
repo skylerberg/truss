@@ -1,6 +1,4 @@
 module Part = Part
-module Names = Resolve.Names
-module Environment = Interface.Environment
 module Path_table = Hashtbl.Make (Path)
 module Call_graph = Graph.Make (Path)
 
@@ -57,31 +55,31 @@ type package_database = {
   mutable files : Path.file list;
   sources : (Path.file, Source.t) Hashtbl.t;
   parsed : (Path.file, parsed) Hashtbl.t;
-  mutable namespace : Names.namespace option;
-  resolved_names : (Names.key * Resolve.section, Resolve.resolved part) Hashtbl.t;
+  mutable namespace : Resolve.Names.namespace option;
+  resolved_names : (Resolve.Names.key * Resolve.section, Resolve.resolved part) Hashtbl.t;
   import_checks : (Path.file, Diagnostic.t list) Hashtbl.t;
-  trait_headers : (Names.key, Resolve.trait_header part) Hashtbl.t;
+  trait_headers : (Resolve.Names.key, Resolve.trait_header part) Hashtbl.t;
   constant_values : Z.t option part Path_table.t;
-  headers : (Names.key, Environment.header part) Hashtbl.t;
-  interfaces : (Names.key, Environment.elaborated_interface part) Hashtbl.t;
+  headers : (Resolve.Names.key, Interface.Environment.header part) Hashtbl.t;
+  interfaces : (Resolve.Names.key, Interface.Environment.elaborated_interface part) Hashtbl.t;
   derived_interfaces : (Path.t * Path.t, Types.impl_interface part) Hashtbl.t;
-  type_facts : Environment.type_facts part Path_table.t;
-  grants : (Path.package, Environment.grant) Hashtbl.t;
-  signature_checks : (Names.key, unit part) Hashtbl.t;
-  contracts : (Names.key, Core.t part) Hashtbl.t;
-  checked_bodies : (Names.key, Infer.checked part) Hashtbl.t;
+  type_facts : Interface.Environment.type_facts part Path_table.t;
+  grants : (Path.package, Interface.Environment.grant) Hashtbl.t;
+  signature_checks : (Resolve.Names.key, unit part) Hashtbl.t;
+  contracts : (Resolve.Names.key, Core.t part) Hashtbl.t;
+  checked_bodies : (Resolve.Names.key, Infer.checked part) Hashtbl.t;
   derived_forms : Core.t part Path_table.t;
-  body_parts : (Names.key, Mir.body_part part) Hashtbl.t;
-  contract_parts : (Names.key, Mir.contract_part part) Hashtbl.t;
+  body_parts : (Resolve.Names.key, Mir.body_part part) Hashtbl.t;
+  contract_parts : (Resolve.Names.key, Mir.contract_part part) Hashtbl.t;
   generated_parts : (Mir.body_part * Mir.contract_part) part Path_table.t;
   mir_call_edges : Path.t list part Path_table.t;
-  patterns : (Names.key, unit part) Hashtbl.t;
-  usage : (Names.key, unit part) Hashtbl.t;
-  ownership : (Names.key, (Core.origin * Core.origin) list part) Hashtbl.t;
-  used_packages : (Names.key, Path.package list part) Hashtbl.t;
+  patterns : (Resolve.Names.key, unit part) Hashtbl.t;
+  usage : (Resolve.Names.key, unit part) Hashtbl.t;
+  ownership : (Resolve.Names.key, (Core.origin * Core.origin) list part) Hashtbl.t;
+  used_packages : (Resolve.Names.key, Path.package list part) Hashtbl.t;
   package_checks : (Package_checks.check, Package_checks.outcome part) Hashtbl.t;
   recursion_groups : Path.t list part Path_table.t;
-  proofs : (Names.key, Prover.proof part) Hashtbl.t;
+  proofs : (Resolve.Names.key, Prover.proof part) Hashtbl.t;
 }
 
 type t = {
@@ -397,7 +395,7 @@ let find_owner database package =
       | Some package_database -> package_database
       | None ->
           let package_database = make_empty_package_database package ~dependencies:[] in
-          package_database.namespace <- Some Names.empty_namespace;
+          package_database.namespace <- Some Resolve.Names.empty_namespace;
           Hashtbl.replace database.absent package package_database;
           package_database)
 
@@ -417,7 +415,7 @@ let read database note part =
   if is_stale database part then
     Compiler_bug.bug ~stage:"Database" "%s is read while it is stale" (Part.show_computed part)
 
-let read_part database note part_of select (key : Names.key) =
+let read_part database note part_of select (key : Resolve.Names.key) =
   let part = part_of key in
   read database note part;
   match Hashtbl.find_opt (select (find_owner database key.module_.package)) key with
@@ -471,7 +469,7 @@ let find_namespace database package =
   | None -> report_uncomputed (Namespace package)
 
 let make_name_lookups_over database ~namespace =
-  Names.of_namespaces ~namespace
+  Resolve.Names.of_namespaces ~namespace
     ~module_exists:(fun (module_ : Path.module_) ->
       module_ = Intrinsic.module_ || List.mem module_ (list_modules database module_.package))
     ~split_module:
@@ -481,7 +479,7 @@ let make_name_lookups_over database ~namespace =
 let make_stored_name_lookups database =
   make_name_lookups_over database ~namespace:(find_namespace database)
 
-let add_recording (names : Names.lookups) (note : Part.t -> unit) : Names.lookups =
+let add_recording (names : Resolve.Names.lookups) (note : Part.t -> unit) : Resolve.Names.lookups =
   let noting (part : Part.name) read =
     note (Name part);
     read
@@ -547,7 +545,7 @@ let find_parsed_file database (file : Path.file) =
 
 let make_namespace database note (package_database : package_database) =
   note (Part.Input (Modules package_database.name));
-  Names.namespace
+  Resolve.Names.namespace
     (make_recording_name_lookups database note)
     package_database.name
     (List.map
@@ -565,9 +563,9 @@ let make_namespace database note (package_database : package_database) =
        package_database.modules)
 
 let list_file_keys database file =
-  List.map Names.key_of ((make_stored_name_lookups database).declarations_in file)
+  List.map Resolve.Names.key_of ((make_stored_name_lookups database).declarations_in file)
 
-let read_resolution_part database note section (key : Names.key) =
+let read_resolution_part database note section (key : Resolve.Names.key) =
   read database note (Resolved (key, section));
   match
     Hashtbl.find_opt (find_owner database key.module_.package).resolved_names (key, section)
@@ -582,7 +580,7 @@ let read_whole_resolution database note key =
   Resolve.merge
     (List.map (fun section -> read_resolution database note section key) Resolve.sections)
 
-let read_elaborated_interface database note ~is_checked (key : Names.key) =
+let read_elaborated_interface database note ~is_checked (key : Resolve.Names.key) =
   let owner = find_owner database key.module_.package in
   read database note (Interface key);
   if is_checked then begin
@@ -638,7 +636,7 @@ let make_recording_interface_lookups database note ~is_checked : Interface.Looku
         Hashtbl.find_opt (find_owner database package).grants dependency);
   }
 
-let make_interface_part (elaborated : Environment.elaborated_interface) =
+let make_interface_part (elaborated : Interface.Environment.elaborated_interface) =
   match (elaborated.diagnostics, elaborated.interface) with
   | [], Error_interface _ -> Blocked
   | [], _ -> Value elaborated
@@ -649,13 +647,13 @@ let find_type_interface lookups path =
   | Value interface -> interface
   | Failed _ | Blocked -> None
 
-let list_derived_methods (names : Names.lookups) package =
+let list_derived_methods (names : Resolve.Names.lookups) package =
   List.concat_map
     (fun (((trait : Path.t), _), (impl : Path.t)) ->
       match (impl, names.key trait) with
       | Derived _, Some trait_key ->
           List.filter_map
-            (fun (member : Names.key) ->
+            (fun (member : Resolve.Names.key) ->
               match member.path with
               | Method { name; receiver; _ } -> Some (Path.Method { owner = impl; name; receiver })
               | _ -> None)
@@ -663,12 +661,14 @@ let list_derived_methods (names : Names.lookups) package =
       | _ -> [])
     (names.impls package)
 
-let list_package_parts database (names : Names.lookups) package : Part.computed list =
+let list_package_parts database (names : Resolve.Names.lookups) package : Part.computed list =
   let package_database = find_owner database package in
   let declarations = names.package_declarations package in
-  let paths = List.map (fun (declaration : Names.declaration) -> declaration.path) declarations in
-  let of_declaration (declaration : Names.declaration) : Part.computed list =
-    let key = Names.key_of declaration in
+  let paths =
+    List.map (fun (declaration : Resolve.Names.declaration) -> declaration.path) declarations
+  in
+  let of_declaration (declaration : Resolve.Names.declaration) : Part.computed list =
+    let key = Resolve.Names.key_of declaration in
     List.map (fun section -> Part.Resolved (key, section)) Resolve.sections
     @ [
         Part.Interface key;
@@ -788,7 +788,7 @@ let make_recording_ownership_lookups database note : Ownership.Lookups.t =
     interface = make_recording_interface_lookups database note ~is_checked:true;
   }
 
-let list_used_packages database note (key : Names.key) =
+let list_used_packages database note (key : Resolve.Names.key) =
   let { Infer.form; evidence_packages; _ } = read_checked database note key in
   Package_checks.list_used_packages
     (read_whole_resolution database note key)
@@ -1191,7 +1191,7 @@ let find_lowering_settings database =
   | Some settings -> settings
   | None -> Compiler_bug.bug ~stage:"Database" "this host has no lowering settings"
 
-let list_proof_template_checks database (key : Names.key) =
+let list_proof_template_checks database (key : Resolve.Names.key) =
   match Hashtbl.find_opt (find_owner database key.module_.package).proofs key with
   | Some (Value (Obligations { obligations; _ })) ->
       List.filter_map
@@ -1206,27 +1206,27 @@ let list_proof_template_checks database (key : Names.key) =
 let make_template_check_root ({ from_template; literals; clauses } : Prover.State.template_check) =
   Instance.Template_check { from_template; literals; clauses }
 
-let own_template_checks database (key : Names.key) =
+let own_template_checks database (key : Resolve.Names.key) =
   if Option.is_some database.lowering then
     own_roots database (Stored (Computed (Proof key)))
       (List.map make_template_check_root (list_proof_template_checks database key))
 
-let find_entry_point (names : Names.lookups) package =
+let find_entry_point (names : Resolve.Names.lookups) package =
   List.find_map
-    (fun (declaration : Names.declaration) ->
+    (fun (declaration : Resolve.Names.declaration) ->
       match declaration.path with
       | Top { name = "main"; _ } when declaration.kind = Function && declaration.ordinal = 0 ->
           Some declaration.path
       | _ -> None)
     (names.declarations { package; modules = [] })
 
-let own_lowering_roots database (names : Names.lookups) package =
+let own_lowering_roots database (names : Resolve.Names.lookups) package =
   if Option.is_some database.lowering then
     own_roots database (Stored (Computed (Namespace package)))
       (Compile.roots
          ~tests:
            (List.filter_map
-              (fun (declaration : Names.declaration) ->
+              (fun (declaration : Resolve.Names.declaration) ->
                 match declaration.path with Test _ -> Some declaration.path | _ -> None)
               (names.package_declarations package))
          ~mains:(Option.to_list (find_entry_point names package)))
@@ -1236,7 +1236,7 @@ let holds_position database (part : Part.computed) =
   | Proof _ | Package_check _ | Lowering (Lowered _) -> true
   | _ -> (make_stored database (Computed part)).is_failed
 
-let mark_change database package (change : Names.change) =
+let mark_change database package (change : Resolve.Names.change) =
   let part : Part.name =
     match change with
     | Entry (module_, name) -> Entry (module_, name)
@@ -1286,7 +1286,7 @@ let namespace_and_implied database (package_database : package_database) =
 
 let compute_namespace database (package_database : package_database) =
   let package = package_database.name in
-  let before = Option.value package_database.namespace ~default:Names.empty_namespace in
+  let before = Option.value package_database.namespace ~default:Resolve.Names.empty_namespace in
   let implied_before = Option.value ~default:[] (Hashtbl.find_opt database.implied package) in
   let after, implied = namespace_and_implied database package_database in
   let membership parts =
@@ -1308,7 +1308,7 @@ let compute_namespace database (package_database : package_database) =
           ignore (Call_graph.add_root graph root)
       | _ -> ())
     implied;
-  List.iter (mark_change database package) (Names.changes before after);
+  List.iter (mark_change database package) (Resolve.Names.changes before after);
   List.iter (fun part -> if not (was_implied part) then mark_stale database part) implied;
   forget database (List.filter (fun part -> not (is_implied part)) implied_before);
   own_lowering_roots database (make_stored_name_lookups database) package
@@ -1924,15 +1924,15 @@ let mark_differences database name ~(before : package_database option)
     ~(after : package_database option) =
   let empty () =
     let package_database = make_empty_package_database name ~dependencies:[] in
-    package_database.namespace <- Some Names.empty_namespace;
+    package_database.namespace <- Some Resolve.Names.empty_namespace;
     package_database
   in
   let before = match before with Some package_database -> package_database | None -> empty () in
   let after = match after with Some package_database -> package_database | None -> empty () in
   let namespace (package_database : package_database) =
-    Option.value package_database.namespace ~default:Names.empty_namespace
+    Option.value package_database.namespace ~default:Resolve.Names.empty_namespace
   in
-  List.iter (mark_change database name) (Names.changes (namespace before) (namespace after));
+  List.iter (mark_change database name) (Resolve.Names.changes (namespace before) (namespace after));
   let text (package_database : package_database) file =
     Option.map Source.text (Hashtbl.find_opt package_database.sources file)
   in
@@ -2202,7 +2202,7 @@ let list_failure_diagnostics table key =
   | Some (Failed diagnostics) -> diagnostics
   | Some (Value _ | Blocked) | None -> []
 
-let list_definition_diagnostics database (key : Names.key) checker =
+let list_definition_diagnostics database (key : Resolve.Names.key) checker =
   let owner = find_owner database key.module_.package in
   match checker with
   | Resolve ->
@@ -2244,7 +2244,7 @@ let list_checker_diagnostics database (file : Path.file) checker =
   let names = make_stored_name_lookups database in
   let package_database = find_owner database file.module_.package in
   let placed key diagnostics =
-    let ({ file = home; base } : Names.place) = names.place key in
+    let ({ file = home; base } : Resolve.Names.place) = names.place key in
     if home = file then
       List.map (Diagnostic.map_spans (Source.Definition_span.to_file ~base)) diagnostics
     else []
@@ -2274,7 +2274,7 @@ let list_checker_diagnostics database (file : Path.file) checker =
 let checkers = [ Resolve; Interface; Infer; Patterns; Usage; Ownership; Package_checks ]
 let check database packages = drain database ~through:Package_checks packages
 
-let read_checked_body database (key : Names.key) =
+let read_checked_body database (key : Resolve.Names.key) =
   drain database ~through:Checked_bodies [ key.module_.package ];
   match Hashtbl.find_opt (find_owner database key.module_.package).checked_bodies key with
   | Some (Value checked) -> Some checked
@@ -2297,7 +2297,7 @@ let list_manifest_problems database package =
   List.concat_map
     (fun dependency ->
       match Hashtbl.find_opt grants dependency with
-      | Some (grant : Environment.grant) ->
+      | Some (grant : Interface.Environment.grant) ->
           List.map (fun name -> Not_a_capability { dependency; name }) grant.unknown
       | None -> report_uncomputed (Grant (package, dependency)))
     ((make_stored_name_lookups database).dependency_names package)
@@ -2311,11 +2311,11 @@ let list_manifest_problems database package =
 let list_code_packages database package =
   drain database ~through:Body_checks [ package ];
   let used_packages = (find_owner database package).used_packages in
-  let read_used (declaration : Names.declaration) =
+  let read_used (declaration : Resolve.Names.declaration) =
     match declaration.path with
     | Test _ -> Some []
     | _ -> (
-        let key = Names.key_of declaration in
+        let key = Resolve.Names.key_of declaration in
         match Hashtbl.find_opt used_packages key with
         | Some (Value used) -> Some used
         | Some (Failed _ | Blocked) -> None
@@ -2335,7 +2335,7 @@ let read_package_database database package =
       Compiler_bug.bug ~stage:"Database" "%s is not a package of the build"
         (Path.show_package package)
 
-type proofs = { database : t; keys : Names.key list }
+type proofs = { database : t; keys : Resolve.Names.key list }
 
 let prove database files =
   let packages =
@@ -2345,7 +2345,7 @@ let prove database files =
   drain database ~through:Recursion_groups packages;
   let keys = List.concat_map (list_file_keys database) files in
   List.iter
-    (fun (key : Names.key) ->
+    (fun (key : Resolve.Names.key) ->
       let part = Part.Proof key in
       if
         is_stale database part
@@ -2358,7 +2358,7 @@ let prove database files =
     keys;
   { database; keys }
 
-let read_proof proofs (key : Names.key) =
+let read_proof proofs (key : Resolve.Names.key) =
   Hashtbl.find_opt (find_owner proofs.database key.module_.package).proofs key
 
 let list_holes proofs path =
@@ -2366,8 +2366,8 @@ let list_holes proofs path =
   match Option.bind (names.key path) (read_proof proofs) with
   | Some (Value (Obligations { holes; _ })) ->
       List.map
-        (fun ((home : Names.key), location) ->
-          let ({ file; base } : Names.place) = names.place home in
+        (fun ((home : Resolve.Names.key), location) ->
+          let ({ file; base } : Resolve.Names.place) = names.place home in
           let span = Prover.resolve_location names home location in
           (file, (Source.Definition_span.to_file ~base span).start))
         holes
@@ -2382,7 +2382,7 @@ let list_template_checks (proofs : proofs) =
   | checks ->
       drain database ~through:Test_keys
         (List.sort_uniq Path.compare_package
-           (List.map (fun (key : Names.key) -> key.module_.package) proofs.keys));
+           (List.map (fun (key : Resolve.Names.key) -> key.module_.package) proofs.keys));
       List.filter
         (fun check ->
           match Instance_table.find_opt database.test_keys (make_template_check_root check) with
@@ -2409,7 +2409,7 @@ let make_name_lookups database packages =
   drain database ~through:Namespaces packages;
   make_stored_name_lookups database
 
-let read_resolved database (key : Names.key) =
+let read_resolved database (key : Resolve.Names.key) =
   drain database ~through:Resolution [ key.module_.package ];
   let owner = find_owner database key.module_.package in
   match
@@ -2647,7 +2647,7 @@ module For_testing = struct
 
   let read_proof = read_proof
 
-  let read_ownership database (key : Names.key) =
+  let read_ownership database (key : Resolve.Names.key) =
     match Hashtbl.find_opt (find_owner database key.module_.package).ownership key with
     | Some part -> part
     | None -> report_uncomputed (Ownership key)

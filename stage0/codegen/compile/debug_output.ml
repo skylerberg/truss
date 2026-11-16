@@ -13,8 +13,6 @@ let form : Ground.ty -> form = function
 let int64 = Ground.builtin Int64
 let uint64 = Ground.builtin UInt64
 
-module Builder = Emit_c.Builder
-
 let signature env ty =
   Writing.signature env
     (if Memory_layout.has_zero_size env ty then [] else [ Writing.value_parameter ty ])
@@ -22,14 +20,14 @@ let signature env ty =
 let text env builder ~output value =
   if value <> "" then
     Writing.call_with_bytes env builder ~output Writing_append ~elements:(Constant (Bytes value))
-      ~length:(Builder.constant_uint64 (String.length value))
+      ~length:(Lowered.make_uint64_constant (String.length value))
 
 let debug_call env builder ~output ty (place : Lowered.place) =
   let value_argument =
     if Memory_layout.has_zero_size env ty then []
     else [ Lowered.Address { place; writable = false } ]
   in
-  Builder.emit builder
+  Emit_c.Builder.emit builder
     (Call
        {
          target = Direct { function_ = Instance (Debug ty); signature = signature env ty };
@@ -40,9 +38,10 @@ let debug_call env builder ~output ty (place : Lowered.place) =
 let scalar_debug env builder ~output (scalar : Memory_layout.scalar) (place : Lowered.place) =
   let write writer ty place = Writing.call env builder ~output writer ty place in
   let widened writer wide (integer : Memory_layout.integer) =
-    let value = Builder.local builder (Value wide) in
-    Builder.emit builder (Assign (Builder.at value, Convert (Copy place, Integer integer)));
-    write writer wide (Builder.at value)
+    let value = Emit_c.Builder.local builder (Value wide) in
+    Emit_c.Builder.emit builder
+      (Assign (Lowered.make_local_place value, Convert (Copy place, Integer integer)));
+    write writer wide (Lowered.make_local_place value)
   in
   match scalar with
   | Integer (Int8 | Int16 | Int32 | Int64) -> widened Writing_signed int64 Int64
@@ -54,31 +53,35 @@ let scalar_debug env builder ~output (scalar : Memory_layout.scalar) (place : Lo
   | Pointer _ | Nullable_pointer _ -> text env builder ~output "pointer"
 
 let debug env ty =
-  let builder = Builder.create env ~key:(Debug ty) in
+  let builder = Emit_c.Builder.create env ~key:(Debug ty) in
   let parameter =
     if Memory_layout.has_zero_size env ty then None
-    else Some (Builder.local builder ~name:"value" (Writing.value_parameter ty))
+    else Some (Emit_c.Builder.local builder ~name:"value" (Writing.value_parameter ty))
   in
   let value : Lowered.place =
     match parameter with
     | Some parameter_local -> { root = Local parameter_local; projections = [ Deref ] }
-    | None -> Builder.at 0
+    | None -> Lowered.make_local_place 0
   in
-  let output_pointer = Builder.local builder ~name:"output" (Writing.output_parameter env) in
-  let output = Lowered.Copy (Builder.at output_pointer) in
+  let output_pointer = Emit_c.Builder.local builder ~name:"output" (Writing.output_parameter env) in
+  let output = Lowered.Copy (Lowered.make_local_place output_pointer) in
   let text = text env builder ~output in
   let debug_call = debug_call env builder ~output in
-  Builder.start builder (Builder.block builder);
+  Emit_c.Builder.start builder (Emit_c.Builder.block builder);
   let rec list_of element ~element_at ~count =
     text "[";
-    Builder.loop builder ~count (fun index ->
-        let is_after_first = Builder.local builder (Raw Bool) in
-        Builder.emit builder
+    Emit_c.Builder.loop builder ~count (fun index ->
+        let is_after_first = Emit_c.Builder.local builder (Raw Bool) in
+        Emit_c.Builder.emit builder
           (Assign
-             ( Builder.at is_after_first,
-               Binary (Not_equal, Copy (Builder.at index), Builder.constant_uint64 0) ));
-        Builder.when_ builder (Copy (Builder.at is_after_first)) (fun () -> text ", ");
-        debug_call element (element_at (Lowered.Copy (Builder.at index))));
+             ( Lowered.make_local_place is_after_first,
+               Binary
+                 (Not_equal, Copy (Lowered.make_local_place index), Lowered.make_uint64_constant 0)
+             ));
+        Emit_c.Builder.when_ builder
+          (Copy (Lowered.make_local_place is_after_first))
+          (fun () -> text ", ");
+        debug_call element (element_at (Lowered.Copy (Lowered.make_local_place index))));
     text "]"
   and storage_or_view field_ty (place : Lowered.place) ~as_text =
     let element, buffer, count =
@@ -138,23 +141,23 @@ let debug env ty =
       | _, Array (element, count) ->
           list_of element
             ~element_at:(fun index -> Lowered.project value (Index index))
-            ~count:(Builder.constant_uint64 count)
+            ~count:(Lowered.make_uint64_constant count)
       | _, Sum variants ->
-          let after = Builder.block builder in
+          let after = Emit_c.Builder.block builder in
           let cases =
             List.map
               (fun (variant_shape : Memory_layout.variant_shape) ->
-                let case = Builder.block builder in
-                Builder.in_block builder case (fun () ->
+                let case = Emit_c.Builder.block builder in
+                Emit_c.Builder.in_block builder case (fun () ->
                     fields_debug variant_shape.name variant_shape.fields (fun field ->
                         Lowered.project value
                           (Variant_field { variant = variant_shape.name; field }));
-                    Builder.finish builder (Goto after));
+                    Emit_c.Builder.finish builder (Goto after));
                 (variant_shape.name, case))
               variants
           in
-          Builder.finish builder (Switch_variant { place = value; cases; default = None });
-          Builder.start builder after));
-  Builder.finish builder (Return None);
-  Builder.build builder
+          Emit_c.Builder.finish builder (Switch_variant { place = value; cases; default = None });
+          Emit_c.Builder.start builder after));
+  Emit_c.Builder.finish builder (Return None);
+  Emit_c.Builder.build builder
     { parameters = Option.to_list parameter @ [ output_pointer ]; result = None; returns = true }

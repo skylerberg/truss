@@ -1,5 +1,3 @@
-module Names = Resolve.Names
-
 let home (source : State.source) =
   match source.key with Some key -> key | None -> Facts.bug "%s has no definition key" source.name
 
@@ -123,7 +121,7 @@ let promises context (source : State.source) locals (costs : Mir.cost list) ~inh
 let promised_by (lookups : Lookups.t) (source : State.source) =
   match source.key with
   | Some { path = Method { owner; _ }; _ }
-    when Names.kind_of lookups.interface.names owner = Some Names.Capability ->
+    when Resolve.Names.kind_of lookups.interface.names owner = Some Resolve.Names.Capability ->
       "capability"
   | _ -> "trait"
 

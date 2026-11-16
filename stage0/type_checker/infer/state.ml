@@ -1,7 +1,3 @@
-module Names = Resolve.Names
-module Impls = Interface.Impls
-module Elaborator = Interface.Elaborator
-
 type local = { type_ : Types.ty; is_var : bool; mode : Types.mode }
 
 type env = {
@@ -64,11 +60,11 @@ type form = {
 
 type state = {
   lookups : Lookups.t;
-  key : Names.key;
+  key : Resolve.Names.key;
   package : Path.package;
   definition : Syntax.definition;
   resolved : Resolve.resolved;
-  context : Elaborator.t;
+  context : Interface.Elaborator.t;
   text : string Lazy.t;
   mutable tables : Tables.t;
   form : form;
@@ -475,10 +471,11 @@ let associated state type_ (trait : Types.trait_reference) name ~(at : Source.De
            (Types.show_trait trait))
 
 let evidence_of = function
-  | Impls.From_impl { impl; substitution } -> Tables.Impl { impl; arguments = substitution }
-  | Impls.From_bound -> Tables.Bound
-  | Impls.From_any -> Tables.Dynamic
-  | Impls.Built_in | Impls.Accepted _ -> Tables.Built_in
+  | Interface.Impls.From_impl { impl; substitution } ->
+      Tables.Impl { impl; arguments = substitution }
+  | Interface.Impls.From_bound -> Tables.Bound
+  | Interface.Impls.From_any -> Tables.Dynamic
+  | Interface.Impls.Built_in | Interface.Impls.Accepted _ -> Tables.Built_in
 
 let trait_reference ?(arguments = []) trait : Types.trait_reference =
   { trait; trait_arguments = arguments; associated = [] }

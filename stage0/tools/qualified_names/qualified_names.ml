@@ -17,7 +17,12 @@ let local_open =
      module: %s"
     operator_module_names
 
-let rejected_opens path =
+let alias = "name the module by its path instead of this alias, and remove it"
+
+let is_export (name : string option) (target : Longident.t) =
+  match (name, target) with Some name, Lident target -> name = target | _ -> false
+
+let rejected_names path =
   let text = In_channel.with_open_bin path In_channel.input_all in
   let lexbuf = Lexing.from_string text in
   Location.init lexbuf path;
@@ -34,11 +39,21 @@ let rejected_opens path =
       default with
       structure_item =
         (fun iterator item ->
-          (match item.pstr_desc with Pstr_open _ -> reject item.pstr_loc open_item | _ -> ());
+          (match item.pstr_desc with
+          | Pstr_open _ -> reject item.pstr_loc open_item
+          | Pstr_module { pmb_name; pmb_expr = { pmod_desc = Pmod_ident target; _ }; _ }
+            when not (is_export pmb_name.txt target.txt) ->
+              reject item.pstr_loc alias
+          | _ -> ());
           default.structure_item iterator item);
       signature_item =
         (fun iterator item ->
-          (match item.psig_desc with Psig_open _ -> reject item.psig_loc open_item | _ -> ());
+          (match item.psig_desc with
+          | Psig_open _ -> reject item.psig_loc open_item
+          | Psig_module { pmd_name; pmd_type = { pmty_desc = Pmty_alias target; _ }; _ }
+            when not (is_export pmd_name.txt target.txt) ->
+              reject item.psig_loc alias
+          | _ -> ());
           default.signature_item iterator item);
       expr =
         (fun iterator expression ->
@@ -48,6 +63,11 @@ let rejected_opens path =
               | Some name -> reject_unless_operator_module expression.pexp_loc name
               | None -> reject expression.pexp_loc local_open);
               iterator.module_expr iterator declaration.popen_expr;
+              iterator.expr iterator body
+          | Pexp_struct_item
+              ( { pstr_desc = Pstr_module { pmb_expr = { pmod_desc = Pmod_ident _; _ }; _ }; _ },
+                body ) ->
+              reject expression.pexp_loc alias;
               iterator.expr iterator body
           | _ -> default.expr iterator expression);
       pat =
@@ -88,7 +108,7 @@ let () =
       (fun path ->
         List.map
           (fun (line, message) -> Printf.sprintf "%s:%d: %s" path line message)
-          (rejected_opens path))
+          (rejected_names path))
       (List.tl (Array.to_list Sys.argv))
   in
   List.iter print_endline failures;

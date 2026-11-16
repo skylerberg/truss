@@ -1,6 +1,3 @@
-module Names = Resolve.Names
-module Symbol = Logic.Symbol
-
 let note_place (context : State.context) (frame : State.frame) origin place =
   if
     frame.source.key = Some context.home
@@ -81,7 +78,8 @@ let type_frame context frame source (ty : Types.ty) ~self =
 
 let type_source (context : State.context) (ty : Types.ty) =
   match ty with
-  | Types.Named { path; _ } when Names.kind_of context.lookups.interface.names path = Some Type ->
+  | Types.Named { path; _ }
+    when Resolve.Names.kind_of context.lookups.interface.names path = Some Type ->
       Option.map (fun (source, _, _) -> source) (Contracts.source_at context.lookups path)
   | _ -> None
 
@@ -114,7 +112,7 @@ let rec validity (context : State.context) frame ~assuming ?(deep = true) ?(own 
       match invariants_of context ty with
       | _ when not own -> Logic.Boolean true
       | Some _ when Facts.constructors context ty = None ->
-          let symbol = Symbol.Valid ty in
+          let symbol = Logic.Symbol.Valid ty in
           Facts.declare context (Logic.Function (symbol, [ Facts.sort_of context ty ], Logic.Bool));
           Logic.Apply (symbol, [ term ])
       | Some (source, written) -> (

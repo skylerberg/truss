@@ -1,10 +1,8 @@
-module Symbol = Logic.Symbol
-
 let applied context (function_type : Types.function_type) callee arguments =
   let inputs = List.map (fun (_, input) -> Facts.sort_of context input) function_type.inputs in
   let output = Facts.sort_of context function_type.output in
   let value_sort = Facts.sort_of context (Types.Function function_type) in
-  let symbol = Symbol.Apply ((value_sort :: inputs) @ [ output ]) in
+  let symbol = Logic.Symbol.Apply ((value_sort :: inputs) @ [ output ]) in
   Facts.declare context (Logic.Function (symbol, value_sort :: inputs, output));
   Logic.Apply (symbol, callee :: arguments)
 
@@ -17,7 +15,7 @@ let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_fr
       context.declarations
   in
   let captures_fresh = function
-    | Symbol.Lambda _ as name when not (Hashtbl.mem context.fresh_order name) -> (
+    | Logic.Symbol.Lambda _ as name when not (Hashtbl.mem context.fresh_order name) -> (
         match Hashtbl.find_opt context.lambda_definitions name with
         | Some defined -> Facts.mentions_fresh_after context start_fresh defined
         | None -> false)
@@ -49,14 +47,14 @@ let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_fr
               | None -> captures_fresh name
             in
             if is_fresh_in_body then begin
-              let lifted = Symbol.Lifted name in
+              let lifted = Logic.Symbol.Lifted name in
               Facts.declare context (Logic.Function (lifted, List.map snd parameters, sort));
               Hashtbl.replace renamed name (Logic.Apply (lifted, variables))
             end
         | Logic.Function (name, inputs, sort) when frame.binders <> [] -> (
             match Hashtbl.find_opt context.fresh_order name with
             | Some order when order > start_fresh && order <= end_fresh ->
-                let lifted = Symbol.Lifted name in
+                let lifted = Logic.Symbol.Lifted name in
                 Facts.declare context
                   (Logic.Function (lifted, inputs @ List.map snd parameters, sort));
                 Hashtbl.replace functions name lifted
@@ -107,7 +105,7 @@ let parameters_of context (frame : State.frame) (function_type : Types.function_
   let depth = List.length frame.bound in
   List.mapi
     (fun index (_, input) ->
-      ( Symbol.Variable { label = "parameter"; numbers = [ depth; index ] },
+      ( Logic.Symbol.Variable { label = "parameter"; numbers = [ depth; index ] },
         Facts.sort_of context (Facts.substituted context frame input) ))
     function_type.inputs
 
@@ -172,7 +170,7 @@ let canonical_binders term =
     List.fold_right
       (fun (name, sort) (bound, renamed) ->
         incr count;
-        let other = Symbol.Variable { label = "binder"; numbers = [ !count ] } in
+        let other = Logic.Symbol.Variable { label = "binder"; numbers = [ !count ] } in
         ((other, sort) :: bound, (name, other) :: renamed))
       bound ([], renamed)
   in
@@ -235,7 +233,7 @@ let lambda_definition context frame (function_type : Types.function_type)
               (List.mapi (fun index parameter -> (index, parameter)) bound)
           in
           let symbol =
-            Symbol.Lambda { sorts = List.map snd bound; definition = named_by_position }
+            Logic.Symbol.Lambda { sorts = List.map snd bound; definition = named_by_position }
           in
           let sort = Facts.sort_of context (Types.Function function_type) in
           let term =

@@ -1,6 +1,4 @@
-module Tables = Unicode_tables
-
-let version = Tables.unicode_version
+let version = Unicode_tables.unicode_version
 
 module Decoded = struct
   type t = Uchar.utf_decode
@@ -54,14 +52,16 @@ let has property value =
   if value < 128 then Bytes.unsafe_get property.ascii value <> '\000'
   else in_ranges property.ranges value
 
-let xid_start = property Tables.xid_start
-let xid_continue = property Tables.xid_continue
-let forbidden = property Tables.forbidden
+let xid_start = property Unicode_tables.xid_start
+let xid_continue = property Unicode_tables.xid_continue
+let forbidden = property Unicode_tables.forbidden
 let is_xid_start = has xid_start
 let is_xid_continue = has xid_continue
 let is_forbidden = has forbidden
-let is_bidi_control = in_ranges Tables.bidi_control
-let is_control = in_ranges Tables.control
+let is_bidi_control = in_ranges Unicode_tables.bidi_control
+let is_control = in_ranges Unicode_tables.control
 
 let forbidden_name value =
-  Option.map (Array.get Tables.forbidden_name_values) (find_key Tables.forbidden_name_keys value)
+  Option.map
+    (Array.get Unicode_tables.forbidden_name_values)
+    (find_key Unicode_tables.forbidden_name_keys value)

@@ -1,5 +1,3 @@
-module Symbol = Logic.Symbol
-
 let ( let* ) = Option.bind
 
 type loop_exits = {
@@ -316,7 +314,7 @@ let read_operand context frame run (operand : Mir.operand) =
       match value with
       | Unit ->
           ignore (Facts.sort_of context Types.unit);
-          Logic.Apply (Symbol.Unit, [])
+          Logic.Apply (Logic.Symbol.Unit, [])
       | Integer number -> Logic.Integer number
       | Float number -> (
           match Facts.float_format ty with

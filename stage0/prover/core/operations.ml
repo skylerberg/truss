@@ -1,5 +1,3 @@
-module Symbol = Logic.Symbol
-
 let float_operation name left right =
   Logic.Operation (name, [ Logic.Operation ("RNE", []); left; right ])
 
@@ -158,7 +156,7 @@ let written_equal context ty left right =
       with
       | Some contract when contract.is_logic_function ->
           let symbol =
-            Symbol.Function
+            Logic.Symbol.Function
               {
                 callee = Path.Method { owner = impl; name = "equal"; receiver = Read };
                 instance = [ Types.Type ty ];
@@ -172,7 +170,7 @@ let written_equal context ty left right =
 
 let derived_equal context (frame : State.frame) (ty : Types.ty) left right =
   let sort = Facts.sort_of context ty in
-  let symbol = Symbol.Equal ty in
+  let symbol = Logic.Symbol.Equal ty in
   Facts.declare context (Logic.Function (symbol, [ sort; sort ], Logic.Bool));
   let equal = Logic.Apply (symbol, [ left; right ]) in
   (match (Facts.visible_type context ty, Facts.constructors context ty) with
@@ -194,7 +192,7 @@ let derived_equal context (frame : State.frame) (ty : Types.ty) left right =
                  match written_equal context field_type left right with
                  | Some equal -> equal
                  | None ->
-                     let symbol = Symbol.Equal field_type in
+                     let symbol = Logic.Symbol.Equal field_type in
                      Facts.declare context
                        (Logic.Function
                           ( symbol,
@@ -236,7 +234,7 @@ let opaque_operation context frame ty operation arguments =
         (bits, match Facts.bounds ty with Some (low, _) -> Z.sign low < 0 | None -> false))
       (width ty)
   in
-  let symbol = Symbol.Opaque_operation { operation; type_ = ty; integer } in
+  let symbol = Logic.Symbol.Opaque_operation { operation; type_ = ty; integer } in
   Facts.declare context (Logic.Function (symbol, sorts, Facts.sort_of context ty));
   let term = Logic.Apply (symbol, arguments) in
   Facts.assume context frame (Facts.in_range ty term);
@@ -349,7 +347,7 @@ let rec of_each_value context (frame : State.frame) value make =
     | None -> ()
 
 let power_facts base exponent =
-  let power exponent = Logic.Apply (Symbol.Cost_power, [ base; exponent ]) in
+  let power exponent = Logic.Apply (Logic.Symbol.Cost_power, [ base; exponent ]) in
   let previous = Logic.Operation ("-", [ exponent; Logic.int 1 ]) in
   ( Logic.
       [
@@ -367,7 +365,7 @@ let power_facts base exponent =
       previous ) )
 
 let power_order base left right =
-  let power exponent = Logic.Apply (Symbol.Cost_power, [ base; exponent ]) in
+  let power exponent = Logic.Apply (Logic.Symbol.Cost_power, [ base; exponent ]) in
   Logic.(
     Operation (">=", [ base; int 1 ])
     ==> (Operation ("<=", [ left; right ])
@@ -375,7 +373,8 @@ let power_order base left right =
         &&& (Operation ("<=", [ right; left ]) ==> Operation ("<=", [ power right; power left ]))))
 
 let power_of context frame base exponent =
-  Facts.declare context (Logic.Function (Symbol.Cost_power, [ Logic.Int; Logic.Int ], Logic.Int));
+  Facts.declare context
+    (Logic.Function (Logic.Symbol.Cost_power, [ Logic.Int; Logic.Int ], Logic.Int));
   let add exponent =
     if not (List.mem (base, exponent) context.powers) then begin
       List.iter
@@ -400,10 +399,10 @@ let power_of context frame base exponent =
     when Z.sign exponent_value >= 0 && Z.leq exponent_value (Z.of_int 256) ->
       Facts.fact context frame
         (Logic.equal
-           (Logic.Apply (Symbol.Cost_power, [ base; exponent ]))
+           (Logic.Apply (Logic.Symbol.Cost_power, [ base; exponent ]))
            (Logic.Integer (Z.pow base_value (Z.to_int exponent_value))))
   | _ -> ());
-  Logic.Apply (Symbol.Cost_power, [ base; exponent ])
+  Logic.Apply (Logic.Symbol.Cost_power, [ base; exponent ])
 
 let primitive_operation context (frame : State.frame) ~(site : Invocation.site)
     (operation : Intrinsic.operation) types operands ~(arguments : Core.origin option list)
@@ -504,11 +503,11 @@ let primitive_operation context (frame : State.frame) ~(site : Invocation.site)
                   Logic.(Operation ("<=", [ left; term ]) &&& Operation ("<=", [ right; term ]));
               Facts.assume context frame (at_most sum);
               Facts.declare context
-                (Logic.Function (Symbol.Cost_power, [ Logic.Int; Logic.Int ], Logic.Int));
+                (Logic.Function (Logic.Symbol.Cost_power, [ Logic.Int; Logic.Int ], Logic.Int));
               let exponent = Logic.Symbol (Facts.variable "exponent") in
               let below value =
                 Logic.Operation
-                  ("<", [ value; Logic.Apply (Symbol.Cost_power, [ Logic.int 2; exponent ]) ])
+                  ("<", [ value; Logic.Apply (Logic.Symbol.Cost_power, [ Logic.int 2; exponent ]) ])
               in
               Facts.assume context frame
                 (Logic.forall
@@ -559,7 +558,7 @@ let primitive_operation context (frame : State.frame) ~(site : Invocation.site)
       match width ty with
       | Some bits ->
           let count counted value =
-            let symbol = Symbol.Bit_count { count = counted; width = bits } in
+            let symbol = Logic.Symbol.Bit_count { count = counted; width = bits } in
             Facts.declare context (Logic.Function (symbol, [ Logic.Int ], Logic.Int));
             Logic.Apply (symbol, [ value ])
           in

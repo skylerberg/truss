@@ -1,5 +1,3 @@
-module Names = Resolve.Names
-
 let bug format = Compiler_bug.bug ~stage:"Lower" format
 
 type context = {
@@ -86,7 +84,8 @@ let signature_of context (path : Path.t) =
   | None -> bug "no signature for %s" (Path.show path)
 
 let code_of context (path : Path.t) type_arguments : code =
-  let function_code ~enclosing_impl (key : Names.key) ~(interface : Types.signature) ~substitution =
+  let function_code ~enclosing_impl (key : Resolve.Names.key) ~(interface : Types.signature)
+      ~substitution =
     {
       definition = key.path;
       written = Some (read_written context key);

@@ -1,5 +1,3 @@
-module Names = Resolve.Names
-
 type lookups = { interface : Interface.Lookups.t; mir : Parts.lookups }
 
 let head_of (ty : Types.ty) = match ty with Named { path; _ } -> Some path | _ -> None
@@ -13,9 +11,10 @@ let rec traits_with_required interface (trait : Path.t) =
            trait_interface.requires
   | _ -> [ trait ]
 
-let written_methods (names : Names.lookups) impl =
+let written_methods (names : Resolve.Names.lookups) impl =
   match names.key impl with
-  | Some impl_key -> List.map (fun (member : Names.key) -> member.path) (names.contained impl_key)
+  | Some impl_key ->
+      List.map (fun (member : Resolve.Names.key) -> member.path) (names.contained impl_key)
   | None -> []
 
 let impl_methods (interface : Interface.Lookups.t) impl =
@@ -26,7 +25,7 @@ let impl_methods (interface : Interface.Lookups.t) impl =
   with
   | Some trait_key ->
       List.filter_map
-        (fun (member : Names.key) ->
+        (fun (member : Resolve.Names.key) ->
           match member.path with
           | Method { name; receiver; _ } as trait_method ->
               let own = Path.Method { owner = impl; name; receiver } in
@@ -217,6 +216,6 @@ let list_implementations (lookups : lookups) ~viewer (path : Path.t) =
                   let method_ = Path.Method { owner = impl; name; receiver } in
                   if writes lookups impl method_ then Some method_ else None)
                 (Interface.Impls.list_impls_of_trait lookups.interface ~trait:owner package))
-            (viewer :: Names.list_transitive_dependencies lookups.interface.names viewer)
+            (viewer :: Resolve.Names.list_transitive_dependencies lookups.interface.names viewer)
       | _ -> [])
   | _ -> []
