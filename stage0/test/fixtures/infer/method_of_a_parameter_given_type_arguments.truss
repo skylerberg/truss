@@ -1,0 +1,3 @@
+fn f[Item](item: Item) -> Int64 {
+  Item[Int64].zero()
+}

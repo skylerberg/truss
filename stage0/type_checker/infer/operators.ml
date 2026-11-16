@@ -5,30 +5,34 @@ let select_arithmetic_trait : Syntax.arithmetic -> Path.t * string = function
   | Divide -> (Well_known.path Divide, "divide")
   | Remainder -> (Well_known.path Remainder, "remainder")
 
-let check_bitwise_operand state span type_ =
-  State.defer state (fun () ->
-      match State.normalize state type_ with
-      | Types.Literal _ | Types.Variable _ -> false
-      | resolved ->
-          if not (State.integer_type state resolved || Types.is_error resolved) then
-            State.report state No_impl span
-              (Printf.sprintf "Bitwise operators work on built-in integers, not `%s`."
-                 (Types.show resolved));
-          true)
+let infer_integer_result state span type_ ~(describe : string -> string) =
+  let is_integer resolved = State.integer_type state resolved || Types.is_error resolved in
+  match State.normalize state type_ with
+  | Types.Literal _ | Types.Variable _ ->
+      State.defer state (fun () ->
+          match State.normalize state type_ with
+          | Types.Literal _ | Types.Variable _ -> false
+          | resolved ->
+              if not (is_integer resolved) then
+                State.report state No_impl span (describe (Types.show resolved));
+              true);
+      type_
+  | resolved when is_integer resolved -> type_
+  | resolved -> State.error state No_impl span (describe (Types.show resolved))
 
-let check_shift_operands state ~left:(left_span, left_type) ~right:(right_span, right_type) =
+let infer_bitwise_result state span type_ =
+  infer_integer_result state span type_
+    ~describe:(Printf.sprintf "Bitwise operators work on built-in integers, not `%s`.")
+
+let infer_shift_result state ~left:(left_span, left_type) ~right:(right_span, right_type) =
   (match State.resolve state right_type with
   | Types.Literal (Integer_literal, _) ->
       ignore (State.unify state right_type (Types.make_builtin UInt64))
   | _ -> ());
   State.defer state (fun () ->
-      match (State.normalize state left_type, State.normalize state right_type) with
-      | (Types.Literal _ | Types.Variable _), _ | _, (Types.Literal _ | Types.Variable _) -> false
-      | left_resolved, right_resolved ->
-          if not (State.integer_type state left_resolved || Types.is_error left_resolved) then
-            State.report state No_impl left_span
-              (Printf.sprintf "Shifts work on built-in integers, not `%s`."
-                 (Types.show left_resolved));
+      match State.normalize state right_type with
+      | Types.Literal _ | Types.Variable _ -> false
+      | right_resolved ->
           if
             not
               (State.integer_type state right_resolved
@@ -38,7 +42,9 @@ let check_shift_operands state ~left:(left_span, left_type) ~right:(right_span, 
             State.report state Mismatch right_span
               (Printf.sprintf "A shift amount is an unsigned integer, not `%s`."
                  (Types.show right_resolved));
-          true)
+          true);
+  infer_integer_result state left_span left_type
+    ~describe:(Printf.sprintf "Shifts work on built-in integers, not `%s`.")
 
 let rec try_ state env (value : Syntax.expression) (inner : Syntax.expression) =
   State.reject_in_formula state env (State.read_span state value.id) "`?`";
@@ -164,16 +170,15 @@ and prefix state env ?expected (value : Syntax.expression) operator (inner : Syn
       State.register_expression state value (fun () ->
           Form.build_operator state value Complement [ inner ]);
       if
-        not
-          (State.integer_type state (State.normalize state type_)
-          ||
-          match State.resolve state type_ with
-          | Types.Literal (Integer_literal, _) -> true
-          | _ -> false)
-      then
-        State.report state No_impl (State.read_span state value.id)
-          (Printf.sprintf "`~` works on built-in integers, not `%s`." (State.show state type_));
-      type_
+        State.integer_type state (State.normalize state type_)
+        ||
+        match State.resolve state type_ with
+        | Types.Literal (Integer_literal, _) -> true
+        | _ -> false
+      then type_
+      else
+        State.error state No_impl (State.read_span state value.id)
+          (Printf.sprintf "`~` works on built-in integers, not `%s`." (State.show state type_))
   | Negate -> (
       match inner.kind with
       | Integer number ->
@@ -202,11 +207,9 @@ and prefix state env ?expected (value : Syntax.expression) operator (inner : Syn
           let type_ = Hooks.expression state env ?expected inner in
           let resolved = State.normalize state type_ in
           if resolved = Types.Hole then Types.Hole
-          else if State.integer_type state resolved && not (State.signed_type state resolved) then begin
-            State.report state Negated_unsigned (State.read_span state value.id)
-              (Printf.sprintf "`%s` is unsigned, so it cannot be negated." (Types.show resolved));
-            type_
-          end
+          else if State.integer_type state resolved && not (State.signed_type state resolved) then
+            State.error state Negated_unsigned (State.read_span state value.id)
+              (Printf.sprintf "`%s` is unsigned, so it cannot be negated." (Types.show resolved))
           else if
             env.specification && (State.integer_type state resolved || resolved = Types.Integer)
           then begin
@@ -372,18 +375,16 @@ and binary state (env : State.env) ?expected (value : Syntax.expression) operato
       literal_operands state ~left:left_type ~right:right_type;
       if not (State.unify state left_type right_type) then
         State.mismatch state (State.read_span state right.id) ~expected:left_type ~actual:right_type;
-      check_bitwise_operand state (State.read_span state value.id) left_type;
-      left_type
+      infer_bitwise_result state (State.read_span state value.id) left_type
   | Operation (Shift _ as operation) ->
       let left_type = Hooks.expression state env ?expected left in
       let right_type = Hooks.expression state env right in
       built_in_operator state value [ left; right ] left_type;
       State.register_expression state value (fun () ->
           Form.build_operator state value (Form.convert_to_operation operation) [ left; right ]);
-      check_shift_operands state
+      infer_shift_result state
         ~left:(State.read_span state left.id, left_type)
-        ~right:(State.read_span state right.id, right_type);
-      left_type
+        ~right:(State.read_span state right.id, right_type)
   | Comparison comparison when operands_hole state env left right ->
       State.register_expression state value (fun () ->
           Form.build_built_in_comparison state comparison left right);
@@ -479,9 +480,8 @@ and binary state (env : State.env) ?expected (value : Syntax.expression) operato
               ]
           | _ -> []
         in
-        State.report state String_addition (State.read_span state value.id) ~fixes
-          "Strings have no `+`. Join them with interpolation, or with methods such as `push`.";
-        State.string_type
+        State.error state String_addition (State.read_span state value.id) ~fixes
+          "Strings have no `+`. Join them with interpolation, or with methods such as `push`."
       end
       else begin
         let integers type_ =

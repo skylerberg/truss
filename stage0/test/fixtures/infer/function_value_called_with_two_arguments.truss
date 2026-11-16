@@ -1,0 +1,3 @@
+fn f(apply: fn(Int64) -> Int64) -> String {
+  apply(1, 2)
+}

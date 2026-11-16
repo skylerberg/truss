@@ -1,0 +1,3 @@
+fn f(number: UInt64) -> Int64 {
+  -number
+}

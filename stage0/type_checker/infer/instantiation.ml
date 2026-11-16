@@ -104,13 +104,19 @@ let rec static_ state (value : Syntax.expression) : static_ option =
   | Self_type_value, _ -> Option.map (fun self -> Static_type self) state.context.self_type
   | _, Some { target = Definition (Type, path); type_arguments; _ } ->
       Some (Static_type (named_type state value path type_arguments))
-  | _, Some { target = Type_parameter parameter; name; type_arguments } ->
-      if Option.is_some type_arguments then
-        State.report state Arity (State.read_span state value.id)
-          (Printf.sprintf "`%s` is a generic parameter, which takes no arguments." name.text);
-      Some (Static_type (Types.Parameter parameter))
-  | _, Some { target = Definition (Trait, path); type_arguments; _ } ->
-      Some (Static_trait (path, Option.map (written_arguments state) type_arguments))
+  | _, Some { target = Type_parameter parameter; name; type_arguments } -> (
+      match type_arguments with
+      | Some _ ->
+          Some
+            (Static_type
+               (State.error state Arity (State.read_span state value.id)
+                  (Printf.sprintf "`%s` is a generic parameter, which takes no arguments." name.text)))
+      | None -> Some (Static_type (Types.Parameter parameter)))
+  | _, Some { target = Definition (Trait, path); type_arguments; _ } -> (
+      match Option.map (written_arguments state) type_arguments with
+      | None -> Some (Static_trait (path, None))
+      | Some (Ok arguments) -> Some (Static_trait (path, Some arguments))
+      | Some (Error error) -> Some (Static_type error))
   | _, Some { target = Definition (Capability, path); _ } -> Some (Static_capability path)
   | Parenthesized inner, None -> static_ state inner
   | _ -> None
@@ -125,30 +131,42 @@ and named_type state (value : Syntax.expression) path type_arguments =
   match type_arguments with
   | None -> type_ (instantiate_type state (State.read_span state value.id) path)
   | Some items -> (
-      let arguments = written_arguments state items in
-      match Resolve.Names.generics_of state.lookups.interface.names path with
-      | Some expected when List.length expected <> List.length arguments ->
-          State.error state Arity (State.read_span state value.id)
-            (Printf.sprintf "`%s` takes %d %s, and %d %s given."
-               (Types.show (Named { path; arguments = [] }))
-               (List.length expected)
-               (if List.length expected = 1 then "argument" else "arguments")
-               (List.length arguments)
-               (if List.length arguments = 1 then "is" else "are"))
-      | _ ->
-          require_type_bounds state (State.read_span state value.id) path arguments;
-          type_ arguments)
+      match written_arguments state items with
+      | Error error -> error
+      | Ok arguments -> (
+          match Resolve.Names.generics_of state.lookups.interface.names path with
+          | Some expected when List.length expected <> List.length arguments ->
+              State.error state Arity (State.read_span state value.id)
+                (Printf.sprintf "`%s` takes %d %s, and %d %s given."
+                   (Types.show (Named { path; arguments = [] }))
+                   (List.length expected)
+                   (if List.length expected = 1 then "argument" else "arguments")
+                   (List.length arguments)
+                   (if List.length arguments = 1 then "is" else "are"))
+          | _ ->
+              require_type_bounds state (State.read_span state value.id) path arguments;
+              type_ arguments))
 
-and written_arguments state items =
-  List.filter_map
-    (function
-      | Syntax.Item item -> Some (type_argument_of_expression state item)
-      | Item_constraint (name, _) ->
-          State.report state Arity (State.read_span state name.id)
-            "An associated type is fixed where a type is written, as in `any Trait[Name = Type]`, \
-             not among type arguments in an expression.";
-          None)
-    items
+and written_arguments state items : (Types.argument list, Types.ty) result =
+  let arguments =
+    List.filter_map
+      (function
+        | Syntax.Item item -> Some (type_argument_of_expression state item)
+        | Item_constraint _ -> None)
+      items
+  in
+  let errors =
+    List.filter_map
+      (function
+        | Syntax.Item _ -> None
+        | Item_constraint ((name : Syntax.name), _) ->
+            Some
+              (State.error state Arity (State.read_span state name.id)
+                 "An associated type is fixed where a type is written, as in `any Trait[Name = \
+                  Type]`, not among type arguments in an expression."))
+      items
+  in
+  match errors with [] -> Ok arguments | error :: _ -> Error error
 
 and type_argument_of_expression state (value : Syntax.expression) : Types.argument =
   match (value.kind, State.head state value) with
