@@ -83,7 +83,7 @@ let of_part : Part.computed -> t = function
   | Checked_body _ | Derived_form _ -> Checked_bodies
   | Body_mir _ | Contract_mir _ | Generated_mir _ -> Mir
   | Mir_call_edges _ -> Mir_call_edges
-  | Patterns _ | Usage _ | Ownership _ | Used_packages _ -> Body_checks
+  | Patterns _ | Usage _ | Ownership _ -> Body_checks
   | Package_check _ -> Package_checks
   | Call_edges _ -> Call_edges
   | Proof _ -> Proofs

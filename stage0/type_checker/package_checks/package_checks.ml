@@ -720,27 +720,6 @@ let list_checks (declarations : Resolve.Names.declaration list) =
     declarations
   @ [ Instantiations; Tests; Dependencies ]
 
-let list_used_packages (resolved : Resolve.resolved) ~evidence_packages (form : Core.t) =
-  let named =
-    List.filter_map
-      (function
-        | Some (Resolve.Definition (_, path) | Variant (path, _)) -> Some (Path.package path)
-        | Some (Module module_) -> Some module_.package
-        | _ -> None)
-      (Array.to_list resolved.names)
-  in
-  let called = ref evidence_packages in
-  Core_walk.definition
-    (Core_walk.callees (function
-      | Trait_method { trait; evidence; _ } ->
-          called :=
-            Path.package trait.trait
-            :: (match evidence with Impl { impl; _ } -> [ Path.package impl ] | _ -> [])
-            @ !called
-      | _ -> ()))
-    form.definition;
-  List.sort_uniq compare (named @ !called)
-
 let describe_unused_dependency ~package dependency =
   Printf.sprintf "Nothing in `%s` uses `%s`. Delete its entry." (Path.show_package package)
     (Path.show_package dependency)

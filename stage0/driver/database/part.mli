@@ -48,7 +48,6 @@ type computed =
   | Patterns of Resolve.Names.key
   | Usage of Resolve.Names.key
   | Ownership of Resolve.Names.key
-  | Used_packages of Resolve.Names.key
   | Import_check of Path.file
   | Package_check of Path.package * Package_checks.check
   | Call_edges of Path.t * Path.package
