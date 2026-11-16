@@ -762,17 +762,20 @@ let call_edge_part database note path =
   | Some part -> part
   | None -> Value []
 
+let read_declared read part_of key =
+  match read key with Some value -> value | None -> unchecked (Part.show (part_of key))
+
 let patterns_lookups database note : Patterns.Lookups.t =
+  let interface = interface_lookups database note ~is_checked:true in
   {
-    core = (fun key -> Some (checked_core database note key));
-    interface = interface_lookups database note ~is_checked:true;
+    core = checked_core database note;
+    spans = read_declared interface.names.spans (fun key -> Part.Tree key);
+    text = read_declared interface.names.text (fun key -> Part.Text key);
+    interface;
   }
 
 let usage_lookups database note : Usage.Lookups.t =
   let names = recording_names database note in
-  let read_declared read part_of key =
-    match read key with Some value -> value | None -> unchecked (Part.show (part_of key))
-  in
   {
     definition = read_declared names.definition (fun key -> Part.Tree key);
     spans = read_declared names.spans (fun key -> Part.Tree key);

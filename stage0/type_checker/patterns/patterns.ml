@@ -122,7 +122,7 @@ and evaluate_named_constant ?(seen = []) context path : space option =
     match context.lookups.interface.constant_value path with
     | Some value -> Some (Constructed (Interval (value, value), []))
     | None -> (
-        match Option.bind (context.lookups.interface.names.key path) context.lookups.core with
+        match Option.map context.lookups.core (context.lookups.interface.names.key path) with
         | Some { definition = Constant (Some value); _ } ->
             evaluate_constant_expression context (path :: seen) value
         | _ -> None)
@@ -564,19 +564,11 @@ let check_definition context (definition : Core.definition) =
     definition
 
 let check (lookups : Lookups.t) key =
-  match lookups.core key with
-  | Some form ->
-      let context =
-        {
-          lookups;
-          spans = lazy (Option.value ~default:[||] (lookups.interface.names.spans key));
-          text = lazy (Option.value ~default:"" (lookups.interface.names.text key));
-          diagnostics = [];
-        }
-      in
-      check_definition context form.definition;
-      List.sort
-        (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
-          compare left.span right.span)
-        context.diagnostics
-  | _ -> []
+  let context =
+    { lookups; spans = lazy (lookups.spans key); text = lazy (lookups.text key); diagnostics = [] }
+  in
+  check_definition context (lookups.core key).definition;
+  List.sort
+    (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
+      compare left.span right.span)
+    context.diagnostics
