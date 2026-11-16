@@ -196,10 +196,9 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
                     let start = State.build_expression state start in
                     Over_range
                       { pattern; start; stop = State.build_expression state stop; inclusive }
-                | Binder_in (written, collection) ->
-                    let pattern = State.build_pattern state written in
-                    Over_collection
-                      { pattern; collection = State.build_expression state collection }
+                | Binder_in _ ->
+                    State.raise_bug
+                      "the checker recorded no elements for a quantifier over a collection"
               in
               make_quantified binder);
       Types.bool

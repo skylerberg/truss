@@ -299,62 +299,7 @@ let is_executable context (condition : Core.expression) =
          | _ -> false)
        condition)
 
-let collect_specification_expressions (definition : Core.definition) =
-  let ids = Hashtbl.create 64 in
-  let mark =
-    Core_walk.make_deep_visitor
-      {
-        Core_walk.ignore_all with
-        expression = (fun (node : Core.expression) -> Hashtbl.replace ids node.id ());
-      }
-  in
-  let check_cost (spent : Core.cost) =
-    match spent.bound with
-    | Finite -> ()
-    | Order_of bound | At_most bound | Exactly bound -> mark.expression bound
-  in
-  (match definition with
-  | Function { parameters; contract; _ } ->
-      List.iter
-        (fun (parameter : Core.parameter) ->
-          Option.iter
-            (fun (contract : Core.callback_contract) -> List.iter mark.expression contract.requires)
-            parameter.callback_contract)
-        parameters;
-      List.iter
-        (fun (condition : Core.condition) -> mark.expression condition.value)
-        contract.requires;
-      List.iter mark.expression contract.ensures;
-      List.iter mark.expression contract.decreases;
-      List.iter check_cost contract.costs
-  | Type { invariants; potential; _ } ->
-      List.iter (fun (invariant : Core.condition) -> mark.expression invariant.value) invariants;
-      Option.iter mark.expression potential
-  | Trait laws ->
-      List.iter
-        (fun (law : Core.law) ->
-          List.iter mark.expression law.requires;
-          Core_walk.walk_block mark law.body)
-        laws
-  | Constant _ | Test _ | Law_proof _ | Empty -> ());
-  Core_walk.walk_definition
-    {
-      Core_walk.ignore_all with
-      statement =
-        (fun (node : Core.statement) ->
-          match node.kind with
-          | Proof body -> Core_walk.walk_block mark body
-          | Assert { condition; _ } -> (
-              match definition with Test _ -> () | _ -> mark.expression condition.value)
-          | For { clauses; _ } | While { clauses; _ } ->
-              List.iter (Core_walk.walk_loop_clause mark) clauses
-          | _ -> ());
-    }
-    definition;
-  ids
-
 let check_semantics context (form : Core.t) =
-  let in_specification = collect_specification_expressions form.definition in
   let check_executable subject (condition : Core.condition) =
     if condition.executable <> is_executable context condition.value then
       context.wrong "%s is marked %sexecutable" subject
@@ -408,12 +353,6 @@ let check_semantics context (form : Core.t) =
                      "a lambda captures %d locals, and its body reads %d of the enclosing \
                       function's"
                      (List.length captures) (List.length free)
-             | Quantified { binder = Over_elements _; _ } when Hashtbl.mem in_specification node.id
-               ->
-                 context.wrong "a quantifier in a specification runs as a loop (`Over_elements`)"
-             | Quantified { binder = Over_collection _; _ }
-               when not (Hashtbl.mem in_specification node.id) ->
-                 context.wrong "a quantifier in executable code is over a mathematical collection"
              | Slice { callee; bounds; _ } ->
                  let name = show_callee callee in
                  let ends suffix =

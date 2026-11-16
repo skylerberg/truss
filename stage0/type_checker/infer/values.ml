@@ -451,10 +451,12 @@ and check_arm_value state env ?expected (body : Syntax.statement) =
 and check_collection_element state env ~(quantifier : Syntax.expression)
     (collection : Syntax.expression) =
   let collection_type = State.normalize state (Hooks.check_expression state env collection) in
-  match collection_type with
-  | Types.Named { path; arguments = [ Types.Type element ] } when Well_known.is Range path ->
+  match (collection.kind, collection_type) with
+  | ( Range { start = Some _; stop = Some _; _ },
+      Types.Named { path; arguments = [ Types.Type element ] } )
+    when Well_known.is Range path ->
       element
-  | Types.Error _ | Types.Hole -> collection_type
+  | _, (Types.Error _ | Types.Hole) -> collection_type
   | _ -> (
       match
         Name_lookup.find_elements_calls state
@@ -462,7 +464,7 @@ and check_collection_element state env ~(quantifier : Syntax.expression)
           collection_type Types.Read
       with
       | Some (loop, element, _) ->
-          if State.runs env then state.tables.loops.(quantifier.id) <- Some loop;
+          state.tables.loops.(quantifier.id) <- Some loop;
           element
       | None ->
           State.make_error_type state Not_indexable

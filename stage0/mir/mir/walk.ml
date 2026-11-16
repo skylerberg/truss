@@ -84,8 +84,7 @@ let visit_rvalue_places visit rvalue =
         | Over_type _ -> ()
         | Over_range { start; stop; _ } ->
             visit_operand start;
-            visit_operand stop
-        | Over_collection collection -> visit_operand collection)
+            visit_operand stop)
   in
   match rvalue with
   | Tree.Operand value | Not value | Convert { value; _ } | To_any { value; _ } | Copy value ->

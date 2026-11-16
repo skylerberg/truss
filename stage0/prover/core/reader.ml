@@ -806,35 +806,20 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
                 inclusive;
                 type_ = compute_operand_type context frame start;
               }
-        | Over_collection collection ->
-            Range_of_collection
-              {
-                collection_type = compute_operand_type context frame collection;
-                collected = translate_operand collection;
-                element = Facts.substitute_type context frame run.infos.(parameter).type_;
-                location;
-              }
       in
-      translate_quantifier_value context frame run ~location quantifier range ~parameter ~matches
-        ~body
+      translate_quantifier_value context frame run quantifier range ~parameter ~matches ~body
 
-and translate_quantifier_value context frame run ~location quantifier range ~parameter
-    ~(matches : Mir.block) ~(body : Mir.block) =
-  match
-    Models.quantify_over context frame quantifier range
-      ~bind:(fun inner value ty ->
-        let after, matched =
-          read_value context
-            (Facts.bind inner (Locals.make_key run.infos parameter) ty value)
-            run matches
-        in
-        (matched, after))
-      ~read:(fun body_frame _ ->
-        let after, term = read_value context body_frame run body in
-        ({ body_frame with spent = after.spent }, term))
-  with
-  | Some quantified -> quantified
-  | None -> Facts.raise_unsupported location "a quantifier that gives no value"
+and translate_quantifier_value context frame run quantifier range ~parameter ~(matches : Mir.block)
+    ~(body : Mir.block) =
+  Models.quantify_over context frame quantifier range
+    ~bind:(fun inner value ty -> Facts.bind inner (Locals.make_key run.infos parameter) ty value)
+    ~read:(fun body_frame _ ->
+      let after_matches, matched = read_value context body_frame run matches in
+      let after, holds = read_value context (Facts.restrict after_matches matched) run body in
+      ( { body_frame with spent = after.spent },
+        match quantifier with
+        | Forall -> Logic.( ==> ) matched holds
+        | Exists -> Logic.( &&& ) matched holds ))
 
 and read_statements context frame run (statements : Mir.statement list) =
   List.fold_left
@@ -1115,7 +1100,7 @@ and read_statement context frame run (statement : Mir.statement) =
           }
       in
       let after, term =
-        translate_quantifier_value context frame run ~location quantifier range ~parameter:part
+        translate_quantifier_value context frame run quantifier range ~parameter:part
           ~matches:
             {
               statements = [];

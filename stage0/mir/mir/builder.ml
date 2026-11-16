@@ -1434,19 +1434,17 @@ and lower_quantified builder (node : Core.expression) (quantifier : Core.quantif
             (fun (start, stop) -> Tree.Over_range { start; stop; inclusive })
             (evaluate_pair builder start stop),
           pattern.type_ )
-    | Over_collection { pattern; collection } ->
+    | Over_elements { elements; _ } ->
         ( Option.map
-            (fun collection -> Tree.Over_collection collection)
-            (lower_expression builder collection),
-          pattern.type_ )
-    | Over_elements { pattern; elements } -> (
-        match elements.count.kind with
-        | Call { arguments = [ Passed { value = collection; _ } ]; _ } ->
-            ( Option.map
-                (fun collection -> Tree.Over_collection collection)
-                (lower_operand builder Read collection),
-              pattern.type_ )
-        | _ -> raise_bug "a quantifier over elements whose count takes no collection")
+            (fun stop ->
+              Tree.Over_range
+                {
+                  start = Constant { value = Integer Z.zero; type_ = elements.count.type_ };
+                  stop;
+                  inclusive = false;
+                })
+            (lower_expression builder elements.count),
+          elements.count.type_ )
   in
   let* range = range in
   let parameter, matches =
@@ -1457,11 +1455,21 @@ and lower_quantified builder (node : Core.expression) (quantifier : Core.quantif
             Tree.statements = [];
             value = Some (Constant { value = Boolean true; type_ = Types.bool });
           } )
-    | Over_range { pattern; _ } | Over_collection { pattern; _ } | Over_elements { pattern; _ } ->
+    | Over_range { pattern; _ } ->
         let parameter = Emitter.allocate_local builder Temporary value_type origin in
         ( parameter,
           Emitter.build_block builder (fun () ->
               match_patterns builder [ pattern ] [ Emitter.make_local_place parameter ] origin) )
+    | Over_elements { pattern; elements = { position; element; _ } } ->
+        let parameter = Emitter.allocate_local builder Temporary value_type origin in
+        ( parameter,
+          Emitter.build_block builder (fun () ->
+              bind ~owned:true builder position (Emitter.make_local_place parameter);
+              match element with
+              | Lent lending ->
+                  let* part = lower_lent builder lending ~duration:Operand_evaluation in
+                  match_patterns builder [ pattern ] [ part ] origin
+              | _ -> raise_bug "a quantifier over elements that no call lends") )
   in
   let body = Emitter.build_block builder (fun () -> lower_expression builder body) in
   Emitter.hold builder node.type_ origin
