@@ -273,7 +273,7 @@ fn report_end(
 fn Worker.ended(mut self, failed: mut Bool, outcome: UInt8, message: intrinsic::View[UInt8])
   ensures intrinsic::storage_length(self.unread) == old(intrinsic::storage_length(self.unread))
 {
-  read_output_until_empty(mut self.output, printed: mut self.printed)
+  read_remaining_output(mut self.output, printed: mut self.printed)
   report_end(
     self.number,
     spent: microseconds_since(self.started),
@@ -313,8 +313,11 @@ fn read_output(output: mut Int32, printed: mut intrinsic::Storage[UInt8]) -> Boo
   }
 }
 
-fn read_output_until_empty(output: mut Int32, printed: mut intrinsic::Storage[UInt8]) {
-  while read_output(mut output, printed: mut printed) {}
+fn read_remaining_output(output: mut Int32, printed: mut intrinsic::Storage[UInt8]) {
+  var reads: UInt64 = 0
+  while reads < 16 && read_output(mut output, printed: mut printed) {
+    reads += 1
+  }
 }
 
 fn Worker.discard_consumed(mut self, consumed: UInt64)

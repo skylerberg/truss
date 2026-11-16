@@ -1,0 +1,5 @@
+test "reads nothing from its standard input"
+  uses Console
+{
+  assert Console.read_line() is None
+}

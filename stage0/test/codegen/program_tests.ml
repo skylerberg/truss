@@ -91,6 +91,33 @@ let () =
                   (String.length expected_long_output)
           | _ -> Codegen_support.fail "%s" (Codegen_support.render_records records)))
 
+let with_standard_input text work =
+  let read_end, write_end = Unix.pipe ~cloexec:true () in
+  ignore (Unix.write_substring write_end text 0 (String.length text));
+  Unix.close write_end;
+  let saved = Unix.dup ~cloexec:true Unix.stdin in
+  Unix.dup2 ~cloexec:false read_end Unix.stdin;
+  Unix.close read_end;
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.dup2 ~cloexec:false saved Unix.stdin;
+      Unix.close saved)
+    work
+
+let () =
+  Codegen_support.test
+    "a test's standard input is empty, whatever the runner's standard input holds" (fun () ->
+      let database, compile =
+        Codegen_support.load Fixtures.Program.test_reading_its_standard_input
+      in
+      match
+        with_standard_input "typed at the terminal\n" (fun () ->
+            Compile.run_tests compile ~time_limit_ms:2000 (Codegen_support.list_tests database))
+      with
+      | Ok [ { outcome = Passed; _ } ] -> ()
+      | Ok records -> Codegen_support.fail "%s" (Codegen_support.render_records records)
+      | Error message -> Codegen_support.fail "%s" message)
+
 let () =
   Codegen_support.test
     "a build checks each primitive operation that could fail, and evaluates no requires clause"
