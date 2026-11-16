@@ -157,9 +157,9 @@ let find_capability_declaration lookups (path : Path.t) =
   let ( let* ) = Option.bind in
   match path with
   | Method { owner = (Impl _ | Derived _) as owner; name; receiver } ->
-      let* impl = read_impl_interface lookups owner in
+      let* impl = find_impl_interface lookups owner in
       let trait_path = impl.implements.trait in
-      let* trait = read_trait_interface lookups trait_path in
+      let* trait = find_trait_interface lookups trait_path in
       if trait.is_capability then Some (Declared_by (Impl_uses { capability = trait_path }))
       else
         let* declared =
@@ -168,7 +168,7 @@ let find_capability_declaration lookups (path : Path.t) =
             trait.methods
         in
         let* signature =
-          read_declared_signature lookups
+          find_declared_signature lookups
             (Method
                {
                  owner = trait_path;
