@@ -519,15 +519,12 @@ let read_lend context (frame : State.frame) run part (call : Mir.call) =
   in
   let lent, write_back =
     match (invocation.lends, invocation.callee, receiver) with
-    | ( Some Types.Mut,
-        Intrinsic
-          { operation = (Storage_at_mut | Array_at_mut | View_at_mut) as operation; type_arguments },
-        Some receiver ) ->
+    | Some Types.Mut, Intrinsic { operation = Lend element_lend; type_arguments }, Some receiver ->
         let index = make_index_term () in
         ( lend frame,
           Some
             (fun frame final ->
-              Intrinsics.write_element_back context frame ~operation ~type_arguments
+              Intrinsics.write_element_back context frame ~lend:element_lend ~type_arguments
                 ~receiver:(make_passed_place context run receiver)
                 ~receiver_type:(compute_place_type context frame run receiver)
                 index final) )
@@ -744,9 +741,9 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
       let types = match types with [] -> [ ty ] | types -> types in
       let terms = List.map translate_operand operands in
       ( frame,
-        Intrinsics.translate_intrinsic context frame ~site operation types terms
-          ~arguments:(List.map find_operand_origin operands)
-          ~changed:terms ty )
+        Operations.translate_primitive_operation context frame ~site operation types terms
+          ~arguments:(List.map find_operand_origin operands) ~fallback:(fun () ->
+            Facts.arrive context frame "result" ty) )
   | Construct { variant; fields; type_ } ->
       Values.apply_construct context frame { site with type_ } variant
         (List.map (fun (name, field) -> (name, Option.map translate_operand field)) fields)

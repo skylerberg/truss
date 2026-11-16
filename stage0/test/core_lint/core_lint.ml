@@ -159,8 +159,7 @@ let is_built_in context (ty : Types.ty) =
   | Projection { trait; _ } -> is_integer_trait trait.trait
   | _ -> Option.is_some (Types.find_builtin ty)
 
-let check_operator_types context (node : Core.expression) (operation : Intrinsic.operation)
-    arguments =
+let check_operator_types context (node : Core.expression) (operation : Intrinsic.scalar) arguments =
   if not (is_built_in context node.type_) then
     context.wrong "an operator has the type `%s`, which is not built in" (Types.show node.type_);
   let operands =
@@ -177,7 +176,7 @@ let check_operator_types context (node : Core.expression) (operation : Intrinsic
     (fun (operand : Core.expression) ->
       if not (fits context ~expected:node.type_ ~found:operand.type_) then
         context.wrong "an operand of `%s` has the type `%s`, and the operator `%s`"
-          (Intrinsic.show_operation operation)
+          (Intrinsic.show_operation (Scalar operation))
           (Types.show operand.type_) (Types.show node.type_))
     operands
 

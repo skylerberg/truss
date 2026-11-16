@@ -677,7 +677,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                            callee =
                              Intrinsic
                                {
-                                 operation = Holds_invariant;
+                                 operation = Runtime Holds_invariant;
                                  type_arguments = [ Types.Type self_type ];
                                };
                            arguments =

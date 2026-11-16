@@ -32,12 +32,12 @@ module Symbol = struct
         self_type : Types.ty;
       }
     | Opaque_operation of {
-        operation : Intrinsic.operation;
+        operation : Intrinsic.scalar;
         type_ : Types.ty;
         integer : (int * bool) option;
       }
-    | Bit_count of { count : Intrinsic.operation; width : int }
-    | System of Intrinsic.operation
+    | Bit_count of { count : Intrinsic.scalar; width : int }
+    | System of Intrinsic.runtime
     | Libc_number of Libc.number
     | Handle_descriptor
     | Compare_bytes_order
@@ -130,9 +130,12 @@ let rec show_symbol : symbol -> string = function
       Printf.sprintf "time.method.%s%s[%s]" (Path.show method_) (show_instance trait_arguments)
         (Types.show self_type)
   | Opaque_operation { operation; type_; _ } ->
-      Printf.sprintf "operation.%s.%s" (Intrinsic.show_operation operation) (Types.show type_)
-  | Bit_count { count; width } -> Printf.sprintf "bits.%s.%d" (Intrinsic.show_operation count) width
-  | System operation -> "system." ^ Intrinsic.show_operation operation
+      Printf.sprintf "operation.%s.%s"
+        (Intrinsic.show_operation (Scalar operation))
+        (Types.show type_)
+  | Bit_count { count; width } ->
+      Printf.sprintf "bits.%s.%d" (Intrinsic.show_operation (Scalar count)) width
+  | System operation -> "system." ^ Intrinsic.show_operation (Runtime operation)
   | Libc_number number -> "libc.number." ^ Libc.show_number number
   | Handle_descriptor -> "handle.descriptor"
   | Compare_bytes_order -> "compare_bytes.order"

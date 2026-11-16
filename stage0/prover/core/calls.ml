@@ -1006,11 +1006,8 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
         (Contracts.find_capability_contract context.lookups capability name)
   | Intrinsic { operation; type_arguments } ->
       let frame =
-        match operation with
-        | Storage_at_mut | Array_at_mut | View_at_mut -> frame
-        | _ -> havoc_mut frame
+        match operation with Lend _ -> frame | Scalar _ | Buffer _ | Runtime _ -> havoc_mut frame
       in
-      let operands = List.map (fun (passed : State.passed) -> passed.term) values in
       let changed =
         List.map
           (fun (passed : State.passed) ->
@@ -1027,82 +1024,8 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
           type_arguments
       in
       let result =
-        match (operation, values) with
-        | Array_model, [ array ] -> Models.make_array_model context frame array.type_ array.term
-        | Array_view, [ array ] -> (
-            match array.type_ with
-            | Types.Named { arguments = Types.Type element :: _; _ } ->
-                let view = Facts.arrive context frame "view" result_type in
-                Facts.assume context frame
-                  (Logic.equal
-                     (Intrinsics.make_buffer_model context View element view)
-                     (Models.make_array_model context frame array.type_ array.term));
-                view
-            | _ -> Facts.arrive context frame "view" result_type)
-        | Array_at_mut, [ array; index ] -> (
-            match array.type_ with
-            | Types.Named { arguments = Types.Type element :: _; _ } -> (
-                let model = Models.make_array_model context frame array.type_ array.term in
-                Facts.oblige context frame Requires location
-                  [
-                    Text "`";
-                    Facts.quote frame.source site.origin;
-                    Text "` may not be within the array.";
-                  ]
-                  Logic.(
-                    Operation ("<=", [ int 0; index.term ])
-                    &&& Operation
-                          ("<", [ index.term; Models.make_sequence_length context element model ]));
-                match Models.index_sequence context element model index.term with
-                | Some part -> part
-                | None -> Facts.arrive context frame "part" result_type)
-            | _ -> Facts.arrive context frame "part" result_type)
-        | Storage_from_array, [ array ] -> (
-            match array.type_ with
-            | Types.Named { arguments = [ Types.Type element; Types.Value count ]; _ } ->
-                let storage = Facts.arrive context frame "storage" result_type in
-                let elements = Intrinsics.make_buffer_model context Storage element storage in
-                let count = Models.make_value_term context frame count in
-                Facts.assume context frame
-                  Logic.(
-                    equal elements (Models.make_array_model context frame array.type_ array.term)
-                    &&& equal (Models.make_sequence_length context element elements) count
-                    &&& equal (Intrinsics.make_buffer_capacity context element storage) count);
-                storage
-            | _ -> Facts.arrive context frame "storage" result_type)
-        | Holds_invariant, [ subject; clause ] -> (
-            match (clause.term, Validity.find_invariants context subject.type_) with
-            | Logic.Integer index, Some (source, written) -> (
-                match List.nth_opt written (Z.to_int index) with
-                | Some invariant ->
-                    let inner =
-                      Validity.make_type_frame context frame source subject.type_
-                        ~self:(Some subject.term)
-                    in
-                    snd (Validity.read_specification context inner invariant)
-                | None -> Facts.arrive context frame "holds" result_type)
-            | _ -> Facts.arrive context frame "holds" result_type)
-        | Array_from_storage, [ storage ] -> (
-            match result_type with
-            | Types.Named { arguments = [ Types.Type element; Types.Value count ]; _ } ->
-                let elements = Intrinsics.make_buffer_model context Storage element storage.term in
-                let count = Models.make_value_term context frame count in
-                Facts.oblige context frame Requires location
-                  [
-                    Text "`";
-                    Facts.quote frame.source site.origin;
-                    Text "` may not have as many elements as the array's count.";
-                  ]
-                  (Logic.equal (Models.make_sequence_length context element elements) count);
-                let array = Facts.arrive context frame "array" result_type in
-                Facts.assume context frame
-                  (Logic.equal (Models.make_array_model context frame result_type array) elements);
-                array
-            | _ -> Facts.arrive context frame "array" result_type)
-        | _ ->
-            let arguments = List.map (fun (passed : State.passed) -> passed.origin) values in
-            Intrinsics.translate_intrinsic context frame ~site operation types operands ~arguments
-              ~changed result_type
+        Intrinsics.translate_intrinsic context frame ~site operation types values ~changed
+          result_type
       in
       let frame =
         Operations.spend context frame (Amounts.compute_step_amount context frame invocation values)
