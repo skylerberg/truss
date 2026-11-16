@@ -1,4 +1,4 @@
-val variable : ?numbers:int list -> string -> 'a Logic.Symbol.t
+val make_variable : ?numbers:int list -> string -> 'a Logic.Symbol.t
 
 exception Unsupported of State.location * string
 exception Foreign_unsupported of string
@@ -6,15 +6,15 @@ exception Foreign_unsupported of string
 val unsupported : State.location -> ('a, unit, string, 'b) format4 -> 'a
 val bug : ('a, unit, string, 'b) format4 -> 'a
 val is_in_recursion_group : State.context -> Path.t -> bool
-val clauses : Mir.requirement list -> Mir.formula list
+val list_clauses : Mir.requirement list -> Mir.formula list
 val declare : State.context -> Logic.declaration -> unit
 val add_fact : State.context -> Logic.term -> unit
-val value_symbol : State.context -> State.frame -> Logic.symbol -> Logic.sort -> Logic.term
-val fresh_name : State.context -> string -> 'a Logic.Symbol.t
-val fresh : State.context -> State.frame -> string -> Logic.sort -> Logic.term
+val declare_value_symbol : State.context -> State.frame -> Logic.symbol -> Logic.sort -> Logic.term
+val make_fresh_name : State.context -> string -> 'a Logic.Symbol.t
+val declare_fresh : State.context -> State.frame -> string -> Logic.sort -> Logic.term
 val mentions_fresh_after : State.context -> int -> Logic.term -> bool
-val closed_over_binders : State.frame -> Logic.term -> Logic.term option
-val fact : State.context -> State.frame -> Logic.term -> unit
+val close_over_binders : State.frame -> Logic.term -> Logic.term option
+val add_frame_fact : State.context -> State.frame -> Logic.term -> unit
 val assume : State.context -> State.frame -> Logic.term -> unit
 val add_requires : State.context -> State.message -> State.fix list
 val truss_of_value : State.context -> Logic.term -> string option
@@ -31,7 +31,7 @@ val oblige :
   Logic.term ->
   unit
 
-val obligation_at :
+val make_closed_obligation :
   ?template_clause:State.template_clause ->
   State.context ->
   State.frame ->
@@ -53,31 +53,32 @@ val make_obligation :
 
 val locate : State.context -> State.source -> Core.origin -> State.location
 val quote : State.source -> int -> State.piece
-val quoted : string -> Source.Definition_span.t -> string
-val text_of : State.context -> State.frame -> Core.origin -> string
-val builtin : Types.ty -> Intrinsic.builtin option
-val bounds : Types.ty -> (Z.t * Z.t) option
-val float_format : Types.ty -> (int * int) option
-val constructor_name : Types.ty -> string option -> 'a Logic.Symbol.t
-val selector_name : Types.ty -> string option -> string -> 'a Logic.Symbol.t
+val quote_span : string -> Source.Definition_span.t -> string
+val quote_origin : State.context -> State.frame -> Core.origin -> string
+val find_bounds : Types.ty -> (Z.t * Z.t) option
+val find_float_format : Types.ty -> (int * int) option
+val make_constructor_symbol : Types.ty -> string option -> 'a Logic.Symbol.t
+val make_selector_symbol : Types.ty -> string option -> string -> 'a Logic.Symbol.t
 val is_standard_equal : Path.t -> bool
 val equal_trait : Path.t
-val visible_type : State.context -> Types.ty -> (Types.type_interface * Types.substitution) option
 
-val constructors :
+val find_visible_type :
+  State.context -> Types.ty -> (Types.type_interface * Types.substitution) option
+
+val find_constructors :
   State.context -> Types.ty -> (string option * (string * Types.ty) list) list option
 
-val sort_of : State.context -> Types.ty -> Logic.sort
-val structural : State.context -> ?seen:Types.ty list -> Types.ty -> bool
-val in_range : Types.ty -> Logic.term -> Logic.term
-val once : State.context -> State.stated -> (unit -> unit) -> unit
+val declare_sort : State.context -> Types.ty -> Logic.sort
+val is_structural : State.context -> ?seen:Types.ty list -> Types.ty -> bool
+val make_in_range : Types.ty -> Logic.term -> Logic.term
+val run_once : State.context -> State.stated -> (unit -> unit) -> unit
 val arrive : State.context -> State.frame -> string -> Types.ty -> Logic.term
 val bind : State.frame -> Locals.key -> Types.ty -> Logic.term -> State.frame
-val substituted : State.context -> State.frame -> Types.ty -> Types.ty
-val local_type : State.context -> State.frame -> Locals.key -> Types.ty option
+val substitute_type : State.context -> State.frame -> Types.ty -> Types.ty
+val find_local_type : State.context -> State.frame -> Locals.key -> Types.ty option
 val mentions_potential : Logic.term -> bool
 val restrict : State.frame -> Logic.term -> State.frame
-val path_condition : State.context -> State.frame -> Logic.term -> Logic.term
+val name_path_condition : State.context -> State.frame -> Logic.term -> Logic.term
 
 val merge :
   State.context ->

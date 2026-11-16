@@ -23,11 +23,11 @@ let unit_callee : _ Core.target -> Invocation.callee = function
   | Intrinsic { operation; type_arguments } -> Intrinsic { operation; type_arguments }
   | Indirect _ -> Indirect ()
 
-let invocation_of (call : Mir.call) ~lends : Invocation.t =
+let make_invocation (call : Mir.call) ~lends : Invocation.t =
   { callee = unit_callee call.callee; lends; uses = call.uses }
 
-let declared_fields context ty variant =
-  match Facts.visible_type context ty with
+let find_declared_fields context ty variant =
+  match Facts.find_visible_type context ty with
   | Some (interface, substitution) -> (
       let fields (list : Types.field list) =
         List.map
@@ -47,28 +47,29 @@ let declared_fields context ty variant =
       | _ -> None)
   | None -> None
 
-let rec place_type context frame run (place : Mir.place) =
+let rec compute_place_type context frame run (place : Mir.place) =
   match place.Mir.projections with
   | [] -> (
       match place.Mir.root with
-      | Local local -> Facts.substituted context frame run.infos.(local).type_
-      | Constant path -> Values.constant_type context path
-      | Literal { type_; _ } -> Facts.substituted context frame type_)
+      | Local local -> Facts.substitute_type context frame run.infos.(local).type_
+      | Constant path -> Values.compute_constant_type context path
+      | Literal { type_; _ } -> Facts.substitute_type context frame type_)
   | _ -> (
       let base =
         { place with Mir.projections = List.rev (List.tl (List.rev place.Mir.projections)) }
       in
-      let base_type = place_type context frame run base in
+      let base_type = compute_place_type context frame run base in
       let variant, field =
         match List.nth place.Mir.projections (List.length place.Mir.projections - 1) with
         | Field field -> (None, field)
         | Variant_field { variant; field } -> (Some variant, field)
       in
-      match Option.bind (declared_fields context base_type variant) (List.assoc_opt field) with
-      | Some field_type -> Facts.substituted context frame field_type
+      match Option.bind (find_declared_fields context base_type variant) (List.assoc_opt field) with
+      | Some field_type -> Facts.substitute_type context frame field_type
       | None -> raise (Facts.Foreign_unsupported (Printf.sprintf "the field `%s`" field)))
 
-let rec aliased (frame : State.frame) run (place : Mir.place) : (Logic.term * Mir.place) list =
+let rec resolve_aliases (frame : State.frame) run (place : Mir.place) :
+    (Logic.term * Mir.place) list =
   match place.Mir.root with
   | Local local -> (
       match Locals.find_opt (Locals.make_key run.infos local) frame.aliases with
@@ -82,22 +83,22 @@ let rec aliased (frame : State.frame) run (place : Mir.place) : (Logic.term * Mi
                       resolved with
                       Mir.projections = resolved.Mir.projections @ place.Mir.projections;
                     } ))
-                (aliased frame run bound_place))
+                (resolve_aliases frame run bound_place))
             bound
       | None -> [ (Logic.Boolean true, place) ])
   | Constant _ | Literal _ -> [ (Logic.Boolean true, place) ]
 
-let expanded frame run (place : Mir.place) =
-  match aliased frame run place with
+let expand_place frame run (place : Mir.place) =
+  match resolve_aliases frame run place with
   | [ (_, place) ] -> place
   | _ ->
       raise (Facts.Foreign_unsupported "a name that the alternatives of a pattern bind `mut`, here")
 
 let read_root context frame run (root : Mir.root) =
   match root with
-  | Constant path -> Values.constant_value context frame path
+  | Constant path -> Values.evaluate_constant context frame path
   | Literal { text; type_ } ->
-      Values.text_value context frame (Facts.substituted context frame type_) text
+      Values.make_text_value context frame (Facts.substitute_type context frame type_) text
   | Local local -> (
       match Locals.make_key run.infos local with
       | Core_local Self -> (
@@ -107,7 +108,7 @@ let read_root context frame run (root : Mir.root) =
       | key -> (
           (match key with
           | Core_local core when frame.makes_obligations && not context.reading_callback ->
-              Validity.escaping_callback context frame core
+              Validity.check_escaping_callback context frame core
           | Core_local _ | Mir_local _ -> ());
           match Locals.find_opt key frame.locals with
           | Some term -> term
@@ -126,22 +127,22 @@ let read_resolved context frame run (place : Mir.place) =
     List.fold_left
       (fun (prefix, term) (projection : Mir.projection) ->
         let base = { place with Mir.projections = prefix } in
-        let base_type = place_type context frame run base in
+        let base_type = compute_place_type context frame run base in
         let variant, field =
           match projection with
           | Field field -> (None, field)
           | Variant_field { variant; field } -> (Some variant, field)
         in
         let projected = { place with Mir.projections = prefix @ [ projection ] } in
-        if Facts.constructors context base_type = None then
+        if Facts.find_constructors context base_type = None then
           raise
             (Facts.Foreign_unsupported
                (Printf.sprintf "a field of `%s`, whose fields the prover does not see"
                   (Types.show base_type)));
-        ignore (Facts.sort_of context base_type);
+        ignore (Facts.declare_sort context base_type);
         ( prefix @ [ projection ],
-          Values.field_of context frame base_type variant field
-            (place_type context frame run projected)
+          Values.project_field context frame base_type variant field
+            (compute_place_type context frame run projected)
             term ))
       ([], read_root context frame run place.Mir.root)
       place.Mir.projections
@@ -149,7 +150,7 @@ let read_resolved context frame run (place : Mir.place) =
   term
 
 let read_place context frame run (place : Mir.place) =
-  match aliased frame run place with
+  match resolve_aliases frame run place with
   | [ (_, place) ] -> read_resolved context frame run place
   | alternatives -> (
       match List.rev alternatives with
@@ -161,14 +162,15 @@ let read_place context frame run (place : Mir.place) =
             later
       | [] -> Facts.bug "a place that is no place")
 
-let field_replaced context ty variant field whole new_value =
-  match Option.bind (Facts.constructors context ty) (List.assoc_opt variant) with
+let replace_field context ty variant field whole new_value =
+  match Option.bind (Facts.find_constructors context ty) (List.assoc_opt variant) with
   | Some fields ->
       Logic.Apply
-        ( Facts.constructor_name ty variant,
+        ( Facts.make_constructor_symbol ty variant,
           List.map
             (fun (name, _) ->
-              if name = field then new_value else Validity.selected context ty variant name whole)
+              if name = field then new_value
+              else Validity.select_field context ty variant name whole)
             fields )
   | None -> raise (Facts.Foreign_unsupported (Printf.sprintf "the fields of `%s`" (Types.show ty)))
 
@@ -176,17 +178,20 @@ let write_resolved context frame run (place : Mir.place) new_value =
   let rec rebuilt prefix whole = function
     | [] -> new_value
     | (projection : Mir.projection) :: rest ->
-        let base_type = place_type context frame run { place with Mir.projections = prefix } in
+        let base_type =
+          compute_place_type context frame run { place with Mir.projections = prefix }
+        in
         let variant, field =
           match projection with
           | Field field -> (None, field)
           | Variant_field { variant; field } -> (Some variant, field)
         in
         let field_type =
-          place_type context frame run { place with Mir.projections = prefix @ [ projection ] }
+          compute_place_type context frame run
+            { place with Mir.projections = prefix @ [ projection ] }
         in
-        let part = Values.field_of context frame base_type variant field field_type whole in
-        field_replaced context base_type variant field whole
+        let part = Values.project_field context frame base_type variant field field_type whole in
+        replace_field context base_type variant field whole
           (rebuilt (prefix @ [ projection ]) part rest)
   in
   match place.Mir.root with
@@ -198,10 +203,11 @@ let write_resolved context frame run (place : Mir.place) new_value =
       in
       match Locals.make_key run.infos local with
       | Core_local Self -> { frame with self = Some whole }
-      | key -> Facts.bind frame key (Facts.substituted context frame run.infos.(local).type_) whole)
+      | key ->
+          Facts.bind frame key (Facts.substitute_type context frame run.infos.(local).type_) whole)
 
 let write_place context frame run (place : Mir.place) new_value =
-  match aliased frame run place with
+  match resolve_aliases frame run place with
   | [ (_, place) ] -> write_resolved context frame run place new_value
   | alternatives ->
       List.fold_left
@@ -220,12 +226,13 @@ let write_place context frame run (place : Mir.place) new_value =
                   match (Locals.find_opt key written.locals, Locals.find_opt key frame.locals) with
                   | Some after, Some before ->
                       Facts.bind frame key
-                        (Facts.substituted context frame run.infos.(local).type_)
+                        (Facts.substitute_type context frame run.infos.(local).type_)
                         (Logic.ite condition after before)
                   | _ -> written)))
         frame alternatives
 
-let changes ?(also = []) run (frame : State.frame) (blocks : Mir.block list) : State.changed =
+let compute_changes ?(also = []) run (frame : State.frame) (blocks : Mir.block list) : State.changed
+    =
   let locals = ref [] and self = ref false and reassigned = ref [] in
   let note (place : Mir.place) =
     List.iter
@@ -236,7 +243,7 @@ let changes ?(also = []) run (frame : State.frame) (blocks : Mir.block list) : S
             | Core_local Self -> self := true
             | key -> if Locals.mem key frame.locals then locals := key :: !locals)
         | Constant _ | Literal _ -> ())
-      (aliased frame run place)
+      (resolve_aliases frame run place)
   in
   let assigned (place : Mir.place) =
     (match place with
@@ -292,7 +299,7 @@ let changes ?(also = []) run (frame : State.frame) (blocks : Mir.block list) : S
     reassigned = List.sort_uniq compare !reassigned;
   }
 
-let float_literal (exponent, significand) value =
+let make_float_literal (exponent, significand) value =
   let bits =
     if exponent = 8 then Z.extract (Z.of_int32 (Int32.bits_of_float value)) 0 32
     else Z.extract (Z.of_int64 (Int64.bits_of_float value)) 0 64
@@ -310,19 +317,20 @@ let read_operand context frame run (operand : Mir.operand) =
   match operand with
   | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> read_place context frame run place
   | Constant { value; type_ } -> (
-      let ty = Facts.substituted context frame type_ in
+      let ty = Facts.substitute_type context frame type_ in
       match value with
       | Unit ->
-          ignore (Facts.sort_of context Types.unit);
+          ignore (Facts.declare_sort context Types.unit);
           Logic.Apply (Logic.Symbol.Unit, [])
       | Integer number -> Logic.Integer number
       | Float number -> (
-          match Facts.float_format ty with
-          | Some format -> float_literal format number
+          match Facts.find_float_format ty with
+          | Some format -> make_float_literal format number
           | None -> raise (Facts.Foreign_unsupported "a float literal without a float type"))
       | Boolean truth -> Logic.Boolean truth)
 
-let operand_type context frame operand = Facts.substituted context frame (Mir.operand_type operand)
+let compute_operand_type context frame operand =
+  Facts.substitute_type context frame (Mir.operand_type operand)
 
 let operand_origin : Mir.operand -> Core.origin option = function
   | Use { origin; _ } | Borrow { origin; _ } | Take { origin; _ } -> Some origin
@@ -334,14 +342,14 @@ let whole_local : Mir.operand -> Mir.local option = function
       Some local
   | Use _ | Borrow _ | Take _ | Constant _ -> None
 
-let passed_place_of context run place =
+let make_passed_place context run place =
   {
     State.read =
       (fun frame -> read_place context { frame with makes_obligations = false } run place);
     write = (fun frame term -> write_place context frame run place term);
   }
 
-let shape_of run ?function_ (value : Mir.operand) : Invocation.shape =
+let classify_shape run ?function_ (value : Mir.operand) : Invocation.shape =
   match (function_, whole_local value) with
   | Some (Mir.Function_reference { path; origin }), _ -> Named_function { origin; path }
   | (Some (Lambda_expression _) | None), Some local -> (
@@ -350,7 +358,7 @@ let shape_of run ?function_ (value : Mir.operand) : Invocation.shape =
       | Temporary | Lent _ -> Other)
   | (Some (Lambda_expression _) | None), None -> Other
 
-let one_place context (places : (Logic.term * State.passed_place) list) : State.passed_place =
+let merge_places context (places : (Logic.term * State.passed_place) list) : State.passed_place =
   match List.rev places with
   | [] -> Facts.bug "a place that is none"
   | [ (_, place) ] -> place
@@ -372,7 +380,8 @@ let one_place context (places : (Logic.term * State.passed_place) list) : State.
                     places)));
       }
 
-let argument_place context (frame : State.frame) run (mode : Types.mode) (value : Mir.operand) =
+let find_argument_place context (frame : State.frame) run (mode : Types.mode) (value : Mir.operand)
+    =
   let held =
     Option.bind (whole_local value) (fun local ->
         Locals.find_opt (Locals.make_key run.infos local) frame.slices)
@@ -380,13 +389,13 @@ let argument_place context (frame : State.frame) run (mode : Types.mode) (value 
   match (mode, held) with
   | Types.Mut, Some (Slices slices) ->
       Some
-        (one_place context
+        (merge_places context
            (List.map
               (fun (condition, (slice : State.slice)) ->
                 ( condition,
                   Intrinsics.slice_place context slice.made_at
-                    ~owner:(passed_place_of context run slice.collection)
-                    ~owner_type:(fun frame -> place_type context frame run slice.collection)
+                    ~owner:(make_passed_place context run slice.collection)
+                    ~owner_type:(fun frame -> compute_place_type context frame run slice.collection)
                     ~low:slice.start ~high:slice.stop ))
               slices))
   | Types.Mut, Some Unknown_slice when Types.is_well_known Slice (Mir.operand_type value) ->
@@ -398,11 +407,14 @@ let argument_place context (frame : State.frame) run (mode : Types.mode) (value 
         "a slice passed `mut` whose collection the prover does not know: a loop assigns the slice, \
          a call returns it, or it is a copy of a parameter"
   | Types.Mut, (Some Unknown_slice | None) -> (
-      match value with Borrow { place; _ } -> Some (passed_place_of context run place) | _ -> None)
+      match value with
+      | Borrow { place; _ } -> Some (make_passed_place context run place)
+      | _ -> None)
   | _ -> None
 
-let call_values context frame run (invocation : Invocation.t) (arguments : Mir.argument list) =
-  Lambdas.passed_values context frame invocation
+let evaluate_call_values context frame run (invocation : Invocation.t)
+    (arguments : Mir.argument list) =
+  Lambdas.make_passed_values context frame invocation
     (List.concat
        (List.mapi
           (fun position (argument : Mir.argument) ->
@@ -425,10 +437,10 @@ let call_values context frame run (invocation : Invocation.t) (arguments : Mir.a
                         {
                           position;
                           mode;
-                          shape = shape_of run ?function_ value;
+                          shape = classify_shape run ?function_ value;
                           origin = operand_origin value;
-                          passed_place = argument_place context frame run mode value;
-                          type_ = operand_type context frame value;
+                          passed_place = find_argument_place context frame run mode value;
+                          type_ = compute_operand_type context frame value;
                           term =
                             Validity.reading_callback context (fun () ->
                                 read_operand context frame run value);
@@ -438,7 +450,7 @@ let call_values context frame run (invocation : Invocation.t) (arguments : Mir.a
           arguments))
 
 let read_call context frame run (call : Mir.call) ~result_type =
-  let invocation = invocation_of call ~lends:None in
+  let invocation = make_invocation call ~lends:None in
   match (invocation.callee, call.arguments) with
   | ( Trait_method { trait; name = "equal"; _ },
       [
@@ -446,10 +458,10 @@ let read_call context frame run (call : Mir.call) ~result_type =
         Passed { value = Borrow { place = { root = Literal { text; _ }; projections = [] }; _ }; _ };
       ] )
     when Path.equal trait.trait Facts.equal_trait ->
-      let ty = operand_type context frame tested in
+      let ty = compute_operand_type context frame tested in
       Some
         ( frame,
-          Values.text_matches context
+          Values.make_text_match context
             (Facts.locate context frame.source call.origin)
             ty
             (read_operand context frame run tested)
@@ -459,22 +471,22 @@ let read_call context frame run (call : Mir.call) ~result_type =
         match call.callee with
         | Indirect callee ->
             Some
-              ( operand_type context frame callee,
+              ( compute_operand_type context frame callee,
                 Validity.reading_callback context (fun () -> read_operand context frame run callee),
-                shape_of run callee )
+                classify_shape run callee )
         | _ -> None
       in
-      let values = call_values context frame run invocation call.arguments in
+      let values = evaluate_call_values context frame run invocation call.arguments in
       Calls.apply_call context frame
         { origin = call.origin; type_ = result_type }
         invocation ~through values
 
 let read_lend context (frame : State.frame) run part (call : Mir.call) =
   let mode = match run.infos.(part).kind with Lent mode -> mode | _ -> Types.Read in
-  let invocation = invocation_of call ~lends:(Some mode) in
+  let invocation = make_invocation call ~lends:(Some mode) in
   let site : Invocation.site = { origin = call.origin; type_ = run.infos.(part).type_ } in
   let location = Facts.locate context frame.source call.origin in
-  let values = call_values context frame run invocation call.arguments in
+  let values = evaluate_call_values context frame run invocation call.arguments in
   let lend ?lent_final frame =
     Calls.apply_call ?lent_final context frame site invocation ~through:None values
   in
@@ -499,8 +511,8 @@ let read_lend context (frame : State.frame) run part (call : Mir.call) =
           Some
             (fun frame final ->
               Intrinsics.element_written_back context frame ~operation ~type_arguments
-                ~receiver:(passed_place_of context run receiver)
-                ~receiver_type:(place_type context frame run receiver)
+                ~receiver:(make_passed_place context run receiver)
+                ~receiver_type:(compute_place_type context frame run receiver)
                 index final) )
     | Some Types.Mut, Intrinsic _, _ -> Facts.unsupported location "this lend"
     | Some Types.Mut, _, _ ->
@@ -527,15 +539,15 @@ let read_lend context (frame : State.frame) run part (call : Mir.call) =
       | None -> lent)
     lent
 
-let target_type context frame run (target : Mir.place) =
+let compute_target_type context frame run (target : Mir.place) =
   match target with
   | { root = Local local; projections = [] } -> run.infos.(local).type_
-  | _ -> place_type context frame run target
+  | _ -> compute_place_type context frame run target
 
 let lends_places (part : Mir.yielded) =
   match part with Built _ | Part (Borrow _) -> true | Part (Use _ | Take _ | Constant _) -> false
 
-let rec yielded_value context frame run ~origin (part : Mir.yielded) =
+let rec read_yielded_value context frame run ~origin (part : Mir.yielded) =
   match part with
   | Part operand -> (frame, read_operand context frame run operand)
   | Built { variant; fields; type_ } ->
@@ -544,36 +556,38 @@ let rec yielded_value context frame run ~origin (part : Mir.yielded) =
           (fun (frame, values) (name, field) ->
             match field with
             | Some field ->
-                let frame, term = yielded_value context frame run ~origin field in
+                let frame, term = read_yielded_value context frame run ~origin field in
                 (frame, values @ [ (name, Some term) ])
             | None -> (frame, values @ [ (name, None) ]))
           (frame, []) fields
       in
       Values.apply_construct context frame { origin; type_ } variant values
 
-let rec written_back context run ty (part : Mir.yielded) frame after =
+let rec write_back_part context run ty (part : Mir.yielded) frame after =
   match part with
   | Part (Borrow { place; _ }) -> write_place context frame run place after
   | Built { variant; fields; _ } -> (
-      match Facts.constructors context ty with
+      match Facts.find_constructors context ty with
       | Some shape ->
           let shaped = Option.value (List.assoc_opt variant shape) ~default:[] in
           List.fold_left
             (fun frame (name, field) ->
               match (field, List.assoc_opt name shaped) with
               | Some field, Some field_type when lends_places field ->
-                  let field_type = Facts.substituted context frame field_type in
-                  let selected = Values.field_of context frame ty variant name field_type after in
+                  let field_type = Facts.substitute_type context frame field_type in
+                  let selected =
+                    Values.project_field context frame ty variant name field_type after
+                  in
                   let value =
                     match variant with
                     | None -> selected
                     | Some _ ->
                         Logic.ite
-                          (Logic.Is (Facts.constructor_name ty variant, after))
+                          (Logic.Is (Facts.make_constructor_symbol ty variant, after))
                           selected
                           (Facts.arrive context frame "lent" field_type)
                   in
-                  written_back context run field_type field frame value
+                  write_back_part context run field_type field frame value
               | _ -> frame)
             frame fields
       | None ->
@@ -598,7 +612,7 @@ let bind_parts context (frame : State.frame) run =
 
 let note_decision (context : State.context) (frame : State.frame) origin test =
   if frame.makes_obligations && frame.source.key = Some context.home then begin
-    let text = Facts.text_of context frame origin in
+    let text = Facts.quote_origin context frame origin in
     context.decisions <-
       ( Printf.sprintf "`%s` is true" text,
         Some (Printf.sprintf "`%s` is false" text),
@@ -607,19 +621,19 @@ let note_decision (context : State.context) (frame : State.frame) origin test =
       :: context.decisions
   end
 
-let refreshed context frame ty (place : State.passed_place) =
+let refresh_place context frame ty (place : State.passed_place) =
   let fresh_value = Facts.arrive context frame "changed" ty in
   let frame = place.write frame fresh_value in
   Validity.assume_valid context frame ty fresh_value;
   frame
 
-let todo_reached (context : State.context) (frame : State.frame) location =
+let record_todo (context : State.context) (frame : State.frame) location =
   if context.proving then begin
     context.holes <- (context.home, location) :: context.holes;
     context.unfinished <- frame.condition :: context.unfinished
   end
 
-let unreachable_reached context frame location =
+let oblige_unreachable context frame location =
   Facts.oblige context frame Unreachable location
     [ Text "This `unreachable` may be reached." ]
     (Logic.Boolean false)
@@ -631,7 +645,7 @@ let lend_part context (frame : State.frame) origin (mode : Types.mode) ~handed ~
       List.iter
         (fun (clause : Mir.formula) ->
           let _, term =
-            Validity.specification_value context
+            Validity.read_specification context
               { frame with result = Some handed; yielded = Some before }
               clause
           in
@@ -656,55 +670,58 @@ let lend_part context (frame : State.frame) origin (mode : Types.mode) ~handed ~
       Some
         {
           frame with
-          yielded_so_far = Some (Intrinsics.appended context frame part_type before part_after);
+          yielded_so_far = Some (Intrinsics.append_part context frame part_type before part_after);
         }
   | _ -> Facts.unsupported location "a lent part outside a lending method's body"
 
 let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(site : Invocation.site)
     =
   let location = Facts.locate context frame.source site.origin in
-  let ty = Facts.substituted context frame site.type_ in
+  let ty = Facts.substitute_type context frame site.type_ in
   let operand = read_operand context frame run in
   match value with
   | Operand value -> (frame, operand value)
   | Compare { comparison = compared; left; right } ->
       ( frame,
-        Operations.compared_terms (operand_type context frame left) compared (operand left)
-          (operand right) )
+        Operations.compare_terms
+          (compute_operand_type context frame left)
+          compared (operand left) (operand right) )
   | Not inner -> (frame, Logic.not_ (operand inner))
   | Is_variant { place; variant } ->
-      let ty = place_type context frame run place in
-      ignore (Facts.sort_of context ty);
-      if Facts.constructors context ty = None then
+      let ty = compute_place_type context frame run place in
+      ignore (Facts.declare_sort context ty);
+      if Facts.find_constructors context ty = None then
         Facts.unsupported location "a variant of `%s`, which the prover does not see"
           (Types.show ty);
       ( frame,
-        Logic.Is (Facts.constructor_name ty (Some variant), read_place context frame run place) )
+        Logic.Is
+          (Facts.make_constructor_symbol ty (Some variant), read_place context frame run place) )
   | Copy copied_operand ->
-      let ty = operand_type context frame copied_operand in
+      let ty = compute_operand_type context frame copied_operand in
       let term = operand copied_operand in
       let literal =
         match copied_operand with
         | Borrow { place = { root = Literal { text; _ }; projections = [] }; _ } -> Some text
         | _ -> None
       in
-      (Values.copied ?literal context frame ty term, term)
+      (Values.copy_value ?literal context frame ty term, term)
   | Convert { conversion = Widen; value; converts_function_expression } ->
       Operations.check_widened location ~is_written:converts_function_expression
-        (operand_type context frame value)
+        (compute_operand_type context frame value)
         ty;
       (frame, operand value)
-  | Value_parameter parameter -> (frame, Models.value_term context frame (Value_parameter parameter))
+  | Value_parameter parameter ->
+      (frame, Models.make_value_term context frame (Value_parameter parameter))
   | Convert { conversion = To_integer; value; _ } -> (frame, operand value)
   | Convert { conversion = From_integer; value; _ } ->
-      (frame, Operations.from_integer context frame site (operand value))
+      (frame, Operations.convert_from_integer context frame site (operand value))
   | Function_value { path; type_arguments; is_argument } ->
       (frame, Values.global_value context frame site path type_arguments ~is_argument)
-  | To_any _ -> Operations.to_any context frame site
+  | To_any _ -> Operations.convert_to_any context frame site
   | Operation { operation; operands; type_arguments } ->
       let types =
         List.filter_map
-          (function Types.Type ty -> Some (Facts.substituted context frame ty) | _ -> None)
+          (function Types.Type ty -> Some (Facts.substitute_type context frame ty) | _ -> None)
           type_arguments
       in
       let types = match types with [] -> [ ty ] | types -> types in
@@ -743,36 +760,38 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
       | _ -> Facts.unsupported location "`yielded` here")
   | Specification (Identical (first, second)) ->
       let first_value = operand first and second_value = operand second in
-      Values.extensional context frame (operand_type context frame first) first_value second_value;
+      Values.assume_extensional context frame
+        (compute_operand_type context frame first)
+        first_value second_value;
       (frame, Logic.equal first_value second_value)
   | Specification (Applied { function_; arguments; unconverted }) ->
       let values = Validity.reading_callback context (fun () -> List.map operand arguments) in
       Values.apply_specification_function context frame ~location function_ values
-        ~unconverted:(List.map (Facts.substituted context frame) unconverted)
-        ~types:(List.map (operand_type context frame) arguments)
+        ~unconverted:(List.map (Facts.substitute_type context frame) unconverted)
+        ~types:(List.map (compute_operand_type context frame) arguments)
   | Specification (Method_time callee) ->
-      (frame, Amounts.method_time context frame (unit_callee callee))
+      (frame, Amounts.compute_method_time context frame (unit_callee callee))
   | Specification (Map entries) ->
       Values.apply_map_literal context frame ~ty ~location
         (List.map (fun (key, entry) -> (operand_origin key, operand key, operand entry)) entries)
   | Specification (Quantified { quantifier; range; parameter; matches; body }) ->
       let range =
         match range with
-        | Over_type ty -> Models.Range_of_type (Facts.substituted context frame ty)
+        | Over_type ty -> Models.Range_of_type (Facts.substitute_type context frame ty)
         | Over_range { start; stop; inclusive } ->
             Range_of_integers
               {
                 low = operand start;
                 high = operand stop;
                 inclusive;
-                type_ = operand_type context frame start;
+                type_ = compute_operand_type context frame start;
               }
         | Over_collection collection ->
             Range_of_collection
               {
-                collection_type = operand_type context frame collection;
+                collection_type = compute_operand_type context frame collection;
                 collected = operand collection;
-                element = Facts.substituted context frame run.infos.(parameter).type_;
+                element = Facts.substitute_type context frame run.infos.(parameter).type_;
                 location;
               }
       in
@@ -829,11 +848,11 @@ and after_either context ~(outer : State.frame) ~condition
             && after_otherwise.condition == entered_otherwise.condition
           then outer.condition
           else
-            Facts.path_condition context outer
+            Facts.name_path_condition context outer
               (Logic.( ||| ) after.condition after_otherwise.condition))
        [ (condition, after, None); (Logic.not_ condition, after_otherwise, None) ])
 
-and either context ~outer ~condition (entered, read) (entered_otherwise, otherwise) =
+and merge_alternatives context ~outer ~condition (entered, read) (entered_otherwise, otherwise) =
   match (read, otherwise) with
   | None, None -> None
   | Some after, None | None, Some after -> Some after
@@ -843,7 +862,7 @@ and either context ~outer ~condition (entered, read) (entered_otherwise, otherwi
             (entered_otherwise, after_otherwise),
           Logic.ite condition value value_otherwise )
 
-and chosen_value context frame run (choice : Mir.choice) =
+and read_choice context frame run (choice : Mir.choice) =
   match choice with
   | Conditional { condition; then_; else_; if_condition } ->
       let test = read_operand context frame run condition in
@@ -852,7 +871,7 @@ and chosen_value context frame run (choice : Mir.choice) =
       | None -> ());
       let entered_then = Facts.restrict frame test
       and entered_else = Facts.restrict frame (Logic.not_ test) in
-      either context ~outer:frame ~condition:test
+      merge_alternatives context ~outer:frame ~condition:test
         (entered_then, read_block context entered_then run then_)
         (entered_else, read_block context entered_else run else_)
   | Cases cases ->
@@ -886,7 +905,7 @@ and chosen_value context frame run (choice : Mir.choice) =
                 read
             else
               let not_taken = Facts.restrict after_tests (Logic.not_ is_taken) in
-              either context ~outer:current ~condition:is_taken (entered, read)
+              merge_alternatives context ~outer:current ~condition:is_taken (entered, read)
                 (not_taken, first_taken not_taken later)
       in
       first_taken frame cases
@@ -921,7 +940,7 @@ and read_statement context frame run (statement : Mir.statement) =
           names
       in
       let frame, term = read_value context frame run code in
-      Assertions.assertion context frame
+      Assertions.check_assertion context frame
         ~origin:(Option.value (operand_origin condition) ~default:statement.origin)
         ~bit_vector:(Some (named, fun isolated -> snd (read_value context isolated run code)))
         term;
@@ -933,17 +952,17 @@ and read_statement context frame run (statement : Mir.statement) =
         | Cases cases -> List.filter_map (fun (case : Mir.case) -> case.value.value) cases
         | Connective _ -> []
       in
-      write_assignment context run target ~copied (chosen_value context frame run choice)
+      write_assignment context run target ~copied (read_choice context frame run choice)
   | Yield { mode; part } ->
       let origin = statement.origin in
-      let frame, handed = yielded_value context frame run ~origin part in
+      let frame, handed = read_yielded_value context frame run ~origin part in
       let part_type =
         match part with
-        | Part operand -> operand_type context frame operand
-        | Built { type_; _ } -> Facts.substituted context frame type_
+        | Part operand -> compute_operand_type context frame operand
+        | Built { type_; _ } -> Facts.substitute_type context frame type_
       in
       lend_part context frame origin mode ~handed ~lends:(lends_places part)
-        ~write_back:(fun frame after -> written_back context run part_type part frame after)
+        ~write_back:(fun frame after -> write_back_part context run part_type part frame after)
   | Jump jump ->
       (match jump with
       | Return returned ->
@@ -968,7 +987,7 @@ and read_statement context frame run (statement : Mir.statement) =
             match returned with
             | Some (value, local) ->
                 Facts.bind frame (Locals.make_key run.infos local)
-                  (operand_type context frame value)
+                  (compute_operand_type context frame value)
                   (read_operand context frame run value)
             | None -> frame
           in
@@ -982,8 +1001,8 @@ and read_statement context frame run (statement : Mir.statement) =
               | Some exits -> exits.ends <- frame :: exits.ends
               | None -> Facts.bug "an early exit of an iteration that is not around it"))
       | Unreachable -> ()
-      | Written_unreachable -> unreachable_reached context frame location
-      | Todo -> todo_reached context frame location);
+      | Written_unreachable -> oblige_unreachable context frame location
+      | Todo -> record_todo context frame location);
       None
   | Fork { fork; branches; _ } ->
       List.fold_left
@@ -1020,11 +1039,11 @@ and read_statement context frame run (statement : Mir.statement) =
       in
       Facts.join_frames context (others :: resumed)
   | While { loop; condition; body; failed; compared } ->
-      Loops.while_ context frame
+      Loops.run_while_loop context frame
         {
           while_at = loop.origin;
           while_clauses = loop.clauses;
-          changed = changes run frame (Mir.nested_blocks statement);
+          changed = compute_changes run frame (Mir.nested_blocks statement);
           bind_parts = (fun frame -> bind_parts context frame run);
           test = (fun head -> read_block context head run condition);
           run_body =
@@ -1067,9 +1086,9 @@ and read_statement context frame run (statement : Mir.statement) =
         | Some { element; collection; _ }, _ ->
             ( Models.Range_of_collection
                 {
-                  collection_type = place_type context frame run collection;
+                  collection_type = compute_place_type context frame run collection;
                   collected = read_place context frame run collection;
-                  element = Facts.substituted context frame run.infos.(element).type_;
+                  element = Facts.substitute_type context frame run.infos.(element).type_;
                   location;
                 },
               element,
@@ -1083,7 +1102,7 @@ and read_statement context frame run (statement : Mir.statement) =
                   low = read_operand context frame run start;
                   high = read_operand context frame run stop;
                   inclusive;
-                  type_ = operand_type context frame start;
+                  type_ = compute_operand_type context frame start;
                 },
               part,
               from 0 bound )
@@ -1106,7 +1125,7 @@ and read_statement context frame run (statement : Mir.statement) =
       let run_body inside element =
         let inside =
           Facts.bind inside (Locals.make_key run.infos part)
-            (Facts.substituted context inside run.infos.(part).type_)
+            (Facts.substitute_type context inside run.infos.(part).type_)
             element
         in
         let exits = { loop = loop.origin; breaks = []; ends = [] } in
@@ -1120,7 +1139,7 @@ and read_statement context frame run (statement : Mir.statement) =
       let bind_element frame element =
         let frame =
           Facts.bind frame (Locals.make_key run.infos part)
-            (Facts.substituted context frame run.infos.(part).type_)
+            (Facts.substitute_type context frame run.infos.(part).type_)
             element
         in
         List.fold_left
@@ -1137,8 +1156,8 @@ and read_statement context frame run (statement : Mir.statement) =
         | Pull { cursor; next } ->
             Over_cursor
               {
-                cursor = passed_place_of context run cursor;
-                cursor_type = place_type context frame run cursor;
+                cursor = make_passed_place context run cursor;
+                cursor_type = compute_place_type context frame run cursor;
                 next = unit_callee next;
               }
       in
@@ -1162,7 +1181,7 @@ and read_statement context frame run (statement : Mir.statement) =
           collection =
             Option.map
               (fun (lent : Mir.lent_element) frame ->
-                ( place_type context frame run lent.collection,
+                ( compute_place_type context frame run lent.collection,
                   read_place context { frame with makes_obligations = false } run lent.collection ))
               lent;
           element_call =
@@ -1188,13 +1207,13 @@ and read_statement context frame run (statement : Mir.statement) =
                             read_place context (lend at after_bindings) run
                               { root = Local lent.element; projections = [] })));
           bind_element;
-          changed_in = (fun frame -> changes ~also:iterated run frame [ body ]);
-          changed_by_body = (fun frame -> changes run frame [ body ]);
+          changed_in = (fun frame -> compute_changes ~also:iterated run frame [ body ]);
+          changed_by_body = (fun frame -> compute_changes run frame [ body ]);
           run_body;
           bind_parts = (fun frame -> bind_parts context frame run);
         }
       in
-      Loops.for_ context frame for_loop
+      Loops.run_for_loop context frame for_loop
 
 and read_basic context frame run (statement : Mir.statement) ~location (basic : Mir.basic) =
   match basic with
@@ -1210,22 +1229,23 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
           frame with
           aliases = Locals.add key [ (Logic.Boolean true, place) ] frame.aliases;
           types =
-            Locals.add key (Facts.substituted context frame run.infos.(local).type_) frame.types;
+            Locals.add key (Facts.substitute_type context frame run.infos.(local).type_) frame.types;
         }
   | Assign { target; value = Lambda { is_argument = true; _ }; _ } ->
       Some
         (write_place context frame run target
-           (Facts.arrive context frame "lambda" (place_type context frame run target)))
+           (Facts.arrive context frame "lambda" (compute_place_type context frame run target)))
   | Assign { target; value } ->
       write_assignment context run target
         ~copied:(match value with Operand copied -> [ copied ] | _ -> [])
         (Some
            (read_rvalue context frame run value
-              ~site:{ origin = statement.origin; type_ = target_type context frame run target }))
+              ~site:
+                { origin = statement.origin; type_ = compute_target_type context frame run target }))
   | Call { destination; call } -> (
       let result_type =
         match destination with
-        | Some destination -> target_type context frame run destination
+        | Some destination -> compute_target_type context frame run destination
         | None -> Types.unit
       in
       match read_call context frame run call ~result_type with
@@ -1288,13 +1308,13 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
         }
   | Lend { part; call } -> read_lend context frame run part call
   | Assert condition ->
-      Assertions.assertion context frame
+      Assertions.check_assertion context frame
         ~origin:(Option.value (operand_origin condition) ~default:statement.origin)
         ~bit_vector:None
         (read_operand context frame run condition);
       Some frame
   | Ghost_assert { condition; by_bit_vector } ->
-      let frame, term = Validity.specification_value context frame condition in
+      let frame, term = Validity.read_specification context frame condition in
       let named () =
         List.map
           (fun parameter ->
@@ -1304,7 +1324,7 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
                 Facts.bug "an assertion's formula that takes no local")
           condition.parameters
       in
-      Assertions.assertion context frame ~origin:condition.origin
+      Assertions.check_assertion context frame ~origin:condition.origin
         ~bit_vector:
           (if by_bit_vector then
              Some
@@ -1313,19 +1333,22 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
            else None)
         term;
       Some frame
-  | Proof code -> Some (Facts.restrict frame (Logic.not_ (Values.ghost_code context frame code)))
+  | Proof code ->
+      Some (Facts.restrict frame (Logic.not_ (Values.run_ghost_code context frame code)))
   | Matched { patterns } ->
       if frame.makes_obligations then
         context.decisions <-
           ( Printf.sprintf "the arm `%s` is taken"
-              (String.concat ", " (List.map (Facts.text_of context frame) patterns)),
+              (String.concat ", " (List.map (Facts.quote_origin context frame) patterns)),
             None,
             frame.condition,
             Logic.Boolean true )
           :: context.decisions;
       Some frame
   | Slice { destination; base; base_type; call } ->
-      let values = call_values context frame run (invocation_of call ~lends:None) call.arguments in
+      let values =
+        evaluate_call_values context frame run (make_invocation call ~lends:None) call.arguments
+      in
       let argument position =
         Option.map
           (fun (passed : State.passed) -> passed.term)
@@ -1333,14 +1356,14 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
       in
       let low = Option.value (argument 1) ~default:(Logic.int 0) in
       let site : Invocation.site =
-        { origin = call.origin; type_ = target_type context frame run destination }
+        { origin = call.origin; type_ = compute_target_type context frame run destination }
       in
-      let base_type = Facts.substituted context frame base_type in
+      let base_type = Facts.substitute_type context frame base_type in
       let collection = read_place context frame run base in
       let frame, viewed, low, high =
         Intrinsics.apply_slice context frame site ~base_type ~collection ~low ~high:(argument 2)
       in
-      let collection = expanded frame run base in
+      let collection = expand_place frame run base in
       let written = write_place context frame run destination viewed in
       Some
         (match destination with
@@ -1361,7 +1384,7 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
       | Trait_method { trait; name; receiver; evidence; _ }, [ Passed { value = template; _ } ] ->
           let frame, tagged =
             Values.apply_template context frame
-              { origin = call.origin; type_ = target_type context frame run destination }
+              { origin = call.origin; type_ = compute_target_type context frame run destination }
               ~trait ~name ~receiver ~evidence ~literals
               (read_operand context frame run template)
           in
@@ -1378,10 +1401,10 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
                (fun frame (implementation : Mir.provided) ->
                  match (implementation.mode, implementation.value) with
                  | Types.Mut, Borrow { place; _ } ->
-                     let root = { (expanded frame run place) with Mir.projections = [] } in
-                     refreshed context frame
-                       (place_type context frame run root)
-                       (passed_place_of context run root)
+                     let root = { (expand_place frame run place) with Mir.projections = [] } in
+                     refresh_place context frame
+                       (compute_place_type context frame run root)
+                       (make_passed_place context run root)
                  | _ -> frame)
                frame provided)
       | None -> Some frame)
@@ -1421,15 +1444,15 @@ and write_assignment context run (target : Mir.place) ~(copied : Mir.operand lis
         }
     | _ -> written)
 
-let new_run ~in_formula ~locals ~lambdas =
+let make_run ~in_formula ~locals ~lambdas =
   { infos = locals; lambdas; in_formula; provides = Hashtbl.create 2; loops = []; cancelled = [] }
 
-let formula_term context (frame : State.frame) (formula : Mir.formula) ~arguments =
-  let run = new_run ~in_formula:true ~locals:formula.locals ~lambdas:formula.lambdas in
+let read_formula context (frame : State.frame) (formula : Mir.formula) ~arguments =
+  let run = make_run ~in_formula:true ~locals:formula.locals ~lambdas:formula.lambdas in
   let inside =
     {
       frame with
-      State.locals = Lambdas.without_temporaries frame.locals;
+      State.locals = Lambdas.remove_temporaries frame.locals;
       aliases = Locals.empty;
       slices = Locals.empty;
       lends = Locals.empty;
@@ -1442,7 +1465,7 @@ let formula_term context (frame : State.frame) (formula : Mir.formula) ~argument
         (fun inside parameter argument ->
           Facts.bind inside
             (Locals.make_key run.infos parameter)
-            (Facts.substituted context inside formula.locals.(parameter).type_)
+            (Facts.substitute_type context inside formula.locals.(parameter).type_)
             argument)
         inside formula.parameters arguments
   in
@@ -1453,7 +1476,7 @@ let formula_term context (frame : State.frame) (formula : Mir.formula) ~argument
     raise (Facts.Foreign_unsupported (Printf.sprintf "%s, in `%s`" message frame.source.name))
 
 let read_body context start ~(lambdas : Mir.body array) (body : Mir.body) =
-  let run = new_run ~in_formula:false ~locals:body.locals ~lambdas in
+  let run = make_run ~in_formula:false ~locals:body.locals ~lambdas in
   let start =
     { start with State.aliases = Locals.empty; slices = Locals.empty; lends = Locals.empty }
   in
@@ -1470,7 +1493,7 @@ let read_body context start ~(lambdas : Mir.body array) (body : Mir.body) =
   let start =
     List.fold_left
       (fun frame local ->
-        let ty = Facts.substituted context frame body.locals.(local).type_ in
+        let ty = Facts.substitute_type context frame body.locals.(local).type_ in
         Facts.bind frame (Locals.make_key run.infos local) ty
           (Facts.arrive context frame "returned" ty))
       start (returned_locals body.code)

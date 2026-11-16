@@ -17,11 +17,11 @@ val slice_place :
   high:Logic.term ->
   State.passed_place
 
-val buffer_capacity : State.context -> Types.ty -> Logic.term -> Logic.term
-val buffer_model : State.context -> Intrinsic.builtin -> Types.ty -> Logic.term -> Logic.term
+val make_buffer_capacity : State.context -> Types.ty -> Logic.term -> Logic.term
+val make_buffer_model : State.context -> Intrinsic.builtin -> Types.ty -> Logic.term -> Logic.term
 val measure_type : Types.ty -> Types.function_type
-val sequence_sum : State.context -> Types.ty -> Logic.term -> Logic.term -> Logic.term
-val appended : State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term -> Logic.term
+val make_sequence_sum : State.context -> Types.ty -> Logic.term -> Logic.term -> Logic.term
+val append_part : State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term -> Logic.term
 
 val intrinsic :
   State.context ->

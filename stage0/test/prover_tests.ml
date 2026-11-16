@@ -117,7 +117,7 @@ let () =
       with
       | Obligations { obligations = [ obligation ]; _ } ->
           if not (List.exists applies_limited obligation.query.facts) then
-            Harness.fail "no fact applies the limited copy: %s" (Logic.text obligation.query)
+            Harness.fail "no fact applies the limited copy: %s" (Logic.show_query obligation.query)
       | _ -> Harness.fail "expected one obligation")
 
 let () =
@@ -1345,7 +1345,7 @@ let () =
             Solver.read request (List.hd (Solver.solve_all solver [ (request, query) ]))
             <> Solver.Proven
           then Harness.fail "expected the cached answer";
-          if Solver.queries_run solver <> 0 then Harness.fail "ran the solver");
+          if Solver.count_queries_run solver <> 0 then Harness.fail "ran the solver");
   Harness.test "a solved answer is added to the cache under its request's key" (fun () ->
       let query = compared_with_itself "<=" in
       let request = Solver.request query in
@@ -1357,7 +1357,7 @@ let () =
       | Error message -> Harness.fail "%s" message
       | Ok solver ->
           ignore (Solver.solve_all solver [ (request, query) ]);
-          if Solver.queries_run solver <> 1 then Harness.fail "did not run the solver";
+          if Solver.count_queries_run solver <> 1 then Harness.fail "did not run the solver";
           if Hashtbl.find_opt cached_answers (Solver.request_key request) <> Some "proven\n" then
             Harness.fail "the cache does not have the answer");
   Harness.test "a query's text names nothing by its Truss name" (fun () ->
@@ -1368,7 +1368,7 @@ let () =
           (Resolve.Names.key_of key)
       with
       | Obligations { obligations = [ obligation ]; _ } ->
-          let text = Logic.text obligation.query in
+          let text = Logic.show_query obligation.query in
           if contains text "count" then Harness.fail "the text names `count`: %s" text
       | _ -> Harness.fail "expected one obligation");
   Harness.test "renaming a function and its parameter gives the same query" (fun () ->
@@ -1434,7 +1434,7 @@ let () =
         | Obligations { obligations; _ } ->
             List.fold_left
               (fun most (obligation : Prover.State.obligation) ->
-                let text = Logic.text obligation.query in
+                let text = Logic.show_query obligation.query in
                 let rec count from actual =
                   match String.index_from_opt text from '1' with
                   | Some at when at + 5 <= String.length text && String.sub text at 5 = "12345" ->
@@ -1466,7 +1466,7 @@ let variable label = Logic.Symbol.Variable { label; numbers = [] }
 
 let triggered fact =
   let open Logic in
-  Logic.text
+  Logic.show_query
     {
       declarations =
         [

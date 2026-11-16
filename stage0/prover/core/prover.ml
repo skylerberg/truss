@@ -8,7 +8,7 @@ type proof =
   | Unsupported of State.location * string
   | Not_proven_here
 
-let inherited (lookups : Lookups.t) (path : Path.t) =
+let find_inherited_part (lookups : Lookups.t) (path : Path.t) =
   match path with
   | Method { owner = impl; name; receiver } -> (
       match Interface.Definition.read_interface lookups.interface impl with
@@ -17,24 +17,24 @@ let inherited (lookups : Lookups.t) (path : Path.t) =
           let substitution =
             Option.value ~default:[] (Interface.Impls.make_impl_substitution lookups.interface impl)
           in
-          match Contracts.trait_part lookups implemented name receiver with
+          match Contracts.find_trait_part lookups implemented name receiver with
           | Some part -> Some (part, substitution)
           | None ->
               Option.map
                 (fun part -> (part, substitution))
-                (Contracts.capability_part lookups implemented name))
+                (Contracts.find_capability_part lookups implemented name))
       | _ -> None)
   | _ -> None
 
-let impl_laws (lookups : Lookups.t) (key : Resolve.Names.key) source =
+let translate_impl_laws (lookups : Lookups.t) (key : Resolve.Names.key) source =
   match Interface.Definition.read_interface lookups.interface key.path with
   | Some (Interface.Environment.Impl_interface interface)
-    when not (Contracts.impl_unfinished lookups key) ->
+    when not (Contracts.is_impl_unfinished lookups key) ->
       [
-        Translate.laws lookups source ~impl:key.path ~trait:interface.implements
+        Translate.translate_laws lookups source ~impl:key.path ~trait:interface.implements
           ~for_type:interface.for_type
           ~proofs:
-            (Contracts.law_proofs lookups (Path.package key.path) interface.implements
+            (Contracts.list_law_proofs lookups (Path.package key.path) interface.implements
                interface.for_type)
           ~at:Whole_definition;
       ]
@@ -42,7 +42,7 @@ let impl_laws (lookups : Lookups.t) (key : Resolve.Names.key) source =
 
 let is_specification_module (key : Resolve.Names.key) = key.module_ = Well_known.specification
 
-let integer_instances (lookups : Lookups.t) (path : Path.t) =
+let list_integer_instances (lookups : Lookups.t) (path : Path.t) =
   let generics =
     match Interface.Impls.read_signature lookups.interface path with
     | Some signature ->
@@ -82,7 +82,8 @@ let integer_instances (lookups : Lookups.t) (path : Path.t) =
     (self @ generics)
   |> List.filter (fun (shown, _) -> shown <> [])
 
-let derived_default (lookups : Lookups.t) (key : Resolve.Names.key) (source : State.source) =
+let translate_derived_default (lookups : Lookups.t) (key : Resolve.Names.key)
+    (source : State.source) =
   let derives_default =
     match Interface.Definition.read_interface lookups.interface key.path with
     | Some (Interface.Environment.Type_interface interface) ->
@@ -98,7 +99,7 @@ let derived_default (lookups : Lookups.t) (key : Resolve.Names.key) (source : St
       }
   in
   if derives_default && Option.is_some (Mir.code_of_path lookups.mir path) then
-    let outcome = Translate.function_ lookups source ~path in
+    let outcome = Translate.translate_function lookups source ~path in
     List.map
       (fun (obligation : State.obligation) ->
         let message =
@@ -115,22 +116,23 @@ let derived_default (lookups : Lookups.t) (key : Resolve.Names.key) (source : St
       outcome.obligations
   else []
 
-let proof (lookups : Lookups.t) (key : Resolve.Names.key) =
-  match (lookups.interface.names.declaration key, Contracts.source_at_key lookups key) with
+let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
+  match (lookups.interface.names.declaration key, Contracts.read_source_at_key lookups key) with
   | _ when is_specification_module key -> Not_proven_here
   | declaration, source -> (
       lookups.patterns key;
       try
         match declaration.kind with
         | (Function | Method) when Mir.code (lookups.mir.body_part key) = None -> Not_proven_here
-        | Theorem -> Obligations (Translate.theorem lookups source ~path:key.path)
+        | Theorem -> Obligations (Translate.translate_theorem lookups source ~path:key.path)
         | Function | Method -> (
             let prove_with substitution =
-              Translate.function_
+              Translate.translate_function
                 ~is_updating_helper:(Contracts.is_updating_helper lookups key.path)
-                ?inherited:(inherited lookups key.path) ~substitution lookups source ~path:key.path
+                ?inherited:(find_inherited_part lookups key.path)
+                ~substitution lookups source ~path:key.path
             in
-            match integer_instances lookups key.path with
+            match list_integer_instances lookups key.path with
             | [] -> Obligations (prove_with [])
             | instances ->
                 let outcomes =
@@ -159,9 +161,9 @@ let proof (lookups : Lookups.t) (key : Resolve.Names.key) =
                         (List.concat_map (fun (outcome : State.outcome) -> outcome.holes) outcomes);
                   })
         | Test -> Obligations (Translate.test lookups source ~path:key.path)
-        | Constant -> Obligations (Translate.constant lookups source ~path:key.path)
+        | Constant -> Obligations (Translate.translate_constant lookups source ~path:key.path)
         | Impl ->
-            let outcomes = impl_laws lookups key source in
+            let outcomes = translate_impl_laws lookups key source in
             Obligations
               {
                 obligations =
@@ -176,22 +178,22 @@ let proof (lookups : Lookups.t) (key : Resolve.Names.key) =
             in
             match Mir.type_clauses_of_path lookups.mir key.path with
             | Some { form = { invariants = _ :: _; _ }; _ } ->
-                let outcome = Translate.type_ lookups source ~path:key.path in
+                let outcome = Translate.translate_type lookups source ~path:key.path in
                 Obligations
                   {
                     outcome with
-                    obligations = outcome.obligations @ derived_default lookups key source;
+                    obligations = outcome.obligations @ translate_derived_default lookups key source;
                   }
             | Some { form = { potential; _ }; _ } when Option.is_some potential || has_defaults ()
               ->
-                Obligations (Translate.type_ lookups source ~path:key.path)
+                Obligations (Translate.translate_type lookups source ~path:key.path)
             | Some _ | None -> Not_proven_here)
         | Trait | Capability | Member_constant | Law_proof -> Not_proven_here
       with
       | Facts.Unsupported (span, message) -> Unsupported (span, message)
       | Facts.Foreign_unsupported message -> Unsupported (Whole_definition, message))
 
-let float_text bits =
+let show_float bits =
   let shortest ~most ~same value =
     let rec shortest_digits digits =
       let text = Printf.sprintf "%.*g" digits value in
@@ -220,7 +222,7 @@ let float_text bits =
     | Some at -> String.sub text 0 at ^ ".0" ^ String.sub text at (String.length text - at)
     | None -> text ^ ".0"
 
-let truss_value members text =
+let show_truss_value members text =
   let tokens =
     let buffer = Buffer.create 16 and tokens = ref [] in
     let flush () =
@@ -270,7 +272,7 @@ let truss_value members text =
   let rec one = function
     | `Open :: `Atom "fp" :: `Atom sign :: `Atom exponent :: `Atom fraction :: `Close :: rest -> (
         match (bits sign, bits exponent, bits fraction) with
-        | Some sign, Some exponent, Some fraction -> (float_text (sign ^ exponent ^ fraction), rest)
+        | Some sign, Some exponent, Some fraction -> (show_float (sign ^ exponent ^ fraction), rest)
         | _ -> ("a float", rest))
     | `Open :: `Atom "_" :: `Atom special :: `Atom _ :: `Atom _ :: `Close :: rest ->
         ( (match special with
@@ -312,12 +314,12 @@ let truss_value members text =
   in
   fst (one tokens)
 
-let counterexample members (obligation : State.obligation) answer_values =
+let show_counterexample members (obligation : State.obligation) answer_values =
   let shown =
     List.filter_map
       (fun (symbol, name) ->
         Option.map
-          (fun value -> Printf.sprintf "`%s` is %s" name (truss_value members value))
+          (fun value -> Printf.sprintf "`%s` is %s" name (show_truss_value members value))
           (List.assoc_opt symbol answer_values))
       (List.rev obligation.values @ List.rev obligation.locals)
   in
@@ -337,16 +339,17 @@ let counterexample members (obligation : State.obligation) answer_values =
   (match shown with [] -> "" | shown -> " For example, when " ^ String.concat ", " shown ^ ".")
   ^ match path with [] -> "" | path -> " On that path, " ^ String.concat ", " path ^ "."
 
-let diagnostic code span message = Diagnostic.make ~code:(Diagnostic.Code.Prover code) span message
+let make_diagnostic code span message =
+  Diagnostic.make ~code:(Diagnostic.Code.Prover code) span message
 
 let resolve_location (names : Resolve.Names.lookups) (key : Resolve.Names.key)
     (location : State.location) =
   Source.Definition_span.locate (names.spans key)
     (match location with Node origin -> origin | Whole_definition -> (names.definition key).id)
 
-let substituted text spans clause replacements =
+let substitute_clause text spans clause replacements =
   let clause_span = Source.Definition_span.locate spans clause in
-  let clause_text = Facts.quoted text clause_span in
+  let clause_text = Facts.quote_span text clause_span in
   let buffer = Buffer.create (String.length clause_text) in
   let next =
     List.fold_left
@@ -373,24 +376,24 @@ let render (lookups : Lookups.t) (message : State.message) =
        (function
          | State.Text text -> text
          | Quote (key, origin) ->
-             Facts.quoted
+             Facts.quote_span
                (lookups.interface.names.text key)
                (Source.Definition_span.locate (lookups.interface.names.spans key) origin)
          | Substituted { key; clause; replacements } ->
-             substituted
+             substitute_clause
                (lookups.interface.names.text key)
                (lookups.interface.names.spans key)
                clause replacements)
        message)
 
-let rendered_fix lookups ({ title; edits } : State.fix) =
+let render_fix lookups ({ title; edits } : State.fix) =
   Diagnostic.fix (render lookups title)
     (List.map
        (fun ({ at; replacement } : State.edit) ->
          Diagnostic.replace at (render lookups replacement))
        edits)
 
-let cited_place (lookups : Lookups.t) ((key : Resolve.Names.key), origin) =
+let locate_citation (lookups : Lookups.t) ((key : Resolve.Names.key), origin) =
   let place = lookups.interface.names.place key in
   ( place,
     Source.Definition_span.to_file ~base:place.base
@@ -408,7 +411,7 @@ type 'span state = {
 
 type verdict = (Source.Definition_span.t state * (Resolve.Names.key * Core.origin) option) list
 
-let definition_states (lookups : Lookups.t) (key : Resolve.Names.key) proof answers =
+let list_definition_states (lookups : Lookups.t) (key : Resolve.Names.key) proof answers =
   let resolve location = resolve_location lookups.interface.names key location in
   match proof with
   | Not_proven_here -> []
@@ -422,7 +425,7 @@ let definition_states (lookups : Lookups.t) (key : Resolve.Names.key) proof answ
             code = Unsupported;
             span = resolve location;
             shows = message;
-            failure = Some (diagnostic Unsupported (resolve location) message);
+            failure = Some (make_diagnostic Unsupported (resolve location) message);
             trusts_compiled_code = false;
           },
           None );
@@ -442,8 +445,8 @@ let definition_states (lookups : Lookups.t) (key : Resolve.Names.key) proof answ
           let failed explained =
             Some
               {
-                (diagnostic obligation.code span (message ^ explained ^ others)) with
-                fixes = List.map (rendered_fix lookups) obligation.fixes;
+                (make_diagnostic obligation.code span (message ^ explained ^ others)) with
+                fixes = List.map (render_fix lookups) obligation.fixes;
               }
           in
           ( {
@@ -458,7 +461,8 @@ let definition_states (lookups : Lookups.t) (key : Resolve.Names.key) proof answ
                     failed
                       (" Running it on this template's text failed, so it is not known: " ^ report)
                 | Solved (Counterexample values) ->
-                    failed (counterexample (Logic.members obligation.query) obligation values)
+                    failed
+                      (show_counterexample (Logic.list_members obligation.query) obligation values)
                 | Solved Out_of_steps ->
                     failed
                       (" The solver ran out of steps, so it may hold but needs help: a `proof` \
@@ -585,7 +589,7 @@ let decide ~runs lookups solver proofs =
                 | Proven | Out_of_steps -> Solved (plain_answer plain_request)))
           questions
       in
-      Hashtbl.replace verdicts key (definition_states lookups key proof answers))
+      Hashtbl.replace verdicts key (list_definition_states lookups key proof answers))
     local_questions;
   { lookups; verdicts }
 
@@ -597,7 +601,7 @@ let file_states { lookups; verdicts } file =
       let ({ base; _ } : Resolve.Names.place) = lookups.interface.names.place key in
       List.map
         (fun (state, cited) ->
-          let cited = Option.map (cited_place lookups) cited in
+          let cited = Option.map (locate_citation lookups) cited in
           let note =
             match cited with
             | Some ((place : Resolve.Names.place), span) when place.file = file ->
@@ -633,7 +637,7 @@ let file_states { lookups; verdicts } file =
         (verdict key))
     (lookups.interface.names.declarations_in file)
 
-let sorted_diagnostics list =
+let sort_diagnostics list =
   List.sort
     (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
       compare (left.span, left.code) (right.span, right.code))
@@ -655,4 +659,4 @@ let list_diagnostics verdicts file =
         ([], []) states
       |> snd)
     (file_states verdicts file)
-  |> sorted_diagnostics
+  |> sort_diagnostics

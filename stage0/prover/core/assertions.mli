@@ -1,4 +1,4 @@
-val assertion :
+val check_assertion :
   State.context ->
   State.frame ->
   origin:int ->

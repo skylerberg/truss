@@ -14,17 +14,17 @@ let bitwise_operations : Intrinsic.operation list =
     Swap_bytes;
   ]
 
-let bitwise_of : Logic.symbol -> _ = function
+let find_bitwise_operation : Logic.symbol -> _ = function
   | Opaque_operation { operation; integer = Some (bits, signed); _ }
     when List.mem operation bitwise_operations ->
       Some (operation, bits, signed)
   | _ -> None
 
-let exactly (query : Logic.query) =
+let add_bitwise_definitions (query : Logic.query) =
   let bitwise_terms = ref [] in
   let rec walk bound = function
     | Logic.Apply (name, arguments) as term ->
-        (if bitwise_of name <> None && not (List.mem_assoc term !bitwise_terms) then
+        (if find_bitwise_operation name <> None && not (List.mem_assoc term !bitwise_terms) then
            let named = List.filter (fun (symbol, _) -> Logic.mentions [ symbol ] term) bound in
            bitwise_terms := (term, named) :: !bitwise_terms);
         List.iter (walk bound) arguments
@@ -35,7 +35,7 @@ let exactly (query : Logic.query) =
   let definition term =
     match term with
     | Logic.Apply (name, arguments) -> (
-        match (bitwise_of name, arguments) with
+        match (find_bitwise_operation name, arguments) with
         | Some (operation, bits, signed), first :: rest ->
             let bits_of value = Logic.Operation (Printf.sprintf "(_ int2bv %d)" bits, [ value ]) in
             let operand_bits = bits_of first in
@@ -123,8 +123,10 @@ let bit_vector_assertion (context : State.context) frame ~named ~origin
   let isolated =
     List.fold_left
       (fun (inside : State.frame) (local, ty) ->
-        let symbol = Facts.fresh context inside "asserted" (Facts.sort_of context ty) in
-        Facts.assume context inside (Facts.in_range ty symbol);
+        let symbol =
+          Facts.declare_fresh context inside "asserted" (Facts.declare_sort context ty)
+        in
+        Facts.assume context inside (Facts.make_in_range ty symbol);
         match local with
         | Core.Self -> { inside with self = Some symbol }
         | _ -> { inside with locals = Locals.add (Core_local local) symbol inside.locals })
@@ -149,13 +151,14 @@ let bit_vector_assertion (context : State.context) frame ~named ~origin
     | Some _ | None -> None
   in
   context.obligations <-
-    { obligation with query = exactly obligation.query; cited } :: context.obligations;
+    { obligation with query = add_bitwise_definitions obligation.query; cited }
+    :: context.obligations;
   context.facts <- saved_facts;
   context.decisions <- saved_decisions;
   Hashtbl.reset context.stated;
   Hashtbl.iter (Hashtbl.replace context.stated) saved_stated
 
-let assertion context frame ~origin ~bit_vector term =
+let check_assertion context frame ~origin ~bit_vector term =
   (match bit_vector with
   | Some (named, read) when not (is_test context) ->
       bit_vector_assertion context frame ~named ~origin ~read

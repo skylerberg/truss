@@ -1,27 +1,27 @@
-let source_of (key : Resolve.Names.key) =
+let make_source (key : Resolve.Names.key) =
   { State.key = Some key; name = Resolve.Names.show_key key }
 
-let source_at_key (lookups : Lookups.t) key =
+let read_source_at_key (lookups : Lookups.t) key =
   ignore (lookups.mir.body_part key);
-  source_of key
+  make_source key
 
-let source_at (lookups : Lookups.t) (path : Path.t) =
+let find_source (lookups : Lookups.t) (path : Path.t) =
   Option.map
     (fun ((origin : Infer.form_origin), substitution) ->
       let source =
         match origin with
-        | Written key | Inherited key -> source_of key
+        | Written key | Inherited key -> make_source key
         | Derived _ -> { key = None; name = Path.show path }
       in
       (source, substitution, origin))
     (lookups.mir.form_origin path)
 
-let trait_substitution (lookups : Lookups.t) (trait : Types.trait_reference) (ty : Types.ty) =
+let make_trait_substitution (lookups : Lookups.t) (trait : Types.trait_reference) (ty : Types.ty) =
   match Interface.Definition.read_trait_interface lookups.interface trait.trait with
   | Some interface -> Interface.Properties.make_trait_substitution interface ~self:ty trait
   | None -> [ (Types.make_self_parameter trait.trait, Types.Type ty) ]
 
-let part_of ?(inherited = false) (lookups : Lookups.t) path callee =
+let find_part ?(inherited = false) (lookups : Lookups.t) path callee =
   Option.map
     (fun (contract : Mir.contract) ->
       {
@@ -53,7 +53,8 @@ let holds_todo (lookups : Lookups.t) (key : Resolve.Names.key) =
       !holds
   | None -> false
 
-let law_proofs (lookups : Lookups.t) package (trait : Types.trait_reference) (for_type : Types.ty) =
+let list_law_proofs (lookups : Lookups.t) package (trait : Types.trait_reference)
+    (for_type : Types.ty) =
   let same_argument (left : Types.argument) (right : Types.argument) =
     match (left, right) with Type left, Type right -> Types.equal left right | _ -> left = right
   in
@@ -78,23 +79,23 @@ let law_proofs (lookups : Lookups.t) package (trait : Types.trait_reference) (fo
             when List.equal same_argument
                    (List.map (Types.substitute_argument renaming) proven.trait.trait_arguments)
                    trait.trait_arguments ->
-              Some (proven.law, (source_at_key lookups key, renaming))
+              Some (proven.law, (read_source_at_key lookups key, renaming))
           | _ -> None)
       | _ -> None)
     named_laws
 
-let impl_unfinished (lookups : Lookups.t) (key : Resolve.Names.key) =
+let is_impl_unfinished (lookups : Lookups.t) (key : Resolve.Names.key) =
   List.exists (holds_todo lookups) (lookups.interface.names.contained key)
 
 let law_unshown (lookups : Lookups.t) (impl : Path.t) (trait : Types.trait_reference) for_type name
     =
   match lookups.interface.names.key impl with
   | Some key ->
-      impl_unfinished lookups key
+      is_impl_unfinished lookups key
       || List.exists
            (fun (law, ((proof : State.source), _)) ->
              law = name && Option.fold ~none:false ~some:(holds_todo lookups) proof.key)
-           (law_proofs lookups (Path.package impl) trait for_type)
+           (list_law_proofs lookups (Path.package impl) trait for_type)
   | None -> false
 
 let make_contract (lookups : Lookups.t) path ~own ~others =
@@ -113,39 +114,39 @@ let make_contract (lookups : Lookups.t) path ~own ~others =
   let result_kind = match signature with Some { output = Lends _; _ } -> `Lends | _ -> `Returns in
   { State.parts = own :: others; is_logic_function; result_kind }
 
-let function_contract lookups (path : Path.t) =
-  Option.bind (source_at lookups path) (fun (callee, _, _) ->
+let find_function_contract lookups (path : Path.t) =
+  Option.bind (find_source lookups path) (fun (callee, _, _) ->
       Option.map
         (fun own -> make_contract lookups path ~own ~others:[])
-        (part_of lookups path callee))
+        (find_part lookups path callee))
 
-let trait_part lookups (trait : Path.t) name receiver =
+let find_trait_part lookups (trait : Path.t) name receiver =
   let path = Path.Method { owner = trait; name; receiver } in
-  Option.bind (source_at lookups path) (fun (callee, _, _) ->
-      part_of ~inherited:true lookups path callee)
+  Option.bind (find_source lookups path) (fun (callee, _, _) ->
+      find_part ~inherited:true lookups path callee)
 
-let capability_contract lookups (capability : Path.t) name =
+let find_capability_contract lookups (capability : Path.t) name =
   let path = Path.Method { owner = capability; name; receiver = Static } in
-  Option.bind (source_at lookups path) (fun (callee, _, _) ->
+  Option.bind (find_source lookups path) (fun (callee, _, _) ->
       Option.map
         (fun own -> { (make_contract lookups path ~own ~others:[]) with is_logic_function = false })
-        (part_of lookups path callee))
+        (find_part lookups path callee))
 
-let capability_part lookups (capability : Path.t) name =
+let find_capability_part lookups (capability : Path.t) name =
   let path = Path.Method { owner = capability; name; receiver = Static } in
-  Option.bind (source_at lookups path) (fun (callee, _, _) -> part_of lookups path callee)
+  Option.bind (find_source lookups path) (fun (callee, _, _) -> find_part lookups path callee)
 
 let method_contract lookups (trait : Types.trait_reference) name receiver (evidence : Core.evidence)
     =
-  let trait_side = trait_part lookups trait.trait name receiver in
+  let trait_side = find_trait_part lookups trait.trait name receiver in
   match evidence with
   | Impl { impl; _ } -> (
       let path = Path.Method { owner = impl; name; receiver } in
-      match source_at lookups path with
+      match find_source lookups path with
       | Some (callee, _, (Written _ | Derived _)) ->
           Option.map
             (fun own -> make_contract lookups path ~own ~others:(Option.to_list trait_side))
-            (part_of lookups path callee)
+            (find_part lookups path callee)
       | Some (_, _, Inherited _) | None ->
           Option.map (fun own -> make_contract lookups path ~own ~others:[]) trait_side)
   | Bound | Dynamic ->
@@ -156,17 +157,17 @@ let method_contract lookups (trait : Types.trait_reference) name receiver (evide
             ~own ~others:[])
         trait_side
 
-let literal (formula : Mir.formula) =
+let find_integer_literal (formula : Mir.formula) =
   match formula.value with
   | { statements = []; value = Some (Constant { value = Integer number; _ }) } -> Some number
   | _ -> None
 
-let distinct_counters counters =
+let deduplicate_counters counters =
   List.fold_left
     (fun distinct counter -> if List.mem counter distinct then distinct else distinct @ [ counter ])
     [] counters
 
-let resource_of (cost : Mir.cost) ~locals : Costs.resource option =
+let find_resource (cost : Mir.cost) ~locals : Costs.resource option =
   match cost.resource with
   | Time -> Some Time
   | Allocations -> Some Allocations
@@ -192,7 +193,7 @@ let is_updating_helper (lookups : Lookups.t) (path : Path.t) =
       | _ -> false)
   | _ -> false
 
-let comparison (comparison : Core.comparison) =
+let find_comparison_operator (comparison : Core.comparison) =
   match comparison with
   | Equal -> Some "="
   | Less -> Some "<"

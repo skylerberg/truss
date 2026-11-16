@@ -29,5 +29,5 @@ type for_loop = {
   bind_parts : State.frame -> State.frame;
 }
 
-val while_ : State.context -> State.frame -> while_loop -> State.frame option
-val for_ : State.context -> State.frame -> for_loop -> State.frame option
+val run_while_loop : State.context -> State.frame -> while_loop -> State.frame option
+val run_for_loop : State.context -> State.frame -> for_loop -> State.frame option

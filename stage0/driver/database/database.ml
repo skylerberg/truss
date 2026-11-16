@@ -1551,7 +1551,7 @@ let compute_part database (part : Part.computed) =
         (fun note -> Some (list_call_edges database note ~viewer path))
   | Proof key ->
       into (make_keyed_slot package_database.proofs key) (fun note ->
-          Some (make_part (Prover.proof (make_recording_proof_lookups database note)) key));
+          Some (make_part (Prover.prove (make_recording_proof_lookups database note)) key));
       own_template_checks database key
   | Lowering (Lowered key) ->
       into (make_instance_slot database.lowered key) (fun note ->

@@ -7,10 +7,10 @@ val check_callback_requires :
   unit
 
 val calls_updating_helper : State.context -> Invocation.t -> bool
-val laws_of : State.context -> Path.t -> (State.source * Mir.law) list
-val law_parameter_types : substitution:Types.substitution -> Mir.law -> Types.ty list
+val list_laws : State.context -> Path.t -> (State.source * Mir.law) list
+val list_law_parameter_types : substitution:Types.substitution -> Mir.law -> Types.ty list
 
-val law_frame :
+val bind_law_parameters :
   State.frame ->
   State.source ->
   substitution:Types.substitution ->

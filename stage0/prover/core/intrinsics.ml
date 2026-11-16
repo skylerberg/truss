@@ -7,11 +7,11 @@ let apply_slice context (frame : State.frame) (site : Invocation.site) ~(base_ty
     | _ -> Facts.unsupported location "a slice of `%s`" (Types.show base_type)
   in
   let model =
-    match Models.model_of context base_type collection ~element with
+    match Models.find_model context base_type collection ~element with
     | Some model -> model
     | None -> Facts.unsupported location "a slice of `%s`" (Types.show base_type)
   in
-  let length = Models.sequence_length context element model in
+  let length = Models.make_sequence_length context element model in
   let high =
     match high with
     | Some high -> high
@@ -26,17 +26,17 @@ let apply_slice context (frame : State.frame) (site : Invocation.site) ~(base_ty
       &&& Operation ("<=", [ low; high ])
       &&& Operation ("<=", [ high; length ]));
   Validity.note_place context frame site.origin (Run (low, high));
-  let slice_type = Facts.substituted context frame site.type_ in
+  let slice_type = Facts.substitute_type context frame site.type_ in
   let viewed = Facts.arrive context frame "slice" slice_type in
-  (match Models.model_of context slice_type viewed ~element with
+  (match Models.find_model context slice_type viewed ~element with
   | Some viewed_model -> (
       let count = Costs.minus high low in
       Facts.assume context frame
-        (Logic.equal (Models.sequence_length context element viewed_model) count);
-      let position = Facts.fresh_name context "index" in
+        (Logic.equal (Models.make_sequence_length context element viewed_model) count);
+      let position = Facts.make_fresh_name context "index" in
       match
-        ( Models.sequence_at context element viewed_model (Logic.Symbol position),
-          Models.sequence_at context element model (Costs.plus low (Logic.Symbol position)) )
+        ( Models.index_sequence context element viewed_model (Logic.Symbol position),
+          Models.index_sequence context element model (Costs.plus low (Logic.Symbol position)) )
       with
       | Some inside, Some outside ->
           Facts.assume context frame
@@ -50,15 +50,15 @@ let apply_slice context (frame : State.frame) (site : Invocation.site) ~(base_ty
   | None -> ());
   (frame, viewed, low, high)
 
-let element_at context element term index =
-  match Models.sequence_at context element term index with
+let index_element context element term index =
+  match Models.index_sequence context element term index with
   | Some term -> term
   | None -> raise (Facts.Foreign_unsupported "the elements of a sequence")
 
-let unchanged_outside context frame element ~before ~after ~start ~stop =
-  let length sequence = Models.sequence_length context element sequence in
-  let at = element_at context element in
-  let limit = Facts.fresh_name context "index" in
+let assume_unchanged_outside context frame element ~before ~after ~start ~stop =
+  let length sequence = Models.make_sequence_length context element sequence in
+  let at = index_element context element in
+  let limit = Facts.make_fresh_name context "index" in
   let index = Logic.Symbol limit in
   Facts.assume context frame (Logic.equal (length after) (length before));
   Facts.assume context frame
@@ -71,7 +71,7 @@ let unchanged_outside context frame element ~before ~after ~start ~stop =
                &&& Operation ("<", [ index; stop ])
                ||| equal (at after index) (at before index))) ))
 
-let sliced_owner_changed context frame ~(owner : State.passed_place) ~owner_type ~start ~stop =
+let write_sliced_owner context frame ~(owner : State.passed_place) ~owner_type ~start ~stop =
   let element =
     match owner_type with
     | Types.Named { arguments = Types.Type element :: _; _ } -> element
@@ -81,11 +81,11 @@ let sliced_owner_changed context frame ~(owner : State.passed_place) ~owner_type
   let before_value = owner.read frame in
   let changed = Facts.arrive context frame "changed" owner_type in
   match
-    ( Models.model_of context owner_type before_value ~element,
-      Models.model_of context owner_type changed ~element )
+    ( Models.find_model context owner_type before_value ~element,
+      Models.find_model context owner_type changed ~element )
   with
   | Some before, Some after ->
-      unchanged_outside context frame element ~before ~after ~start ~stop;
+      assume_unchanged_outside context frame element ~before ~after ~start ~stop;
       Validity.assume_valid context frame owner_type changed;
       owner.write frame changed
   | _ ->
@@ -105,42 +105,46 @@ let slice_place context (site : Invocation.site) ~(owner : State.passed_place) ~
     write =
       (fun frame _ ->
         try
-          sliced_owner_changed context frame ~owner ~owner_type:(owner_type frame) ~start:low
+          write_sliced_owner context frame ~owner ~owner_type:(owner_type frame) ~start:low
             ~stop:high
         with Facts.Unsupported _ | Facts.Foreign_unsupported _ ->
           owner.write frame (Facts.arrive context frame "changed" (owner_type frame)));
   }
 
 let handle_descriptor context handle =
-  let handle_sort = Facts.sort_of context (Types.make_builtin Handle) in
+  let handle_sort = Facts.declare_sort context (Types.make_builtin Handle) in
   Facts.declare context
     (Logic.Function (Logic.Symbol.Handle_descriptor, [ handle_sort ], Logic.Int));
   Logic.Apply (Logic.Symbol.Handle_descriptor, [ handle ])
 
-let libc_number context frame (number : Libc.number) =
+let declare_libc_number context frame (number : Libc.number) =
   let symbol = Logic.Symbol.Libc_number number in
   Facts.declare context (Logic.Constant (symbol, Logic.Int));
   let term = Logic.Symbol symbol in
   Facts.assume context frame
-    (Facts.in_range (Types.make_builtin (Intrinsic.libc_builtin (Libc.number_type number))) term);
+    (Facts.make_in_range
+       (Types.make_builtin (Intrinsic.libc_builtin (Libc.number_type number)))
+       term);
   term
 
-let buffer_capacity context element term =
+let make_buffer_capacity context element term =
   let ty =
     Types.Named { path = Intrinsic.builtin_path Storage; arguments = [ Types.Type element ] }
   in
   let symbol = Logic.Symbol.Capacity ty in
-  Facts.declare context (Logic.Function (symbol, [ Facts.sort_of context ty ], Logic.Int));
+  Facts.declare context (Logic.Function (symbol, [ Facts.declare_sort context ty ], Logic.Int));
   Logic.Apply (symbol, [ term ])
 
-let buffer_model context (builtin : Intrinsic.builtin) element term =
+let make_buffer_model context (builtin : Intrinsic.builtin) element term =
   let ty =
     Types.Named { path = Intrinsic.builtin_path builtin; arguments = [ Types.Type element ] }
   in
   let symbol = Logic.Symbol.Model ty in
   Facts.declare context
     (Logic.Function
-       (symbol, [ Facts.sort_of context ty ], Facts.sort_of context (Models.sequence_type element)));
+       ( symbol,
+         [ Facts.declare_sort context ty ],
+         Facts.declare_sort context (Models.make_sequence_type element) ));
   Logic.Apply (symbol, [ term ])
 
 let libc_call context frame ~(site : Invocation.site) (function_ : Libc.function_) operands ~changed
@@ -168,7 +172,7 @@ let libc_call context frame ~(site : Invocation.site) (function_ : Libc.function
             if each = 1 then value else Logic.Operation ("*", [ Logic.int each; value ]))
           (value_of by)
     | Exactly elements -> Some (Logic.int elements)
-    | Number number -> Some (libc_number context frame number)
+    | Number number -> Some (declare_libc_number context frame number)
     | Through_zero -> None
   in
   let needs requirement condition =
@@ -182,7 +186,7 @@ let libc_call context frame ~(site : Invocation.site) (function_ : Libc.function
       condition
   in
   let element_of scalar = Types.make_builtin (Intrinsic.libc_builtin scalar) in
-  let length element sequence = Models.sequence_length context element sequence in
+  let length element sequence = Models.make_sequence_length context element sequence in
   List.iteri
     (fun position (_, passes) ->
       match (passes, List.nth_opt operands position, List.nth_opt changed position) with
@@ -190,8 +194,8 @@ let libc_call context frame ~(site : Invocation.site) (function_ : Libc.function
           Some before,
           Some after ) -> (
           let element = element_of scalar in
-          let model term = buffer_model context Storage element term in
-          let capacity term = buffer_capacity context element term in
+          let model term = make_buffer_model context Storage element term in
+          let capacity term = make_buffer_capacity context element term in
           Facts.assume context frame
             Logic.(
               equal (length element (model after)) (length element (model before))
@@ -215,7 +219,7 @@ let libc_call context frame ~(site : Invocation.site) (function_ : Libc.function
           | _, None -> ())
       | Some (Libc.Elements (scalar, extent)), Some view, _ -> (
           let element = element_of scalar in
-          let elements = buffer_model context View element view in
+          let elements = make_buffer_model context View element view in
           match count extent with
           | Some counted ->
               needs "have the elements it reads"
@@ -226,7 +230,7 @@ let libc_call context frame ~(site : Invocation.site) (function_ : Libc.function
                 Logic.(
                   Operation (">=", [ length element elements; int 1 ])
                   &&&
-                  match Models.sequence_at context element elements last with
+                  match Models.index_sequence context element elements last with
                   | Some last_element -> equal last_element (int 0)
                   | None -> Boolean false))
       | _ -> ())
@@ -246,35 +250,38 @@ let measure_type element : Types.function_type =
     costs = [ { amortized = false; resource = Types.Time; bound = Finite_cost } ];
   }
 
-let sequence_sum context element term measure =
+let make_sequence_sum context element term measure =
   let path = Path.Method { owner = Models.sequence_path; name = "sum"; receiver = Read } in
   let symbol = Logic.Symbol.Function { callee = path; instance = [ Types.Type element ] } in
   Facts.declare context
     (Logic.Function
        ( symbol,
          [
-           Facts.sort_of context (Models.sequence_type element);
-           Facts.sort_of context (Types.Function (measure_type element));
+           Facts.declare_sort context (Models.make_sequence_type element);
+           Facts.declare_sort context (Types.Function (measure_type element));
          ],
          Logic.Int ));
   Logic.Apply (symbol, [ term; measure ])
 
-let appended context frame element parts part =
+let append_part context frame element parts part =
   let longer =
-    Facts.fresh context frame "parts" (Facts.sort_of context (Models.sequence_type element))
+    Facts.declare_fresh context frame "parts"
+      (Facts.declare_sort context (Models.make_sequence_type element))
   in
-  let length = Models.sequence_length context element parts in
+  let length = Models.make_sequence_length context element parts in
   Facts.assume context frame
     Logic.(
       Operation (">=", [ length; int 0 ])
-      &&& equal (Models.sequence_length context element longer) (Operation ("+", [ length; int 1 ])));
-  (match (Models.sequence_at context element longer length, frame.bound) with
+      &&& equal
+            (Models.make_sequence_length context element longer)
+            (Operation ("+", [ length; int 1 ])));
+  (match (Models.index_sequence context element longer length, frame.bound) with
   | Some last, _ -> Facts.assume context frame (Logic.equal last part)
   | None, _ -> ());
-  let index = Facts.fresh_name context "index" in
+  let index = Facts.make_fresh_name context "index" in
   (match
-     ( Models.sequence_at context element longer (Logic.Symbol index),
-       Models.sequence_at context element parts (Logic.Symbol index) )
+     ( Models.index_sequence context element longer (Logic.Symbol index),
+       Models.index_sequence context element parts (Logic.Symbol index) )
    with
   | Some after, Some before ->
       Facts.assume context frame
@@ -285,36 +292,39 @@ let appended context frame element parts part =
                &&& Operation ("<", [ Symbol index; length ])
                ==> equal after before) ))
   | _ -> ());
-  let measure = Facts.fresh_name context "measure" in
+  let measure = Facts.make_fresh_name context "measure" in
   Facts.assume context frame
     (Logic.forall
-       ( [ (measure, Facts.sort_of context (Types.Function (measure_type element))) ],
+       ( [ (measure, Facts.declare_sort context (Types.Function (measure_type element))) ],
          Logic.equal
-           (sequence_sum context element longer (Logic.Symbol measure))
+           (make_sequence_sum context element longer (Logic.Symbol measure))
            (Logic.Operation
               ( "+",
                 [
-                  sequence_sum context element parts (Logic.Symbol measure);
-                  Lambdas.applied context (measure_type element) (Logic.Symbol measure) [ part ];
+                  make_sequence_sum context element parts (Logic.Symbol measure);
+                  Lambdas.apply_function context (measure_type element) (Logic.Symbol measure)
+                    [ part ];
                 ] )) ));
   longer
 
-let byte_order context left right =
-  let sequence = Facts.sort_of context (Models.sequence_type (Types.make_builtin UInt8)) in
+let make_byte_order context left right =
+  let sequence =
+    Facts.declare_sort context (Models.make_sequence_type (Types.make_builtin UInt8))
+  in
   let symbol = Logic.Symbol.Compare_bytes_order in
   let first = not (Hashtbl.mem context.declared symbol) in
   Facts.declare context (Logic.Function (symbol, [ sequence; sequence ], Logic.Int));
   let order first_term second_term = Logic.Apply (symbol, [ first_term; second_term ]) in
   if first then begin
-    let first_term = Logic.Symbol (Facts.variable "bytes.first")
-    and second_term = Logic.Symbol (Facts.variable "bytes.second")
-    and third_term = Logic.Symbol (Facts.variable "bytes.third") in
+    let first_term = Logic.Symbol (Facts.make_variable "bytes.first")
+    and second_term = Logic.Symbol (Facts.make_variable "bytes.second")
+    and third_term = Logic.Symbol (Facts.make_variable "bytes.third") in
     let over names body = Logic.forall (List.map (fun name -> (name, sequence)) names, body) in
     List.iter (Facts.add_fact context)
       (List.rev
          [
            over
-             [ Facts.variable "bytes.first"; Facts.variable "bytes.second" ]
+             [ Facts.make_variable "bytes.first"; Facts.make_variable "bytes.second" ]
              Logic.(
                Operation ("<=", [ int (-1); order first_term second_term ])
                &&& Operation ("<=", [ order first_term second_term; int 1 ])
@@ -322,13 +332,13 @@ let byte_order context left right =
                &&& equal (order second_term first_term)
                      (Operation ("-", [ order first_term second_term ])));
            over
-             [ Facts.variable "bytes.first" ]
+             [ Facts.make_variable "bytes.first" ]
              (Logic.equal (order first_term first_term) (Logic.int 0));
            over
              [
-               Facts.variable "bytes.first";
-               Facts.variable "bytes.second";
-               Facts.variable "bytes.third";
+               Facts.make_variable "bytes.first";
+               Facts.make_variable "bytes.second";
+               Facts.make_variable "bytes.third";
              ]
              Logic.(
                Operation ("<", [ order first_term second_term; int 0 ])
@@ -340,17 +350,18 @@ let byte_order context left right =
 
 let buffer_operation context frame ~(site : Invocation.site) (operation : Intrinsic.operation)
     element operands ~changed known =
-  let length sequence = Models.sequence_length context element sequence in
+  let length sequence = Models.make_sequence_length context element sequence in
   let fits value =
-    Logic.(Operation ("<=", [ int 0; value ]) &&& Facts.in_range (Types.make_builtin Int64) value)
+    Logic.(
+      Operation ("<=", [ int 0; value ]) &&& Facts.make_in_range (Types.make_builtin Int64) value)
   in
   let model builtin term =
-    let sequence = buffer_model context builtin element term in
+    let sequence = make_buffer_model context builtin element term in
     Facts.assume context frame (fits (length sequence));
     sequence
   in
   let view = model Intrinsic.View in
-  let capacity term = buffer_capacity context element term in
+  let capacity term = make_buffer_capacity context element term in
   let storage term =
     let sequence = model Intrinsic.Storage term in
     Facts.assume context frame
@@ -371,8 +382,8 @@ let buffer_operation context frame ~(site : Invocation.site) (operation : Intrin
     Facts.assume context frame
       (Logic.equal (capacity (List.hd changed)) (capacity (List.hd operands)))
   in
-  let at = element_at context element in
-  let bound () = Facts.fresh_name context "index" in
+  let at = index_element context element in
+  let bound () = Facts.make_fresh_name context "index" in
   let in_interval index low high =
     Logic.(Operation ("<=", [ low; index ]) &&& Operation ("<", [ index; high ]))
   in
@@ -381,13 +392,14 @@ let buffer_operation context frame ~(site : Invocation.site) (operation : Intrin
   in
   let in_bounds index sequence = in_interval index (Logic.int 0) (length sequence) in
   let each_sum relation =
-    let measure = Facts.fresh_name context "measure" in
+    let measure = Facts.make_fresh_name context "measure" in
     Logic.forall
-      ( [ (measure, Facts.sort_of context (Types.Function (measure_type element))) ],
+      ( [ (measure, Facts.declare_sort context (Types.Function (measure_type element))) ],
         relation
-          (fun sequence -> sequence_sum context element sequence (Logic.Symbol measure))
+          (fun sequence -> make_sequence_sum context element sequence (Logic.Symbol measure))
           (fun value ->
-            Lambdas.applied context (measure_type element) (Logic.Symbol measure) [ value ]) )
+            Lambdas.apply_function context (measure_type element) (Logic.Symbol measure) [ value ])
+      )
   in
   let changed_storage () = storage (List.hd changed) in
   match (operation, operands) with
@@ -436,12 +448,12 @@ let buffer_operation context frame ~(site : Invocation.site) (operation : Intrin
   | Storage_push, [ buffer; value ] ->
       needs (Logic.Operation ("<", [ length (storage buffer); capacity buffer ]));
       keeps_capacity ();
-      let longer = appended context frame element (storage buffer) value in
+      let longer = append_part context frame element (storage buffer) value in
       Facts.assume context frame (Logic.equal (changed_storage ()) longer);
       known
   | Storage_pop, [ _ ] ->
       keeps_capacity ();
-      let longer = appended context frame element (changed_storage ()) known in
+      let longer = append_part context frame element (changed_storage ()) known in
       Facts.assume context frame (Logic.equal (storage (List.hd operands)) longer);
       known
   | Storage_insert, [ buffer; index; value ] ->
@@ -538,7 +550,7 @@ let buffer_operation context frame ~(site : Invocation.site) (operation : Intrin
   | Storage_view, [ buffer ] ->
       Facts.assume context frame (Logic.equal (view known) (storage buffer));
       known
-  | Compare_bytes, [ left; right ] -> byte_order context (view left) (view right)
+  | Compare_bytes, [ left; right ] -> make_byte_order context (view left) (view right)
   | View_slice, [ buffer; start; stop ] ->
       let whole = view buffer and part = view known in
       let limit = bound () in
@@ -557,7 +569,7 @@ let buffer_operation context frame ~(site : Invocation.site) (operation : Intrin
       known
   | _ -> known
 
-let scalar_bytes element : int option =
+let find_scalar_bytes element : int option =
   match Types.find_builtin element with
   | Some (Int8 | UInt8 | Bool) -> Some 1
   | Some (Int16 | UInt16) -> Some 2
@@ -583,7 +595,7 @@ let intrinsic context frame ~(site : Invocation.site) (operation : Intrinsic.ope
         (Lazy.force known)
   | Libc function_, _ ->
       libc_call context frame ~site function_ operands ~changed (Lazy.force known)
-  | Libc_number number, _ -> libc_number context frame number
+  | Libc_number number, _ -> declare_libc_number context frame number
   | (System_is_os _ | System_is_architecture _), _ ->
       let symbol operation = Logic.Symbol.System operation in
       let kind =
@@ -598,7 +610,7 @@ let intrinsic context frame ~(site : Invocation.site) (operation : Intrinsic.ope
       List.iter
         (fun other -> Facts.declare context (Logic.Constant (symbol other, Logic.Bool)))
         kind;
-      Facts.once context
+      Facts.run_once context
         (Exclusive (symbol operation))
         (fun () ->
           List.iteri
@@ -611,11 +623,12 @@ let intrinsic context frame ~(site : Invocation.site) (operation : Intrinsic.ope
                 kind)
             kind);
       Logic.Symbol (symbol operation)
-  | View_address, element :: _ when scalar_bytes element <> None -> (
-      match (operands, scalar_bytes element) with
+  | View_address, element :: _ when find_scalar_bytes element <> None -> (
+      match (operands, find_scalar_bytes element) with
       | [ view ], Some bytes ->
           let length =
-            Models.sequence_length context element (buffer_model context View element view)
+            Models.make_sequence_length context element
+              (make_buffer_model context View element view)
           in
           Facts.assume context frame
             Logic.(
@@ -631,18 +644,18 @@ let intrinsic context frame ~(site : Invocation.site) (operation : Intrinsic.ope
       | _ -> Lazy.force known)
   | Environment_entry, _ ->
       let byte = Types.make_builtin UInt8 in
-      let model = buffer_model context View byte (Lazy.force known) in
-      let length = Models.sequence_length context byte model in
+      let model = make_buffer_model context View byte (Lazy.force known) in
+      let length = Models.make_sequence_length context byte model in
       (match
-         Models.sequence_at context byte model (Logic.Symbol (Facts.variable "entry.index"))
+         Models.index_sequence context byte model (Logic.Symbol (Facts.make_variable "entry.index"))
        with
       | Some at ->
           Facts.assume context frame
             (Logic.forall
-               ( [ (Facts.variable "entry.index", Logic.Int) ],
+               ( [ (Facts.make_variable "entry.index", Logic.Int) ],
                  Logic.(
-                   Operation ("<=", [ int 0; Symbol (Facts.variable "entry.index") ])
-                   &&& Operation ("<", [ Symbol (Facts.variable "entry.index"); length ])
+                   Operation ("<=", [ int 0; Symbol (Facts.make_variable "entry.index") ])
+                   &&& Operation ("<", [ Symbol (Facts.make_variable "entry.index"); length ])
                    ==> not_ (equal at (int 0))) ))
       | None -> ());
       Lazy.force known
@@ -657,17 +670,17 @@ let intrinsic context frame ~(site : Invocation.site) (operation : Intrinsic.ope
       match operands with
       | [ handle ] ->
           let descriptor = handle_descriptor context handle in
-          Facts.assume context frame (Facts.in_range (Types.make_builtin Int32) descriptor);
+          Facts.assume context frame (Facts.make_in_range (Types.make_builtin Int32) descriptor);
           descriptor
       | _ -> Lazy.force known)
   | _ ->
       Operations.primitive_operation context frame ~site operation types operands ~arguments
         ~fallback:(fun () -> Lazy.force known)
 
-let replaced context frame element ~before ~after index part =
-  let length sequence = Models.sequence_length context element sequence in
-  let at = element_at context element in
-  let limit = Facts.fresh_name context "index" in
+let replace_element context frame element ~before ~after index part =
+  let length sequence = Models.make_sequence_length context element sequence in
+  let at = index_element context element in
+  let limit = Facts.make_fresh_name context "index" in
   Facts.assume context frame
     (Logic.conjunction
        [ Logic.equal (length after) (length before); Logic.equal (at after index) part ]);
@@ -680,28 +693,28 @@ let replaced context frame element ~before ~after index part =
            &&& not_ (equal (Symbol limit) index)
            ==> equal (at after (Symbol limit)) (at before (Symbol limit))) ))
 
-let storage_updated context frame element storage index part =
+let update_storage context frame element storage index part =
   let storage_type =
     Types.Named { path = Intrinsic.builtin_path Storage; arguments = [ Types.Type element ] }
   in
   let updated = Facts.arrive context frame "changed" storage_type in
-  replaced context frame element
-    ~before:(buffer_model context Storage element storage)
-    ~after:(buffer_model context Storage element updated)
+  replace_element context frame element
+    ~before:(make_buffer_model context Storage element storage)
+    ~after:(make_buffer_model context Storage element updated)
     index part;
   Facts.assume context frame
     (Logic.equal
-       (buffer_capacity context element updated)
-       (buffer_capacity context element storage));
+       (make_buffer_capacity context element updated)
+       (make_buffer_capacity context element storage));
   updated
 
-let array_updated context frame (array_type : Types.ty) array index part =
+let update_array context frame (array_type : Types.ty) array index part =
   match array_type with
   | Types.Named { arguments = Types.Type element :: _; _ } ->
       let updated = Facts.arrive context frame "changed" array_type in
-      replaced context frame element
-        ~before:(Models.array_model context frame array_type array)
-        ~after:(Models.array_model context frame array_type updated)
+      replace_element context frame element
+        ~before:(Models.make_array_model context frame array_type array)
+        ~after:(Models.make_array_model context frame array_type updated)
         index part;
       updated
   | _ ->
@@ -712,22 +725,22 @@ let element_written_back context frame ~(operation : Intrinsic.operation) ~type_
     ~(receiver : State.passed_place) ~receiver_type index final =
   let element () =
     match type_arguments with
-    | Types.Type element :: _ -> Facts.substituted context frame element
+    | Types.Type element :: _ -> Facts.substitute_type context frame element
     | _ -> Facts.bug "an element's lend with no element type"
   in
   match operation with
   | Storage_at_mut ->
       receiver.write frame
-        (storage_updated context frame (element ()) (receiver.read frame) index final)
+        (update_storage context frame (element ()) (receiver.read frame) index final)
   | Array_at_mut ->
       receiver.write frame
-        (array_updated context frame receiver_type (receiver.read frame) index final)
+        (update_array context frame receiver_type (receiver.read frame) index final)
   | View_at_mut ->
       let element = element () in
       let updated = Facts.arrive context frame "changed" receiver_type in
-      replaced context frame element
-        ~before:(buffer_model context View element (receiver.read frame))
-        ~after:(buffer_model context View element updated)
+      replace_element context frame element
+        ~before:(make_buffer_model context View element (receiver.read frame))
+        ~after:(make_buffer_model context View element updated)
         index final;
       receiver.write frame updated
   | _ -> Facts.bug "a lend of an element by an operation that lends none"
