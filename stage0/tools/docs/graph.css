@@ -9,20 +9,6 @@
   --link: #2b59c3;
   --dependency: #0a7083;
   --dependent: #c0531a;
-  --area-0: #64748b;
-  --area-1: #1a54f0;
-  --area-2: #005b4a;
-  --area-3: #ac6cd1;
-  --area-4: #9d5e01;
-  --area-5: #37830f;
-  --area-6: #f119a7;
-  --area-7: #ee092f;
-  --area-8: #950681;
-  --area-9: #1f98ed;
-  --area-10: #90101c;
-  --area-11: #45418c;
-  --area-12: #cf7f7a;
-  --area-13: #7f0fdc;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
@@ -38,22 +24,23 @@
     --link: #7f9dff;
     --dependency: #3cc1d4;
     --dependent: #f08b4c;
-    --area-0: #96a4b8;
-    --area-1: #ac639b;
-    --area-2: #19bf2f;
-    --area-3: #da942c;
-    --area-4: #e4da8c;
-    --area-5: #ea43e2;
-    --area-6: #72fc29;
-    --area-7: #8e52fd;
-    --area-8: #718b46;
-    --area-9: #fc7b9b;
-    --area-10: #23dbc1;
-    --area-11: #e62a38;
-    --area-12: #ecc0ef;
-    --area-13: #1d8ef5;
   }
 }
+
+.area-0 { --area: #e5031a; --area-label: #ffffff; }
+.area-1 { --area: #98f608; --area-label: #000000; }
+.area-2 { --area: #9304fe; --area-label: #ffffff; }
+.area-3 { --area: #ffbf00; --area-label: #000000; }
+.area-4 { --area: #0159fe; --area-label: #ffffff; }
+.area-5 { --area: #fe5103; --area-label: #000000; }
+.area-6 { --area: #01a200; --area-label: #000000; }
+.area-7 { --area: #fc05df; --area-label: #000000; }
+.area-8 { --area: #fdf70a; --area-label: #000000; }
+.area-9 { --area: #3703f0; --area-label: #ffffff; }
+.area-10 { --area: #fc8820; --area-label: #000000; }
+.area-11 { --area: #038db3; --area-label: #000000; }
+.area-12 { --area: #808080; --area-label: #000000; }
+.area-13 { --area: #ffffff; --area-label: #000000; }
 
 * {
   box-sizing: border-box;
@@ -90,6 +77,19 @@ h1 {
   margin: 0 auto 0 0;
   font-size: 1.375rem;
   font-weight: 600;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle input {
+  margin: 0;
+  accent-color: var(--link);
 }
 
 #find {
@@ -132,6 +132,10 @@ main {
   display: block;
   width: 100%;
   height: 100%;
+}
+
+#canvas svg[hidden] {
+  display: none;
 }
 
 .zoom {
@@ -217,6 +221,7 @@ main {
   height: 8px;
   border-radius: 2px;
   background: var(--area);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--area) 60%, var(--ink));
 }
 
 .areas {
@@ -251,12 +256,12 @@ main {
 
 #canvas .node path,
 #canvas .node polygon {
-  fill: color-mix(in srgb, var(--area) 13%, var(--surface));
-  stroke: var(--area);
+  fill: var(--area);
+  stroke: color-mix(in srgb, var(--area) 60%, var(--ink));
 }
 
 #canvas .node text {
-  fill: var(--ink);
+  fill: var(--area-label);
 }
 
 #canvas .node a {
@@ -309,7 +314,7 @@ body.areas-page #canvas svg.focused .edge text {
 #canvas .node.focus polygon,
 #canvas .node.member path,
 #canvas .node.member polygon {
-  fill: color-mix(in srgb, var(--area) 35%, var(--surface));
+  stroke: var(--ink);
   stroke-width: 2.6;
 }
 
