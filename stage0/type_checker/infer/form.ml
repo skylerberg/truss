@@ -285,7 +285,7 @@ let find_capability_impls (state : State.state) (type_ : Types.ty) =
       List.filter_map
         (fun (trait, _) ->
           if Resolve.Names.find_kind state.lookups.interface.names trait = Some Capability then
-            match State.implements state type_ (State.make_trait_reference trait) with
+            match State.implements state type_ (State.make_trait_reference ~arguments:[] trait) with
             | Some (Interface.Impls.From_impl { impl; substitution }) ->
                 Option.map
                   (fun interface ->
@@ -576,7 +576,7 @@ let build_constant_pattern state (id : Syntax.id) (value : Core.pattern_constant
   let type_ = read_pattern_type state id in
   if is_built_in_scalar type_ then Literal value
   else
-    let equal = State.make_trait_reference (Well_known.path Equal) in
+    let equal = State.make_trait_reference ~arguments:[] (Well_known.path Equal) in
     match State.implements state type_ equal with
     | Some implementation ->
         Equal_to
@@ -952,7 +952,7 @@ let quantify_over_elements state (collection : Syntax.expression) ~count ~elemen
         }
 
 let build_cursor_next state (cursor : Types.ty) : Core.callee =
-  let trait = State.make_trait_reference (Well_known.path Cursor) in
+  let trait = State.make_trait_reference ~arguments:[] (Well_known.path Cursor) in
   match State.implements state cursor trait with
   | Some implementation ->
       Trait_method

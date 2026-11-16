@@ -483,7 +483,7 @@ let convert_evidence = function
   | Interface.Impls.From_any -> Tables.Dynamic
   | Interface.Impls.Built_in | Interface.Impls.Accepted _ -> Tables.Built_in
 
-let make_trait_reference ?(arguments = []) trait : Types.trait_reference =
+let make_trait_reference ~arguments trait : Types.trait_reference =
   { trait; trait_arguments = arguments; associated = [] }
 
 let string_type = Types.Named { path = Well_known.path String; arguments = [] }

@@ -63,7 +63,7 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
               let part_type = State.normalize state part_type in
               if Types.contains_unsolved part_type then false
               else begin
-                let display = State.make_trait_reference (Well_known.path Display) in
+                let display = State.make_trait_reference ~arguments:[] (Well_known.path Display) in
                 (match State.implements state part_type display with
                 | Some evidence ->
                     set_part index
@@ -100,7 +100,9 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
           (match expected with
           | Some expected -> ignore (State.unify state tag_type expected)
           | None -> ());
-          let template_trait = State.make_trait_reference (Well_known.path From_template) in
+          let template_trait =
+            State.make_trait_reference ~arguments:[] (Well_known.path From_template)
+          in
           let part_type = ref None in
           State.register_expression state value (fun () ->
               match !part_type with

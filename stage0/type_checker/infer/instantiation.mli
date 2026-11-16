@@ -12,6 +12,7 @@ val require :
   unit
 
 val make_fresh_arguments : State.state -> Path.t -> Types.argument list
+val make_fresh_trait_reference : State.state -> Path.t -> Types.trait_reference
 val instantiate_type : State.state -> Source.Definition_span.t -> Path.t -> Types.argument list
 val find_static : State.state -> Syntax.expression -> static_ option
 
