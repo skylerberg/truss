@@ -6,6 +6,7 @@ type package_database
 val create : ?loaded:package_database list -> ?checks:bool -> Project.package list -> t
 val copy : t -> t
 val read_package_database : t -> Path.package -> package_database
+val list_package_diagnostics : package_database -> (Source.t * Diagnostic.t list) list
 val update : t -> (Path.file * string option) list -> unit
 val relayout : t -> loaded:package_database list -> Project.package list -> unit
 val propagate : ?on_bug:(Compiler_bug.t -> unit) -> t -> unit
@@ -20,6 +21,7 @@ val restore :
 
 val check : t -> Path.package list -> unit
 val list_file_diagnostics : t -> Path.file -> Diagnostic.t list
+val list_dependency_diagnostics : t -> Path.package -> (Source.t * Diagnostic.t list) list
 
 type manifest_problem =
   | Not_a_capability of { dependency : Path.package; name : string }

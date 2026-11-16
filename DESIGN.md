@@ -1808,7 +1808,7 @@ and `opaque`, the homes of methods and `impl`s, grants, and versions.
 | A package is not a unit of building. | Results are cached per definition, so splitting a package makes no build faster. A package is split only where a boundary should be checked. |
 | A project lists no members. | A list is one more file that every agent that adds a package must edit, and so one more place for a merge conflict (*parallel agents*). |
 | A dependency names a package, never a path to it. | Moving a directory breaks no dependency. |
-| A project's package replaces the registry's package of the same name. | This is how a dependency is patched before its owner releases a fix, with the patched copy in the repository for a reviewer to see. |
+| A project's package replaces the registry's package of the same name. A registry package that depends on it, directly or through other registry packages, is built in the project's database. | This is how a dependency is patched before its owner releases a fix, with the patched copy in the repository for a reviewer to see. A package that depends on the patched copy changes with the project's files, so no cached database can hold it. |
 | A registry package is named `owner::name`. | Much malware arrives by typosquatting: a name one letter away from a well-known name. LLMs make it worse by inventing package names, which attackers then publish. With an owner in the name, every path that uses the code says who published it. |
 
 ### Versions
@@ -1853,6 +1853,7 @@ Rules: [The registry](PACKAGES.md#the-registry).
 | The registry keeps an append-only public log of the hash of every version, as Go's checksum database does. | The registry cannot give two users different code under one version. |
 | The registry signs the proofs and test results that it computed for a release. | Proving a whole dependency tree on a machine that starts with nothing, such as an agent's new container, is the cost that GOALS.md sets out to remove. Each signed result is a function of its key, so a registry that signed a false result is caught by anyone who recomputes it. |
 | A new toolchain re-proves the registry, as far as the toolchain changed the proofs. | A toolchain that fails a proof of an approved package that the previous toolchain passed is not released. |
+| A package's database records, when it is built, the diagnostics that can block code that uses the package: its parse errors and the errors of its definitions, except its tests. A registry package with such a diagnostic is a problem on the lock file, which names the package. The standard library's are a compiler bug. | A part that reads a failed part is blocked and reports no error, so code that uses a broken dependency would stop checking with nothing to say why. A user never builds a dependency's tests, so their errors are the author's alone. The diagnostics are a function of the database's key, so they are listed once, when the database is built, and read on every load. |
 | A yanked release, one that is marked as not to use, still builds. | If yanking broke builds, one compromised account could stop every project that depends on the package. |
 
 ## Incremental builds
