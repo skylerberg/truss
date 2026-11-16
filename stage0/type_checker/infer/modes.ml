@@ -228,12 +228,20 @@ let classify_argument state (value : Syntax.expression) =
       | Some mode -> Lent mode
       | None -> if State.is_place state value then Place else Temporary)
 
+let is_known_not_plain state type_ =
+  State.decide_property state Interface.Properties.Plain type_ = Interface.Properties.Fails
+
+let list_copy_fixes state (value : Syntax.expression) type_ ~label =
+  if State.decide_property state Interface.Properties.Copyable type_ = Interface.Properties.Holds
+  then [ State.fix label [ State.insert (State.read_span state value.id).stop ".copy()" ] ]
+  else []
+
 let find_lent_field_mode (state : State.state) (value : Syntax.expression) type_ : Types.mode option
     =
   match (Hashtbl.find_opt state.yielded value.id, classify_argument state value) with
   | _ when is_slice value -> None
   | Some Read, With_mode (Mut, _) -> Some Read
-  | Some Read, (Place | Lent _) when not (State.is_plain state type_) -> Some Read
+  | Some Read, (Place | Lent _) when is_known_not_plain state type_ -> Some Read
   | Some Mut, With_mode (Mut, _) -> Some Mut
   | _ -> None
 
@@ -274,15 +282,9 @@ let check_mode state env (value : Syntax.expression) (parameter : Types.paramete
             lent from `mut`, so that it is lent `mut`."
            name)
   | Own, Lent _ ->
-      if not (State.is_plain state type_) then
+      if is_known_not_plain state type_ then
         State.report state Missing_mode (State.read_span state value.id)
-          ~fixes:
-            (if State.is_copyable state type_ then
-               [
-                 State.fix "Pass a copy."
-                   [ State.insert (State.read_span state value.id).stop ".copy()" ];
-               ]
-             else [])
+          ~fixes:(list_copy_fixes state value type_ ~label:"Pass a copy.")
           (Printf.sprintf
              "`%s` takes ownership of its argument, and a part that is lent cannot be moved. Pass \
               a copy."
@@ -292,8 +294,7 @@ let check_mode state env (value : Syntax.expression) (parameter : Types.paramete
         (Printf.sprintf "`%s` mutates its argument in place, so it must be a place passed `mut`."
            name)
   | Own, With_mode (Own, inner) ->
-      if
-        State.is_plain state type_ && not (Types.exists Types.is_open_type (State.zonk state type_))
+      if State.decide_property state Interface.Properties.Plain type_ = Interface.Properties.Holds
       then
         State.report state Redundant_mode (State.read_span state value.id)
           ~fixes:
@@ -304,32 +305,19 @@ let check_mode state env (value : Syntax.expression) (parameter : Types.paramete
           (Printf.sprintf "`%s` copies implicitly, so it needs no `own`." (State.show state type_))
   | Own, Temporary -> ()
   | Own, Place when Hashtbl.find_opt state.yielded value.id = Some Mut ->
-      if not (State.is_plain state type_) then
+      if is_known_not_plain state type_ then
         State.report state Missing_mode (State.read_span state value.id)
           ~fixes:
             (State.fix "Lend it `mut`."
                [ State.insert (State.read_span state value.id).start "mut " ]
-            ::
-            (if State.is_copyable state type_ then
-               [
-                 State.fix "Pass a copy."
-                   [ State.insert (State.read_span state value.id).stop ".copy()" ];
-               ]
-             else []))
+            :: list_copy_fixes state value type_ ~label:"Pass a copy.")
           (Printf.sprintf
              "`%s` is a field of a value that is lent `mut`. Pass the place `mut` to lend it too, \
               or pass a copy."
              name)
   | Own, Place ->
-      if not (State.is_plain state type_) then
-        let copy =
-          if State.is_copyable state type_ then
-            [
-              State.fix "Pass a copy."
-                [ State.insert (State.read_span state value.id).stop ".copy()" ];
-            ]
-          else []
-        in
+      if is_known_not_plain state type_ then
+        let copy = list_copy_fixes state value type_ ~label:"Pass a copy." in
         let fixes, message =
           match find_immovable state env value with
           | None ->
@@ -394,15 +382,8 @@ let check_owned state env (value : Syntax.expression) type_ =
           let type_ = State.normalize state type_ in
           if Types.contains_unsolved type_ then false
           else begin
-            if not (State.is_plain state type_) then begin
-              let copy =
-                if State.is_copyable state type_ then
-                  [
-                    State.fix "Copy it."
-                      [ State.insert (State.read_span state value.id).stop ".copy()" ];
-                  ]
-                else []
-              in
+            if is_known_not_plain state type_ then begin
+              let copy = list_copy_fixes state value type_ ~label:"Copy it." in
               let fixes, message =
                 match immovable with
                 | None ->

@@ -484,9 +484,9 @@ let solve_trait_arguments state type_ (trait : Types.trait_reference) =
       | _ -> trait)
   | _ -> trait
 
-let is_copyable state type_ =
-  Interface.Impls.is_copyable state.lookups.interface ~list_bounds:(lookup_bounds state)
-    (zonk state type_)
+let decide_property state property type_ =
+  Interface.Impls.decide_property property state.lookups.interface
+    ~list_bounds:(lookup_bounds state) (zonk state type_)
 
 let is_plain state type_ =
   Interface.Impls.is_plain state.lookups.interface ~list_bounds:(lookup_bounds state)

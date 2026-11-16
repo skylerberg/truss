@@ -669,11 +669,14 @@ let make_recording_interface_lookups database note ~is_checked : Interface.Looku
         Option.map require_value
           (Type_trait_table.find_opt
              (obtain_owner database (Path.locate_package type_)).derived_interfaces (type_, trait)));
-    find_type_facts =
+    read_type_facts =
       (fun path ->
         read database note (Type_facts path);
-        Option.map require_value
-          (Path_table.find_opt (obtain_owner database (Path.locate_package path)).type_facts path));
+        match
+          Path_table.find_opt (obtain_owner database (Path.locate_package path)).type_facts path
+        with
+        | Some facts -> require_value facts
+        | None -> report_uncomputed (Type_facts path));
     find_grant =
       (fun package dependency ->
         read database note (Grant (package, dependency));

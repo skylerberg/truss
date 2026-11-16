@@ -529,7 +529,9 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
     | Some method_path -> Some (wanted, method_path)
     | None when lent_mode = Some Types.Mut && List.mem_assoc Path.Read overloads ->
         Some (Path.Read, List.assoc Path.Read overloads)
-    | None when (not has_mode_keyword) && ((not place) || State.is_plain state receiver_type) -> (
+    | None
+      when (not has_mode_keyword)
+           && ((not place) || not (Modes.is_known_not_plain state receiver_type)) -> (
         match List.assoc_opt Path.Own overloads with
         | Some method_path -> Some (Path.Own, method_path)
         | None -> None)

@@ -39,6 +39,8 @@ module Properties : sig
     Types.ty ->
     Types.trait_reference list
 
+  type property = Properties.property = Copyable | Plain | View | Holds_function
+  type answer = Properties.answer = Holds | Fails | Unknown of Types.ty
   type occurrence = Environment.occurrence = In_place | Indirect | Function_input
 
   val compose_occurrences : occurrence -> occurrence -> occurrence
