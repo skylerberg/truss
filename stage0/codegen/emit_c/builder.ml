@@ -10,17 +10,29 @@ module Blocks = Set.Make (Int)
 type local_info = { ty : Lowered.ty; name : string option; is_zeroed : bool }
 type instance = C_instance.t
 
-open C_instance
-
 let instance_key (instance : instance) = instance.key
 
+type code = {
+  key : Instance.key;
+  context : C_types.context;
+  mutable nested : (int * (string * string)) list;
+}
+
+type role =
+  | Own
+  | Outlined of {
+      index : int;
+      parent : int;
+      parts : Lowered.local list;
+      holder : Lowered.local;
+      environment : Lowered.local;
+    }
+
+type prototype = { parameters : Lowered.local list; result : Lowered.ty option; returns : bool }
+
 type function_ = {
-  code : instance;
-  nested : int option;
-  parent : int;
-  parts : Lowered.local list;
-  holder : Lowered.local option;
-  environment : Lowered.local option;
+  code : code;
+  role : role;
   entry : Lowered.block;
   prologue : Buffer.t;
   mutable mentioned : Locals.t;
@@ -44,21 +56,17 @@ type t = {
   mentions : Locals.t Dynarray.t;
   successors : Lowered.block list Dynarray.t;
   facts : facts Dynarray.t;
-  owners : int Dynarray.t;
+  owners : int option Dynarray.t;
   mutable current : Lowered.block;
   mutable pending : Buffer.t;
   functions : function_ Dynarray.t;
   mutable function_ : int;
 }
 
-let new_function ~code ~nested ~parent ~parts ~holder ~environment ~entry =
+let new_function ~code ~role ~entry =
   {
     code;
-    nested;
-    parent;
-    parts;
-    holder;
-    environment;
+    role;
     entry;
     prologue = Buffer.create 64;
     mentioned = Locals.empty;
@@ -89,23 +97,16 @@ let block builder =
   Dynarray.add_last builder.mentions Locals.empty;
   Dynarray.add_last builder.successors [];
   Dynarray.add_last builder.facts (no_facts ());
-  Dynarray.add_last builder.owners (-1);
+  Dynarray.add_last builder.owners None;
   Dynarray.length builder.texts - 1
 
-let start_function builder ~code ~nested =
-  Dynarray.add_last builder.functions
-    (new_function ~code ~nested ~parent:(-1) ~parts:[] ~holder:None ~environment:None ~entry:0);
+let start_function builder ~code =
+  Dynarray.add_last builder.functions (new_function ~code ~role:Own ~entry:0);
   builder
 
 let create env ~key =
-  let code = { key; context = new_context env (Instance.symbol key); functions = []; weight = 0 } in
-  start_function (new_builder env) ~code ~nested:None
-
-let nested parent ~index ~environment =
-  let code = (Dynarray.get parent.functions parent.function_).code in
-  code.context.environments <-
-    Keys.add (Environment (Instance.symbol code.key, index)) environment code.context.environments;
-  start_function (new_builder parent.env) ~code ~nested:(Some index)
+  let code = { key; context = new_context env (Instance.symbol key); nested = [] } in
+  start_function (new_builder env) ~code
 
 let local builder ?name ?(is_zeroed = false) ty =
   Dynarray.add_last builder.locals { ty; name; is_zeroed };
@@ -134,7 +135,7 @@ let prologue_context builder (function_ : function_) =
       function_.mentioned <- Locals.add local function_.mentioned)
 
 let start builder block =
-  Dynarray.set builder.owners block builder.function_;
+  Dynarray.set builder.owners block (Some builder.function_);
   Dynarray.set builder.mentions block Locals.empty;
   Dynarray.set builder.facts block (no_facts ());
   builder.current <- block;
@@ -234,15 +235,18 @@ let write_in builder number body =
   builder.current <- current;
   builder.pending <- pending
 
-let outline builder ~nested ~parts body =
+let outline builder ~index ~parts body =
   let code = (current_function builder).code in
-  let holder = local builder ~name:"environment" (Environment nested) in
+  let holder = local builder ~name:"environment" (Environment index) in
   let arrives = local builder ~name:"environment" (Raw (Nullable_pointer Opaque)) in
-  let environment = local builder (Pointer { target = Environment nested; writable = false }) in
+  let environment = local builder (Pointer { target = Environment index; writable = false }) in
   let entry = block builder in
   Dynarray.add_last builder.functions
-    (new_function ~code ~nested:(Some nested) ~parent:builder.function_ ~parts:(arrives :: parts)
-       ~holder:(Some holder) ~environment:(Some environment) ~entry);
+    (new_function ~code
+       ~role:
+         (Outlined
+            { index; parent = builder.function_; parts = arrives :: parts; holder; environment })
+       ~entry);
   let number = Dynarray.length builder.functions - 1 in
   let function_ = Dynarray.get builder.functions number in
   statement_c code.context
@@ -273,7 +277,10 @@ let resolve text name =
   scan 0;
   Buffer.contents buffer
 
-let build ?(returns = true) builder ~parameters ~result =
+let nested_symbol (code : code) index =
+  Printf.sprintf "%s_Nested_%d" (Instance.symbol code.key) index
+
+let write_function_texts builder ~own_symbol { parameters; result; returns } =
   let functions = Dynarray.to_array builder.functions in
   let count = Array.length functions in
   let texts = Dynarray.to_array builder.texts and owners = Dynarray.to_array builder.owners in
@@ -296,22 +303,29 @@ let build ?(returns = true) builder ~parameters ~result =
   let add key keys = if List.exists (Instance.equal key) keys then keys else key :: keys in
   Array.iteri
     (fun block is_reached ->
-      if is_reached && owners.(block) >= 0 then begin
-        let function_ = functions.(owners.(block)) in
-        function_.mentioned <-
-          Locals.union (Dynarray.get builder.mentions block) function_.mentioned;
-        let facts = Dynarray.get builder.facts block and context = function_.code.context in
-        context.instances <- List.fold_right add facts.instances context.instances;
-        context.called <- List.fold_right add facts.called context.called;
-        context.calls <- facts.calls @ context.calls;
-        context.failures <- facts.failures @ context.failures
-      end)
+      match owners.(block) with
+      | Some owner when is_reached ->
+          let function_ = functions.(owner) in
+          function_.mentioned <-
+            Locals.union (Dynarray.get builder.mentions block) function_.mentioned;
+          let facts = Dynarray.get builder.facts block and context = function_.code.context in
+          context.instances <- List.fold_right add facts.instances context.instances;
+          context.called <- List.fold_right add facts.called context.called;
+          context.calls <- facts.calls @ context.calls;
+          context.failures <- facts.failures @ context.failures
+      | Some _ | None -> ())
     reached;
-  let main = functions.(0) in
-  main.mentioned <- List.fold_left (fun set local -> Locals.add local set) main.mentioned parameters;
-  let parameters_of number = if number = 0 then parameters else functions.(number).parts in
-  let parent number = functions.(number).parent in
-  let rec depth number = if number = 0 then 0 else 1 + depth (parent number) in
+  let own = functions.(0) in
+  own.mentioned <- List.fold_left (fun set local -> Locals.add local set) own.mentioned parameters;
+  let parameters_of number =
+    match functions.(number).role with Own -> parameters | Outlined { parts; _ } -> parts
+  in
+  let parent number =
+    match functions.(number).role with Own -> number | Outlined { parent; _ } -> parent
+  in
+  let rec depth number =
+    match functions.(number).role with Own -> 0 | Outlined { parent; _ } -> 1 + depth parent
+  in
   let rec enclosing first second =
     if first = second then first
     else if depth first >= depth second then enclosing (parent first) second
@@ -322,11 +336,13 @@ let build ?(returns = true) builder ~parameters ~result =
     (fun number (function_ : function_) ->
       Locals.iter
         (fun local ->
-          if not (number > 0 && List.mem local function_.parts) then
-            Hashtbl.replace home local
-              (match Hashtbl.find_opt home local with
-              | Some other -> enclosing number other
-              | None -> number))
+          match function_.role with
+          | Outlined { parts; _ } when List.mem local parts -> ()
+          | Own | Outlined _ ->
+              Hashtbl.replace home local
+                (match Hashtbl.find_opt home local with
+                | Some other -> enclosing number other
+                | None -> number))
         function_.mentioned)
     functions;
   let is_own number local =
@@ -344,7 +360,9 @@ let build ?(returns = true) builder ~parameters ~result =
             let rec reach number =
               if number <> owner then begin
                 captured.(number) <- Locals.add local captured.(number);
-                reach (parent number)
+                match functions.(number).role with
+                | Outlined { parent; _ } -> reach parent
+                | Own -> ()
               end
             in
             reach number)
@@ -357,41 +375,38 @@ let build ?(returns = true) builder ~parameters ~result =
   in
   Array.iteri
     (fun number (function_ : function_) ->
-      match (function_.nested, function_.holder, captures number) with
-      | Some nested, Some _, captures ->
+      match function_.role with
+      | Outlined { index; _ } ->
           let context = function_.code.context in
           context.environments <-
             Keys.add
-              (Environment (Instance.symbol function_.code.key, nested))
+              (Environment (Instance.symbol function_.code.key, index))
               (List.map
                  (fun (local, field) ->
                    (field, Lowered.Pointer { target = local_type builder local; writable = true }))
-                 captures)
+                 (captures number))
               context.environments
-      | None, None, (local, _) :: _ ->
-          if number > 0 then
-            bug "a separate function names local %d of the function it is written in" local
-      | _ -> ())
+      | Own -> ())
     functions;
   let fills = Array.init count (fun _ -> Buffer.create 64) in
   Array.iteri
     (fun number (function_ : function_) ->
-      match function_.holder with
-      | Some holder ->
-          let parent = functions.(function_.parent) in
+      match function_.role with
+      | Outlined { holder; parent = parent_number; _ } ->
+          let parent = functions.(parent_number) in
           List.iter
             (fun (local, field) ->
               statement_c parent.code.context (prologue_context builder parent)
-                fills.(function_.parent)
+                fills.(parent_number)
                 (Assign
                    ( { root = Local holder; projections = [ Field field ] },
                      Use (Address { place = at local; writable = true }) )))
             (captures number)
-      | None -> ())
+      | Own -> ())
     functions;
-  Array.iteri
+  Array.mapi
     (fun number (function_ : function_) ->
-      let result = if number = 0 then result else None in
+      let result = match function_.role with Own -> result | Outlined _ -> None in
       List.iter
         (fun gives ->
           match (gives, result) with
@@ -404,8 +419,8 @@ let build ?(returns = true) builder ~parameters ~result =
       let name local =
         if is_own number local then local_name local (Dynarray.get builder.locals local).name
         else
-          match (function_.environment, List.assoc_opt local captures) with
-          | Some environment, Some field ->
+          match (function_.role, List.assoc_opt local captures) with
+          | Outlined { environment; _ }, Some field ->
               Printf.sprintf "(*(*%s).f_%s)"
                 (local_name environment (Dynarray.get builder.locals environment).name)
                 field
@@ -438,7 +453,8 @@ let build ?(returns = true) builder ~parameters ~result =
       let blocks =
         function_.entry
         :: List.filter
-             (fun block -> block <> function_.entry && owners.(block) = number && reached.(block))
+             (fun block ->
+               block <> function_.entry && owners.(block) = Some number && reached.(block))
              (List.init (Array.length texts) Fun.id)
       in
       List.iter
@@ -450,9 +466,9 @@ let build ?(returns = true) builder ~parameters ~result =
         blocks;
       Buffer.add_string body "}\n";
       let symbol =
-        match function_.nested with
-        | Some nested -> Printf.sprintf "%s_Nested_%d" (Instance.symbol function_.code.key) nested
-        | None -> Instance.symbol function_.code.key
+        match function_.role with
+        | Outlined { index; _ } -> nested_symbol function_.code index
+        | Own -> own_symbol
       in
       let parameters = parameters_of number in
       let header =
@@ -462,13 +478,40 @@ let build ?(returns = true) builder ~parameters ~result =
           {
             parameters = List.map (local_type builder) parameters;
             result;
-            returns = (if number = 0 then returns else true);
+            returns = (match function_.role with Own -> returns | Outlined _ -> true);
           }
       in
-      function_.code.functions <-
-        (function_.nested, (header, resolve (Buffer.contents body) name))
-        :: function_.code.functions;
-      if number = 0 && function_.nested = None then function_.code.weight <- function_.size)
+      (header, resolve (Buffer.contents body) name))
     functions
 
-let built builder = (Dynarray.get builder.functions 0).code
+let write_functions builder ~own_symbol prototype =
+  let functions = Dynarray.to_array builder.functions in
+  let texts = write_function_texts builder ~own_symbol prototype in
+  Array.iteri
+    (fun number (function_ : function_) ->
+      match function_.role with
+      | Outlined { index; _ } ->
+          function_.code.nested <- (index, texts.(number)) :: function_.code.nested
+      | Own -> ())
+    functions;
+  texts.(0)
+
+let build builder prototype : instance =
+  let own = Dynarray.get builder.functions 0 in
+  let own_text = write_functions builder ~own_symbol:(Instance.symbol own.code.key) prototype in
+  {
+    key = own.code.key;
+    context = own.code.context;
+    own = own_text;
+    nested = own.code.nested;
+    weight = own.size;
+  }
+
+let build_nested parent ~index ~environment body =
+  let code = (current_function parent).code in
+  code.context.environments <-
+    Keys.add (Environment (Instance.symbol code.key, index)) environment code.context.environments;
+  let builder = start_function (new_builder parent.env) ~code in
+  let prototype = body builder in
+  code.nested <-
+    (index, write_functions builder ~own_symbol:(nested_symbol code index) prototype) :: code.nested

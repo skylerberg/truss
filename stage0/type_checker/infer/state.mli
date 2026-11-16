@@ -1,7 +1,7 @@
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
-module Elaborate = Interface.Elaborate
+module Elaborator = Interface.Elaborator
 
 type local = { type_ : Types.ty; is_var : bool; mode : Types.mode }
 
@@ -68,7 +68,7 @@ type state = {
   package : Path.package;
   definition : Syntax.definition;
   resolved : Resolve.resolved;
-  context : Elaborate.context;
+  context : Elaborator.t;
   text : string Lazy.t;
   mutable tables : Tables.t;
   form : form;
@@ -114,7 +114,6 @@ val error :
 
 val source : state -> Source.Definition_span.t -> string
 val fresh_node_id : state -> int
-val build_operand : Types.mode -> Core.expression -> Core.operand
 val synthetic_expression : state -> origin:Core.origin -> Types.ty -> Core.kind -> Core.expression
 val register_expression : state -> Syntax.expression -> (unit -> Core.kind) -> unit
 val was_hole : state -> (Tables.t -> Types.ty option array) -> Syntax.id -> bool

@@ -1,7 +1,7 @@
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
-module Elaborate = Interface.Elaborate
+module Elaborator = Interface.Elaborator
 
 val select_arithmetic_trait : Syntax.arithmetic -> Path.t * string
 val check_bitwise_operand : State.state -> Source.Definition_span.t -> Types.ty -> unit

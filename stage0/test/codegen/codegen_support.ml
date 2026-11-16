@@ -126,18 +126,18 @@ let write builder (function_ : function_) =
       List.iter (Builder.emit builder) block.statements;
       Builder.finish builder block.terminator)
     function_.blocks;
-  Builder.build builder ~returns:function_.returns ~parameters:function_.parameters
-    ~result:function_.result
+  ({ parameters = function_.parameters; result = function_.result; returns = function_.returns }
+    : Builder.prototype)
 
 let instance ?(nested = []) name main : instance =
  fun env ->
   let builder = Emit_c.Builder.create env ~key:(key name) in
   List.iteri
     (fun index (function_ : function_) ->
-      write (Emit_c.Builder.nested builder ~index ~environment:function_.environment) function_)
+      Emit_c.Builder.build_nested builder ~index ~environment:function_.environment (fun nested ->
+          write nested function_))
     nested;
-  write builder main;
-  Emit_c.Builder.built builder
+  Emit_c.Builder.build builder (write builder main)
 
 let printed instance : instance = fun _ -> instance
 
@@ -239,7 +239,7 @@ let load_files ?results ?(roots = []) files =
       | [] ->
           ignore
             (Core_lint.check_file
-               (Database.drain_interface_lookups database [ file.module_.package ])
+               (Database.make_interface_lookups database [ file.module_.package ])
                ~core:(fun key ->
                  Option.map
                    (fun (checked : Infer.checked) -> checked.form)
@@ -294,7 +294,7 @@ let drop_shapes =
   ]
 
 let standard_interface =
-  lazy (Database.drain_interface_lookups (database []) [ Path.standard_package ])
+  lazy (Database.make_interface_lookups (database []) [ Path.standard_package ])
 
 let standard_context : Monomorphic.context =
   {

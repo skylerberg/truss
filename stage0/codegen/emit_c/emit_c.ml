@@ -152,20 +152,10 @@ let fragment env (compiled : compiled) =
   let functions, definition, kind =
     match compiled with
     | Code code ->
-        let nested =
-          List.sort compare
-            (List.filter_map
-               (fun (nested, text) -> Option.map (fun nested -> (nested, text)) nested)
-               code.C_instance.functions)
-        in
-        let main =
-          match List.assoc_opt None code.C_instance.functions with
-          | Some text -> text
-          | None -> Compiler_bug.bug ~stage:"Emit_c" "%s is not built" (Instance.to_string key)
-        in
-        ( List.map snd nested @ [ main ],
+        let nested = List.sort compare code.nested in
+        ( List.map snd nested @ [ code.own ],
           "",
-          Functions { nested = List.length nested; weight = code.C_instance.weight } )
+          Functions { nested = List.length nested; weight = code.weight } )
     | Data data -> ([], data_c context data, Static_data)
     | Table table -> ([], table_c context table, Table_entries table.capability)
   in

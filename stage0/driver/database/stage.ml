@@ -15,13 +15,12 @@ type t =
   | Checked_bodies
   | Derived_forms
   | Mir
-  | Call_edges
+  | Mir_call_edges
   | Body_checks
   | Package_checks
-  | Callees
+  | Call_edges
   | Recursion_groups
   | Proofs
-  | Folded_constants
   | Lowered_code
   | Test_keys
 
@@ -43,13 +42,12 @@ let all =
     Checked_bodies;
     Derived_forms;
     Mir;
-    Call_edges;
+    Mir_call_edges;
     Body_checks;
     Package_checks;
-    Callees;
+    Call_edges;
     Recursion_groups;
     Proofs;
-    Folded_constants;
     Lowered_code;
     Test_keys;
   ]
@@ -62,17 +60,17 @@ let position stage =
 let precedes earlier later = position earlier <= position later
 
 let is_lowering = function
-  | Folded_constants | Lowered_code | Test_keys -> true
+  | Lowered_code | Test_keys -> true
   | Parse | Namespaces | Resolution | Import_checks | Trait_headers | Constant_values | Headers
   | Interfaces | Derived_interfaces | Type_facts | Grants | Signature_checks | Contracts
-  | Checked_bodies | Derived_forms | Mir | Call_edges | Body_checks | Package_checks | Callees
-  | Recursion_groups | Proofs ->
+  | Checked_bodies | Derived_forms | Mir | Mir_call_edges | Body_checks | Package_checks
+  | Call_edges | Recursion_groups | Proofs ->
       false
 
 let drains ~through stage =
   precedes stage through
   && ((not (is_lowering through))
-     || is_lowering stage || precedes stage Call_edges || stage = Callees)
+     || is_lowering stage || precedes stage Mir_call_edges || stage = Call_edges)
 
 let of_part : Part.computed -> t = function
   | Parsed _ -> Parse
@@ -91,11 +89,10 @@ let of_part : Part.computed -> t = function
   | Checked_body _ -> Checked_bodies
   | Derived_form _ -> Derived_forms
   | Body_mir _ | Contract_mir _ | Generated_mir _ -> Mir
-  | Call_edges _ -> Call_edges
+  | Mir_call_edges _ -> Mir_call_edges
   | Patterns _ | Usage _ | Ownership _ | Used_packages _ -> Body_checks
   | Package_check _ -> Package_checks
-  | Callees _ -> Callees
+  | Call_edges _ -> Call_edges
   | Proof _ -> Proofs
-  | Lowering (Folded_constants _) -> Folded_constants
   | Lowering (Lowered _) -> Lowered_code
   | Lowering (Test_key _) -> Test_keys

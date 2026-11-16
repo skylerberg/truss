@@ -47,22 +47,15 @@ let make (context : Lower.context) (key : Instance.key) : lowered =
   | Call_evaluation { function_; arguments } ->
       code (Lower.lower_call_evaluation context ~function_ ~arguments)
 
-let lower (settings : Lookups.settings) (lookups : Lookups.t) ~lowered_constant key =
+let lower (settings : Lookups.settings) (lookups : Lookups.t) key =
   let env =
     Memory_layout.create settings.system
       ~shape_of:(Monomorphic.shape (Lower.monomorphic lookups.interface))
   in
-  let constant path =
-    match lowered_constant path with
-    | Ok (Folded (data, _)) -> Some data.Lowered.value
-    | Ok (Evaluate _) -> None
-    | Ok (Compiled _) -> bug "%s is not a constant" (Path.show path)
-    | Error unsupported -> raise (Lower.Unsupported unsupported)
-  in
   match
     Compiler_bug.while_doing ~stage:"Compile"
       ("lowering " ^ Instance.to_string key)
-      (fun () -> make (Lower.context settings ~constant ~env lookups) key)
+      (fun () -> make (Lower.context settings ~env lookups) key)
   with
   | lowered -> Ok lowered
   | exception Lower.Unsupported unsupported -> Error unsupported
@@ -126,20 +119,20 @@ let bound_methods (interface : Interface.Lookups.t) path type_arguments =
         (pairs signature.generics type_arguments)
   | None -> []
 
-let check_calls (interface : Interface.Lookups.t) ~list_callees (key : Instance.key) lowered =
+let check_calls (interface : Interface.Lookups.t) ~list_call_edges (key : Instance.key) lowered =
   match (key, lowered) with
   | Code { path = caller; type_arguments }, Compiled fragment -> (
       match caller with
       | Method { owner = Derived _; _ } -> ()
       | _ -> (
-          match list_callees (call_node interface caller) with
+          match list_call_edges (call_node interface caller) with
           | None -> ()
-          | Some callees ->
+          | Some call_edges ->
               let allowed =
-                callees
+                call_edges
                 @ List.concat_map
-                    (fun callee -> Option.value (list_callees callee) ~default:[])
-                    callees
+                    (fun callee -> Option.value (list_call_edges callee) ~default:[])
+                    call_edges
                 @ bound_methods interface caller type_arguments
               in
               List.iter
@@ -150,7 +143,7 @@ let check_calls (interface : Interface.Lookups.t) ~list_callees (key : Instance.
                            (is_runtime_call callee
                            || List.exists (Path.equal callee) allowed
                            || List.exists (Path.equal (call_node interface callee)) allowed) ->
-                      bug "%s calls %s, which is not among its callees" (Instance.to_string key)
+                      bug "%s calls %s, which is not among its call edges" (Instance.to_string key)
                         (Instance.to_string called)
                   | _ -> ())
                 (Emit_c.called fragment)))
@@ -753,11 +746,6 @@ let create ?(file_name = Path.show_file) ?results ?(evaluation_time_limit_ms = 1
     programs;
     runs = Hashtbl.create 8;
   }
-
-let list_folded_constants lookups path =
-  Compiler_bug.while_doing ~stage:"Compile"
-    ("listing the constants that " ^ Path.show path ^ " folds")
-    (fun () -> Lower.list_folded_constants lookups path)
 
 module For_testing = struct
   let is_folded compiler path =

@@ -572,10 +572,126 @@ let check_type lookups ~contained (declaration : Names.declaration) =
   let definition, spans = read_definition lookups declaration in
   check_recursion lookups ~contained declaration spans definition
 
+let read_constant_value (lookups : Lookups.t) path =
+  match Option.map lookups.core (lookups.interface.names.key path) with
+  | Some { definition = Constant (Some value) } -> Some value
+  | _ -> None
+
+let find_field_default (lookups : Lookups.t) (type_ : Types.ty) variant field =
+  match type_ with
+  | Named { path; _ } -> (
+      match Option.map lookups.core (lookups.interface.names.key path) with
+      | Some { definition = Type { defaults; _ } } ->
+          List.find_map
+            (fun (default_variant, default_field, value) ->
+              if
+                Option.equal String.equal default_variant variant
+                && String.equal default_field field
+              then Some (path, value)
+              else None)
+            defaults
+      | _ -> None)
+  | _ -> None
+
+type named_constant = { origin : Core.origin; constant : Path.t; omitted_field : string option }
+
+let list_named_constants (lookups : Lookups.t) (value : Core.expression) =
+  let named = ref [] in
+  let entered_defaults = Hashtbl.create 8 in
+  let rec visit ~through (value : Core.expression) =
+    Core_walk.expression
+      {
+        Core_walk.ignore_all with
+        place =
+          (function
+          | Constant { path; origin; _ } ->
+              let origin, omitted_field =
+                match through with
+                | Some (origin, field) -> (origin, Some field)
+                | None -> (origin, None)
+              in
+              named := { origin; constant = path; omitted_field } :: !named
+          | Local _ | Field _ | Lent _ | Temporary _ -> ());
+        expression =
+          (fun (node : Core.expression) ->
+            match node.kind with
+            | Construct { variant; fields } ->
+                List.iter
+                  (fun (field, operand) ->
+                    if Option.is_none operand then
+                      match find_field_default lookups node.type_ variant field with
+                      | Some (type_path, default) ->
+                          let entered = (type_path, variant, field) in
+                          if not (Hashtbl.mem entered_defaults entered) then begin
+                            Hashtbl.replace entered_defaults entered ();
+                            let through =
+                              match through with
+                              | Some _ -> through
+                              | None -> Some (node.origin, field)
+                            in
+                            visit ~through default
+                          end
+                      | None -> ())
+                  fields
+            | _ -> ());
+      }
+      value
+  in
+  visit ~through:None value;
+  List.sort_uniq compare !named
+
+let describe_constant_cycle ~cyclic (named : named_constant) =
+  let is_itself = Path.equal named.constant cyclic in
+  let constant = Path.show named.constant and cyclic = Path.show cyclic in
+  let consequence = Printf.sprintf "so `%s` would be computed from itself." cyclic in
+  match (named.omitted_field, is_itself) with
+  | None, true -> Printf.sprintf "This reads `%s` in its own value, %s" constant consequence
+  | None, false ->
+      Printf.sprintf "This reads `%s`, whose value depends on `%s`, %s" constant cyclic consequence
+  | Some field, true ->
+      Printf.sprintf "This leaves out the field `%s`, whose default reads `%s`, %s" field constant
+        consequence
+  | Some field, false ->
+      Printf.sprintf
+        "This leaves out the field `%s`, whose default reads `%s`. The value of `%s` depends on \
+         `%s`, %s"
+        field constant constant cyclic consequence
+
+let check_constant (lookups : Lookups.t) (declaration : Names.declaration) =
+  let path = declaration.path in
+  match read_constant_value lookups path with
+  | None -> []
+  | Some value ->
+      let visited = Hashtbl.create 16 in
+      let rec depends_on_constant named =
+        Path.equal named path
+        || (not (Hashtbl.mem visited named))
+           && begin
+             Hashtbl.replace visited named ();
+             match read_constant_value lookups named with
+             | Some named_value ->
+                 List.exists
+                   (fun (further : named_constant) -> depends_on_constant further.constant)
+                   (list_named_constants lookups named_value)
+             | None -> false
+           end
+      in
+      let key = Names.key_of declaration in
+      let spans = lookups.interface.names.spans key in
+      List.filter_map
+        (fun (named : named_constant) ->
+          if depends_on_constant named.constant then
+            Some
+              (diagnostic_at key Constant_cycle spans.(named.origin)
+                 (describe_constant_cycle ~cyclic:path named))
+          else None)
+        (list_named_constants lookups value)
+
 type check =
   | Sealed of Names.key
   | Impl of Names.key
   | Type of Names.key
+  | Constant of Names.key
   | Instantiations
   | Tests
   | Dependencies
@@ -588,6 +704,7 @@ let list_checks (declarations : Names.declaration list) =
         match declaration.kind with
         | Impl -> [ Sealed (Names.key_of declaration); Impl (Names.key_of declaration) ]
         | Type -> [ Type (Names.key_of declaration) ]
+        | Constant | Member_constant -> [ Constant (Names.key_of declaration) ]
         | _ -> [])
     declarations
   @ [ Instantiations; Tests; Dependencies ]
@@ -635,6 +752,7 @@ let run (lookups : Lookups.t) package check =
   | Sealed key -> Placed (check_sealed lookups (lookups.interface.names.declaration key))
   | Impl key -> Placed (check_impl lookups ~contained (lookups.interface.names.declaration key))
   | Type key -> Placed (check_type lookups ~contained (lookups.interface.names.declaration key))
+  | Constant key -> Placed (check_constant lookups (lookups.interface.names.declaration key))
   | Instantiations -> Placed (check_instantiation lookups package)
   | Tests -> Placed (check_tests lookups package)
   | Dependencies -> Unused_dependencies (list_unused_dependencies lookups package)

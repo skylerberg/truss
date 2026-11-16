@@ -238,8 +238,8 @@ let impls (side : side) package =
     (declarations side package)
 
 let compare ~before ~after package =
-  let before = { database = before; lookups = Database.drain_interface_lookups before [ package ] }
-  and after = { database = after; lookups = Database.drain_interface_lookups after [ package ] } in
+  let before = { database = before; lookups = Database.make_interface_lookups before [ package ] }
+  and after = { database = after; lookups = Database.make_interface_lookups after [ package ] } in
   let old = List.filter (public before) (declarations before package) in
   let now = List.filter (public after) (declarations after package) in
   let public_change path change = { path; change } in

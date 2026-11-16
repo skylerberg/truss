@@ -86,7 +86,7 @@ let record database snapshot registry (package : Path.package) =
   (entries, List.sort_uniq compare !problems)
 
 let failed_tests database snapshot packages =
-  let interface = Database.drain_interface_lookups database packages in
+  let interface = Database.make_interface_lookups database packages in
   let tests =
     List.filter
       (fun (test : Test_command.test) ->

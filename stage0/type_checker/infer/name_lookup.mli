@@ -2,7 +2,7 @@ module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
 module Properties = Interface.Properties
-module Elaborate = Interface.Elaborate
+module Elaborator = Interface.Elaborator
 
 type overload =
   | Type_overload of Path.t

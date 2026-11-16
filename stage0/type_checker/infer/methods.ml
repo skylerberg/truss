@@ -3,7 +3,7 @@ module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
 module Properties = Interface.Properties
-module Elaborate = Interface.Elaborate
+module Elaborator = Interface.Elaborator
 open State
 open Modes
 open Instantiation
@@ -65,9 +65,7 @@ and call_named state env ?expected (value : expression) (callee : expression)
           state.tables.resolutions.(value.id) <- Some Specification_value;
           register_expression state value (fun () ->
               let make = synthetic_expression state ~origin:value.id in
-              let passed value : Core.argument =
-                Passed { mode = Read; value = Value value; mode_keyword = None }
-              in
+              let passed = Operands.build_argument Read in
               let first =
                 make part
                   (Call

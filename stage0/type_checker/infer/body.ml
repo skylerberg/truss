@@ -1,7 +1,7 @@
 open Syntax
 module Names = Resolve.Names
 module Environment = Interface.Environment
-module Elaborate = Interface.Elaborate
+module Elaborator = Interface.Elaborator
 open State
 open Statements
 open Expressions
@@ -451,7 +451,7 @@ let check_definition state (elaborated : Environment.elaborated_interface) ~chec
                       match parameter.kind with
                       | Named_parameter { name; type_; _ } ->
                           declare state name
-                            (Elaborate.type_ state.context type_)
+                            (Elaborator.elaborate_type state.context type_)
                             ~is_var:false ~mode:Types.Read
                       | _ -> ())
                     law.parameters;
@@ -678,9 +678,7 @@ let check (lookups : Lookups.t) (key : Names.key) ~checks_body =
   let module_ = key.module_ in
   let definition = lookups.interface.names.definition key in
   let spans = lookups.interface.names.spans key in
-  let context =
-    Interface.Elaborate.create_context lookups.interface resolved ~spans elaborated.scope
-  in
+  let context = Interface.Elaborator.create lookups.interface resolved ~spans elaborated.scope in
   let text = lazy (lookups.interface.names.text key) in
   let state : state =
     {

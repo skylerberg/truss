@@ -43,7 +43,8 @@ let build_arguments state (call : Tables.call) : Core.argument list =
           Core.Passed
             {
               mode = argument.mode;
-              value = build_operand argument.mode (build_expression_by_id state argument.expression);
+              value =
+                Operands.build argument.mode (build_expression_by_id state argument.expression);
               mode_keyword = argument.mode_keyword;
             }
       | None -> Default)
@@ -52,7 +53,7 @@ let build_call state ~lends ?function_value (call : Tables.call) : Core.call =
   {
     callee =
       (match (call.callee, function_value) with
-      | Indirect, Some function_value -> Indirect (build_operand Read function_value)
+      | Indirect, Some function_value -> Indirect (Operands.build Read function_value)
       | direct, _ -> convert_callee direct);
     arguments = build_arguments state call;
     lends;
@@ -117,7 +118,8 @@ let build_call_kind ?lends ?function_value state (value : expression) : Core.kin
   match recorded.callee with
   | Trait_method { trait; evidence = Built_in; _ } when Well_known.is Copyable trait.trait -> (
       match recorded.arguments with
-      | [ receiver ] -> Copy (build_operand Read (build_expression_by_id state receiver.expression))
+      | [ receiver ] ->
+          Copy (Operands.build Read (build_expression_by_id state receiver.expression))
       | _ -> bug "`copy` does not have exactly one argument")
   | Trait_method { trait; name; self_type; _ }
     when Option.is_some (find_built_in_operation trait name self_type) ->
@@ -137,7 +139,7 @@ let build_call_kind ?lends ?function_value state (value : expression) : Core.kin
         List.map
           (fun (argument : Tables.argument) ->
             ( (List.nth declared argument.core_argument_index).field_name,
-              Some (build_operand argument.mode (build_expression_by_id state argument.expression))
+              Some (Operands.build argument.mode (build_expression_by_id state argument.expression))
             ))
           recorded.arguments
       in
@@ -263,7 +265,7 @@ let build_record fields : Core.kind =
   Construct
     {
       variant = None;
-      fields = List.map (fun (name, value) -> (name, Some (Core.Value value))) fields;
+      fields = List.map (fun (name, value) -> (name, Some (Operands.build Own value))) fields;
     }
 
 let build_range_record state (value : expression) start stop ~inclusive : Core.kind =
@@ -305,7 +307,7 @@ let build_provide state (implementations : expression list) (body : block) : Cor
         {
           origin = implementation.id;
           mode;
-          value = build_operand mode node;
+          value = Operands.build mode node;
           type_ = node.type_;
           provides = List.map fst (find_capability_impls state node.type_);
         })
@@ -346,7 +348,8 @@ let build_untagged_string state ~origin (literal : string_literal) : Core.kind =
                    kind = Bind { local = builder; name = "builder"; is_var = true; mode = Own };
                  };
                value =
-                 Value (make builder_type (make_call (build_text_builder_callee "new" Static) []));
+                 Operands.build Own
+                   (make builder_type (make_call (build_text_builder_callee "new" Static) []));
                else_ = None;
              })
       in
@@ -385,12 +388,7 @@ let build_untagged_string state ~origin (literal : string_literal) : Core.kind =
                          callee = convert_callee recorded.callee;
                          arguments =
                            [
-                             Passed
-                               {
-                                 mode = Read;
-                                 value = build_operand Read (build_expression state part);
-                                 mode_keyword = None;
-                               };
+                             Operands.build_argument Read (build_expression state part);
                              Passed { mode = Mut; value = Place builder_place; mode_keyword = None };
                            ];
                          lends = None;
@@ -411,14 +409,7 @@ let build_untagged_string state ~origin (literal : string_literal) : Core.kind =
               (make string_type
                  (make_call
                     (build_text_builder_callee "finish" Own)
-                    [
-                      Passed
-                        {
-                          mode = Own;
-                          value = Value (make builder_type (Use builder_place));
-                          mode_keyword = None;
-                        };
-                    ]));
+                    [ Operands.build_argument Own (make builder_type (Use builder_place)) ]));
         }
 
 let build_list_literal state ~origin (element : Types.ty) (elements : Core.expression list) :
@@ -452,9 +443,9 @@ let build_list_literal state ~origin (element : Types.ty) (elements : Core.expre
                kind = Bind { local = storage; name = "storage"; is_var = true; mode = Own };
              };
            value =
-             Value
+             Operands.build Own
                (make_intrinsic_call Storage_with_capacity storage_type
-                  [ Passed { mode = Read; value = Value capacity; mode_keyword = None } ]);
+                  [ Operands.build_argument Read capacity ]);
            else_ = None;
          })
   in
@@ -471,7 +462,7 @@ let build_list_literal state ~origin (element : Types.ty) (elements : Core.expre
                       value = Place (Local { local = storage; type_ = storage_type; origin });
                       mode_keyword = None;
                     };
-                  Passed { mode = Own; value = Value element; mode_keyword = None };
+                  Operands.build_argument Own element;
                 ])))
       elements
   in
@@ -566,7 +557,7 @@ let build_tagged_string state (value : expression) (literal : string_literal) ~(
           (Call
              {
                callee = convert_callee from_template.callee;
-               arguments = [ Passed { mode = Read; value = Value template; mode_keyword = None } ];
+               arguments = [ Operands.build_argument Read template ];
                lends = None;
                uses = from_template.uses;
              });
@@ -693,7 +684,7 @@ let build_comparison state (value : expression) comparison (left : expression) (
       let make_matches_variant variant : Core.kind =
         Matches
           {
-            value = Value call;
+            value = Operands.build Own call;
             pattern =
               {
                 id = fresh_node_id state;
@@ -778,7 +769,7 @@ let build_compound_assign state (written : statement) (target : expression) (val
       (Use (Local { local = bound; type_ = right.type_; origin = value.id }))
   in
   let make_built_in operation : Core.kind * Core.operand =
-    (Operator { operation; arguments = [ current; bound_value ] }, Value right)
+    (Operator { operation; arguments = [ current; bound_value ] }, Operands.build Own right)
   in
   let kind, right_operand =
     match state.tables.calls.(written.id) with
@@ -800,19 +791,13 @@ let build_compound_assign state (written : statement) (target : expression) (val
                   callee = convert_callee recorded.callee;
                   arguments =
                     [
-                      Passed
-                        { mode = read_argument_mode 0; value = Value current; mode_keyword = None };
-                      Passed
-                        {
-                          mode = read_argument_mode 1;
-                          value = build_operand (read_argument_mode 1) bound_value;
-                          mode_keyword = None;
-                        };
+                      Operands.build_argument (read_argument_mode 0) current;
+                      Operands.build_argument (read_argument_mode 1) bound_value;
                     ];
                   lends = None;
                   uses = recorded.uses;
                 },
-              build_operand (read_argument_mode 1) right ))
+              Operands.build (read_argument_mode 1) right ))
     | Some _ -> bug "a compound assignment's call is not a trait method call"
     | None -> make_built_in (convert_to_operation operation)
   in
@@ -854,7 +839,7 @@ let rec lend_statements state (mode : Types.mode) (value : Core.expression) : Co
            })
   | Block body -> make_branching (Block (lend_block state mode body))
   | _ when value.type_ = Types.Never -> make_statement (Evaluate value)
-  | _ -> make_statement (Yield { mode; part = build_operand mode value })
+  | _ -> make_statement (Yield { mode; part = Operands.build mode value })
 
 and lend_block state mode (body : Core.block) : Core.block =
   match body.value with
@@ -873,7 +858,7 @@ let build_collection_place state (iterable : expression) (mode : Types.mode) :
   | Use place when is_fixed_place place -> (place, None)
   | _ ->
       let local = fresh_synthetic_local state and origin = iterable.id in
-      let scrutinee = build_operand mode collection in
+      let scrutinee = Operands.build mode collection in
       let pattern : Core.pattern =
         {
           id = fresh_node_id state;
@@ -934,7 +919,8 @@ let build_elements state ~origin (collection : Core.place) ~(count : Tables.call
                 arguments =
                   [
                     make_receiver lends;
-                    Passed { mode = Read; value = build_operand Read position; mode_keyword = None };
+                    Passed
+                      { mode = Read; value = Operands.build Read position; mode_keyword = None };
                   ];
                 lends = Some lends;
                 uses = element.uses;
@@ -1000,7 +986,7 @@ let build_for_loop state (written : statement) (iterable : expression) ~pattern 
                    arguments =
                      [
                        Passed
-                         { mode = Own; value = build_operand Own collection; mode_keyword = None };
+                         { mode = Own; value = Operands.build Own collection; mode_keyword = None };
                      ];
                    lends = None;
                    uses = cursor_call.uses;
@@ -1059,7 +1045,7 @@ let build_for_loop state (written : statement) (iterable : expression) ~pattern 
             (synthetic_expression state ~origin:written.id Types.unit
                (Match
                   {
-                    scrutinees = [ Value pulled ];
+                    scrutinees = [ Operands.build Own pulled ];
                     arms =
                       [
                         {
@@ -1161,7 +1147,7 @@ let build_try state (value : expression) (inner : expression) ~(output : Types.t
   let make_arm patterns body : Core.arm = { patterns; guard = None; body; origin = value.id } in
   Match
     {
-      scrutinees = [ Value scrutinee ];
+      scrutinees = [ Operands.build Own scrutinee ];
       arms =
         [
           make_arm [ success_pattern ]
@@ -1184,7 +1170,7 @@ let build_try state (value : expression) (inner : expression) ~(output : Types.t
                                    fields =
                                      List.map2
                                        (fun (field : Types.field) (_, field_value) ->
-                                         (field.field_name, Some (Core.Value field_value)))
+                                         (field.field_name, Some (Operands.build Own field_value)))
                                        (Option.value ~default:[] returned_failure.fields)
                                        failure_fields;
                                  })))));
@@ -1212,11 +1198,7 @@ let build_inserted_literal state ~origin (type_ : Types.ty) ~name ~insert
          })
   in
   let capacity = make (Types.make_builtin UInt64) (Integer (Z.of_int (List.length entries))) in
-  let created =
-    make_call "with_capacity" Static
-      [ Passed { mode = Read; value = Value capacity; mode_keyword = None } ]
-      type_
-  in
+  let created = make_call "with_capacity" Static [ Operands.build_argument Read capacity ] type_ in
   match entries with
   | [] -> created.kind
   | _ ->
@@ -1233,7 +1215,7 @@ let build_inserted_literal state ~origin (type_ : Types.ty) ~name ~insert
                    type_;
                    kind = Bind { local; name; is_var = true; mode = Own };
                  };
-               value = Value created;
+               value = Operands.build Own created;
                else_ = None;
              })
       in
@@ -1245,8 +1227,7 @@ let build_inserted_literal state ~origin (type_ : Types.ty) ~name ~insert
                  (make_call insert Mut
                     (Passed { mode = Mut; value = Place collection; mode_keyword = None }
                     :: List.map
-                         (fun argument : Core.argument ->
-                           Passed { mode = Own; value = Value argument; mode_keyword = None })
+                         (fun argument : Core.argument -> Operands.build_argument Own argument)
                          entry)
                     Types.unit)))
           entries

@@ -194,7 +194,7 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
             (fun (written : path_type) ->
               match (resolved : Resolve.resolved).names.(written.path.last.id) with
               | Some (Definition (_, trait)) ->
-                  let shown = Elaborate.show_path written.path in
+                  let shown = Elaborator.show_path written.path in
                   if
                     not
                       (Names.derivable trait || Well_known.is Copyable trait
@@ -299,7 +299,7 @@ let check_no_capability_parameter state definition_kind (name : name)
 
 let check_trait_cycle state (requires : path_type list) =
   let is_required_by required =
-    List.exists (Path.equal state.key.path) (Elaborate.list_trait_closure state.lookups required)
+    List.exists (Path.equal state.key.path) (Elaborator.list_trait_closure state.lookups required)
   in
   match state.lookups.trait_header state.key.path with
   | Some header when List.exists is_required_by header.required -> (

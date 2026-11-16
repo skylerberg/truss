@@ -409,13 +409,13 @@ let () =
     (fun () ->
       expect_included
         (propagated ~before:[ ("app::main", stepper) ] ~after:[ ("app::main", stepper_that_runs) ])
-        ~parts:[ "callees app app::main::Step.step(own self)"; "proof app::main::run" ]);
-  test "only a trait method's callees read the dependencies of the viewer's packages" (fun () ->
+        ~parts:[ "call edges app app::main::Step.step(own self)"; "proof app::main::run" ]);
+  test "only a trait method's call edges read the dependencies of the viewer's packages" (fun () ->
       let database = built [ ("app::main", stepper_that_runs) ] in
       let dependencies = [ "dependencies app"; "dependencies standard" ] in
-      expect_reads database "callees app app::main::Step.step(own self)" ~includes:dependencies
+      expect_reads database "call edges app app::main::Step.step(own self)" ~includes:dependencies
         ~excludes:[];
-      expect_reads database "callees app app::main::run" ~includes:[] ~excludes:dependencies);
+      expect_reads database "call edges app app::main::run" ~includes:[] ~excludes:dependencies);
   test "a construction that runs a field default joins the recursion group of the default's callee"
     (fun () ->
       expect_included
@@ -424,7 +424,7 @@ let () =
            ~after:[ ("app::main", configured "Config()") ])
         ~parts:
           [
-            "call edges app::main::make";
+            "MIR call edges app::main::make";
             "recursion group app::main::make";
             "recursion group app::main::start";
             "proof app::main::start";
@@ -536,7 +536,8 @@ let () =
         (propagated_with_roots ~roots:[ "size" ] ~before:(program "List[Chain]")
            ~after:(program "Option[Chain]"))
         ~parts:[ lowered "size" ]);
-  test "an edit to a constant recomputes the constants that fold it, in order" (fun () ->
+  test "an edit to a constant recomputes the constants that fold it, which lower no copy of it"
+    (fun () ->
       let constants first =
         [
           ( "app::main",
@@ -544,9 +545,11 @@ let () =
             ^ "\nlet second: Int64 = first + 1\nfn read() -> Int64 { second }\n" );
         ]
       in
-      expect_included
-        (propagated_with_roots ~roots:[ "read" ] ~before:(constants "1") ~after:(constants "2"))
-        ~parts:[ lowered "first"; lowered "second" ]);
+      let recomputed =
+        propagated_with_roots ~roots:[ "read" ] ~before:(constants "1") ~after:(constants "2")
+      in
+      expect_included recomputed ~parts:[ lowered "second" ];
+      expect_untouched recomputed ~names:[ lowered "first" ]);
   test "adding a dependency to a manifest fixes the dependent's use of it" (fun () ->
       expect_included
         (relaid ~before:(Support.setup tool_user)
@@ -559,7 +562,7 @@ let () =
       ignore (relaid ~before:alone ~after:with_lib ());
       expect_untouched
         (List.filter
-           (fun part -> not (String.starts_with ~prefix:"callees app " part))
+           (fun part -> not (String.starts_with ~prefix:"call edges app " part))
            (relaid ~before:with_lib ~after:alone ()))
         ~names:[ "lib::" ]);
   test "a new version of a loaded package recomputes only the readers of what changed" (fun () ->
