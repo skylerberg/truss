@@ -118,12 +118,6 @@ let fresh_node_id state =
   state.form.next_node_id <- id + 1;
   id
 
-let build_operand (mode : Types.mode) (node : Core.expression) : Core.operand =
-  match (mode, node.kind) with
-  | (Read | Mut), Use place -> Place place
-  | Read, String _ -> Place (Temporary node)
-  | _ -> Value node
-
 let synthetic_expression state ~origin type_ kind : Core.expression =
   { id = fresh_node_id state; origin; type_; kind }
 
@@ -185,7 +179,7 @@ let rec build_expression state (value : expression) : Core.expression =
                         type_ = node.type_;
                         kind = Wildcard;
                       };
-                    value = (match node.kind with Use place -> Place place | _ -> Value node);
+                    value = Operands.build Read node;
                     else_ = None;
                   };
             }
@@ -927,9 +921,7 @@ let slice state ~origin ~viewed (base : Core.place) ~start ~stop ~inclusive : Co
          })
   in
   let receiver : Core.argument = Passed { mode = Read; value = Place base; mode_keyword = None } in
-  let bound value : Core.argument =
-    Passed { mode = Read; value = Value value; mode_keyword = None }
-  in
+  let bound = Operands.build_argument Read in
   let start = match start with Some start -> start | None -> make uint64 (Integer Z.zero) in
   match stop with
   | None -> Slice { call = call "slice_from" [ receiver; bound start ] viewed }
@@ -985,15 +977,7 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
                                    path = Method { owner = path; name = "slice"; receiver = Read };
                                    type_arguments = arguments;
                                  };
-                             arguments =
-                               [
-                                 Passed
-                                   {
-                                     mode = Read;
-                                     value = build_operand Read inner;
-                                     mode_keyword = None;
-                                   };
-                               ];
+                             arguments = [ Operands.build_argument Read inner ];
                              lends = None;
                              uses = Types.no_capabilities;
                            })

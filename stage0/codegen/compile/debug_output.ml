@@ -149,5 +149,5 @@ let debug env ty =
           finish builder (Switch_variant { place = value; cases; default = None });
           start builder after));
   finish builder (Return None);
-  build builder ~parameters:(Option.to_list parameter @ [ output_pointer ]) ~result:None;
-  built builder
+  build builder
+    { parameters = Option.to_list parameter @ [ output_pointer ]; result = None; returns = true }

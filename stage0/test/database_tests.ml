@@ -536,7 +536,8 @@ let () =
         (propagated_with_roots ~roots:[ "size" ] ~before:(program "List[Chain]")
            ~after:(program "Option[Chain]"))
         ~parts:[ lowered "size" ]);
-  test "an edit to a constant recomputes the constants that fold it, in order" (fun () ->
+  test "an edit to a constant recomputes the constants that fold it, which lower no copy of it"
+    (fun () ->
       let constants first =
         [
           ( "app::main",
@@ -544,9 +545,11 @@ let () =
             ^ "\nlet second: Int64 = first + 1\nfn read() -> Int64 { second }\n" );
         ]
       in
-      expect_included
-        (propagated_with_roots ~roots:[ "read" ] ~before:(constants "1") ~after:(constants "2"))
-        ~parts:[ lowered "first"; lowered "second" ]);
+      let recomputed =
+        propagated_with_roots ~roots:[ "read" ] ~before:(constants "1") ~after:(constants "2")
+      in
+      expect_included recomputed ~parts:[ lowered "second" ];
+      expect_untouched recomputed ~names:[ lowered "first" ]);
   test "adding a dependency to a manifest fixes the dependent's use of it" (fun () ->
       expect_included
         (relaid ~before:(Support.setup tool_user)

@@ -24,7 +24,7 @@ type name =
   | Impls_of_trait of Path.package * Path.t
   | Law_proofs of Path.package * Resolve.Names.law_proof_name
 
-type lowering = Folded_constants of Path.t | Lowered of Instance.key | Test_key of Instance.key
+type lowering = Lowered of Instance.key | Test_key of Instance.key
 
 type computed =
   | Parsed of Path.file
@@ -101,8 +101,7 @@ let package : computed -> Path.package = function
   | Derived_form path
   | Generated_mir path
   | Call_edges path
-  | Derived_interface { type_ = path; _ }
-  | Lowering (Folded_constants path) ->
+  | Derived_interface { type_ = path; _ } ->
       Path.package path
   | Lowering (Lowered key | Test_key key) -> instance_package key
 
@@ -192,13 +191,13 @@ let show_computed part =
         | Sealed declared -> "sealed " ^ show_key declared
         | Impl declared -> "impl " ^ show_key declared
         | Type declared -> "type " ^ show_key declared
+        | Constant declared -> "constant " ^ show_key declared
         | Instantiations -> "instantiations"
         | Tests -> "tests"
         | Dependencies -> "dependencies")
   | Callees (path, package) ->
       Printf.sprintf "callees %s %s" (Path.show_package package) (Path.show path)
   | Proof declared -> "proof " ^ show_key declared
-  | Lowering (Folded_constants path) -> "folded constants " ^ Path.show path
   | Lowering (Lowered instance) -> "lowered " ^ Instance.to_string instance
   | Lowering (Test_key instance) -> "test key " ^ Instance.to_string instance
 
@@ -259,15 +258,14 @@ let computed_definition = function
   | Ownership key
   | Used_packages key
   | Proof key
-  | Package_check (_, (Sealed key | Impl key | Type key)) ->
+  | Package_check (_, (Sealed key | Impl key | Type key | Constant key)) ->
       Some key.path
   | Constant_value path
   | Type_facts path
   | Derived_form path
   | Generated_mir path
   | Call_edges path
-  | Callees (path, _)
-  | Lowering (Folded_constants path) ->
+  | Callees (path, _) ->
       Some path
   | Derived_interface { type_; trait } -> Some (Derived { type_; trait })
   | Lowering (Lowered key | Test_key key) -> instance_definition key
@@ -325,7 +323,6 @@ let computed_kind_name = function
   | Package_check _ -> "package check"
   | Callees _ -> "callees"
   | Proof _ -> "proof"
-  | Lowering (Folded_constants _) -> "folded constants"
   | Lowering (Lowered _) -> "lowered code"
   | Lowering (Test_key _) -> "test key"
 

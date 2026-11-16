@@ -24,7 +24,7 @@ type name =
   | Impls_of_trait of Path.package * Path.t
   | Law_proofs of Path.package * Resolve.Names.law_proof_name
 
-type lowering = Folded_constants of Path.t | Lowered of Instance.key | Test_key of Instance.key
+type lowering = Lowered of Instance.key | Test_key of Instance.key
 
 type computed =
   | Parsed of Path.file

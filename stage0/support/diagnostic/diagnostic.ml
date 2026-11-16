@@ -233,6 +233,7 @@ module Code = struct
     | Not_strictly_positive
     | Growing_type
     | Instantiation_cycle
+    | Constant_cycle
     | Duplicate_test
 
   type t =
@@ -480,6 +481,7 @@ module Code = struct
     | Not_strictly_positive -> "not_strictly_positive"
     | Growing_type -> "growing_type"
     | Instantiation_cycle -> "instantiation_cycle"
+    | Constant_cycle -> "constant_cycle"
     | Duplicate_test -> "duplicate_test"
 
   let prover_name code =

@@ -76,14 +76,14 @@ let () =
       Emit_c.Builder.start builder (Emit_c.Builder.block builder);
       Emit_c.Builder.emit builder (Assign (at parameter, Use (constant_int32 5)));
       let first =
-        Emit_c.Builder.outline builder ~nested:0 ~parts:[] (fun () ->
+        Emit_c.Builder.outline builder ~index:0 ~parts:[] (fun () ->
             let own = Emit_c.Builder.local builder ~name:"own" int in
             Emit_c.Builder.emit builder (Assign (at own, add parameter parameter));
             Emit_c.Builder.emit builder (Assign (at sum, add own parameter));
             Emit_c.Builder.finish builder (Return None))
       in
       let second =
-        Emit_c.Builder.outline builder ~nested:1 ~parts:[] (fun () ->
+        Emit_c.Builder.outline builder ~index:1 ~parts:[] (fun () ->
             Emit_c.Builder.emit builder (Assign (at other, Use (copy parameter)));
             Emit_c.Builder.finish builder (Return None))
       in
@@ -91,8 +91,9 @@ let () =
       Emit_c.Builder.emit builder (Fork { branches = [ (0, address first); (1, address second) ] });
       Emit_c.Builder.emit builder (Assign (at sum, add sum other));
       Emit_c.Builder.finish builder (Return (Some (copy sum)));
-      Emit_c.Builder.build builder ~parameters:[] ~result:(Some int);
-      let instance = Emit_c.Builder.built builder in
+      let instance =
+        Emit_c.Builder.build builder { parameters = []; result = Some int; returns = true }
+      in
       let c = Emit_c.For_testing.c (Emit_c.fragment env (Code instance)) in
       List.iter
         (fun text -> if not (contains c text) then fail "no %s in:\n%s" text c)

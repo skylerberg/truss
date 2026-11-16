@@ -126,18 +126,18 @@ let write builder (function_ : function_) =
       List.iter (Builder.emit builder) block.statements;
       Builder.finish builder block.terminator)
     function_.blocks;
-  Builder.build builder ~returns:function_.returns ~parameters:function_.parameters
-    ~result:function_.result
+  ({ parameters = function_.parameters; result = function_.result; returns = function_.returns }
+    : Builder.prototype)
 
 let instance ?(nested = []) name main : instance =
  fun env ->
   let builder = Emit_c.Builder.create env ~key:(key name) in
   List.iteri
     (fun index (function_ : function_) ->
-      write (Emit_c.Builder.nested builder ~index ~environment:function_.environment) function_)
+      Emit_c.Builder.build_nested builder ~index ~environment:function_.environment (fun nested ->
+          write nested function_))
     nested;
-  write builder main;
-  Emit_c.Builder.built builder
+  Emit_c.Builder.build builder (write builder main)
 
 let printed instance : instance = fun _ -> instance
 

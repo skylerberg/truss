@@ -140,7 +140,7 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
       register_expression state value (fun () ->
           Matches
             {
-              value = build_operand mode (build_expression state tested);
+              value = Operands.build mode (build_expression state tested);
               pattern = build_pattern state written;
             });
       Types.bool

@@ -144,24 +144,13 @@ let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                    uses = Types.no_capabilities;
                  })
           in
-          let text_argument text : Core.argument =
-            Passed
-              {
-                mode = Read;
-                value =
-                  Place
-                    (Temporary
-                       (node (Types.make_named (Well_known.path String_slice) []) (String text)));
-                mode_keyword = None;
-              }
+          let text_argument text =
+            Operands.build_argument Read
+              (node (Types.make_named (Well_known.path String_slice) []) (String text))
           in
-          let count_argument count : Core.argument =
-            Passed
-              {
-                mode = Read;
-                value = Value (node (Types.make_builtin UInt64) (Integer (Z.of_int count)));
-                mode_keyword = None;
-              }
+          let count_argument count =
+            Operands.build_argument Read
+              (node (Types.make_builtin UInt64) (Integer (Z.of_int count)))
           in
           let read place : Core.argument =
             Passed { mode = Read; value = Place place; mode_keyword = None }
@@ -363,7 +352,7 @@ let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                           node result
                             (Match
                                {
-                                 scrutinees = [ Value compared ];
+                                 scrutinees = [ Operands.build Own compared ];
                                  arms =
                                    [
                                      arm
@@ -452,7 +441,7 @@ let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                           is_var = false;
                                           mode = Own;
                                         });
-                                 value = Value numbered;
+                                 value = Operands.build Own numbered;
                                  else_ = None;
                                });
                         ];
@@ -554,7 +543,7 @@ let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   node ok
                     (Match
                        {
-                         scrutinees = [ Value call ];
+                         scrutinees = [ Operands.build Own call ];
                          arms =
                            [
                              arm
@@ -680,12 +669,7 @@ let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                              [
                                Passed
                                  { mode = Read; value = Place built_place; mode_keyword = None };
-                               Passed
-                                 {
-                                   mode = Read;
-                                   value = Value (node uint64 (Integer (Z.of_int index)));
-                                   mode_keyword = None;
-                                 };
+                               Operands.build_argument Read (node uint64 (Integer (Z.of_int index)));
                              ];
                            lends = None;
                            uses = Types.no_capabilities;
@@ -707,7 +691,7 @@ let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                (Construct
                                   {
                                     variant = Some "Err";
-                                    fields = [ ("error", Some (Core.Value error)) ];
+                                    fields = [ ("error", Some (Operands.build Own error)) ];
                                   }))))
                   in
                   statement
@@ -727,7 +711,7 @@ let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                     (Let
                        {
                          pattern = pattern type_ (Bind { local; name; is_var; mode = Own });
-                         value = Value value;
+                         value = Operands.build Own value;
                          else_ = None;
                        })
                 in
@@ -785,7 +769,10 @@ let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                 (Match
                                    {
                                      scrutinees =
-                                       [ Value (read_field Deserialize_optional field optional) ];
+                                       [
+                                         Operands.build Own
+                                           (read_field Deserialize_optional field optional);
+                                       ];
                                      arms =
                                        [
                                          arm
@@ -858,7 +845,9 @@ let form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                 variant = Some "Ok";
                                 fields =
                                   [
-                                    ("value", Some (Core.Value (node self_type (Use built_place))));
+                                    ( "value",
+                                      Some (Operands.build Own (node self_type (Use built_place)))
+                                    );
                                   ];
                               }));
                   }

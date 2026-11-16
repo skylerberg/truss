@@ -94,7 +94,6 @@ type t = {
   implied : (Path.package, Part.computed list) Hashtbl.t;
   graphs : (Path.package, Call_graph.t) Hashtbl.t;
   lowering : Compile.Lookups.settings option;
-  folded_constants : Path.t list part Path_table.t;
   lowered : (Compile.lowered, Compile.unsupported) result part Instance_table.t;
   test_keys : (string, Compile.unsupported) result part Instance_table.t;
   references : References.t;
@@ -214,7 +213,6 @@ let create ?(loaded = []) ?(checks = true) (packages : Project.package list) =
       implied = Hashtbl.create 8;
       graphs = Hashtbl.create 8;
       lowering = Option.map (fun system -> { Compile.Lookups.checks; system }) Libc.host;
-      folded_constants = Path_table.create 256;
       lowered = Instance_table.create 1024;
       test_keys = Instance_table.create 1024;
       references = References.create ~tracks_blocked:false;
@@ -295,7 +293,6 @@ let copy database =
     implied = Hashtbl.copy database.implied;
     graphs;
     lowering = database.lowering;
-    folded_constants = Path_table.copy database.folded_constants;
     lowered = Instance_table.copy database.lowered;
     test_keys = Instance_table.copy database.test_keys;
     references = References.copy database.references;
@@ -857,27 +854,6 @@ let instance_part database note table part instance =
 let lowered database note key = instance_part database note database.lowered (Lowered key) key
 let test_key database note key = instance_part database note database.test_keys (Test_key key) key
 
-let make_constant_reader database note (key : Instance.key) =
-  match key with
-  | Constant path ->
-      let part = Part.Lowering (Folded_constants path) in
-      read database note part;
-      let folded_constants =
-        match Path_table.find_opt database.folded_constants path with
-        | Some (Value folded_constants) -> folded_constants
-        | Some (Failed _ | Blocked) -> raise Reads_failed_part
-        | None -> unchecked part
-      in
-      fun constant ->
-        if not (List.exists (Path.equal constant) folded_constants) then
-          Compiler_bug.bug ~stage:"Database" "%s folds %s, which its folded constants lack"
-            (Path.show path) (Path.show constant);
-        lowered database note (Constant constant)
-  | key ->
-      fun constant ->
-        Compiler_bug.bug ~stage:"Database" "%s reads the value of %s, and only a constant folds"
-          (Instance.to_string key) (Path.show constant)
-
 let instance_slot table instance =
   {
     stored = Instance_table.find_opt table instance;
@@ -1054,17 +1030,6 @@ let stored database (part : Part.stored) =
                      (Marshal.from_string bytes 0)));
           }
       | Proof key -> keyed ~is_failed:failed (fun package_database -> package_database.proofs) key
-      | Lowering (Folded_constants path) ->
-          let find database = Path_table.find_opt database.folded_constants path in
-          {
-            is_failed = Option.fold ~none:false ~some:failed (find database);
-            remove = (fun () -> Path_table.remove database.folded_constants path);
-            is_equal_in = (fun other -> compare (find other) (find database) = 0);
-            saved = (fun () -> Option.map marshalled (find database));
-            restore =
-              (fun bytes ->
-                Path_table.replace database.folded_constants path (Marshal.from_string bytes 0));
-          }
       | Lowering (Lowered key) -> of_instance (fun database -> database.lowered) key
       | Lowering (Test_key key) -> of_instance (fun database -> database.test_keys) key)
 
@@ -1074,13 +1039,10 @@ let discard database part =
   Computed_table.remove database.reads part;
   mark_unsaved database (Reads part)
 
-let instance_parts (key : Instance.key) : Part.lowering list =
-  (match key with Constant path -> [ Part.Folded_constants path ] | _ -> [])
-  @ [ Lowered key; Test_key key ]
+let instance_parts key : Part.lowering list = [ Lowered key; Test_key key ]
 
 let is_stored database (part : Part.lowering) =
   match part with
-  | Folded_constants path -> Path_table.mem database.folded_constants path
   | Lowered key -> Instance_table.mem database.lowered key
   | Test_key key -> Instance_table.mem database.test_keys key
 
@@ -1151,23 +1113,13 @@ and collect database keys =
   List.iter (fun part -> database.observe (Collected part)) parts;
   forget database (List.map (fun part -> Part.Lowering part) parts)
 
-let find_folded_constants database (key : Instance.key) =
-  match key with
-  | Constant path -> (
-      match Path_table.find_opt database.folded_constants path with
-      | Some (Value paths) -> paths
-      | Some (Failed _ | Blocked) | None -> [])
-  | _ -> []
-
 let list_lowered_references database key =
   match Instance_table.find_opt database.lowered key with
   | Some (Value (Ok lowered)) -> Compile.references lowered
   | Some (Value (Error _) | Failed _ | Blocked) | None -> []
 
 let list_instance_edges database key =
-  List.sort_uniq Instance.compare
-    (List.map (fun path -> Instance.Constant path) (find_folded_constants database key)
-    @ list_lowered_references database key)
+  List.sort_uniq Instance.compare (list_lowered_references database key)
 
 let update_references database key =
   let edges = list_instance_edges database key in
@@ -1177,12 +1129,8 @@ let update_references database key =
     settle_references database
   end
 
-let list_current_edges database (key : Instance.key) =
-  (match key with
-    | Constant path when not (is_stale database (Lowering (Folded_constants path))) ->
-        List.map (fun path -> Instance.Constant path) (find_folded_constants database key)
-    | _ -> [])
-  @ if is_stale database (Lowering (Lowered key)) then [] else list_lowered_references database key
+let list_current_edges database key =
+  if is_stale database (Lowering (Lowered key)) then [] else list_lowered_references database key
 
 let list_ready_instances database =
   let ready = Instance_table.create 1024 in
@@ -1208,7 +1156,6 @@ let list_ready_instances database =
 
 let is_drained ~ready (part : Part.computed) =
   match part with
-  | Lowering (Folded_constants path) -> Instance_table.mem (Lazy.force ready) (Constant path)
   | Lowering (Lowered key | Test_key key) -> Instance_table.mem (Lazy.force ready) key
   | _ -> true
 
@@ -1579,18 +1526,11 @@ let compute_part database (part : Part.computed) =
       into (keyed package_database.proofs key) (fun note ->
           Some (computed (Prover.proof (proof_lookups database note)) key));
       own_template_checks database key
-  | Lowering (Folded_constants path) ->
-      into (at_path database.folded_constants path) (fun note ->
-          Some (computed (Compile.list_folded_constants (mir_lookups database note)) path));
-      update_references database (Constant path)
   | Lowering (Lowered key) ->
       into (instance_slot database.lowered key) (fun note ->
           Some
             (match
-               Compile.lower (lowering_settings database)
-                 (stage_lowering_lookups database note)
-                 ~lowered_constant:(make_constant_reader database note key)
-                 key
+               Compile.lower (lowering_settings database) (stage_lowering_lookups database note) key
              with
             | lowered -> Value lowered
             | exception Reads_failed_part -> Blocked
@@ -1634,28 +1574,6 @@ let list_components database (stage : Stage.t) package parts =
              | None -> [])
            paths)
   | _ -> List.map (fun part -> Single part) parts
-
-let list_constant_components database parts =
-  let keys =
-    List.filter_map (function Part.Lowering (Lowered key) -> Some key | _ -> None) parts
-  in
-  let in_closure = Instance_table.of_seq (Seq.map (fun key -> (key, ())) (List.to_seq keys)) in
-  let successors (key : Instance.key) =
-    match key with
-    | Constant _ ->
-        List.filter (Instance_table.mem in_closure)
-          (List.map (fun path -> Instance.Constant path) (find_folded_constants database key))
-    | _ -> []
-  in
-  List.map
-    (function
-      | [ key ] when not (List.exists (Instance.equal key) (successors key)) ->
-          Single (Lowering (Lowered key))
-      | cycle ->
-          Compiler_bug.bug ~stage:"Database" "constants that read one another: %s"
-            (String.concat ", "
-               (List.map (fun key -> Part.show_computed (Lowering (Lowered key))) cycle)))
-    (Strongly_connected.find_components (module Instance_key) ~successors keys)
 
 let list_test_key_components database parts =
   let keys =
@@ -1753,8 +1671,7 @@ let drain_stage database ~is_drained ~on_raise (stage : Stage.t) packages =
       in
       let all_parts () = parts_where (fun _ -> true) in
       match stage with
-      | Folded_constants -> compute_components (List.map (fun part -> Single part) (all_parts ()))
-      | Lowered_code -> compute_components (list_constant_components database (all_parts ()))
+      | Lowered_code -> compute_components (List.map (fun part -> Single part) (all_parts ()))
       | Test_keys -> compute_components (list_test_key_components database (all_parts ()))
       | stage ->
           List.iter
@@ -2199,7 +2116,6 @@ let restore_references database =
     database.owned;
   let instances = Instance_table.create 1024 in
   let note key = Instance_table.replace instances key () in
-  Path_table.iter (fun path _ -> note (Constant path)) database.folded_constants;
   Instance_table.iter (fun key _ -> note key) database.lowered;
   Instance_table.iter
     (fun key () ->
