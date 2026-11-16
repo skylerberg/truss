@@ -35,6 +35,22 @@ let () =
         ~message:
           "This call uses `Panic`, which is not available here. Declare it with `Panic` in the \
            `impl`'s `capability Uses`.");
+  Harness.test "a call in an impl declares a capability its trait's method allows on the method"
+    (fun () ->
+      expect_not_available Fixtures.Capabilities.describe_impl_omitting_the_clock_its_trait_declares
+        ~message:
+          "This call uses `Clock`, which is not available here. Declare it with `uses Clock`, or \
+           `provide` an implementation.";
+      expect_not_available Fixtures.Capabilities.countdown_cursor_using_panic_without_naming_its_set
+        ~message:
+          "This call uses `Panic`, which is not available here. Declare it with `uses Panic`.");
+  Harness.test "a call in an impl adds the capability to its set and names the set on the method"
+    (fun () ->
+      expect_not_available
+        Fixtures.Capabilities.countdown_cursor_calling_panic_without_naming_its_set
+        ~message:
+          "This call uses `Panic`, which is not available here. Declare it with `capability Uses = \
+           Panic` in the `impl` and `uses Self.Uses` on the method.");
   Harness.test "a call in an impl of a trait that fixes its method's capabilities can only provide"
     (fun () ->
       expect_not_available Fixtures.Capabilities.describe_impl_calling_clock

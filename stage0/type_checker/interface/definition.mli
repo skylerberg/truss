@@ -18,14 +18,5 @@ val read_test_uses : Lookups.t -> Path.t -> Types.capability_set
 val is_external_test : Lookups.t -> Path.t -> bool
 val find_real_implementation : Lookups.t -> Path.t -> Path.t option
 
-type declaring_clause =
-  | Own_uses
-  | Impl_uses of { capability : Path.t }
-  | Associated_capability_set of { name : string; is_defined : bool }
-
-type capability_declaration =
-  | Declared_by of declaring_clause
-  | Fixed_by_trait of { trait : Types.trait_reference; method_name : string }
-
-val find_capability_declaration : Lookups.t -> Path.t -> capability_declaration option
-val show_declaring_clause : declaring_clause -> string -> string
+val find_trait_method :
+  Lookups.t -> Path.t -> name:string -> receiver:Path.receiver -> Types.trait_method option

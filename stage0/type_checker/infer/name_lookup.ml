@@ -360,7 +360,9 @@ and list_trait_static_methods (state : State.state) path name receiver =
     (fun package ->
       List.filter_map
         (fun trait ->
-          match Members.find_trait_method state.lookups trait name receiver with
+          match
+            Interface.Definition.find_trait_method state.lookups.interface trait ~name ~receiver
+          with
           | Some method_ ->
               let reference = Instantiation.make_fresh_trait_reference state trait in
               if

@@ -247,7 +247,8 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
       let trait = State.make_trait_reference ~arguments:[] (Well_known.make_path Index_assign) in
       match
         ( State.find_evidence state base_type trait,
-          Members.find_trait_method state.lookups trait.trait "assign" Mut )
+          Interface.Definition.find_trait_method state.lookups.interface trait.trait ~name:"assign"
+            ~receiver:Mut )
       with
       | ( Some ((Interface.Impls.From_impl _ | From_bound | From_any) as evidence_source),
           Some method_ ) ->

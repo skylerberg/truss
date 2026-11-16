@@ -99,6 +99,13 @@ let compare_signatures ~(before : Types.signature) ~(after : Types.signature) =
       (if gained_default then [ Grows "gained a default" ] else []);
     ]
 
+let read_effective_signature (side : side) path =
+  match Interface.Impls.read_signature side.lookups path with
+  | Some signature -> signature
+  | None ->
+      Compiler_bug.raise_bug ~stage:"Compatibility" "%s has an interface and no signature"
+        (Path.show path)
+
 let read_invariants side key =
   match read_form side key with Some (Type { invariants; _ }) -> invariants | _ -> []
 
@@ -264,9 +271,11 @@ let compare ~before ~after package =
                  ( Interface.Definition.find_interface before.lookups path,
                    Interface.Definition.find_interface after.lookups path )
                with
-              | ( Some (Function_interface old_signature | Theorem_interface old_signature),
-                  Some (Function_interface new_signature | Theorem_interface new_signature) ) ->
-                  compare_signatures ~before:old_signature ~after:new_signature
+              | ( Some (Function_interface _ | Theorem_interface _),
+                  Some (Function_interface _ | Theorem_interface _) ) ->
+                  compare_signatures
+                    ~before:(read_effective_signature before path)
+                    ~after:(read_effective_signature after path)
                   @ compare_contracts ~before:(read_contract before before_key)
                       ~after:(read_contract after after_key)
               | Some (Type_interface old_type), Some (Type_interface new_type) ->

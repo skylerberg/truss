@@ -11,8 +11,10 @@ let report checking ?(fixes = []) code (origin : Core.origin) message =
   checking.state.diagnostics <-
     Diagnostic.make ~fixes ~code:(Capabilities code) span message :: checking.state.diagnostics
 
+type function_body = { path : Path.t; implementation : Interface.Impls.implementation option }
+
 type scope_kind =
-  | Function_body of Interface.Definition.capability_declaration option
+  | Function_body of function_body
   | Lambda_body of Core.origin
   | Restricted of string
 
@@ -20,7 +22,8 @@ type scope = { available : Types.capability_set; kind : scope_kind }
 
 let find_implemented_capability scope : Types.capability option =
   match scope.kind with
-  | Function_body (Some (Declared_by (Impl_uses { capability }))) -> Some (Capability capability)
+  | Function_body { implementation = Some { trait = { is_capability = true; _ }; impl; _ }; _ } ->
+      Some (Capability impl.implements.trait)
   | Function_body _ | Lambda_body _ | Restricted _ -> None
 
 let make_panic_only_scope description =
@@ -48,7 +51,9 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.callee) =
             (Path.locate_package path) signature.uses)
         (Interface.Impls.read_signature state.lookups.interface path)
   | Trait_method { trait; name; receiver; evidence; _ } -> (
-      (match Members.find_trait_method state.lookups trait.trait name receiver with
+      (match
+         Interface.Definition.find_trait_method state.lookups.interface trait.trait ~name ~receiver
+       with
       | Some method_ ->
           check_grant checking origin
             ~subject:(Printf.sprintf "`%s.%s`" (Path.show trait.trait) name)
@@ -106,7 +111,7 @@ let require_available checking scope (origin : Core.origin) ?(for_implementation
               (Printf.sprintf
                  "This call uses `%s`, but %s may use only `Panic`, whatever the function declares."
                  shown description)
-        | Function_body declaration ->
+        | Function_body { path; _ } ->
             let subject = if for_implementation then "This implementation" else "This call" in
             let can_provide =
               match capability with
@@ -115,11 +120,13 @@ let require_available checking scope (origin : Core.origin) ?(for_implementation
               | Capability_error _ -> State.raise_bug "a capability with an error is missing"
             in
             report checking Not_available origin
-              (match declaration with
+              (match
+                 Interface.Impls.find_capability_declaration state.lookups.interface path capability
+               with
               | Some (Declared_by clause) ->
                   Printf.sprintf "%s uses `%s`, which is not available here. Declare it with %s%s."
                     subject shown
-                    (Interface.Definition.show_declaring_clause clause shown)
+                    (Interface.Impls.show_declaring_clause clause shown)
                     (if can_provide then ", or `provide` an implementation" else "")
               | Some (Fixed_by_trait { trait; method_name }) ->
                   Printf.sprintf
@@ -151,7 +158,8 @@ let require_callee_uses checking scope (origin : Core.origin) (callee : Core.cal
   | Trait_method { trait; name; receiver; self_type; type_arguments; _ } ->
       require_available checking scope origin
         (match
-           ( Members.find_trait_method state.lookups trait.trait name receiver,
+           ( Interface.Definition.find_trait_method state.lookups.interface trait.trait ~name
+               ~receiver,
              Interface.Definition.find_trait_interface state.lookups.interface trait.trait )
          with
         | Some method_, Some interface ->
@@ -524,11 +532,19 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
     (form : Core.t) =
   let checking = { state; provides = [] } in
   let make_function_body_scope available =
+    let path = state.key.path in
     {
       available;
       kind =
         Function_body
-          (Interface.Definition.find_capability_declaration state.lookups.interface state.key.path);
+          {
+            path;
+            implementation =
+              (match path with
+              | Method { owner = (Impl _ | Derived _) as owner; _ } ->
+                  Interface.Impls.find_implementation state.lookups.interface owner
+              | _ -> None);
+          };
     }
   in
   let check_specification =
@@ -565,7 +581,12 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
         laws
   | Constant _ | Test _ | Law_proof _ | Empty -> ());
   (match (form.definition, state.definition.kind, elaborated.interface) with
-  | Function { body; _ }, (Function _ | Method_declaration _), Function_interface signature ->
+  | Function { body; _ }, (Function _ | Method_declaration _), Function_interface _ ->
+      let signature =
+        match Interface.Impls.read_signature state.lookups.interface state.key.path with
+        | Some signature -> signature
+        | None -> State.raise_bug "a checked function has no signature"
+      in
       Option.iter
         (check_block checking
            (make_function_body_scope

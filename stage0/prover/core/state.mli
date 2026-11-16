@@ -26,7 +26,7 @@ type obligation = {
   locals : (Logic.term * string) list;
   template_clause : template_clause option;
   decisions : (string * string option * Logic.term * Logic.term) list;
-  panic_clause : Interface.Definition.declaring_clause option;
+  panic_clause : Interface.Impls.declaring_clause option;
 }
 
 type outcome = { obligations : obligation list; holes : (Resolve.Names.key * location) list }
@@ -53,7 +53,7 @@ type slice = {
 }
 
 type held_slice = Slices of (Logic.term * slice) list | Unknown_slice
-type panic = Declared | Undeclared of Interface.Definition.declaring_clause | Undeclarable
+type panic = Declared | Undeclared of Interface.Impls.declaring_clause | Undeclarable
 
 type frame = {
   source : source;
@@ -163,7 +163,7 @@ type context = {
   mutable decisions : (string * string option * Logic.term * Logic.term) list;
   mutable entry : Logic.symbol list;
   mutable proving : bool;
-  mutable inherits_precondition : bool;
+  inherits_precondition : bool;
   mutable holes : (Resolve.Names.key * location) list;
   mutable unfinished : Logic.term list;
   mutable call_targets : (Logic.term * Core.local) list;

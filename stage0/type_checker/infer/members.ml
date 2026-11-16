@@ -18,11 +18,6 @@ let list_trait_methods (lookups : Lookups.t) trait name =
         interface.methods
   | None -> []
 
-let find_trait_method lookups trait name receiver =
-  List.find_opt
-    (fun (method_ : Types.trait_method) -> method_.method_receiver = receiver)
-    (list_trait_methods lookups trait name)
-
 let find_fields (lookups : Lookups.t) path arguments =
   Option.bind (Interface.Definition.find_type_interface lookups.interface path) (fun interface ->
       Types.instantiate_fields interface arguments)

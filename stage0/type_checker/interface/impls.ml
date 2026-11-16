@@ -62,13 +62,49 @@ let derive_interface lookups ~type_ ~trait =
         }
   | _ -> None
 
-let make_impl_substitution lookups (impl : Path.t) =
-  Option.bind (Definition.find_impl_interface lookups impl)
-    (fun (interface : Types.impl_interface) ->
-      Option.map
-        (fun trait ->
-          Properties.make_trait_substitution trait ~self:interface.for_type interface.implements)
-        (Definition.find_trait_interface lookups interface.implements.trait))
+type implementation = {
+  impl : Types.impl_interface;
+  trait : Types.trait_interface;
+  substitution : Types.substitution;
+}
+
+let find_implementation_of lookups (impl : Types.impl_interface) =
+  Option.map
+    (fun trait ->
+      {
+        impl;
+        trait;
+        substitution = Properties.make_trait_substitution trait ~self:impl.for_type impl.implements;
+      })
+    (Definition.find_trait_interface lookups impl.implements.trait)
+
+let find_implementation lookups (impl : Path.t) =
+  Option.bind (Definition.find_impl_interface lookups impl) (find_implementation_of lookups)
+
+type implemented_method = {
+  implementation : implementation;
+  declared : Types.trait_method;
+  declaration : Path.t;
+}
+
+let find_implemented_method lookups (path : Path.t) =
+  let ( let* ) = Option.bind in
+  match path with
+  | Method { owner = (Impl _ | Derived _) as owner; name; receiver } ->
+      let* implementation = find_implementation lookups owner in
+      let trait = implementation.impl.implements.trait in
+      let* declared = Definition.find_trait_method lookups trait ~name ~receiver in
+      Some
+        {
+          implementation;
+          declared;
+          declaration =
+            Method
+              { owner = trait; name = declared.method_name; receiver = declared.method_receiver };
+        }
+  | Top _ | Method _ | Member_constant _ | Impl _ | Derived _ | Test _ | Law_proof _ | Unresolved _
+    ->
+      None
 
 let is_open_value = function
   | Types.Value_variable _ -> true
@@ -418,27 +454,184 @@ and normalize lookups ~list_bounds ?defining (type_ : Types.ty) : Types.ty =
       | _ -> None)
     type_
 
-let read_signature lookups (path : Path.t) =
-  match (Definition.find_declared_signature lookups path, path) with
-  | Some signature, _ -> Some signature
-  | None, Method { owner = (Impl _ | Derived _) as owner; name; receiver } -> (
-      match
-        (Definition.find_impl_interface lookups owner, make_impl_substitution lookups owner)
-      with
-      | Some impl, Some substitution ->
-          Option.map
-            (fun declared ->
-              let signature =
-                Types.add_impl_generics_and_uses ~impl_generics:impl.impl_generics
-                  ~impl_uses:impl.impl_uses
-                  (Types.substitute_signature substitution declared)
-              in
-              let list_bounds = Types.list_bounds signature.generics in
-              { signature with uses = normalize_capabilities lookups ~list_bounds signature.uses })
-            (Definition.find_declared_signature lookups
-               (Method { owner = impl.implements.trait; name; receiver }))
+let list_impl_bounds (impl : Types.impl_interface) ~list_bounds parameter =
+  match
+    List.find_opt (fun (generic : Types.generic) -> generic.generic = parameter) impl.impl_generics
+  with
+  | Some { kind = Type_generic bounds; _ } -> bounds
+  | _ -> list_bounds parameter
+
+let normalize_in_impl lookups ~list_bounds ?(missing_associated = []) (impl : Types.impl_interface)
+    type_ =
+  Types.map
+    (function
+      | Types.Projection { base; trait = projected; name } when Types.equal base impl.for_type -> (
+          let projected = read_declaring_type_trait lookups ~base projected name in
+          let is_declared_by_impl = Path.equal projected.trait impl.implements.trait in
+          match
+            (List.assoc_opt name impl.implements.associated, List.assoc_opt name missing_associated)
+          with
+          | Some fixed, _ when is_declared_by_impl -> Some fixed
+          | None, Some missing when is_declared_by_impl ->
+              Some (Types.Error (Diagnostic.make_reported missing))
+          | _ ->
+              project_associated_type lookups
+                ~list_bounds:(list_impl_bounds impl ~list_bounds)
+                impl.for_type projected name)
       | _ -> None)
-  | None, _ -> None
+    type_
+
+let normalize_capabilities_in_impl lookups ~list_bounds (impl : Types.impl_interface) capabilities =
+  Types.flat_map_capabilities
+    (fun capability ->
+      let set =
+        match capability with
+        | Types.Capability_projection { base; trait = projected; name }
+          when Types.equal base impl.for_type
+               && Path.equal (read_declaring_capability_trait lookups ~base projected name).trait
+                    impl.implements.trait ->
+            Option.value ~default:Types.no_capabilities (List.assoc_opt name impl.capability_sets)
+        | capability ->
+            normalize_capabilities lookups
+              ~list_bounds:(list_impl_bounds impl ~list_bounds)
+              (Types.make_capability_set [ capability ])
+      in
+      (set :> Types.capability list))
+    capabilities
+
+let normalize_signature_in_impl lookups ~list_bounds ?missing_associated
+    (implementation : implementation) (signature : Types.signature) =
+  let signature = Types.substitute_signature implementation.substitution signature in
+  {
+    (Types.map_signature
+       (normalize_in_impl lookups ~list_bounds ?missing_associated implementation.impl)
+       signature)
+    with
+    uses = normalize_capabilities_in_impl lookups ~list_bounds implementation.impl signature.uses;
+  }
+
+let read_trait_signature lookups (implemented : implemented_method) =
+  Definition.read_method_signature lookups ~owner:implemented.implementation.impl.implements.trait
+    implemented.declared
+
+let make_expected_signature lookups (implemented : implemented_method) =
+  let declared = read_trait_signature lookups implemented in
+  normalize_signature_in_impl lookups
+    ~list_bounds:
+      (Types.list_bounds (implemented.implementation.impl.impl_generics @ declared.generics))
+    implemented.implementation declared
+
+let read_signature lookups (path : Path.t) =
+  let ( let* ) = Option.bind in
+  match path with
+  | Method { owner = (Impl _ | Derived _) as owner; _ } ->
+      let* impl = Definition.find_impl_interface lookups owner in
+      let implemented = find_implemented_method lookups path in
+      let* own =
+        match Definition.find_declared_signature lookups path with
+        | Some own -> Some own
+        | None -> Option.map (make_expected_signature lookups) implemented
+      in
+      let signature =
+        Types.add_impl_generics_and_uses ~impl_generics:impl.impl_generics ~impl_uses:impl.impl_uses
+          own
+      in
+      let normalize_capabilities =
+        normalize_capabilities_in_impl lookups
+          ~list_bounds:(Types.list_bounds signature.generics)
+          impl
+      in
+      Some
+        {
+          (Types.map_signature
+             (Types.map ~map_capabilities:normalize_capabilities (fun _ -> None))
+             signature)
+          with
+          uses = normalize_capabilities signature.uses;
+          terminates =
+            (signature.terminates
+            ||
+            match implemented with
+            | Some implemented -> (read_trait_signature lookups implemented).terminates
+            | None -> false);
+        }
+  | Top _ | Method _ | Member_constant _ | Impl _ | Derived _ | Test _ | Law_proof _ | Unresolved _
+    ->
+      Definition.find_declared_signature lookups path
+
+type declaring_clause =
+  | Own_uses
+  | Impl_uses
+  | Associated_capability_set of { name : string; is_defined : bool; is_named : bool }
+
+type capability_declaration =
+  | Declared_by of declaring_clause
+  | Fixed_by_trait of { trait : Types.trait_reference; method_name : string }
+
+let find_self_capability_set (implemented : implemented_method) (declared : Types.signature) =
+  let trait = implemented.implementation.trait in
+  let trait_path = implemented.implementation.impl.implements.trait in
+  List.find_map
+    (function
+      | Types.Capability_projection { base = Parameter parameter; name; _ }
+        when Path.equal parameter.owner trait_path
+             && Types.is_self_parameter parameter
+             && List.mem name trait.associated_capabilities ->
+          Some name
+      | _ -> None)
+    (declared.uses :> Types.capability list)
+
+let names_capability_set (impl : Types.impl_interface) name (own : Types.signature) =
+  List.exists
+    (function
+      | Types.Capability_projection { base; name = named; _ } ->
+          Types.equal base impl.for_type && named = name
+      | _ -> false)
+    (own.uses :> Types.capability list)
+
+let find_capability_declaration lookups (path : Path.t) (capability : Types.capability) =
+  let ( let* ) = Option.bind in
+  match path with
+  | Method { owner = Impl _ | Derived _; name; _ } ->
+      let* implemented = find_implemented_method lookups path in
+      let impl = implemented.implementation.impl in
+      if implemented.implementation.trait.is_capability then Some (Declared_by Impl_uses)
+      else if
+        Types.is_capability_subset
+          (Types.make_capability_set [ capability ])
+          (make_expected_signature lookups implemented).uses
+      then Some (Declared_by Own_uses)
+      else
+        Some
+          (match
+             find_self_capability_set implemented (read_trait_signature lookups implemented)
+           with
+          | Some set ->
+              Declared_by
+                (Associated_capability_set
+                   {
+                     name = set;
+                     is_defined = List.mem_assoc set impl.capability_sets;
+                     is_named =
+                       (match Definition.find_declared_signature lookups path with
+                       | Some own -> names_capability_set impl set own
+                       | None -> false);
+                   })
+          | None -> Fixed_by_trait { trait = impl.implements; method_name = name })
+  | Top _ | Method _ | Test _ -> Some (Declared_by Own_uses)
+  | Member_constant _ | Impl _ | Derived _ | Law_proof _ | Unresolved _ ->
+      raise_bug "%s declares no capabilities" (Path.show path)
+
+let show_declaring_clause clause capability =
+  match clause with
+  | Own_uses -> Printf.sprintf "`uses %s`" capability
+  | Impl_uses -> Printf.sprintf "`uses %s` on the `impl`" capability
+  | Associated_capability_set { name; is_defined; is_named } ->
+      let set =
+        if is_defined then Printf.sprintf "`%s` in the `impl`'s `capability %s`" capability name
+        else Printf.sprintf "`capability %s = %s` in the `impl`" name capability
+      in
+      if is_named then set else Printf.sprintf "%s and `uses Self.%s` on the method" set name
 
 let decide_property property lookups ~list_bounds type_ =
   Properties.decide_property lookups ~list_bounds ~normalize:(normalize lookups ~list_bounds)

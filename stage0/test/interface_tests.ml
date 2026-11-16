@@ -231,6 +231,14 @@ let () =
       expect_no_diagnostics [ ("app::main", Fixtures.Interface.clock_impl_using_random) ]);
   Harness.test "a capability's impl method may repeat its impl's uses" (fun () ->
       expect_no_diagnostics [ ("app::main", Fixtures.Interface.clock_impl_method_repeating_uses) ]);
+  Harness.test "an impl's method may declare its trait's set or the capabilities in it" (fun () ->
+      expect_no_diagnostics
+        [ ("app::main", Fixtures.Interface.countdown_cursor_naming_its_set_of_panic) ];
+      expect_no_diagnostics
+        [ ("app::main", Fixtures.Interface.countdown_cursor_declaring_the_panic_its_set_holds) ]);
+  Harness.test "an impl's method cannot declare a capability outside its trait's set" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.countdown_cursor_declaring_a_clock_its_set_lacks
+        "types.impl_uses");
   Harness.test "a method of a capability's impl cannot declare `uses`" (fun () ->
       expect_one_diagnostic Fixtures.Interface.clock_impl_method_declaring_uses "types.impl_uses");
   Harness.test "an impl's method can rename its generic parameters" (fun () ->

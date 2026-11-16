@@ -72,11 +72,6 @@ let read_impl_interface context impl =
 let read_trait_interface context trait =
   Interface.Definition.read_trait_interface context.lookups.interface trait
 
-let make_trait_substitution context impl =
-  match Interface.Impls.make_impl_substitution context.lookups.interface impl with
-  | Some substitution -> substitution
-  | None -> raise_bug "no trait for %s" (Path.show impl)
-
 let read_signature context (path : Path.t) =
   match Interface.Impls.read_signature context.lookups.interface path with
   | Some signature -> signature
@@ -127,15 +122,17 @@ let make_code context (path : Path.t) type_arguments : code =
             written = Some (read_written context type_key);
             enclosing_impl;
           }
-      | Some (Inherited provided, _), Method { owner = (Impl _ | Derived _) as impl; _ } ->
-          let trait = (read_impl_interface context impl).implements.trait in
+      | ( Some (Inherited provided, trait_substitution),
+          Method { owner = (Impl _ | Derived _) as impl; _ } ) ->
+          let impl_interface = read_impl_interface context impl in
+          let trait = impl_interface.implements.trait in
           let trait_signature = read_signature context provided.path in
-          let count = List.length (read_impl_interface context impl).impl_generics in
+          let count = List.length impl_interface.impl_generics in
           let of_impl = List.take count substitution in
           let of_trait =
             List.map
               (fun (parameter, argument) -> (parameter, Types.substitute_argument of_impl argument))
-              (make_trait_substitution context impl)
+              trait_substitution
           in
           let own_generics =
             List.filter
