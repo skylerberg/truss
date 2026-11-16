@@ -100,8 +100,7 @@ let check database =
 
 let is_always_read : Database.Part.computed -> bool = function
   | Parsed _ | Resolved _ | Trait_header _ | Interface _ | Signature_check _ | Contract _
-  | Checked_body _ | Derived_form _ | Body_mir _ | Contract_mir _ | Mir_call_edges _
-  | Used_packages _ ->
+  | Checked_body _ | Derived_form _ | Body_mir _ | Contract_mir _ | Mir_call_edges _ ->
       true
   | Namespace _ | Constant_value _ | Header _ | Derived_interface _ | Type_facts _ | Grant _
   | Generated_mir _ | Patterns _ | Usage _ | Ownership _ | Import_check _ | Package_check _

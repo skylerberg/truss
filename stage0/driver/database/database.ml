@@ -76,7 +76,6 @@ type package_database = {
   patterns : (Resolve.Names.key, unit part) Hashtbl.t;
   usage : (Resolve.Names.key, unit part) Hashtbl.t;
   ownership : (Resolve.Names.key, (Core.origin * Core.origin) list part) Hashtbl.t;
-  used_packages : (Resolve.Names.key, Path.package list part) Hashtbl.t;
   package_checks : (Package_checks.check, Package_checks.outcome part) Hashtbl.t;
   recursion_groups : Path.t list part Path_table.t;
   proofs : (Resolve.Names.key, Prover.proof part) Hashtbl.t;
@@ -132,7 +131,6 @@ let make_empty_package_database name ~dependencies =
     patterns = Hashtbl.create 64;
     usage = Hashtbl.create 64;
     ownership = Hashtbl.create 64;
-    used_packages = Hashtbl.create 64;
     package_checks = Hashtbl.create 64;
     recursion_groups = Path_table.create 64;
     proofs = Hashtbl.create 64;
@@ -261,7 +259,6 @@ let copy_package_database (package_database : package_database) =
     patterns = Hashtbl.copy package_database.patterns;
     usage = Hashtbl.copy package_database.usage;
     ownership = Hashtbl.copy package_database.ownership;
-    used_packages = Hashtbl.copy package_database.used_packages;
     package_checks = Hashtbl.copy package_database.package_checks;
     recursion_groups = Path_table.copy package_database.recursion_groups;
     proofs = Hashtbl.copy package_database.proofs;
@@ -680,7 +677,6 @@ let list_package_parts database (names : Resolve.Names.lookups) package : Part.c
         Patterns key;
         Usage key;
         Ownership key;
-        Used_packages key;
         Proof key;
       ]
     @ (match declaration.kind with
@@ -788,18 +784,11 @@ let make_recording_ownership_lookups database note : Ownership.Lookups.t =
     interface = make_recording_interface_lookups database note ~is_checked:true;
   }
 
-let list_used_packages database note (key : Resolve.Names.key) =
-  let { Infer.form; evidence_packages; _ } = read_checked database note key in
-  Package_checks.list_used_packages
-    (read_whole_resolution database note key)
-    ~evidence_packages form
-
 let make_recording_package_checks_lookups database note : Package_checks.Lookups.t =
   {
     interface = make_recording_interface_lookups database note ~is_checked:true;
     core = read_checked_form database note;
-    used_packages =
-      read_part database note (fun key -> Part.Used_packages key) (fun owner -> owner.used_packages);
+    used_packages = (fun key -> (read_checked database note key).used_packages);
   }
 
 let list_used_imports database note file =
@@ -1036,8 +1025,6 @@ let make_stored database (part : Part.stored) =
       | Usage key -> keyed ~is_failed:failed (fun package_database -> package_database.usage) key
       | Ownership key ->
           keyed ~is_failed:failed (fun package_database -> package_database.ownership) key
-      | Used_packages key ->
-          keyed ~is_failed:failed (fun package_database -> package_database.used_packages) key
       | Package_check (_, check) ->
           keyed ~is_failed:failed (fun package_database -> package_database.package_checks) check
       | Call_edges (path, viewer) ->
@@ -1543,9 +1530,6 @@ let compute_part database (part : Part.computed) =
                  in
                  (result.diagnostics, result.must_be_disjoint))
                key))
-  | Used_packages key ->
-      into (make_keyed_slot package_database.used_packages key) (fun note ->
-          Some (make_part (list_used_packages database note) key))
   | Package_check (package, check) ->
       into (make_keyed_slot package_database.package_checks check) (fun note ->
           Some
@@ -1914,7 +1898,6 @@ let list_stored_parts (package_database : package_database) : Part.stored list =
            make_keyed_slot package_database.patterns (fun key -> Part.Patterns key);
            make_keyed_slot package_database.usage (fun key -> Part.Usage key);
            make_keyed_slot package_database.ownership (fun key -> Part.Ownership key);
-           make_keyed_slot package_database.used_packages (fun key -> Part.Used_packages key);
            make_keyed_slot package_database.package_checks (fun check ->
                Part.Package_check (package_database.name, check));
            make_keyed_slot package_database.proofs (fun key -> Part.Proof key);
@@ -2309,17 +2292,17 @@ let list_manifest_problems database package =
       (list_package_outcomes database package)
 
 let list_code_packages database package =
-  drain database ~through:Body_checks [ package ];
-  let used_packages = (find_owner database package).used_packages in
+  drain database ~through:Checked_bodies [ package ];
+  let checked_bodies = (find_owner database package).checked_bodies in
   let read_used (declaration : Resolve.Names.declaration) =
     match declaration.path with
     | Test _ -> Some []
     | _ -> (
         let key = Resolve.Names.key_of declaration in
-        match Hashtbl.find_opt used_packages key with
-        | Some (Value used) -> Some used
+        match Hashtbl.find_opt checked_bodies key with
+        | Some (Value checked) -> Some checked.used_packages
         | Some (Failed _ | Blocked) -> None
-        | None -> report_uncomputed (Used_packages key))
+        | None -> report_uncomputed (Checked_body key))
   in
   let used =
     List.map read_used ((make_stored_name_lookups database).package_declarations package)
