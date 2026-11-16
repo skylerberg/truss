@@ -218,8 +218,8 @@ let expect_status ?extra ?anchors expected instances =
 
 let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [] }
 let example_file : Path.file = { module_ = example; name = "main" }
-let standard_state = lazy (Workspace.For_testing.standard_state ())
-let database packages = Database.create ~loaded:[ Lazy.force standard_state ] packages
+let standard_package_database = lazy (Workspace.For_testing.load_standard_package_database ())
+let database packages = Database.create ~loaded:[ Lazy.force standard_package_database ] packages
 
 let example_package files : Project.package list =
   [ { name = { owner = None; name = "example" }; dependencies = []; files } ]

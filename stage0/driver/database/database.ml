@@ -62,7 +62,7 @@ end
 
 module Entry_table = Hashtbl.Make (Entry)
 
-type state = {
+type package_database = {
   name : Path.package;
   mutable dependencies : Manifest.dependency list;
   mutable modules : Path.module_ list;
@@ -97,9 +97,9 @@ type state = {
 }
 
 type t = {
-  states : (Path.package, state) Hashtbl.t;
+  package_databases : (Path.package, package_database) Hashtbl.t;
   mutable project : Path.package list;
-  absent : (Path.package, state) Hashtbl.t;
+  absent : (Path.package, package_database) Hashtbl.t;
   reads : Part.t list Part_table.t;
   readers : unit Part_table.t Part_table.t;
   stale : (Path.package * Stage.t, unit Part_table.t) Hashtbl.t;
@@ -120,7 +120,7 @@ type t = {
 
 and observation = Computed of Part.t | Collected of Part.t
 
-let empty_state name ~dependencies =
+let make_empty_package_database name ~dependencies =
   {
     name;
     dependencies;
@@ -155,24 +155,27 @@ let empty_state name ~dependencies =
     proofs = Hashtbl.create 64;
   }
 
-let list_files (state : state) files =
-  state.files <- List.sort compare files;
-  state.modules <-
-    List.sort_uniq compare (List.map (fun (file : Path.file) -> file.module_) state.files)
+let list_files (package_database : package_database) files =
+  package_database.files <- List.sort compare files;
+  package_database.modules <-
+    List.sort_uniq compare
+      (List.map (fun (file : Path.file) -> file.module_) package_database.files)
 
 let source_of (file : Path.file) text = Source.create ~path:(Path.show_file file) text
 
-let fresh_state name ~dependencies (texts : (Path.file * string) list) =
-  let state = empty_state name ~dependencies in
-  List.iter (fun (file, text) -> Hashtbl.replace state.sources file (source_of file text)) texts;
-  list_files state (List.map fst texts);
-  state
+let make_package_database name ~dependencies (texts : (Path.file * string) list) =
+  let package_database = make_empty_package_database name ~dependencies in
+  List.iter
+    (fun (file, text) -> Hashtbl.replace package_database.sources file (source_of file text))
+    texts;
+  list_files package_database (List.map fst texts);
+  package_database
 
 let mark_unsaved database entry = Entry_table.replace database.unsaved entry ()
 
-let mark_state_unsaved database (state : state) =
-  mark_unsaved database (Package state.name);
-  List.iter (fun file -> mark_unsaved database (File file)) state.files
+let mark_package_database_unsaved database (package_database : package_database) =
+  mark_unsaved database (Package package_database.name);
+  List.iter (fun file -> mark_unsaved database (File file)) package_database.files
 
 let mark_stale database part =
   let slot = (Part.package part, Stage.of_part part) in
@@ -212,11 +215,14 @@ let stale_parts database package stage =
   | None -> []
 
 let create ?(loaded = []) ?(checks = true) (packages : Project.package list) =
-  let states = Hashtbl.create 8 in
-  List.iter (fun state -> Hashtbl.replace states state.name state) loaded;
+  let package_databases = Hashtbl.create 8 in
+  List.iter
+    (fun package_database ->
+      Hashtbl.replace package_databases package_database.name package_database)
+    loaded;
   let database =
     {
-      states;
+      package_databases;
       project = List.map (fun (package : Project.package) -> package.name) packages;
       absent = Hashtbl.create 4;
       reads = Part_table.create 4096;
@@ -239,54 +245,59 @@ let create ?(loaded = []) ?(checks = true) (packages : Project.package list) =
   in
   List.iter
     (fun (package : Project.package) ->
-      let state = fresh_state package.name ~dependencies:package.dependencies package.files in
-      Hashtbl.replace states package.name state;
-      mark_state_unsaved database state;
-      List.iter (fun file -> mark_stale database (Parsed file)) state.files;
+      let package_database =
+        make_package_database package.name ~dependencies:package.dependencies package.files
+      in
+      Hashtbl.replace package_databases package.name package_database;
+      mark_package_database_unsaved database package_database;
+      List.iter (fun file -> mark_stale database (Parsed file)) package_database.files;
       mark_stale database (Namespace package.name))
     packages;
   database
 
-let copy_state (state : state) =
+let copy_package_database (package_database : package_database) =
   {
-    name = state.name;
-    dependencies = state.dependencies;
-    modules = state.modules;
-    files = state.files;
-    sources = Hashtbl.copy state.sources;
-    parsed = Hashtbl.copy state.parsed;
-    namespace = state.namespace;
-    resolved_names = Hashtbl.copy state.resolved_names;
-    import_checks = Hashtbl.copy state.import_checks;
-    trait_headers = Hashtbl.copy state.trait_headers;
-    constant_values = Path_table.copy state.constant_values;
-    headers = Hashtbl.copy state.headers;
-    interfaces = Hashtbl.copy state.interfaces;
-    derived_interfaces = Path_table.copy state.derived_interfaces;
-    type_facts = Path_table.copy state.type_facts;
-    grants = Hashtbl.copy state.grants;
-    signature_checks = Hashtbl.copy state.signature_checks;
-    contracts = Hashtbl.copy state.contracts;
-    checked_bodies = Hashtbl.copy state.checked_bodies;
-    derived_forms = Path_table.copy state.derived_forms;
-    body_parts = Hashtbl.copy state.body_parts;
-    contract_parts = Hashtbl.copy state.contract_parts;
-    generated_parts = Path_table.copy state.generated_parts;
-    call_edges = Path_table.copy state.call_edges;
-    patterns = Hashtbl.copy state.patterns;
-    usage = Hashtbl.copy state.usage;
-    ownership = Hashtbl.copy state.ownership;
-    used_packages = Hashtbl.copy state.used_packages;
-    package_checks = Hashtbl.copy state.package_checks;
-    recursion_groups = Path_table.copy state.recursion_groups;
-    proofs = Hashtbl.copy state.proofs;
+    name = package_database.name;
+    dependencies = package_database.dependencies;
+    modules = package_database.modules;
+    files = package_database.files;
+    sources = Hashtbl.copy package_database.sources;
+    parsed = Hashtbl.copy package_database.parsed;
+    namespace = package_database.namespace;
+    resolved_names = Hashtbl.copy package_database.resolved_names;
+    import_checks = Hashtbl.copy package_database.import_checks;
+    trait_headers = Hashtbl.copy package_database.trait_headers;
+    constant_values = Path_table.copy package_database.constant_values;
+    headers = Hashtbl.copy package_database.headers;
+    interfaces = Hashtbl.copy package_database.interfaces;
+    derived_interfaces = Path_table.copy package_database.derived_interfaces;
+    type_facts = Path_table.copy package_database.type_facts;
+    grants = Hashtbl.copy package_database.grants;
+    signature_checks = Hashtbl.copy package_database.signature_checks;
+    contracts = Hashtbl.copy package_database.contracts;
+    checked_bodies = Hashtbl.copy package_database.checked_bodies;
+    derived_forms = Path_table.copy package_database.derived_forms;
+    body_parts = Hashtbl.copy package_database.body_parts;
+    contract_parts = Hashtbl.copy package_database.contract_parts;
+    generated_parts = Path_table.copy package_database.generated_parts;
+    call_edges = Path_table.copy package_database.call_edges;
+    patterns = Hashtbl.copy package_database.patterns;
+    usage = Hashtbl.copy package_database.usage;
+    ownership = Hashtbl.copy package_database.ownership;
+    used_packages = Hashtbl.copy package_database.used_packages;
+    package_checks = Hashtbl.copy package_database.package_checks;
+    recursion_groups = Path_table.copy package_database.recursion_groups;
+    proofs = Hashtbl.copy package_database.proofs;
   }
 
 let copy database =
-  let states = Hashtbl.copy database.states in
+  let package_databases = Hashtbl.copy database.package_databases in
   Hashtbl.filter_map_inplace
-    (fun name state -> Some (if List.mem name database.project then copy_state state else state))
-    states;
+    (fun name package_database ->
+      Some
+        (if List.mem name database.project then copy_package_database package_database
+         else package_database))
+    package_databases;
   let readers = Part_table.copy database.readers in
   Part_table.filter_map_inplace (fun _ parts -> Some (Part_table.copy parts)) readers;
   let stale = Hashtbl.copy database.stale in
@@ -296,7 +307,7 @@ let copy database =
   let holders = Type_table.copy database.holders in
   Type_table.filter_map_inplace (fun _ instances -> Some (Instance_table.copy instances)) holders;
   {
-    states;
+    package_databases;
     project = database.project;
     absent = Hashtbl.copy database.absent;
     reads = Part_table.copy database.reads;
@@ -403,16 +414,16 @@ let compute_into database part slot compute =
   store database part slot (computing database [ part ] compute)
 
 let owner database package =
-  match Hashtbl.find_opt database.states package with
-  | Some state -> state
+  match Hashtbl.find_opt database.package_databases package with
+  | Some package_database -> package_database
   | None -> (
       match Hashtbl.find_opt database.absent package with
-      | Some state -> state
+      | Some package_database -> package_database
       | None ->
-          let state = empty_state package ~dependencies:[] in
-          state.namespace <- Some Names.empty_namespace;
-          Hashtbl.replace database.absent package state;
-          state)
+          let package_database = make_empty_package_database package ~dependencies:[] in
+          package_database.namespace <- Some Names.empty_namespace;
+          Hashtbl.replace database.absent package package_database;
+          package_database)
 
 let call_graph database package =
   match Hashtbl.find_opt database.graphs package with
@@ -447,7 +458,7 @@ let checked_part check key =
   | exception Reads_failed_part -> Blocked
 
 let value = function Value value -> value | Failed _ | Blocked -> raise Reads_failed_part
-let package database name = Hashtbl.find_opt database.states name
+let package database name = Hashtbl.find_opt database.package_databases name
 
 let dependency_names database name =
   match package database name with
@@ -564,9 +575,9 @@ let parsed_file database (file : Path.file) =
   | Some parsed -> parsed
   | None -> unchecked (Part.show (Parsed file))
 
-let namespace_of database note (state : state) =
-  note (Part.Modules state.name);
-  Names.namespace (recording_names database note) state.name
+let namespace_of database note (package_database : package_database) =
+  note (Part.Modules package_database.name);
+  Names.namespace (recording_names database note) package_database.name
     (List.map
        (fun module_ ->
          ( module_,
@@ -578,8 +589,8 @@ let namespace_of database note (state : state) =
                  Some (file, parsed.file, parsed.text)
                end
                else None)
-             state.files ))
-       state.modules)
+             package_database.files ))
+       package_database.modules)
 
 let file_keys database file = List.map Names.key_of ((names_lookups database).declarations_in file)
 
@@ -688,7 +699,7 @@ let derived_paths names package =
     (impl_methods names package)
 
 let package_parts database (names : Names.lookups) package : Part.t list =
-  let state = owner database package in
+  let package_database = owner database package in
   let declarations = names.package_declarations package in
   let paths = List.map (fun (declaration : Names.declaration) -> declaration.path) declarations in
   let of_declaration (declaration : Names.declaration) : Part.t list =
@@ -731,7 +742,7 @@ let package_parts database (names : Names.lookups) package : Part.t list =
   @ List.map
       (fun dependency -> Part.Grant (package, dependency))
       (List.sort_uniq Path.compare_package (names.dependency_names package))
-  @ List.map (fun file -> Part.Import_check file) state.files
+  @ List.map (fun file -> Part.Import_check file) package_database.files
   @ List.map (fun check -> Part.Package_check (package, check)) (Package_checks.checks declarations)
 
 let checked_body database note key =
@@ -963,11 +974,11 @@ let marshalled value = Marshal.to_string value []
 
 let stored database (part : Part.t) =
   let package = Part.package part in
-  let state = owner database package in
+  let package_database = owner database package in
   let failed = function Failed _ -> true | Value _ | Blocked -> false in
   let never _ = false in
   let keyed ~is_failed select key =
-    let table = select state in
+    let table = select package_database in
     {
       is_failed = Option.fold ~none:false ~some:is_failed (Hashtbl.find_opt table key);
       remove = (fun () -> Hashtbl.remove table key);
@@ -980,7 +991,7 @@ let stored database (part : Part.t) =
     }
   in
   let at_path ~is_failed select path =
-    let table = select state in
+    let table = select package_database in
     {
       is_failed = Option.fold ~none:false ~some:is_failed (Path_table.find_opt table path);
       remove = (fun () -> Path_table.remove table path);
@@ -1011,38 +1022,58 @@ let stored database (part : Part.t) =
       (Part.show part)
   in
   match part with
-  | Parsed file -> keyed ~is_failed:never (fun state -> state.parsed) file
+  | Parsed file -> keyed ~is_failed:never (fun package_database -> package_database.parsed) file
   | Namespace _ ->
       {
         is_failed = false;
-        remove = (fun () -> state.namespace <- None);
-        is_equal_in = (fun other -> compare (owner other package).namespace state.namespace = 0);
+        remove = (fun () -> package_database.namespace <- None);
+        is_equal_in =
+          (fun other -> compare (owner other package).namespace package_database.namespace = 0);
         saved = unsaved;
         restore = (fun _ -> unsaved ());
       }
   | Resolved (key, section) ->
-      keyed ~is_failed:failed (fun state -> state.resolved_names) (key, section)
-  | Import_check file -> keyed ~is_failed:never (fun state -> state.import_checks) file
-  | Trait_header key -> keyed ~is_failed:failed (fun state -> state.trait_headers) key
-  | Constant_value path -> at_path ~is_failed:failed (fun state -> state.constant_values) path
-  | Header key -> keyed ~is_failed:failed (fun state -> state.headers) key
-  | Interface key -> keyed ~is_failed:failed (fun state -> state.interfaces) key
-  | Derived_interface path -> at_path ~is_failed:failed (fun state -> state.derived_interfaces) path
-  | Type_facts path -> at_path ~is_failed:failed (fun state -> state.type_facts) path
-  | Grant (_, dependency) -> keyed ~is_failed:never (fun state -> state.grants) dependency
-  | Signature_check key -> keyed ~is_failed:failed (fun state -> state.signature_checks) key
-  | Contract key -> keyed ~is_failed:failed (fun state -> state.contracts) key
-  | Checked_body key -> keyed ~is_failed:failed (fun state -> state.checked_bodies) key
-  | Derived_form path -> at_path ~is_failed:failed (fun state -> state.derived_forms) path
-  | Body_mir key -> keyed ~is_failed:failed (fun state -> state.body_parts) key
-  | Contract_mir key -> keyed ~is_failed:failed (fun state -> state.contract_parts) key
-  | Generated_mir path -> at_path ~is_failed:failed (fun state -> state.generated_parts) path
-  | Call_edges path -> at_path ~is_failed:failed (fun state -> state.call_edges) path
-  | Patterns key -> keyed ~is_failed:failed (fun state -> state.patterns) key
-  | Usage key -> keyed ~is_failed:failed (fun state -> state.usage) key
-  | Ownership key -> keyed ~is_failed:failed (fun state -> state.ownership) key
-  | Used_packages key -> keyed ~is_failed:failed (fun state -> state.used_packages) key
-  | Package_check (_, check) -> keyed ~is_failed:failed (fun state -> state.package_checks) check
+      keyed ~is_failed:failed
+        (fun package_database -> package_database.resolved_names)
+        (key, section)
+  | Import_check file ->
+      keyed ~is_failed:never (fun package_database -> package_database.import_checks) file
+  | Trait_header key ->
+      keyed ~is_failed:failed (fun package_database -> package_database.trait_headers) key
+  | Constant_value path ->
+      at_path ~is_failed:failed (fun package_database -> package_database.constant_values) path
+  | Header key -> keyed ~is_failed:failed (fun package_database -> package_database.headers) key
+  | Interface key ->
+      keyed ~is_failed:failed (fun package_database -> package_database.interfaces) key
+  | Derived_interface path ->
+      at_path ~is_failed:failed (fun package_database -> package_database.derived_interfaces) path
+  | Type_facts path ->
+      at_path ~is_failed:failed (fun package_database -> package_database.type_facts) path
+  | Grant (_, dependency) ->
+      keyed ~is_failed:never (fun package_database -> package_database.grants) dependency
+  | Signature_check key ->
+      keyed ~is_failed:failed (fun package_database -> package_database.signature_checks) key
+  | Contract key -> keyed ~is_failed:failed (fun package_database -> package_database.contracts) key
+  | Checked_body key ->
+      keyed ~is_failed:failed (fun package_database -> package_database.checked_bodies) key
+  | Derived_form path ->
+      at_path ~is_failed:failed (fun package_database -> package_database.derived_forms) path
+  | Body_mir key ->
+      keyed ~is_failed:failed (fun package_database -> package_database.body_parts) key
+  | Contract_mir key ->
+      keyed ~is_failed:failed (fun package_database -> package_database.contract_parts) key
+  | Generated_mir path ->
+      at_path ~is_failed:failed (fun package_database -> package_database.generated_parts) path
+  | Call_edges path ->
+      at_path ~is_failed:failed (fun package_database -> package_database.call_edges) path
+  | Patterns key -> keyed ~is_failed:failed (fun package_database -> package_database.patterns) key
+  | Usage key -> keyed ~is_failed:failed (fun package_database -> package_database.usage) key
+  | Ownership key ->
+      keyed ~is_failed:failed (fun package_database -> package_database.ownership) key
+  | Used_packages key ->
+      keyed ~is_failed:failed (fun package_database -> package_database.used_packages) key
+  | Package_check (_, check) ->
+      keyed ~is_failed:failed (fun package_database -> package_database.package_checks) check
   | Successors (path, viewer) ->
       let successors database =
         Option.bind (Hashtbl.find_opt database.graphs viewer) (fun graph ->
@@ -1059,8 +1090,9 @@ let stored database (part : Part.t) =
               (Call_graph.set_successors (call_graph database viewer) path
                  (Marshal.from_string bytes 0)));
       }
-  | Recursion_group path -> at_path ~is_failed:failed (fun state -> state.recursion_groups) path
-  | Proof key -> keyed ~is_failed:failed (fun state -> state.proofs) key
+  | Recursion_group path ->
+      at_path ~is_failed:failed (fun package_database -> package_database.recursion_groups) path
+  | Proof key -> keyed ~is_failed:failed (fun package_database -> package_database.proofs) key
   | Ground_types key -> of_instance (fun database -> database.ground_types) key
   | Lowered key -> of_instance (fun database -> database.lowered) key
   | Test_key key -> of_instance (fun database -> database.test_keys) key
@@ -1334,27 +1366,27 @@ let is_own_namespace_part package (part : Part.t) =
   | Packages -> false
   | part -> Stage.of_part part = Namespaces && Part.package part = package
 
-let namespace_and_implied database (state : state) =
-  let package = state.name in
+let namespace_and_implied database (package_database : package_database) =
+  let package = package_database.name in
   let namespace, implied =
     computing database [ Part.Namespace package ] (fun note ->
         let note part = if not (is_own_namespace_part package part) then note part in
-        let own_namespace = namespace_of database note state in
+        let own_namespace = namespace_of database note package_database in
         let names =
           names_over database ~namespace:(fun name ->
               if name = package then own_namespace else namespace database name)
         in
         (own_namespace, package_parts database (recording names note) package))
   in
-  state.namespace <- Some namespace;
+  package_database.namespace <- Some namespace;
   Hashtbl.replace database.implied package implied;
   (namespace, implied)
 
-let compute_namespace database (state : state) =
-  let package = state.name in
-  let before = Option.value state.namespace ~default:Names.empty_namespace in
+let compute_namespace database (package_database : package_database) =
+  let package = package_database.name in
+  let before = Option.value package_database.namespace ~default:Names.empty_namespace in
   let implied_before = Option.value ~default:[] (Hashtbl.find_opt database.implied package) in
-  let after, implied = namespace_and_implied database state in
+  let after, implied = namespace_and_implied database package_database in
   let membership parts =
     let members = Part_table.create 256 in
     List.iter (fun part -> Part_table.replace members part ()) parts;
@@ -1408,17 +1440,17 @@ let compute_type_facts database paths =
 
 let compute_part database (part : Part.t) =
   database.observe (Computed part);
-  let state = owner database (Part.package part) in
+  let package_database = owner database (Part.package part) in
   let into slot compute = compute_into database part slot compute in
   match part with
   | Parsed file ->
-      into (keyed state.parsed file) (fun note ->
+      into (keyed package_database.parsed file) (fun note ->
           note (Source file);
           Some (Parsed.parse (source database file)))
-  | Namespace _ -> compute_namespace database state
+  | Namespace _ -> compute_namespace database package_database
   | Resolved (key, section) ->
       into
-        (keyed state.resolved_names (key, section))
+        (keyed package_database.resolved_names (key, section))
         (fun note ->
           Some
             (match Resolve.resolve (recording_names database note) key section with
@@ -1426,10 +1458,10 @@ let compute_part database (part : Part.t) =
             | Some (Error diagnostics) -> Failed diagnostics
             | None -> Blocked))
   | Import_check file ->
-      into (keyed state.import_checks file) (fun note ->
+      into (keyed package_database.import_checks file) (fun note ->
           Some (import_diagnostics database note file))
   | Trait_header key ->
-      into (keyed state.trait_headers key) (fun note ->
+      into (keyed package_database.trait_headers key) (fun note ->
           Some
             (match
                ( (recording_names database note).definition key,
@@ -1441,13 +1473,13 @@ let compute_part database (part : Part.t) =
                 | None -> Blocked)
             | _ -> Blocked))
   | Constant_value path ->
-      into (at_path state.constant_values path) (fun note ->
+      into (at_path package_database.constant_values path) (fun note ->
           Some
             (computed
                (Interface.Constants.value_of (interface_lookups database note ~is_checked:false))
                path))
   | Header key ->
-      into (keyed state.headers key) (fun note ->
+      into (keyed package_database.headers key) (fun note ->
           Some
             (match
                computed
@@ -1458,7 +1490,7 @@ let compute_part database (part : Part.t) =
             | Value (Some (Error (_ :: _ as diagnostics))) -> Failed diagnostics
             | Value (Some (Error [])) | Value None | Failed _ | Blocked -> Blocked))
   | Interface key ->
-      into (keyed state.interfaces key) (fun note ->
+      into (keyed package_database.interfaces key) (fun note ->
           Some
             (match
                computed
@@ -1468,7 +1500,7 @@ let compute_part database (part : Part.t) =
             | Value lowered -> interface_part lowered
             | Failed _ | Blocked -> Blocked))
   | Derived_interface (Derived { type_; trait } as impl) ->
-      into (at_path state.derived_interfaces impl) (fun note ->
+      into (at_path package_database.derived_interfaces impl) (fun note ->
           Some
             (match
                computed
@@ -1485,19 +1517,19 @@ let compute_part database (part : Part.t) =
       let entry =
         List.find
           (fun (entry : Manifest.dependency) -> entry.package = dependency)
-          state.dependencies
+          package_database.dependencies
       in
-      into (keyed state.grants dependency) (fun note ->
+      into (keyed package_database.grants dependency) (fun note ->
           note (Dependencies package);
           Some
             (Interface.Grants.grant
                (interface_lookups database note ~is_checked:false)
                ~package entry.capabilities))
   | Signature_check key ->
-      into (keyed state.signature_checks key) (fun note ->
+      into (keyed package_database.signature_checks key) (fun note ->
           read database note (Interface key);
           Some
-            (match Hashtbl.find_opt state.interfaces key with
+            (match Hashtbl.find_opt package_database.interfaces key with
             | Some (Value _) ->
                 checked_part
                   (fun key ->
@@ -1508,7 +1540,7 @@ let compute_part database (part : Part.t) =
                   key
             | Some (Failed _ | Blocked) | None -> Blocked))
   | Contract key ->
-      into (keyed state.contracts key) (fun note ->
+      into (keyed package_database.contracts key) (fun note ->
           Option.map
             (function
               | Value (checked : Infer.checked) -> Value checked.form
@@ -1516,19 +1548,19 @@ let compute_part database (part : Part.t) =
               | Blocked -> Blocked)
             (type_check Infer.contract (infer_lookups database note) key))
   | Checked_body key ->
-      into (keyed state.checked_bodies key) (fun note ->
+      into (keyed package_database.checked_bodies key) (fun note ->
           type_check Infer.body (infer_lookups database note) key)
   | Derived_form path ->
-      into (at_path state.derived_forms path) (fun note ->
+      into (at_path package_database.derived_forms path) (fun note ->
           match Infer.derived (infer_lookups database note) path with
           | Some form -> Some (Value form)
           | None -> None
           | exception Reads_failed_part -> Some Blocked)
   | Body_mir key ->
-      into (keyed state.body_parts key) (fun note ->
+      into (keyed package_database.body_parts key) (fun note ->
           read database note (Checked_body key);
           Some
-            (match Hashtbl.find_opt state.checked_bodies key with
+            (match Hashtbl.find_opt package_database.checked_bodies key with
             | Some (Value checked) -> (
                 match lowered_interface database note ~is_checked:true key with
                 | lowered ->
@@ -1541,10 +1573,10 @@ let compute_part database (part : Part.t) =
                 | exception Reads_failed_part -> Blocked)
             | Some (Failed _ | Blocked) | None -> Blocked))
   | Contract_mir key ->
-      into (keyed state.contract_parts key) (fun note ->
+      into (keyed package_database.contract_parts key) (fun note ->
           read database note (Contract key);
           Some
-            (match Hashtbl.find_opt state.contracts key with
+            (match Hashtbl.find_opt package_database.contracts key with
             | Some (Value form) ->
                 Value
                   (Mir.contract_part
@@ -1554,7 +1586,7 @@ let compute_part database (part : Part.t) =
                      key.path form)
             | Some (Failed _ | Blocked) | None -> Blocked))
   | Generated_mir path ->
-      into (at_path state.generated_parts path) (fun note ->
+      into (at_path package_database.generated_parts path) (fun note ->
           read database note (Derived_form path);
           Option.map
             (function
@@ -1567,21 +1599,21 @@ let compute_part database (part : Part.t) =
                              (interface_lookups database note ~is_checked:true))
                         path form )
               | Failed _ | Blocked -> Blocked)
-            (Path_table.find_opt state.derived_forms path))
+            (Path_table.find_opt package_database.derived_forms path))
   | Call_edges path ->
-      into (at_path state.call_edges path) (fun note ->
+      into (at_path package_database.call_edges path) (fun note ->
           Some (computed (Mir.Call_edges.of_path (call_edge_lookups database note)) path))
   | Patterns key ->
-      into (keyed state.patterns key) (fun note ->
+      into (keyed package_database.patterns key) (fun note ->
           Some
             (checked_part
                (fun key -> (Patterns.check (patterns_lookups database note) key, ()))
                key))
   | Usage key ->
-      into (keyed state.usage key) (fun note ->
+      into (keyed package_database.usage key) (fun note ->
           Some (checked_part (fun key -> (Usage.check (usage_lookups database note) key, ())) key))
   | Ownership key ->
-      into (keyed state.ownership key) (fun note ->
+      into (keyed package_database.ownership key) (fun note ->
           Some
             (checked_part
                (fun key ->
@@ -1590,10 +1622,10 @@ let compute_part database (part : Part.t) =
                  | None -> ([], []))
                key))
   | Used_packages key ->
-      into (keyed state.used_packages key) (fun note ->
+      into (keyed package_database.used_packages key) (fun note ->
           Some (computed (used_packages database note) key))
   | Package_check (package, check) ->
-      into (keyed state.package_checks check) (fun note ->
+      into (keyed package_database.package_checks check) (fun note ->
           Some (computed (Package_checks.run (package_checks_lookups database note) package) check))
   | Successors (path, viewer) ->
       let graph = call_graph database viewer in
@@ -1609,7 +1641,7 @@ let compute_part database (part : Part.t) =
         }
         (fun note -> Some (successors database note ~viewer path))
   | Proof key ->
-      into (keyed state.proofs key) (fun note ->
+      into (keyed package_database.proofs key) (fun note ->
           Some (computed (Prover.proof (proof_lookups database note)) key));
       own_template_checks database key
   | Ground_types key ->
@@ -1960,111 +1992,121 @@ let update database changes =
   List.iter
     (fun ((file : Path.file), text) ->
       let package = file.module_.package in
-      let state =
-        match Hashtbl.find_opt database.states package with
-        | Some state -> state
+      let package_database =
+        match Hashtbl.find_opt database.package_databases package with
+        | Some package_database -> package_database
         | None ->
             Compiler_bug.bug ~stage:"Database" "%s is not a package of the build"
               (Path.show_package package)
       in
-      let previous = Hashtbl.find_opt state.sources file in
+      let previous = Hashtbl.find_opt package_database.sources file in
       let is_unchanged =
         match (previous, text) with
         | Some source, Some text -> String.equal (Source.text source) text
-        | None, None -> not (List.mem file state.files)
+        | None, None -> not (List.mem file package_database.files)
         | Some _, None | None, Some _ -> false
       in
       if not is_unchanged then begin
         mark_unsaved database (File file);
         (match text with
         | Some text ->
-            Hashtbl.replace state.sources file (source_of file text);
+            Hashtbl.replace package_database.sources file (source_of file text);
             mark_stale database (Parsed file)
         | None ->
-            Hashtbl.remove state.sources file;
+            Hashtbl.remove package_database.sources file;
             forget database [ Parsed file ]);
         mark_readers database (Source file);
         if Option.is_none previous || Option.is_none text then begin
-          let modules = state.modules in
-          list_files state
-            (List.filter (( <> ) file) state.files @ if Option.is_some text then [ file ] else []);
-          if modules <> state.modules then mark_readers database (Modules package);
+          let modules = package_database.modules in
+          list_files package_database
+            (List.filter (( <> ) file) package_database.files
+            @ if Option.is_some text then [ file ] else []);
+          if modules <> package_database.modules then mark_readers database (Modules package);
           mark_stale database (Namespace package)
         end
       end)
     changes
 
-let state_parts (state : state) : Part.t list =
+let list_stored_parts (package_database : package_database) : Part.t list =
   let keyed table part = Hashtbl.fold (fun key _ parts -> part key :: parts) table [] in
   let at_paths table part = Path_table.fold (fun path _ parts -> part path :: parts) table [] in
   List.concat
     [
-      keyed state.parsed (fun file -> Part.Parsed file);
-      keyed state.resolved_names (fun (key, section) -> Part.Resolved (key, section));
-      keyed state.import_checks (fun file -> Part.Import_check file);
-      keyed state.trait_headers (fun key -> Part.Trait_header key);
-      at_paths state.constant_values (fun path -> Part.Constant_value path);
-      keyed state.headers (fun key -> Part.Header key);
-      keyed state.interfaces (fun key -> Part.Interface key);
-      at_paths state.derived_interfaces (fun path -> Part.Derived_interface path);
-      at_paths state.type_facts (fun path -> Part.Type_facts path);
-      keyed state.grants (fun dependency -> Part.Grant (state.name, dependency));
-      keyed state.signature_checks (fun key -> Part.Signature_check key);
-      keyed state.contracts (fun key -> Part.Contract key);
-      keyed state.checked_bodies (fun key -> Part.Checked_body key);
-      at_paths state.derived_forms (fun path -> Part.Derived_form path);
-      keyed state.body_parts (fun key -> Part.Body_mir key);
-      keyed state.contract_parts (fun key -> Part.Contract_mir key);
-      at_paths state.generated_parts (fun path -> Part.Generated_mir path);
-      at_paths state.call_edges (fun path -> Part.Call_edges path);
-      keyed state.patterns (fun key -> Part.Patterns key);
-      keyed state.usage (fun key -> Part.Usage key);
-      keyed state.ownership (fun key -> Part.Ownership key);
-      keyed state.used_packages (fun key -> Part.Used_packages key);
-      keyed state.package_checks (fun check -> Part.Package_check (state.name, check));
-      at_paths state.recursion_groups (fun path -> Part.Recursion_group path);
-      keyed state.proofs (fun key -> Part.Proof key);
+      keyed package_database.parsed (fun file -> Part.Parsed file);
+      keyed package_database.resolved_names (fun (key, section) -> Part.Resolved (key, section));
+      keyed package_database.import_checks (fun file -> Part.Import_check file);
+      keyed package_database.trait_headers (fun key -> Part.Trait_header key);
+      at_paths package_database.constant_values (fun path -> Part.Constant_value path);
+      keyed package_database.headers (fun key -> Part.Header key);
+      keyed package_database.interfaces (fun key -> Part.Interface key);
+      at_paths package_database.derived_interfaces (fun path -> Part.Derived_interface path);
+      at_paths package_database.type_facts (fun path -> Part.Type_facts path);
+      keyed package_database.grants (fun dependency ->
+          Part.Grant (package_database.name, dependency));
+      keyed package_database.signature_checks (fun key -> Part.Signature_check key);
+      keyed package_database.contracts (fun key -> Part.Contract key);
+      keyed package_database.checked_bodies (fun key -> Part.Checked_body key);
+      at_paths package_database.derived_forms (fun path -> Part.Derived_form path);
+      keyed package_database.body_parts (fun key -> Part.Body_mir key);
+      keyed package_database.contract_parts (fun key -> Part.Contract_mir key);
+      at_paths package_database.generated_parts (fun path -> Part.Generated_mir path);
+      at_paths package_database.call_edges (fun path -> Part.Call_edges path);
+      keyed package_database.patterns (fun key -> Part.Patterns key);
+      keyed package_database.usage (fun key -> Part.Usage key);
+      keyed package_database.ownership (fun key -> Part.Ownership key);
+      keyed package_database.used_packages (fun key -> Part.Used_packages key);
+      keyed package_database.package_checks (fun check ->
+          Part.Package_check (package_database.name, check));
+      at_paths package_database.recursion_groups (fun path -> Part.Recursion_group path);
+      keyed package_database.proofs (fun key -> Part.Proof key);
     ]
 
-let mark_differences database name ~(before : state option) ~(after : state option) =
+let mark_differences database name ~(before : package_database option)
+    ~(after : package_database option) =
   let empty () =
-    let state = empty_state name ~dependencies:[] in
-    state.namespace <- Some Names.empty_namespace;
-    state
+    let package_database = make_empty_package_database name ~dependencies:[] in
+    package_database.namespace <- Some Names.empty_namespace;
+    package_database
   in
-  let before = match before with Some state -> state | None -> empty () in
-  let after = match after with Some state -> state | None -> empty () in
-  let namespace (state : state) = Option.value state.namespace ~default:Names.empty_namespace in
+  let before = match before with Some package_database -> package_database | None -> empty () in
+  let after = match after with Some package_database -> package_database | None -> empty () in
+  let namespace (package_database : package_database) =
+    Option.value package_database.namespace ~default:Names.empty_namespace
+  in
   List.iter (mark_change database name) (Names.changes (namespace before) (namespace after));
-  let text (state : state) file = Option.map Source.text (Hashtbl.find_opt state.sources file) in
+  let text (package_database : package_database) file =
+    Option.map Source.text (Hashtbl.find_opt package_database.sources file)
+  in
   List.iter
     (fun file -> if text before file <> text after file then mark_readers database (Source file))
     (List.sort_uniq compare (before.files @ after.files));
   if before.modules <> after.modules then mark_readers database (Modules name);
   if before.dependencies <> after.dependencies then mark_readers database (Dependencies name);
-  let view (state : state) =
-    let states = Hashtbl.create 1 in
-    Hashtbl.replace states name state;
-    { database with states }
+  let view (package_database : package_database) =
+    let package_databases = Hashtbl.create 1 in
+    Hashtbl.replace package_databases name package_database;
+    { database with package_databases }
   in
   let parts = Part_table.create 1024 in
-  List.iter (fun part -> Part_table.replace parts part ()) (state_parts before @ state_parts after);
+  List.iter
+    (fun part -> Part_table.replace parts part ())
+    (list_stored_parts before @ list_stored_parts after);
   Part_table.iter
     (fun part () ->
       if not ((stored (view before) part).is_equal_in (view after)) then mark_readers database part)
     parts
 
-let retire database (state : state) =
-  let package = state.name in
+let retire database (package_database : package_database) =
+  let package = package_database.name in
   own_roots database (Namespace package) [];
-  Hashtbl.iter (fun key _ -> own_roots database (Proof key) []) state.proofs;
+  Hashtbl.iter (fun key _ -> own_roots database (Proof key) []) package_database.proofs;
   let is_own (part : Part.t) =
     match Stage.of_part part with
     | Input -> false
     | stage -> (not (Stage.is_lowering stage)) && Part.package part = package
   in
-  mark_state_unsaved database state;
-  List.iter (fun part -> mark_unsaved database (Value part)) (state_parts state);
+  mark_package_database_unsaved database package_database;
+  List.iter (fun part -> mark_unsaved database (Value part)) (list_stored_parts package_database);
   List.iter
     (fun part ->
       mark_unsaved database (Value part);
@@ -2082,40 +2124,47 @@ let retire database (state : state) =
     database.stale;
   Hashtbl.remove database.graphs package;
   Hashtbl.remove database.implied package;
-  Hashtbl.remove database.states package
+  Hashtbl.remove database.package_databases package
 
-let relayout database ~(loaded : state list) (packages : Project.package list) =
+let relayout database ~(loaded : package_database list) (packages : Project.package list) =
   let project = List.map (fun (package : Project.package) -> package.name) packages in
-  let loaded_as name = List.find_opt (fun (state : state) -> state.name = name) loaded in
-  let names_before = Hashtbl.fold (fun name _ names -> name :: names) database.states [] in
+  let loaded_as name =
+    List.find_opt (fun (package_database : package_database) -> package_database.name = name) loaded
+  in
+  let names_before =
+    Hashtbl.fold (fun name _ names -> name :: names) database.package_databases []
+  in
   List.iter
     (fun name ->
-      let before = Hashtbl.find database.states name in
+      let before = Hashtbl.find database.package_databases name in
       let is_kept =
         if List.mem name database.project then List.mem name project
-        else match loaded_as name with Some state -> state == before | None -> false
+        else
+          match loaded_as name with
+          | Some package_database -> package_database == before
+          | None -> false
       in
       if not is_kept then begin
         let after = if List.mem name project then None else loaded_as name in
         mark_differences database name ~before:(Some before) ~after;
         retire database before;
-        Option.iter (Hashtbl.replace database.states name) after
+        Option.iter (Hashtbl.replace database.package_databases name) after
       end)
     names_before;
   List.iter
-    (fun (state : state) ->
-      if not (Hashtbl.mem database.states state.name) then begin
-        mark_differences database state.name ~before:None ~after:(Some state);
-        Hashtbl.remove database.absent state.name;
-        Hashtbl.replace database.states state.name state
+    (fun (package_database : package_database) ->
+      if not (Hashtbl.mem database.package_databases package_database.name) then begin
+        mark_differences database package_database.name ~before:None ~after:(Some package_database);
+        Hashtbl.remove database.absent package_database.name;
+        Hashtbl.replace database.package_databases package_database.name package_database
       end)
     loaded;
   List.iter
     (fun (package : Project.package) ->
-      match Hashtbl.find_opt database.states package.name with
-      | Some state ->
-          if state.dependencies <> package.dependencies then begin
-            state.dependencies <- package.dependencies;
+      match Hashtbl.find_opt database.package_databases package.name with
+      | Some package_database ->
+          if package_database.dependencies <> package.dependencies then begin
+            package_database.dependencies <- package.dependencies;
             mark_unsaved database (Package package.name);
             mark_readers database (Dependencies package.name);
             mark_stale database (Namespace package.name)
@@ -2124,18 +2173,22 @@ let relayout database ~(loaded : state list) (packages : Project.package list) =
             (List.map (fun (file, text) -> (file, Some text)) package.files
             @ List.filter_map
                 (fun file -> if List.mem_assoc file package.files then None else Some (file, None))
-                state.files)
+                package_database.files)
       | None ->
-          let state = fresh_state package.name ~dependencies:package.dependencies package.files in
+          let package_database =
+            make_package_database package.name ~dependencies:package.dependencies package.files
+          in
           Hashtbl.remove database.absent package.name;
-          Hashtbl.replace database.states package.name state;
-          mark_state_unsaved database state;
+          Hashtbl.replace database.package_databases package.name package_database;
+          mark_package_database_unsaved database package_database;
           mark_readers database (Modules package.name);
           mark_readers database (Dependencies package.name);
-          List.iter (fun file -> mark_stale database (Parsed file)) state.files;
+          List.iter (fun file -> mark_stale database (Parsed file)) package_database.files;
           mark_stale database (Namespace package.name))
     packages;
-  let names_after = Hashtbl.fold (fun name _ names -> name :: names) database.states [] in
+  let names_after =
+    Hashtbl.fold (fun name _ names -> name :: names) database.package_databases []
+  in
   if List.sort compare names_before <> List.sort compare names_after then
     mark_readers database Packages;
   database.project <- project
@@ -2157,15 +2210,17 @@ let saved_value database (entry : Entry.t) =
   | Stale part -> if is_saved_part database part && is_stale database part then Some "" else None
   | Package name ->
       if List.mem name database.project then
-        Option.map (fun (state : state) -> marshalled state.dependencies) (package database name)
+        Option.map
+          (fun (package_database : package_database) -> marshalled package_database.dependencies)
+          (package database name)
       else None
   | File file ->
       let name = file.module_.package in
       if List.mem name database.project then
-        Option.bind (package database name) (fun (state : state) ->
+        Option.bind (package database name) (fun (package_database : package_database) ->
             Option.map
               (fun source -> fingerprint (Source.text source))
-              (Hashtbl.find_opt state.sources file))
+              (Hashtbl.find_opt package_database.sources file))
       else None
   | Owned owner -> Option.map marshalled (Part_table.find_opt database.owned owner)
 
@@ -2192,17 +2247,19 @@ let restore_packages database ~texts entries =
   List.iter
     (function
       | Entry.Package name, dependencies ->
-          let state = empty_state name ~dependencies:(Marshal.from_string dependencies 0) in
+          let package_database =
+            make_empty_package_database name ~dependencies:(Marshal.from_string dependencies 0)
+          in
           let listed = Option.value ~default:[] (Hashtbl.find_opt files name) in
           List.iter
             (fun (file, saved) ->
               match texts file with
               | Some text when String.equal (fingerprint text) saved ->
-                  Hashtbl.replace state.sources file (source_of file text)
+                  Hashtbl.replace package_database.sources file (source_of file text)
               | Some _ | None -> ())
             listed;
-          list_files state (List.map fst listed);
-          Hashtbl.replace database.states name state;
+          list_files package_database (List.map fst listed);
+          Hashtbl.replace database.package_databases name package_database;
           database.project <- name :: database.project
       | _ -> ())
     entries;
@@ -2224,7 +2281,9 @@ let restore_namespaces database =
   List.iter
     (fun name ->
       if List.mem name database.project then begin
-        let _, implied = namespace_and_implied database (Hashtbl.find database.states name) in
+        let _, implied =
+          namespace_and_implied database (Hashtbl.find database.package_databases name)
+        in
         let graph = call_graph database name in
         List.iter
           (function
@@ -2314,7 +2373,7 @@ let package_outcomes database package =
 
 let stage_diagnostics database (file : Path.file) stage =
   let names = names_lookups database in
-  let state = owner database file.module_.package in
+  let package_database = owner database file.module_.package in
   let placed key diagnostics =
     match names.place key with
     | Some { file = home; base } when home = file ->
@@ -2329,7 +2388,8 @@ let stage_diagnostics database (file : Path.file) stage =
   by_span_and_code
     (match stage with
     | Resolve ->
-        Option.value ~default:[] (Hashtbl.find_opt state.import_checks file) @ of_definitions ()
+        Option.value ~default:[] (Hashtbl.find_opt package_database.import_checks file)
+        @ of_definitions ()
     | Package_checks ->
         List.concat_map
           (function
@@ -2369,10 +2429,10 @@ let code_packages database package =
   | Some (Value (Packages packages)) -> Some packages
   | Some (Value (Placed _ | Problems _) | Failed _ | Blocked) | None -> None
 
-let state database package =
+let read_package_database database package =
   drain database ~through:Recursion_groups [ package ];
-  match Hashtbl.find_opt database.states package with
-  | Some state -> state
+  match Hashtbl.find_opt database.package_databases package with
+  | Some package_database -> package_database
   | None ->
       Compiler_bug.bug ~stage:"Database" "%s is not a package of the build"
         (Path.show_package package)
@@ -2657,11 +2717,11 @@ module For_testing = struct
       (fun database ->
         Part_table.iter (fun part _ -> Part_table.replace parts part ()) database.reads;
         Hashtbl.iter
-          (fun _ state ->
+          (fun _ package_database ->
             Path_table.iter
               (fun path _ -> Part_table.replace parts (Recursion_group path) ())
-              state.recursion_groups)
-          database.states)
+              package_database.recursion_groups)
+          database.package_databases)
       [ hot; cold ];
     let reads database part =
       Option.map (List.sort compare) (Part_table.find_opt database.reads part)

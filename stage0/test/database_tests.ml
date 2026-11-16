@@ -77,7 +77,7 @@ let expect_included recomputed ~parts =
         fail "did not recompute %s; it recomputed %s" part (String.concat ", " recomputed))
     parts
 
-let standard = lazy (Workspace.For_testing.standard_state ())
+let standard = lazy (Workspace.For_testing.load_standard_package_database ())
 
 let settled loaded packages =
   let database = Database.create ~loaded:(Lazy.force standard :: loaded) packages in
@@ -98,7 +98,9 @@ let relaid ?(loaded = ([], [])) ~before ~after () =
 
 let loaded_package files =
   let packages = Support.setup files in
-  Database.state (Database.create ~loaded:[ Lazy.force standard ] packages) (List.hd packages).name
+  Database.read_package_database
+    (Database.create ~loaded:[ Lazy.force standard ] packages)
+    (List.hd packages).name
 
 let saved database =
   let entries = Database.unsaved database in

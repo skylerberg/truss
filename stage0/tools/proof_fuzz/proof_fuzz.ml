@@ -1,10 +1,10 @@
 let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [] }
 let example_file : Path.file = { module_ = example; name = "main" }
-let standard_state = lazy (Workspace.For_testing.standard_state ())
+let standard_package_database = lazy (Workspace.For_testing.load_standard_package_database ())
 
 let build_example_database text =
   Database.create
-    ~loaded:[ Lazy.force standard_state ]
+    ~loaded:[ Lazy.force standard_package_database ]
     [ { name = example.package; dependencies = []; files = [ (example_file, text) ] } ]
 
 let solver =

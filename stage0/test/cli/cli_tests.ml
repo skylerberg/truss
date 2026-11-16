@@ -1198,7 +1198,7 @@ let () =
       if
         List.exists
           (fun state -> contains state "acme::rings" || contains state "acme::chains")
-          (Workspace.states ())
+          (Workspace.list_package_databases ())
       then fail "a package of the cycle has a state");
   test "a project's package and a registry package that depend on each other form a cycle"
     (fun () ->

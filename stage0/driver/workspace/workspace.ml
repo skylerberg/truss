@@ -35,11 +35,16 @@ let collect () =
       | () -> Cache.collect cache ~budget:(budget ())
       | exception Unix.Unix_error _ -> ())
 
-type loaded = { package : Path.package; hash : string; key : string; state : Database.state }
+type loaded = {
+  package : Path.package;
+  hash : string;
+  key : string;
+  package_database : Database.package_database;
+}
 
-let loaded_states : (string, loaded) Hashtbl.t = Hashtbl.create 8
+let loaded_package_databases : (string, loaded) Hashtbl.t = Hashtbl.create 8
 
-let state_key ~hash ~visible =
+let make_package_database_key ~hash ~visible =
   Cbor.encode
     (Cbor.Array
        [
@@ -64,54 +69,54 @@ let exclusively name work =
       Unix.lockf lock F_LOCK 0;
       work ())
 
-let package_state (package : Project.package) ~hash ~visible =
-  let key = state_key ~hash ~visible in
-  match Hashtbl.find_opt loaded_states key with
+let load_package_database (package : Project.package) ~hash ~visible =
+  let key = make_package_database_key ~hash ~visible in
+  match Hashtbl.find_opt loaded_package_databases key with
   | Some loaded -> loaded
   | None ->
       let stored () =
         Option.map
-          (fun bytes -> (Marshal.from_string bytes 0 : Database.state))
+          (fun bytes -> (Marshal.from_string bytes 0 : Database.package_database))
           (Cache.find_result (open_cache ()) ~kind:Package_database ~key)
       in
-      let state =
+      let package_database =
         match stored () with
-        | Some state -> state
+        | Some package_database -> package_database
         | None ->
             exclusively "package-states.lock" (fun () ->
                 match stored () with
-                | Some state -> state
+                | Some package_database -> package_database
                 | None ->
-                    let state =
-                      Database.state
+                    let package_database =
+                      Database.read_package_database
                         (Database.create
-                           ~loaded:(List.map (fun visible -> visible.state) visible)
+                           ~loaded:(List.map (fun visible -> visible.package_database) visible)
                            [ package ])
                         package.name
                     in
                     Cache.add_result (open_cache ()) ~kind:Package_database ~key
-                      (Marshal.to_string state []);
+                      (Marshal.to_string package_database []);
                     Cache.flush (open_cache ());
-                    state)
+                    package_database)
       in
-      let loaded = { package = package.name; hash; key; state } in
-      Hashtbl.replace loaded_states key loaded;
+      let loaded = { package = package.name; hash; key; package_database } in
+      Hashtbl.replace loaded_package_databases key loaded;
       loaded
 
 let standard_package : Project.package =
   { name = Path.standard_package; dependencies = []; files = Standard_library.files }
 
-let standard_state =
+let standard_package_database =
   lazy
     (let standard =
-       package_state standard_package ~visible:[]
+       load_package_database standard_package ~visible:[]
          ~hash:
            (Registry.Content.hash
               (List.map
                  (fun (file, text) -> (Project.file_path ~directory:"" file, text))
                  Standard_library.files))
      in
-     let database = Database.create ~loaded:[ standard.state ] [] in
+     let database = Database.create ~loaded:[ standard.package_database ] [] in
      let rendered =
        List.concat_map
          (fun ((file : Path.file), text) ->
@@ -127,12 +132,12 @@ let standard_state =
          (String.concat "" rendered);
      standard)
 
-let states () =
+let list_package_databases () =
   List.sort compare
     (Hashtbl.fold
        (fun _ { package; hash; _ } lines ->
          Printf.sprintf "%s %s" (Path.show_package package) (String.sub hash 0 16) :: lines)
-       loaded_states [])
+       loaded_package_databases [])
 
 type kind =
   | Worktree of string
@@ -279,52 +284,53 @@ let registry_packages snapshot =
       (selected.name, selected.version, selected.hash))
     snapshot.project.selection.selected
 
-let package_states snapshot =
-  let standard = Lazy.force standard_state in
+let load_package_databases snapshot =
+  let standard = Lazy.force standard_package_database in
   let hashes =
     List.filter_map
       (fun (name, (place : Project.place)) ->
         match place.root with Registry hash -> Some (name, hash) | Project -> None)
       snapshot.project.places
   in
-  let states = Hashtbl.create 8 in
+  let loaded_by_name = Hashtbl.create 8 in
   let rec visible name =
     List.concat_map
       (fun dependency ->
         if List.mem_assoc dependency hashes then dependency :: visible dependency else [])
       (dependency_names snapshot name)
   in
-  let rec state_of name =
-    match Hashtbl.find_opt states name with
+  let rec load_named name =
+    match Hashtbl.find_opt loaded_by_name name with
     | Some loaded -> loaded
     | None ->
         let loaded =
           match package snapshot name with
           | Some package ->
-              package_state package ~hash:(List.assoc name hashes)
+              load_package_database package ~hash:(List.assoc name hashes)
                 ~visible:
                   (standard
-                  :: List.map state_of (List.sort_uniq Path.compare_package (visible name)))
+                  :: List.map load_named (List.sort_uniq Path.compare_package (visible name)))
           | None -> Compiler_bug.bug ~stage:"Workspace" "%s has no files" (Path.show_package name)
         in
-        Hashtbl.replace states name loaded;
+        Hashtbl.replace loaded_by_name name loaded;
         loaded
   in
-  standard :: List.map (fun (name, _) -> state_of name) hashes
+  standard :: List.map (fun (name, _) -> load_named name) hashes
 
 let layout snapshot =
-  let loaded = package_states snapshot in
+  let loaded = load_package_databases snapshot in
   ( loaded,
     List.filter
       (fun (package : Project.package) ->
-        not (List.exists (fun (state : loaded) -> state.package = package.name) loaded))
+        not (List.exists (fun (candidate : loaded) -> candidate.package = package.name) loaded))
       snapshot.project.packages )
 
-let pipeline_states loaded = List.map (fun (loaded : loaded) -> loaded.state) loaded
+let extract_package_databases loaded =
+  List.map (fun (loaded : loaded) -> loaded.package_database) loaded
 
 let build_cold_database ~checks snapshot =
   let loaded, packages = layout snapshot in
-  Database.create ~checks ~loaded:(pipeline_states loaded) packages
+  Database.create ~checks ~loaded:(extract_package_databases loaded) packages
 
 let database_directory = ".truss"
 let compiler_line = "compiler " ^ Compiler_version.digest
@@ -353,28 +359,28 @@ let of_hex hex =
     in
     fill 0
 
-let saved_state ~(current : loaded list) key =
+let find_saved_package_database ~(current : loaded list) key =
   match List.find_opt (fun (loaded : loaded) -> loaded.key = key) current with
-  | Some loaded -> Some loaded.state
+  | Some loaded -> Some loaded.package_database
   | None -> (
-      match Hashtbl.find_opt loaded_states key with
-      | Some loaded -> Some loaded.state
+      match Hashtbl.find_opt loaded_package_databases key with
+      | Some loaded -> Some loaded.package_database
       | None ->
           Option.map
-            (fun bytes -> (Marshal.from_string bytes 0 : Database.state))
+            (fun bytes -> (Marshal.from_string bytes 0 : Database.package_database))
             (Cache.find_result (open_cache ()) ~kind:Package_database ~key))
 
-let saved_states segments ~current =
+let find_saved_package_databases segments ~current =
   match Segments.header segments with
   | Some (line :: loaded_lines) when line = compiler_line ->
       List.fold_right
-        (fun line states ->
-          Option.bind states (fun states ->
+        (fun line package_databases ->
+          Option.bind package_databases (fun package_databases ->
               match String.split_on_char ' ' line with
               | [ "loaded"; hex ] ->
                   Option.map
-                    (fun state -> state :: states)
-                    (Option.bind (of_hex hex) (saved_state ~current))
+                    (fun package_database -> package_database :: package_databases)
+                    (Option.bind (of_hex hex) (find_saved_package_database ~current))
               | _ -> None))
         loaded_lines (Some [])
   | Some _ | None -> None
@@ -391,10 +397,10 @@ let restore_database segments snapshot =
   let loaded, packages = layout snapshot in
   let cold () =
     Segments.discard segments;
-    Database.create ~loaded:(pipeline_states loaded) packages
+    Database.create ~loaded:(extract_package_databases loaded) packages
   in
   let database =
-    match saved_states segments ~current:loaded with
+    match find_saved_package_databases segments ~current:loaded with
     | None -> cold ()
     | Some saved -> (
         match Segments.entries segments with
@@ -402,7 +408,7 @@ let restore_database segments snapshot =
         | Some entries -> (
             match Database.restore ~loaded:saved ~texts:(project_texts snapshot) entries with
             | database ->
-                Database.relayout database ~loaded:(pipeline_states loaded) packages;
+                Database.relayout database ~loaded:(extract_package_databases loaded) packages;
                 database
             | exception (Failure _ | Invalid_argument _ | End_of_file) -> cold ()))
   in
@@ -474,7 +480,7 @@ let apply_changes database (after : snapshot) = function
       None
   | None ->
       let loaded, packages = layout after in
-      Database.relayout database ~loaded:(pipeline_states loaded) packages;
+      Database.relayout database ~loaded:(extract_package_databases loaded) packages;
       Some loaded
 
 let copy_database root (trial : snapshot) =
@@ -855,7 +861,7 @@ let stop = Server.stop
 let wait_until_ended = Server.wait_until_ended
 
 module For_testing = struct
-  let standard_state () = (Lazy.force standard_state).state
+  let load_standard_package_database () = (Lazy.force standard_package_database).package_database
   let build_cold_database = build_cold_database ~checks:true
   let collect_cache = collect
   let listen = Server.listen

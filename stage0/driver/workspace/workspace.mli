@@ -13,7 +13,7 @@ val package_files : snapshot -> Path.package -> Path.file list
 val dependency_names : snapshot -> Path.package -> Path.package list
 val source : snapshot -> Path.file -> Source.t
 val file_path : snapshot -> Path.file -> string
-val states : unit -> string list
+val list_package_databases : unit -> string list
 val trial : snapshot -> (string * string option) list -> snapshot
 val base_commit : snapshot -> string option -> string option
 val of_commit : snapshot -> string -> (snapshot, string) result
@@ -52,7 +52,7 @@ val open_cache : unit -> Cache.t
 val reset : unit -> unit
 
 module For_testing : sig
-  val standard_state : unit -> Database.state
+  val load_standard_package_database : unit -> Database.package_database
   val build_cold_database : snapshot -> Database.t
   val collect_cache : unit -> unit
   val listen : key:string -> (Unix.file_descr, string) result

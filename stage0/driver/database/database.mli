@@ -1,17 +1,20 @@
 module Part = Part
 
 type t
-type state
+type package_database
 
-val create : ?loaded:state list -> ?checks:bool -> Project.package list -> t
+val create : ?loaded:package_database list -> ?checks:bool -> Project.package list -> t
 val copy : t -> t
-val state : t -> Path.package -> state
+val read_package_database : t -> Path.package -> package_database
 val update : t -> (Path.file * string option) list -> unit
-val relayout : t -> loaded:state list -> Project.package list -> unit
+val relayout : t -> loaded:package_database list -> Project.package list -> unit
 val propagate : ?on_bug:(Compiler_bug.t -> unit) -> t -> unit
 val unsaved : t -> (string * string option) list
 val mark_saved : t -> unit
-val restore : loaded:state list -> texts:(Path.file -> string option) -> (string * string) list -> t
+
+val restore :
+  loaded:package_database list -> texts:(Path.file -> string option) -> (string * string) list -> t
+
 val check : t -> Path.package list -> unit
 val file_diagnostics : t -> Path.file -> Diagnostic.t list
 val manifest_problems : t -> Path.package -> Package_checks.manifest_problem list

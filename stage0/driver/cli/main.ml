@@ -260,10 +260,10 @@ let new_ =
     Term.(const (fun () name -> Outcome.Exit (New_command.run ~name)) $ common $ name)
 
 let status =
-  command "status" ~doc:"List the package states that the background process holds."
+  command "status" ~doc:"List the package databases that the background process holds."
     Term.(
       const (fun () ->
-          List.iter Output.print_line (Workspace.states ());
+          List.iter Output.print_line (Workspace.list_package_databases ());
           Outcome.Exit 0)
       $ common)
 

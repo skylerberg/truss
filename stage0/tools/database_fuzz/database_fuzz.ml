@@ -6,7 +6,7 @@ let usage =
    every stage, or stops a commit before its rename. With no file, it edits the corpus beside it."
 
 let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [] }
-let standard_state = lazy (Workspace.For_testing.standard_state ())
+let standard_package_database = lazy (Workspace.For_testing.load_standard_package_database ())
 
 type file = { name : string; text : string }
 
@@ -15,7 +15,7 @@ let path_of file : Path.file = { module_ = example; name = file.name }
 let built files =
   let database =
     Database.create
-      ~loaded:[ Lazy.force standard_state ]
+      ~loaded:[ Lazy.force standard_package_database ]
       [
         {
           name = example.package;

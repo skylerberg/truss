@@ -16,8 +16,8 @@ let file_of text : Path.file =
       let module_ = module_of text in
       { module_; name = (match List.rev module_.modules with last :: _ -> last | [] -> "main") }
 
-let standard_state = lazy (Workspace.For_testing.standard_state ())
-let database packages = Database.create ~loaded:[ Lazy.force standard_state ] packages
+let standard_package_database = lazy (Workspace.For_testing.load_standard_package_database ())
+let database packages = Database.create ~loaded:[ Lazy.force standard_package_database ] packages
 
 let setup ?(dependencies = []) files : Project.package list =
   let files = List.map (fun (name, text) -> (file_of name, text)) files in
