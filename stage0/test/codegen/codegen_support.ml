@@ -239,7 +239,7 @@ let load_files ?results ?(roots = []) files =
       | [] ->
           ignore
             (Core_lint.check_file
-               (Database.drain_interface_lookups database [ file.module_.package ])
+               (Database.make_interface_lookups database [ file.module_.package ])
                ~core:(fun key ->
                  Option.map
                    (fun (checked : Infer.checked) -> checked.form)
@@ -294,7 +294,7 @@ let drop_shapes =
   ]
 
 let standard_interface =
-  lazy (Database.drain_interface_lookups (database []) [ Path.standard_package ])
+  lazy (Database.make_interface_lookups (database []) [ Path.standard_package ])
 
 let standard_context : Monomorphic.context =
   {

@@ -581,7 +581,7 @@ let () =
               (fun () ->
                 let checked = database packages in
                 let interface =
-                  Database.drain_interface_lookups checked [ example_file.module_.package ]
+                  Database.make_interface_lookups checked [ example_file.module_.package ]
                 in
                 let functions =
                   List.filter_map

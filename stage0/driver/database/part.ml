@@ -44,14 +44,14 @@ type computed =
   | Body_mir of Resolve.Names.key
   | Contract_mir of Resolve.Names.key
   | Generated_mir of Path.t
-  | Call_edges of Path.t
+  | Mir_call_edges of Path.t
   | Patterns of Resolve.Names.key
   | Usage of Resolve.Names.key
   | Ownership of Resolve.Names.key
   | Used_packages of Resolve.Names.key
   | Import_check of Path.file
   | Package_check of Path.package * Package_checks.check
-  | Callees of Path.t * Path.package
+  | Call_edges of Path.t * Path.package
   | Proof of Resolve.Names.key
   | Lowering of lowering
 
@@ -79,7 +79,7 @@ let instance_package : Instance.key -> Path.package = function
 
 let package : computed -> Path.package = function
   | Parsed file | Import_check file -> file.module_.package
-  | Namespace package | Grant (package, _) | Package_check (package, _) | Callees (_, package) ->
+  | Namespace package | Grant (package, _) | Package_check (package, _) | Call_edges (_, package) ->
       package
   | Resolved (key, _)
   | Trait_header key
@@ -100,7 +100,7 @@ let package : computed -> Path.package = function
   | Type_facts path
   | Derived_form path
   | Generated_mir path
-  | Call_edges path
+  | Mir_call_edges path
   | Derived_interface { type_ = path; _ } ->
       Path.package path
   | Lowering (Lowered key | Test_key key) -> instance_package key
@@ -179,7 +179,7 @@ let show_computed part =
   | Body_mir declared -> "body mir " ^ show_key declared
   | Contract_mir declared -> "contract mir " ^ show_key declared
   | Generated_mir path -> "generated mir " ^ Path.show path
-  | Call_edges path -> "call edges " ^ Path.show path
+  | Mir_call_edges path -> "MIR call edges " ^ Path.show path
   | Patterns declared -> "patterns " ^ show_key declared
   | Usage declared -> "usage " ^ show_key declared
   | Ownership declared -> "ownership " ^ show_key declared
@@ -195,8 +195,8 @@ let show_computed part =
         | Instantiations -> "instantiations"
         | Tests -> "tests"
         | Dependencies -> "dependencies")
-  | Callees (path, package) ->
-      Printf.sprintf "callees %s %s" (Path.show_package package) (Path.show path)
+  | Call_edges (path, package) ->
+      Printf.sprintf "call edges %s %s" (Path.show_package package) (Path.show path)
   | Proof declared -> "proof " ^ show_key declared
   | Lowering (Lowered instance) -> "lowered " ^ Instance.to_string instance
   | Lowering (Test_key instance) -> "test key " ^ Instance.to_string instance
@@ -264,8 +264,8 @@ let computed_definition = function
   | Type_facts path
   | Derived_form path
   | Generated_mir path
-  | Call_edges path
-  | Callees (path, _) ->
+  | Mir_call_edges path
+  | Call_edges (path, _) ->
       Some path
   | Derived_interface { type_; trait } -> Some (Derived { type_; trait })
   | Lowering (Lowered key | Test_key key) -> instance_definition key
@@ -314,14 +314,14 @@ let computed_kind_name = function
   | Checked_body _ | Derived_form _ -> "checked body"
   | Body_mir _ | Generated_mir _ -> "MIR of the body"
   | Contract_mir _ -> "MIR of the contract"
-  | Call_edges _ -> "call edges"
+  | Mir_call_edges _ -> "MIR call edges"
   | Patterns _ -> "pattern check"
   | Usage _ -> "usage check"
   | Ownership _ -> "ownership check"
   | Used_packages _ -> "used packages"
   | Import_check _ -> "import check"
   | Package_check _ -> "package check"
-  | Callees _ -> "callees"
+  | Call_edges _ -> "call edges"
   | Proof _ -> "proof"
   | Lowering (Lowered _) -> "lowered code"
   | Lowering (Test_key _) -> "test key"

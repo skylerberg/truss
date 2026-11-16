@@ -52,7 +52,7 @@ type candidate = {
 
 let runnable database =
   let mir = Database.For_testing.make_mir_lookups database example.package in
-  let interface = Database.drain_interface_lookups database [ example.package ] in
+  let interface = Database.make_interface_lookups database [ example.package ] in
   let lookups = Database.make_proof_lookups database in
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->

@@ -100,6 +100,16 @@ let check database =
   Database.check database [ Path.standard_package ];
   database
 
+let is_always_read : Database.Part.computed -> bool = function
+  | Parsed _ | Resolved _ | Trait_header _ | Interface _ | Signature_check _ | Contract _
+  | Checked_body _ | Derived_form _ | Body_mir _ | Contract_mir _ | Mir_call_edges _
+  | Used_packages _ ->
+      true
+  | Namespace _ | Constant_value _ | Header _ | Derived_interface _ | Type_facts _ | Grant _
+  | Generated_mir _ | Patterns _ | Usage _ | Ownership _ | Import_check _ | Package_check _
+  | Call_edges _ | Proof _ | Lowering _ ->
+      false
+
 let measure database ~is_measured =
   let database = check database in
   let measured =
@@ -147,6 +157,11 @@ let () =
       exit 0)
     measured_modules;
   let database = timed "type checking" (fun () -> check (database ())) in
+  test "every part whose kind is always read has a reader" (fun () ->
+      List.iter
+        (fun part ->
+          if is_always_read part then fail "no part reads %s" (Database.Part.show_computed part))
+        (Database.For_testing.list_unread_parts database [ Path.standard_package ]));
   let checked =
     List.map
       (fun (module_, files) ->
