@@ -36,5 +36,5 @@ let () =
       Printf.printf "let digest = %S\n"
         (Digest.BLAKE256.to_hex (Digest.BLAKE256.string (Buffer.contents buffer)))
   | _ ->
-      prerr_endline "usage: digest DIRECTORY BUILT-WITH...";
+      prerr_endline "usage: digest_compiler DIRECTORY BUILT-WITH...";
       exit 2
