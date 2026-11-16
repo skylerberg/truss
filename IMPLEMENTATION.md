@@ -154,11 +154,10 @@ develop as well as make it easier to bootstrap the compiler in parts.
   name,** and it includes `Tree` and `Walk`. The emitter's state is
   abstract: the lowering changes it through the emitter's operations
   alone, and passes what a callee needs to know as an argument.
-- **A module of the prover opens only the modules before it:** `State`,
-  `Facts`, `Contracts`, the rules from `Validity` to `Loops`, `Assertions`,
-  `Reader`, and `Translate`. A rule reads a body or a formula through the context, which
-  `Reader` fills, so the one cycle, between a call and a formula that holds
-  calls, is in one place.
+- **The prover's one cycle runs through the context.** A rule reads a body
+  or a formula by calling the context's `run_body` or `formula_term`, which
+  `Reader` fills, so the cycle between a call and a formula that holds calls
+  is in one place.
 
 ### Documents
 
@@ -195,6 +194,22 @@ named after the failure it prevents. A rule of the language belongs in
 file with `stage0/tools/comments`. The tool also rejects a file type that it
 has no comment syntax for, so a new type of file cannot add comments
 unchecked.
+
+### Opens
+
+Code has no `open`. A qualified name, such as `Facts.visible_type`, names
+the module that defines it, so a reader finds the definition without
+searching every opened module. No `open` can shadow a name in scope. A
+file that names a module often gives it an alias, as in
+`module Names = Resolve.Names`. A function that reads the fields of a
+record from another module annotates the parameter, as in
+`(context : State.context)`, instead of qualifying a field, as in
+`context.State.lookups`.
+
+An expression may open a module for its infix operators: `Logic`, or
+Cmdliner's `Arg` or `Term`, as in `Logic.(a &&& b)`. Warnings 44 and 45
+reject such an open when it shadows a name in scope. CI rejects every other
+open with `stage0/tools/opens`.
 
 ### Testing
 

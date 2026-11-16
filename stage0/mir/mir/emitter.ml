@@ -1,47 +1,49 @@
-open Tree
-open Walk
-
 let bug format = Compiler_bug.bug ~stage:"MIR" format
 
 type frame = Bindings | Statement | Condition
 
 type scope = {
   frame : frame;
-  mutable bound : local list;
+  mutable bound : Tree.local list;
   mutable loans : int list;
-  mutable temporaries : local list;
+  mutable temporaries : Tree.local list;
   provides : bool;
 }
 
 type condition_lends = For_statement | For_block | For_condition
-type held = local list * local list * int list
-type task_exit = Exit_return of operand option | Exit_break | Exit_continue
-type group = { winner : local; mutable exits : (local option * (unit -> block)) list }
+type held = Tree.local list * Tree.local list * int list
+type task_exit = Exit_return of Tree.operand option | Exit_break | Exit_continue
+
+type group = {
+  winner : Tree.local;
+  mutable exits : (Tree.local option * (unit -> Tree.block)) list;
+}
+
 type enclosing_loop = { depth : int; tasks_around : int }
 
 type t = {
-  infos : (local, local_info) Hashtbl.t;
+  infos : (Tree.local, Tree.local_info) Hashtbl.t;
   mutable local_count : int;
-  mutable statements : statement list;
+  mutable statements : Tree.statement list;
   mutable reaches : bool;
-  sources : (Core.local, local) Hashtbl.t;
+  sources : (Core.local, Tree.local) Hashtbl.t;
   mutable scopes : scope list;
   mutable loops : enclosing_loop list;
-  mutable compound_target : place option;
-  lambdas : body list ref;
+  mutable compound_target : Tree.place option;
+  lambdas : Tree.body list ref;
   mutable loan_count : int;
-  mutable deferred : local list option;
+  mutable deferred : Tree.local list option;
   mutable extended : Core.id list;
   mutable binds_into : frame;
-  mutable tasks : (task * int) list;
+  mutable tasks : (Tree.task * int) list;
   groups : (Core.origin, group) Hashtbl.t;
-  held_places : (local, place) Hashtbl.t;
-  bound_to_places : (local, unit) Hashtbl.t;
+  held_places : (Tree.local, Tree.place) Hashtbl.t;
+  bound_to_places : (Tree.local, unit) Hashtbl.t;
   is_specification : bool;
   entry_locals : Core.local list;
   mutable in_old : bool;
   takes_free_locals : bool;
-  mutable free : local list;
+  mutable free : Tree.local list;
 }
 
 let create ?(is_specification = false) ?(entry_locals = []) ?(takes_free_locals = false) () =
@@ -86,7 +88,7 @@ let temporary builder type_ origin =
   add_temporary builder local;
   local
 
-let at local = { root = Local local; projections = [] }
+let at local = { Tree.root = Local local; projections = [] }
 
 let emit builder kind origin =
   if builder.reaches then builder.statements <- { kind; origin } :: builder.statements
@@ -103,7 +105,7 @@ let hold_in_temporary builder type_ origin write =
   else
     let local = temporary builder type_ origin in
     write (at local);
-    Some (Use { place = at local; type_; origin })
+    Some (Tree.Use { place = at local; type_; origin })
 
 let hold ?node builder type_ origin value =
   hold_in_temporary builder type_ origin (fun target -> assign ?node builder target value origin)
@@ -112,13 +114,16 @@ let hold_choice builder type_ origin choice =
   hold_in_temporary builder type_ origin (fun target ->
       emit builder (Choose { target; choice }) origin)
 
-let block_of builder (build : unit -> operand option) : block =
+let block_of builder (build : unit -> Tree.operand option) : Tree.block =
   let enclosing = builder.statements in
   builder.statements <- [];
   builder.reaches <- true;
   let value = build () in
   let block =
-    { statements = List.rev builder.statements; value = (if builder.reaches then value else None) }
+    {
+      statements = List.rev builder.statements;
+      Tree.value = (if builder.reaches then value else None);
+    }
   in
   if builder.reaches && value = None then bug "a block that control leaves by no jump";
   builder.statements <- enclosing;
@@ -175,15 +180,15 @@ let end_loans builder loans origin =
 
 let scope_ends scope origin =
   List.map
-    (fun basic -> { kind = Basic basic; origin })
-    ((if scope.loans <> [] then [ Loan_end (List.rev scope.loans) ] else [])
-    @ (if scope.bound <> [] then [ Dead (List.rev scope.bound) ] else [])
-    @ (if scope.temporaries <> [] then [ Dead (List.rev scope.temporaries) ] else [])
+    (fun basic -> { Tree.kind = Basic basic; origin })
+    ((if scope.loans <> [] then [ Tree.Loan_end (List.rev scope.loans) ] else [])
+    @ (if scope.bound <> [] then [ Tree.Dead (List.rev scope.bound) ] else [])
+    @ (if scope.temporaries <> [] then [ Tree.Dead (List.rev scope.temporaries) ] else [])
     @ if scope.provides then [ Provide_end ] else [])
 
 let end_scope builder scope origin =
   List.iter
-    (fun (ended : statement) -> emit builder ended.kind ended.origin)
+    (fun (ended : Tree.statement) -> emit builder ended.kind ended.origin)
     (scope_ends scope origin)
 
 let in_scope ?(provides = false) ?(held = ([], [], [])) builder origin f =
@@ -214,12 +219,12 @@ let in_statement builder origin f =
   end_scope builder scope origin;
   result
 
-let held_past_scopes builder origin (value : operand) =
+let held_past_scopes builder origin (value : Tree.operand) =
   match value with
   | Use { type_; _ } ->
       let local = new_local builder Temporary type_ origin in
       assign builder (at local) (Operand value) origin;
-      Use { place = at local; type_; origin }
+      Tree.Use { place = at local; type_; origin }
   | Constant _ | Borrow _ | Take _ -> value
 
 let return_from_scopes builder value origin =
@@ -227,13 +232,13 @@ let return_from_scopes builder value origin =
   leave_scopes builder ~depth:0 origin;
   jump builder (Return value) origin
 
-let unit_value = Constant { value = Unit; type_ = Types.unit }
+let unit_value = Tree.Constant { value = Unit; type_ = Types.unit }
 
-let group_key : task -> Core.origin = function
+let group_key : Tree.task -> Core.origin = function
   | Branch { block; _ } -> block
   | Iteration { loop } -> loop
 
-let held builder (value : operand) type_ origin =
+let held builder (value : Tree.operand) type_ origin =
   match value with
   | Constant _ | Borrow { mode = Mut; _ } | Take _ -> value
   | Use { place = { root = Local local; projections = [] }; _ }
@@ -250,13 +255,13 @@ let held builder (value : operand) type_ origin =
       assign builder (at local) (Operand value) origin;
       Borrow { place = at local; type_; mode; origin }
 
-let rec borrowed_place builder (place : place) =
+let rec borrowed_place builder (place : Tree.place) =
   match place.root with
   | Local local -> (
       match Hashtbl.find_opt builder.held_places local with
       | Some held ->
           let held = borrowed_place builder held in
-          { held with projections = held.projections @ place.projections }
+          { held with Tree.projections = held.Tree.projections @ place.projections }
       | None -> place)
   | Constant _ | Literal _ -> place
 
@@ -265,7 +270,7 @@ let in_condition_scope :
     lends:condition_lends ->
     t ->
     (unit -> 'value) ->
-    'value * scope * scope * (local list * local list * int list) =
+    'value * scope * scope * (Tree.local list * Tree.local list * int list) =
  fun ~lends builder evaluate ->
   let naming = List.find_opt (fun scope -> scope.frame = Statement) builder.scopes in
   let named_before = match naming with Some scope -> scope.bound | None -> [] in
@@ -303,7 +308,7 @@ let in_condition_scope :
   in
   (value, on_true, on_false, if lends = For_block then (names, lent, loans) else ([], [], []))
 
-let in_value_scope ?provides builder origin (build : unit -> operand option) =
+let in_value_scope ?provides builder origin (build : unit -> Tree.operand option) =
   in_scope ?provides builder origin (fun () ->
       let value = build () in
       match (value, builder.scopes) with
@@ -330,7 +335,7 @@ let looping builder build =
   build ();
   builder.loops <- List.tl builder.loops
 
-let group_of builder (task : task) origin =
+let group_of builder (task : Tree.task) origin =
   let key = group_key task in
   match Hashtbl.find_opt builder.groups key with
   | Some group -> group
@@ -382,7 +387,9 @@ let leave_tasks builder tasks exit origin =
         leave_scopes builder ~depth:start origin;
         let group = group_of builder task origin in
         let slot =
-          Option.map (fun value -> new_local builder Temporary (operand_type value) origin) returned
+          Option.map
+            (fun value -> new_local builder Temporary (Walk.operand_type value) origin)
+            returned
         in
         let moved =
           match (returned, slot) with Some value, Some slot -> Some (value, slot) | _ -> None
@@ -392,7 +399,7 @@ let leave_tasks builder tasks exit origin =
               leave
                 (Option.map
                    (fun (value, slot) ->
-                     Use { place = at slot; type_ = operand_type value; origin })
+                     Tree.Use { place = at slot; type_ = Walk.operand_type value; origin })
                    moved)
                 outer;
               if builder.reaches then Some unit_value else None)
@@ -417,7 +424,9 @@ let start_group builder key origin =
 let resume_group builder key origin =
   match Hashtbl.find_opt builder.groups key with
   | Some { winner; exits = _ :: _ as exits } ->
-      let exits = List.map (fun (returned, resumed) -> { resumed = resumed (); returned }) exits in
+      let exits =
+        List.map (fun (returned, resumed) -> { Tree.resumed = resumed (); returned }) exits
+      in
       emit builder (Resume { winner; exits }) origin
   | _ -> ()
 
@@ -501,7 +510,7 @@ let note_bound_to_place builder local =
       { (Hashtbl.find builder.infos local) with has_several_bindings = true }
   else Hashtbl.replace builder.bound_to_places local ()
 
-type suspended = statement list
+type suspended = Tree.statement list
 
 let suspend_block builder =
   let enclosing = builder.statements in
@@ -520,8 +529,8 @@ let in_arm_scope builder build =
 
 let dead_in scope origin =
   List.map
-    (fun basic -> { kind = Basic basic; origin })
-    ((if scope.bound <> [] then [ Dead (List.rev scope.bound) ] else [])
+    (fun basic -> { Tree.kind = Basic basic; origin })
+    ((if scope.bound <> [] then [ Tree.Dead (List.rev scope.bound) ] else [])
     @ if scope.temporaries <> [] then [ Dead (List.rev scope.temporaries) ] else [])
 
 let in_task builder task build =
@@ -549,7 +558,7 @@ let continue_ builder origin =
   | _ :: _, tasks -> leave_tasks builder tasks Exit_continue origin
   | [], _ -> bug "a `continue` outside a loop"
 
-let finish ?(captures = []) ?(is_functional = false) ?value_type builder ~parameters : body =
+let finish ?(captures = []) ?(is_functional = false) ?value_type builder ~parameters : Tree.body =
   if builder.reaches then bug "a body whose end control reaches";
   {
     parameters;
@@ -560,13 +569,14 @@ let finish ?(captures = []) ?(is_functional = false) ?value_type builder ~parame
     value_type;
   }
 
-let formula builder ~origin ~type_ (build : unit -> local list * operand option) : formula =
+let formula builder ~origin ~type_ (build : unit -> Tree.local list * Tree.operand option) :
+    Tree.formula =
   let built = ref None in
   let formula_so_far parameters value =
     built :=
       Some
         {
-          parameters;
+          Tree.parameters;
           locals = [||];
           value = { statements = statements builder; value = Some value };
           type_;

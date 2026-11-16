@@ -1,7 +1,6 @@
-open Core
-open State
+module Names = Resolve.Names
 
-let source_of (key : Names.key) = { key = Some key; name = Names.show_key key }
+let source_of (key : Names.key) = { State.key = Some key; name = Names.show_key key }
 
 let source_at_key (lookups : Lookups.t) key =
   ignore (lookups.mir.body_part key);
@@ -37,7 +36,7 @@ let part_of ?(inherited = false) (lookups : Lookups.t) path callee =
   Option.map
     (fun (contract : Mir.contract) ->
       {
-        callee;
+        State.callee;
         parameters = contract.parameters;
         requires = contract.requires;
         ensures = contract.ensures;
@@ -104,7 +103,7 @@ let law_unshown (lookups : Lookups.t) (impl : Path.t) (trait : Types.trait_refer
   | Some key ->
       impl_unfinished lookups key
       || List.exists
-           (fun (law, ((proof : source), _)) ->
+           (fun (law, ((proof : State.source), _)) ->
              law = name && Option.fold ~none:false ~some:(holds_todo lookups) proof.key)
            (law_proofs lookups (Path.package impl) trait for_type)
   | None -> false
@@ -123,7 +122,7 @@ let make_contract (lookups : Lookups.t) path ~own ~others =
     | None -> false
   in
   let result_kind = match signature with Some { output = Lends _; _ } -> `Lends | _ -> `Returns in
-  { parts = own :: others; is_logic_function; result_kind }
+  { State.parts = own :: others; is_logic_function; result_kind }
 
 let function_contract lookups (path : Path.t) =
   Option.bind (source_at lookups path) (fun (callee, _, _) ->
@@ -147,7 +146,8 @@ let capability_part lookups (capability : Path.t) name =
   let path = Path.Method { owner = capability; name; receiver = Static } in
   Option.bind (source_at lookups path) (fun (callee, _, _) -> part_of lookups path callee)
 
-let method_contract lookups (trait : Types.trait_reference) name receiver (evidence : evidence) =
+let method_contract lookups (trait : Types.trait_reference) name receiver (evidence : Core.evidence)
+    =
   let trait_side = trait_part lookups trait.trait name receiver in
   match evidence with
   | Impl { impl; _ } -> (
@@ -201,7 +201,7 @@ let is_updating_helper (lookups : Lookups.t) (path : Path.t) =
       | _ -> false)
   | _ -> false
 
-let comparison (comparison : comparison) =
+let comparison (comparison : Core.comparison) =
   match comparison with
   | Equal -> Some "="
   | Less -> Some "<"

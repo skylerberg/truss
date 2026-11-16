@@ -1,8 +1,8 @@
-open State
+module Symbol = Logic.Symbol
 
 let variable ?(numbers = []) label = Symbol.Variable { label; numbers }
 
-exception Unsupported of location * string
+exception Unsupported of State.location * string
 exception Foreign_unsupported of string
 
 let unsupported location format =
@@ -10,13 +10,13 @@ let unsupported location format =
 
 let bug format = Compiler_bug.bug ~stage:"Prover" format
 
-let is_in_recursion_group context path =
+let is_in_recursion_group (context : State.context) path =
   List.exists (Path.equal path) (context.lookups.recursion_group context.current)
 
 let clauses (requires : Mir.requirement list) =
   List.map (fun (requirement : Mir.requirement) -> requirement.clause) requires
 
-let declare context (declaration : Logic.declaration) =
+let declare (context : State.context) (declaration : Logic.declaration) =
   match declaration with
   | Constant (name, _) | Function (name, _, _) ->
       if not (Hashtbl.mem context.declared name) then begin
@@ -25,9 +25,9 @@ let declare context (declaration : Logic.declaration) =
       end
   | Datatype _ -> invalid_arg "Translate.declare: a datatype is declared by its sort"
 
-let add_fact context fact = context.facts <- fact :: context.facts
+let add_fact (context : State.context) fact = context.facts <- fact :: context.facts
 
-let value_symbol context frame name sort =
+let value_symbol context (frame : State.frame) name sort =
   match List.rev frame.binders with
   | [] ->
       declare context (Logic.Constant (name, sort));
@@ -37,7 +37,7 @@ let value_symbol context frame name sort =
         (Logic.Function (name, List.map (fun (_, sort, _) -> sort) outermost_first, sort));
       Logic.Apply (name, List.map (fun (bound, _, _) -> Logic.Symbol bound) outermost_first)
 
-let fresh_name context label =
+let fresh_name (context : State.context) label =
   context.fresh <- context.fresh + 1;
   variable label ~numbers:[ context.fresh ]
 
@@ -46,7 +46,7 @@ let fresh context frame label sort =
   Hashtbl.replace context.fresh_order name context.fresh;
   value_symbol context frame name sort
 
-let mentions_fresh_after context mark term =
+let mentions_fresh_after (context : State.context) mark term =
   let is_fresh_after name =
     match Hashtbl.find_opt context.fresh_order name with
     | Some order -> order > mark
@@ -62,7 +62,7 @@ let mentions_fresh_after context mark term =
   in
   walk term
 
-let closed_over_binders frame term =
+let closed_over_binders (frame : State.frame) term =
   let names = List.map (fun (name, _, _) -> name) frame.binders in
   if Logic.mentions (List.filter (fun name -> not (List.mem name names)) frame.bound) term then None
   else if not (Logic.mentions names term) then Some term
@@ -75,19 +75,19 @@ let closed_over_binders frame term =
              (Logic.conjunction (List.map (fun (_, _, premise) -> premise) outermost_first))
              term ))
 
-let in_scope context frame term =
+let in_scope (context : State.context) (frame : State.frame) term =
   let named = List.filter (fun name -> Logic.mentions [ name ] term) frame.bound in
   if List.for_all (fun name -> List.mem_assoc name context.scopes) named then
     match List.find_opt (fun (name, _) -> List.mem name named) context.scopes with
     | Some (_, facts) -> facts := term :: !facts
     | None -> ()
 
-let scope_facts context names =
+let scope_facts (context : State.context) names =
   List.concat_map
     (fun (name, facts) -> if List.mem name names then List.rev !facts else [])
     context.scopes
 
-let with_quantifier_facts ?(binders = []) context term =
+let with_quantifier_facts ?(binders = []) (context : State.context) term =
   let stated bound fact =
     List.for_all
       (fun name -> List.mem name bound || not (Logic.mentions [ name ] fact))
@@ -124,11 +124,11 @@ let with_quantifier_facts ?(binders = []) context term =
   in
   walk true binders term
 
-let fact context frame term =
+let fact context (frame : State.frame) term =
   if not (Logic.mentions frame.bound term) then add_fact context term
   else in_scope context frame term
 
-let assume context frame term =
+let assume context (frame : State.frame) term =
   match term with
   | Logic.Boolean true -> ()
   | _ ->
@@ -137,10 +137,10 @@ let assume context frame term =
         add_fact context guarded
       else in_scope context frame guarded
 
-let locate context (source : source) origin =
-  if source.key = Some context.home then Node origin else Whole_definition
+let locate (context : State.context) (source : State.source) origin =
+  if source.key = Some context.home then State.Node origin else Whole_definition
 
-let add_requires context required =
+let add_requires (context : State.context) required =
   let names = context.lookups.interface.names in
   let text = names.text context.home in
   let brace =
@@ -150,7 +150,8 @@ let add_requires context required =
     | _ -> None
   in
   let edit at before =
-    Some { at; replacement = (Text (before ^ "  requires ") :: required) @ [ Text "\n" ] }
+    Some
+      { State.at; replacement = (State.Text (before ^ "  requires ") :: required) @ [ Text "\n" ] }
   in
   let edit =
     match brace with
@@ -161,10 +162,12 @@ let add_requires context required =
   in
   match edit with
   | Some edit ->
-      [ { title = (Text "Add `requires " :: required) @ [ Text "`" ]; edits = [ edit ] } ]
+      [
+        { State.title = (State.Text "Add `requires " :: required) @ [ Text "`" ]; edits = [ edit ] };
+      ]
   | None -> []
 
-let parameter_name context symbol =
+let parameter_name (context : State.context) symbol =
   if List.mem symbol context.entry then
     match List.assoc_opt symbol context.values with Some name -> Some name | None -> Some "self"
   else None
@@ -229,7 +232,8 @@ let truss_of_goal context term =
     printed
   else None
 
-let rec oblige ?template_clause ?cited ?(fixes = []) context frame code location message goal =
+let rec oblige ?template_clause ?cited ?(fixes = []) context (frame : State.frame) code location
+    message goal =
   match
     obligation_at ?template_clause context frame code location message
       (with_quantifier_facts
@@ -307,13 +311,13 @@ and make_obligation ?template_clause context frame code location message goal =
     template_clause;
   }
 
-let quote source origin =
-  match source.key with Some key -> Quote (key, origin) | None -> Text "this expression"
+let quote (source : State.source) origin =
+  match source.key with Some key -> State.Quote (key, origin) | None -> Text "this expression"
 
 let quoted text (span : Source.Definition_span.t) =
   if span.stop = span.start then "this expression" else Source.Definition_span.quote text span
 
-let text_of context frame origin =
+let text_of (context : State.context) (frame : State.frame) origin =
   if frame.source.key <> Some context.home then
     bug "a quote of %s, outside the definition being proven" frame.source.name;
   let names = context.lookups.interface.names in
@@ -336,7 +340,7 @@ let selector_name ty variant field = Symbol.Field { type_ = ty; variant; field }
 let is_standard_equal = Well_known.is Equal
 let equal_trait = Well_known.path Equal
 
-let visible_type context (ty : Types.ty) =
+let visible_type (context : State.context) (ty : Types.ty) =
   match ty with
   | Named { path; arguments } when builtin ty = None -> (
       match Interface.Definition.read_interface context.lookups.interface path with
@@ -372,7 +376,7 @@ let constructors context ty =
       | Todo_type | Builtin_type _ -> None)
   | None -> None
 
-let rec sort_of context (ty : Types.ty) : Logic.sort =
+let rec sort_of (context : State.context) (ty : Types.ty) : Logic.sort =
   if is_numeric ty then Int
   else if is_bool ty then Bool
   else
@@ -436,7 +440,7 @@ let in_range ty term =
       else in_bounds
   | None -> Logic.Boolean true
 
-let once context stated make =
+let once (context : State.context) stated make =
   if not (Hashtbl.mem context.stated stated) then begin
     Hashtbl.replace context.stated stated ();
     make ()
@@ -447,14 +451,14 @@ let arrive context frame prefix ty =
   assume context frame (in_range ty value);
   value
 
-let bind frame local ty term =
+let bind (frame : State.frame) local ty term =
   {
     frame with
-    locals = Locals.add local term frame.locals;
+    State.locals = Locals.add local term frame.locals;
     types = Locals.add local ty frame.types;
   }
 
-let substituted context frame ty =
+let substituted (context : State.context) (frame : State.frame) ty =
   (Interface.Impls.normalize context.lookups.interface ~bounds:Interface.Impls.no_bounds)
     (Types.substitute frame.substitution ty)
 
@@ -469,13 +473,14 @@ let mentions_potential term =
   in
   walk term
 
-let restrict frame condition = { frame with condition = Logic.( &&& ) frame.condition condition }
+let restrict (frame : State.frame) condition =
+  { frame with State.condition = Logic.( &&& ) frame.condition condition }
 
-let known_on_paths (paths : (Logic.term * frame) list) =
+let known_on_paths (paths : (Logic.term * State.frame) list) =
   let known pick ~is_same ~differing =
     let keys =
       List.fold_left
-        (fun keys ((_, frame) : Logic.term * frame) ->
+        (fun keys ((_, frame) : Logic.term * State.frame) ->
           Locals.fold (fun key _ keys -> Locals.add key () keys) (pick frame) keys)
         Locals.empty paths
     in
@@ -508,21 +513,21 @@ let known_on_paths (paths : (Logic.term * frame) list) =
       ~differing:(fun each ->
         if
           List.exists
-            (function _, (None | Some Unknown_slice) -> true | _, Some (Slices _) -> false)
+            (function _, (None | Some State.Unknown_slice) -> true | _, Some (Slices _) -> false)
             each
         then Unknown_slice
         else
           Slices
             (List.concat_map
                (function
-                 | condition, Some (Slices slices) -> under condition slices
+                 | condition, Some (State.Slices slices) -> under condition slices
                  | _, (Some Unknown_slice | None) -> [])
                each))
   in
   let lends = known (fun frame -> frame.lends) ~is_same:( == ) ~differing:each_under in
   (aliases, slices, lends)
 
-let path_condition context (frame : frame) condition =
+let path_condition context (frame : State.frame) condition =
   match condition with
   | Logic.Boolean _ | Logic.Symbol _ -> condition
   | _ when (not frame.makes_obligations) || Logic.mentions frame.bound condition -> condition
@@ -531,7 +536,8 @@ let path_condition context (frame : frame) condition =
       fact context frame (Logic.equal path condition);
       path
 
-let merge context ?value_type ~condition (paths : (Logic.term * frame * Logic.term option) list) =
+let merge context ?value_type ~condition
+    (paths : (Logic.term * State.frame * Logic.term option) list) =
   let first = match paths with (_, first, _) :: _ -> first | [] -> bug "no paths meet" in
   let is_expression = not first.makes_obligations in
   let aliases, slices, lends =
@@ -544,7 +550,7 @@ let merge context ?value_type ~condition (paths : (Logic.term * frame * Logic.te
         List.fold_left (fun otherwise (on, _, term) -> Logic.ite on term otherwise) last earlier
     | [] -> bug "a value that no path gives"
   in
-  let define prefix sort (values : (Logic.term * frame * Logic.term) list) =
+  let define prefix sort (values : (Logic.term * State.frame * Logic.term) list) =
     match values with
     | (_, _, term) :: rest
       when List.for_all (fun (_, _, other) -> other == term || other = term) rest ->
@@ -560,7 +566,7 @@ let merge context ?value_type ~condition (paths : (Logic.term * frame * Logic.te
     | _
       when is_expression
            || List.exists
-                (fun (on, (frame : frame), term) ->
+                (fun (on, (frame : State.frame), term) ->
                   Logic.mentions first.bound on
                   || Logic.mentions first.bound frame.condition
                   || Logic.mentions first.bound term)
@@ -569,7 +575,7 @@ let merge context ?value_type ~condition (paths : (Logic.term * frame * Logic.te
     | _ ->
         let symbol = fresh context first prefix sort in
         List.iter
-          (fun (_, (frame : frame), term) ->
+          (fun (_, (frame : State.frame), term) ->
             fact context first (Logic.( ==> ) frame.condition (Logic.equal symbol term)))
           values;
         symbol
@@ -584,7 +590,7 @@ let merge context ?value_type ~condition (paths : (Logic.term * frame * Logic.te
   in
   let keys =
     List.fold_left
-      (fun keys (_, (frame : frame), _) ->
+      (fun keys (_, (frame : State.frame), _) ->
         Locals.fold (fun key _ keys -> Locals.add key () keys) frame.locals keys)
       Locals.empty paths
   in
@@ -602,7 +608,9 @@ let merge context ?value_type ~condition (paths : (Logic.term * frame * Logic.te
             define "joined" sort values
         | None -> (
             match
-              List.find_map (fun (_, (frame : frame), _) -> Locals.find_opt id frame.locals) paths
+              List.find_map
+                (fun (_, (frame : State.frame), _) -> Locals.find_opt id frame.locals)
+                paths
             with
             | Some term -> term
             | None -> bug "a local that no path binds"))
@@ -610,7 +618,8 @@ let merge context ?value_type ~condition (paths : (Logic.term * frame * Logic.te
   in
   let types =
     List.fold_left
-      (fun types (_, (frame : frame), _) -> Locals.union (fun _ ty _ -> Some ty) types frame.types)
+      (fun types (_, (frame : State.frame), _) ->
+        Locals.union (fun _ ty _ -> Some ty) types frame.types)
       Locals.empty paths
   in
   let self =
@@ -618,7 +627,7 @@ let merge context ?value_type ~condition (paths : (Logic.term * frame * Logic.te
     | Some ty, Some values -> Some (define "self" (sort_of context ty) values)
     | _ -> first.self
   in
-  let in_joined (frame : frame) amount =
+  let in_joined (frame : State.frame) amount =
     let renamed =
       Locals.fold
         (fun id joined renamed ->
@@ -639,7 +648,7 @@ let merge context ?value_type ~condition (paths : (Logic.term * frame * Logic.te
       (fun (key, term) ->
         let values =
           List.map
-            (fun (on, (frame : frame), _) ->
+            (fun (on, (frame : State.frame), _) ->
               ( on,
                 in_joined frame
                   (match List.assoc_opt key frame.spent with
@@ -698,11 +707,11 @@ let join context ?value_type frames =
   | (first, _) :: _ ->
       let condition =
         path_condition context first
-          (Logic.disjunction (List.map (fun ((frame : frame), _) -> frame.condition) frames))
+          (Logic.disjunction (List.map (fun ((frame : State.frame), _) -> frame.condition) frames))
       in
       Some
         (merge context ?value_type ~condition
-           (List.map (fun ((frame : frame), value) -> (frame.condition, frame, value)) frames))
+           (List.map (fun ((frame : State.frame), value) -> (frame.condition, frame, value)) frames))
 
 let join_frames context frames =
   Option.map fst (join context (List.map (fun frame -> (frame, None)) frames))

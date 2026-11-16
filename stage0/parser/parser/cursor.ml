@@ -1,5 +1,3 @@
-open Token
-
 exception Failed
 
 type t = {
@@ -23,7 +21,7 @@ let group_ends tokens ~first ~stop =
   let ends = Array.init (stop - first) (fun offset -> first + offset) in
   let openers = ref [] in
   for index = first to stop - 1 do
-    match tokens.(index).kind with
+    match tokens.(index).Token.kind with
     | Punctuation (Open _) -> openers := index :: !openers
     | Punctuation (Close _) -> (
         match !openers with
@@ -69,7 +67,7 @@ let end_token cursor =
     if cursor.stop > cursor.first then cursor.tokens.(cursor.stop - 1).span.stop else cursor.base
   in
   {
-    kind = End_of_file;
+    Token.kind = End_of_file;
     span = Source.zero_width position;
     line_break_before = false;
     blank_line_before = false;
@@ -113,7 +111,7 @@ let is_punctuation cursor punctuation =
   | Punctuation current -> Token.equal_punctuation current punctuation
   | _ -> false
 
-let is_keyword cursor (keyword : keyword) =
+let is_keyword cursor (keyword : Token.keyword) =
   match peek_kind cursor with Keyword current -> current = keyword | _ -> false
 
 let accept_punctuation cursor punctuation =
@@ -217,12 +215,12 @@ let describe (token : Token.t) =
   | End_of_file -> "the end of the definition"
   | Upper name | Lower name -> Printf.sprintf "the name `%s`" name
   | Underscore -> "`_`"
-  | Keyword keyword -> Printf.sprintf "`%s`" (keyword_spelling keyword)
-  | Reserved reserved -> Printf.sprintf "`%s`" (reserved_spelling reserved)
+  | Keyword keyword -> Printf.sprintf "`%s`" (Token.keyword_spelling keyword)
+  | Reserved reserved -> Printf.sprintf "`%s`" (Token.reserved_spelling reserved)
   | Integer _ | Float _ -> "a number"
   | String _ -> "a string"
-  | Punctuation punctuation -> Printf.sprintf "`%s`" (punctuation_spelling punctuation)
-  | Foreign foreign -> Printf.sprintf "`%s`" (foreign_spelling foreign)
+  | Punctuation punctuation -> Printf.sprintf "`%s`" (Token.punctuation_spelling punctuation)
+  | Foreign foreign -> Printf.sprintf "`%s`" (Token.foreign_spelling foreign)
 
 let fail cursor expected =
   let token = peek cursor in
@@ -235,7 +233,7 @@ let fail cursor expected =
   | Reserved reserved ->
       report cursor Reserved_word token.span
         (Printf.sprintf "`%s` is reserved for possible later use, and means nothing in Truss yet."
-           (reserved_spelling reserved))
+           (Token.reserved_spelling reserved))
   | _ ->
       report cursor Unexpected_token token.span
         (Printf.sprintf "Expected %s, found %s." expected (describe token)));
@@ -243,11 +241,11 @@ let fail cursor expected =
 
 let expect_punctuation cursor punctuation =
   if not (accept_punctuation cursor punctuation) then
-    fail cursor (Printf.sprintf "`%s`" (punctuation_spelling punctuation))
+    fail cursor (Printf.sprintf "`%s`" (Token.punctuation_spelling punctuation))
 
 let expect_keyword cursor keyword =
   if not (accept_keyword cursor keyword) then
-    fail cursor (Printf.sprintf "`%s`" (keyword_spelling keyword))
+    fail cursor (Printf.sprintf "`%s`" (Token.keyword_spelling keyword))
 
 let nested cursor parse =
   if cursor.nesting_depth >= nesting_limit then begin

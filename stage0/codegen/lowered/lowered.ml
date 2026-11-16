@@ -1,6 +1,7 @@
 include Lowered_types
 
 let local_place local = { root = Local local; projections = [] }
+let project place projection = { place with projections = place.projections @ [ projection ] }
 let bug format = Compiler_bug.bug ~stage:"Lowered" format
 
 let erased env = function

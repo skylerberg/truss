@@ -1,19 +1,16 @@
-open Core
-open State
-open Facts
-open Contracts
-open Validity
+module Symbol = Logic.Symbol
 
 let applied context (function_type : Types.function_type) callee arguments =
-  let inputs = List.map (fun (_, input) -> sort_of context input) function_type.inputs in
-  let output = sort_of context function_type.output in
-  let value_sort = sort_of context (Types.Function function_type) in
+  let inputs = List.map (fun (_, input) -> Facts.sort_of context input) function_type.inputs in
+  let output = Facts.sort_of context function_type.output in
+  let value_sort = Facts.sort_of context (Types.Function function_type) in
   let symbol = Symbol.Apply ((value_sort :: inputs) @ [ output ]) in
-  declare context (Logic.Function (symbol, value_sort :: inputs, output));
+  Facts.declare context (Logic.Function (symbol, value_sort :: inputs, output));
   Logic.Apply (symbol, callee :: arguments)
 
-let add_lambda_facts context frame ~capture_free function_type term ~called ~arguments ~start_fresh
-    ~end_fresh ~start_declarations ~premises ~shown ~ended =
+let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_free
+    (function_type : Types.function_type) term ~called ~arguments ~start_fresh ~end_fresh
+    ~start_declarations ~premises ~shown ~ended =
   let declared_here =
     List.filteri
       (fun index _ -> index < List.length context.declarations - start_declarations)
@@ -22,7 +19,7 @@ let add_lambda_facts context frame ~capture_free function_type term ~called ~arg
   let captures_fresh = function
     | Symbol.Lambda _ as name when not (Hashtbl.mem context.fresh_order name) -> (
         match Hashtbl.find_opt context.lambda_definitions name with
-        | Some defined -> mentions_fresh_after context start_fresh defined
+        | Some defined -> Facts.mentions_fresh_after context start_fresh defined
         | None -> false)
     | _ -> false
   in
@@ -30,8 +27,8 @@ let add_lambda_facts context frame ~capture_free function_type term ~called ~arg
     let parameters =
       List.mapi
         (fun index (_, input) ->
-          (variable "lambda.argument" ~numbers:[ index ], sort_of context input))
-        function_type.Types.inputs
+          (Facts.variable "lambda.argument" ~numbers:[ index ], Facts.sort_of context input))
+        function_type.inputs
     in
     let variables = List.map (fun (name, _) -> Logic.Symbol name) parameters in
     let renamed = Hashtbl.create 16 in
@@ -53,14 +50,15 @@ let add_lambda_facts context frame ~capture_free function_type term ~called ~arg
             in
             if is_fresh_in_body then begin
               let lifted = Symbol.Lifted name in
-              declare context (Logic.Function (lifted, List.map snd parameters, sort));
+              Facts.declare context (Logic.Function (lifted, List.map snd parameters, sort));
               Hashtbl.replace renamed name (Logic.Apply (lifted, variables))
             end
         | Logic.Function (name, inputs, sort) when frame.binders <> [] -> (
             match Hashtbl.find_opt context.fresh_order name with
             | Some order when order > start_fresh && order <= end_fresh ->
                 let lifted = Symbol.Lifted name in
-                declare context (Logic.Function (lifted, inputs @ List.map snd parameters, sort));
+                Facts.declare context
+                  (Logic.Function (lifted, inputs @ List.map snd parameters, sort));
                 Hashtbl.replace functions name lifted
             | _ -> ())
         | _ -> ())
@@ -82,7 +80,7 @@ let add_lambda_facts context frame ~capture_free function_type term ~called ~arg
     let statements =
       List.map lift shown
       @ List.filter_map
-          (fun ((exit_ : frame), value) ->
+          (fun ((exit_ : State.frame), value) ->
             Option.map
               (fun value ->
                 Logic.( ==> ) (lift exit_.condition) (Logic.equal applied_here (lift value)))
@@ -92,10 +90,10 @@ let add_lambda_facts context frame ~capture_free function_type term ~called ~arg
     List.iter
       (fun statement ->
         let stated = Logic.forall (parameters, Logic.( ==> ) premise statement) in
-        if frame.bound = [] || capture_free then add_fact context stated
+        if frame.bound = [] || capture_free then Facts.add_fact context stated
         else
-          match closed_over_binders frame stated with
-          | Some closed -> add_fact context closed
+          match Facts.closed_over_binders frame stated with
+          | Some closed -> Facts.add_fact context closed
           | None -> ())
       statements
   end
@@ -105,12 +103,12 @@ let in_the_logic (function_type : Types.function_type) =
   && function_type.uses = Types.no_capabilities
   && List.for_all (fun (mode, _) -> mode <> Types.Mut) function_type.inputs
 
-let parameters_of context frame (function_type : Types.function_type) =
+let parameters_of context (frame : State.frame) (function_type : Types.function_type) =
   let depth = List.length frame.bound in
   List.mapi
     (fun index (_, input) ->
       ( Symbol.Variable { label = "parameter"; numbers = [ depth; index ] },
-        sort_of context (substituted context frame input) ))
+        Facts.sort_of context (Facts.substituted context frame input) ))
     function_type.inputs
 
 let without_temporaries locals =
@@ -118,8 +116,8 @@ let without_temporaries locals =
     (fun key _ -> match key with Core.Synthetic number -> number >= 0 | _ -> true)
     locals
 
-let body_run ?(entering = Fun.id) context frame ~(lambdas : Mir.body array) (body : Mir.body) ~type_
-    =
+let body_run ?(entering = Fun.id) (context : State.context) (frame : State.frame)
+    ~(lambdas : Mir.body array) (body : Mir.body) ~type_ =
   let is_foreign = frame.source.key <> Some context.home in
   let saved_returns = context.returns in
   context.returns <- [];
@@ -128,9 +126,9 @@ let body_run ?(entering = Fun.id) context frame ~(lambdas : Mir.body array) (bod
     (fun () ->
       let inside = entering { frame with locals = without_temporaries frame.locals } in
       (try context.run_body inside ~lambdas body
-       with Unsupported (_, message) when is_foreign ->
-         raise (Foreign_unsupported (Printf.sprintf "%s, in `%s`" message frame.source.name)));
-      match join context ~value_type:type_ (List.rev context.returns) with
+       with Facts.Unsupported (_, message) when is_foreign ->
+         raise (Facts.Foreign_unsupported (Printf.sprintf "%s, in `%s`" message frame.source.name)));
+      match Facts.join context ~value_type:type_ (List.rev context.returns) with
       | Some (returned, Some term) -> Some ({ frame with spent = returned.spent }, term)
       | Some (_, None) | None -> None)
 
@@ -139,13 +137,14 @@ let returned_type context frame (body : Mir.body) =
     List.find_map
       (fun (statement : Mir.statement) ->
         match statement.kind with
-        | Jump (Return (Some value)) -> Some (substituted context frame (Mir.operand_type value))
+        | Jump (Return (Some value)) ->
+            Some (Facts.substituted context frame (Mir.operand_type value))
         | _ -> List.find_map returned (Mir.nested_blocks statement))
       block.statements
   in
   Option.value ~default:Types.unit (returned body.code)
 
-let captured_locals (written : lambda_code) =
+let captured_locals (written : State.lambda_code) =
   List.filter_map
     (fun capture ->
       match written.code.locals.(capture).kind with
@@ -179,7 +178,8 @@ let canonical_binders term =
   in
   walk [] term
 
-let lambda_definition context frame (function_type : Types.function_type) (written : lambda_code) =
+let lambda_definition context frame (function_type : Types.function_type)
+    (written : State.lambda_code) =
   match written.code.is_functional with
   | true when in_the_logic function_type -> (
       let bound = parameters_of context frame function_type in
@@ -195,11 +195,11 @@ let lambda_definition context frame (function_type : Types.function_type) (writt
                 List.fold_left2
                   (fun inside parameter (name, _) ->
                     let info = written.code.locals.(parameter) in
-                    bind inside
+                    Facts.bind inside
                       (match info.kind with
                       | Source { local; _ } -> local
                       | Temporary | Lent _ -> Core.Synthetic (-1 - parameter))
-                      (substituted context inside info.type_)
+                      (Facts.substituted context inside info.type_)
                       (Logic.Symbol name))
                   inside written.code.parameters bound
               in
@@ -214,10 +214,10 @@ let lambda_definition context frame (function_type : Types.function_type) (writt
                   ~lambdas:written.lambdas written.code
                   ~type_:(returned_type context frame written.code)
               with
-              | Some (_, defined) when not (mentions_fresh_after context mark defined) ->
+              | Some (_, defined) when not (Facts.mentions_fresh_after context mark defined) ->
                   Some defined
               | Some _ | None -> None
-            with Unsupported _ | Foreign_unsupported _ -> None)
+            with Facts.Unsupported _ | Facts.Foreign_unsupported _ -> None)
       in
       let quantified = List.map (fun (name, _, _) -> name) frame.binders in
       let enclosing_parameters =
@@ -231,7 +231,7 @@ let lambda_definition context frame (function_type : Types.function_type) (writt
             List.fold_left
               (fun term (index, (name, _)) ->
                 Logic.replace ~from:(Logic.Symbol name)
-                  ~into:(Logic.Symbol (variable "parameter" ~numbers:[ index ]))
+                  ~into:(Logic.Symbol (Facts.variable "parameter" ~numbers:[ index ]))
                   term)
               defined
               (List.mapi (fun index parameter -> (index, parameter)) bound)
@@ -239,39 +239,42 @@ let lambda_definition context frame (function_type : Types.function_type) (writt
           let symbol =
             Symbol.Lambda { sorts = List.map snd bound; definition = named_by_position }
           in
-          let sort = sort_of context (Types.Function function_type) in
+          let sort = Facts.sort_of context (Types.Function function_type) in
           let term =
-            if Logic.mentions frame.bound defined then value_symbol context frame symbol sort
-            else value_symbol context { frame with binders = [] } symbol sort
+            if Logic.mentions frame.bound defined then Facts.value_symbol context frame symbol sort
+            else Facts.value_symbol context { frame with binders = [] } symbol sort
           in
           let application =
             applied context function_type term (List.map (fun (name, _) -> Logic.Symbol name) bound)
           in
           Hashtbl.replace context.lambda_definitions symbol defined;
-          fact context frame (Logic.forall (bound, Logic.equal application defined));
+          Facts.fact context frame (Logic.forall (bound, Logic.equal application defined));
           (match written.code.value_type with
           | Some value_type -> (
-              match in_range (substituted context frame value_type) application with
+              match Facts.in_range (Facts.substituted context frame value_type) application with
               | Logic.Boolean true -> ()
               | range ->
                   let arguments_in_range =
                     Logic.conjunction
                       (List.map2
                          (fun (name, _) (_, input) ->
-                           in_range (substituted context frame input) (Logic.Symbol name))
+                           Facts.in_range
+                             (Facts.substituted context frame input)
+                             (Logic.Symbol name))
                          bound function_type.inputs)
                   in
-                  fact context frame (Logic.forall (bound, Logic.( ==> ) arguments_in_range range)))
+                  Facts.fact context frame
+                    (Logic.forall (bound, Logic.( ==> ) arguments_in_range range)))
           | None -> ());
           Some term
       | _ -> None)
   | _ -> None
 
 let check_valid context frame location ty term ~deep ~when_ =
-  match validity context frame ~assuming:false ~deep ty term with
+  match Validity.validity context frame ~assuming:false ~deep ty term with
   | Logic.Boolean true -> ()
   | valid ->
-      oblige context frame Invariant location
+      Facts.oblige context frame Invariant location
         [ Text (Printf.sprintf "The invariant of `%s` may not hold %s." (Types.show ty) when_) ]
         valid
 
@@ -284,11 +287,11 @@ let loop_counters locals (body : Mir.body) =
     List.iter
       (function
         | Mir.Cost cost -> (
-            match resource_of cost ~locals with
+            match Contracts.resource_of cost ~locals with
             | Some resource ->
                 counters :=
                   { Costs.resource; counting = counting_of cost; amortized = false } :: !counters
-            | None -> raise (Foreign_unsupported "this `calls` target"))
+            | None -> raise (Facts.Foreign_unsupported "this `calls` target"))
         | Invariant _ | Decreases _ -> ())
       loop.clauses
   in
@@ -302,39 +305,39 @@ let loop_counters locals (body : Mir.body) =
   visit body.code;
   List.rev !counters
 
-let facts_since context count =
+let facts_since (context : State.context) count =
   let rec take count list =
     if count <= 0 then []
     else match list with [] -> [] | item :: rest -> item :: take (count - 1) rest
   in
   take (List.length context.facts - count) context.facts
 
-let read_lambda ?(capture_free = false) context frame ~(site : Invocation.site)
-    (written : lambda_code) ~facts =
-  let location = locate context frame.source site.origin in
-  let ty = substituted context frame site.type_ in
+let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : Invocation.site)
+    (written : State.lambda_code) ~facts =
+  let location = Facts.locate context frame.source site.origin in
+  let ty = Facts.substituted context frame site.type_ in
   let function_type =
     match ty with
     | Types.Function function_type -> function_type
-    | _ -> unsupported location "a lambda"
+    | _ -> Facts.unsupported location "a lambda"
   in
   if List.length written.code.parameters <> List.length function_type.inputs then
-    unsupported location "a lambda with a different number of parameters";
-  let called = fresh context frame "called" Logic.Bool in
-  let inside = { (restrict frame called) with result = None } in
+    Facts.unsupported location "a lambda with a different number of parameters";
+  let called = Facts.fresh context frame "called" Logic.Bool in
+  let inside = { (Facts.restrict frame called) with result = None } in
   let start_fresh = context.fresh
   and start_facts = List.length context.facts
   and start_declarations = List.length context.declarations in
   let arguments =
     List.map
       (fun (_, input) ->
-        let input = substituted context frame input in
-        let argument = arrive context inside "argument" input in
-        assume_valid context inside input argument;
+        let input = Facts.substituted context frame input in
+        let argument = Facts.arrive context inside "argument" input in
+        Validity.assume_valid context inside input argument;
         argument)
       function_type.inputs
   in
-  List.iter (assume context inside) (facts arguments);
+  List.iter (Facts.assume context inside) (facts arguments);
   let promised =
     List.filter_map
       (fun (cost : Types.cost) ->
@@ -368,7 +371,7 @@ let read_lambda ?(capture_free = false) context frame ~(site : Invocation.site)
   let times_by_type = List.exists (fun (counter, _) -> counter = time_units) promised in
   let saved_counters = context.counters in
   context.counters <-
-    distinct_counters
+    Contracts.distinct_counters
       ((if counts_time then [ time_units ] else [])
       @ List.map fst promised
       @ loop_counters inside.locals written.code);
@@ -406,11 +409,11 @@ let read_lambda ?(capture_free = false) context frame ~(site : Invocation.site)
             List.fold_left2
               (fun inside parameter argument ->
                 let info = written.code.locals.(parameter) in
-                bind inside
+                Facts.bind inside
                   (match info.kind with
                   | Source { local; _ } -> local
                   | Temporary | Lent _ -> Core.Synthetic (-1 - parameter))
-                  (substituted context inside info.type_)
+                  (Facts.substituted context inside info.type_)
                   argument)
               inside written.code.parameters arguments
           in
@@ -425,11 +428,11 @@ let read_lambda ?(capture_free = false) context frame ~(site : Invocation.site)
           (match finished with Some (frame, value) -> [ (frame, Some value) ] | None -> [])
           @ context.returns;
         List.iter
-          (fun ((exit_ : frame), returned) ->
+          (fun ((exit_ : State.frame), returned) ->
             Option.iter
               (fun term ->
                 check_valid context exit_ location
-                  (substituted context frame function_type.output)
+                  (Facts.substituted context frame function_type.output)
                   term ~deep:true ~when_:"for the value this lambda returns")
               returned;
             List.iter2
@@ -438,17 +441,18 @@ let read_lambda ?(capture_free = false) context frame ~(site : Invocation.site)
                 | Types.Mut, Source { local; _ } -> (
                     match Locals.find_opt local exit_.locals with
                     | Some term ->
-                        check_valid context exit_ location (substituted context frame input) term
-                          ~deep:true ~when_:"for a `mut` parameter when this lambda ends"
+                        check_valid context exit_ location
+                          (Facts.substituted context frame input)
+                          term ~deep:true ~when_:"for a `mut` parameter when this lambda ends"
                     | None -> ())
                 | _ -> ())
               written.code.parameters function_type.inputs)
           !ended;
-        let spent_of (exit_ : frame) counter =
+        let spent_of (exit_ : State.frame) counter =
           match List.assoc_opt counter exit_.spent with Some term -> term | None -> Costs.zero
         in
         List.iter
-          (fun (exit_ : frame) ->
+          (fun (exit_ : State.frame) ->
             List.iter
               (fun (counter, (bound : Types.cost_bound)) ->
                 let spent = spent_of exit_ counter in
@@ -459,7 +463,7 @@ let read_lambda ?(capture_free = false) context frame ~(site : Invocation.site)
                   | Exactly_cost (Some limit) -> Logic.equal spent (Logic.Integer limit)
                   | _ -> Logic.Boolean true
                 in
-                oblige context exit_ Cost location
+                Facts.oblige context exit_ Cost location
                   [
                     Text
                       (Printf.sprintf "This lambda may spend more than its type, `%s`, allows."
@@ -477,18 +481,18 @@ let read_lambda ?(capture_free = false) context frame ~(site : Invocation.site)
           in
           match
             Costs.bound_on
-              ~varies:(mentions_fresh_after context mark)
+              ~varies:(Facts.mentions_fresh_after context mark)
               ~facts:
                 (facts_since context facts_mark
-                @ List.map (fun (exit_ : frame) -> exit_.condition) exits)
+                @ List.map (fun (exit_ : State.frame) -> exit_.condition) exits)
               most
           with
           | Some bound ->
               Some
                 ( bound,
                   List.filter_map
-                    (fun ((exit_ : frame), spent) ->
-                      obligation_at context exit_ Cost location
+                    (fun ((exit_ : State.frame), spent) ->
+                      Facts.obligation_at context exit_ Cost location
                         [
                           Text
                             "The prover cannot show that a call of this lambda takes no more time \
@@ -504,7 +508,7 @@ let read_lambda ?(capture_free = false) context frame ~(site : Invocation.site)
     match lambda_definition context frame function_type written with
     | Some term -> term
     | None ->
-        let term = arrive context frame "lambda" ty in
+        let term = Facts.arrive context frame "lambda" ty in
         if in_the_logic function_type then
           add_lambda_facts context frame ~capture_free function_type term ~called ~arguments
             ~start_fresh ~end_fresh ~start_declarations ~premises
@@ -517,7 +521,8 @@ let read_lambda ?(capture_free = false) context frame ~(site : Invocation.site)
   | None -> ());
   (frame, term)
 
-let lambda context frame ~(site : Invocation.site) (written : lambda_code) ~facts =
+let lambda context (frame : State.frame) ~(site : Invocation.site) (written : State.lambda_code)
+    ~facts =
   let captured (local : Core.local) =
     match local with Self -> frame.self | local -> Locals.find_opt local frame.locals
   in
@@ -538,21 +543,21 @@ let lambda context frame ~(site : Invocation.site) (written : lambda_code) ~fact
     (frame, term)
   else read_lambda context frame ~site written ~facts
 
-let passed_values context frame (invocation : Invocation.t) (arguments : call_argument list) =
+let passed_values context frame (invocation : Invocation.t) (arguments : State.call_argument list) =
   let known =
     List.filter_map
       (function
-        | Value_argument (passed : passed) -> Some (passed.position, passed.term)
+        | State.Value_argument (passed : State.passed) -> Some (passed.position, passed.term)
         | Lambda_argument _ -> None)
       arguments
   in
   List.map
     (function
-      | Value_argument passed -> passed
+      | State.Value_argument passed -> passed
       | Lambda_argument { position; mode; site; lambda = written } ->
           let _, term =
             lambda context frame ~site written
-              ~facts:(callback_facts context frame invocation position known)
+              ~facts:(Validity.callback_facts context frame invocation position known)
           in
           {
             position;
@@ -560,7 +565,7 @@ let passed_values context frame (invocation : Invocation.t) (arguments : call_ar
             shape = Other;
             origin = Some site.origin;
             passed_place = None;
-            type_ = substituted context frame site.type_;
+            type_ = Facts.substituted context frame site.type_;
             term;
           })
     arguments

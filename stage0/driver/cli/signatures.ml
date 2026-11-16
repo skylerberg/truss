@@ -1,7 +1,5 @@
-open Syntax
-
-let bodies ~opaque (spans : Source.Definition_span.t array) (definition : definition) =
-  let function_body (function_definition : function_definition) =
+let bodies ~opaque (spans : Source.Definition_span.t array) (definition : Syntax.definition) =
+  let function_body (function_definition : Syntax.function_definition) =
     [ spans.(function_definition.body.id) ]
   in
   match definition.kind with
@@ -9,13 +7,13 @@ let bodies ~opaque (spans : Source.Definition_span.t array) (definition : defini
   | Theorem { body; _ } | Test { body; _ } | Law_proof { body; _ } -> [ spans.(body.id) ]
   | Trait { members; _ } ->
       List.concat_map
-        (fun (member : trait_member node) ->
+        (fun (member : Syntax.trait_member Syntax.node) ->
           match member.kind with Law law -> [ spans.(law.body.id) ] | _ -> [])
         members
   | Type_definition { name; generics; _ } when opaque ->
       let stop =
         List.fold_left
-          (fun stop (generic : generic_parameter) -> max stop spans.(generic.id).stop)
+          (fun stop (generic : Syntax.generic_parameter) -> max stop spans.(generic.id).stop)
           spans.(name.id).stop generics
       in
       let stop = if generics = [] then stop else stop + 1 in

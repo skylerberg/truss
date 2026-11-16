@@ -1,5 +1,3 @@
-open Harness
-
 let callee_name : Core.callee -> string = function
   | Function { path; _ } -> Path.show path
   | Trait_method { trait; name; _ } -> Path.show trait.trait ^ "." ^ name
@@ -445,7 +443,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
     | _ -> ""
   in
   let wrong format =
-    Printf.ksprintf (fun message -> fail "%s: %s%s" name message (quoted ())) format
+    Printf.ksprintf (fun message -> Harness.fail "%s: %s%s" name message (quoted ())) format
   in
   let own =
     let of_generics = List.map (fun (generic : T.generic) -> generic.generic) in

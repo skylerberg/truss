@@ -1,5 +1,3 @@
-open Codegen_support
-
 let probe : Path.file =
   { module_ = { package = Path.standard_package; modules = [ "shared_probe" ] }; name = "probe" }
 
@@ -20,28 +18,34 @@ let loaded =
      Database.For_testing.root database
        (Generated (Program_main (Top { module_ = probe.module_; name = "main" })));
      let text = Source.create ~path:(Path.show_file probe) source in
-     (match diagnostics database probe with
+     (match Codegen_support.diagnostics database probe with
      | [] -> ()
      | diagnostics ->
-         fail "the source has diagnostics:\n%s"
+         Codegen_support.fail "the source has diagnostics:\n%s"
            (String.concat "" (List.map (Diagnostic.render text) diagnostics)));
      ( database,
        Compile.create
          (Database.make_lowering_requests database [ Path.standard_package ])
-         (Lazy.force compiler) (Lazy.force cache) (Lazy.force settings) ))
+         (Lazy.force Codegen_support.compiler)
+         (Lazy.force Codegen_support.cache)
+         (Lazy.force Codegen_support.settings) ))
 
 let () =
-  test "shared values are updated, copied, and dropped without a leak" (fun () ->
+  Codegen_support.test "shared values are updated, copied, and dropped without a leak" (fun () ->
       let database, compile = Lazy.force loaded in
-      match Compile.run_tests compile ~time_limit_ms:2000 (tests_in database probe.module_) with
+      match
+        Compile.run_tests compile ~time_limit_ms:2000
+          (Codegen_support.tests_in database probe.module_)
+      with
       | Ok records ->
-          expect_string
+          Codegen_support.expect_string
             ~expected:(String.concat "" (List.init 5 (Printf.sprintf "test %d passed\n")))
-            (render_records records)
+            (Codegen_support.render_records records)
       | Error message -> failwith message)
 
 let () =
-  test "on threads, references to one shared value are copied and dropped" (fun () ->
+  Codegen_support.test "on threads, references to one shared value are copied and dropped"
+    (fun () ->
       let _, compile = Lazy.force loaded in
       List.iter
         (fun workers ->
@@ -51,10 +55,10 @@ let () =
               ~main:(Top { module_ = probe.module_; name = "main" })
               ~arguments:[]
           with
-          | Ok (0, output, _) -> expect_string ~expected:"released\n" output
-          | Ok (status, _, errors) -> fail "ended with status %d: %s" status errors
+          | Ok (0, output, _) -> Codegen_support.expect_string ~expected:"released\n" output
+          | Ok (status, _, errors) -> Codegen_support.fail "ended with status %d: %s" status errors
           | Error message -> failwith message)
-        worker_counts)
+        Codegen_support.worker_counts)
 
 let checks : Path.file =
   { module_ = { package = Path.standard_package; modules = [ "shared_checks" ] }; name = "checks" }
@@ -62,7 +66,7 @@ let checks : Path.file =
 let checks_source = Fixtures.Shared.checks_source
 
 let () =
-  test
+  Codegen_support.test
     "Shared's operations need Tasks except directly in a method of a capability's impl, and its \
      value must be Storable" (fun () ->
       let database =
@@ -82,7 +86,7 @@ let () =
             ( Diagnostic.Code.name diagnostic.code,
               String.sub text diagnostic.span.start (diagnostic.span.stop - diagnostic.span.start)
             ))
-          (diagnostics database checks)
+          (Codegen_support.diagnostics database checks)
       in
       let expected =
         [
@@ -94,6 +98,6 @@ let () =
       in
       let show = List.map (fun (code, excerpt) -> code ^ " at " ^ excerpt) in
       if actual <> expected then
-        fail "expected [%s], got [%s]"
+        Codegen_support.fail "expected [%s], got [%s]"
           (String.concat "; " (show expected))
           (String.concat "; " (show actual)))

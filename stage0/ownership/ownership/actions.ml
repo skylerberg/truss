@@ -1,5 +1,3 @@
-open Context
-
 type view = Borrow_of of Place.t | Copy_of_view_in of Place.t
 
 let viewed_place = function Borrow_of place | Copy_of_view_in place -> place
@@ -166,13 +164,13 @@ let views_of_copy builder (place : Mir.place) =
 let views_of_borrow builder (place : Mir.place) type_ =
   match tracked builder place with
   | Some place ->
-      [ (if plain builder.context type_ then Copy_of_view_in place else Borrow_of place) ]
+      [ (if Context.plain builder.context type_ then Copy_of_view_in place else Borrow_of place) ]
   | None -> (
       match (place.root, temporary_of builder place) with
       | Local _, Some temporary
         when (held builder temporary).owns_new_value
-             && (not (plain builder.context type_))
-             && not (is_view builder.context type_) ->
+             && (not (Context.plain builder.context type_))
+             && not (Context.is_view builder.context type_) ->
           [ Borrow_of { root = Temporary temporary; steps = [] } ]
       | Local local, _ -> (held builder local).views
       | (Constant _ | Literal _), _ -> [])
@@ -194,18 +192,19 @@ let views_of_argument builder (mode : Types.mode) (operand : Mir.operand) =
 
 let views_of_part builder (operand : Mir.operand) =
   match operand_type operand with
-  | Some type_ when is_view builder.context type_ -> views_of_operand builder operand
+  | Some type_ when Context.is_view builder.context type_ -> views_of_operand builder operand
   | _ -> []
 
 let operand_borrows builder (operand : Mir.operand) =
   match operand with
   | Borrow { place; _ } -> Option.to_list (tracked builder place)
-  | Use { type_; _ } when is_view builder.context type_ ->
+  | Use { type_; _ } when Context.is_view builder.context type_ ->
       List.map viewed_place (views_of_operand builder operand)
   | Use _ | Take _ | Constant _ -> []
 
 let result_may_view builder (mode : Types.mode) type_ =
-  (mode <> Own && not (plain builder.context type_)) || is_view builder.context type_
+  (mode <> Own && not (Context.plain builder.context type_))
+  || Context.is_view builder.context type_
 
 let viewable_argument builder (argument : Mir.argument) =
   match argument with
@@ -299,7 +298,7 @@ let call builder (call : Mir.call) origin =
          (fun position (argument : Mir.argument) ->
            match argument with
            | Passed { value = (Use { type_; origin; _ } | Borrow { type_; origin; _ }) as value; _ }
-             when is_view builder.context type_ ->
+             when Context.is_view builder.context type_ ->
                [ { position; views = views_of_operand builder value; origin } ]
            | Passed _ | Default -> [])
          call.arguments)
@@ -308,15 +307,15 @@ let call builder (call : Mir.call) origin =
     emit builder (Arguments { borrowed_arguments; view_arguments; is_yielded = false }) origin;
   let can_store_in target (other : Mir.operand) =
     match operand_type other with
-    | Some (Types.Function { output; _ }) when not (is_view builder.context output) ->
-        holds_function builder.context target
+    | Some (Types.Function { output; _ }) when not (Context.is_view builder.context output) ->
+        Context.holds_function builder.context target
     | _ -> true
   in
   List.iter
     (fun (argument : Mir.argument) ->
       match argument with
       | Passed { mode = Mut; value = Borrow { place; type_; _ } as target; _ }
-        when is_view builder.context type_ -> (
+        when Context.is_view builder.context type_ -> (
           match tracked builder place with
           | Some place ->
               let others =
@@ -324,7 +323,7 @@ let call builder (call : Mir.call) origin =
                   (fun other ->
                     other != target
                     && (match operand_type other with
-                      | Some type_ -> is_view builder.context type_
+                      | Some type_ -> Context.is_view builder.context type_
                       | None -> false)
                     && can_store_in type_ other)
                   (List.map snd (viewable_arguments builder call))
@@ -344,7 +343,7 @@ let call builder (call : Mir.call) origin =
     (fun position (argument : Mir.argument) ->
       match argument with
       | Passed { mode = Own; value = Use { type_ = Types.Function _; origin; _ } as value; _ }
-        when stores_function builder.context call.callee position ->
+        when Context.stores_function builder.context call.callee position ->
           emit builder (Pass_owned_function (views_of_operand builder value)) origin
       | _ -> ())
     call.arguments
@@ -359,7 +358,7 @@ let call_result builder (call : Mir.call) =
   }
 
 let lent_part builder (call : Mir.call) ~part_type =
-  if is_view builder.context part_type then call_result builder call
+  if Context.is_view builder.context part_type then call_result builder call
   else
     let receiver =
       match call.arguments with first :: _ -> viewable_argument builder first | [] -> None
@@ -445,7 +444,7 @@ let rvalue builder (value : Mir.rvalue) : held =
 let bound_value builder (local : Mir.local) (core : Core.local) (value : Mir.rvalue) origin ~is_var
     =
   let type_ = (local_info builder local).type_ in
-  let holds_views = is_view builder.context type_ in
+  let holds_views = Context.is_view builder.context type_ in
   let result = rvalue builder value in
   let is_loop_part (place : Mir.place) =
     match place.root with
@@ -458,7 +457,8 @@ let bound_value builder (local : Mir.local) (core : Core.local) (value : Mir.rva
     when (not is_var)
          && is_untracked_lent_part builder place
          && (not (is_loop_part place))
-         && ((not (plain builder.context part_type)) || is_view builder.context part_type) ->
+         && ((not (Context.plain builder.context part_type))
+            || Context.is_view builder.context part_type) ->
       builder.lent_part_bindings <-
         { binding = local; part; part_type; origin = at } :: builder.lent_part_bindings
   | _ -> ());
@@ -466,14 +466,15 @@ let bound_value builder (local : Mir.local) (core : Core.local) (value : Mir.rva
     match value with
     | Operand (Borrow { place; type_ = part_type; _ })
       when holds_views || is_temporary builder place || is_loop_part place
-           || (Option.is_some (tracked builder place) && not (plain builder.context part_type)) ->
+           || Option.is_some (tracked builder place)
+              && not (Context.plain builder.context part_type) ->
         views_of_borrow builder place part_type
     | Operand (Borrow _) -> []
     | _ when holds_views -> result.views
     | _ -> []
   in
   let is_copy_of_loop_part =
-    plain builder.context type_
+    Context.plain builder.context type_
     &&
     match value with
     | Operand (Use { place; _ } | Borrow { place; _ }) -> is_loop_part place
@@ -610,7 +611,7 @@ let statement builder (statement : Mir.Graph.statement) =
           writes_through builder ~whole:false target (Option.value ~default:Types.unit type_) origin;
           emit builder (Assign place) origin;
           match type_ with
-          | Some type_ when is_view builder.context type_ ->
+          | Some type_ when Context.is_view builder.context type_ ->
               emit builder
                 (Store { place; views = result.views; replaces_root = place.steps = [] })
                 origin
@@ -741,7 +742,7 @@ let terminator builder ~returns_to_caller (basic : Mir.Graph.basic_block) =
     match value with
     | Some value -> (
         match operand_type value with
-        | Some type_ when returns_to_caller && is_view builder.context type_ ->
+        | Some type_ when returns_to_caller && Context.is_view builder.context type_ ->
             emit builder (Return_view (views_of_operand builder value)) origin
         | _ -> ())
     | None -> ()
@@ -790,7 +791,7 @@ let terminator builder ~returns_to_caller (basic : Mir.Graph.basic_block) =
       let lent_by_address (operand : Mir.operand) =
         match operand with
         | Use { place; type_; _ } | Borrow { place; type_; _ } | Take { place; type_; _ } ->
-            if plain builder.context type_ then None else Some place
+            if Context.plain builder.context type_ then None else Some place
         | Constant _ -> None
       in
       let parts =
@@ -803,7 +804,8 @@ let terminator builder ~returns_to_caller (basic : Mir.Graph.basic_block) =
           (fun (leaf : Mir.operand) ->
             match (lent_by_address leaf, operand_type leaf) with
             | Some place, Some type_
-              when is_untracked_lent_part builder place && not (is_view builder.context type_) ->
+              when is_untracked_lent_part builder place
+                   && not (Context.is_view builder.context type_) ->
                 views_of_operand builder leaf
             | _ -> [])
           (leaves part)
@@ -812,9 +814,10 @@ let terminator builder ~returns_to_caller (basic : Mir.Graph.basic_block) =
         match part with
         | Part operand -> (
             match operand_type operand with
-            | Some type_ when is_view builder.context type_ -> views_of_operand builder operand
+            | Some type_ when Context.is_view builder.context type_ ->
+                views_of_operand builder operand
             | _ -> [])
-        | Built { type_; _ } when is_view builder.context type_ ->
+        | Built { type_; _ } when Context.is_view builder.context type_ ->
             List.concat_map
               (fun (leaf : Mir.operand) ->
                 match leaf with

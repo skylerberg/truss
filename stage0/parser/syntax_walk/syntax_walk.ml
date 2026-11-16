@@ -1,28 +1,28 @@
-open Syntax
-
-let rec type_expression on_expression (type_ : type_expression) =
+let rec type_expression on_expression (type_ : Syntax.type_expression) =
   match type_.kind with
   | Path_type path -> path_type on_expression path
   | Any_type path -> path_type on_expression path
   | Function_type { inputs; output; clauses; _ } ->
-      List.iter (fun (input : function_input) -> type_expression on_expression input.type_) inputs;
+      List.iter
+        (fun (input : Syntax.function_input) -> type_expression on_expression input.type_)
+        inputs;
       Option.iter (type_expression on_expression) output;
       List.iter (clause on_expression) clauses
   | Self_type _ | Associated _ | Type_error -> ()
 
-and path_type on_expression (path : path_type) =
+and path_type on_expression (path : Syntax.path_type) =
   List.iter (type_argument on_expression) path.arguments
 
 and type_argument on_expression = function
   | Type_argument type_ | Constraint (_, type_) -> type_expression on_expression type_
   | Count _ | Count_name _ -> ()
 
-and capability_reference on_expression (reference : capability_reference) =
+and capability_reference on_expression (reference : Syntax.capability_reference) =
   match reference.kind with
   | Capability_path path -> path_type on_expression path
   | Self_capabilities _ | Associated_capabilities _ -> ()
 
-and clause on_expression (clause : clause) =
+and clause on_expression (clause : Syntax.clause) =
   match clause.kind with
   | Uses capabilities -> List.iter (capability_reference on_expression) capabilities
   | Requires value | Ensures value -> on_expression value
@@ -33,7 +33,7 @@ and clause on_expression (clause : clause) =
       | Finite -> ())
   | Clause_error -> ()
 
-and loop_clause on_expression (clause : loop_clause) =
+and loop_clause on_expression (clause : Syntax.loop_clause) =
   match clause.kind with
   | Invariant value -> on_expression value
   | Loop_decreases measures -> List.iter on_expression measures
@@ -42,11 +42,11 @@ and loop_clause on_expression (clause : loop_clause) =
       | Big_o value | At_most value | Exactly value -> on_expression value
       | Finite -> ())
 
-and string_literal on_expression (literal : string_literal) =
+and string_literal on_expression (literal : Syntax.string_literal) =
   List.iter (fun (value, _) -> on_expression value) literal.rest
 
-let expression_parts ~expression:on_expression ~statement:on_statement (value : expression) =
-  let block (block : block) = List.iter on_statement block.statements in
+let expression_parts ~expression:on_expression ~statement:on_statement (value : Syntax.expression) =
+  let block (block : Syntax.block) = List.iter on_statement block.statements in
   match value.kind with
   | Integer _ | Float _ | True | False | Todo | Unreachable | Break | Continue | Self_value
   | Self_type_value | Name _ | Expression_error ->
@@ -65,16 +65,16 @@ let expression_parts ~expression:on_expression ~statement:on_statement (value : 
       on_expression inner;
       List.iter
         (function
-          | Item item -> on_expression item
+          | Syntax.Item item -> on_expression item
           | Item_constraint (_, type_) -> type_expression on_expression type_)
         items
   | Call (callee, arguments) ->
       on_expression callee;
-      List.iter (fun (argument : argument) -> on_expression argument.value) arguments
+      List.iter (fun (argument : Syntax.argument) -> on_expression argument.value) arguments
   | With (base, updates) ->
       on_expression base;
       List.iter
-        (fun (update : update) ->
+        (fun (update : Syntax.update) ->
           match update.kind with
           | Update { value; _ } -> Option.iter on_expression value
           | Update_error -> ())
@@ -109,7 +109,7 @@ let expression_parts ~expression:on_expression ~statement:on_statement (value : 
   | Match { scrutinees; arms } ->
       List.iter on_expression scrutinees;
       List.iter
-        (fun (arm : arm) ->
+        (fun (arm : Syntax.arm) ->
           Option.iter on_expression arm.guard;
           on_statement arm.body)
         arms
@@ -118,8 +118,8 @@ let expression_parts ~expression:on_expression ~statement:on_statement (value : 
       block body
   | Block body -> block body
 
-let statement_parts ~expression:on_expression ~statement:on_statement (parent : statement) =
-  let block (block : block) = List.iter on_statement block.statements in
+let statement_parts ~expression:on_expression ~statement:on_statement (parent : Syntax.statement) =
+  let block (block : Syntax.block) = List.iter on_statement block.statements in
   match parent.kind with
   | Let { annotation; value; else_; _ } ->
       Option.iter (type_expression on_expression) annotation;
@@ -141,21 +141,22 @@ let statement_parts ~expression:on_expression ~statement:on_statement (parent : 
   | Parallel body | Concurrent body | Proof body -> block body
   | Statement_error -> ()
 
-let rec statement on_expression (parent : statement) =
+let rec statement on_expression (parent : Syntax.statement) =
   statement_parts ~expression:on_expression ~statement:(statement on_expression) parent
 
-let block on_expression (block : block) = List.iter (statement on_expression) block.statements
+let block on_expression (block : Syntax.block) =
+  List.iter (statement on_expression) block.statements
 
 let children on_expression value =
   expression_parts ~expression:on_expression ~statement:(statement on_expression) value
 
-let contains_break (body : block) =
+let contains_break (body : Syntax.block) =
   let has_break = ref false in
-  let rec search_statement (statement : statement) =
+  let rec search_statement (statement : Syntax.statement) =
     match statement.kind with
     | For _ | While _ -> ()
     | _ -> statement_parts ~expression:search_expression ~statement:search_statement statement
-  and search_expression (value : expression) =
+  and search_expression (value : Syntax.expression) =
     match value.kind with
     | Break -> has_break := true
     | Lambda _ -> ()
@@ -164,27 +165,27 @@ let contains_break (body : block) =
   List.iter search_statement body.statements;
   !has_break
 
-let generic_parameter on_expression (parameter : generic_parameter) =
+let generic_parameter on_expression (parameter : Syntax.generic_parameter) =
   match parameter.kind with
   | Type_parameter (_, bounds) -> List.iter (path_type on_expression) bounds
   | Value_parameter (_, type_) -> type_expression on_expression type_
   | Capability_parameter _ | Generic_error -> ()
 
-let type_head on_expression (head : type_head) =
+let type_head on_expression (head : Syntax.type_head) =
   List.iter (generic_parameter on_expression) head.generics
 
 let definition_name on_expression = function
-  | Plain_name _ -> ()
+  | Syntax.Plain_name _ -> ()
   | Member_name (head, _) -> type_head on_expression head
 
-let parameter on_expression (parameter : parameter) =
+let parameter on_expression (parameter : Syntax.parameter) =
   match parameter.kind with
   | Named_parameter { type_; default; _ } ->
       type_expression on_expression type_;
       Option.iter on_expression default
   | Self_parameter _ | Parameter_error -> ()
 
-let signature on_expression (signature : signature) =
+let signature on_expression (signature : Syntax.signature) =
   definition_name on_expression signature.name;
   List.iter (generic_parameter on_expression) signature.generics;
   List.iter (parameter on_expression) signature.parameters;
@@ -193,21 +194,21 @@ let signature on_expression (signature : signature) =
   | None -> ());
   List.iter (clause on_expression) signature.clauses
 
-let function_definition ?statement:visit on_expression (definition : function_definition) =
+let function_definition ?statement:visit on_expression (definition : Syntax.function_definition) =
   signature on_expression definition.signature;
   match visit with
   | Some visit -> List.iter visit definition.body.statements
   | None -> block on_expression definition.body
 
-let field on_expression (field : field) =
+let field on_expression (field : Syntax.field) =
   match field.kind with
   | Field_declaration { type_; default; _ } ->
       type_expression on_expression type_;
       Option.iter on_expression default
   | Field_error -> ()
 
-let definition ?statement:visit on_expression (definition : definition) =
-  let walk_block (body : block) =
+let definition ?statement:visit on_expression (definition : Syntax.definition) =
+  let walk_block (body : Syntax.block) =
     match visit with
     | Some visit -> List.iter visit body.statements
     | None -> block on_expression body
@@ -221,12 +222,12 @@ let definition ?statement:visit on_expression (definition : definition) =
       | Fields fields -> List.iter (field on_expression) fields
       | Variants variants ->
           List.iter
-            (fun (variant : variant) ->
+            (fun (variant : Syntax.variant) ->
               Option.iter (List.iter (field on_expression)) variant.fields)
             variants
       | Type_todo -> ());
       List.iter
-        (fun (clause : type_clause) ->
+        (fun (clause : Syntax.type_clause) ->
           match clause.kind with
           | Type_invariant value | Potential value -> on_expression value
           | Derives traits -> List.iter (path_type on_expression) traits)
@@ -235,7 +236,7 @@ let definition ?statement:visit on_expression (definition : definition) =
       List.iter (generic_parameter on_expression) generics;
       List.iter (path_type on_expression) requires;
       List.iter
-        (fun (member : trait_member node) ->
+        (fun (member : Syntax.trait_member Syntax.node) ->
           match member.kind with
           | Associated_type (_, bounds) -> List.iter (path_type on_expression) bounds
           | Law law ->
@@ -249,7 +250,7 @@ let definition ?statement:visit on_expression (definition : definition) =
       type_head on_expression type_;
       List.iter (capability_reference on_expression) uses;
       List.iter
-        (fun (member : impl_member node) ->
+        (fun (member : Syntax.impl_member Syntax.node) ->
           match member.kind with
           | Associated_definition (_, type_) -> type_expression on_expression type_
           | Capability_definition (_, capabilities) ->
@@ -275,12 +276,12 @@ let definition ?statement:visit on_expression (definition : definition) =
       walk_block body
   | Definition_error _ -> ()
 
-let walk_names ~on_name (definition : definition) =
-  let walk_path (path : path) =
+let walk_names ~on_name (definition : Syntax.definition) =
+  let walk_path (path : Syntax.path) =
     List.iter on_name path.modules;
     on_name path.last
   in
-  let rec walk_type (type_ : type_expression) =
+  let rec walk_type (type_ : Syntax.type_expression) =
     match type_.kind with
     | Path_type path | Any_type path -> walk_path_type path
     | Self_type key -> Option.iter on_name key
@@ -289,32 +290,32 @@ let walk_names ~on_name (definition : definition) =
         on_name key
     | Function_type { inputs; output; clauses; _ } ->
         List.iter
-          (fun (input : function_input) ->
+          (fun (input : Syntax.function_input) ->
             Option.iter on_name input.name;
             walk_type input.type_)
           inputs;
         Option.iter walk_type output;
         List.iter walk_clause clauses
     | Type_error -> ()
-  and walk_path_type (path_type : path_type) =
+  and walk_path_type (path_type : Syntax.path_type) =
     walk_path path_type.path;
     List.iter
       (function
-        | Type_argument argument -> walk_type argument
+        | Syntax.Type_argument argument -> walk_type argument
         | Count _ -> ()
         | Count_name name -> on_name name
         | Constraint (name, argument) ->
             on_name name;
             walk_type argument)
       path_type.arguments
-  and walk_capability (reference : capability_reference) =
+  and walk_capability (reference : Syntax.capability_reference) =
     match reference.kind with
     | Capability_path path -> walk_path_type path
     | Self_capabilities name -> on_name name
     | Associated_capabilities (base, name) ->
         on_name base;
         on_name name
-  and walk_clause (clause : clause) =
+  and walk_clause (clause : Syntax.clause) =
     match clause.kind with
     | Uses capabilities -> List.iter walk_capability capabilities
     | Requires value | Ensures value -> walk_expression value
@@ -331,10 +332,10 @@ let walk_names ~on_name (definition : definition) =
         | Big_o value | At_most value | Exactly value -> walk_expression value
         | Finite -> ())
     | Clause_error -> ()
-  and walk_string_literal (literal : string_literal) =
+  and walk_string_literal (literal : Syntax.string_literal) =
     Option.iter walk_path literal.tag;
     List.iter (fun (value, _) -> walk_expression value) literal.rest
-  and walk_expression (value : expression) =
+  and walk_expression (value : Syntax.expression) =
     match value.kind with
     | Name path -> walk_path path
     | Member (base, name) ->
@@ -344,14 +345,14 @@ let walk_names ~on_name (definition : definition) =
     | Call (callee, arguments) ->
         walk_expression callee;
         List.iter
-          (fun (argument : argument) ->
+          (fun (argument : Syntax.argument) ->
             Option.iter on_name argument.label;
             walk_expression argument.value)
           arguments
     | With (base, updates) ->
         walk_expression base;
         List.iter
-          (fun (update : update) ->
+          (fun (update : Syntax.update) ->
             match update.kind with
             | Update { field; path = rest; value } ->
                 on_name field;
@@ -377,7 +378,7 @@ let walk_names ~on_name (definition : definition) =
     | Match { scrutinees; arms } ->
         List.iter walk_expression scrutinees;
         List.iter
-          (fun (arm : arm) ->
+          (fun (arm : Syntax.arm) ->
             List.iter walk_pattern arm.patterns;
             Option.iter walk_expression arm.guard;
             walk_statement arm.body)
@@ -386,13 +387,13 @@ let walk_names ~on_name (definition : definition) =
         walk_expression base;
         List.iter
           (function
-            | Item item -> walk_expression item
+            | Syntax.Item item -> walk_expression item
             | Item_constraint (name, type_) ->
                 on_name name;
                 walk_type type_)
           items
     | _ -> expression_parts ~expression:walk_expression ~statement:walk_statement value
-  and walk_statement (statement : statement) =
+  and walk_statement (statement : Syntax.statement) =
     match statement.kind with
     | Let { pattern = bound; annotation; value; else_; _ } ->
         Option.iter walk_type annotation;
@@ -406,8 +407,8 @@ let walk_names ~on_name (definition : definition) =
         List.iter (loop_clause walk_expression) clauses;
         walk_block body
     | _ -> statement_parts ~expression:walk_expression ~statement:walk_statement statement
-  and walk_block (block : block) = List.iter walk_statement block.statements
-  and walk_pattern (pattern : pattern) =
+  and walk_block (block : Syntax.block) = List.iter walk_statement block.statements
+  and walk_pattern (pattern : Syntax.pattern) =
     match pattern.kind with
     | Wildcard | Pattern_error -> ()
     | Binding name -> on_name name
@@ -421,7 +422,7 @@ let walk_names ~on_name (definition : definition) =
         Option.iter (List.iter walk_pattern_field) fields
     | Record fields -> List.iter walk_pattern_field fields
     | Alternatives alternatives -> List.iter walk_pattern alternatives
-  and walk_pattern_field (field : pattern_field) =
+  and walk_pattern_field (field : Syntax.pattern_field) =
     match field.kind with
     | Named_field (name, inner) ->
         on_name name;
@@ -436,12 +437,12 @@ let walk_names ~on_name (definition : definition) =
     | Type_constant (path, name) ->
         walk_path path;
         on_name name
-  and walk_range_end (range_end : range_end) =
+  and walk_range_end (range_end : Syntax.range_end) =
     match range_end.kind with
     | End_literal literal -> walk_literal literal
     | End_constant constant -> walk_constant constant
   in
-  let walk_generic (parameter : generic_parameter) =
+  let walk_generic (parameter : Syntax.generic_parameter) =
     match parameter.kind with
     | Type_parameter (name, bounds) ->
         on_name name;
@@ -452,17 +453,17 @@ let walk_names ~on_name (definition : definition) =
     | Capability_parameter name -> on_name name
     | Generic_error -> ()
   in
-  let walk_head (head : type_head) =
+  let walk_head (head : Syntax.type_head) =
     walk_path head.path;
     List.iter walk_generic head.generics
   in
   let walk_definition_name = function
-    | Plain_name name -> on_name name
+    | Syntax.Plain_name name -> on_name name
     | Member_name (head, name) ->
         walk_head head;
         on_name name
   in
-  let walk_parameter (parameter : parameter) =
+  let walk_parameter (parameter : Syntax.parameter) =
     match parameter.kind with
     | Named_parameter { name; type_; default; _ } ->
         on_name name;
@@ -470,7 +471,7 @@ let walk_names ~on_name (definition : definition) =
         Option.iter walk_expression default
     | Self_parameter _ | Parameter_error -> ()
   in
-  let walk_signature (signature : signature) =
+  let walk_signature (signature : Syntax.signature) =
     walk_definition_name signature.name;
     List.iter walk_generic signature.generics;
     List.iter walk_parameter signature.parameters;
@@ -479,9 +480,9 @@ let walk_names ~on_name (definition : definition) =
     | None -> ());
     List.iter walk_clause signature.clauses
   in
-  let walk_fields (fields : field list) =
+  let walk_fields (fields : Syntax.field list) =
     List.iter
-      (fun (field : field) ->
+      (fun (field : Syntax.field) ->
         match field.kind with
         | Field_declaration { name; type_; default } ->
             on_name name;
@@ -502,13 +503,13 @@ let walk_names ~on_name (definition : definition) =
       | Fields fields -> walk_fields fields
       | Variants variants ->
           List.iter
-            (fun (variant : variant) ->
+            (fun (variant : Syntax.variant) ->
               on_name variant.name;
               Option.iter walk_fields variant.fields)
             variants
       | Type_todo -> ());
       List.iter
-        (fun (clause : type_clause) ->
+        (fun (clause : Syntax.type_clause) ->
           match clause.kind with
           | Type_invariant value | Potential value -> walk_expression value
           | Derives traits -> List.iter walk_path_type traits)
@@ -518,7 +519,7 @@ let walk_names ~on_name (definition : definition) =
       List.iter walk_generic generics;
       List.iter walk_path_type requires;
       List.iter
-        (fun (member : trait_member node) ->
+        (fun (member : Syntax.trait_member Syntax.node) ->
           match member.kind with
           | Associated_type (name, bounds) ->
               on_name name;
@@ -536,7 +537,7 @@ let walk_names ~on_name (definition : definition) =
       walk_head head;
       List.iter walk_capability uses;
       List.iter
-        (fun (member : impl_member node) ->
+        (fun (member : Syntax.impl_member Syntax.node) ->
           match member.kind with
           | Associated_definition (name, type_) ->
               on_name name;
@@ -568,9 +569,10 @@ let walk_names ~on_name (definition : definition) =
       walk_block body
   | Definition_error { name; _ } -> Option.iter walk_definition_name name
 
-let collect_names (spans : Source.Definition_span.t array) (definition : definition) =
+let collect_names (spans : Source.Definition_span.t array) (definition : Syntax.definition) =
   let names = ref [] in
   walk_names ~on_name:(fun name -> names := name :: !names) definition;
   List.stable_sort
-    (fun (left : name) (right : name) -> compare spans.(left.id).start spans.(right.id).start)
+    (fun (left : Syntax.name) (right : Syntax.name) ->
+      compare spans.(left.id).start spans.(right.id).start)
     !names

@@ -1,5 +1,3 @@
-open Token
-
 type entry = (Lexing.lexbuf -> Truss.token) -> Lexing.lexbuf -> unit
 
 let token (kind : Token.kind) : Truss.token option =

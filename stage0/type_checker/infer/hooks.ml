@@ -1,12 +1,10 @@
-open Syntax
-open State
+let not_set name _ = State.bug "Hooks.%s was called before Expressions set it" name
 
-let not_set name _ = bug "Hooks.%s was called before Expressions set it" name
-
-let expression_hook : (state -> env -> ?expected:Types.ty -> expression -> Types.ty) ref =
+let expression_hook :
+    (State.state -> State.env -> ?expected:Types.ty -> Syntax.expression -> Types.ty) ref =
   ref (fun _ _ ?expected:_ -> not_set "expression")
 
-let check_hook : (state -> env -> expression -> Types.ty -> unit) ref =
+let check_hook : (State.state -> State.env -> Syntax.expression -> Types.ty -> unit) ref =
   ref (fun _ _ _ -> not_set "check")
 
 let expression state env ?expected value = !expression_hook state env ?expected value

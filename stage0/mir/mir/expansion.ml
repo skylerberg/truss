@@ -1,18 +1,16 @@
-open Tree
-
 let bug format = Compiler_bug.bug ~stage:"MIR" format
 
 type undecided =
   | Undecided_connective of {
-      target : place;
-      connective : connective;
-      left : operand;
-      right : block;
+      target : Tree.place;
+      connective : Tree.connective;
+      left : Tree.operand;
+      right : Tree.block;
       origin : Core.origin;
     }
   | Undecided_not of {
-      target : place;
-      negated : operand;
+      target : Tree.place;
+      negated : Tree.operand;
       node : Core.id option;
       origin : Core.origin;
     }
@@ -20,10 +18,10 @@ type undecided =
 type jump_targets = {
   break_ : Graph.block option;
   continue_ : Graph.terminator option;
-  task_ends : (task * Graph.block) list;
+  task_ends : (Tree.task * Graph.block) list;
 }
 
-let expanded_body (body : body) : Graph.body =
+let expanded_body (body : Tree.body) : Graph.body =
   let blocks : Graph.basic_block Dynarray.t = Dynarray.create () in
   let fresh () =
     Dynarray.add_last blocks { statements = []; terminator = Unreachable; terminator_origin = 0 };
@@ -37,26 +35,26 @@ let expanded_body (body : body) : Graph.body =
   let assigned target value origin : Graph.statement =
     { kind = Assign { target; value = Operand value; node = None }; origin }
   in
-  let place_local : place -> local option = function
+  let place_local : Tree.place -> Tree.local option = function
     | { root = Local local; projections = [] } -> Some local
     | _ -> None
   in
-  let whole_local : operand -> local option = function
+  let whole_local : Tree.operand -> Tree.local option = function
     | Use { place; _ } -> place_local place
     | Borrow _ | Take _ | Constant _ -> None
   in
-  let is_use_of target (value : operand) =
+  let is_use_of target (value : Tree.operand) =
     Option.is_some (whole_local value) && place_local target = whole_local value
   in
-  let branch_on current (value : operand) ~yes ~no origin =
+  let branch_on current (value : Tree.operand) ~yes ~no origin =
     match value with
     | Constant { value = Boolean true; _ } -> close current (Goto yes) origin
     | Constant { value = Boolean false; _ } -> close current (Goto no) origin
     | _ -> close current (Branch { condition = value; yes; no; is_if_condition = false }) origin
   in
-  let rec emit targets current (undecided : undecided list) (statements : statement list) =
+  let rec emit targets current (undecided : undecided list) (statements : Tree.statement list) =
     let decided () = with_values targets current undecided in
-    let reads_undecided (operand : operand) =
+    let reads_undecided (operand : Tree.operand) =
       match List.rev undecided with
       | (Undecided_connective { target; _ } | Undecided_not { target; _ }) :: _ ->
           is_use_of target operand
@@ -95,7 +93,7 @@ let expanded_body (body : body) : Graph.body =
             let joined = fresh () in
             let unmatched, reaches =
               List.fold_left
-                (fun (current, reaches) (case : case) ->
+                (fun (current, reaches) (case : Tree.case) ->
                   let matched = fresh () and next = fresh () in
                   branch targets current case.tests.statements case.tests.value ~yes:matched
                     ~no:next origin;
@@ -160,7 +158,7 @@ let expanded_body (body : body) : Graph.body =
                    part;
                    lent =
                      Option.map
-                       (fun (lent : lent_element) ->
+                       (fun (lent : Tree.lent_element) ->
                          { lent with count = { lent.count with statements = [] } })
                        lent;
                    body = inside;
@@ -177,7 +175,7 @@ let expanded_body (body : body) : Graph.body =
             let entries = List.map (fun _ -> fresh ()) branches in
             let branches =
               List.mapi
-                (fun index (branch : block) ->
+                (fun index (branch : Tree.block) ->
                   let entry = List.nth entries index in
                   let next =
                     if index + 1 = List.length entries then join else List.nth entries (index + 1)
@@ -215,7 +213,7 @@ let expanded_body (body : body) : Graph.body =
             let next = fresh () in
             let exits =
               List.map
-                (fun (exit : early_exit) ->
+                (fun (exit : Tree.early_exit) ->
                   let entry = fresh () in
                   (match emit targets (entry, []) [] exit.resumed.statements with
                   | Some (current, undecided) ->
@@ -260,12 +258,12 @@ let expanded_body (body : body) : Graph.body =
         | Basic basic ->
             let index, emitted = decided () in
             emit targets (index, { kind = basic; origin } :: emitted) [] rest)
-  and block targets current (statements : statement list) =
+  and block targets current (statements : Tree.statement list) =
     match emit targets current [] statements with
     | Some (current, undecided) -> with_values targets current undecided
     | None -> bug "statements that control leaves, where it goes on after them"
-  and branch targets current (statements : statement list) (value : operand option) ~yes ~no origin
-      =
+  and branch targets current (statements : Tree.statement list) (value : Tree.operand option) ~yes
+      ~no origin =
     match value with
     | None -> (
         match emit targets current [] statements with
@@ -281,7 +279,7 @@ let expanded_body (body : body) : Graph.body =
           when is_use_of target value ->
             branch targets current (List.rev before) (Some negated) ~yes:no ~no:yes origin
         | _ -> branch_on (block targets current statements) value ~yes ~no origin)
-  and branch_undecided targets current (undecided : undecided list) (value : operand) ~yes ~no
+  and branch_undecided targets current (undecided : undecided list) (value : Tree.operand) ~yes ~no
       origin =
     match List.rev undecided with
     | Undecided_connective { target; connective; left; right; _ } :: before
@@ -291,7 +289,7 @@ let expanded_body (body : body) : Graph.body =
     | Undecided_not { target; negated; _ } :: before when is_use_of target value ->
         branch_undecided targets current (List.rev before) negated ~yes:no ~no:yes origin
     | _ -> branch_on (with_values targets current undecided) value ~yes ~no origin
-  and branch_connective targets connective (right : block) ~left ~yes ~no origin =
+  and branch_connective targets connective (right : Tree.block) ~left ~yes ~no origin =
     let evaluated = fresh () in
     (match connective with
     | And -> left ~yes:evaluated ~no
@@ -320,7 +318,7 @@ let expanded_body (body : body) : Graph.body =
     | Undecided_not { target; negated; node; origin } :: before ->
         let index, emitted = with_values targets current (List.rev before) in
         (index, { kind = Assign { target; value = Not negated; node }; origin } :: emitted)
-  and arm targets entry (block : block) ~target ~joined origin =
+  and arm targets entry (block : Tree.block) ~target ~joined origin =
     match (emit targets (entry, []) [] block.statements, block.value) with
     | Some (current, undecided), Some value ->
         let index, emitted = with_values targets current undecided in
@@ -342,10 +340,10 @@ let expanded_body (body : body) : Graph.body =
     blocks = Graph.canonical (Dynarray.to_array blocks);
   }
 
-let expanded (code : t) : Graph.t =
+let expanded (code : Tree.t) : Graph.t =
   { body = expanded_body code.body; lambdas = Array.map expanded_body code.lambdas }
 
-let code_of_formula (formula : formula) : Graph.t =
+let code_of_formula (formula : Tree.formula) : Graph.t =
   expanded
     {
       body =

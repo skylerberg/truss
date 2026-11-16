@@ -1,5 +1,3 @@
-open Harness
-
 let module_of text : Path.module_ =
   match Path.parse_names text with
   | Some (name :: modules) -> { package = { owner = None; name }; modules }
@@ -71,7 +69,7 @@ let checked ~check packages name =
   let file = file_of name in
   (match parse_errors packages file with
   | [] -> ()
-  | errors -> fail "the test input does not parse: %s" (String.concat " " errors));
+  | errors -> Harness.fail "the test input does not parse: %s" (String.concat " " errors));
   check packages file
 
 type core_nodes = {
@@ -118,7 +116,7 @@ let no_diagnostics ~check files =
       (match checked ~check packages name with
       | [] -> ()
       | reported ->
-          fail "%s: %s" name
+          Harness.fail "%s: %s" name
             (String.concat "; "
                (List.map
                   (fun (diagnostic : Diagnostic.t) ->
@@ -140,25 +138,25 @@ let one_diagnostic ~check ?(setup = fun files -> setup files) ?(file = "app::mai
   match checked ~check packages file with
   | [ (diagnostic : Diagnostic.t) ] -> (
       let actual = Diagnostic.Code.name diagnostic.code in
-      if actual <> code then fail "expected %s, got %s: %s" code actual diagnostic.message;
+      if actual <> code then Harness.fail "expected %s, got %s: %s" code actual diagnostic.message;
       Option.iter
         (fun says ->
           if not (Substring.contains diagnostic.message says) then
-            fail "expected a message that says %S, got: %s" says diagnostic.message)
+            Harness.fail "expected a message that says %S, got: %s" says diagnostic.message)
         says;
       match (fixed, diagnostic.fixes) with
       | None, _ -> ()
-      | Some _, [] -> fail "no fix"
+      | Some _, [] -> Harness.fail "no fix"
       | Some expected, fix :: _ -> (
           let after = Diagnostic.apply_fix text fix in
-          if after <> expected then fail "fixed to %S" after
+          if after <> expected then Harness.fail "fixed to %S" after
           else
             let packages = setup ((file, after) :: others) in
             match checked ~check packages file with
             | [] -> ()
-            | left -> fail "after the fix: %s" (String.concat "; " (codes left))))
+            | left -> Harness.fail "after the fix: %s" (String.concat "; " (codes left))))
   | reported ->
-      fail "expected one %s, got [%s]" code
+      Harness.fail "expected one %s, got [%s]" code
         (String.concat "; "
            (List.map
               (fun (diagnostic : Diagnostic.t) ->

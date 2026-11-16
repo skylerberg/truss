@@ -1,22 +1,14 @@
-open Core
-open State
-open Facts
-open Contracts
-open Validity
-open Lambdas
-open Laws
-open Amounts
-open Values
-open Reader
+module Names = Resolve.Names
 
-let home source =
-  match source.key with Some key -> key | None -> bug "%s has no definition key" source.name
+let home (source : State.source) =
+  match source.key with Some key -> key | None -> Facts.bug "%s has no definition key" source.name
 
 let new_context (lookups : Lookups.t) ~home ~current ~terminates ~measures =
   let rec context =
     {
-      run_body = (fun frame ~lambdas body -> read_body context frame ~lambdas body);
-      formula_term = (fun frame formula ~arguments -> formula_term context frame formula ~arguments);
+      State.run_body = (fun frame ~lambdas body -> Reader.read_body context frame ~lambdas body);
+      formula_term =
+        (fun frame formula ~arguments -> Reader.formula_term context frame formula ~arguments);
       home;
       laws_assumed = [];
       lookups;
@@ -73,11 +65,12 @@ let new_context (lookups : Lookups.t) ~home ~current ~terminates ~measures =
   in
   context
 
-let outcome context = { obligations = List.rev context.obligations; holes = List.rev context.holes }
+let outcome (context : State.context) =
+  { State.obligations = List.rev context.obligations; holes = List.rev context.holes }
 
 let empty_frame source =
   {
-    source;
+    State.source;
     locals = Locals.empty;
     types = Locals.empty;
     old_locals = Locals.empty;
@@ -98,19 +91,25 @@ let empty_frame source =
     spent = [];
   }
 
-type promise = { counter : Costs.counter; clause : Mir.cost; written_in : source; inherited : bool }
+type promise = {
+  counter : Costs.counter;
+  clause : Mir.cost;
+  written_in : State.source;
+  inherited : bool;
+}
 
-let promises context (source : source) locals (costs : Mir.cost list) ~inherited =
+let promises context (source : State.source) locals (costs : Mir.cost list) ~inherited =
   List.filter_map
     (fun (cost : Mir.cost) ->
       match cost with
       | { resource = Time; bound = Finite; _ } -> None
       | _ -> (
-          match resource_of cost ~locals with
-          | None -> unsupported (locate context source cost.origin) "this `calls` target"
+          match Contracts.resource_of cost ~locals with
+          | None ->
+              Facts.unsupported (Facts.locate context source cost.origin) "this `calls` target"
           | Some resource ->
               let counter =
-                { Costs.resource; counting = counting_of cost; amortized = cost.amortized }
+                { Costs.resource; counting = Lambdas.counting_of cost; amortized = cost.amortized }
               in
               (match (cost.resource, resource) with
               | Calls (Function_parameter local), Calls (Through term) ->
@@ -121,14 +120,15 @@ let promises context (source : source) locals (costs : Mir.cost list) ~inherited
               Some { counter; clause = cost; written_in = source; inherited }))
     costs
 
-let promised_by (lookups : Lookups.t) (source : source) =
+let promised_by (lookups : Lookups.t) (source : State.source) =
   match source.key with
   | Some { path = Method { owner; _ }; _ }
     when Names.kind_of lookups.interface.names owner = Some Names.Capability ->
       "capability"
   | _ -> "trait"
 
-let keep_promise context (frame : frame) (promise : promise) ~(at : frame) ~location ~change =
+let keep_promise context (frame : State.frame) (promise : promise) ~(at : State.frame) ~location
+    ~change =
   let spent =
     match List.assoc_opt promise.counter frame.spent with Some term -> term | None -> Costs.zero
   in
@@ -136,7 +136,7 @@ let keep_promise context (frame : frame) (promise : promise) ~(at : frame) ~loca
   let amount =
     match promise.clause.bound with
     | Order_of amount | At_most amount | Exactly amount ->
-        snd (specification_value context { at with makes_obligations = false } amount)
+        snd (Validity.specification_value context { at with makes_obligations = false } amount)
     | Finite -> Costs.zero
   in
   let goal =
@@ -145,24 +145,24 @@ let keep_promise context (frame : frame) (promise : promise) ~(at : frame) ~loca
     | Exactly -> Logic.equal spent amount
     | At_most -> Costs.at_most spent amount
   in
-  oblige context frame Cost location
+  Facts.oblige context frame Cost location
     [
       Text
         (if promise.inherited then
            Printf.sprintf "This method may spend more than its %s's `"
              (promised_by context.lookups promise.written_in)
          else "This may spend more than `");
-      quote promise.written_in promise.clause.origin;
+      Facts.quote promise.written_in promise.clause.origin;
       Text "` allows.";
     ]
     goal
 
 let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substitution = [])
-    (lookups : Lookups.t) (source : source) ~path =
+    (lookups : Lookups.t) (source : State.source) ~path =
   let contract =
     match Mir.contract_of_path lookups.mir path with
     | Some { form; _ } -> form
-    | None -> bug "`%s` has no MIR of its contract" source.name
+    | None -> Facts.bug "`%s` has no MIR of its contract" source.name
   in
   let parameters = contract.parameters in
   let signature =
@@ -187,7 +187,7 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
           (fun (parameter : Mir.parameter) -> (parameter.local, parameter.name, callback))
           (List.nth_opt parameters position))
       contract.callbacks;
-  let own_requires = clauses contract.requires and own_ensures = contract.ensures in
+  let own_requires = Facts.clauses contract.requires and own_ensures = contract.ensures in
   let output = match signature with Some { output = Returns ty; _ } -> Some ty | _ -> None in
   let start =
     List.fold_left
@@ -197,24 +197,24 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
             let self_type =
               match signature with
               | Some { receiver = Some (_, ty); _ } -> ty
-              | _ -> unsupported Whole_definition "`self` without a type"
+              | _ -> Facts.unsupported Whole_definition "`self` without a type"
             in
-            let self = arrive context frame "self" self_type in
+            let self = Facts.arrive context frame "self" self_type in
             (match self with
             | Logic.Symbol symbol -> context.entry <- symbol :: context.entry
             | _ -> ());
-            if not is_updating_helper then assume_valid context frame self_type self;
+            if not is_updating_helper then Validity.assume_valid context frame self_type self;
             { frame with self = Some self; self_type = Some self_type }
         | local ->
-            let ty = substituted context frame parameter.type_ in
-            let term = arrive context frame ("parameter." ^ parameter.name) ty in
+            let ty = Facts.substituted context frame parameter.type_ in
+            let term = Facts.arrive context frame ("parameter." ^ parameter.name) ty in
             (match term with
             | Logic.Symbol symbol ->
                 context.values <- (symbol, parameter.name) :: context.values;
                 context.entry <- symbol :: context.entry
             | _ -> ());
-            assume_valid context frame ty term;
-            bind frame local ty term)
+            Validity.assume_valid context frame ty term;
+            Facts.bind frame local ty term)
       { (empty_frame source) with substitution }
       parameters
   in
@@ -225,12 +225,12 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
         context.yielded_part <- Some part;
         context.yield_ensures <-
           Some
-            ( List.filter mentions_result own_ensures,
-              List.filter (fun clause -> not (mentions_result clause)) own_ensures );
-        { start with yielded_so_far = Some (empty_parts context start part) }
+            ( List.filter Amounts.mentions_result own_ensures,
+              List.filter (fun clause -> not (Amounts.mentions_result clause)) own_ensures );
+        { start with yielded_so_far = Some (Amounts.empty_parts context start part) }
     | _ -> start
   in
-  let values_of (at : frame) =
+  let values_of (at : State.frame) =
     List.filter_map
       (fun (parameter : Mir.parameter) ->
         match parameter.local with Self -> at.self | local -> Locals.find_opt local at.locals)
@@ -238,7 +238,7 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
   in
   let paired terms =
     match (inherited, parameters, terms) with
-    | Some ((part : part), _), { local = Self; _ } :: _, _ :: rest
+    | Some ((part : State.part), _), { local = Self; _ } :: _, _ :: rest
       when not
              (List.exists
                 (fun (parameter : Mir.parameter) -> parameter.local = Self)
@@ -246,11 +246,12 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
         rest
     | _ -> terms
   in
-  let values_of (at : frame) = paired (values_of at) in
+  let values_of (at : State.frame) = paired (values_of at) in
   let own_terms = values_of start in
-  let trait_frame (at : frame) ~result =
+  let trait_frame (at : State.frame) ~result =
     match inherited with
-    | Some ((part : part), substitution) when List.length part.parameters = List.length own_terms ->
+    | Some ((part : State.part), substitution)
+      when List.length part.parameters = List.length own_terms ->
         let locals, types, self, old_locals =
           List.fold_left2
             (fun (locals, types, self, old_locals) (parameter : Mir.parameter) (entry, exit_) ->
@@ -287,14 +288,14 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
     | Some (part, inside) ->
         Logic.conjunction
           (List.map
-             (fun requirement -> snd (specification_value context inside requirement))
-             (clauses part.requires))
+             (fun requirement -> snd (Validity.specification_value context inside requirement))
+             (Facts.clauses part.requires))
     | None -> Logic.Boolean true
   in
   let mir =
     match Mir.code_of_path lookups.mir path with
     | Some { form; _ } -> form
-    | None -> bug "`%s` has a body and no MIR" source.name
+    | None -> Facts.bug "`%s` has a body and no MIR" source.name
   in
   let promised =
     promises context source start.locals contract.costs ~inherited:false
@@ -304,8 +305,9 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
     | None -> []
   in
   context.counters <-
-    distinct_counters
-      (List.map (fun promise -> promise.counter) promised @ loop_counters start.locals mir.body);
+    Contracts.distinct_counters
+      (List.map (fun promise -> promise.counter) promised
+      @ Lambdas.loop_counters start.locals mir.body);
   let start =
     { start with spent = List.map (fun counter -> (counter, Costs.zero)) context.counters }
   in
@@ -314,41 +316,42 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
     | Some (part, _)
       when not
              (match part.callee.key with
-             | Some { path = Method { owner; _ }; _ } -> Path.equal owner template_trait
+             | Some { path = Method { owner; _ }; _ } -> Path.equal owner Laws.template_trait
              | _ -> false) ->
         if own_requires = [] then begin
-          assume context start trait_requires;
+          Facts.assume context start trait_requires;
           start
         end
         else begin
           ignore
             (List.fold_left
                (fun frame (requirement : Mir.formula) ->
-                 let frame, term = specification_value context frame requirement in
-                 oblige context frame Requires
-                   (locate context frame.source requirement.origin)
+                 let frame, term = Validity.specification_value context frame requirement in
+                 Facts.oblige context frame Requires
+                   (Facts.locate context frame.source requirement.origin)
                    [
                      Text "`";
-                     quote source requirement.origin;
+                     Facts.quote source requirement.origin;
                      Text
                        "` may not follow from the trait's precondition, which callers through the \
                         trait show, and an `impl`'s precondition must.";
                    ]
                    term;
                  frame)
-               (restrict start trait_requires) own_requires);
+               (Facts.restrict start trait_requires)
+               own_requires);
           List.fold_left
             (fun frame requirement ->
-              let frame, term = specification_value context frame requirement in
-              assume context frame term;
+              let frame, term = Validity.specification_value context frame requirement in
+              Facts.assume context frame term;
               frame)
             start own_requires
         end
     | _ ->
         List.fold_left
           (fun frame requirement ->
-            let frame, term = specification_value context frame requirement in
-            assume context frame term;
+            let frame, term = Validity.specification_value context frame requirement in
+            Facts.assume context frame term;
             frame)
           start own_requires
   in
@@ -357,11 +360,11 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
       if not promise.inherited then
         match promise.clause.bound with
         | Order_of amount | At_most amount | Exactly amount ->
-            let result = Option.map (arrive context start "result") output in
-            ignore (specification_value context { start with result } amount)
+            let result = Option.map (Facts.arrive context start "result") output in
+            ignore (Validity.specification_value context { start with result } amount)
         | Finite -> ())
     promised;
-  read_body context start ~lambdas:mir.lambdas mir.body;
+  Reader.read_body context start ~lambdas:mir.lambdas mir.body;
   let returns = List.rev context.returns in
   let mut_parameters =
     List.filter
@@ -374,26 +377,27 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
       parameters
   in
   List.iter
-    (fun ((frame : frame), returned) ->
+    (fun ((frame : State.frame), returned) ->
       let frame = { frame with result = returned } in
       (match (returned, output) with
       | Some term, Some output ->
-          check_valid context frame Whole_definition output term ~deep:true
+          Lambdas.check_valid context frame Whole_definition output term ~deep:true
             ~when_:"for the value returned"
       | _ -> ());
       List.iter
         (fun (parameter : Mir.parameter) ->
           match
-            (Locals.find_opt parameter.local frame.locals, local_type context frame parameter.local)
+            ( Locals.find_opt parameter.local frame.locals,
+              Facts.local_type context frame parameter.local )
           with
           | Some term, Some ty ->
-              check_valid context frame Whole_definition ty term ~deep:true
+              Lambdas.check_valid context frame Whole_definition ty term ~deep:true
                 ~when_:(Printf.sprintf "for `%s` when the function returns" parameter.name)
           | _ -> ())
         mut_parameters;
       (match (mut_self, is_updating_helper, frame.self, frame.self_type) with
       | true, false, Some self, Some self_type ->
-          check_valid context frame Whole_definition self_type self ~deep:true
+          Lambdas.check_valid context frame Whole_definition self_type self ~deep:true
             ~when_:"for `self` when the method returns"
       | _ -> ());
       (match (context.yield_ensures, frame.yielded_so_far) with
@@ -401,24 +405,28 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
           List.iter
             (fun (ensured : Mir.formula) ->
               let _, term =
-                specification_value context { frame with yielded = Some yielded_so_far } ensured
+                Validity.specification_value context
+                  { frame with yielded = Some yielded_so_far }
+                  ensured
               in
-              oblige context frame Ensures
-                (locate context frame.source ensured.origin)
+              Facts.oblige context frame Ensures
+                (Facts.locate context frame.source ensured.origin)
                 [
-                  Text "`"; quote source ensured.origin; Text "` may not hold when the method ends.";
+                  Text "`";
+                  Facts.quote source ensured.origin;
+                  Text "` may not hold when the method ends.";
                 ]
                 term)
             at_end
       | _ ->
           List.iter
             (fun (ensured : Mir.formula) ->
-              let _, term = specification_value context frame ensured in
-              oblige context frame Ensures
-                (locate context frame.source ensured.origin)
+              let _, term = Validity.specification_value context frame ensured in
+              Facts.oblige context frame Ensures
+                (Facts.locate context frame.source ensured.origin)
                 [
                   Text "`";
-                  quote source ensured.origin;
+                  Facts.quote source ensured.origin;
                   Text "` may not hold when the function returns.";
                 ]
                 term)
@@ -433,16 +441,17 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
                 | local ->
                     ( Locals.find_opt local start.locals,
                       Locals.find_opt local frame.locals,
-                      local_type context frame local )
+                      Facts.local_type context frame local )
               in
               match (parameter.mode, entry, ty) with
               | (Types.Mut | Types.Own), Some entry, Some ty ->
                   let potential_after =
                     match (parameter.mode, later) with
-                    | Types.Mut, Some later -> potential context frame ty later
+                    | Types.Mut, Some later -> Amounts.potential context frame ty later
                     | _ -> Costs.zero
                   in
-                  Costs.plus total (Costs.minus potential_after (potential context frame ty entry))
+                  Costs.plus total
+                    (Costs.minus potential_after (Amounts.potential context frame ty entry))
               | _ -> total)
             Costs.zero parameters
         in
@@ -450,15 +459,17 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
           List.fold_left
             (fun total (ty, handed, back) ->
               Costs.minus total
-                (Costs.minus (potential context frame ty back) (potential context frame ty handed)))
+                (Costs.minus
+                   (Amounts.potential context frame ty back)
+                   (Amounts.potential context frame ty handed)))
             potential_change context.lent_back
         in
         match (returned, output) with
         | Some term, Some output ->
-            Costs.plus potential_change (potential context frame output term)
+            Costs.plus potential_change (Amounts.potential context frame output term)
         | _ -> potential_change
       in
-      let under_trait = restrict frame trait_requires in
+      let under_trait = Facts.restrict frame trait_requires in
       List.iter
         (fun promise ->
           if promise.inherited then
@@ -471,18 +482,18 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
           else
             keep_promise context frame promise
               ~at:{ frame with locals = frame.old_locals; self = frame.old_self; result = returned }
-              ~location:(locate context source promise.clause.origin)
+              ~location:(Facts.locate context source promise.clause.origin)
               ~change)
         promised;
       match trait_frame frame ~result:returned with
       | Some (part, inside) ->
           List.iter
             (fun (clause : Mir.formula) ->
-              let _, term = specification_value context inside clause in
-              oblige context under_trait Ensures Whole_definition
+              let _, term = Validity.specification_value context inside clause in
+              Facts.oblige context under_trait Ensures Whole_definition
                 [
                   Text (Printf.sprintf "The %s's `" (promised_by lookups part.callee));
-                  quote part.callee clause.origin;
+                  Facts.quote part.callee clause.origin;
                   Text "` may not hold when this method returns.";
                 ]
                 term)
@@ -491,37 +502,38 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
     returns;
   outcome context
 
-let laws (lookups : Lookups.t) (source : source) ~impl ~trait ~for_type ~proofs ~at =
+let laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~for_type ~proofs ~at =
   let home = home source in
   let context = new_context lookups ~home ~current:impl ~terminates:false ~measures:[] in
   let start = empty_frame source in
-  let substitution = trait_substitution lookups trait for_type in
+  let substitution = Contracts.trait_substitution lookups trait for_type in
   List.iter
     (fun (law_source, (law : Mir.law)) ->
-      let types = law_parameter_types ~substitution law in
+      let types = Laws.law_parameter_types ~substitution law in
       if not (List.exists (fun ty -> Types.is_error ty) types) then begin
         context.laws_assumed <- (trait, for_type) :: context.laws_assumed;
         let terms =
           List.map
             (fun ty ->
-              let term = arrive context start "law" ty in
-              assume_valid context start ty term;
+              let term = Facts.arrive context start "law" ty in
+              Validity.assume_valid context start ty term;
               term)
             types
         in
-        let inside = law_frame start law_source ~substitution law terms in
+        let inside = Laws.law_frame start law_source ~substitution law terms in
         List.iter
-          (fun clause -> assume context start (snd (specification_value context inside clause)))
+          (fun clause ->
+            Facts.assume context start (snd (Validity.specification_value context inside clause)))
           law.requires;
         let start =
           List.fold_left
-            (fun start ((proof_source : source), renaming) ->
+            (fun (start : State.frame) ((proof_source : State.source), renaming) ->
               let proof =
                 match
                   Option.bind proof_source.key (fun key -> Mir.code (lookups.mir.body_part key))
                 with
                 | Some proof -> proof
-                | None -> bug "the proof `%s` has no MIR" proof_source.name
+                | None -> Facts.bug "the proof `%s` has no MIR" proof_source.name
               in
               let parameters =
                 List.map
@@ -529,7 +541,7 @@ let laws (lookups : Lookups.t) (source : source) ~impl ~trait ~for_type ~proofs 
                     match proof.body.locals.(parameter) with
                     | { kind = Source { local; _ }; type_; _ } -> (local, type_)
                     | { kind = Temporary | Lent _; _ } ->
-                        bug "a parameter of the proof `%s` is a temporary" proof_source.name)
+                        Facts.bug "a parameter of the proof `%s` is a temporary" proof_source.name)
                   proof.body.parameters
               in
               let locals, types =
@@ -540,9 +552,9 @@ let laws (lookups : Lookups.t) (source : source) ~impl ~trait ~for_type ~proofs 
                   (start.locals, start.types) parameters
                   (List.filteri (fun index _ -> index < List.length parameters) terms)
               in
-              restrict start
+              Facts.restrict start
                 (Logic.not_
-                   (ghost_code context
+                   (Values.ghost_code context
                       {
                         start with
                         source = proof_source;
@@ -557,8 +569,8 @@ let laws (lookups : Lookups.t) (source : source) ~impl ~trait ~for_type ~proofs 
                (fun (name, proof) -> if name = law.name then Some proof else None)
                proofs)
         in
-        let _, holds = specification_value context inside law.states in
-        oblige context start Law at
+        let _, holds = Validity.specification_value context inside law.states in
+        Facts.oblige context start Law at
           [
             Text
               (Printf.sprintf "The law `%s.%s` may not hold for `%s`." (Types.show_trait trait)
@@ -566,10 +578,10 @@ let laws (lookups : Lookups.t) (source : source) ~impl ~trait ~for_type ~proofs 
           ]
           holds
       end)
-    (laws_of context trait.trait);
+    (Laws.laws_of context trait.trait);
   outcome context
 
-let type_ (lookups : Lookups.t) (source : source) ~path =
+let type_ (lookups : Lookups.t) (source : State.source) ~path =
   let home = home source in
   let context = new_context lookups ~home ~current:path ~terminates:false ~measures:[] in
   (match Mir.type_clauses_of_path lookups.mir path with
@@ -586,23 +598,24 @@ let type_ (lookups : Lookups.t) (source : source) ~path =
           List.iter
             (fun (default : Mir.t Mir.field_default) ->
               ignore
-                (code_value context start default.value
-                   ~type_:(substituted context start default.type_)))
+                (Amounts.code_value context start default.value
+                   ~type_:(Facts.substituted context start default.type_)))
             defaults
       | Some { form = Parameter_defaults _; _ } | None -> ());
-      let value_ = arrive context start "value" ty in
-      assume context start (validity context start ~assuming:true ~own:false ty value_);
+      let value_ = Facts.arrive context start "value" ty in
+      Facts.assume context start
+        (Validity.validity context start ~assuming:true ~own:false ty value_);
       let at_value = { start with self = Some value_; old_self = Some value_ } in
       List.iter
         (fun (invariant : Mir.requirement) ->
-          let after, holds = specification_value context at_value invariant.clause in
-          assume context after holds)
+          let after, holds = Validity.specification_value context at_value invariant.clause in
+          Facts.assume context after holds)
         invariants;
       Option.iter
         (fun (written : Mir.formula) ->
-          let _, own = specification_value context at_value written in
-          oblige context at_value Cost
-            (locate context at_value.source written.origin)
+          let _, own = Validity.specification_value context at_value written in
+          Facts.oblige context at_value Cost
+            (Facts.locate context at_value.source written.origin)
             [
               Text
                 (Printf.sprintf
@@ -614,21 +627,24 @@ let type_ (lookups : Lookups.t) (source : source) ~path =
   | None -> ());
   outcome context
 
-let test (lookups : Lookups.t) (source : source) ~path =
+let test (lookups : Lookups.t) (source : State.source) ~path =
   let home = home source in
   let context = new_context lookups ~home ~current:path ~terminates:false ~measures:[] in
   (match Mir.code (lookups.mir.body_part home) with
-  | Some (mir : Mir.t) -> read_body context (empty_frame source) ~lambdas:mir.lambdas mir.body
-  | None -> bug "the test `%s` has no MIR" source.name);
+  | Some (mir : Mir.t) ->
+      Reader.read_body context (empty_frame source) ~lambdas:mir.lambdas mir.body
+  | None -> Facts.bug "the test `%s` has no MIR" source.name);
   outcome context
 
-let constant (lookups : Lookups.t) (source : source) ~path =
+let constant (lookups : Lookups.t) (source : State.source) ~path =
   let home = home source in
   let context = new_context lookups ~home ~current:path ~terminates:false ~measures:[] in
   (match Mir.initializer_of_path lookups.mir path with
   | Some { form = code; _ } ->
-      ignore (code_value context (empty_frame source) code ~type_:(constant_type context path))
-  | None -> bug "the constant `%s` has no MIR" (Path.show path));
+      ignore
+        (Amounts.code_value context (empty_frame source) code
+           ~type_:(Values.constant_type context path))
+  | None -> Facts.bug "the constant `%s` has no MIR" (Path.show path));
   outcome context
 
 let theorem lookups source ~path = function_ ~proof:true lookups source ~path

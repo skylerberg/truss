@@ -1,5 +1,3 @@
-open Harness
-
 let share =
   match Sys.getenv_opt "TRUSS_PROOF_SHARE" with
   | None | Some "" -> None
@@ -37,7 +35,7 @@ let test_name (module_ : Path.module_) =
 
 let modules =
   match share with
-  | None -> List.filter (fun (module_, _) -> wanted (test_name module_)) library
+  | None -> List.filter (fun (module_, _) -> Harness.wanted (test_name module_)) library
   | Some (index, count) ->
       let totals = Array.make count 0 in
       let weighed = List.map (fun entry -> (weight entry, entry)) library in
@@ -157,10 +155,11 @@ let () =
       exit 0)
     measured_modules;
   let database = timed "type checking" (fun () -> check (database ())) in
-  test "every part whose kind is always read has a reader" (fun () ->
+  Harness.test "every part whose kind is always read has a reader" (fun () ->
       List.iter
         (fun part ->
-          if is_always_read part then fail "no part reads %s" (Database.Part.show_computed part))
+          if is_always_read part then
+            Harness.fail "no part reads %s" (Database.Part.show_computed part))
         (Database.For_testing.list_unread_parts database [ Path.standard_package ]));
   let checked =
     List.map
@@ -179,7 +178,7 @@ let () =
   in
   List.iter
     (fun ((module_ : Path.module_), files) ->
-      test (test_name module_) (fun () ->
+      Harness.test (test_name module_) (fun () ->
           timed (Path.show_module module_) (fun () ->
               List.iter
                 (fun (file, errors) ->
@@ -188,7 +187,7 @@ let () =
                       (List.assoc file Standard_library.files)
                   in
                   List.iter
-                    (fun diagnostic -> fail "%s" (Diagnostic.render source diagnostic))
+                    (fun diagnostic -> Harness.fail "%s" (Diagnostic.render source diagnostic))
                     (match errors with
                     | [] -> Prover.list_diagnostics verdicts file
                     | errors -> errors))

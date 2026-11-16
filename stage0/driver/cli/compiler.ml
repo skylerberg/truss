@@ -41,9 +41,9 @@ let create database snapshot packages build =
           extra = Toolchain.link_time_optimization toolchain @ c_flags ();
         }
   in
-  let file_name file =
+  let file_name (file : Path.file) =
     match build with
-    | Development when List.mem file.Path.module_.package packages ->
+    | Development when List.mem file.module_.package packages ->
         Shown_path.shown (Command_packages.path snapshot file)
     | _ -> Path.show_file file
   in

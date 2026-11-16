@@ -1,10 +1,9 @@
-open Syntax
 module Names = Resolve.Names
 
 type state = {
   lookups : Lookups.t;
   key : Names.key;
-  definition : definition;
+  definition : Syntax.definition;
   elaborated : Environment.elaborated_interface;
   spans : Source.Definition_span.t array;
   diagnostics : Diagnostic.in_definition list ref;

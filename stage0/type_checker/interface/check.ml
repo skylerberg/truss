@@ -1,7 +1,4 @@
-open Syntax
 module Names = Resolve.Names
-open Checking
-open Impl_checks
 
 let list_bound_diagnostics lookups ~package ~bounds ~spans named =
   List.concat_map
@@ -35,10 +32,10 @@ let list_bound_diagnostics lookups ~package ~bounds ~spans named =
       | _ -> [])
     named
 
-let check_bounds state =
+let check_bounds (state : Checking.state) =
   state.diagnostics :=
     list_bound_diagnostics state.lookups ~package:state.key.module_.package
-      ~bounds:(list_bounds state) ~spans:state.spans state.elaborated.named
+      ~bounds:(Checking.list_bounds state) ~spans:state.spans state.elaborated.named
     @ !(state.diagnostics)
 
 let rec list_mentioned_paths = function
@@ -54,7 +51,7 @@ and list_argument_paths = function
   | Types.Type type_ -> list_mentioned_paths type_
   | Types.Value _ | Types.Capabilities _ -> []
 
-let find_visibility state (path : Path.t) =
+let find_visibility (state : Checking.state) (path : Path.t) =
   match path with
   | Top { module_; name } -> (
       match state.lookups.names.find module_ name with
@@ -68,7 +65,7 @@ let check_private_in_public state ~visibility types (span : Source.Definition_sp
       (fun path ->
         match find_visibility state path with
         | Some (Private | Internal) ->
-            report state Private_in_public span
+            Checking.report state Private_in_public span
               (Printf.sprintf
                  "This public definition mentions `%s`, which other packages cannot name. Make \
                   `%s` public, or this definition not."
@@ -76,7 +73,7 @@ let check_private_in_public state ~visibility types (span : Source.Definition_sp
         | _ -> ())
       (List.sort_uniq Path.compare (List.concat_map list_mentioned_paths types))
 
-let check_method_location state (head : type_head) =
+let check_method_location (state : Checking.state) (head : Syntax.type_head) =
   let owner =
     match state.key.path with
     | Method { owner; _ } | Member_constant { owner; _ } -> Some owner
@@ -87,14 +84,14 @@ let check_method_location state (head : type_head) =
       match state.lookups.names.find owner_module name with
       | Some { kind = Type; visibility; _ } ->
           if owner_module.package <> state.key.module_.package then
-            report state Method_outside_package state.spans.(head.id)
+            Checking.report state Method_outside_package state.spans.(head.id)
               (Printf.sprintf
                  "`%s` is defined in the package `%s`, so its methods and constants must be too. A \
                   function of this package can take it as a parameter instead."
                  (Path.show owner)
                  (Path.show_package owner_module.package))
           else if visibility = Private && owner_module <> state.key.module_ then
-            report state Method_outside_package state.spans.(head.id)
+            Checking.report state Method_outside_package state.spans.(head.id)
               (Printf.sprintf
                  "`%s` is private to its module, so its methods and constants must be in that \
                   module."
@@ -135,32 +132,32 @@ let check_main state (signature : Types.signature) span =
     | _ -> false
   in
   if not (list_of_string && exit_code && signature.generics = [] && signature.receiver = None) then
-    report state Main_signature span main_message
+    Checking.report state Main_signature span main_message
 
-let check_duplicates state member_kind (names : name list) =
+let check_duplicates state member_kind (names : Syntax.name list) =
   ignore
     (List.fold_left
-       (fun seen (name : name) ->
+       (fun seen (name : Syntax.name) ->
          if List.mem name.text seen then
-           report state Duplicate_field state.spans.(name.id)
+           Checking.report state Duplicate_field state.spans.(name.id)
              (Printf.sprintf "Another %s of this type is already named `%s`." member_kind name.text);
          name.text :: seen)
        [] names)
 
-let list_field_names (fields : field list) =
+let list_field_names (fields : Syntax.field list) =
   List.filter_map
-    (fun (field : field) ->
+    (fun (field : Syntax.field) ->
       match field.kind with Field_declaration { name; _ } -> Some name | Field_error -> None)
     fields
 
-let make_derive_removal (spans : Source.Definition_span.t array) (clause : type_clause)
-    (traits : path_type list) (written : path_type) =
+let make_derive_removal (spans : Source.Definition_span.t array) (clause : Syntax.type_clause)
+    (traits : Syntax.path_type list) (written : Syntax.path_type) =
   let delete start stop = Diagnostic.delete (Source.Definition_span.make start stop) in
   match traits with
   | [ _ ] -> delete spans.(clause.id).start spans.(clause.id).stop
   | _ -> (
       let rec find_next = function
-        | (first : path_type) :: (next :: _ as rest) ->
+        | (first : Syntax.path_type) :: (next :: _ as rest) ->
             if first == written then Some next else find_next rest
         | _ -> None
       in
@@ -168,7 +165,7 @@ let make_derive_removal (spans : Source.Definition_span.t array) (clause : type_
       | Some next -> delete spans.(written.id).start spans.(next.id).start
       | None -> (
           let rec find_previous = function
-            | (previous : path_type) :: (next :: _ as rest) ->
+            | (previous : Syntax.path_type) :: (next :: _ as rest) ->
                 if next == written then Some previous else find_previous rest
             | _ -> None
           in
@@ -176,22 +173,25 @@ let make_derive_removal (spans : Source.Definition_span.t array) (clause : type_
           | Some previous -> delete spans.(previous.id).stop spans.(written.id).stop
           | None -> delete spans.(written.id).start spans.(written.id).stop))
 
-let check_derives state (interface : Types.type_interface) (clauses : type_clause list) resolved =
+let check_derives state (interface : Types.type_interface) (clauses : Syntax.type_clause list)
+    resolved =
   let field_types = Types.list_field_types interface in
   let list_derived_bounds trait parameter =
     if
       List.exists
         (fun (generic : Types.generic) -> generic.generic = parameter)
         interface.type_generics
-    then list_bounds state parameter @ [ { Types.trait; trait_arguments = []; associated = [] } ]
-    else list_bounds state parameter
+    then
+      Checking.list_bounds state parameter
+      @ [ { Types.trait; trait_arguments = []; associated = [] } ]
+    else Checking.list_bounds state parameter
   in
   List.iter
-    (fun (clause : type_clause) ->
+    (fun (clause : Syntax.type_clause) ->
       match clause.kind with
       | Derives traits ->
           List.iter
-            (fun (written : path_type) ->
+            (fun (written : Syntax.path_type) ->
               match (resolved : Resolve.resolved).names.(written.path.last.id) with
               | Some (Definition (_, trait)) ->
                   let shown = Elaborator.show_path written.path in
@@ -200,7 +200,7 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
                       (Names.derivable trait || Well_known.is Copyable trait
                      || Well_known.is Plain trait)
                   then
-                    report state Not_derivable state.spans.(written.id)
+                    Checking.report state Not_derivable state.spans.(written.id)
                       (Printf.sprintf
                          "Only `Equal`, `Hash`, `Ordered`, `Default`, `Copyable`, `Plain`, \
                           `serialization::Serialize`, and `serialization::Deserialize` can be \
@@ -208,7 +208,7 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
                          shown)
                   else if Well_known.is Copyable trait || Well_known.is Plain trait then
                     begin if not interface.opaque then
-                      report state Derives_inferred state.spans.(written.id)
+                      Checking.report state Derives_inferred state.spans.(written.id)
                         ~fixes:
                           [
                             Diagnostic.fix "Remove the declaration."
@@ -232,7 +232,7 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
                         else Impls.is_copyable state.lookups ~bounds self
                       in
                       if not holds then
-                        report state Cannot_derive state.spans.(written.id)
+                        Checking.report state Cannot_derive state.spans.(written.id)
                           (Printf.sprintf "A field of this type is not `%s`, so the type cannot be."
                              shown)
                     end
@@ -240,14 +240,14 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
                     (if Well_known.is Default trait then
                        match interface.shape with
                        | Sum _ ->
-                           report state Cannot_derive state.spans.(written.id)
+                           Checking.report state Cannot_derive state.spans.(written.id)
                              "`Default` is derived as each field's default, so only a record can \
                               derive it: no variant of this type is its default. Write the `impl`, \
                               which says which variant is."
                        | Record _ | Todo_type | Builtin_type _ -> ());
                     if Well_known.is Ordered trait || Well_known.is Hash trait then
                       if not (List.exists (Well_known.is Equal) interface.derives) then
-                        report state Cannot_derive state.spans.(written.id)
+                        Checking.report state Cannot_derive state.spans.(written.id)
                           (Printf.sprintf
                              "Deriving `%s` needs `Equal` to be derived too, so that the two agree."
                              shown);
@@ -270,7 +270,7 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
                             (Impls.implements state.lookups ~bounds:(list_derived_bounds trait)
                                type_ wanted)
                         then
-                          report state Cannot_derive state.spans.(written.id)
+                          Checking.report state Cannot_derive state.spans.(written.id)
                             (Printf.sprintf
                                "A field of type `%s` does not implement `%s`, so `%s` cannot be \
                                 derived."
@@ -282,13 +282,13 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
       | _ -> ())
     clauses
 
-let check_no_capability_parameter state definition_kind (name : name)
-    (generics : generic_parameter list) =
+let check_no_capability_parameter state definition_kind (name : Syntax.name)
+    (generics : Syntax.generic_parameter list) =
   List.iter
-    (fun (generic : generic_parameter) ->
+    (fun (generic : Syntax.generic_parameter) ->
       match generic.kind with
       | Capability_parameter parameter ->
-          report state Misplaced_capability_parameter state.spans.(generic.id)
+          Checking.report state Misplaced_capability_parameter state.spans.(generic.id)
             (Printf.sprintf
                "Only a function can take a capability parameter. No type argument can be written \
                 for `%s`, so no signature or field could name %s `%s` with the capabilities that \
@@ -297,7 +297,7 @@ let check_no_capability_parameter state definition_kind (name : name)
       | Type_parameter _ | Value_parameter _ | Generic_error -> ())
     generics
 
-let check_trait_cycle state (requires : path_type list) =
+let check_trait_cycle (state : Checking.state) (requires : Syntax.path_type list) =
   let is_required_by required =
     List.exists (Path.equal state.key.path) (Elaborator.list_trait_closure state.lookups required)
   in
@@ -305,13 +305,13 @@ let check_trait_cycle state (requires : path_type list) =
   | Some header when List.exists is_required_by header.required -> (
       match requires with
       | first :: _ ->
-          report state Trait_cycle state.spans.(first.id)
+          Checking.report state Trait_cycle state.spans.(first.id)
             "This trait requires itself through the traits it requires."
       | [] -> ())
   | _ -> ()
 
-let check_redeclared state (name : name) (receiver : Path.receiver) ~(trait_path : Path.t)
-    (trait : Types.trait_interface) =
+let check_redeclared (state : Checking.state) (name : Syntax.name) (receiver : Path.receiver)
+    ~(trait_path : Path.t) (trait : Types.trait_interface) =
   let inherited =
     List.concat_map
       (fun (required : Types.trait_reference) ->
@@ -331,15 +331,15 @@ let check_redeclared state (name : name) (receiver : Path.receiver) ~(trait_path
   in
   match List.assoc_opt (name.text, receiver) inherited with
   | Some from ->
-      report state Redeclared_method state.spans.(name.id)
+      Checking.report state Redeclared_method state.spans.(name.id)
         (Printf.sprintf
            "`%s` already declares a `%s` that takes %s, so a trait that requires it cannot declare \
             it again."
            (Path.show from) name.text (Path.show_receiver receiver))
   | None -> ()
 
-let check_proof_bounds state (written : type_head) (generics : Types.generic list)
-    (impl : Types.impl_interface) =
+let check_proof_bounds (state : Checking.state) (written : Syntax.type_head)
+    (generics : Types.generic list) (impl : Types.impl_interface) =
   if List.length generics = List.length impl.impl_generics then begin
     let renaming : Types.substitution =
       List.map2
@@ -368,10 +368,10 @@ let check_proof_bounds state (written : type_head) (generics : Types.generic lis
                 then
                   let span =
                     match List.nth_opt written.generics index with
-                    | Some (generic : generic_parameter) -> state.spans.(generic.id)
+                    | Some (generic : Syntax.generic_parameter) -> state.spans.(generic.id)
                     | None -> state.spans.(written.id)
                   in
-                  report state Unsatisfied_bound span
+                  Checking.report state Unsatisfied_bound span
                     (Printf.sprintf
                        "The `impl` does not require `%s: %s`, so this proof cannot assume it: the \
                         law is proven for every type that the `impl` is for."
@@ -381,7 +381,7 @@ let check_proof_bounds state (written : type_head) (generics : Types.generic lis
       (List.combine generics impl.impl_generics)
   end
 
-let check state =
+let check (state : Checking.state) =
   let lookups = state.lookups in
   let definition = state.definition in
   let is_broken part = Names.is_broken lookups.names state.key part in
@@ -403,7 +403,7 @@ let check state =
             check_private_in_public state ~visibility (list_signature_types written)
               state.spans.(name.id)
         | { kind = Impl { trait_; _ }; _ }, Impl_interface impl ->
-            check_impl_method state name
+            Impl_checks.check_impl_method state name
               (Names.receiver signature.parameters)
               written impl
               ~trait_span:(lookups.names.spans container).(trait_.id)
@@ -425,7 +425,7 @@ let check state =
     | None, Law_proof { law; type_; _ }, Law_proof_interface { generics; trait; for_type; _ } -> (
         (match lookups.trait_header trait.trait with
         | Some header when not (List.mem law.text header.laws) ->
-            report state Unknown_member state.spans.(law.id)
+            Checking.report state Unknown_member state.spans.(law.id)
               (Printf.sprintf "`%s` has no law `%s`." (Types.show_trait trait) law.text)
         | _ -> ());
         let arity_matches =
@@ -437,9 +437,9 @@ let check state =
           | _ -> true
         in
         if arity_matches && not (Types.is_error for_type) then
-          match implements state for_type trait with
+          match Checking.implements state for_type trait with
           | None ->
-              report state No_impl state.spans.(type_.id)
+              Checking.report state No_impl state.spans.(type_.id)
                 (Printf.sprintf "`%s` does not implement `%s`, so it has no law of it to keep."
                    (Types.show for_type) (Types.show_trait trait))
           | Some (Impls.From_impl { impl; _ }) ->
@@ -453,9 +453,9 @@ let check state =
         | Fields fields -> check_duplicates state "field" (list_field_names fields)
         | Variants variants ->
             check_duplicates state "variant"
-              (List.map (fun (variant : variant) -> variant.name) variants);
+              (List.map (fun (variant : Syntax.variant) -> variant.name) variants);
             List.iter
-              (fun (variant : variant) ->
+              (fun (variant : Syntax.variant) ->
                 Option.iter
                   (fun fields -> check_duplicates state "field" (list_field_names fields))
                   variant.fields)
@@ -475,14 +475,15 @@ let check state =
     | None, Constant { name = Plain_name name; _ }, Constant_interface constant ->
         check_private_in_public state ~visibility:definition.visibility [ constant.constant_type ]
           state.spans.(name.id)
-    | None, Impl { trait_; members; _ }, Impl_interface impl -> check_impl state members impl trait_
+    | None, Impl { trait_; members; _ }, Impl_interface impl ->
+        Impl_checks.check_impl state members impl trait_
     | None, Constant { name = Member_name (head, _); _ }, _ -> check_method_location state head
     | None, _, _ -> ()
 
 let list_diagnostics (lookups : Lookups.t) key =
   let state =
     {
-      lookups;
+      Checking.lookups;
       key;
       definition = lookups.names.definition key;
       elaborated = lookups.elaborated_interface key;
@@ -492,7 +493,7 @@ let list_diagnostics (lookups : Lookups.t) key =
   in
   (try check state
    with Properties.Recursion_limit message ->
-     report state Recursion_limit state.spans.(state.definition.id) message);
+     Checking.report state Recursion_limit state.spans.(state.definition.id) message);
   List.sort
     (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
       compare (left.span, left.code) (right.span, right.code))

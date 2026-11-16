@@ -1,8 +1,3 @@
-module Names = Resolve.Names
-module Environment = Interface.Environment
-module Impls = Interface.Impls
-module Elaborator = Interface.Elaborator
-
 type local = { type_ : Types.ty; is_var : bool; mode : Types.mode }
 
 type env = {
@@ -64,11 +59,11 @@ type form = {
 
 type state = {
   lookups : Lookups.t;
-  key : Names.key;
+  key : Resolve.Names.key;
   package : Path.package;
   definition : Syntax.definition;
   resolved : Resolve.resolved;
-  context : Elaborator.t;
+  context : Interface.Elaborator.t;
   text : string Lazy.t;
   mutable tables : Tables.t;
   form : form;
@@ -149,7 +144,7 @@ val final_capabilities : state -> Types.capability_set -> Types.capability_set
 val final_argument : state -> Types.argument -> Types.argument
 val unify : state -> Types.ty -> Types.ty -> bool
 val unify_as_hint : state -> Types.ty -> Types.ty -> unit
-val implements : state -> Types.ty -> Types.trait_reference -> Impls.evidence option
+val implements : state -> Types.ty -> Types.trait_reference -> Interface.Impls.evidence option
 val plain : state -> Types.ty -> bool
 val is_view : state -> Types.ty -> bool
 val copyable : state -> Types.ty -> bool
@@ -157,7 +152,7 @@ val copyable : state -> Types.ty -> bool
 val associated :
   state -> Types.ty -> Types.trait_reference -> string -> at:Source.Definition_span.t -> Types.ty
 
-val evidence_of : Impls.evidence -> Tables.evidence
+val evidence_of : Interface.Impls.evidence -> Tables.evidence
 val trait_reference : ?arguments:Types.argument list -> Path.t -> Types.trait_reference
 val string_type : Types.ty
 val in_statement : state -> env -> Source.Definition_span.t -> (unit -> 'a) -> 'a

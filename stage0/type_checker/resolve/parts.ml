@@ -1,15 +1,13 @@
-open Syntax
-
 type part = Header | Body | Member_header of int | Member_body of int
 
-let part_spans (spans : Source.Definition_span.t array) (definition : definition) =
+let part_spans (spans : Source.Definition_span.t array) (definition : Syntax.definition) =
   let split header body (whole : Source.Definition_span.t) (body_span : Source.Definition_span.t) =
     [ (header, Source.Definition_span.make whole.start body_span.start); (body, body_span) ]
   in
   let members lines body_of =
     List.concat
       (List.mapi
-         (fun index (line : _ node) ->
+         (fun index (line : _ Syntax.node) ->
            match body_of line.kind with
            | Some (body : Source.Definition_span.t) ->
                split (Member_header index) (Member_body index) spans.(line.id) body
@@ -19,7 +17,7 @@ let part_spans (spans : Source.Definition_span.t array) (definition : definition
   let with_members lines body_of =
     let header =
       match lines with
-      | (first : _ node) :: _ ->
+      | (first : _ Syntax.node) :: _ ->
           Source.Definition_span.make spans.(definition.id).start spans.(first.id).start
       | [] -> spans.(definition.id)
     in
@@ -35,8 +33,8 @@ let part_spans (spans : Source.Definition_span.t array) (definition : definition
       with_members members (function
         | Law { body; _ } -> Some spans.(body.id)
         | Associated_type _ | Associated_capability _ | Trait_member_error -> None)
-  | Impl { members; _ } -> with_members members (fun (_ : impl_member) -> None)
-  | Capability { members; _ } -> with_members members (fun (_ : capability_member) -> None)
+  | Impl { members; _ } -> with_members members (fun (_ : Syntax.impl_member) -> None)
+  | Capability { members; _ } -> with_members members (fun (_ : Syntax.capability_member) -> None)
 
 let lies_in all (recovered : Source.Definition_span.t) (part_span : Source.Definition_span.t) =
   if recovered.start < recovered.stop then

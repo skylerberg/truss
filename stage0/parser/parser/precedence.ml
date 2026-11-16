@@ -1,9 +1,7 @@
-open Syntax
-
 type group =
   | Arithmetic
   | Shift
-  | Bitwise of bitwise
+  | Bitwise of Syntax.bitwise
   | Range_group
   | Comparison
   | And_group
@@ -11,7 +9,7 @@ type group =
   | Implies_group
   | Lowest
 
-let binary_group : binary -> group = function
+let binary_group : Syntax.binary -> group = function
   | Operation (Arithmetic _) -> Arithmetic
   | Operation (Shift _) -> Shift
   | Operation (Bitwise bitwise) -> Bitwise bitwise
@@ -20,7 +18,7 @@ let binary_group : binary -> group = function
   | Connective Or -> Or_group
   | Connective Implies -> Implies_group
 
-let group (value : expression) =
+let group (value : Syntax.expression) =
   match value.kind with
   | Binary { operator; _ } -> Some (binary_group operator)
   | Is _ -> Some Comparison
@@ -28,19 +26,19 @@ let group (value : expression) =
   | Quantified _ | Echo _ | Return _ -> Some Lowest
   | _ -> None
 
-let operands (value : expression) =
+let operands (value : Syntax.expression) =
   match value.kind with
   | Binary { left; right; _ } -> Some (left.id, right.id)
   | Is { value; pattern; _ } -> Some (value.id, pattern.id)
   | Range { start = Some start; stop = Some stop; _ } -> Some (start.id, stop.id)
   | _ -> None
 
-let operator_id (value : expression) =
+let operator_id (value : Syntax.expression) =
   match value.kind with
   | Binary { operator_id; _ } | Is { operator_id; _ } | Range { operator_id; _ } -> operator_id
   | _ -> value.id
 
-let level language (operator : binary) =
+let level language (operator : Syntax.binary) =
   match (language, operator) with
   | `Truss, operator -> Parse_expression.binary_level operator
   | _, Connective _ -> 0
@@ -82,14 +80,14 @@ let parentheses cursor first last =
     Diagnostic.insert (Source.zero_width (Cursor.read_file_span cursor last).stop) ")";
   ]
 
-let is_name_or_literal (value : expression) =
+let is_name_or_literal (value : Syntax.expression) =
   match value.kind with
   | Name _ | Integer _ | Float _ | String _ | True | False -> true
   | _ -> false
 
 type problem = Lowest_operand | Chained of string | Mixed of string | Mixed_bitwise
 
-let find_problem parent child ~right (operand : expression) =
+let find_problem parent child ~right (operand : Syntax.expression) =
   let bitwise = function Shift | Bitwise _ -> true | _ -> false in
   match (parent, child) with
   | (And_group | Or_group | Implies_group), Lowest
@@ -110,14 +108,14 @@ let find_problem parent child ~right (operand : expression) =
   | _ when bitwise parent || bitwise child -> Some Mixed_bitwise
   | _ -> Some (Mixed "These operators need parentheses to say which applies first.")
 
-let wrapped cursor ?context (whole : expression) last edits =
+let wrapped cursor ?context (whole : Syntax.expression) last edits =
   match (context, last) with
   | Some (outer, whole_is_right), Some last
     when find_problem outer last ~right:whole_is_right whole <> None ->
       edits @ parentheses cursor whole.id whole.id
   | _ -> edits
 
-let grouping_fix cursor ?context ~(whole : expression) ~(operand : expression)
+let grouping_fix cursor ?context ~(whole : Syntax.expression) ~(operand : Syntax.expression)
     (first_operator, second_operator, third_operator) ~parsed grouping =
   let edits =
     match grouping with
@@ -132,7 +130,7 @@ let grouping_fix cursor ?context ~(whole : expression) ~(operand : expression)
   in
   fix cursor ~fallback whole.id (wrapped cursor ?context whole last edits)
 
-let rec first_operand (value : expression) =
+let rec first_operand (value : Syntax.expression) =
   match value.kind with
   | Binary { left; _ } when Option.equal ( = ) (group left) (group value) -> first_operand left
   | Binary { left; _ } -> Some left
@@ -140,13 +138,14 @@ let rec first_operand (value : expression) =
   | Range { start = Some start; stop = Some _; _ } -> Some start
   | _ -> None
 
-let last_operand (value : expression) =
+let last_operand (value : Syntax.expression) =
   match value.kind with
   | Binary { right; _ } -> Some right
   | Range { start = Some _; stop = Some stop; _ } -> Some stop
   | _ -> None
 
-let report_problem cursor ?context (whole : expression) (operand : expression) ~right problem =
+let report_problem cursor ?context (whole : Syntax.expression) (operand : Syntax.expression) ~right
+    problem =
   let pieces =
     match (operands whole, operands operand) with
     | Some (_, third_operator), Some (first_operator, second_operator) when not right ->
@@ -154,7 +153,7 @@ let report_problem cursor ?context (whole : expression) (operand : expression) ~
     | Some (first_operator, _), Some (_, third_operator) when right ->
         Option.map
           (fun second_operator -> (first_operator, second_operator, third_operator))
-          (Option.map (fun (first : expression) -> first.id) (first_operand operand))
+          (Option.map (fun (first : Syntax.expression) -> first.id) (first_operand operand))
     | _ -> None
   in
   let parsed = if right then Right_first else Left_first in
@@ -164,7 +163,7 @@ let report_problem cursor ?context (whole : expression) (operand : expression) ~
     grouping = parsed
     ||
     match (group whole, if right then first_operand operand else last_operand operand) with
-    | Some outer, Some (middle : expression) -> (
+    | Some outer, Some (middle : Syntax.expression) -> (
         match group middle with
         | Some inner -> find_problem outer inner ~right middle = None
         | None -> true)
@@ -229,8 +228,8 @@ let report_problem cursor ?context (whole : expression) (operand : expression) ~
       in
       report cursor (operator_id whole) message fixes
 
-let rec checked_expression ?context cursor (value : expression) =
-  let operand parent ~right (operand : expression) =
+let rec checked_expression ?context cursor (value : Syntax.expression) =
+  let operand parent ~right (operand : Syntax.expression) =
     checked_expression ~context:(parent, right) cursor operand;
     match Option.bind (group operand) (fun child -> find_problem parent child ~right operand) with
     | Some problem -> report_problem cursor ?context value operand ~right problem

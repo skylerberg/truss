@@ -1,7 +1,6 @@
-open Token
-open Syntax
+let pattern_node cursor start kind : Syntax.pattern =
+  { kind; id = Cursor.allocate_id_from cursor start }
 
-let pattern_node cursor start kind : pattern = { kind; id = Cursor.allocate_id_from cursor start }
 let range_bound = "a literal or a constant with its module or type, such as `http::last`"
 
 let string_literal cursor ~start ~modules literal =
@@ -13,36 +12,36 @@ let string_literal cursor ~start ~modules literal =
   in
   Atoms.string_literal cursor ~start ~modules literal ~interpolation
 
-let literal cursor : literal option =
+let literal cursor : Syntax.literal option =
   let start = Cursor.index cursor in
   let take literal =
     Cursor.advance cursor;
     Some literal
   in
   match Cursor.peek_kind cursor with
-  | Integer value -> take (Literal_integer value)
+  | Integer value -> take (Syntax.Literal_integer value)
   | Punctuation Minus -> (
       Cursor.advance cursor;
       match Cursor.peek_kind cursor with
-      | Integer value -> take (Literal_integer (Z.neg value))
+      | Integer value -> take (Syntax.Literal_integer (Z.neg value))
       | _ -> Cursor.fail cursor "a number after `-` in a pattern")
   | Float _ ->
       Cursor.report cursor Float_pattern (Cursor.peek cursor).span
         "A float literal cannot be a pattern, since `==` on floats treats `-0.0` and `0.0` as \
          equal; match with a guard instead, as in `value if value == 0.0`.";
       raise Cursor.Failed
-  | Keyword True -> take Literal_true
-  | Keyword False -> take Literal_false
+  | Keyword True -> take Syntax.Literal_true
+  | Keyword False -> take Syntax.Literal_false
   | String literal -> Some (Literal_string (string_literal cursor ~start ~modules:[] literal))
   | _ -> None
 
-let rec variant_or_constant cursor start (path : path) =
+let rec variant_or_constant cursor start (path : Syntax.path) =
   if Cursor.is_punctuation cursor Dot then begin
     Cursor.advance cursor;
     let constant =
-      Type_constant (path, Atoms.lower_name cursor "the name of a constant after `.`")
+      Syntax.Type_constant (path, Atoms.lower_name cursor "the name of a constant after `.`")
     in
-    range_or_single cursor start (End_constant constant) (Qualified_constant constant)
+    range_or_single cursor start (Syntax.End_constant constant) (Syntax.Qualified_constant constant)
   end
   else
     let fields =
@@ -51,7 +50,7 @@ let rec variant_or_constant cursor start (path : path) =
     pattern_node cursor start (Variant { name = path.last; fields })
 
 and range_or_single cursor start end_kind kind =
-  let first : range_end = { kind = end_kind; id = Cursor.allocate_id_from cursor start } in
+  let first : Syntax.range_end = { kind = end_kind; id = Cursor.allocate_id_from cursor start } in
   match Cursor.peek_kind cursor with
   | Punctuation ((Dot_dot | Dot_dot_equal) as operator) ->
       Cursor.advance cursor;
@@ -60,7 +59,7 @@ and range_or_single cursor start end_kind kind =
         match literal cursor with
         | Some literal ->
             ({ kind = End_literal literal; id = Cursor.allocate_id_from cursor stop_start }
-              : range_end)
+              : Syntax.range_end)
         | None -> (
             match Cursor.peek_kind cursor with
             | Lower _ | Upper _ -> constant_end cursor stop_start
@@ -70,23 +69,23 @@ and range_or_single cursor start end_kind kind =
         (Pattern_range { start = first; stop; inclusive = operator = Dot_dot_equal })
   | _ -> pattern_node cursor start kind
 
-and constant_end cursor start : range_end =
+and constant_end cursor start : Syntax.range_end =
   let modules = Atoms.module_prefix cursor in
   let kind =
     match Cursor.peek_kind cursor with
     | Lower _ when modules = [] -> Cursor.fail cursor range_bound
     | Lower text ->
-        End_constant
+        Syntax.End_constant
           (Module_constant { modules; last = Atoms.name cursor (Cursor.next cursor) text })
     | Upper text ->
-        let path = { modules; last = Atoms.name cursor (Cursor.next cursor) text } in
+        let path = { Syntax.modules; last = Atoms.name cursor (Cursor.next cursor) text } in
         Cursor.expect_punctuation cursor Dot;
         End_constant (Type_constant (path, Atoms.lower_name cursor "the name of a constant"))
     | _ -> Cursor.fail cursor "a constant"
   in
   { kind; id = Cursor.allocate_id_from cursor start }
 
-and primary cursor : pattern =
+and primary cursor : Syntax.pattern =
   let start = Cursor.index cursor in
   match literal cursor with
   | Some literal -> range_or_single cursor start (End_literal literal) (Literal literal)
@@ -108,18 +107,18 @@ and name_pattern cursor start =
       pattern_node cursor start (Binding (Atoms.name cursor (Cursor.next cursor) text))
   | Lower text, _ ->
       let constant =
-        Module_constant { modules; last = Atoms.name cursor (Cursor.next cursor) text }
+        Syntax.Module_constant { modules; last = Atoms.name cursor (Cursor.next cursor) text }
       in
       range_or_single cursor start (End_constant constant) (Qualified_constant constant)
   | Upper text, _ ->
-      let path = { modules; last = Atoms.name cursor (Cursor.next cursor) text } in
+      let path = { Syntax.modules; last = Atoms.name cursor (Cursor.next cursor) text } in
       variant_or_constant cursor start (unqualified_variant cursor start path)
   | String ({ tag = Some _; _ } as literal), _ ->
-      let literal = Literal_string (string_literal cursor ~start ~modules literal) in
+      let literal = Syntax.Literal_string (string_literal cursor ~start ~modules literal) in
       range_or_single cursor start (End_literal literal) (Literal literal)
   | _ -> Cursor.fail cursor "a name after `::`"
 
-and unqualified_variant cursor start (path : path) =
+and unqualified_variant cursor start (path : Syntax.path) =
   let rec last_name (qualified : Token.t option) =
     match (Cursor.peek_kind cursor, Cursor.token_at cursor (Cursor.index cursor + 1)) with
     | Punctuation (Dot | Colon_colon), ({ kind = Upper _; _ } as variant) ->
@@ -140,13 +139,13 @@ and unqualified_variant cursor start (path : path) =
   | _ -> path
 
 and pattern_fields cursor =
-  let field cursor : pattern_field =
+  let field cursor : Syntax.pattern_field =
     let start = Cursor.index cursor in
     let kind =
       match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
       | Punctuation Dot_dot, _ ->
           Cursor.advance cursor;
-          Rest
+          Syntax.Rest
       | Lower text, Punctuation Colon ->
           let name = Atoms.name cursor (Cursor.next cursor) text in
           Cursor.advance cursor;
@@ -163,7 +162,7 @@ and pattern_fields cursor =
         })
   in
   List.iteri
-    (fun index (field : pattern_field) ->
+    (fun index (field : Syntax.pattern_field) ->
       if field.kind = Rest && index < List.length fields - 1 then
         Cursor.report cursor Unexpected_token
           (Cursor.read_file_span cursor field.id)
@@ -171,9 +170,9 @@ and pattern_fields cursor =
     fields;
   fields
 
-and pattern cursor : pattern = Cursor.nested cursor alternatives
+and pattern cursor : Syntax.pattern = Cursor.nested cursor alternatives
 
-and alternatives cursor : pattern =
+and alternatives cursor : Syntax.pattern =
   let start = Cursor.index cursor in
   match Cursor.separated cursor ~separator:Bar primary with
   | [ single ] -> single

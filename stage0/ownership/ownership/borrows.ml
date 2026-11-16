@@ -1,20 +1,18 @@
-open Context
-
 let is_borrow_of_root (root : Place.root) (view : Actions.view) =
   match view with Borrow_of place -> place.root = root | Copy_of_view_in _ -> false
 
-let lifetime_ends_at_return context (view : Actions.view) =
+let lifetime_ends_at_return (context : Context.context) (view : Actions.view) =
   let place = Actions.viewed_place view in
   match place.root with
   | Constant _ -> false
   | Temporary _ | Environment -> true
   | Local local ->
       if local = Self || List.mem local context.parameters then
-        binding_mode context place.root = Own && is_borrow_of_root place.root view
+        Context.binding_mode context place.root = Own && is_borrow_of_root place.root view
       else true
 
 let outlives_function context (place : Place.t) =
-  binding_mode context place.root = Mut
+  Context.binding_mode context place.root = Mut
   &&
   match place.root with
   | Local local -> List.mem local context.parameters
@@ -36,19 +34,19 @@ let loan_message context (loan : Actions.loan) ~is_through_view (place : Place.t
     | Operand_evaluation -> "an earlier operand of this expression"
   and through =
     if is_through_view then
-      Printf.sprintf " through `%s`, which views it" (show context loan.borrowed)
+      Printf.sprintf " through `%s`, which views it" (Context.show context loan.borrowed)
     else ""
   in
   match loan.mode with
   | Mut ->
       Printf.sprintf "`%s` is borrowed `mut` by %s%s, so it cannot be used here."
-        (show context place) lender through
+        (Context.show context place) lender through
   | Read | Own ->
-      Printf.sprintf "`%s` cannot %s while %s borrows it%s." (show context place) verb lender
-        through
+      Printf.sprintf "`%s` cannot %s while %s borrows it%s." (Context.show context place) verb
+        lender through
 
 let report_dangling_view context at ~views ~doing ~fix =
-  let report_view = report context View_escapes at in
+  let report_view = Context.report context View_escapes at in
   match Option.map Actions.viewed_place (List.find_opt (lifetime_ends_at_return context) views) with
   | Some { root = Environment; _ } ->
       report_view
@@ -69,11 +67,13 @@ let report_dangling_view context at ~views ~doing ~fix =
         (Printf.sprintf
            "This %s a view of `%s`, which is dropped when the function returns, so the view would \
             dangle. %s"
-           doing (show_root context place.root) fix);
+           doing
+           (Context.show_root context place.root)
+           fix);
       true
   | None -> false
 
-let check_disjoint context first second ~on_overlap =
+let check_disjoint (context : Context.context) first second ~on_overlap =
   match Place.overlap first second with
   | Overlapping -> on_overlap ()
   | Maybe_disjoint (first, second) ->
@@ -141,18 +141,20 @@ let check_body context (actions : Actions.t) moves =
   let check_use (here : here) (place : Place.t) =
     match List.find_opt is_mut (covering here place) with
     | Some (loan, is_through_view) ->
-        report context Conflicting_loan (span context here.origin)
+        Context.report context Conflicting_loan
+          (Context.span context here.origin)
           (loan_message context loan ~is_through_view place ~verb:"be used")
     | None -> ()
   in
   let check_mutation (here : here) (place : Place.t) ~verb =
-    let at = span context here.origin in
+    let at = Context.span context here.origin in
     let covering = covering here place in
     match (List.find_opt is_mut covering, covering) with
     | Some (loan, is_through_view), _ ->
-        report context Conflicting_loan at (loan_message context loan ~is_through_view place ~verb)
+        Context.report context Conflicting_loan at
+          (loan_message context loan ~is_through_view place ~verb)
     | None, (loan, is_through_view) :: _ ->
-        report context Mutated_while_viewed at
+        Context.report context Mutated_while_viewed at
           (loan_message context loan ~is_through_view place ~verb)
     | None, [] ->
         List.iter
@@ -169,13 +171,14 @@ let check_body context (actions : Actions.t) moves =
                    (fun view -> Place.overlap (Actions.viewed_place view) place <> Disjoint)
                    viewed
             then
-              report context Mutated_while_viewed at
+              Context.report context Mutated_while_viewed at
                 (Printf.sprintf "`%s` cannot %s while `%s`, which views it, is still live."
-                   (show context place) verb (show_root context holder)))
+                   (Context.show context place) verb
+                   (Context.show_root context holder)))
           here.views
   in
   each_step all_positions (fun here (step : Actions.step) ->
-      let at = span context here.origin in
+      let at = Context.span context here.origin in
       match step.action with
       | Read place -> check_use here place
       | Mutate place ->
@@ -189,7 +192,7 @@ let check_body context (actions : Actions.t) moves =
           | Reads -> ()
           | Refused refuse -> refuse context at type_)
       | Move_out_of_lent type_ ->
-          report context Not_owned at
+          Context.report context Not_owned at
             ~fixes:(Move_rules.copy_fix context "Copy it." type_ at)
             "This part is lent, so it cannot be moved: the loan ends when the statement ends. Copy \
              it instead."
@@ -203,8 +206,8 @@ let check_body context (actions : Actions.t) moves =
                         let exclusive, also =
                           if first.mode = Mut then (first, second) else (second, first)
                         in
-                        report context Conflicting_loan
-                          (span_with_mode_keyword context second.origin)
+                        Context.report context Conflicting_loan
+                          (Context.span_with_mode_keyword context second.origin)
                           (Printf.sprintf
                              (if is_yielded then
                                 format_of_string
@@ -213,7 +216,8 @@ let check_body context (actions : Actions.t) moves =
                               else
                                 "`%s` is borrowed `mut` by this call, so the call cannot also use \
                                  `%s`.")
-                             (show context exclusive.place) (show context also.place))))
+                             (Context.show context exclusive.place)
+                             (Context.show context also.place))))
                 borrowed_arguments)
             borrowed_arguments;
           List.iter
@@ -225,12 +229,12 @@ let check_body context (actions : Actions.t) moves =
                     List.iter
                       (fun viewed_place ->
                         check_disjoint context viewed_place passed.place ~on_overlap:(fun () ->
-                            report context Conflicting_loan
-                              (span_with_mode_keyword context argument.origin)
+                            Context.report context Conflicting_loan
+                              (Context.span_with_mode_keyword context argument.origin)
                               (Printf.sprintf
                                  "`%s` is borrowed `mut` by this call, so the call cannot also \
                                   take a view of it."
-                                 (show context passed.place))))
+                                 (Context.show context passed.place))))
                       viewed)
                 borrowed_arguments)
             view_arguments
@@ -251,7 +255,7 @@ let check_body context (actions : Actions.t) moves =
                   let named_holder =
                     match holder with
                     | Local local when Hashtbl.mem context.names local ->
-                        Some (show_root context holder)
+                        Some (Context.show_root context holder)
                     | _ -> None
                   in
                   let holder =
@@ -261,7 +265,8 @@ let check_body context (actions : Actions.t) moves =
                   in
                   match dropped.owner with
                   | Temporary _ ->
-                      report context Views_temporary (span context dropped.origin)
+                      Context.report context Views_temporary
+                        (Context.span context dropped.origin)
                         (Printf.sprintf
                            "This temporary is dropped while %s may still store a view of it, which \
                             would dangle. Bind the temporary to a name with `let`%s, so that it \
@@ -271,15 +276,17 @@ let check_body context (actions : Actions.t) moves =
                            | Some name -> Printf.sprintf " in the block that declares `%s`" name
                            | None -> ""))
                   | Local _ | Constant _ | Environment ->
-                      report context View_escapes (span context dropped.origin)
+                      Context.report context View_escapes
+                        (Context.span context dropped.origin)
                         (Printf.sprintf
                            "`%s` is dropped at the end of its scope while %s may still store a \
                             view of it, which would dangle."
-                           (show_root context dropped.owner) holder))
+                           (Context.show_root context dropped.owner)
+                           holder))
               | _ -> ())
             dropped
       | Bind_lent_part type_ ->
-          report context Lent_part_escapes at
+          Context.report context Lent_part_escapes at
             ~fixes:(Move_rules.copy_fix context "Copy it." type_ at)
             "This part is lent only until the statement ends, so it cannot be bound to a name. Use \
              it in this statement, or copy it."
@@ -290,21 +297,21 @@ let check_body context (actions : Actions.t) moves =
                 match viewed.root with
                 | Environment -> true
                 | Temporary _ | Constant _ -> false
-                | Local _ -> binding_mode context viewed.root <> Own)
+                | Local _ -> Context.binding_mode context viewed.root <> Own)
               (viewed_places here views)
           with
           | Some { root = Environment; _ } ->
-              report context View_escapes at
+              Context.report context View_escapes at
                 "This lambda captures local variables, and the callee may store a function that it \
                  takes through an `own` parameter, so the lambda could outlive them. Pass a \
                  function that captures nothing."
           | Some viewed ->
-              report context View_escapes at
+              Context.report context View_escapes at
                 (Printf.sprintf
                    "`%s` is not owned here, so it may be a capturing lambda, and the callee may \
                     store a function that it takes through an `own` parameter. Pass a function \
                     that captures nothing."
-                   (show context viewed))
+                   (Context.show context viewed))
           | None -> ())
       | Return_view views ->
           let views = resolve here.views views in
@@ -315,7 +322,7 @@ let check_body context (actions : Actions.t) moves =
             && context.implements_capability
             && List.exists (is_borrow_of_root (Local Self)) views
           then
-            report context View_crosses_capability at
+            Context.report context View_crosses_capability at
               "This returns a view of the capability implementation's own state. The caller cannot \
                see the implementation, so nothing stops the next call from mutating that state \
                while the view is in use. Return a copy."
@@ -326,7 +333,7 @@ let check_body context (actions : Actions.t) moves =
               match (Actions.viewed_place view).root with
               | Local local when local = Self || List.mem local context.parameters -> (
                   match Hashtbl.find_opt context.types local with
-                  | Some type_ -> not (is_view context type_)
+                  | Some type_ -> not (Context.is_view context type_)
                   | None -> false)
               | Local _ | Temporary _ | Constant _ | Environment -> false
             in
@@ -342,7 +349,7 @@ let check_body context (actions : Actions.t) moves =
                 (report_dangling_view context at ~views:resolved
                    ~doing:
                      (Printf.sprintf "stores in `%s`, which outlives this function,"
-                        (show_root context place.root))
+                        (Context.show_root context place.root))
                    ~fix:"A `mut` parameter stores only views that the function receives.")
             then
               match
@@ -351,28 +358,31 @@ let check_body context (actions : Actions.t) moves =
                   List.find_opt views_borrowed_parameter resolved )
               with
               | Some stored_view, _, _ ->
-                  report context View_crosses_capability at
+                  Context.report context View_crosses_capability at
                     (Printf.sprintf
                        "This stores a view of `%s` in a capability implementation. The caller \
                         cannot see the implementation, so it could mutate or drop the view's \
                         original while the implementation still stores the view. Store a copy."
-                       (show_root context (Actions.viewed_place stored_view).root))
+                       (Context.show_root context (Actions.viewed_place stored_view).root))
               | None, true, _ ->
-                  report context Self_referential at
+                  Context.report context Self_referential at
                     (Printf.sprintf
                        "This stores a view of a part of `%s` in `%s` itself, which makes it \
                         self-referential. The caller does not know about the view, so it could \
                         mutate that part and invalidate the view."
-                       (show_root context place.root) (show_root context place.root))
+                       (Context.show_root context place.root)
+                       (Context.show_root context place.root))
               | None, false, Some parameter ->
-                  let parameter = show_root context (Actions.viewed_place parameter).root in
-                  report context View_escapes at
+                  let parameter = Context.show_root context (Actions.viewed_place parameter).root in
+                  Context.report context View_escapes at
                     (Printf.sprintf
                        "This stores a view of `%s` in `%s`, which outlives this function, but `%s` \
                         is only borrowed for the call, and the caller does not expect it to stay \
                         borrowed afterwards. Take `%s` as a view type, such as a `Slice`, to store \
                         a view of it."
-                       parameter (show_root context place.root) parameter parameter)
+                       parameter
+                       (Context.show_root context place.root)
+                       parameter parameter)
               | None, false, None -> ())
       | Write_through slice -> (
           let mutable_root (root : Place.root) =
@@ -380,18 +390,18 @@ let check_body context (actions : Actions.t) moves =
             | Temporary _ -> true
             | Constant _ | Environment -> false
             | Local local -> (
-                match binding_mode context root with
+                match Context.binding_mode context root with
                 | Mut -> true
                 | Own -> List.mem local context.mutable_locals
                 | Read -> false)
           in
           match slice with
           | { steps = _ :: _; _ } ->
-              report context Read_only_view at
+              Context.report context Read_only_view at
                 (Printf.sprintf
                    "`%s` is a slice stored in a field, so it is read-only. Mutate the collection \
                     that it views instead."
-                   (show context slice))
+                   (Context.show context slice))
           | { root = Local local; _ } when List.mem local context.parameters -> ()
           | _ -> (
               match
@@ -400,11 +410,12 @@ let check_body context (actions : Actions.t) moves =
                   (viewed_places here [ Copy_of_view_in slice ])
               with
               | Some viewed ->
-                  report context Read_only_view at
+                  Context.report context Read_only_view at
                     (Printf.sprintf
                        "`%s` views `%s`, which is read-only here, so `%s` cannot be written \
                         through."
-                       (show context slice) (show context viewed) (show context slice))
+                       (Context.show context slice) (Context.show context viewed)
+                       (Context.show context slice))
               | None -> ()))
       | Yield_point { views; parts; forwarded } -> (
           let forwarded = resolve here.views forwarded in
@@ -415,7 +426,8 @@ let check_body context (actions : Actions.t) moves =
           in
           let owned =
             List.find_opt
-              (fun (part : Place.t) -> part.steps <> [] && binding_mode context part.root = Own)
+              (fun (part : Place.t) ->
+                part.steps <> [] && Context.binding_mode context part.root = Own)
               parts
           in
           let receiver =
@@ -428,29 +440,29 @@ let check_body context (actions : Actions.t) moves =
                 | Local local
                   when (local = Self || List.mem local context.parameters)
                        && Some local <> receiver
-                       && binding_mode context part.root <> Own ->
+                       && Context.binding_mode context part.root <> Own ->
                     Some part.root
                 | _ -> None)
               (parts @ List.map Actions.viewed_place forwarded)
           in
           match (owned, other_parameter) with
           | Some part, _ when not is_dangling ->
-              report context View_escapes at
+              Context.report context View_escapes at
                 (Printf.sprintf
                    "This lends a part of %s, which the method owns and drops when it returns, so \
                     the part would dangle. Lend the whole value, move the part out of it and lend \
                     that, or return the part."
                    (match part.root with
                    | Temporary _ -> "a temporary"
-                   | root -> Printf.sprintf "`%s`" (show_root context root)))
+                   | root -> Printf.sprintf "`%s`" (Context.show_root context root)))
           | None, Some root when not is_dangling ->
-              report context Lends_other_parameter at
+              Context.report context Lends_other_parameter at
                 (Printf.sprintf
                    "This lends a part of `%s`, which is not the method's first parameter. A caller \
                     keeps only the first argument lent, so it could mutate or drop `%s` while the \
                     part is lent. A method lends a part of its first parameter, a copy of a \
                     `Plain` value, or a whole value that it made."
-                   (show_root context root) (show_root context root))
+                   (Context.show_root context root) (Context.show_root context root))
           | _ -> ())
       | Bind _ | Bind_views _ | Start_loan _ | End_loans _ -> ());
   let effects positions =
@@ -487,11 +499,11 @@ let check_body context (actions : Actions.t) moves =
                     List.iter
                       (fun used_place ->
                         check_disjoint context place used_place ~on_overlap:(fun () ->
-                            report context Data_race (span context origin)
+                            Context.report context Data_race (Context.span context origin)
                               (Printf.sprintf
                                  "Data race: one branch of this `%s` block mutates `%s`, and \
                                   another branch uses it."
-                                 keyword (show context place))))
+                                 keyword (Context.show context place))))
                       used)
                   mutations)
             branches)
@@ -513,7 +525,7 @@ let check_body context (actions : Actions.t) moves =
             | Temporary local -> not (List.mem local temporaries)
           in
           if is_outside_iteration then
-            report context Data_race (span context origin)
+            Context.report context Data_race (Context.span context origin)
               (Printf.sprintf
                  "Data race: the iterations of a `%s for` run at the same time, so the body can \
                   mutate only its own element and its own locals."

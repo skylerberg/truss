@@ -2,7 +2,7 @@ val applied : State.context -> Types.function_type -> Logic.term -> Logic.term l
 val in_the_logic : Types.function_type -> bool
 
 val parameters_of :
-  State.context -> State.frame -> Types.function_type -> ('a State.Symbol.t * Logic.sort) list
+  State.context -> State.frame -> Types.function_type -> ('a Logic.Symbol.t * Logic.sort) list
 
 val check_valid :
   State.context ->
@@ -14,7 +14,7 @@ val check_valid :
   when_:string ->
   unit
 
-val without_temporaries : 'a State.Locals.t -> 'a State.Locals.t
+val without_temporaries : 'a Locals.t -> 'a Locals.t
 
 val body_run :
   ?entering:(State.frame -> State.frame) ->
@@ -26,7 +26,7 @@ val body_run :
   (State.frame * Logic.term) option
 
 val counting_of : Mir.cost -> Costs.counting
-val loop_counters : Logic.term State.Locals.t -> Mir.body -> Costs.counter list
+val loop_counters : Logic.term Locals.t -> Mir.body -> Costs.counter list
 val facts_since : State.context -> int -> Logic.term list
 
 val lambda :

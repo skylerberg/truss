@@ -1,5 +1,3 @@
-open Tree
-
 type t
 
 val create :
@@ -8,39 +6,46 @@ val create :
 val for_lambda : t -> t
 val is_specification : t -> bool
 val entry_locals : t -> Core.local list
-val new_local : t -> local_kind -> Types.ty -> Core.origin -> local
-val local_info : t -> local -> local_info
-val temporary : t -> Types.ty -> Core.origin -> local
-val add_temporary : t -> local -> unit
-val at : local -> place
-val source : t -> Core.local -> local option
-val add_source : t -> Core.local -> local -> unit
-val free_source : t -> Core.local -> type_:Types.ty -> origin:Core.origin -> local
+val new_local : t -> Tree.local_kind -> Types.ty -> Core.origin -> Tree.local
+val local_info : t -> Tree.local -> Tree.local_info
+val temporary : t -> Types.ty -> Core.origin -> Tree.local
+val add_temporary : t -> Tree.local -> unit
+val at : Tree.local -> Tree.place
+val source : t -> Core.local -> Tree.local option
+val add_source : t -> Core.local -> Tree.local -> unit
+val free_source : t -> Core.local -> type_:Types.ty -> origin:Core.origin -> Tree.local
 
 val bind_source :
-  ?name:string -> ?is_var:bool -> t -> Core.local -> Types.mode -> Types.ty -> Core.origin -> local
+  ?name:string ->
+  ?is_var:bool ->
+  t ->
+  Core.local ->
+  Types.mode ->
+  Types.ty ->
+  Core.origin ->
+  Tree.local
 
-val register_binding : t -> local -> unit
-val note_bound_to_place : t -> local -> unit
-val place_temporary : t -> node:Core.id -> Types.ty -> Core.origin -> local
-val free_locals : t -> local list
-val emit : t -> statement_kind -> Core.origin -> unit
-val assign : ?node:Core.id -> t -> place -> rvalue -> Core.origin -> unit
-val hold : ?node:Core.id -> t -> Types.ty -> Core.origin -> rvalue -> operand option
-val hold_choice : t -> Types.ty -> Core.origin -> choice -> operand option
-val held : t -> operand -> Types.ty -> Core.origin -> operand
-val borrowed_place : t -> place -> place
-val jump : t -> jump -> Core.origin -> unit
+val register_binding : t -> Tree.local -> unit
+val note_bound_to_place : t -> Tree.local -> unit
+val place_temporary : t -> node:Core.id -> Types.ty -> Core.origin -> Tree.local
+val free_locals : t -> Tree.local list
+val emit : t -> Tree.statement_kind -> Core.origin -> unit
+val assign : ?node:Core.id -> t -> Tree.place -> Tree.rvalue -> Core.origin -> unit
+val hold : ?node:Core.id -> t -> Types.ty -> Core.origin -> Tree.rvalue -> Tree.operand option
+val hold_choice : t -> Types.ty -> Core.origin -> Tree.choice -> Tree.operand option
+val held : t -> Tree.operand -> Types.ty -> Core.origin -> Tree.operand
+val borrowed_place : t -> Tree.place -> Tree.place
+val jump : t -> Tree.jump -> Core.origin -> unit
 val reaches : t -> bool
 val mark_unreachable : t -> unit
-val block_of : t -> (unit -> operand option) -> block
+val block_of : t -> (unit -> Tree.operand option) -> Tree.block
 
 type suspended
 
 val suspend_block : t -> suspended
-val resume_block : t -> suspended -> statement list
-val emitted : t -> statement list
-val start_loan : t -> operand -> Types.mode -> loan_duration -> Core.origin -> int
+val resume_block : t -> suspended -> Tree.statement list
+val emitted : t -> Tree.statement list
+val start_loan : t -> Tree.operand -> Types.mode -> Tree.loan_duration -> Core.origin -> int
 val end_loans : t -> int list -> Core.origin -> unit
 
 type scope
@@ -50,11 +55,11 @@ val in_scope : ?provides:bool -> ?held:held -> t -> Core.origin -> (unit -> 'a) 
 val in_statement : t -> Core.origin -> (unit -> 'a) -> 'a
 
 val in_value_scope :
-  ?provides:bool -> t -> Core.origin -> (unit -> operand option) -> operand option
+  ?provides:bool -> t -> Core.origin -> (unit -> Tree.operand option) -> Tree.operand option
 
 val in_arm_scope : t -> (scope -> 'a) -> 'a
 val end_scope : t -> scope -> Core.origin -> unit
-val dead_in : scope -> Core.origin -> statement list
+val dead_in : scope -> Core.origin -> Tree.statement list
 
 type condition_lends = For_statement | For_block | For_condition
 
@@ -65,28 +70,32 @@ val in_old : t -> (unit -> 'a) -> 'a
 val reads_entry : t -> Core.local -> bool
 val binding_to_statement : t -> (unit -> 'a) -> 'a
 val extending : t -> Core.id list -> (unit -> 'a) -> 'a
-val deferring : t -> (unit -> 'a) -> 'a * local list
-val with_compound_target : t -> place -> (unit -> 'a) -> 'a
-val compound_target : t -> place option
+val deferring : t -> (unit -> 'a) -> 'a * Tree.local list
+val with_compound_target : t -> Tree.place -> (unit -> 'a) -> 'a
+val compound_target : t -> Tree.place option
 val looping : t -> (unit -> unit) -> unit
-val in_task : t -> task -> (unit -> 'a) -> 'a
+val in_task : t -> Tree.task -> (unit -> 'a) -> 'a
 val start_group : t -> Core.origin -> Core.origin -> unit
 val resume_group : t -> Core.origin -> Core.origin -> unit
-val return_ : t -> operand option -> Core.origin -> unit
+val return_ : t -> Tree.operand option -> Core.origin -> unit
 val break_ : t -> Core.origin -> unit
 val continue_ : t -> Core.origin -> unit
-val add_lambda : t -> body -> int
-val lambdas : t -> body array
+val add_lambda : t -> Tree.body -> int
+val lambdas : t -> Tree.body array
 
 val finish :
-  ?captures:local list ->
+  ?captures:Tree.local list ->
   ?is_functional:bool ->
   ?value_type:Types.ty ->
   t ->
-  parameters:local list ->
-  body
+  parameters:Tree.local list ->
+  Tree.body
 
 val formula :
-  t -> origin:Core.origin -> type_:Types.ty -> (unit -> local list * operand option) -> formula
+  t ->
+  origin:Core.origin ->
+  type_:Types.ty ->
+  (unit -> Tree.local list * Tree.operand option) ->
+  Tree.formula
 
-val unit_value : operand
+val unit_value : Tree.operand

@@ -1,7 +1,3 @@
-open C_runtime
-open C_types
-open C_data
-
 type build = C_runtime.build = Development | Release
 type linkage = C_runtime.linkage = External | Internal
 
@@ -20,8 +16,8 @@ type fragment = {
   kind : kind;
   functions : (string * string) list;
   definition : string;
-  types : key list;
-  environments : (key * defined) list;
+  types : C_types.key list;
+  environments : (C_types.key * C_types.defined) list;
   prototypes : (string * string) list;
   statics : string list;
   sites : Lowered.site list;
@@ -85,11 +81,12 @@ let text fragment =
   let self = Instance.symbol fragment.key in
   number "@instance_" (List.map Instance.symbol fragment.references);
   number "@type_"
-    (List.map key_name
+    (List.map C_types.key_name
        (fragment.types
-       @ List.concat_map (fun (_, (defined : defined)) -> defined.references) fragment.environments
-       ));
-  number "@site_" (List.map site_symbol fragment.sites);
+       @ List.concat_map
+           (fun (_, (defined : C_types.defined)) -> defined.references)
+           fragment.environments));
+  number "@site_" (List.map C_runtime.site_symbol fragment.sites);
   let rename identifier =
     if String.starts_with ~prefix:self identifier then
       "@self"
@@ -101,8 +98,8 @@ let text fragment =
       (List.concat_map (fun (header, body) -> [ header; body ]) fragment.functions
       @ [ fragment.definition ]
       @ List.map
-          (fun (key, (defined : defined)) ->
-            key_name key
+          (fun (key, (defined : C_types.defined)) ->
+            C_types.key_name key
             ^
             match defined.definition with
             | Struct { body; _ } -> body
@@ -146,8 +143,8 @@ let fragment env (compiled : compiled) =
   let key, context =
     match compiled with
     | Code code -> (code.C_instance.key, code.context)
-    | Data data -> (data.data_key, new_context env (Instance.symbol data.data_key))
-    | Table table -> (table.table_key, new_context env (Instance.symbol table.table_key))
+    | Data data -> (data.data_key, C_types.new_context env (Instance.symbol data.data_key))
+    | Table table -> (table.table_key, C_types.new_context env (Instance.symbol table.table_key))
   in
   let functions, definition, kind =
     match compiled with
@@ -156,13 +153,14 @@ let fragment env (compiled : compiled) =
         ( List.map snd nested @ [ code.own ],
           "",
           Functions { nested = List.length nested; weight = code.weight } )
-    | Data data -> ([], data_c context data, Static_data)
-    | Table table -> ([], table_c context table, Table_entries table.capability)
+    | Data data -> ([], C_data.data_c context data, Static_data)
+    | Table table -> ([], C_data.table_c context table, Table_entries table.capability)
   in
   let types = List.rev context.order in
   let environments =
     List.filter_map
-      (fun key -> match key with Environment _ -> Some (key, define context key) | _ -> None)
+      (fun key ->
+        match key with C_types.Environment _ -> Some (key, C_types.define context key) | _ -> None)
       types
   in
   {
@@ -170,7 +168,7 @@ let fragment env (compiled : compiled) =
     kind;
     functions;
     definition;
-    types = List.filter (function Environment _ -> false | _ -> true) types;
+    types = List.filter (function C_types.Environment _ -> false | _ -> true) types;
     environments;
     prototypes = List.rev context.prototypes;
     statics =
@@ -188,16 +186,16 @@ let fragment env (compiled : compiled) =
   }
 
 let file env build (fragments : (fragment * linkage) list) =
-  let context = new_context env "" in
+  let context = C_types.new_context env "" in
   let local_types = Hashtbl.create 16 in
   List.iter
     (fun ((fragment : fragment), _) ->
-      List.iter (register context) fragment.types;
+      List.iter (C_types.register context) fragment.types;
       List.iter
-        (fun (key, (defined : defined)) ->
+        (fun (key, (defined : C_types.defined)) ->
           Hashtbl.replace local_types key defined;
-          register context key;
-          List.iter (register context) defined.references)
+          C_types.register context key;
+          List.iter (C_types.register context) defined.references)
         fragment.environments)
     fragments;
   let linkage_text = function Internal -> "static inline " | External -> "" in
@@ -235,26 +233,28 @@ let file env build (fragments : (fragment * linkage) list) =
           end)
         fragment.prototypes)
     fragments;
-  let definitions = ref Keys.empty in
+  let definitions = ref C_types.Keys.empty in
   let define_key key =
     match Hashtbl.find_opt local_types key with
     | Some defined -> defined
-    | None -> define context key
+    | None -> C_types.define context key
   in
   let rec close () =
     let pending =
-      List.filter (fun key -> not (Keys.mem key !definitions)) (List.rev context.order)
+      List.filter (fun key -> not (C_types.Keys.mem key !definitions)) (List.rev context.order)
     in
     if pending <> [] then begin
-      List.iter (fun key -> definitions := Keys.add key (define_key key) !definitions) pending;
+      List.iter
+        (fun key -> definitions := C_types.Keys.add key (define_key key) !definitions)
+        pending;
       close ()
     end
   in
   close ();
   let keys = List.rev context.order in
-  let defined key = Keys.find key !definitions in
+  let defined key = C_types.Keys.find key !definitions in
   let buffer = Buffer.create 4096 in
-  Buffer.add_string buffer runtime_declarations;
+  Buffer.add_string buffer C_runtime.runtime_declarations;
   Buffer.add_string buffer
     (match build with
     | Development -> "#define T_UNREACHABLE() t_runtime_compiler_bug()\n"
@@ -266,37 +266,38 @@ let file env build (fragments : (fragment * linkage) list) =
   in
   List.iter
     (fun (name, text) -> if List.mem name helpers_used then Buffer.add_string buffer text)
-    helpers;
+    C_runtime.helpers;
   List.iter
     (fun key ->
       match (defined key).definition with
       | Struct _ ->
           Buffer.add_string buffer
-            (Printf.sprintf "typedef struct %s %s;\n" (key_name key) (key_name key))
+            (Printf.sprintf "typedef struct %s %s;\n" (C_types.key_name key) (C_types.key_name key))
       | Typedef _ | Code_typedef _ -> ())
     keys;
-  let emitted = ref Keys.empty in
+  let emitted = ref C_types.Keys.empty in
   let rec emit_typedef key =
-    if not (Keys.mem key !emitted) then
+    if not (C_types.Keys.mem key !emitted) then
       match (defined key).definition with
       | Struct _ -> ()
       | (Typedef _ | Code_typedef _) as definition ->
-          emitted := Keys.add key () !emitted;
+          emitted := C_types.Keys.add key () !emitted;
           List.iter emit_typedef (defined key).references;
           Buffer.add_string buffer
             (match definition with
-            | Typedef c_type -> Printf.sprintf "typedef %s %s;\n" c_type (key_name key)
+            | Typedef c_type -> Printf.sprintf "typedef %s %s;\n" c_type (C_types.key_name key)
             | Code_typedef text -> text
             | Struct _ -> "")
   in
   List.iter emit_typedef keys;
   let rec emit key =
-    if not (Keys.mem key !emitted) then begin
-      emitted := Keys.add key () !emitted;
+    if not (C_types.Keys.mem key !emitted) then begin
+      emitted := C_types.Keys.add key () !emitted;
       match (defined key).definition with
       | Struct { body; holds } ->
           List.iter emit holds;
-          Buffer.add_string buffer (Printf.sprintf "struct %s {\n%s};\n" (key_name key) body)
+          Buffer.add_string buffer
+            (Printf.sprintf "struct %s {\n%s};\n" (C_types.key_name key) body)
       | Typedef _ | Code_typedef _ -> ()
     end
   in
@@ -305,7 +306,7 @@ let file env build (fragments : (fragment * linkage) list) =
     (fun key ->
       let layout =
         match key with
-        | Type ty -> Some (Memory_layout.of_type env ty)
+        | C_types.Type ty -> Some (Memory_layout.of_type env ty)
         | Block (ty, variant) -> Some (Memory_layout.block env ty variant)
         | Code _ | Environment _ | Evidence _ -> None
       in
@@ -313,13 +314,13 @@ let file env build (fragments : (fragment * linkage) list) =
         (fun (layout : Memory_layout.t) ->
           Buffer.add_string buffer
             (Printf.sprintf "_Static_assert(sizeof(%s) == %d && _Alignof(%s) == %d, \"layout\");\n"
-               (key_name key) layout.size (key_name key) layout.alignment))
+               (C_types.key_name key) layout.size (C_types.key_name key) layout.alignment))
         layout)
     keys;
   List.iter
     (fun site ->
       Buffer.add_string buffer
-        (Printf.sprintf "extern const struct t_site %s;\n" (site_symbol site)))
+        (Printf.sprintf "extern const struct t_site %s;\n" (C_runtime.site_symbol site)))
     (List.sort_uniq compare
        (List.concat_map (fun ((fragment : fragment), _) -> fragment.sites) fragments));
   Buffer.add_buffer buffer declarations;
@@ -347,10 +348,11 @@ let sites_file ~position:resolve fragments =
          (List.map (fun (_, (position : position)) -> position.file) positions))
   in
   String.concat ""
-    ((runtime_declarations :: List.map bytes_definition file_symbols)
+    ((C_runtime.runtime_declarations :: List.map bytes_definition file_symbols)
     @ List.map
         (fun (site, (position : position)) ->
-          Printf.sprintf "const struct t_site %s = { %s, %d, %d, %d };\n" (site_symbol site)
+          Printf.sprintf "const struct t_site %s = { %s, %d, %d, %d };\n"
+            (C_runtime.site_symbol site)
             (List.assoc position.file file_symbols)
             (String.length position.file) position.line position.column)
         positions)

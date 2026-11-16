@@ -26,10 +26,10 @@ val assume_valid : State.context -> State.frame -> Types.ty -> Logic.term -> uni
 val callback_arguments : State.context -> State.frame -> ('a * Types.ty) list -> Logic.term list
 
 val callback_contract_frame :
-  State.frame -> (State.Locals.key * 'a) list -> Logic.term list -> State.frame
+  State.frame -> (Locals.key * 'a) list -> Logic.term list -> State.frame
 
 val own_callback : State.context -> Core.local -> (string * Mir.callback) option
-val escaping_callback : State.context -> State.frame -> State.Locals.key -> unit
+val escaping_callback : State.context -> State.frame -> Locals.key -> unit
 val reading_callback : State.context -> (unit -> 'a) -> 'a
 
 val part_frame :
@@ -56,6 +56,6 @@ val check_forwarded_callback :
   Invocation.site ->
   Invocation.t ->
   State.passed ->
-  State.Locals.key ->
+  Locals.key ->
   State.passed list ->
   unit

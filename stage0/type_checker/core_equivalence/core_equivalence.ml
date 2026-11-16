@@ -1,7 +1,9 @@
-open Core
+type parameters = Core.parameter list * Core.parameter list
 
-type parameters = parameter list * parameter list
-type renaming = { forward : (local, local) Hashtbl.t; backward : (local, local) Hashtbl.t }
+type renaming = {
+  forward : (Core.local, Core.local) Hashtbl.t;
+  backward : (Core.local, Core.local) Hashtbl.t;
+}
 
 let corresponds renaming before after =
   match (Hashtbl.find_opt renaming.forward before, Hashtbl.find_opt renaming.backward after) with
@@ -19,7 +21,7 @@ let rename_parameters ((before, after) : parameters) =
   let renaming = { forward = Hashtbl.create 16; backward = Hashtbl.create 16 } in
   ignore (corresponds renaming Self Self);
   let rec pair = function
-    | (was : parameter) :: before, (now : parameter) :: after ->
+    | (was : Core.parameter) :: before, (now : Core.parameter) :: after ->
         ignore (corresponds renaming was.local now.local);
         pair (before, after)
     | _ -> ()
@@ -27,7 +29,7 @@ let rename_parameters ((before, after) : parameters) =
   pair (before, after);
   renaming
 
-let rec place renaming (before : place) (after : place) =
+let rec place renaming (before : Core.place) (after : Core.place) =
   match (before, after) with
   | Local { local; type_; origin = _ }, Local after ->
       corresponds renaming local after.local && Types.equal type_ after.type_
@@ -39,13 +41,13 @@ let rec place renaming (before : place) (after : place) =
   | Lent before, Lent after | Temporary before, Temporary after -> expression renaming before after
   | (Local _ | Constant _ | Field _ | Lent _ | Temporary _), _ -> false
 
-and operand renaming (before : operand) (after : operand) =
+and operand renaming (before : Core.operand) (after : Core.operand) =
   match (before, after) with
   | Place before, Place after -> place renaming before after
   | Value before, Value after -> expression renaming before after
   | (Place _ | Value _), _ -> false
 
-and callee renaming (before : callee) (after : callee) =
+and callee renaming (before : Core.callee) (after : Core.callee) =
   match (before, after) with
   | Function { path; type_arguments }, Function after ->
       Path.equal path after.path && type_arguments = after.type_arguments
@@ -62,23 +64,23 @@ and callee renaming (before : callee) (after : callee) =
   | Indirect before, Indirect after -> operand renaming before after
   | (Function _ | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _), _ -> false
 
-and call renaming ({ callee = called; arguments; lends; uses } : call) (after : call) =
+and call renaming ({ callee = called; arguments; lends; uses } : Core.call) (after : Core.call) =
   callee renaming called after.callee
   && List.equal (argument renaming) arguments after.arguments
   && lends = after.lends && uses = after.uses
 
-and argument renaming (before : argument) (after : argument) =
+and argument renaming (before : Core.argument) (after : Core.argument) =
   match (before, after) with
   | Passed { mode; value; mode_keyword = _ }, Passed after ->
       mode = after.mode && operand renaming value after.value
   | Default, Default -> true
   | (Passed _ | Default), _ -> false
 
-and expression renaming ({ id = _; origin = _; type_; kind = form } : expression)
-    (after : expression) =
+and expression renaming ({ id = _; origin = _; type_; kind = form } : Core.expression)
+    (after : Core.expression) =
   Types.equal type_ after.type_ && kind renaming form after.kind
 
-and kind renaming (before : kind) (after : kind) =
+and kind renaming (before : Core.kind) (after : Core.kind) =
   match (before, after) with
   | Integer before, Integer after -> Z.equal before after
   | Float before, Float after -> Float.equal before after
@@ -175,10 +177,10 @@ and kind renaming (before : kind) (after : kind) =
       _ ) ->
       false
 
-and capture renaming ({ local; type_ } : capture) (after : capture) =
+and capture renaming ({ local; type_ } : Core.capture) (after : Core.capture) =
   corresponds renaming local after.local && Types.equal type_ after.type_
 
-and binder renaming (before : binder) (after : binder) =
+and binder renaming (before : Core.binder) (after : Core.binder) =
   match (before, after) with
   | Over_type { local; name = _; type_ }, Over_type after ->
       corresponds renaming local after.local && Types.equal type_ after.type_
@@ -193,22 +195,23 @@ and binder renaming (before : binder) (after : binder) =
       pattern renaming bound after.pattern && elements renaming counted after.elements
   | (Over_type _ | Over_range _ | Over_collection _ | Over_elements _), _ -> false
 
-and elements renaming ({ count; position; element } : elements) (after : elements) =
+and elements renaming ({ count; position; element } : Core.elements) (after : Core.elements) =
   expression renaming count after.count
   && pattern renaming position after.position
   && place renaming element after.element
 
-and implementation renaming ({ origin = _; mode; value; type_; provides } : implementation)
-    (after : implementation) =
+and implementation renaming ({ origin = _; mode; value; type_; provides } : Core.implementation)
+    (after : Core.implementation) =
   mode = after.mode
   && operand renaming value after.value
   && Types.equal type_ after.type_ && provides = after.provides
 
-and block renaming ({ statements; value } : block) (after : block) =
+and block renaming ({ statements; value } : Core.block) (after : Core.block) =
   List.equal (statement renaming) statements after.statements
   && Option.equal (expression renaming) value after.value
 
-and statement renaming ({ id = _; origin = _; kind = form } : statement) (after : statement) =
+and statement renaming ({ id = _; origin = _; kind = form } : Core.statement)
+    (after : Core.statement) =
   match (form, after.kind) with
   | Let { pattern = bound; value; else_ }, Let after ->
       operand renaming value after.value
@@ -243,7 +246,7 @@ and statement renaming ({ id = _; origin = _; kind = form } : statement) (after 
       _ ) ->
       false
 
-and iteration renaming (before : iteration) (after : iteration) =
+and iteration renaming (before : Core.iteration) (after : Core.iteration) =
   match (before, after) with
   | Integer_range { start; stop; inclusive }, Integer_range after ->
       expression renaming start after.start
@@ -254,26 +257,26 @@ and iteration renaming (before : iteration) (after : iteration) =
       place renaming cursor after.cursor && callee renaming next after.next
   | (Integer_range _ | Elements _ | Cursor _), _ -> false
 
-and loop_clause renaming (before : loop_clause) (after : loop_clause) =
+and loop_clause renaming (before : Core.loop_clause) (after : Core.loop_clause) =
   match (before, after) with
   | Invariant before, Invariant after -> expression renaming before after
   | Decreases before, Decreases after -> List.equal (expression renaming) before after
   | Cost before, Cost after -> cost renaming before after
   | (Invariant _ | Decreases _ | Cost _), _ -> false
 
-and cost renaming ({ origin = _; amortized; resource = spent; bound = limit } : cost) (after : cost)
-    =
+and cost renaming ({ origin = _; amortized; resource = spent; bound = limit } : Core.cost)
+    (after : Core.cost) =
   Bool.equal amortized after.amortized
   && resource renaming spent after.resource
   && bound renaming limit after.bound
 
-and resource renaming (before : resource) (after : resource) =
+and resource renaming (before : Core.resource) (after : Core.resource) =
   match (before, after) with
   | Time, Time | Allocations, Allocations | Allocated_bytes, Allocated_bytes -> true
   | Calls before, Calls after -> calls_target renaming before after
   | (Time | Allocations | Allocated_bytes | Calls _), _ -> false
 
-and calls_target renaming (before : calls_target) (after : calls_target) =
+and calls_target renaming (before : Core.calls_target) (after : Core.calls_target) =
   match (before, after) with
   | Function_parameter before, Function_parameter after -> corresponds renaming before after
   | Capability before, Capability after -> Path.equal before after
@@ -281,7 +284,7 @@ and calls_target renaming (before : calls_target) (after : calls_target) =
       Path.equal capability after_capability && String.equal name after_name
   | (Function_parameter _ | Capability _ | Capability_method _), _ -> false
 
-and bound renaming (before : bound) (after : bound) =
+and bound renaming (before : Core.bound) (after : Core.bound) =
   match (before, after) with
   | Finite, Finite -> true
   | Order_of before, Order_of after | At_most before, At_most after | Exactly before, Exactly after
@@ -289,15 +292,16 @@ and bound renaming (before : bound) (after : bound) =
       expression renaming before after
   | (Finite | Order_of _ | At_most _ | Exactly _), _ -> false
 
-and condition renaming ({ value; executable } : condition) (after : condition) =
+and condition renaming ({ value; executable } : Core.condition) (after : Core.condition) =
   expression renaming value after.value && Bool.equal executable after.executable
 
-and arm renaming ({ patterns; guard; body; origin = _ } : arm) (after : arm) =
+and arm renaming ({ patterns; guard; body; origin = _ } : Core.arm) (after : Core.arm) =
   List.equal (pattern renaming) patterns after.patterns
   && Option.equal (expression renaming) guard after.guard
   && block renaming body after.body
 
-and pattern renaming ({ id = _; origin = _; type_; kind = form } : pattern) (after : pattern) =
+and pattern renaming ({ id = _; origin = _; type_; kind = form } : Core.pattern)
+    (after : Core.pattern) =
   Types.equal type_ after.type_
   &&
   match (form, after.kind) with
@@ -321,7 +325,7 @@ and pattern renaming ({ id = _; origin = _; type_; kind = form } : pattern) (aft
 and field_pattern renaming (name, bound) (after_name, after_bound) =
   String.equal name after_name && pattern renaming bound after_bound
 
-and pattern_constant (before : pattern_constant) (after : pattern_constant) =
+and pattern_constant (before : Core.pattern_constant) (after : Core.pattern_constant) =
   match (before, after) with
   | Boolean_constant before, Boolean_constant after -> Bool.equal before after
   | Integer_constant before, Integer_constant after -> Z.equal before after
@@ -329,22 +333,22 @@ and pattern_constant (before : pattern_constant) (after : pattern_constant) =
   | Named_constant before, Named_constant after -> Path.equal before after
   | (Boolean_constant _ | Integer_constant _ | String_constant _ | Named_constant _), _ -> false
 
-and range_bound (before : range_bound) (after : range_bound) =
+and range_bound (before : Core.range_bound) (after : Core.range_bound) =
   match (before, after) with
   | Integer_bound before, Integer_bound after -> Z.equal before after
   | Constant_bound before, Constant_bound after -> Path.equal before after
   | (Integer_bound _ | Constant_bound _), _ -> false
 
-let callback_contract renaming ({ inputs; requires } : callback_contract)
-    (after : callback_contract) =
+let callback_contract renaming ({ inputs; requires } : Core.callback_contract)
+    (after : Core.callback_contract) =
   List.equal
     (fun (local, _) (after_local, _) -> corresponds renaming local after_local)
     inputs after.inputs
   && List.equal (expression renaming) requires after.requires
 
 let parameter renaming
-    ({ local; name; mode; type_; default; callback_contract = contract } : parameter)
-    (after : parameter) =
+    ({ local; name; mode; type_; default; callback_contract = contract } : Core.parameter)
+    (after : Core.parameter) =
   corresponds renaming local after.local
   && String.equal name after.name && mode = after.mode && Types.equal type_ after.type_
   && Option.equal (expression renaming) default after.default
@@ -357,7 +361,7 @@ let equal_expression ~parameters before after =
 
 let equal_cost ~parameters before after = cost (rename_parameters parameters) before after
 
-let equal_law ({ name; parameters; requires; body } : law) (after : law) =
+let equal_law ({ name; parameters; requires; body } : Core.law) (after : Core.law) =
   let renaming = rename_parameters ([], []) in
   let is_still_required was =
     List.exists (fun now -> expression (copy renaming) was now) after.requires

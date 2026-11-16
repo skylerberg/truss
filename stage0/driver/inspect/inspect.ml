@@ -1,5 +1,4 @@
 module References = References
-open Syntax
 
 let at table id = if id < Array.length table then table.(id) else None
 
@@ -15,12 +14,16 @@ let local_type (tables : Infer.tables) id =
 let from_tables (tables : Infer.tables option) show id =
   match tables with Some tables -> show tables id | None -> "an unknown type"
 
-type unfinished = { keyword : [ `Todo | `Echo ]; id : id option; span : Source.Definition_span.t }
+type unfinished = {
+  keyword : [ `Todo | `Echo ];
+  id : Syntax.id option;
+  span : Source.Definition_span.t;
+}
 
-let unfinished (spans : Source.Definition_span.t array) (definition : definition) =
+let unfinished (spans : Source.Definition_span.t array) (definition : Syntax.definition) =
   let found = ref [] in
   let add keyword id (span : Source.Definition_span.t) = found := { keyword; id; span } :: !found in
-  let rec visit (value : expression) =
+  let rec visit (value : Syntax.expression) =
     (match value.kind with
     | Todo -> add `Todo (Some value.id) spans.(value.id)
     | Echo _ -> add `Echo (Some value.id) spans.(value.id)
@@ -86,7 +89,7 @@ let describe_target (target : Resolve.target) =
   | Specification_function _ -> ("a specification function", None)
   | Unknown _ -> ("nothing: the name is not known", None)
 
-let resolved_meaning (resolved : Resolve.resolved) (name : name) =
+let resolved_meaning (resolved : Resolve.resolved) (name : Syntax.name) =
   match at resolved.names name.id with
   | Some target ->
       let meaning, refers_to = describe_target target in
@@ -99,8 +102,8 @@ let contains (span : Source.Definition_span.t) offset = span.start <= offset && 
 let known_type (tables : Infer.tables) id =
   Option.map (fun _ -> show_type tables id) (at tables.types id)
 
-let explain_name ~(path : Path.t) (definition : definition) (resolved : Resolve.resolved)
-    (tables : Infer.tables option) (name : name) =
+let explain_name ~(path : Path.t) (definition : Syntax.definition) (resolved : Resolve.resolved)
+    (tables : Infer.tables option) (name : Syntax.name) =
   let is_declared =
     match References.declared_name definition with
     | Some declared -> declared.id = name.id
@@ -115,11 +118,11 @@ let explain_name ~(path : Path.t) (definition : definition) (resolved : Resolve.
   in
   { text = name.text; meaning; refers_to; type_ }
 
-let explain_at ~path (spans : Source.Definition_span.t array) (definition : definition)
+let explain_at ~path (spans : Source.Definition_span.t array) (definition : Syntax.definition)
     (resolved : Resolve.resolved) (tables : Infer.tables option) ~text offset =
   let innermost = ref None in
   let calls = Hashtbl.create 8 in
-  let rec visit (value : expression) =
+  let rec visit (value : Syntax.expression) =
     if contains spans.(value.id) offset then begin
       (match value.kind with
       | Call (({ kind = Member _; _ } as callee), _) -> Hashtbl.replace calls callee.id value.id
@@ -133,13 +136,13 @@ let explain_at ~path (spans : Source.Definition_span.t array) (definition : defi
   Syntax_walk.definition visit definition;
   let name_at =
     List.find_opt
-      (fun (name : name) -> contains spans.(name.id) offset)
+      (fun (name : Syntax.name) -> contains spans.(name.id) offset)
       (Syntax_walk.collect_names spans definition)
   in
-  let is_written_in (value : expression) (name : name) =
+  let is_written_in (value : Syntax.expression) (name : Syntax.name) =
     match value.kind with
     | Name written ->
-        List.exists (fun (part : name) -> part.id = name.id) (written.last :: written.modules)
+        List.exists (fun (part : Syntax.name) -> part.id = name.id) (written.last :: written.modules)
     | Member (_, member) -> member.id = name.id
     | _ -> false
   in

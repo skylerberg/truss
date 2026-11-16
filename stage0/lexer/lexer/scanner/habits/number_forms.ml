@@ -1,5 +1,3 @@
-open Cursor
-
 let suffixes =
   [
     ("u8", Some "UInt8");
@@ -229,20 +227,21 @@ and check text = match foreign text with Some checked -> checked | None -> Numbe
 let trailing_point cursor ~start ~stop (checked : Numbers.checked) =
   match checked with
   | { value = Integer _; problem = None; _ }
-    when is_at cursor stop '.' && not (is_radix (String.sub cursor.text start (stop - start))) -> (
+    when Cursor.is_at cursor stop '.'
+         && not (is_radix (String.sub cursor.text start (stop - start))) -> (
       match check (String.sub cursor.text start (stop + 1 - start) ^ "0") with
       | { value = Float _ as value; problem = None; _ } -> Some value
       | _ -> None)
   | _ -> None
 
-let report_trailing_point cursor ~start ~point =
+let report_trailing_point (cursor : Cursor.t) ~start ~point =
   let written = String.sub cursor.text start (point + 1 - start) in
-  report cursor ~code:Number_missing_digits
-    ~fixes:(code_fixes cursor (span start (point + 1)) [ written ^ "0" ])
-    (span point (point + 1))
+  Cursor.report cursor ~code:Number_missing_digits
+    ~fixes:(Cursor.code_fixes cursor (Cursor.span start (point + 1)) [ written ^ "0" ])
+    (Cursor.span point (point + 1))
     (Printf.sprintf "A float has a digit after its `.`: `%s0`." written)
 
-let leading_dot cursor =
+let leading_dot (cursor : Cursor.t) =
   let start = cursor.position in
   let stop = scan_end cursor.text (start + 1) in
   let written = String.sub cursor.text start (stop - start) in
@@ -254,10 +253,12 @@ let leading_dot cursor =
       let fixes, message =
         match checked.problem with
         | None ->
-            ( code_fixes cursor (span start stop) [ fixed ],
+            ( Cursor.code_fixes cursor (Cursor.span start stop) [ fixed ],
               Printf.sprintf "A float has a digit before its `.`: `%s`." fixed )
         | Some _ -> ([], "A float has a digit before its `.`.")
       in
-      report cursor ~code:Number_missing_digits ~fixes (span start (start + 1)) message;
+      Cursor.report cursor ~code:Number_missing_digits ~fixes
+        (Cursor.span start (start + 1))
+        message;
       Some checked.value
   | _ -> None

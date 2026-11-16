@@ -1,14 +1,10 @@
-open Syntax
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Elaborator = Interface.Elaborator
-open State
-open Statements
-open Expressions
 
 type checked = { form : Core.t; tables : Tables.published; evidence_packages : Path.package list }
 
-let no_output : env =
+let no_output : State.env =
   {
     output = None;
     specification = false;
@@ -19,46 +15,48 @@ let no_output : env =
     in_quantifier = false;
   }
 
-let constant_expression : env = { no_output with compile_time = true }
+let constant_expression : State.env = { no_output with compile_time = true }
 
-let body state env (written : block) =
+let body state (env : State.env) (written : Syntax.block) =
   let rec check_statements = function
     | [] -> (
         match env.output with
         | Some (Returns output) ->
-            if not (unify state output Types.unit) then
-              report state Mismatch
-                (Source.Definition_span.make (read_span state written.id).stop
-                   (read_span state written.id).stop)
-                (Printf.sprintf "This body must end with a value of type `%s`." (show state output))
+            if not (State.unify state output Types.unit) then
+              State.report state Mismatch
+                (Source.Definition_span.make (State.read_span state written.id).stop
+                   (State.read_span state written.id).stop)
+                (Printf.sprintf "This body must end with a value of type `%s`."
+                   (State.show state output))
         | _ -> ())
-    | [ (last : statement) ] ->
-        in_statement state env (read_span state last.id) (fun () ->
+    | [ (last : Syntax.statement) ] ->
+        State.in_statement state env (State.read_span state last.id) (fun () ->
             match (last.kind, env.output) with
-            | Expression _, Some (Returns output) when resolve state output = Types.unit ->
-                statement state env last ~last:false
-            | Expression value, Some (Returns output) -> check state env value output
+            | Expression _, Some (Returns output) when State.resolve state output = Types.unit ->
+                Statements.statement state env last ~last:false
+            | Expression value, Some (Returns output) -> Expressions.check state env value output
             | Expression value, Some (Lends (_, part)) ->
-                mark_lent_tails state value;
-                check state env value part
+                State.mark_lent_tails state value;
+                Expressions.check state env value part
             | _, Some (Returns output) ->
-                statement state env last ~last:true;
-                if not (statement_diverges state last || unify state output Types.unit) then
-                  report state Mismatch (read_span state last.id)
+                Statements.statement state env last ~last:true;
+                if not (State.statement_diverges state last || State.unify state output Types.unit)
+                then
+                  State.report state Mismatch (State.read_span state last.id)
                     (Printf.sprintf "This body must end with a value of type `%s`."
-                       (show state output))
-            | _ -> statement state env last ~last:false)
-    | (first : statement) :: rest ->
-        in_statement state env (read_span state first.id) (fun () ->
-            statement state env first ~last:false);
+                       (State.show state output))
+            | _ -> Statements.statement state env last ~last:false)
+    | (first : Syntax.statement) :: rest ->
+        State.in_statement state env (State.read_span state first.id) (fun () ->
+            Statements.statement state env first ~last:false);
         check_statements rest
   in
-  in_statement state env (read_span state written.id) (fun () ->
+  State.in_statement state env (State.read_span state written.id) (fun () ->
       check_statements written.statements)
 
-let declare_parameters state (written : parameter list) (signature : Types.signature) =
+let declare_parameters state (written : Syntax.parameter list) (signature : Types.signature) =
   List.iter
-    (fun (parameter : parameter) ->
+    (fun (parameter : Syntax.parameter) ->
       match parameter.kind with
       | Named_parameter { name; _ } -> (
           match
@@ -66,7 +64,7 @@ let declare_parameters state (written : parameter list) (signature : Types.signa
               (fun (info : Types.parameter_info) -> info.name = name.text)
               signature.parameters
           with
-          | Some info -> declare state name info.type_ ~is_var:false ~mode:info.mode
+          | Some info -> State.declare state name info.type_ ~is_var:false ~mode:info.mode
           | None -> ())
       | Self_parameter _ | Parameter_error -> ())
     written
@@ -77,9 +75,9 @@ let self_mode (signature : Types.signature) =
   | Some (Own, _) -> Types.Own
   | _ -> Types.Read
 
-let clause_expressions (clauses : clause list) =
+let clause_expressions (clauses : Syntax.clause list) =
   List.concat_map
-    (fun (clause : clause) ->
+    (fun (clause : Syntax.clause) ->
       match clause.kind with
       | Requires value | Ensures value -> [ (value, `Bool) ]
       | Decreases measures -> List.map (fun measure -> (measure, `Cost_function)) measures
@@ -88,28 +86,29 @@ let clause_expressions (clauses : clause list) =
       | Cost { bound = Finite; _ } | Uses _ | Clause_error -> [])
     clauses
 
-let check_clauses state env (clauses : clause list) =
-  let env = { env with specification = true } in
+let check_clauses state env (clauses : Syntax.clause list) =
+  let env = { env with State.specification = true } in
   List.iter
-    (fun (clause : clause) ->
-      match clause.kind with Cost { resource; _ } -> check_resource state resource | _ -> ())
+    (fun (clause : Syntax.clause) ->
+      match clause.kind with Cost { resource; _ } -> State.check_resource state resource | _ -> ())
     clauses;
   List.iter
-    (fun ((value : expression), kind) ->
-      in_statement state env (read_span state value.id) (fun () ->
+    (fun ((value : Syntax.expression), kind) ->
+      State.in_statement state env (State.read_span state value.id) (fun () ->
           match kind with
-          | `Bool -> check state env value Types.bool
-          | `Cost_function -> ignore (expression state env value)))
+          | `Bool -> Expressions.check state env value Types.bool
+          | `Cost_function -> ignore (Expressions.expression state env value)))
     (clause_expressions clauses)
 
-let check_function_type_requires state env (written : parameter list) (signature : Types.signature)
-    =
-  let env = { env with specification = true } in
+let check_function_type_requires state env (written : Syntax.parameter list)
+    (signature : Types.signature) =
+  let env = { env with State.specification = true } in
   List.iter
-    (fun (parameter : parameter) ->
+    (fun (parameter : Syntax.parameter) ->
       match parameter.kind with
       | Named_parameter { name; type_ = { kind = Function_type { inputs; clauses; _ }; _ }; _ }
-        when List.exists (fun (input : function_input) -> Option.is_some input.name) inputs -> (
+        when List.exists (fun (input : Syntax.function_input) -> Option.is_some input.name) inputs
+        -> (
           match
             List.find_opt
               (fun (info : Types.parameter_info) -> info.name = name.text)
@@ -117,26 +116,26 @@ let check_function_type_requires state env (written : parameter list) (signature
           with
           | Some { type_ = Types.Function elaborated; _ } ->
               List.iter2
-                (fun (input : function_input) (mode, type_) ->
+                (fun (input : Syntax.function_input) (mode, type_) ->
                   Option.iter
-                    (fun input_name -> declare state input_name type_ ~is_var:false ~mode)
+                    (fun input_name -> State.declare state input_name type_ ~is_var:false ~mode)
                     input.name)
                 inputs elaborated.inputs;
               List.iter
-                (fun (clause : clause) ->
+                (fun (clause : Syntax.clause) ->
                   match clause.kind with
                   | Requires value ->
-                      in_statement state env (read_span state value.id) (fun () ->
-                          check state env value Types.bool)
+                      State.in_statement state env (State.read_span state value.id) (fun () ->
+                          Expressions.check state env value Types.bool)
                   | _ -> ())
                 clauses
           | _ -> ())
       | _ -> ())
     written
 
-let check_defaults state env (written : parameter list) (signature : Types.signature) =
+let check_defaults state env (written : Syntax.parameter list) (signature : Types.signature) =
   List.iter
-    (fun (parameter : parameter) ->
+    (fun (parameter : Syntax.parameter) ->
       match parameter.kind with
       | Named_parameter { name; default = Some value; _ } -> (
           match
@@ -145,8 +144,8 @@ let check_defaults state env (written : parameter list) (signature : Types.signa
               signature.parameters
           with
           | Some info ->
-              in_statement state env (read_span state value.id) (fun () ->
-                  let actual = expression state env ~expected:info.type_ value in
+              State.in_statement state env (State.read_span state value.id) (fun () ->
+                  let actual = Expressions.expression state env ~expected:info.type_ value in
                   Name_lookup.coerce state env ~argument:info.mode value ~actual
                     ~expected:info.type_);
               Constant.check state ~default:true value
@@ -154,18 +153,22 @@ let check_defaults state env (written : parameter list) (signature : Types.signa
       | _ -> ())
     written
 
-let core_contract state (clauses : clause list) : Core.contract =
-  let each choose = List.concat_map (fun (clause : clause) -> choose clause.kind) clauses in
+let core_contract state (clauses : Syntax.clause list) : Core.contract =
+  let each choose = List.concat_map (fun (clause : Syntax.clause) -> choose clause.kind) clauses in
   let requires =
     each (function
       | Requires value ->
-          let value = build_expression state value in
+          let value = State.build_expression state value in
           [ { Core.value; executable = Form.is_executable state value } ]
       | _ -> [])
   in
-  let ensures = each (function Ensures value -> [ build_expression state value ] | _ -> []) in
+  let ensures =
+    each (function Ensures value -> [ State.build_expression state value ] | _ -> [])
+  in
   let decreases =
-    each (function Decreases measures -> List.map (build_expression state) measures | _ -> [])
+    each (function
+      | Decreases measures -> List.map (State.build_expression state) measures
+      | _ -> [])
   in
   {
     requires;
@@ -173,17 +176,17 @@ let core_contract state (clauses : clause list) : Core.contract =
     decreases;
     costs =
       List.filter_map
-        (fun (clause : clause) ->
+        (fun (clause : Syntax.clause) ->
           match clause.kind with
           | Cost cost -> Some (Form.build_cost state ~origin:clause.id cost)
           | _ -> None)
         clauses;
   }
 
-let core_parameters state (written : parameter list) (signature : Types.signature) :
+let core_parameters state (written : Syntax.parameter list) (signature : Types.signature) :
     Core.parameter list =
   List.filter_map
-    (fun (parameter : parameter) : Core.parameter option ->
+    (fun (parameter : Syntax.parameter) : Core.parameter option ->
       match parameter.kind with
       | Self_parameter _ ->
           Option.map
@@ -200,7 +203,7 @@ let core_parameters state (written : parameter list) (signature : Types.signatur
       | Named_parameter { name; default; type_; _ } ->
           Option.map
             (fun (info : Types.parameter_info) : Core.parameter ->
-              let default = Option.map (build_expression state) default in
+              let default = Option.map (State.build_expression state) default in
               {
                 local = Named name.id;
                 name = name.text;
@@ -211,23 +214,23 @@ let core_parameters state (written : parameter list) (signature : Types.signatur
                   (match type_.kind with
                   | Function_type { inputs = _ :: _ as inputs; clauses; _ }
                     when List.for_all
-                           (fun (input : function_input) -> Option.is_some input.name)
+                           (fun (input : Syntax.function_input) -> Option.is_some input.name)
                            inputs ->
                       Some
                         {
                           inputs =
                             List.filter_map
-                              (fun (input : function_input) ->
+                              (fun (input : Syntax.function_input) ->
                                 Option.map
-                                  (fun (input_name : name) : (Core.local * string) ->
+                                  (fun (input_name : Syntax.name) : (Core.local * string) ->
                                     (Named input_name.id, input_name.text))
                                   input.name)
                               inputs;
                           requires =
                             List.filter_map
-                              (fun (clause : clause) ->
+                              (fun (clause : Syntax.clause) ->
                                 match clause.kind with
-                                | Requires value -> Some (build_expression state value)
+                                | Requires value -> Some (State.build_expression state value)
                                 | _ -> None)
                               clauses;
                         }
@@ -239,9 +242,9 @@ let core_parameters state (written : parameter list) (signature : Types.signatur
       | Parameter_error -> None)
     written
 
-let check_function state ~broken_body (written : signature) (body_block : block option)
-    (signature : Types.signature) =
-  let env : env =
+let check_function state ~broken_body (written : Syntax.signature)
+    (body_block : Syntax.block option) (signature : Types.signature) =
+  let env : State.env =
     {
       output = Some signature.output;
       specification = signature.specification_only;
@@ -263,7 +266,7 @@ let check_function state ~broken_body (written : signature) (body_block : block 
       (fun ~holds_body ->
         let parameters = core_parameters state written.parameters signature in
         let contract = core_contract state written.clauses in
-        let body = if holds_body then Option.map (build_block state) body_block else None in
+        let body = if holds_body then Option.map (State.build_block state) body_block else None in
         let body =
           match signature.output with
           | Lends (mode, _) -> Option.map (Form.lend_block state mode) body
@@ -280,15 +283,16 @@ let check_deserialized_invariants state (elaborated : Environment.elaborated_int
       List.iter
         (fun (invariant : Core.condition) ->
           if not invariant.executable then
-            report state Cannot_derive
-              (read_span state invariant.value.origin)
+            State.report state Cannot_derive
+              (State.read_span state invariant.value.origin)
               "This invariant cannot be checked at run time, so `serialization::Deserialize` \
                cannot be derived: a value read from data might break it. Write the `impl`, which \
                checks the value another way.")
         invariants
   | _ -> ()
 
-let check_definition state (elaborated : Environment.elaborated_interface) ~checks_body =
+let check_definition (state : State.state) (elaborated : Environment.elaborated_interface)
+    ~checks_body =
   let definition = state.definition in
   let broken (part : Resolve.Parts.part) =
     Names.is_broken state.lookups.interface.names state.key part || (part = Body && not checks_body)
@@ -307,21 +311,21 @@ let check_definition state (elaborated : Environment.elaborated_interface) ~chec
               arguments = Types.list_generic_arguments interface.type_generics;
             }
         in
-        let env : env = { no_output with specification = true; self = Some self } in
+        let env : State.env = { no_output with specification = true; self = Some self } in
         List.iter
-          (fun (clause : type_clause) ->
+          (fun (clause : Syntax.type_clause) ->
             match clause.kind with
             | Type_invariant value ->
-                in_statement state env (read_span state value.id) (fun () ->
-                    check state env value Types.bool)
+                State.in_statement state env (State.read_span state value.id) (fun () ->
+                    Expressions.check state env value Types.bool)
             | Potential value ->
-                in_statement state env (read_span state value.id) (fun () ->
-                    ignore (expression state env value))
+                State.in_statement state env (State.read_span state value.id) (fun () ->
+                    ignore (Expressions.expression state env value))
             | Derives _ -> ())
           clauses;
-        let defaulted variant (fields : field list) =
+        let defaulted variant (fields : Syntax.field list) =
           List.filter_map
-            (fun (field : field) ->
+            (fun (field : Syntax.field) ->
               match field.kind with
               | Field_declaration { name; default = Some value; _ } ->
                   Some (variant, name.text, value)
@@ -333,19 +337,20 @@ let check_definition state (elaborated : Environment.elaborated_interface) ~chec
             (fun ~holds_body:_ ->
               let defaults =
                 List.map
-                  (fun (variant, name, value) -> (variant, name, build_expression state value))
+                  (fun (variant, name, value) ->
+                    (variant, name, State.build_expression state value))
                   (match type_body with
                   | Fields fields -> defaulted None fields
                   | Variants variants ->
                       List.concat_map
-                        (fun (variant : variant) ->
+                        (fun (variant : Syntax.variant) ->
                           defaulted (Some variant.name.text)
                             (Option.value ~default:[] variant.fields))
                         variants
                   | Type_todo -> [])
               in
               let clause choose =
-                List.filter_map (fun (clause : type_clause) -> choose clause.kind) clauses
+                List.filter_map (fun (clause : Syntax.type_clause) -> choose clause.kind) clauses
               in
               Type
                 {
@@ -353,21 +358,21 @@ let check_definition state (elaborated : Environment.elaborated_interface) ~chec
                   invariants =
                     clause (function
                       | Type_invariant value ->
-                          let value = build_expression state value in
+                          let value = State.build_expression state value in
                           Some { Core.value; executable = Form.is_executable state value }
                       | _ -> None);
                   potential =
                     (match
                        clause (function
-                         | Potential value -> Some (build_expression state value)
+                         | Potential value -> Some (State.build_expression state value)
                          | _ -> None)
                      with
                     | first :: _ -> Some first
                     | [] -> None);
                 });
-        let defaults (fields : field list) (lowered_fields : Types.field list) =
+        let defaults (fields : Syntax.field list) (lowered_fields : Types.field list) =
           List.iter
-            (fun (field : field) ->
+            (fun (field : Syntax.field) ->
               match field.kind with
               | Field_declaration { name; default = Some value; _ } -> (
                   match
@@ -376,8 +381,9 @@ let check_definition state (elaborated : Environment.elaborated_interface) ~chec
                       lowered_fields
                   with
                   | Some elaborated ->
-                      in_statement state constant_expression (read_span state value.id) (fun () ->
-                          check state constant_expression value elaborated.field_type);
+                      State.in_statement state constant_expression (State.read_span state value.id)
+                        (fun () ->
+                          Expressions.check state constant_expression value elaborated.field_type);
                       Constant.check state ~default:true value
                   | None -> ())
               | _ -> ())
@@ -387,7 +393,7 @@ let check_definition state (elaborated : Environment.elaborated_interface) ~chec
         | Fields fields, Record lowered_fields -> defaults fields lowered_fields
         | Variants variants, Sum lowered_variants ->
             List.iter
-              (fun (variant : variant) ->
+              (fun (variant : Syntax.variant) ->
                 match
                   ( variant.fields,
                     List.find_opt
@@ -408,13 +414,13 @@ let check_definition state (elaborated : Environment.elaborated_interface) ~chec
               Trait
                 (List.concat
                    (List.mapi
-                      (fun index (line : trait_member node) ->
+                      (fun index (line : Syntax.trait_member Syntax.node) ->
                         match line.kind with
                         | Law law
                           when not (broken (Member_header index) || broken (Member_body index)) ->
                             let parameters =
                               List.filter_map
-                                (fun (parameter : parameter) : Core.parameter option ->
+                                (fun (parameter : Syntax.parameter) : Core.parameter option ->
                                   match parameter.kind with
                                   | Named_parameter { name; _ } ->
                                       Some
@@ -429,36 +435,36 @@ let check_definition state (elaborated : Environment.elaborated_interface) ~chec
                                   | _ -> None)
                                 law.parameters
                             in
-                            let requires = List.map (build_expression state) law.requires in
+                            let requires = List.map (State.build_expression state) law.requires in
                             [
                               {
                                 Core.name = law.name.text;
                                 parameters;
                                 requires;
-                                body = build_block state law.body;
+                                body = State.build_block state law.body;
                               };
                             ]
                         | _ -> [])
                       members)));
         List.iteri
-          (fun index (line : trait_member node) ->
+          (fun index (line : Syntax.trait_member Syntax.node) ->
             if not (broken (Member_header index)) then
               match line.kind with
               | Law law ->
-                  let env : env = { no_output with specification = true; self = Some self } in
+                  let env : State.env = { no_output with specification = true; self = Some self } in
                   List.iter
-                    (fun (parameter : parameter) ->
+                    (fun (parameter : Syntax.parameter) ->
                       match parameter.kind with
                       | Named_parameter { name; type_; _ } ->
-                          declare state name
+                          State.declare state name
                             (Elaborator.elaborate_type state.context type_)
                             ~is_var:false ~mode:Types.Read
                       | _ -> ())
                     law.parameters;
                   List.iter
-                    (fun (requirement : expression) ->
-                      in_statement state env (read_span state requirement.id) (fun () ->
-                          check state env requirement Types.bool))
+                    (fun (requirement : Syntax.expression) ->
+                      State.in_statement state env (State.read_span state requirement.id) (fun () ->
+                          Expressions.check state env requirement Types.bool))
                     law.requires;
                   if not (broken (Member_body index)) then
                     body state { env with output = Some (Returns Types.bool) } law.body
@@ -468,7 +474,7 @@ let check_definition state (elaborated : Environment.elaborated_interface) ~chec
         state.form.definition_builder <-
           Some
             (fun ~holds_body ->
-              Constant (if holds_body then Some (build_expression state value) else None));
+              Constant (if holds_body then Some (State.build_expression state value) else None));
         if not (broken Body) then begin
           let env =
             {
@@ -477,20 +483,20 @@ let check_definition state (elaborated : Environment.elaborated_interface) ~chec
                 Option.is_some (Types.find_specification_only_type constant.constant_type);
             }
           in
-          in_statement state env (read_span state value.id) (fun () ->
-              check state env value constant.constant_type);
+          State.in_statement state env (State.read_span state value.id) (fun () ->
+              Expressions.check state env value constant.constant_type);
           Constant.check state ~default:false value
         end
     | Test { body = written; _ }, _ ->
         state.form.definition_builder <-
           Some
             (fun ~holds_body ->
-              Test (if holds_body then Some (build_block state written) else None));
+              Test (if holds_body then Some (State.build_block state written) else None));
         if not (broken Body) then
           body state { no_output with output = Some (Returns Types.unit) } written
     | Theorem { parameters; clauses; body = written; _ }, Theorem_interface signature ->
         declare_parameters state parameters signature;
-        let env : env =
+        let env : State.env =
           { no_output with specification = true; output = Some (Returns Types.unit) }
         in
         check_clauses state env clauses;
@@ -503,7 +509,7 @@ let check_definition state (elaborated : Environment.elaborated_interface) ~chec
                 {
                   parameters;
                   contract;
-                  body = (if holds_body then Some (build_block state written) else None);
+                  body = (if holds_body then Some (State.build_block state written) else None);
                 });
         if not (broken Body) then body state env written
     | Law_proof { body = written; _ }, Law_proof_interface { trait; law; for_type; _ } ->
@@ -527,7 +533,7 @@ let check_definition state (elaborated : Environment.elaborated_interface) ~chec
                       local = Synthetic index;
                       name;
                       mode = Read;
-                      type_ = final_type state type_;
+                      type_ = State.final_type state type_;
                       default = None;
                       callback_contract = None;
                     })
@@ -537,7 +543,7 @@ let check_definition state (elaborated : Environment.elaborated_interface) ~chec
               Law_proof
                 {
                   parameters;
-                  body = (if holds_body then Some (build_block state written) else None);
+                  body = (if holds_body then Some (State.build_block state written) else None);
                 });
         if not (broken Body) then
           body state
@@ -550,7 +556,7 @@ let check_definition state (elaborated : Environment.elaborated_interface) ~chec
               Law_proof
                 {
                   parameters = [];
-                  body = (if holds_body then Some (build_block state written) else None);
+                  body = (if holds_body then Some (State.build_block state written) else None);
                 });
         if not (broken Body) then
           body state
@@ -558,8 +564,8 @@ let check_definition state (elaborated : Environment.elaborated_interface) ~chec
             written
     | _ -> ()
 
-let finalize (state : state) =
-  let final_type = final_type state and argument = final_argument state in
+let finalize (state : State.state) =
+  let final_type = State.final_type state and argument = State.final_argument state in
   let trait (reference : Types.trait_reference) =
     {
       reference with
@@ -598,7 +604,7 @@ let finalize (state : state) =
         | Intrinsic intrinsic ->
             Intrinsic { intrinsic with type_arguments = List.map argument intrinsic.type_arguments }
         | other -> other);
-      uses = final_capabilities state written.uses;
+      uses = State.final_capabilities state written.uses;
       callee_result = final_type written.callee_result;
     }
   in
@@ -642,8 +648,8 @@ let finalize (state : state) =
       })
 
 let integer_literal_range (bounds : Types.trait_reference list) =
-  let signed = Intrinsic.[ Int8; Int16; Int32; Int64 ]
-  and unsigned = Intrinsic.[ UInt8; UInt16; UInt32; UInt64 ] in
+  let signed = [ Intrinsic.Int8; Int16; Int32; Int64 ]
+  and unsigned = [ Intrinsic.UInt8; UInt16; UInt32; UInt64 ] in
   let implementors =
     List.fold_left
       (fun found (bound : Types.trait_reference) ->
@@ -680,7 +686,7 @@ let check (lookups : Lookups.t) (key : Names.key) ~checks_body =
   let spans = lookups.interface.names.spans key in
   let context = Interface.Elaborator.create lookups.interface resolved ~spans elaborated.scope in
   let text = lazy (lookups.interface.names.text key) in
-  let state : state =
+  let state : State.state =
     {
       lookups;
       key;
@@ -722,12 +728,12 @@ let check (lookups : Lookups.t) (key : Names.key) ~checks_body =
   state.unifier.integer_range <-
     (fun type_ ->
       integer_literal_range
-        (Interface.Properties.list_known_bounds lookups.interface ~bounds:(bounds state) type_));
+        (Interface.Properties.list_known_bounds lookups.interface ~bounds:(State.bounds state) type_));
   check_definition state elaborated ~checks_body;
   state.diagnostics <- !(context.diagnostics) @ state.diagnostics;
   state.diagnostics <-
     Interface.Check.list_bound_diagnostics lookups.interface ~package:state.package
-      ~bounds:(bounds state) ~spans !(context.named)
+      ~bounds:(State.bounds state) ~spans !(context.named)
     @ state.diagnostics;
   finalize state;
   Exported_parts.check state;

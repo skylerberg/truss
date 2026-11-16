@@ -1,5 +1,3 @@
-open Token
-
 type input =
   | Next of {
       kind : Token.kind;
@@ -18,9 +16,15 @@ type input =
 type mode = File of { recovery : bool } | Interpolation
 
 let token kind span =
-  { kind; span; line_break_before = false; blank_line_before = false; is_inserted_closer = false }
+  {
+    Token.kind;
+    span;
+    line_break_before = false;
+    blank_line_before = false;
+    is_inserted_closer = false;
+  }
 
-let spelling punctuation = punctuation_spelling punctuation
+let spelling punctuation = Token.punctuation_spelling punctuation
 let opener_spelling bracket = spelling (Open bracket)
 let closer_spelling bracket = spelling (Close bracket)
 
@@ -41,7 +45,7 @@ let starts_definition source offset =
   stop > offset
   &&
   match Token.word (String.sub text offset (stop - offset)) with
-  | Some (Keyword keyword) -> List.mem keyword definition_keywords
+  | Some (Keyword keyword) -> List.mem keyword Token.definition_keywords
   | _ -> false
 
 let indentation_of source offset =
@@ -57,14 +61,14 @@ let indentation_of source offset =
 let token_starts_definition source ~first_line_break (kind : Token.kind) offset =
   first_line_break <> None
   && indentation_of source offset = ""
-  && match kind with Keyword keyword -> List.mem keyword definition_keywords | _ -> false
+  && match kind with Keyword keyword -> List.mem keyword Token.definition_keywords | _ -> false
 
 let closer_position first_line_break position =
   match first_line_break with
   | Some (line_break : Source.span) -> line_break.start
   | None -> position
 
-type opener = { bracket : bracket; span : Source.span; index : int }
+type opener = { bracket : Token.bracket; span : Source.span; index : int }
 
 let closing_position source tokens ~closers ~is_unterminated_string (opener : opener) =
   let opener_line = Source.line_start source opener.span.start in
@@ -119,7 +123,7 @@ let closing_edits source tokens ~closers ~is_unterminated_string openers =
   in
   edits 0 [] openers
 
-let bracket_index = function Paren -> 0 | Square -> 1 | Curly -> 2
+let bracket_index = function Token.Paren -> 0 | Square -> 1 | Curly -> 2
 
 let run ~source ~diagnostics ~mode next_input =
   let output = Dynarray.create () in
@@ -130,7 +134,7 @@ let run ~source ~diagnostics ~mode next_input =
   let open_at_end = ref false in
   let unterminated_strings = Hashtbl.create 4 in
   let is_unterminated_string (span : Source.span) = Hashtbl.mem unterminated_strings span.start in
-  let emit token =
+  let emit (token : Token.t) =
     Dynarray.add_last output token;
     Dynarray.add_last closers (-1);
     previous := Some token.kind
@@ -230,7 +234,7 @@ let run ~source ~diagnostics ~mode next_input =
           ~reason:" before the end of the file"
     | Interpolation -> close_all ~position ~reason:" before the end of the interpolation");
     (match (mode, !previous) with
-    | File _, Some previous_kind when can_end previous_kind ->
+    | File _, Some previous_kind when Token.can_end previous_kind ->
         emit
           (token Newline
              (match first_line_break with Some span -> span | None -> Source.zero_width position))
@@ -262,13 +266,13 @@ let run ~source ~diagnostics ~mode next_input =
         in
         (match (first_line_break, !previous) with
         | Some line_break, Some previous_kind
-          when (not ignores_line_breaks) && can_end previous_kind && can_begin kind ->
+          when (not ignores_line_breaks) && Token.can_end previous_kind && Token.can_begin kind ->
             emit (token Newline line_break)
         | _ -> ());
         if unterminated_string then Hashtbl.replace unterminated_strings span.start ();
         let current =
           {
-            kind;
+            Token.kind;
             span;
             line_break_before = first_line_break <> None;
             blank_line_before = blank_line;

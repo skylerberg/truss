@@ -1,523 +1,569 @@
-open Harness
-open Parse_support
-
 let () =
-  test "a method, its receiver, and its result" (fun () ->
-      definition
+  Harness.test "a method, its receiver, and its result" (fun () ->
+      Parse_support.definition
         "fn List[Element: Ordered].least(mut self, by: Order = Order.Ascending) lends mut Element \
          {}"
         "(fn List[Element: Ordered].least (mut self (by: Order (= (. Order Ascending)))) lends mut \
          Element (block))";
-      definition "fn hourly::Forecast.summary(self) -> String { todo }"
+      Parse_support.definition "fn hourly::Forecast.summary(self) -> String { todo }"
         "(fn hourly::Forecast.summary (self) -> String (block todo))");
-  test "clauses in the order written" (fun () ->
-      definition Fixtures.Parser_rules.clauses_in_the_order_written
+  Harness.test "clauses in the order written" (fun () ->
+      Parse_support.definition Fixtures.Parser_rules.clauses_in_the_order_written
         "(fn f ((x: Int64)) -> Int64 (ensures (> result x)) (requires (> x 0)) (decreases x 1) \
          (uses Clock) (block x))");
-  test "cost clauses" (fun () ->
-      definition Fixtures.Parser_rules.cost_clauses
+  Harness.test "cost clauses" (fun () ->
+      Parse_support.definition Fixtures.Parser_rules.cost_clauses
         "(fn f ((visit: (fn (Item) (cost time finite)))) (cost amortized time (O (* (call (. items \
          length)) (call time visit)))) (cost allocations (<= 1)) (cost (calls visit) (== 2)) (cost \
          (calls FileRead.read) (== 3)) (cost (calls FileRead) (== 4)) (cost time finite) (block))");
-  test "parsing continues after a misspelled cost word" (fun () ->
-      error "fn f() cost time fnite {}" ~code:Cost_word ~at:"fnite"
+  Harness.test "parsing continues after a misspelled cost word" (fun () ->
+      Parse_support.error "fn f() cost time fnite {}" ~code:Cost_word ~at:"fnite"
         ~fixed:"fn f() cost time finite {}";
-      let _, diagnostics = parse "fn f() cost tme fnite {}" in
-      if codes diagnostics <> [ "parser.cost_word"; "parser.cost_word" ] then
-        fail "got [%s]" (String.concat "; " (codes diagnostics)));
-  test "a trait's body on the next line" (fun () ->
-      definition Fixtures.Parser_rules.traits_body_on_the_next_line "(trait T (type K))");
-  test "a misspelled cost word has a fix" (fun () ->
-      error "fn f() cost allocation == 0 {}" ~code:Cost_word ~at:"allocation"
+      let _, diagnostics = Parse_support.parse "fn f() cost tme fnite {}" in
+      if Parse_support.codes diagnostics <> [ "parser.cost_word"; "parser.cost_word" ] then
+        Harness.fail "got [%s]" (String.concat "; " (Parse_support.codes diagnostics)));
+  Harness.test "a trait's body on the next line" (fun () ->
+      Parse_support.definition Fixtures.Parser_rules.traits_body_on_the_next_line
+        "(trait T (type K))");
+  Harness.test "a misspelled cost word has a fix" (fun () ->
+      Parse_support.error "fn f() cost allocation == 0 {}" ~code:Cost_word ~at:"allocation"
         ~fixed:"fn f() cost allocations == 0 {}");
-  test "finite is only for time" (fun () ->
-      error "fn f() cost allocations finite {}" ~code:Finite_not_time ~at:"finite");
-  test "cost potential belongs to a type" (fun () ->
-      error "fn f() cost potential x {}" ~code:Misplaced_potential ~at:"potential");
-  test "uses appears at most once" (fun () ->
-      error "fn f() uses Clock uses Random {}" ~code:Repeated_clause ~at:"uses Random");
-  test "a missing body gets { todo }" (fun () ->
-      error "fn f() -> Int64\nfn g() {}" ~code:Missing_body ~at:"\nfn g"
+  Harness.test "finite is only for time" (fun () ->
+      Parse_support.error "fn f() cost allocations finite {}" ~code:Finite_not_time ~at:"finite");
+  Harness.test "cost potential belongs to a type" (fun () ->
+      Parse_support.error "fn f() cost potential x {}" ~code:Misplaced_potential ~at:"potential");
+  Harness.test "uses appears at most once" (fun () ->
+      Parse_support.error "fn f() uses Clock uses Random {}" ~code:Repeated_clause ~at:"uses Random");
+  Harness.test "a missing body gets { todo }" (fun () ->
+      Parse_support.error "fn f() -> Int64\nfn g() {}" ~code:Missing_body ~at:"\nfn g"
         ~fixed:"fn f() -> Int64 { todo }\nfn g() {}");
-  test "self only in a method" (fun () -> error "fn f(self) {}" ~code:Misplaced_self ~at:"self");
-  test "self only first" (fun () ->
-      error "fn T.f(x: Int64, self) {}" ~code:Misplaced_self ~at:"self");
-  test "a parameter cannot be named result" (fun () ->
-      error "fn f(result: Int64) {}" ~code:Reserved_specification_name ~at:"result");
-  test "a function cannot be named old" (fun () ->
-      error "fn old() {}" ~code:Reserved_specification_name ~at:"old");
-  test "types" (fun () ->
-      definition "type Point(x: Float64, y: Float64 = 0.0)"
+  Harness.test "self only in a method" (fun () ->
+      Parse_support.error "fn f(self) {}" ~code:Misplaced_self ~at:"self");
+  Harness.test "self only first" (fun () ->
+      Parse_support.error "fn T.f(x: Int64, self) {}" ~code:Misplaced_self ~at:"self");
+  Harness.test "a parameter cannot be named result" (fun () ->
+      Parse_support.error "fn f(result: Int64) {}" ~code:Reserved_specification_name ~at:"result");
+  Harness.test "a function cannot be named old" (fun () ->
+      Parse_support.error "fn old() {}" ~code:Reserved_specification_name ~at:"old");
+  Harness.test "types" (fun () ->
+      Parse_support.definition "type Point(x: Float64, y: Float64 = 0.0)"
         "(type Point ((x: Float64) (y: Float64 (= 0e0))))";
-      definition "type DiscardLog()" "(type DiscardLog ())";
-      definition "type Bit = Zero | One" "(type Bit (= Zero One))";
-      definition "public opaque type Session = todo" "(public opaque (type Session = todo))";
-      definition Fixtures.Parser_rules.types
+      Parse_support.definition "type DiscardLog()" "(type DiscardLog ())";
+      Parse_support.definition "type Bit = Zero | One" "(type Bit (= Zero One))";
+      Parse_support.definition "public opaque type Session = todo"
+        "(public opaque (type Session = todo))";
+      Parse_support.definition Fixtures.Parser_rules.types
         "(type Tree[Value] (= Leaf (indirect Node ((left: Tree[Value]) (right: Tree[Value])))) \
          (invariant (call is_balanced self)) (derives Equal Hash) (cost potential (call size \
          self)))");
-  test "a trait" (fun () ->
-      definition Fixtures.Parser_rules.trait
+  Harness.test "a trait" (fun () ->
+      Parse_support.definition Fixtures.Parser_rules.trait
         "(trait Ordered : Equal (type Key: Hash) (law transitive ((a: Self) (b: Self)) (requires \
          (<= a b)) (block true)) (fn compare (self (other: Self)) -> Ordering) (fn max (own self \
          (other: own Self)) -> Self (ensures true) (block self)))";
-      definition "trait Loggable: Display + Hash {}" "(trait Loggable : Display + Hash)");
-  test "an impl" (fun () ->
-      definition Fixtures.Parser_rules.impl
+      Parse_support.definition "trait Loggable: Display + Hash {}"
+        "(trait Loggable : Display + Hash)");
+  Harness.test "an impl" (fun () ->
+      Parse_support.definition Fixtures.Parser_rules.impl
         "(impl FileRead for FilesWithin (uses FileRead) (type Error = FileError) (fn read (self) \
          -> Bytes (block todo)))";
-      definition "impl Display for List[Element: Display] {}"
+      Parse_support.definition "impl Display for List[Element: Display] {}"
         "(impl Display for List[Element: Display])");
-  test "an associated capability set" (fun () ->
-      definition Fixtures.Parser_rules.associated_capability_set
+  Harness.test "an associated capability set" (fun () ->
+      Parse_support.definition Fixtures.Parser_rules.associated_capability_set
         "(trait Feed (capability Uses) (fn pull (mut self) -> Int64 (uses Self.Uses)))";
-      definition Fixtures.Parser_rules.associated_capability_set_2
+      Parse_support.definition Fixtures.Parser_rules.associated_capability_set_2
         "(impl Feed for Zip[First: Feed, Second: Feed] (capability Uses = First.Uses Second.Uses \
          Clock))";
-      definition Fixtures.Parser_rules.associated_capability_set_3
+      Parse_support.definition Fixtures.Parser_rules.associated_capability_set_3
         "(fn drain[Source: Feed] ((source: mut Source)) (uses Source.Uses Clock) (block))";
-      definition "fn run(step: (fn() uses Self.Uses)) {}"
+      Parse_support.definition "fn run(step: (fn() uses Self.Uses)) {}"
         "(fn run ((step: (fn () (uses Self.Uses)))) (block))");
-  test "an associated capability set is named after a dot" (fun () ->
-      error Fixtures.Parser_rules.associated_capability_set_is_named_after_a_dot
+  Harness.test "an associated capability set is named after a dot" (fun () ->
+      Parse_support.error Fixtures.Parser_rules.associated_capability_set_is_named_after_a_dot
         ~code:Unexpected_token ~at:"\n{";
-      error Fixtures.Parser_rules.associated_capability_set_is_named_after_a_dot_2
+      Parse_support.error Fixtures.Parser_rules.associated_capability_set_is_named_after_a_dot_2
         ~code:Unexpected_token ~at:"}";
-      error "type Point(x: Int64)\n  derives Self.Uses" ~code:Unexpected_token ~at:"Self");
-  test "a capability" (fun () ->
-      definition Fixtures.Parser_rules.capability
+      Parse_support.error "type Point(x: Int64)\n  derives Self.Uses" ~code:Unexpected_token
+        ~at:"Self");
+  Harness.test "a capability" (fun () ->
+      Parse_support.definition Fixtures.Parser_rules.capability
         "(capability Clock (fn now () -> Instant) (fn sleep ((duration: Duration))))");
-  test "a capability's methods take no self" (fun () ->
-      error Fixtures.Parser_rules.capabilitys_methods_take_no_self ~code:Misplaced_self ~at:"self");
-  test "an impl's methods need bodies" (fun () ->
-      error Fixtures.Parser_rules.impls_methods_need_bodies ~code:Missing_body ~at:"\n}"
-        ~fixed:Fixtures.Parser_rules.impls_methods_need_bodies_fixed);
-  test "constants" (fun () ->
-      definition "public let UInt8.maximum: UInt8 = 255" "(public (let UInt8.maximum : UInt8 255))";
-      definition "let pi: Float64 = 3.14" "(let pi : Float64 314e-2)");
-  test "a test, a theorem, and a law's proof" (fun () ->
-      definition Fixtures.Parser_rules.test_a_theorem_and_a_laws_proof
+  Harness.test "a capability's methods take no self" (fun () ->
+      Parse_support.error Fixtures.Parser_rules.capabilitys_methods_take_no_self
+        ~code:Misplaced_self ~at:"self");
+  Harness.test "an impl's methods need bodies" (fun () ->
+      Parse_support.error Fixtures.Parser_rules.impls_methods_need_bodies ~code:Missing_body
+        ~at:"\n}" ~fixed:Fixtures.Parser_rules.impls_methods_need_bodies_fixed);
+  Harness.test "constants" (fun () ->
+      Parse_support.definition "public let UInt8.maximum: UInt8 = 255"
+        "(public (let UInt8.maximum : UInt8 255))";
+      Parse_support.definition "let pi: Float64 = 3.14" "(let pi : Float64 314e-2)");
+  Harness.test "a test, a theorem, and a law's proof" (fun () ->
+      Parse_support.definition Fixtures.Parser_rules.test_a_theorem_and_a_laws_proof
         "(test \"writes\" (uses FileWrite) (block (assert true)))";
-      definition Fixtures.Parser_rules.test_a_theorem_and_a_laws_proof_2
+      Parse_support.definition Fixtures.Parser_rules.test_a_theorem_and_a_laws_proof_2
         "(public (theorem keeps[Element] ((items: List[Element])) (ensures true) (block)))";
-      definition "proof Monoid.associative for Int64 {\n  lemma()\n}"
+      Parse_support.definition "proof Monoid.associative for Int64 {\n  lemma()\n}"
         "(proof Monoid.associative for Int64 (block (call lemma)))");
-  test "a law's proof names its type as an impl does, with generic parameters" (fun () ->
-      definition "proof Ordered.transitive for Box[Item: Ordered] {\n  lemma()\n}"
+  Harness.test "a law's proof names its type as an impl does, with generic parameters" (fun () ->
+      Parse_support.definition "proof Ordered.transitive for Box[Item: Ordered] {\n  lemma()\n}"
         "(proof Ordered.transitive for Box[Item: Ordered] (block (call lemma)))";
-      error "proof Ordered.transitive for any Shown {}" ~code:Unexpected_token ~at:"any");
-  test "a test's name is a plain string" (fun () ->
-      error "test \"a${b}\" {}" ~code:Interpolation_not_allowed ~at:"\"a");
-  test "an impl takes no visibility" (fun () ->
-      error "public impl A for B {}" ~code:Misplaced_visibility ~at:"public"
+      Parse_support.error "proof Ordered.transitive for any Shown {}" ~code:Unexpected_token
+        ~at:"any");
+  Harness.test "a test's name is a plain string" (fun () ->
+      Parse_support.error "test \"a${b}\" {}" ~code:Interpolation_not_allowed ~at:"\"a");
+  Harness.test "an impl takes no visibility" (fun () ->
+      Parse_support.error "public impl A for B {}" ~code:Misplaced_visibility ~at:"public"
         ~fixed:"impl A for B {}");
-  test "an impl's trait arguments declare no generic parameter, as the recursive type check assumes"
-    (fun () -> error "impl Selected[Carried: Shown] for Marker {}" ~code:Unexpected_token ~at:":");
-  test "an impl's trait arguments hold no function type, at any depth" (fun () ->
-      error "impl From[fn(Int64) -> Int64] for Handler {}" ~code:Misplaced_function_type ~at:"fn(";
-      error "impl From[List[fn() -> Int64]] for Handler {}" ~code:Misplaced_function_type ~at:"fn(";
-      error "impl From[any Source[Item = fn() -> Int64]] for Handler {}"
-        ~code:Misplaced_function_type ~at:"fn(");
-  test "an impl's trait arguments hold no associated type, so the impl overlaps no other" (fun () ->
-      error "impl Multiply[Dimension.Scalar] for Quantity[Dimension: Measure] {}"
-        ~code:Misplaced_associated_type ~at:"Dimension.Scalar";
-      error "impl Add[Self.Output] for Meters {}" ~code:Misplaced_associated_type ~at:"Self.Output");
-  test "a law's proof holds no trait argument that an impl cannot hold" (fun () ->
-      error "proof From[fn() -> Int64].round_trips for Handler {}" ~code:Misplaced_function_type
-        ~at:"fn(";
-      error "proof Add[Self.Output].associative for Meters {}" ~code:Misplaced_associated_type
-        ~at:"Self.Output");
-  test "an impl's trait takes no constraint, which its body would override" (fun () ->
-      error "impl Cursor[Element = Int64] for Numbers {}" ~code:Misplaced_constraint
-        ~at:"Element = Int64";
-      error "impl Convert[Int64, Output = Text] for Number {}" ~code:Misplaced_constraint
-        ~at:"Output = Text";
-      error "proof Cursor[Element = Int64].ordered for Numbers {}" ~code:Misplaced_constraint
-        ~at:"Element = Int64");
-  test "a constraint inside an impl's trait arguments is part of an any type" (fun () ->
-      definition "impl From[any Cursor[Element = Int64]] for Numbers {}"
-        "(impl From[(any Cursor[Element = Int64])] for Numbers)");
-  test "an impl's trait arguments may be types, its generic parameters, Self, any, and counts"
+  Harness.test
+    "an impl's trait arguments declare no generic parameter, as the recursive type check assumes"
     (fun () ->
-      definition "impl Add[Element] for Vector[Element] {}"
+      Parse_support.error "impl Selected[Carried: Shown] for Marker {}" ~code:Unexpected_token
+        ~at:":");
+  Harness.test "an impl's trait arguments hold no function type, at any depth" (fun () ->
+      Parse_support.error "impl From[fn(Int64) -> Int64] for Handler {}"
+        ~code:Misplaced_function_type ~at:"fn(";
+      Parse_support.error "impl From[List[fn() -> Int64]] for Handler {}"
+        ~code:Misplaced_function_type ~at:"fn(";
+      Parse_support.error "impl From[any Source[Item = fn() -> Int64]] for Handler {}"
+        ~code:Misplaced_function_type ~at:"fn(");
+  Harness.test "an impl's trait arguments hold no associated type, so the impl overlaps no other"
+    (fun () ->
+      Parse_support.error "impl Multiply[Dimension.Scalar] for Quantity[Dimension: Measure] {}"
+        ~code:Misplaced_associated_type ~at:"Dimension.Scalar";
+      Parse_support.error "impl Add[Self.Output] for Meters {}" ~code:Misplaced_associated_type
+        ~at:"Self.Output");
+  Harness.test "a law's proof holds no trait argument that an impl cannot hold" (fun () ->
+      Parse_support.error "proof From[fn() -> Int64].round_trips for Handler {}"
+        ~code:Misplaced_function_type ~at:"fn(";
+      Parse_support.error "proof Add[Self.Output].associative for Meters {}"
+        ~code:Misplaced_associated_type ~at:"Self.Output");
+  Harness.test "an impl's trait takes no constraint, which its body would override" (fun () ->
+      Parse_support.error "impl Cursor[Element = Int64] for Numbers {}" ~code:Misplaced_constraint
+        ~at:"Element = Int64";
+      Parse_support.error "impl Convert[Int64, Output = Text] for Number {}"
+        ~code:Misplaced_constraint ~at:"Output = Text";
+      Parse_support.error "proof Cursor[Element = Int64].ordered for Numbers {}"
+        ~code:Misplaced_constraint ~at:"Element = Int64");
+  Harness.test "a constraint inside an impl's trait arguments is part of an any type" (fun () ->
+      Parse_support.definition "impl From[any Cursor[Element = Int64]] for Numbers {}"
+        "(impl From[(any Cursor[Element = Int64])] for Numbers)");
+  Harness.test
+    "an impl's trait arguments may be types, its generic parameters, Self, any, and counts"
+    (fun () ->
+      Parse_support.definition "impl Add[Element] for Vector[Element] {}"
         "(impl Add[Element] for Vector[Element])";
-      definition "impl From[List[map::Entry[Key, Value]]] for Table[Key, Value] {}"
+      Parse_support.definition "impl From[List[map::Entry[Key, Value]]] for Table[Key, Value] {}"
         "(impl From[List[map::Entry[Key, Value]]] for Table[Key, Value])";
-      definition "impl Add[Self] for Meters {}" "(impl Add[Self] for Meters)";
-      definition "impl From[any Display] for Report {}" "(impl From[(any Display)] for Report)";
-      definition "impl From[Array[UInt8, 32]] for Digest {}"
+      Parse_support.definition "impl Add[Self] for Meters {}" "(impl Add[Self] for Meters)";
+      Parse_support.definition "impl From[any Display] for Report {}"
+        "(impl From[(any Display)] for Report)";
+      Parse_support.definition "impl From[Array[UInt8, 32]] for Digest {}"
         "(impl From[Array[UInt8, 32]] for Digest)");
-  test "a test takes no visibility" (fun () ->
-      error "internal test \"a\" {}" ~code:Misplaced_visibility ~at:"internal"
+  Harness.test "a test takes no visibility" (fun () ->
+      Parse_support.error "internal test \"a\" {}" ~code:Misplaced_visibility ~at:"internal"
         ~fixed:"test \"a\" {}");
-  test "a law's proof takes no visibility" (fun () ->
-      error "public proof A.b for C {}" ~code:Misplaced_visibility ~at:"public"
+  Harness.test "a law's proof takes no visibility" (fun () ->
+      Parse_support.error "public proof A.b for C {}" ~code:Misplaced_visibility ~at:"public"
         ~fixed:"proof A.b for C {}");
-  test "only a type is opaque" (fun () ->
-      error "public opaque fn f() {}" ~code:Misplaced_opaque ~at:"opaque" ~fixed:"public fn f() {}");
-  test "an impl with a visibility and a modifier has one diagnostic" (fun () ->
-      error "public opaque impl A for B {}" ~code:Misplaced_visibility ~at:"public"
+  Harness.test "only a type is opaque" (fun () ->
+      Parse_support.error "public opaque fn f() {}" ~code:Misplaced_opaque ~at:"opaque"
+        ~fixed:"public fn f() {}");
+  Harness.test "an impl with a visibility and a modifier has one diagnostic" (fun () ->
+      Parse_support.error "public opaque impl A for B {}" ~code:Misplaced_visibility ~at:"public"
         ~fixed:"impl A for B {}")
 
 let () =
   let combination text ~at ~code ~fixes =
     match fixes with
     | fixed :: alternatives ->
-        body_error ("let x = " ^ text) ~code ~at ~fixed:("let x = " ^ fixed)
+        Parse_support.body_error ("let x = " ^ text) ~code ~at ~fixed:("let x = " ^ fixed)
           ~alternatives:(List.map (( ^ ) "let x = ") alternatives)
-    | [] -> body_error ("let x = " ^ text) ~code ~at
+    | [] -> Parse_support.body_error ("let x = " ^ text) ~code ~at
   in
-  test "bitwise and comparison: Rust's reading, then C's" (fun () ->
+  Harness.test "bitwise and comparison: Rust's reading, then C's" (fun () ->
       combination "flags & mask == 0" ~at:"==" ~code:Needs_parentheses
         ~fixes:[ "(flags & mask) == 0"; "flags & (mask == 0)" ]);
-  test "shift and addition: C and Rust's reading, then Go and Swift's" (fun () ->
+  Harness.test "shift and addition: C and Rust's reading, then Go and Swift's" (fun () ->
       combination "a << b + 1" ~at:"<<" ~code:Needs_parentheses
         ~fixes:[ "a << (b + 1)"; "(a << b) + 1" ]);
-  test "a reading whose parentheses would mix operators inside them is not offered" (fun () ->
+  Harness.test "a reading whose parentheses would mix operators inside them is not offered"
+    (fun () ->
       combination "a + b * c << d" ~at:"<<" ~code:Needs_parentheses ~fixes:[ "(a + b * c) << d" ]);
-  test "& and | read the same everywhere" (fun () ->
+  Harness.test "& and | read the same everywhere" (fun () ->
       combination "a & b | c" ~at:"|" ~code:Needs_parentheses ~fixes:[ "(a & b) | c" ]);
-  test "& and | read the same on the right" (fun () ->
+  Harness.test "& and | read the same on the right" (fun () ->
       combination "c | a & b" ~at:"|" ~code:Needs_parentheses ~fixes:[ "c | (a & b)" ]);
-  test "a reading that needs more parentheses inside && gets them" (fun () ->
+  Harness.test "a reading that needs more parentheses inside && gets them" (fun () ->
       combination "a & b == c && d" ~at:"==" ~code:Needs_parentheses
         ~fixes:[ "(a & b) == c && d"; "(a & (b == c)) && d" ]);
-  test "the other reading takes the operand next to the operator" (fun () ->
+  Harness.test "the other reading takes the operand next to the operator" (fun () ->
       combination "s & a + b + c" ~at:"&" ~code:Needs_parentheses
         ~fixes:[ "s & (a + b + c)"; "(s & a) + b + c" ]);
-  test "the same bitwise operator chains" (fun () ->
-      statement "let x = a | b | c" "(let x (| (| a b) c))");
-  test "shifts chain" (fun () -> statement "let x = a << 1 >> 2" "(let x (>> (<< a 1) 2))");
-  test "&& and || cannot be mixed" (fun () ->
+  Harness.test "the same bitwise operator chains" (fun () ->
+      Parse_support.statement "let x = a | b | c" "(let x (| (| a b) c))");
+  Harness.test "shifts chain" (fun () ->
+      Parse_support.statement "let x = a << 1 >> 2" "(let x (>> (<< a 1) 2))");
+  Harness.test "&& and || cannot be mixed" (fun () ->
       combination "a && b || c" ~at:"||" ~code:Needs_parentheses
         ~fixes:[ "(a && b) || c"; "a && (b || c)" ]);
-  test "comparisons do not chain" (fun () ->
+  Harness.test "comparisons do not chain" (fun () ->
       combination "a < b < c" ~at:"< c" ~code:Needs_parentheses ~fixes:[ "a < b && b < c" ]);
-  test "comparisons joined under || get parentheses" (fun () ->
+  Harness.test "comparisons joined under || get parentheses" (fun () ->
       combination "a || b <= c < d" ~at:"< d" ~code:Needs_parentheses
         ~fixes:[ "a || (b <= c && c < d)" ]);
-  test "a chained comparison without a simple middle has no fix" (fun () ->
+  Harness.test "a chained comparison without a simple middle has no fix" (fun () ->
       combination "a < f(b) < c" ~at:"< c" ~code:Needs_parentheses ~fixes:[]);
-  test "is does not chain" (fun () ->
+  Harness.test "is does not chain" (fun () ->
       combination "a is B == c" ~at:"==" ~code:Needs_parentheses ~fixes:[]);
-  test "is beside & has no fix that puts & inside the pattern" (fun () ->
+  Harness.test "is beside & has no fix that puts & inside the pattern" (fun () ->
       combination "value is Ready & mask" ~at:"&" ~code:Needs_parentheses
         ~fixes:[ "(value is Ready) & mask" ]);
-  test "ranges do not chain" (fun () ->
+  Harness.test "ranges do not chain" (fun () ->
       combination "0..10..20" ~at:"..20" ~code:Needs_parentheses ~fixes:[]);
-  test "==> does not chain: Dafny's reading first" (fun () ->
-      error "fn f() requires a ==> b ==> c {}" ~code:Needs_parentheses ~at:"==> c"
+  Harness.test "==> does not chain: Dafny's reading first" (fun () ->
+      Parse_support.error "fn f() requires a ==> b ==> c {}" ~code:Needs_parentheses ~at:"==> c"
         ~fixed:"fn f() requires a ==> (b ==> c) {}"
         ~alternatives:[ "fn f() requires (a ==> b) ==> c {}" ]);
-  test "parentheses settle a combination" (fun () ->
-      statement "let x = (flags & mask) == 0" "(let x (== (paren (& flags mask)) 0))");
-  test "a quantifier may end && in a specification" (fun () ->
-      definition "fn f() requires a && exists x in s => x {}"
+  Harness.test "parentheses settle a combination" (fun () ->
+      Parse_support.statement "let x = (flags & mask) == 0" "(let x (== (paren (& flags mask)) 0))");
+  Harness.test "a quantifier may end && in a specification" (fun () ->
+      Parse_support.definition "fn f() requires a && exists x in s => x {}"
         "(fn f () (requires (&& a (exists (in x s) x))) (block))");
-  test "a quantifier elsewhere needs parentheses" (fun () ->
-      error "fn f() requires count + forall x in s => x {}" ~code:Needs_parentheses ~at:"forall"
-        ~fixed:"fn f() requires count + (forall x in s => x) {}");
-  test "echo as an operand needs parentheses" (fun () ->
-      body_error "let x = count + echo x" ~code:Needs_parentheses ~at:"echo"
+  Harness.test "a quantifier elsewhere needs parentheses" (fun () ->
+      Parse_support.error "fn f() requires count + forall x in s => x {}" ~code:Needs_parentheses
+        ~at:"forall" ~fixed:"fn f() requires count + (forall x in s => x) {}");
+  Harness.test "echo as an operand needs parentheses" (fun () ->
+      Parse_support.body_error "let x = count + echo x" ~code:Needs_parentheses ~at:"echo"
         ~fixed:"let x = count + (echo x)");
-  test "each combination in a chain is reported" (fun () ->
-      let _, diagnostics = body_of "let x = a < b < c < d" in
-      if List.length diagnostics <> 2 then fail "got %d diagnostics" (List.length diagnostics))
+  Harness.test "each combination in a chain is reported" (fun () ->
+      let _, diagnostics = Parse_support.body_of "let x = a < b < c < d" in
+      if List.length diagnostics <> 2 then
+        Harness.fail "got %d diagnostics" (List.length diagnostics))
 
 let () =
-  test "a quantifier over a range is an expression in code" (fun () ->
-      statement "let x = forall i in s => i" "(let x (forall (in i s) i))");
-  test "a quantifier over a type in a test" (fun () ->
-      error Fixtures.Parser_rules.quantifier_over_a_type_in_a_test ~code:Specification_only
-        ~at:"forall");
-  test "==> in a test" (fun () ->
-      error Fixtures.Parser_rules.in_a_test ~code:Specification_only ~at:"==>");
-  test "==> in a constant" (fun () ->
-      error "let x: Bool = a ==> b" ~code:Specification_only ~at:"==>");
-  test "==> and a quantifier over a type in a function's body are left to the type checker"
+  Harness.test "a quantifier over a range is an expression in code" (fun () ->
+      Parse_support.statement "let x = forall i in s => i" "(let x (forall (in i s) i))");
+  Harness.test "a quantifier over a type in a test" (fun () ->
+      Parse_support.error Fixtures.Parser_rules.quantifier_over_a_type_in_a_test
+        ~code:Specification_only ~at:"forall");
+  Harness.test "==> in a test" (fun () ->
+      Parse_support.error Fixtures.Parser_rules.in_a_test ~code:Specification_only ~at:"==>");
+  Harness.test "==> in a constant" (fun () ->
+      Parse_support.error "let x: Bool = a ==> b" ~code:Specification_only ~at:"==>");
+  Harness.test "==> and a quantifier over a type in a function's body are left to the type checker"
     (fun () ->
-      definition Fixtures.Parser_rules.and_a_quantifier_over_a_type_in_a_functions_body
+      Parse_support.definition
+        Fixtures.Parser_rules.and_a_quantifier_over_a_type_in_a_functions_body
         "(fn f () -> Bool (block (==> a (forall value: Int64 (== value value)))))");
-  test "a lending method's parameter cannot be named final" (fun () ->
-      error Fixtures.Parser_rules.lending_methods_parameter_cannot_be_named_final
+  Harness.test "a lending method's parameter cannot be named final" (fun () ->
+      Parse_support.error Fixtures.Parser_rules.lending_methods_parameter_cannot_be_named_final
         ~code:Reserved_specification_name ~at:"final";
-      definition "fn f(final: Bool) {}" "(fn f ((final: Bool)) (block))");
-  test "a loop's cost clause" (fun () ->
-      statement "for row in rows\n  cost time O(visited.length())\n{}"
+      Parse_support.definition "fn f(final: Bool) {}" "(fn f ((final: Bool)) (block))");
+  Harness.test "a loop's cost clause" (fun () ->
+      Parse_support.statement "for row in rows\n  cost time O(visited.length())\n{}"
         "(for row rows (cost time (O (call (. visited length)))) (block))");
-  test "a loop's cost is not amortized or finite" (fun () ->
-      body_error "while a\n  cost amortized time O(1)\n{}" ~code:Loop_cost_bound ~at:"cost";
-      body_error "while a\n  cost time finite\n{}" ~code:Loop_cost_bound ~at:"cost");
-  test "specifications allow forall" (fun () ->
-      definition "type S(items: List[Int64])\n  invariant forall i in items => i > 0"
+  Harness.test "a loop's cost is not amortized or finite" (fun () ->
+      Parse_support.body_error "while a\n  cost amortized time O(1)\n{}" ~code:Loop_cost_bound
+        ~at:"cost";
+      Parse_support.body_error "while a\n  cost time finite\n{}" ~code:Loop_cost_bound ~at:"cost");
+  Harness.test "specifications allow forall" (fun () ->
+      Parse_support.definition "type S(items: List[Int64])\n  invariant forall i in items => i > 0"
         "(type S ((items: List[Int64])) (invariant (forall (in i items) (> i 0))))";
-      statement "while a\n  invariant forall i in s => i\n{}"
+      Parse_support.statement "while a\n  invariant forall i in s => i\n{}"
         "(while a (invariant (forall (in i s) i)) (block))");
-  test "assert outside tests and proofs" (fun () ->
-      body_error "assert true" ~code:Misplaced_assert ~at:"assert");
-  test "assert in a proof block" (fun () ->
-      statement "proof {\n  assert true\n}" "(proof (block (assert true)))");
-  test "assert in a lambda in a test" (fun () ->
-      error Fixtures.Parser_rules.assert_in_a_lambda_in_a_test ~code:Misplaced_assert ~at:"assert");
-  test "a proof block outside a function's body" (fun () ->
-      error Fixtures.Parser_rules.proof_block_outside_a_functions_body ~code:Misplaced_proof
-        ~at:"proof");
-  test "a method that lends" (fun () ->
-      definition Fixtures.Parser_rules.method_that_lends
+  Harness.test "assert outside tests and proofs" (fun () ->
+      Parse_support.body_error "assert true" ~code:Misplaced_assert ~at:"assert");
+  Harness.test "assert in a proof block" (fun () ->
+      Parse_support.statement "proof {\n  assert true\n}" "(proof (block (assert true)))");
+  Harness.test "assert in a lambda in a test" (fun () ->
+      Parse_support.error Fixtures.Parser_rules.assert_in_a_lambda_in_a_test ~code:Misplaced_assert
+        ~at:"assert");
+  Harness.test "a proof block outside a function's body" (fun () ->
+      Parse_support.error Fixtures.Parser_rules.proof_block_outside_a_functions_body
+        ~code:Misplaced_proof ~at:"proof");
+  Harness.test "a method that lends" (fun () ->
+      Parse_support.definition Fixtures.Parser_rules.method_that_lends
         "(fn Grid.cell (mut self (position: Position)) lends mut Cell (block (mut ([] (. self \
          cells) 0))))");
-  test "yield and yields are identifiers" (fun () ->
-      definition "fn yields(yield: Int64) -> Int64 { yield }"
+  Harness.test "yield and yields are identifiers" (fun () ->
+      Parse_support.definition "fn yields(yield: Int64) -> Int64 { yield }"
         "(fn yields ((yield: Int64)) -> Int64 (block yield))");
-  test "lends own" (fun () ->
-      error "fn T.part(own self) lends own Part {}" ~code:Lends_own ~at:"own Part"
+  Harness.test "lends own" (fun () ->
+      Parse_support.error "fn T.part(own self) lends own Part {}" ~code:Lends_own ~at:"own Part"
         ~fixed:"fn T.part(own self) lends Part {}");
-  test "break outside a loop" (fun () -> body_error "break" ~code:Misplaced_loop_exit ~at:"break");
-  test "continue across a lambda" (fun () ->
-      body_error "for x in s {\n  f(fn() { continue })\n}" ~code:Misplaced_loop_exit ~at:"continue");
-  test "break and continue in a loop" (fun () ->
-      statement "while true {\n  if a { break } else { continue }\n}"
+  Harness.test "break outside a loop" (fun () ->
+      Parse_support.body_error "break" ~code:Misplaced_loop_exit ~at:"break");
+  Harness.test "continue across a lambda" (fun () ->
+      Parse_support.body_error "for x in s {\n  f(fn() { continue })\n}" ~code:Misplaced_loop_exit
+        ~at:"continue");
+  Harness.test "break and continue in a loop" (fun () ->
+      Parse_support.statement "while true {\n  if a { break } else { continue }\n}"
         "(while true (block (if a (block break) (block continue))))");
-  test "return leaving a parallel block" (fun () ->
-      body_error "parallel {\n  return\n}" ~code:Exits_parallel ~at:"return");
-  test "? leaving a parallel for" (fun () ->
-      body_error "parallel for x in s {\n  let y = f(x)?\n}" ~code:Exits_parallel ~at:"?");
-  test "break in a parallel for" (fun () ->
-      body_error "parallel for x in s {\n  break\n}" ~code:Exits_parallel ~at:"break");
-  test "continue in a parallel for" (fun () ->
-      statement "parallel for x in s {\n  continue\n}" "(parallel-for x s (block continue))");
-  test "break leaving a branch" (fun () ->
-      body_error "while a {\n  parallel {\n    break\n  }\n}" ~code:Exits_parallel ~at:"break");
-  test "a loop inside a branch" (fun () ->
-      statement "parallel {\n  for x in s { break }\n}" "(parallel (block (for x s (block break))))");
-  test "return in a lambda inside a branch" (fun () ->
-      statement "parallel {\n  f(fn() { return })\n}"
+  Harness.test "return leaving a parallel block" (fun () ->
+      Parse_support.body_error "parallel {\n  return\n}" ~code:Exits_parallel ~at:"return");
+  Harness.test "? leaving a parallel for" (fun () ->
+      Parse_support.body_error "parallel for x in s {\n  let y = f(x)?\n}" ~code:Exits_parallel
+        ~at:"?");
+  Harness.test "break in a parallel for" (fun () ->
+      Parse_support.body_error "parallel for x in s {\n  break\n}" ~code:Exits_parallel ~at:"break");
+  Harness.test "continue in a parallel for" (fun () ->
+      Parse_support.statement "parallel for x in s {\n  continue\n}"
+        "(parallel-for x s (block continue))");
+  Harness.test "break leaving a branch" (fun () ->
+      Parse_support.body_error "while a {\n  parallel {\n    break\n  }\n}" ~code:Exits_parallel
+        ~at:"break");
+  Harness.test "a loop inside a branch" (fun () ->
+      Parse_support.statement "parallel {\n  for x in s { break }\n}"
+        "(parallel (block (for x s (block break))))");
+  Harness.test "return in a lambda inside a branch" (fun () ->
+      Parse_support.statement "parallel {\n  f(fn() { return })\n}"
         "(parallel (block (call f (fn () (block (return))))))");
-  test "return, ?, and break leaving a concurrent block or loop" (fun () ->
-      statement "concurrent {\n  return\n  let y = f(x)?\n}"
+  Harness.test "return, ?, and break leaving a concurrent block or loop" (fun () ->
+      Parse_support.statement "concurrent {\n  return\n  let y = f(x)?\n}"
         "(concurrent (block (return) (let y (? (call f x)))))";
-      statement "concurrent for x in s {\n  if a { break } else { continue }\n}"
+      Parse_support.statement "concurrent for x in s {\n  if a { break } else { continue }\n}"
         "(concurrent-for x s (block (if a (block break) (block continue))))";
-      statement "while a {\n  concurrent {\n    break\n  }\n}"
+      Parse_support.statement "while a {\n  concurrent {\n    break\n  }\n}"
         "(while a (block (concurrent (block break))))");
-  test "return leaving a parallel block inside a concurrent one" (fun () ->
-      body_error "concurrent {\n  parallel {\n    return\n  }\n}" ~code:Exits_parallel ~at:"return");
-  test "echo in a specification" (fun () ->
-      error "fn f(x: Int64) requires echo x > 0 {}" ~code:Echo_in_specification ~at:"echo");
-  test "a statement rule applies in every block" (fun () ->
-      body_error Fixtures.Parser_rules.statement_rule_applies_in_every_block ~code:Misplaced_assert
-        ~at:"assert");
-  test "echo in a proof" (fun () ->
-      body_error "proof {\n  echo x\n}" ~code:Echo_in_specification ~at:"echo")
+  Harness.test "return leaving a parallel block inside a concurrent one" (fun () ->
+      Parse_support.body_error "concurrent {\n  parallel {\n    return\n  }\n}" ~code:Exits_parallel
+        ~at:"return");
+  Harness.test "echo in a specification" (fun () ->
+      Parse_support.error "fn f(x: Int64) requires echo x > 0 {}" ~code:Echo_in_specification
+        ~at:"echo");
+  Harness.test "a statement rule applies in every block" (fun () ->
+      Parse_support.body_error Fixtures.Parser_rules.statement_rule_applies_in_every_block
+        ~code:Misplaced_assert ~at:"assert");
+  Harness.test "echo in a proof" (fun () ->
+      Parse_support.body_error "proof {\n  echo x\n}" ~code:Echo_in_specification ~at:"echo")
 
 let () =
-  test "an error in a statement leaves the next one parsed" (fun () ->
-      recovered_statements ~codes:[ "parser.unexpected_token" ] "let x = 1 2 3\nlet y = 2"
-        [ "error"; "(let y 2)" ]);
-  test "each bad item in brackets gets its own error" (fun () ->
-      recovered_statements
+  Harness.test "an error in a statement leaves the next one parsed" (fun () ->
+      Parse_support.recovered_statements ~codes:[ "parser.unexpected_token" ]
+        "let x = 1 2 3\nlet y = 2" [ "error"; "(let y 2)" ]);
+  Harness.test "each bad item in brackets gets its own error" (fun () ->
+      Parse_support.recovered_statements
         ~codes:[ "parser.unexpected_token"; "parser.unexpected_token"; "parser.unexpected_token" ]
         "f(1 +, x, 2 3, g(a b))\nlet y = 2"
         [ "(call f error x error (call g error))"; "(let y 2)" ]);
-  test "an error in a clause leaves the body parsed" (fun () ->
-      recovered_definitions ~codes:[ "parser.unexpected_token" ]
+  Harness.test "an error in a clause leaves the body parsed" (fun () ->
+      Parse_support.recovered_definitions ~codes:[ "parser.unexpected_token" ]
         Fixtures.Parser_rules.error_in_a_clause_leaves_the_body_parsed
         [ "(fn f () error (ensures true) (block x))" ]);
-  test "an error in a member leaves the next member parsed" (fun () ->
+  Harness.test "an error in a member leaves the next member parsed" (fun () ->
       let file, diagnostics =
-        parse Fixtures.Parser_rules.error_in_a_member_leaves_the_next_member_parsed
+        Parse_support.parse Fixtures.Parser_rules.error_in_a_member_leaves_the_next_member_parsed
       in
       ignore file;
-      if List.length diagnostics > 2 then fail "got [%s]" (String.concat "; " (codes diagnostics)));
-  test "nothing is reported before a closer the lexer inserted" (fun () ->
+      if List.length diagnostics > 2 then
+        Harness.fail "got [%s]" (String.concat "; " (Parse_support.codes diagnostics)));
+  Harness.test "nothing is reported before a closer the lexer inserted" (fun () ->
       let _, diagnostics =
-        parse Fixtures.Parser_rules.nothing_is_reported_before_a_closer_the_lexer
+        Parse_support.parse Fixtures.Parser_rules.nothing_is_reported_before_a_closer_the_lexer
       in
-      if codes diagnostics <> [ "lexer.unclosed_bracket" ] then
-        fail "got [%s]" (String.concat "; " (codes diagnostics)));
-  test "a reserved word is reported as reserved" (fun () ->
-      error "fn f[T]() where T: Hash {}" ~code:Reserved_word ~at:"where")
+      if Parse_support.codes diagnostics <> [ "lexer.unclosed_bracket" ] then
+        Harness.fail "got [%s]" (String.concat "; " (Parse_support.codes diagnostics)));
+  Harness.test "a reserved word is reported as reserved" (fun () ->
+      Parse_support.error "fn f[T]() where T: Hash {}" ~code:Reserved_word ~at:"where")
 
 let () =
-  test "i++" (fun () -> body_error "count++" ~code:Increment ~at:"++" ~fixed:"count += 1");
-  test "i--" (fun () -> body_error "items[0]--" ~code:Increment ~at:"--" ~fixed:"items[0] -= 1");
-  test "--x" (fun () ->
-      body_error "let y = --x" ~code:Double_negation ~at:"--" ~fixed:"let y = -(-x)");
-  test "a fix that would add an error is withheld" (fun () ->
+  Harness.test "i++" (fun () ->
+      Parse_support.body_error "count++" ~code:Increment ~at:"++" ~fixed:"count += 1");
+  Harness.test "i--" (fun () ->
+      Parse_support.body_error "items[0]--" ~code:Increment ~at:"--" ~fixed:"items[0] -= 1");
+  Harness.test "--x" (fun () ->
+      Parse_support.body_error "let y = --x" ~code:Double_negation ~at:"--" ~fixed:"let y = -(-x)");
+  Harness.test "a fix that would add an error is withheld" (fun () ->
       let fixes_of text code =
         match
           List.find_opt
             (fun (diagnostic : Diagnostic.t) -> diagnostic.code = Parser code)
-            (snd (parse ("fn example() {\n" ^ text ^ "\n}")))
+            (snd (Parse_support.parse ("fn example() {\n" ^ text ^ "\n}")))
         with
         | Some diagnostic -> diagnostic.fixes
         | None ->
-            fail "no %s for %S" (Diagnostic.Code.name (Parser code)) text;
+            Harness.fail "no %s for %S" (Diagnostic.Code.name (Parser code)) text;
             []
       in
-      if fixes_of "count :=== 0" Short_declaration <> [] then fail "offered the `let` fix";
+      if fixes_of "count :=== 0" Short_declaration <> [] then Harness.fail "offered the `let` fix";
       if fixes_of "match a {\n  A => 0,e(b) => 1\n}" Match_arm_comma <> [] then
-        fail "offered the comma fix");
-  test "a comma after a match arm" (fun () ->
-      body_error "match a {\n  A => 1,\n  B => 2\n}" ~code:Match_arm_comma ~at:","
+        Harness.fail "offered the comma fix");
+  Harness.test "a comma after a match arm" (fun () ->
+      Parse_support.body_error "match a {\n  A => 1,\n  B => 2\n}" ~code:Match_arm_comma ~at:","
         ~fixed:"match a {\n  A => 1\n  B => 2\n}");
-  test "x ? a : b" (fun () ->
-      body_error "let y = ready ? first : second" ~code:Conditional_operator ~at:"?"
+  Harness.test "x ? a : b" (fun () ->
+      Parse_support.body_error "let y = ready ? first : second" ~code:Conditional_operator ~at:"?"
         ~fixed:"let y = if ready { first } else { second }");
-  test "x ? a : b takes the whole left side as the condition" (fun () ->
-      body_error "let larger = a > b ? a : b" ~code:Conditional_operator ~at:"?"
+  Harness.test "x ? a : b takes the whole left side as the condition" (fun () ->
+      Parse_support.body_error "let larger = a > b ? a : b" ~code:Conditional_operator ~at:"?"
         ~fixed:"let larger = if a > b { a } else { b }");
-  test "let mut" (fun () ->
-      body_error "let mut count = 0" ~code:Let_mut ~at:"mut" ~fixed:"var count = 0");
-  test "&x" (fun () -> body_error "f(&x)" ~code:Address_of ~at:"&" ~fixed:"f(x)");
-  test "& between two names" (fun () ->
-      body_error "match& value {\n  _ => todo\n}" ~code:Address_of ~at:"&"
+  Harness.test "let mut" (fun () ->
+      Parse_support.body_error "let mut count = 0" ~code:Let_mut ~at:"mut" ~fixed:"var count = 0");
+  Harness.test "&x" (fun () ->
+      Parse_support.body_error "f(&x)" ~code:Address_of ~at:"&" ~fixed:"f(x)");
+  Harness.test "& between two names" (fun () ->
+      Parse_support.body_error "match& value {\n  _ => todo\n}" ~code:Address_of ~at:"&"
         ~fixed:"match value {\n  _ => todo\n}");
-  test "&mut x" (fun () ->
-      body_error "sort(&mut items)" ~code:Address_of ~at:"&" ~fixed:"sort(mut items)");
-  test "|x| x + 1" (fun () ->
-      body_error "let f = items.map(|item| item + 1)" ~code:Closure_bars ~at:"|"
+  Harness.test "&mut x" (fun () ->
+      Parse_support.body_error "sort(&mut items)" ~code:Address_of ~at:"&" ~fixed:"sort(mut items)");
+  Harness.test "|x| x + 1" (fun () ->
+      Parse_support.body_error "let f = items.map(|item| item + 1)" ~code:Closure_bars ~at:"|"
         ~fixed:"let f = items.map(fn(item) { item + 1 })");
-  test "|x| with a block" (fun () ->
-      body_error "let f = items.map(|item| { item })" ~code:Closure_bars ~at:"|"
+  Harness.test "|x| with a block" (fun () ->
+      Parse_support.body_error "let f = items.map(|item| { item })" ~code:Closure_bars ~at:"|"
         ~fixed:"let f = items.map(fn(item) { item })");
-  test "|x| before let ... else" (fun () ->
-      body_error Fixtures.Parser_rules.x_before_let_else ~code:Closure_bars ~at:"||"
+  Harness.test "|x| before let ... else" (fun () ->
+      Parse_support.body_error Fixtures.Parser_rules.x_before_let_else ~code:Closure_bars ~at:"||"
         ~fixed:Fixtures.Parser_rules.x_before_let_else_fixed);
-  test "|| x" (fun () ->
-      body_error "let f = run(|| 1)" ~code:Closure_bars ~at:"||" ~fixed:"let f = run(fn() { 1 })");
-  test "Point { x: 1.0 }" (fun () ->
-      body_error "let p = Point { x: 1.0, y: 2.0 }" ~code:Brace_record ~at:"{ x"
+  Harness.test "|| x" (fun () ->
+      Parse_support.body_error "let f = run(|| 1)" ~code:Closure_bars ~at:"||"
+        ~fixed:"let f = run(fn() { 1 })");
+  Harness.test "Point { x: 1.0 }" (fun () ->
+      Parse_support.body_error "let p = Point { x: 1.0, y: 2.0 }" ~code:Brace_record ~at:"{ x"
         ~fixed:"let p = Point(x: 1.0, y: 2.0)");
-  test "parse::<Int64>(text)" (fun () ->
-      body_error "let n = parse::<Int64>(text)" ~code:Turbofish ~at:"<"
+  Harness.test "parse::<Int64>(text)" (fun () ->
+      Parse_support.body_error "let n = parse::<Int64>(text)" ~code:Turbofish ~at:"<"
         ~fixed:"let n = parse[Int64](text)");
-  test "List<String> in a type" (fun () ->
-      body_error "let names: List<String> = []" ~code:Angle_brackets ~at:"<"
+  Harness.test "List<String> in a type" (fun () ->
+      Parse_support.body_error "let names: List<String> = []" ~code:Angle_brackets ~at:"<"
         ~fixed:"let names: List[String] = []";
-      body_error "let table: Map<String, List<Int64>> = [:]" ~code:Angle_brackets ~at:"<"
-        ~fixed:"let table: Map[String, List[Int64]] = [:]");
-  test "fn first<T> in a definition" (fun () ->
-      error "fn first<Element: Ordered>(items: List[Element]) -> Element { todo }"
+      Parse_support.body_error "let table: Map<String, List<Int64>> = [:]" ~code:Angle_brackets
+        ~at:"<" ~fixed:"let table: Map[String, List[Int64]] = [:]");
+  Harness.test "fn first<T> in a definition" (fun () ->
+      Parse_support.error "fn first<Element: Ordered>(items: List[Element]) -> Element { todo }"
         ~code:Angle_brackets ~at:"<"
         ~fixed:"fn first[Element: Ordered](items: List[Element]) -> Element { todo }";
-      error "type Box<Item>(item: Item)" ~code:Angle_brackets ~at:"<"
+      Parse_support.error "type Box<Item>(item: Item)" ~code:Angle_brackets ~at:"<"
         ~fixed:"type Box[Item](item: Item)");
-  test "a comparison after a type is not angle brackets" (fun () ->
-      let _, diagnostics = body_of "let small = count as Int64 < limit" in
-      if codes diagnostics <> [ "parser.as_conversion" ] then
-        fail "got [%s]" (String.concat "; " (codes diagnostics)));
-  test "a comparison in a function type inside angle brackets stays a comparison" (fun () ->
+  Harness.test "a comparison after a type is not angle brackets" (fun () ->
+      let _, diagnostics = Parse_support.body_of "let small = count as Int64 < limit" in
+      if Parse_support.codes diagnostics <> [ "parser.as_conversion" ] then
+        Harness.fail "got [%s]" (String.concat "; " (Parse_support.codes diagnostics)));
+  Harness.test "a comparison in a function type inside angle brackets stays a comparison" (fun () ->
       let _, diagnostics =
-        body_of "let checks: List<(fn(index: UInt64) requires index < 3)> = []"
+        Parse_support.body_of "let checks: List<(fn(index: UInt64) requires index < 3)> = []"
       in
-      if codes diagnostics <> [ "parser.angle_brackets" ] then
-        fail "got [%s]" (String.concat "; " (codes diagnostics)));
-  test "Shape::Circle" (fun () ->
-      body_error "let shape = Shape::Circle(radius: 1.0)" ~code:Path_separator ~at:"::"
-        ~fixed:"let shape = Shape.Circle(radius: 1.0)";
-      body_error "let items = List::new()" ~code:Path_separator ~at:"::"
+      if Parse_support.codes diagnostics <> [ "parser.angle_brackets" ] then
+        Harness.fail "got [%s]" (String.concat "; " (Parse_support.codes diagnostics)));
+  Harness.test "Shape::Circle" (fun () ->
+      Parse_support.body_error "let shape = Shape::Circle(radius: 1.0)" ~code:Path_separator
+        ~at:"::" ~fixed:"let shape = Shape.Circle(radius: 1.0)";
+      Parse_support.body_error "let items = List::new()" ~code:Path_separator ~at:"::"
         ~fixed:"let items = List.new()");
-  test "Shape::Circle is parsed as the member it means" (fun () ->
-      recovered_statements "let shape = geometry::Shape::Circle"
+  Harness.test "Shape::Circle is parsed as the member it means" (fun () ->
+      Parse_support.recovered_statements "let shape = geometry::Shape::Circle"
         [ "(let shape (. geometry::Shape Circle))" ]);
-  test "a variant with its type in a pattern" (fun () ->
-      body_error Fixtures.Parser_rules.variant_with_its_type_in_a_pattern ~code:Qualified_variant
-        ~at:"Shape." ~fixed:Fixtures.Parser_rules.variant_with_its_type_in_a_pattern_fixed;
-      body_error "let empty = shape is geometry::Shape::Empty" ~code:Qualified_variant
+  Harness.test "a variant with its type in a pattern" (fun () ->
+      Parse_support.body_error Fixtures.Parser_rules.variant_with_its_type_in_a_pattern
+        ~code:Qualified_variant ~at:"Shape."
+        ~fixed:Fixtures.Parser_rules.variant_with_its_type_in_a_pattern_fixed;
+      Parse_support.body_error "let empty = shape is geometry::Shape::Empty" ~code:Qualified_variant
         ~at:"geometry::Shape::" ~fixed:"let empty = shape is Empty");
-  test "a variant with its module in a pattern" (fun () ->
-      body_error "let round = shape is geometry::Circle(radius)" ~code:Qualified_variant
-        ~at:"geometry::" ~fixed:"let round = shape is Circle(radius)");
-  test "a constant of a type in a pattern is not a variant" (fun () ->
+  Harness.test "a variant with its module in a pattern" (fun () ->
+      Parse_support.body_error "let round = shape is geometry::Circle(radius)"
+        ~code:Qualified_variant ~at:"geometry::" ~fixed:"let round = shape is Circle(radius)");
+  Harness.test "a constant of a type in a pattern is not a variant" (fun () ->
       List.iter
         (fun text ->
-          let _, diagnostics = body_of text in
-          if codes diagnostics <> [] then fail "got [%s]" (String.concat "; " (codes diagnostics)))
+          let _, diagnostics = Parse_support.body_of text in
+          if Parse_support.codes diagnostics <> [] then
+            Harness.fail "got [%s]" (String.concat "; " (Parse_support.codes diagnostics)))
         [ "let teapot = status is Status.teapot"; "let teapot = status is http::Status.teapot" ]);
-  test "vec![...]" (fun () ->
-      body_error "let items = vec![1, 2]" ~code:Macro_call ~at:"!" ~fixed:"let items = [1, 2]");
-  test "println!(...) has no fix" (fun () ->
-      body_error "println!(\"total: {}\", total)" ~code:Macro_call ~at:"!");
-  test "todo!()" (fun () ->
-      body_error "todo!()" ~code:Macro_call ~at:"!" ~fixed:"todo";
-      body_error "unreachable!(\"never\")" ~code:Macro_call ~at:"!");
-  test "a negation after a name is not a macro" (fun () ->
-      let _, diagnostics = body_of "let different = a != (b)" in
-      if codes diagnostics <> [] then fail "got [%s]" (String.concat "; " (codes diagnostics)));
-  test "a tuple" (fun () ->
-      body_error "let pair = (1, 2)" ~code:Tuple ~at:"(" ~occurrence:2;
-      body_error "let first = pair.0" ~code:Tuple ~at:"0";
-      body_error "let pair: (Int64, String) = make()" ~code:Tuple ~at:"(" ~occurrence:2);
-  test "a ** b" (fun () ->
-      body_error "let square = x ** 2" ~code:Power_operator ~at:"**";
-      recovered_statements "let y = a + x ** 2" [ "(let y (+ a error))" ]);
-  test "name := value" (fun () ->
-      body_error "count := 0" ~code:Short_declaration ~at:":=" ~fixed:"let count = 0";
-      body_error "point.x := 0" ~code:Short_declaration ~at:":=");
-  test "value |> function" (fun () ->
-      body_error "let total = items |> sum" ~code:Pipe_operator ~at:"|>"
+  Harness.test "vec![...]" (fun () ->
+      Parse_support.body_error "let items = vec![1, 2]" ~code:Macro_call ~at:"!"
+        ~fixed:"let items = [1, 2]");
+  Harness.test "println!(...) has no fix" (fun () ->
+      Parse_support.body_error "println!(\"total: {}\", total)" ~code:Macro_call ~at:"!");
+  Harness.test "todo!()" (fun () ->
+      Parse_support.body_error "todo!()" ~code:Macro_call ~at:"!" ~fixed:"todo";
+      Parse_support.body_error "unreachable!(\"never\")" ~code:Macro_call ~at:"!");
+  Harness.test "a negation after a name is not a macro" (fun () ->
+      let _, diagnostics = Parse_support.body_of "let different = a != (b)" in
+      if Parse_support.codes diagnostics <> [] then
+        Harness.fail "got [%s]" (String.concat "; " (Parse_support.codes diagnostics)));
+  Harness.test "a tuple" (fun () ->
+      Parse_support.body_error "let pair = (1, 2)" ~code:Tuple ~at:"(" ~occurrence:2;
+      Parse_support.body_error "let first = pair.0" ~code:Tuple ~at:"0";
+      Parse_support.body_error "let pair: (Int64, String) = make()" ~code:Tuple ~at:"("
+        ~occurrence:2);
+  Harness.test "a ** b" (fun () ->
+      Parse_support.body_error "let square = x ** 2" ~code:Power_operator ~at:"**";
+      Parse_support.recovered_statements "let y = a + x ** 2" [ "(let y (+ a error))" ]);
+  Harness.test "name := value" (fun () ->
+      Parse_support.body_error "count := 0" ~code:Short_declaration ~at:":=" ~fixed:"let count = 0";
+      Parse_support.body_error "point.x := 0" ~code:Short_declaration ~at:":=");
+  Harness.test "value |> function" (fun () ->
+      Parse_support.body_error "let total = items |> sum" ~code:Pipe_operator ~at:"|>"
         ~fixed:"let total = sum(items)";
-      body_error "let total = items\n  |> list::sum" ~code:Pipe_operator ~at:"|>"
+      Parse_support.body_error "let total = items\n  |> list::sum" ~code:Pipe_operator ~at:"|>"
         ~fixed:"let total = list::sum(items)";
-      body_error "let total = items |> take(3)" ~code:Pipe_operator ~at:"|>");
-  test "a lambda with annotations" (fun () ->
-      body_error "let double = fn(x: Int64) { x * 2 }" ~code:Lambda_annotation ~at:": Int64"
-        ~fixed:"let double = fn(x) { x * 2 }";
-      body_error "let double = fn(x) -> Int64 { x * 2 }" ~code:Lambda_annotation ~at:" -> Int64"
-        ~fixed:"let double = fn(x) { x * 2 }");
-  test "List<String>.new() in an expression" (fun () ->
-      body_error "let names = List<String>.new()" ~code:Angle_brackets ~at:"<"
+      Parse_support.body_error "let total = items |> take(3)" ~code:Pipe_operator ~at:"|>");
+  Harness.test "a lambda with annotations" (fun () ->
+      Parse_support.body_error "let double = fn(x: Int64) { x * 2 }" ~code:Lambda_annotation
+        ~at:": Int64" ~fixed:"let double = fn(x) { x * 2 }";
+      Parse_support.body_error "let double = fn(x) -> Int64 { x * 2 }" ~code:Lambda_annotation
+        ~at:" -> Int64" ~fixed:"let double = fn(x) { x * 2 }");
+  Harness.test "List<String>.new() in an expression" (fun () ->
+      Parse_support.body_error "let names = List<String>.new()" ~code:Angle_brackets ~at:"<"
         ~fixed:"let names = List[String].new()");
-  test "a comparison of uppercase names is not angle brackets" (fun () ->
-      let _, diagnostics = body_of "let between = Low < value && value > High" in
-      if codes diagnostics <> [] then fail "got [%s]" (String.concat "; " (codes diagnostics)));
-  test "impl<T>" (fun () ->
-      error "impl<Item> Shown for Box[Item] {}" ~code:Impl_parameters ~at:"<"
+  Harness.test "a comparison of uppercase names is not angle brackets" (fun () ->
+      let _, diagnostics = Parse_support.body_of "let between = Low < value && value > High" in
+      if Parse_support.codes diagnostics <> [] then
+        Harness.fail "got [%s]" (String.concat "; " (Parse_support.codes diagnostics)));
+  Harness.test "impl<T>" (fun () ->
+      Parse_support.error "impl<Item> Shown for Box[Item] {}" ~code:Impl_parameters ~at:"<"
         ~fixed:"impl Shown for Box[Item] {}";
-      error "impl<Item: Shown> Shown for Box[Item] {}" ~code:Impl_parameters ~at:"<");
-  test "!value is Pattern needs parentheses" (fun () ->
-      body_error "let failed = !response is Ok(_)" ~code:Needs_parentheses ~at:"is"
+      Parse_support.error "impl<Item: Shown> Shown for Box[Item] {}" ~code:Impl_parameters ~at:"<");
+  Harness.test "!value is Pattern needs parentheses" (fun () ->
+      Parse_support.body_error "let failed = !response is Ok(_)" ~code:Needs_parentheses ~at:"is"
         ~fixed:"let failed = !(response is Ok(_))"
         ~alternatives:[ "let failed = (!response) is Ok(_)" ];
-      body_error "let off = !flags.ready is true" ~code:Needs_parentheses ~at:"is"
+      Parse_support.body_error "let off = !flags.ready is true" ~code:Needs_parentheses ~at:"is"
         ~fixed:"let off = !(flags.ready is true)"
         ~alternatives:[ "let off = (!flags.ready) is true" ]);
-  test "a negation that is not the whole left operand of is needs none" (fun () ->
+  Harness.test "a negation that is not the whole left operand of is needs none" (fun () ->
       let _, diagnostics =
-        body_of Fixtures.Parser_rules.negation_that_is_not_the_whole_left_operand_of_is
+        Parse_support.body_of
+          Fixtures.Parser_rules.negation_that_is_not_the_whole_left_operand_of_is
       in
-      if codes diagnostics <> [] then fail "got [%s]" (String.concat "; " (codes diagnostics)));
-  test "a ?? b" (fun () ->
-      body_error "let name = user.name ?? \"guest\"" ~code:Null_coalescing ~at:"?"
+      if Parse_support.codes diagnostics <> [] then
+        Harness.fail "got [%s]" (String.concat "; " (Parse_support.codes diagnostics)));
+  Harness.test "a ?? b" (fun () ->
+      Parse_support.body_error "let name = user.name ?? \"guest\"" ~code:Null_coalescing ~at:"?"
         ~fixed:"let name = user.name.unwrap_or(\"guest\")";
-      body_error "let port = settings.port ?: 80" ~code:Null_coalescing ~at:"?"
+      Parse_support.body_error "let port = settings.port ?: 80" ~code:Null_coalescing ~at:"?"
         ~fixed:"let port = settings.port.unwrap_or(80)";
-      body_error "let total = a + b ?? 0" ~code:Null_coalescing ~at:"?"
+      Parse_support.body_error "let total = a + b ?? 0" ~code:Null_coalescing ~at:"?"
         ~fixed:"let total = (a + b).unwrap_or(0)");
-  test "a ? after a call is still a try" (fun () ->
-      let _, diagnostics = body_of Fixtures.Parser_rules.after_a_call_is_still_a_try in
-      if codes diagnostics <> [] then fail "got [%s]" (String.concat "; " (codes diagnostics)));
-  test "items.map { it.name }" (fun () ->
-      body_error "let names = items.map { it.name }" ~code:Trailing_lambda ~at:"{ it"
+  Harness.test "a ? after a call is still a try" (fun () ->
+      let _, diagnostics =
+        Parse_support.body_of Fixtures.Parser_rules.after_a_call_is_still_a_try
+      in
+      if Parse_support.codes diagnostics <> [] then
+        Harness.fail "got [%s]" (String.concat "; " (Parse_support.codes diagnostics)));
+  Harness.test "items.map { it.name }" (fun () ->
+      Parse_support.body_error "let names = items.map { it.name }" ~code:Trailing_lambda ~at:"{ it"
         ~fixed:"let names = items.map(fn(item) { item.name })");
-  test "it in an interpolation is renamed too" (fun () ->
-      body_error "let x = items.map { \"${it.name}\" }" ~code:Trailing_lambda ~at:"{ \""
-        ~fixed:"let x = items.map(fn(item) { \"${item.name}\" })");
-  test "the lambda's parameter is a plain singular, or element" (fun () ->
-      body_error "let x = entries.map { it.key }" ~code:Trailing_lambda ~at:"{ it"
+  Harness.test "it in an interpolation is renamed too" (fun () ->
+      Parse_support.body_error "let x = items.map { \"${it.name}\" }" ~code:Trailing_lambda
+        ~at:"{ \"" ~fixed:"let x = items.map(fn(item) { \"${item.name}\" })");
+  Harness.test "the lambda's parameter is a plain singular, or element" (fun () ->
+      Parse_support.body_error "let x = entries.map { it.key }" ~code:Trailing_lambda ~at:"{ it"
         ~fixed:"let x = entries.map(fn(entry) { entry.key })";
-      body_error "let x = statuses.map { it.code }" ~code:Trailing_lambda ~at:"{ it"
+      Parse_support.body_error "let x = statuses.map { it.code }" ~code:Trailing_lambda ~at:"{ it"
         ~fixed:"let x = statuses.map(fn(element) { element.code })");
-  test "x as Int64" (fun () ->
-      body_error "let n = size as Int64" ~code:As_conversion ~at:"as"
+  Harness.test "x as Int64" (fun () ->
+      Parse_support.body_error "let n = size as Int64" ~code:As_conversion ~at:"as"
         ~fixed:"let n = Int64.from(size)"
         ~alternatives:[ "let n = Int64.try_from(size)" ]);
-  test "loop" (fun () ->
-      body_error "loop {\n  todo\n}" ~code:Reserved_word ~at:"loop" ~fixed:"while true {\n  todo\n}");
-  test "const" (fun () ->
-      error "const pi: Float64 = 3.14" ~code:Reserved_word ~at:"const"
+  Harness.test "loop" (fun () ->
+      Parse_support.body_error "loop {\n  todo\n}" ~code:Reserved_word ~at:"loop"
+        ~fixed:"while true {\n  todo\n}");
+  Harness.test "const" (fun () ->
+      Parse_support.error "const pi: Float64 = 3.14" ~code:Reserved_word ~at:"const"
         ~fixed:"let pi: Float64 = 3.14");
-  test "elif" (fun () ->
-      body_error "if a {\n  f()\n}\nelif b {\n  g()\n}" ~code:Elif ~at:"elif"
+  Harness.test "elif" (fun () ->
+      Parse_support.body_error "if a {\n  f()\n}\nelif b {\n  g()\n}" ~code:Elif ~at:"elif"
         ~fixed:"if a {\n  f()\n} else if b {\n  g()\n}")

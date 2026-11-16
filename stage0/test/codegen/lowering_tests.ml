@@ -1,186 +1,208 @@
-open Codegen_support
-
 let () =
-  passes "calls, operators, comparisons, a let, an if, and a return"
+  Codegen_support.passes "calls, operators, comparisons, a let, an if, and a return"
     Fixtures.Lowering.calls_operators_comparisons_a_let_an_if_and_a;
-  passes "`let x = own y` moves the value, and `let x = y` aliases the place"
+  Codegen_support.passes "`let x = own y` moves the value, and `let x = y` aliases the place"
     Fixtures.Lowering.let_x_own_y_moves_the_value_and_let_x_y_aliases;
-  passes "a trait method call resolves to the type's impl, or to a bound in a generic function"
+  Codegen_support.passes
+    "a trait method call resolves to the type's impl, or to a bound in a generic function"
     Fixtures.Lowering.trait_method_call_resolves_to_the_types_impl_or_to;
-  passes "an assignment, a call that omits an argument with a default, and a field access"
+  Codegen_support.passes
+    "an assignment, a call that omits an argument with a default, and a field access"
     Fixtures.Lowering.assignment_a_call_that_omits_an_argument_with_a
 
 let () =
-  passes "a string literal, a constant, and a constructor call with every field"
+  Codegen_support.passes "a string literal, a constant, and a constructor call with every field"
     Fixtures.Lowering.string_literal_a_constant_and_a_constructor_call
 
 let () =
-  passes "a while loop with break and continue, and a for loop over an integer range"
+  Codegen_support.passes
+    "a while loop with break and continue, and a for loop over an integer range"
     Fixtures.Lowering.while_loop_with_break_and_continue_and_a_for_loop;
-  passes "a for loop over a list" Fixtures.Lowering.for_loop_over_a_list
+  Codegen_support.passes "a for loop over a list" Fixtures.Lowering.for_loop_over_a_list
 
 let () =
-  passes "a match on literals, a range, strings, and two values at once"
+  Codegen_support.passes "a match on literals, a range, strings, and two values at once"
     Fixtures.Lowering.match_on_literals_a_range_strings_and_two_values;
-  passes "alternatives that bind a name bind it from the alternative that matched"
+  Codegen_support.passes "alternatives that bind a name bind it from the alternative that matched"
     Fixtures.Lowering.alternatives_that_bind_a_name_bind_it_from_the;
-  passes "a let with an else, an is-test, a guard, and a pattern in a let and in a for loop"
+  Codegen_support.passes
+    "a let with an else, an is-test, a guard, and a pattern in a let and in a for loop"
     Fixtures.Lowering.let_with_an_else_an_is_test_a_guard_and_a_pattern
 
 let () =
-  passes "a todo and an unreachable on paths not taken, and a proof block"
+  Codegen_support.passes "a todo and an unreachable on paths not taken, and a proof block"
     Fixtures.Lowering.todo_and_an_unreachable_on_paths_not_taken_and_a
 
 let () =
-  passes "an is-test on a call's result keeps the result for the names it binds"
+  Codegen_support.passes "an is-test on a call's result keeps the result for the names it binds"
     Fixtures.Lowering.is_test_on_a_calls_result_keeps_the_result_for_the
 
 let () =
-  passes "defaults of a plain, a read-only, and an own parameter, and a requires clause"
+  Codegen_support.passes
+    "defaults of a plain, a read-only, and an own parameter, and a requires clause"
     Fixtures.Lowering.defaults_of_a_plain_a_read_only_and_an_own;
-  test "a requires clause is not evaluated when a test runs" (fun () ->
-      expect_output Fixtures.Lowering.requires_clause_is_not_evaluated_when_a_test_runs
-        "test 0 passed\n");
-  test "an index of a list out of bounds is reported where the index is written" (fun () ->
-      expect_output Fixtures.Lowering.index_out_of_bounds_is_reported_where_the_index_is
+  Codegen_support.test "a requires clause is not evaluated when a test runs" (fun () ->
+      Codegen_support.expect_output
+        Fixtures.Lowering.requires_clause_is_not_evaluated_when_a_test_runs "test 0 passed\n");
+  Codegen_support.test "an index of a list out of bounds is reported where the index is written"
+    (fun () ->
+      Codegen_support.expect_output
+        Fixtures.Lowering.index_out_of_bounds_is_reported_where_the_index_is
         "test 0 panicked\nmessage 47\nindex out of bounds\n  at example/main.truss:4:3\n");
-  test "a check in a called lending method of the standard library reports the program's call site"
+  Codegen_support.test
+    "a check in a called lending method of the standard library reports the program's call site"
     (fun () ->
-      expect_output Fixtures.Lowering.check_in_a_map_index_reports_the_programs_call_site
+      Codegen_support.expect_output
+        Fixtures.Lowering.check_in_a_map_index_reports_the_programs_call_site
         "test 0 panicked\nmessage 48\nindex out of bounds\n  at example/main.truss:3:11\n");
-  test "a check on the first line of an indented method reports its column in the file" (fun () ->
-      expect_output Fixtures.Lowering.panic_on_the_first_line_of_a_method_in_an_impl
+  Codegen_support.test
+    "a check on the first line of an indented method reports its column in the file" (fun () ->
+      Codegen_support.expect_output Fixtures.Lowering.panic_on_the_first_line_of_a_method_in_an_impl
         "test 0 panicked\nmessage 48\narithmetic overflow\n  at example/main.truss:8:28\n");
-  test "a column after a letter of two bytes counts Unicode scalar values, as a diagnostic's does"
+  Codegen_support.test
+    "a column after a letter of two bytes counts Unicode scalar values, as a diagnostic's does"
     (fun () ->
-      expect_output Fixtures.Lowering.column_after_a_letter_of_two_bytes_counts_scalar_values
+      Codegen_support.expect_output
+        Fixtures.Lowering.column_after_a_letter_of_two_bytes_counts_scalar_values
         "test 0 panicked\nmessage 48\nindex out of bounds\n  at example/main.truss:3:29\n")
 
 let () =
-  passes "an index, and a lending method with a default"
+  Codegen_support.passes "an index, and a lending method with a default"
     Fixtures.Lowering.index_and_a_lending_method_with_a_default
 
 let () =
-  passes "a capability method call, a provide, and a crash on a path not taken"
+  Codegen_support.passes "a capability method call, a provide, and a crash on a path not taken"
     Fixtures.Lowering.capability_method_call_a_provide_and_a_crash_on_a;
-  passes "a value converted to an any value, from an impl and from a bound"
+  Codegen_support.passes "a value converted to an any value, from an impl and from a bound"
     Fixtures.Lowering.value_converted_to_an_any_value_from_an_impl_and
 
 let () =
-  passes "an interpolated string, a tagged string, and a copy"
+  Codegen_support.passes "an interpolated string, a tagged string, and a copy"
     Fixtures.Lowering.interpolated_string_a_tagged_string_and_a_copy;
-  passes "a set, a map, a record update, a field default, and a parallel block"
+  Codegen_support.passes "a set, a map, a record update, a field default, and a parallel block"
     Fixtures.Lowering.set_a_map_a_record_update_a_field_default_and_a
 
 let () =
-  passes "an array literal and a generic value parameter used as a value"
+  Codegen_support.passes "an array literal and a generic value parameter used as a value"
     Fixtures.Lowering.array_literal_and_a_generic_value_parameter_used
 
 let () =
-  test "a call of a lending method that never lends compiles, and the code after it is unreachable"
+  Codegen_support.test
+    "a call of a lending method that never lends compiles, and the code after it is unreachable"
     (fun () ->
-      expect_output Fixtures.Lowering.call_of_a_lending_method_that_never_lends
+      Codegen_support.expect_output Fixtures.Lowering.call_of_a_lending_method_that_never_lends
         "test 0 panicked\nmessage 35\nno cell\n  at example/main.truss:6:3\n")
 
 let () =
-  passes "a named function as a value, at its own type and at a wider one"
+  Codegen_support.passes "a named function as a value, at its own type and at a wider one"
     Fixtures.Lowering.named_function_as_a_value_at_its_own_type_and_at_a
 
 let () =
-  passes "a lambda that captures a local and one that captures self, called through a value"
+  Codegen_support.passes
+    "a lambda that captures a local and one that captures self, called through a value"
     Fixtures.Lowering.lambda_that_captures_a_local_and_one_that_captures;
-  passes "a method called through an any value" Fixtures.Lowering.method_called_through_an_any_value;
-  passes "next on a cursor and a loop over the rest of it"
+  Codegen_support.passes "a method called through an any value"
+    Fixtures.Lowering.method_called_through_an_any_value;
+  Codegen_support.passes "next on a cursor and a loop over the rest of it"
     Fixtures.Lowering.next_on_a_cursor_and_a_loop_over_the_rest_of_it
 
 let () =
-  passes "a loop over a value of a type that implements Cursor"
+  Codegen_support.passes "a loop over a value of a type that implements Cursor"
     Fixtures.Lowering.loop_over_a_value_of_a_type_that_implements_cursor
 
 let () =
-  passes "a capability method called with arguments left to their defaults"
+  Codegen_support.passes "a capability method called with arguments left to their defaults"
     Fixtures.Lowering.capability_method_called_with_arguments_left_to
 
 let () =
-  passes "a capability default with arithmetic is lowered with its method's spans"
+  Codegen_support.passes "a capability default with arithmetic is lowered with its method's spans"
     Fixtures.Lowering.capability_default_with_arithmetic_has_its_methods
 
 let () =
-  passes "a slice of a range of a list, of a slice, and with a bound left out"
+  Codegen_support.passes "a slice of a range of a list, of a slice, and with a bound left out"
     Fixtures.Lowering.slice_of_a_range_of_a_list_of_a_slice_and_with_a
 
 let () =
-  passes "a slice of a small array, or of one in a small record, views the caller's array"
+  Codegen_support.passes
+    "a slice of a small array, or of one in a small record, views the caller's array"
     Fixtures.Lowering.slice_of_a_small_array_or_of_one_in_a_small_record
 
 let () =
-  passes "constructors of lent places, lent read-only and `mut`"
+  Codegen_support.passes "constructors of lent places, lent read-only and `mut`"
     Fixtures.Lowering.constructors_of_lent_places_lent_read_only_and
 
 let () =
-  passes "a lent constructor is read, mutated, and passed whole, and its places are written back"
+  Codegen_support.passes
+    "a lent constructor is read, mutated, and passed whole, and its places are written back"
     Fixtures.Lowering.lent_constructor_is_read_mutated_and_passed_whole
 
 let () =
-  passes
+  Codegen_support.passes
     "a lending method that lends on several paths: places, a value it makes, and one built around \
      places"
     Fixtures.Lowering.lending_method_that_lends_on_several_paths_places
 
 let () =
-  passes "a value moved out of a `mut` parameter, which is then reinitialized"
+  Codegen_support.passes "a value moved out of a `mut` parameter, which is then reinitialized"
     Fixtures.Lowering.value_moved_out_of_a_mut_parameter_which_is_then
 
 let () =
-  passes "quantifiers over ranges, which run as loops that stop at the first answer"
+  Codegen_support.passes "quantifiers over ranges, which run as loops that stop at the first answer"
     Fixtures.Lowering.quantifiers_over_ranges_which_run_as_loops_that
 
 let () =
-  passes "quantifiers over a list, a slice, and a type with a `count` and an `element` of its own"
+  Codegen_support.passes
+    "quantifiers over a list, a slice, and a type with a `count` and an `element` of its own"
     Fixtures.Lowering.quantifiers_over_a_list_a_slice_and_a_type_with_an
 
 let () =
-  passes "constants that are infinite or not a number, which C has no literal for"
+  Codegen_support.passes "constants that are infinite or not a number, which C has no literal for"
     Fixtures.Lowering.constants_that_are_infinite_or_not_a_number_which
 
 let () =
-  passes "a cursor through a bound, and the methods Cursor gives it"
+  Codegen_support.passes "a cursor through a bound, and the methods Cursor gives it"
     Fixtures.Lowering.cursor_through_a_bound_and_the_methods_cursor_gives
 
 let () =
-  passes "any of a trait whose methods name an associated type, over two kinds of cursor"
+  Codegen_support.passes
+    "any of a trait whose methods name an associated type, over two kinds of cursor"
     Fixtures.Lowering.any_of_a_trait_whose_methods_name_an_associated
 
 let () =
-  passes "a match that owns a sum takes one variant's payload and drops the other variant whole"
+  Codegen_support.passes
+    "a match that owns a sum takes one variant's payload and drops the other variant whole"
     Fixtures.Lowering.match_that_owns_a_sum_takes_one_variants_payload
 
 let () =
-  passes "a loop over a range of characters, which has no surrogates in it"
+  Codegen_support.passes "a loop over a range of characters, which has no surrogates in it"
     Fixtures.Lowering.loop_over_a_range_of_characters_which_has_no
 
 let () =
-  passes "a function with a default, called through a function value, uses its arguments"
+  Codegen_support.passes
+    "a function with a default, called through a function value, uses its arguments"
     Fixtures.Lowering.function_with_a_default_called_through_a_function
 
 let folds name ~folded ~run source =
-  test name (fun () ->
+  Codegen_support.test name (fun () ->
       let _, compile =
-        load
+        Codegen_support.load
           ~roots:
             (List.map
-               (fun name -> Instance.Constant (Top { module_ = example; name }))
+               (fun name -> Instance.Constant (Top { module_ = Codegen_support.example; name }))
                (folded @ run))
           source
       in
       let is_folded name =
-        Compile.For_testing.is_folded compile (Top { module_ = example; name })
+        Compile.For_testing.is_folded compile (Top { module_ = Codegen_support.example; name })
       in
       List.iter
-        (fun name -> if not (is_folded name) then fail "%s is run, and should fold" name)
+        (fun name ->
+          if not (is_folded name) then Codegen_support.fail "%s is run, and should fold" name)
         folded;
-      List.iter (fun name -> if is_folded name then fail "%s folds, and should be run" name) run;
-      expect_output source "test 0 passed\n")
+      List.iter
+        (fun name -> if is_folded name then Codegen_support.fail "%s folds, and should be run" name)
+        run;
+      Codegen_support.expect_output source "test 0 passed\n")
 
 let () =
   folds "constants fold from their MIR, except a set, which is built by running"
@@ -190,5 +212,5 @@ let () =
     Fixtures.Lowering.chain_of_ten_constants_each_naming_the_one_before_folds
 
 let () =
-  passes "a return in an arm of a match on a lent part drops only what it holds"
+  Codegen_support.passes "a return in an arm of a match on a lent part drops only what it holds"
     Fixtures.Lowering.return_in_an_arm_of_a_match_on_a_lent_part_drops

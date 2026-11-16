@@ -1,5 +1,3 @@
-open Token
-
 type piece = Split.piece = { first : int; stop : int }
 
 let split = Split.pieces

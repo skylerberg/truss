@@ -1,16 +1,13 @@
-open Token
-open Cursor
-
 type t = Cursor.t
 
 let create = Cursor.create ~foreign_escape:Habits.Escapes.scan
 
-let punctuation cursor current =
+let punctuation (cursor : Cursor.t) current =
   let start = cursor.position in
-  let is offset character = is_at cursor (start + offset) character in
+  let is offset character = Cursor.is_at cursor (start + offset) character in
   let take kind length =
     cursor.position <- start + length;
-    Some (Punctuation kind)
+    Some (Token.Punctuation kind)
   in
   let followed_by options default =
     match List.find_opt (fun (character, _, _) -> is 1 character) options with
@@ -49,7 +46,7 @@ let punctuation cursor current =
       else followed_by [ ('=', Greater_equal, 2) ] Greater
   | _ -> None
 
-let checked_name cursor name =
+let checked_name (cursor : Cursor.t) name =
   match Hashtbl.find_opt cursor.names name with
   | Some checked -> checked
   | None ->
@@ -63,7 +60,7 @@ let ends_operand : Token.kind -> bool = function
   | Keyword (True | False | Self_value | Self_type | Todo | Unreachable) -> true
   | _ -> false
 
-let follows_operand cursor =
+let follows_operand (cursor : Cursor.t) =
   match cursor.previous with Some token -> ends_operand token.kind | None -> false
 
 let begins_operand : Token.kind -> bool = function
@@ -76,9 +73,9 @@ let is_word : Token.kind -> bool = function
   | Upper _ | Lower _ | Underscore | Keyword _ | Reserved _ -> true
   | _ -> false
 
-let token cursor ~inline ~start ?(ending = Closed) kind =
+let token cursor ~inline ~start ?(ending = Cursor.Closed) kind =
   Habits.Comments.end_semicolons cursor
-    ~line_break:(match kind with Punctuation (Close Curly) -> false | _ -> true);
+    ~line_break:(match kind with Token.Punctuation (Close Curly) -> false | _ -> true);
   let first_line_break = if inline then None else cursor.first_line_break in
   let blank_line = (not inline) && cursor.blank_line in
   if not inline then begin
@@ -86,11 +83,11 @@ let token cursor ~inline ~start ?(ending = Closed) kind =
     cursor.blank_line <- false;
     cursor.line_is_blank <- false
   end;
-  { kind; start; stop = cursor.position; ending; first_line_break; blank_line }
+  { Cursor.kind; start; stop = cursor.position; ending; first_line_break; blank_line }
 
-let hold cursor items = cursor.held <- items @ cursor.held
+let hold (cursor : Cursor.t) items = cursor.held <- items @ cursor.held
 
-let with_trivia_of (skipped : token) (next : token) =
+let with_trivia_of (skipped : Cursor.token) (next : Cursor.token) =
   {
     next with
     first_line_break =
@@ -100,13 +97,13 @@ let with_trivia_of (skipped : token) (next : token) =
     blank_line = skipped.blank_line || next.blank_line;
   }
 
-let restore_trivia cursor (skipped : token) =
+let restore_trivia (cursor : Cursor.t) (skipped : Cursor.token) =
   (match skipped.first_line_break with
   | Some _ as line_break -> cursor.first_line_break <- line_break
   | None -> ());
   cursor.blank_line <- skipped.blank_line || cursor.blank_line
 
-let rec scan cursor ~inline ~nesting =
+let rec scan (cursor : Cursor.t) ~inline ~nesting =
   let item =
     match cursor.held with
     | item :: rest ->
@@ -117,7 +114,7 @@ let rec scan cursor ~inline ~nesting =
   (match item with Token token -> cursor.previous <- Some token | Line_end | End -> ());
   item
 
-and scan_after cursor ~inline ~nesting previous =
+and scan_after (cursor : Cursor.t) ~inline ~nesting previous =
   cursor.previous <- previous;
   scan_item cursor ~inline ~nesting
 
@@ -128,7 +125,7 @@ and scan_item cursor ~inline ~nesting =
     Source_text.reject ?code cursor ~length message;
     again ()
   in
-  let token ?ending kind = Token (token cursor ~inline ~start ?ending kind) in
+  let token ?ending kind = Cursor.Token (token cursor ~inline ~start ?ending kind) in
   let forbidden () =
     Source_text.forbidden_run cursor ~context:Code;
     cursor.line_is_blank <- false;
@@ -138,18 +135,18 @@ and scan_item cursor ~inline ~nesting =
     Habits.Comments.end_semicolons cursor ~line_break:false;
     item
   in
-  if at_end cursor start then no_token End
+  if Cursor.at_end cursor start then no_token Cursor.End
   else
-    let current = char cursor start in
-    if is_space current then begin
+    let current = Cursor.char cursor start in
+    if Cursor.is_space current then begin
       cursor.position <- start + 1;
       again ()
     end
-    else if is_line_break current then no_token Line_end
-    else if is_ascii_letter current || current = '_' then name cursor ~inline ~nesting
-    else if is_digit current then number cursor ~inline ~nesting
-    else if not (is_ascii current) then begin
-      let decoded = decode cursor start in
+    else if Cursor.is_line_break current then no_token Cursor.Line_end
+    else if Cursor.is_ascii_letter current || current = '_' then name cursor ~inline ~nesting
+    else if Cursor.is_digit current then number cursor ~inline ~nesting
+    else if not (Cursor.is_ascii current) then begin
+      let decoded = Cursor.decode cursor start in
       if not (Unicode.Decoded.is_valid decoded) then begin
         Source_text.invalid_run cursor;
         again ()
@@ -161,7 +158,8 @@ and scan_item cursor ~inline ~nesting =
         else
           let length = Unicode.Decoded.length decoded in
           let unused () =
-            reject length (Printf.sprintf "%s is not used in Truss." (show_character cursor start))
+            reject length
+              (Printf.sprintf "%s is not used in Truss." (Cursor.show_character cursor start))
           in
           match Habits.Confusables.scan cursor ~value ~length with
           | Some (Lexed kind) -> token kind
@@ -187,10 +185,13 @@ and scan_item cursor ~inline ~nesting =
               | '$' when Strings.opens_raw_string cursor start ->
                   string cursor ~tag:None ~inline ~nesting ~start
               | '$' ->
-                  reject (run_length cursor start '$')
+                  reject
+                    (Cursor.run_length cursor start '$')
                     "`$` is used only in strings: `${...}` inside a string interpolates, and `$`s \
                      before a raw string's `\"\"\"` choose how it interpolates."
-              | '.' when satisfies cursor (start + 1) is_digit && not (follows_operand cursor) -> (
+              | '.'
+                when Cursor.satisfies cursor (start + 1) Cursor.is_digit
+                     && not (follows_operand cursor) -> (
                   match Habits.Number_forms.leading_dot cursor with
                   | Some kind -> token kind
                   | None -> (
@@ -207,15 +208,15 @@ and number cursor ~inline ~nesting =
   let checked = Habits.Number_forms.check (String.sub cursor.text start (stop - start)) in
   (match checked.problem with
   | Some problem ->
-      report cursor ~code:problem.code
+      Cursor.report cursor ~code:problem.code
         ~fixes:
-          (if is_at cursor stop '.' then []
+          (if Cursor.is_at cursor stop '.' then []
            else
              List.map
                (fun (title, replacement) ->
-                 Diagnostic.fix title [ Diagnostic.replace (span start stop) replacement ])
+                 Diagnostic.fix title [ Diagnostic.replace (Cursor.span start stop) replacement ])
                checked.fixes)
-        (span (start + problem.start) (start + problem.stop))
+        (Cursor.span (start + problem.start) (start + problem.stop))
         problem.message
   | None -> ());
   let integer = token cursor ~inline ~start checked.value in
@@ -263,15 +264,15 @@ and name cursor ~inline ~nesting =
   let start = cursor.position in
   let rec loop () =
     let position = cursor.position in
-    if at_end cursor position then ()
-    else if is_ascii (char cursor position) then
-      begin if is_ascii_name_byte (char cursor position) then begin
+    if Cursor.at_end cursor position then ()
+    else if Cursor.is_ascii (Cursor.char cursor position) then
+      begin if Cursor.is_ascii_name_byte (Cursor.char cursor position) then begin
         cursor.position <- position + 1;
         loop ()
       end
       end
     else
-      let decoded = decode cursor position in
+      let decoded = Cursor.decode cursor position in
       if
         Unicode.Decoded.is_valid decoded
         && Unicode.is_xid_continue (Unicode.Decoded.code_point decoded)
@@ -284,7 +285,7 @@ and name cursor ~inline ~nesting =
   let stop = cursor.position in
   let spelling = String.sub cursor.text start (stop - start) in
   let kind =
-    if spelling = "_" then Underscore
+    if spelling = "_" then Token.Underscore
     else
       match Token.word spelling with
       | Some kind -> kind
@@ -293,8 +294,8 @@ and name cursor ~inline ~nesting =
           (match checked.problem with
           | Some (code, message) ->
               let opens_literal =
-                is_at cursor stop '"' || is_at cursor stop '\''
-                || (is_at cursor stop '$' && Strings.opens_raw_string cursor stop)
+                Cursor.is_at cursor stop '"' || Cursor.is_at cursor stop '\''
+                || (Cursor.is_at cursor stop '$' && Strings.opens_raw_string cursor stop)
               in
               let fixes =
                 match checked.fix with
@@ -302,18 +303,19 @@ and name cursor ~inline ~nesting =
                     [
                       Diagnostic.fix
                         ("Write `" ^ fixed ^ "`")
-                        [ Diagnostic.replace (span start stop) fixed ];
+                        [ Diagnostic.replace (Cursor.span start stop) fixed ];
                     ]
                 | Some _ | None -> []
               in
-              report cursor ~code ~fixes (span start stop) message
+              Cursor.report cursor ~code ~fixes (Cursor.span start stop) message
           | None -> ());
           if checked.kind = Names.Upper then Upper checked.name else Lower checked.name
   in
   match kind with
   | Upper tag
-    when is_at cursor stop '"' || (is_at cursor stop '$' && Strings.opens_raw_string cursor stop) ->
-      string cursor ~tag:(Some (tag, span start stop)) ~inline ~nesting ~start
+    when Cursor.is_at cursor stop '"'
+         || (Cursor.is_at cursor stop '$' && Strings.opens_raw_string cursor stop) ->
+      string cursor ~tag:(Some (tag, Cursor.span start stop)) ~inline ~nesting ~start
   | kind -> (
       match Habits.String_forms.after_name cursor ~scan ~nesting ~start kind with
       | Some (kind, ending) -> Token (token cursor ~inline ~start ~ending kind)
@@ -336,7 +338,7 @@ let rec next cursor =
       Layout.Next
         {
           kind = token.kind;
-          span = span token.start token.stop;
+          span = Cursor.span token.start token.stop;
           first_line_break = token.first_line_break;
           blank_line = token.blank_line;
           unterminated_string = token.ending = Unterminated;

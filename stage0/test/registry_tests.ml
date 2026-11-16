@@ -1,4 +1,3 @@
-open Harness
 module Version = Registry.Version
 module Content = Registry.Content
 module Lock = Registry.Lock
@@ -8,18 +7,18 @@ module Selection = Registry.Selection
 let contains text part = Substring.contains text part
 
 let () =
-  test "a version is three numbers" (fun () ->
-      if Version.parse "1.4.2" <> Some (1, 4, 2) then fail "1.4.2 is not read";
+  Harness.test "a version is three numbers" (fun () ->
+      if Version.parse "1.4.2" <> Some (1, 4, 2) then Harness.fail "1.4.2 is not read";
       List.iter
-        (fun text -> if Version.parse text <> None then fail "%s is read" text)
+        (fun text -> if Version.parse text <> None then Harness.fail "%s is read" text)
         [ "1.4"; "1.4.2.0"; "1.x.2"; ""; "1..2"; "-1.0.0" ]);
-  test "versions compare by their numbers, not as text" (fun () ->
-      if Version.compare (1, 10, 0) (1, 9, 0) <= 0 then fail "1.10.0 is not after 1.9.0");
-  test "a package's versions start with the number at the end of its name, or 1" (fun () ->
+  Harness.test "versions compare by their numbers, not as text" (fun () ->
+      if Version.compare (1, 10, 0) (1, 9, 0) <= 0 then Harness.fail "1.10.0 is not after 1.9.0");
+  Harness.test "a package's versions start with the number at the end of its name, or 1" (fun () ->
       List.iter
         (fun (name, major) ->
           let actual = Version.major_of_name name in
-          if actual <> major then fail "%s gives %d" (Path.show_package name) actual)
+          if actual <> major then Harness.fail "%s gives %d" (Path.show_package name) actual)
         [
           ({ owner = Some "acme"; name = "geometry" }, 1);
           ({ owner = Some "acme"; name = "geometry_v2" }, 2);
@@ -30,21 +29,21 @@ let () =
         ])
 
 let () =
-  test "a package's hash does not depend on the order its files are given in" (fun () ->
+  Harness.test "a package's hash does not depend on the order its files are given in" (fun () ->
       let files = [ ("truss.toml", "a"); ("vector.truss", "b"); ("guide/start.md", "c") ] in
-      if Content.hash files <> Content.hash (List.rev files) then fail "the hashes differ";
-      if not (Content.is_hash (Content.hash files)) then fail "not 64 hexadecimal digits");
-  test "a package's hash is the BLAKE3 hash of a line for each file, as PACKAGES.md defines"
+      if Content.hash files <> Content.hash (List.rev files) then Harness.fail "the hashes differ";
+      if not (Content.is_hash (Content.hash files)) then Harness.fail "not 64 hexadecimal digits");
+  Harness.test "a package's hash is the BLAKE3 hash of a line for each file, as PACKAGES.md defines"
     (fun () ->
       let line path bytes = path ^ " " ^ Blake3.hex_digest bytes ^ "\n" in
       let expected = Blake3.hex_digest (line "a.truss" "one" ^ line "b/c.truss" "two") in
       if Content.hash [ ("b/c.truss", "two"); ("a.truss", "one") ] <> expected then
-        fail "another hash");
-  test "a package's hash changes with a file's bytes, and with its path" (fun () ->
+        Harness.fail "another hash");
+  Harness.test "a package's hash changes with a file's bytes, and with its path" (fun () ->
       let hash = Content.hash [ ("a.truss", "one"); ("b.truss", "two") ] in
-      if hash = Content.hash [ ("a.truss", "one"); ("b.truss", "too") ] then fail "bytes";
-      if hash = Content.hash [ ("a.truss", "one"); ("c.truss", "two") ] then fail "path";
-      if hash = Content.hash [ ("a.truss", "onetwo") ] then fail "one file for two")
+      if hash = Content.hash [ ("a.truss", "one"); ("b.truss", "too") ] then Harness.fail "bytes";
+      if hash = Content.hash [ ("a.truss", "one"); ("c.truss", "two") ] then Harness.fail "path";
+      if hash = Content.hash [ ("a.truss", "onetwo") ] then Harness.fail "one file for two")
 
 let lock_block () =
   String.concat "\n"
@@ -54,7 +53,7 @@ let lock_block () =
   ^ "\n"
 
 let () =
-  test "PACKAGES.md's lock file is read, and is written back as it is" (fun () ->
+  Harness.test "PACKAGES.md's lock file is read, and is written back as it is" (fun () ->
       let text = lock_block () in
       match Lock.parse text with
       | [
@@ -71,31 +70,33 @@ let () =
             _;
           };
         ] as entries ->
-          if Lock.print entries <> text then fail "written as %S" (Lock.print entries)
-      | _ -> fail "read differently");
-  test "a lock file with nothing in it has no package" (fun () ->
-      if Lock.parse "" <> [] || Lock.parse "format 1\n" <> [] then fail "has one");
+          if Lock.print entries <> text then Harness.fail "written as %S" (Lock.print entries)
+      | _ -> Harness.fail "read differently");
+  Harness.test "a lock file with nothing in it has no package" (fun () ->
+      if Lock.parse "" <> [] || Lock.parse "format 1\n" <> [] then Harness.fail "has one");
   let hash = String.make 64 'a' in
   let malformed_at line text =
     match Lock.parse text with
     | exception Lock.Malformed { line = actual; _ } when actual = line -> ()
-    | exception Lock.Malformed { line = actual; message } -> fail "at line %d: %s" actual message
-    | _ -> fail "accepted"
+    | exception Lock.Malformed { line = actual; message } ->
+        Harness.fail "at line %d: %s" actual message
+    | _ -> Harness.fail "accepted"
   in
-  test "a lock file without its first line is malformed" (fun () ->
+  Harness.test "a lock file without its first line is malformed" (fun () ->
       malformed_at 1 (Printf.sprintf "acme::geometry 1.0.0 %s\n" hash));
-  test "a line that is not a name, a version, and a hash is malformed, at its line" (fun () ->
+  Harness.test "a line that is not a name, a version, and a hash is malformed, at its line"
+    (fun () ->
       malformed_at 2 "format 1\nacme::geometry 1.0.0\n";
       malformed_at 2 (Printf.sprintf "format 1\ngeometry 1.0.0 %s\n" hash);
       malformed_at 2 (Printf.sprintf "format 1\nacme::geometry 1.0 %s\n" hash);
       malformed_at 2 "format 1\nacme::geometry 1.0.0 abc\n";
       malformed_at 3
         (Printf.sprintf "format 1\nacme::geometry 1.0.0 %s\nacme::geometry 1.1.0 %s\n" hash hash));
-  test "a version must start with the number its package's name ends in" (fun () ->
+  Harness.test "a version must start with the number its package's name ends in" (fun () ->
       malformed_at 2 (Printf.sprintf "format 1\nacme::geometry_v2 1.0.0 %s\n" hash);
       malformed_at 2 (Printf.sprintf "format 1\nacme::geometry 2.0.0 %s\n" hash))
 
-let fresh = scratch
+let fresh = Harness.scratch
 
 let at root =
   Unix.putenv Index.variable root;
@@ -106,7 +107,7 @@ let version_directory root (package : Path.package) version =
 
 let () =
   let files = [ ("truss.toml", "[package]\nname = \"acme::geometry\"\n"); ("vector.truss", "") ] in
-  test "a registry lists a package's versions in the order they were added" (fun () ->
+  Harness.test "a registry lists a package's versions in the order they were added" (fun () ->
       let registry = at (fresh "registry") in
       Index.add registry { Path.owner = Some "acme"; name = "geometry" } (1, 0, 0) files;
       Index.add registry
@@ -114,15 +115,15 @@ let () =
         (1, 1, 0) (("angle.truss", "") :: files);
       (match Index.versions registry { Path.owner = Some "acme"; name = "geometry" } with
       | [ ((1, 0, 0), first); ((1, 1, 0), second) ] ->
-          if first <> Content.hash files || first = second then fail "the hashes are wrong"
-      | _ -> fail "listed differently");
+          if first <> Content.hash files || first = second then Harness.fail "the hashes are wrong"
+      | _ -> Harness.fail "listed differently");
       if
         Option.map fst (Index.newest registry { Path.owner = Some "acme"; name = "geometry" })
         <> Some (1, 1, 0)
-      then fail "the newest is not 1.1.0";
+      then Harness.fail "the newest is not 1.1.0";
       if Index.versions registry { Path.owner = Some "acme"; name = "nothing" } <> [] then
-        fail "a package it does not hold");
-  test "a version is fetched into a directory named by its hash, with every file" (fun () ->
+        Harness.fail "a package it does not hold");
+  Harness.test "a version is fetched into a directory named by its hash, with every file" (fun () ->
       let registry = at (fresh "registry") and into = fresh "packages" in
       Index.add registry { Path.owner = Some "acme"; name = "geometry" } (1, 0, 0) files;
       let hash = Content.hash files in
@@ -130,10 +131,10 @@ let () =
         Index.fetch registry ~into { Path.owner = Some "acme"; name = "geometry" } (1, 0, 0) ~hash
       with
       | Ok directory ->
-          if Filename.basename directory <> hash then fail "in %s" directory;
-          if Content.hash (Content.all_files directory) <> hash then fail "other files"
-      | Error reason -> fail "%s" reason);
-  test "files that do not have the hash asked for are not kept" (fun () ->
+          if Filename.basename directory <> hash then Harness.fail "in %s" directory;
+          if Content.hash (Content.all_files directory) <> hash then Harness.fail "other files"
+      | Error reason -> Harness.fail "%s" reason);
+  Harness.test "files that do not have the hash asked for are not kept" (fun () ->
       let root = fresh "registry" and into = fresh "packages" in
       let registry = at root in
       Index.add registry { Path.owner = Some "acme"; name = "geometry" } (1, 0, 0) files;
@@ -147,10 +148,11 @@ let () =
       (match
          Index.fetch registry ~into { Path.owner = Some "acme"; name = "geometry" } (1, 0, 0) ~hash
        with
-      | Error reason -> if not (contains reason "do not have the hash") then fail "said %s" reason
-      | Ok _ -> fail "kept");
-      if Sys.readdir into <> [||] then fail "left files behind");
-  test "a version the registry does not hold is not fetched" (fun () ->
+      | Error reason ->
+          if not (contains reason "do not have the hash") then Harness.fail "said %s" reason
+      | Ok _ -> Harness.fail "kept");
+      if Sys.readdir into <> [||] then Harness.fail "left files behind");
+  Harness.test "a version the registry does not hold is not fetched" (fun () ->
       let registry = at (fresh "registry") and into = fresh "packages" in
       match
         Index.fetch registry ~into
@@ -158,7 +160,7 @@ let () =
           (1, 0, 0) ~hash:(String.make 64 'b')
       with
       | Error _ -> ()
-      | Ok _ -> fail "fetched")
+      | Ok _ -> Harness.fail "fetched")
 
 let package text = Option.get (Path.parse_package text)
 let hash_of name (version : Version.t) = Content.hash [ (name, Version.show version) ]
@@ -188,7 +190,7 @@ let entry name version =
 
 let chosen (packages, problems) =
   if problems <> [] then
-    fail "problems: %s" (String.concat " " (List.map Selection.sentence problems));
+    Harness.fail "problems: %s" (String.concat " " (List.map Selection.sentence problems));
   List.map
     (fun (actual : Selection.package) -> (Path.show_package actual.name, actual.version))
     packages
@@ -211,31 +213,32 @@ let () =
       ~local:(fun name -> name = package "app" || name = package "acme::local")
       ~load:(load published)
   in
-  test "a build uses the version its lock file names, and nothing newer" (fun () ->
+  Harness.test "a build uses the version its lock file names, and nothing newer" (fun () ->
       if
         chosen (choose [ entry "acme::units" (1, 1, 0) ] [ "acme::units" ])
         <> [ ("acme::units", (1, 1, 0)) ]
-      then fail "chose another");
-  test "a build uses the highest version any of its packages was published with" (fun () ->
+      then Harness.fail "chose another");
+  Harness.test "a build uses the highest version any of its packages was published with" (fun () ->
       let lock = [ entry "acme::geometry" (1, 0, 0); entry "acme::shapes" (1, 0, 0) ] in
       if
         chosen (choose lock [ "acme::geometry"; "acme::shapes" ])
         <> [
              ("acme::geometry", (1, 0, 0)); ("acme::shapes", (1, 0, 0)); ("acme::units", (1, 1, 0));
            ]
-      then fail "chose another");
-  test "a version the lock file names above every record's is kept" (fun () ->
+      then Harness.fail "chose another");
+  Harness.test "a version the lock file names above every record's is kept" (fun () ->
       let lock = [ entry "acme::geometry" (1, 0, 0); entry "acme::units" (1, 3, 0) ] in
       if
         chosen (choose lock [ "acme::geometry" ])
         <> [ ("acme::geometry", (1, 0, 0)); ("acme::units", (1, 3, 0)) ]
-      then fail "chose another");
-  test "a package no dependency reaches is not in the build, whatever the lock file names"
+      then Harness.fail "chose another");
+  Harness.test "a package no dependency reaches is not in the build, whatever the lock file names"
     (fun () ->
       let lock = [ entry "acme::units" (1, 0, 0); entry "acme::shapes" (1, 0, 0) ] in
       if chosen (choose lock [ "acme::units" ]) <> [ ("acme::units", (1, 0, 0)) ] then
-        fail "chose another");
-  test "a dependency that nothing gives a version is a problem that names who wants it" (fun () ->
+        Harness.fail "chose another");
+  Harness.test "a dependency that nothing gives a version is a problem that names who wants it"
+    (fun () ->
       match choose [] [ "acme::units" ] with
       | ( _,
           [
@@ -246,8 +249,8 @@ let () =
               };
           ] ) ->
           ()
-      | _ -> fail "not reported");
-  test "a version whose files cannot be had is a problem" (fun () ->
+      | _ -> Harness.fail "not reported");
+  Harness.test "a version whose files cannot be had is a problem" (fun () ->
       match choose [ entry "acme::units" (1, 9, 0) ] [ "acme::units" ] with
       | ( _,
           [
@@ -255,8 +258,9 @@ let () =
               { name = { Path.owner = Some "acme"; name = "units" }; version = 1, 9, 0; _ };
           ] ) ->
           ()
-      | _ -> fail "not reported");
-  test "a record that names a version under another hash than the build's is a problem" (fun () ->
+      | _ -> Harness.fail "not reported");
+  Harness.test "a record that names a version under another hash than the build's is a problem"
+    (fun () ->
       let lock =
         [
           entry "acme::geometry" (1, 0, 0); { (entry "acme::units" (1, 0, 0)) with hash = "other" };
@@ -273,8 +277,8 @@ let () =
                        true
                    | _ -> false)
                  problems)
-          then fail "not reported");
-  test "a project's package is used whatever the registry has by its name" (fun () ->
+          then Harness.fail "not reported");
+  Harness.test "a project's package is used whatever the registry has by its name" (fun () ->
       let published =
         (("acme::walls", (1, 0, 0)), ([ ("acme::local", []) ], [ ("acme::local", (1, 0, 0)) ]))
         :: published
@@ -290,7 +294,7 @@ let () =
           ~local:(fun name -> name = { Path.owner = Some "acme"; name = "local" })
           ~load:(load published)
       in
-      if chosen packages <> [ ("acme::walls", (1, 0, 0)) ] then fail "chose another")
+      if chosen packages <> [ ("acme::walls", (1, 0, 0)) ] then Harness.fail "chose another")
 
 let () =
   let package name dependencies : Selection.package =
@@ -311,7 +315,7 @@ let () =
     }
   in
   let grant package capabilities = { Manifest.package; capabilities } in
-  test "a package holds the capabilities the project grants it" (fun () ->
+  Harness.test "a package holds the capabilities the project grants it" (fun () ->
       let held =
         Selection.For_testing.holds
           ~project:
@@ -319,8 +323,8 @@ let () =
           [ package { Path.owner = Some "truss"; name = "http" } [] ]
       in
       if held <> [ ({ Path.owner = Some "truss"; name = "http" }, [ "Clock"; "NetworkClient" ]) ]
-      then fail "holds another");
-  test "a package holds only the granted capabilities that its user holds itself" (fun () ->
+      then Harness.fail "holds another");
+  Harness.test "a package holds only the granted capabilities that its user holds itself" (fun () ->
       let held =
         Selection.For_testing.holds
           ~project:[ grant { Path.owner = Some "truss"; name = "http" } [ "NetworkClient" ] ]
@@ -332,9 +336,9 @@ let () =
           ]
       in
       if List.assoc { Path.owner = Some "truss"; name = "tls" } held <> [ "NetworkClient" ] then
-        fail "holds [%s]"
+        Harness.fail "holds [%s]"
           (String.concat "; " (List.assoc { Path.owner = Some "truss"; name = "tls" } held)));
-  test "a package holds every capability any of its users grants it" (fun () ->
+  Harness.test "a package holds every capability any of its users grants it" (fun () ->
       let held =
         Selection.For_testing.holds
           ~project:
@@ -351,8 +355,9 @@ let () =
       in
       if
         List.assoc { Path.owner = Some "truss"; name = "tls" } held <> [ "NetworkClient"; "Random" ]
-      then fail "holds another");
-  test "where a lock file differs from the one a build gives is told for each package" (fun () ->
+      then Harness.fail "holds another");
+  Harness.test "where a lock file differs from the one a build gives is told for each package"
+    (fun () ->
       let written =
         [
           entry "acme::units" (1, 0, 0);
@@ -361,7 +366,7 @@ let () =
       and current = [ entry "acme::geometry" (1, 0, 0); entry "truss::http" (1, 0, 0) ] in
       let actual = String.concat " " (Selection.differences ~written ~current) in
       List.iter
-        (fun part -> if not (contains actual part) then fail "%s is not in: %s" part actual)
+        (fun part -> if not (contains actual part) then Harness.fail "%s is not in: %s" part actual)
         [
           "`acme::geometry` 1.0.0 is in the build and has no line";
           "Nothing in the build uses `acme::units`";

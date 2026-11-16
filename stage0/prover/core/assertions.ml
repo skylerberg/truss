@@ -1,7 +1,5 @@
-open State
-open Facts
-
-let is_test context = match context.current with Path.Test _ -> true | _ -> false
+let is_test (context : State.context) =
+  match context.current with Path.Test _ -> true | _ -> false
 
 let bitwise_operations : Intrinsic.operation list =
   [
@@ -107,7 +105,8 @@ let exactly (query : Logic.query) =
   in
   { query with facts = query.facts @ List.filter_map defined (List.rev !bitwise_terms) }
 
-let bit_vector_assertion context frame ~named ~origin ~(read : frame -> Logic.term) =
+let bit_vector_assertion (context : State.context) frame ~named ~origin
+    ~(read : State.frame -> Logic.term) =
   let saved_facts = context.facts and saved_decisions = context.decisions in
   let saved_stated = Hashtbl.copy context.stated in
   context.facts <- [];
@@ -115,7 +114,7 @@ let bit_vector_assertion context frame ~named ~origin ~(read : frame -> Logic.te
   let isolated =
     {
       frame with
-      condition = Logic.Boolean true;
+      State.condition = Logic.Boolean true;
       bound = [];
       binders = [];
       makes_obligations = false;
@@ -123,9 +122,9 @@ let bit_vector_assertion context frame ~named ~origin ~(read : frame -> Logic.te
   in
   let isolated =
     List.fold_left
-      (fun (inside : frame) (local, ty) ->
-        let symbol = fresh context inside "asserted" (sort_of context ty) in
-        assume context inside (in_range ty symbol);
+      (fun (inside : State.frame) (local, ty) ->
+        let symbol = Facts.fresh context inside "asserted" (Facts.sort_of context ty) in
+        Facts.assume context inside (Facts.in_range ty symbol);
         match local with
         | Core.Self -> { inside with self = Some symbol }
         | _ -> { inside with locals = Locals.add local symbol inside.locals })
@@ -133,13 +132,13 @@ let bit_vector_assertion context frame ~named ~origin ~(read : frame -> Logic.te
   in
   let term = read isolated in
   let obligation =
-    make_obligation context
+    Facts.make_obligation context
       { isolated with makes_obligations = true }
       Assertion
-      (locate context frame.source origin)
+      (Facts.locate context frame.source origin)
       [
         Text "`";
-        quote frame.source origin;
+        Facts.quote frame.source origin;
         Text "` may not hold for every value of the variables it names.";
       ]
       term
@@ -161,9 +160,9 @@ let assertion context frame ~origin ~bit_vector term =
   | Some (named, read) when not (is_test context) ->
       bit_vector_assertion context frame ~named ~origin ~read
   | _ -> ());
-  if is_test context || bit_vector <> None then assume context frame term
+  if is_test context || bit_vector <> None then Facts.assume context frame term
   else
-    oblige context frame Assertion
-      (locate context frame.source origin)
-      [ Text "`"; quote frame.source origin; Text "` may not hold." ]
+    Facts.oblige context frame Assertion
+      (Facts.locate context frame.source origin)
+      [ Text "`"; Facts.quote frame.source origin; Text "` may not hold." ]
       term

@@ -1,7 +1,5 @@
-open Context
-
 let copy_fix context title type_ (at : Source.Definition_span.t) =
-  if copyable context type_ then
+  if Context.copyable context type_ then
     [
       Diagnostic.fix title
         [ Diagnostic.insert (Source.Definition_span.zero_width at.stop) ".copy()" ];
@@ -11,22 +9,26 @@ let copy_fix context title type_ (at : Source.Definition_span.t) =
 type verdict =
   | Moves
   | Reads
-  | Refused of (context -> Source.Definition_span.t -> Types.ty -> unit)
+  | Refused of (Context.context -> Source.Definition_span.t -> Types.ty -> unit)
 
 let verdict context (place : Place.t) ~type_ ~is_returned ~is_captured : verdict =
-  let shown = show context place in
+  let shown = Context.show context place in
   let refuse message =
     Refused
       (fun context at type_ ->
-        report context Not_owned at ~fixes:(copy_fix context "Pass a copy." type_ at) message)
+        Context.report context Not_owned at
+          ~fixes:(copy_fix context "Pass a copy." type_ at)
+          message)
   in
-  let root_mode : Types.mode = if is_captured then Read else binding_mode context place.root in
+  let root_mode : Types.mode =
+    if is_captured then Read else Context.binding_mode context place.root
+  in
   if is_returned && root_mode <> Own then
-    if is_view context type_ then Reads
+    if Context.is_view context type_ then Reads
     else
       Refused
         (fun context at type_ ->
-          report context Needs_owned at
+          Context.report context Needs_owned at
             ~fixes:(copy_fix context "Return a copy." type_ at)
             (Printf.sprintf
                "A returned value must be owned, and `%s` is not owned here. Return a copy." shown))
@@ -77,13 +79,16 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
             match (place_of moved, first_move state moved) with
             | Some shown, Some moved_origin ->
                 Hashtbl.replace reported_use_after_move moved ();
-                let shown = show context shown in
-                report context Use_after_move (span context origin)
-                  ~notes:[ (span context moved_origin, Printf.sprintf "`%s` is moved here." shown) ]
+                let shown = Context.show context shown in
+                Context.report context Use_after_move (Context.span context origin)
+                  ~notes:
+                    [
+                      (Context.span context moved_origin, Printf.sprintf "`%s` is moved here." shown);
+                    ]
                   ~fixes:
                     [
                       Diagnostic.fix "Pass a copy at the move instead."
-                        (copy_edits context moved_origin);
+                        (Context.copy_edits context moved_origin);
                     ]
                   (Printf.sprintf "`%s` is used after it was moved." shown)
             | _ -> ())
@@ -99,12 +104,12 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
               match (place_of moved, first_move state moved) with
               | Some shown, Some moved_origin when moved_in_scope moved ->
                   Hashtbl.replace reported_not_reinitialized moved ();
-                  let moved_span = span context moved_origin in
-                  let root = show context { shown with steps = [] } in
-                  report context Not_reinitialized
+                  let moved_span = Context.span context moved_origin in
+                  let root = Context.show context { shown with steps = [] } in
+                  Context.report context Not_reinitialized
                     (Option.value ~default:moved_span at)
                     ~notes:(if at = None then [] else [ (moved_span, "It is moved out here.") ])
-                    (message (show context shown) root)
+                    (message (Context.show context shown) root)
               | _ -> ())
           | _ -> ())
       locals
@@ -161,7 +166,7 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
             (Moves.ended_by statement);
           Moves.apply moves state statement)
         basic.statements;
-      let at = span context basic.terminator_origin in
+      let at = Context.span context basic.terminator_origin in
       check_uses state (Moves.terminator_uses moves basic);
       match basic.terminator with
       | Return _ -> check_at_return at state
@@ -189,7 +194,10 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
     body.blocks
 
 let analyse context body =
-  Moves.analyse ~moving:(fun type_ -> not (plain context type_)) ~tracks:(fun _ -> true) body
+  Moves.analyse
+    ~moving:(fun type_ -> not (Context.plain context type_))
+    ~tracks:(fun _ -> true)
+    body
 
 let check context (mir : Mir.Graph.t) ~moves ~returns_to_caller =
   check_body context mir.body (moves mir.body) ~returns_to_caller;

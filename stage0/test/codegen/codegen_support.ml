@@ -39,15 +39,15 @@ let option value = named "Option" ~arguments:[ Type value ]
 let list element = named "List" ~arguments:[ Type element ]
 let array element count = named "Array" ~arguments:[ Type element; Value (Z.of_int count) ]
 
-open Memory_layout
-
 let host =
   match Libc.host with Some os -> os | None -> failwith "these tests run only on Linux and macOS"
 
-let field name ty = (name, Typed ty)
-let variant ?(indirect = false) name fields : variant_shape = { name; indirect; fields }
+let field name ty = (name, Memory_layout.Typed ty)
 
-let shapes extra (ty : Ground.ty) : shape =
+let variant ?(indirect = false) name fields : Memory_layout.variant_shape =
+  { name; indirect; fields }
+
+let shapes extra (ty : Ground.ty) : Memory_layout.shape =
   match ty with
   | Named { path = Top { name = "Int64"; _ }; _ } -> Scalar (Integer Int64)
   | Named { path = Top { name = "UInt8"; _ }; _ } -> Scalar (Integer UInt8)
@@ -82,7 +82,9 @@ let shapes extra (ty : Ground.ty) : shape =
       | Some shape -> shape
       | None -> invalid_arg ("no shape for " ^ Ground.to_string ty))
 
-let layout ?(extra = []) ty = of_type (create host ~shape_of:(shapes extra)) ty
+let layout ?(extra = []) ty =
+  Memory_layout.of_type (Memory_layout.create host ~shape_of:(shapes extra)) ty
+
 let describe ?extra ty = Memory_layout.For_testing.to_string (layout ?extra ty)
 let int32 = named "Int32"
 let uint64 = named "UInt64"
@@ -155,7 +157,7 @@ let call name ?(result = Some (value int32)) ?(parameters = []) arguments place 
       result = (match place with Some place -> Returned place | None -> Discarded);
     }
 
-let shape_env ?(extra = []) () = create host ~shape_of:(shapes extra)
+let shape_env ?(extra = []) () = Memory_layout.create host ~shape_of:(shapes extra)
 let scratch = lazy (Harness.scratch "codegen")
 
 let compiler =
@@ -282,7 +284,7 @@ let run_main ?(arguments = []) ?input text =
 
 let drop_shapes =
   [
-    ("Text", Record [ ("buffer", Raw (Pointer Opaque)) ]);
+    ("Text", Memory_layout.Record [ ("buffer", Raw (Pointer Opaque)) ]);
     ("Pair", Record [ field "first" text; field "second" text ]);
     ( "Box",
       Sum

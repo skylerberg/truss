@@ -1,6 +1,4 @@
-open Syntax
 module Names = Resolve.Names
-open Checking
 
 let show_signature (signature : Types.signature) =
   Printf.sprintf "(%s)%s"
@@ -60,7 +58,7 @@ let compiler_implements (impl : Types.impl_interface) =
   || Well_known.is Storable impl.implements.trait
 
 let make_conformance lookups ~bounds ~(trait_span : Source.Definition_span.t)
-    (impl : Types.impl_interface) (trait_path : path_type) =
+    (impl : Types.impl_interface) (trait_path : Syntax.path_type) =
   let shown_trait = Elaborator.show_path trait_path.path in
   let impl_bounds parameter =
     match
@@ -136,21 +134,21 @@ let make_conformance lookups ~bounds ~(trait_span : Source.Definition_span.t)
         })
       (Definition.read_trait_interface lookups impl.implements.trait)
 
-let check_impl state (written_members : impl_member node list) (impl : Types.impl_interface)
-    (trait_path : path_type) =
+let check_impl (state : Checking.state) (written_members : Syntax.impl_member Syntax.node list)
+    (impl : Types.impl_interface) (trait_path : Syntax.path_type) =
   let lookups = state.lookups in
   if Well_known.is Panic impl.implements.trait then
-    report state Implements_panic state.spans.(trait_path.id)
+    Checking.report state Implements_panic state.spans.(trait_path.id)
       "Nothing can implement `Panic`, since a panic cannot be caught."
   else if compiler_implements impl then
-    report state Implements_built_in state.spans.(trait_path.id)
+    Checking.report state Implements_built_in state.spans.(trait_path.id)
       (Printf.sprintf
          "The compiler implements `%s` from a type's fields; no `impl` of it can be written."
          (Elaborator.show_path trait_path.path))
   else
     match
-      make_conformance lookups ~bounds:(list_bounds state) ~trait_span:state.spans.(trait_path.id)
-        impl trait_path
+      make_conformance lookups ~bounds:(Checking.list_bounds state)
+        ~trait_span:state.spans.(trait_path.id) impl trait_path
     with
     | None -> ()
     | Some { trait; shown_trait; substitution; impl_bounds; normalize; missing_associated; _ } ->
@@ -181,7 +179,7 @@ let check_impl state (written_members : impl_member node list) (impl : Types.imp
                 written_methods
             in
             if (not is_written) && not method_.provided then
-              report state Missing_member state.spans.(trait_path.id)
+              Checking.report state Missing_member state.spans.(trait_path.id)
                 (Printf.sprintf "This `impl` must give `%s%s`, which `%s` declares."
                    method_.method_name
                    (show_signature
@@ -200,7 +198,7 @@ let check_impl state (written_members : impl_member node list) (impl : Types.imp
                     let bound = Types.substitute_trait substitution bound in
                     match Impls.implements lookups ~bounds:impl_bounds chosen bound with
                     | None ->
-                        report state Unsatisfied_bound state.spans.(trait_path.id)
+                        Checking.report state Unsatisfied_bound state.spans.(trait_path.id)
                           (Printf.sprintf "`%s` declares `type %s: %s`, and `%s` is not one."
                              shown_trait associated.associated_name (Types.show_trait bound)
                              (Types.show chosen))
@@ -209,7 +207,7 @@ let check_impl state (written_members : impl_member node list) (impl : Types.imp
           trait.associated_types;
         ignore
           (List.fold_left
-             (fun defined (line : impl_member node) ->
+             (fun defined (line : Syntax.impl_member Syntax.node) ->
                match line.kind with
                | Associated_definition (name, _) ->
                    if
@@ -219,17 +217,17 @@ let check_impl state (written_members : impl_member node list) (impl : Types.imp
                             associated.associated_name = name.text)
                           trait.associated_types)
                    then
-                     report state Extra_member state.spans.(name.id)
+                     Checking.report state Extra_member state.spans.(name.id)
                        (Printf.sprintf "`%s` declares no associated type `%s`." shown_trait
                           name.text);
                    defined
                | Capability_definition (name, _) ->
                    if not (List.mem name.text trait.associated_capabilities) then
-                     report state Extra_member state.spans.(name.id)
+                     Checking.report state Extra_member state.spans.(name.id)
                        (Printf.sprintf "`%s` declares no associated capability set `%s`."
                           shown_trait name.text)
                    else if List.mem name.text defined then
-                     report state Extra_member state.spans.(name.id)
+                     Checking.report state Extra_member state.spans.(name.id)
                        (Printf.sprintf
                           "This `impl` already defines `%s`. List every capability in one \
                            definition, separated by commas."
@@ -242,19 +240,22 @@ let check_impl state (written_members : impl_member node list) (impl : Types.imp
             let required = Types.substitute_trait substitution required in
             match Impls.implements lookups ~bounds:impl_bounds impl.for_type required with
             | None ->
-                report state Missing_required_impl state.spans.(trait_path.id)
+                Checking.report state Missing_required_impl state.spans.(trait_path.id)
                   (Printf.sprintf "`%s` requires `%s`, which `%s` does not implement." shown_trait
                      (Types.show_trait required) (Types.show impl.for_type))
             | Some evidence -> check_evidence_grants state.spans.(trait_path.id) evidence)
           trait.requires;
         if (not trait.is_capability) && impl.impl_uses <> Types.no_capabilities then
-          report state Impl_uses state.spans.(trait_path.id)
+          Checking.report state Impl_uses state.spans.(trait_path.id)
             "Only an `impl` of a capability can have `uses`. A trait's methods can use only the \
              capabilities the trait declares."
 
-let check_impl_method state (name : name) (receiver : Path.receiver) (written : Types.signature)
-    (impl : Types.impl_interface) ~trait_span (trait_path : path_type) =
-  match make_conformance state.lookups ~bounds:(list_bounds state) ~trait_span impl trait_path with
+let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : Path.receiver)
+    (written : Types.signature) (impl : Types.impl_interface) ~trait_span
+    (trait_path : Syntax.path_type) =
+  match
+    make_conformance state.lookups ~bounds:(Checking.list_bounds state) ~trait_span impl trait_path
+  with
   | None -> ()
   | Some { trait; shown_trait; normalize; normalize_capabilities; _ } -> (
       let declared =
@@ -266,14 +267,14 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (written : 
       in
       match declared with
       | None ->
-          report state Extra_member state.spans.(name.id)
+          Checking.report state Extra_member state.spans.(name.id)
             (Printf.sprintf "`%s` declares no method `%s` with this receiver." shown_trait name.text)
       | Some declared ->
           let declared =
             Definition.read_method_signature state.lookups ~owner:impl.implements.trait declared
           in
           if trait.is_capability && not (receiver = Read || receiver = Mut) then
-            report state Wrong_receiver state.spans.(name.id)
+            Checking.report state Wrong_receiver state.spans.(name.id)
               "A capability's implementation takes `self`, or `mut self` if it mutates its own \
                state."
           else begin
@@ -332,13 +333,13 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (written : 
                 (parameters_agree && receivers_agree && generics_agree
                 && results_agree expected.output written.output)
             then
-              report state Signature_mismatch state.spans.(name.id)
+              Checking.report state Signature_mismatch state.spans.(name.id)
                 (Printf.sprintf "`%s` must have the signature `%s%s` that `%s` declares." name.text
                    name.text (show_signature expected) shown_trait)
             else
               let allowed = if trait.is_capability then Types.no_capabilities else expected.uses in
               if not (Types.is_capability_subset (normalize_capabilities written.uses) allowed) then
-                report state Impl_uses state.spans.(name.id)
+                Checking.report state Impl_uses state.spans.(name.id)
                   (if trait.is_capability then
                      Printf.sprintf
                        "`%s` implements a capability, so it can use only the capabilities its \

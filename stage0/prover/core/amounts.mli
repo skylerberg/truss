@@ -4,7 +4,7 @@ val mentions_result : Mir.formula -> bool
 val mentions_history : Mir.formula -> bool
 val assume_typed : State.context -> State.frame -> Logic.term -> unit
 val lexicographically_less : Logic.term list -> Logic.term list -> Logic.term
-val same_resource : Mir.cost -> locals:Logic.term State.Locals.t -> Costs.counter -> bool
+val same_resource : Mir.cost -> locals:Logic.term Locals.t -> Costs.counter -> bool
 val bounded_amount : State.context -> State.frame -> Logic.term -> Logic.term
 
 val may_be_target :

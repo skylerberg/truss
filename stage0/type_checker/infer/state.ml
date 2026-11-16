@@ -1,6 +1,4 @@
-open Syntax
 module Names = Resolve.Names
-module Environment = Interface.Environment
 module Impls = Interface.Impls
 module Elaborator = Interface.Elaborator
 
@@ -39,10 +37,15 @@ type frame = {
   span : Source.Definition_span.t;
 }
 
-type undecided_literal = { index : int; kind : Types.literal_kind; local : id; owner : frame }
+type undecided_literal = {
+  index : int;
+  kind : Types.literal_kind;
+  local : Syntax.id;
+  owner : frame;
+}
 
 type literal_decision = {
-  decided_local : id;
+  decided_local : Syntax.id;
   decided_type : Types.ty;
   decided_at : Source.Definition_span.t;
   is_default : bool;
@@ -63,7 +66,7 @@ type state = {
   lookups : Lookups.t;
   key : Names.key;
   package : Path.package;
-  definition : definition;
+  definition : Syntax.definition;
   resolved : Resolve.resolved;
   context : Elaborator.t;
   text : string Lazy.t;
@@ -71,13 +74,13 @@ type state = {
   form : form;
   mutable diagnostics : Diagnostic.in_definition list;
   unifier : Unify.t;
-  locals : (id, local) Hashtbl.t;
+  locals : (Syntax.id, local) Hashtbl.t;
   mutable law_parameters : (string * Types.ty) list;
   mutable frames : frame list;
-  mutable locals_read : id list;
-  mutable receiver_modes : (id * Types.mode) list;
-  yielded : (id, Types.mode) Hashtbl.t;
-  lent_tails : (id, unit) Hashtbl.t;
+  mutable locals_read : Syntax.id list;
+  mutable receiver_modes : (Syntax.id * Types.mode) list;
+  yielded : (Syntax.id, Types.mode) Hashtbl.t;
+  lent_tails : (Syntax.id, unit) Hashtbl.t;
   mutable lambdas : Source.Definition_span.t list;
   mutable unsolved : Diagnostic.reported option;
   mutable capability_constraints : subset_constraint list;
@@ -85,7 +88,7 @@ type state = {
   mutable evidence_packages : Path.package list;
   mutable undecided : undecided_literal list;
   decisions : (int, literal_decision) Hashtbl.t;
-  annotatable : (id, unit) Hashtbl.t;
+  annotatable : (Syntax.id, unit) Hashtbl.t;
 }
 
 let reported state ?notes ?(fixes = []) code (span : Source.Definition_span.t) message =
@@ -117,7 +120,7 @@ let fresh_node_id state =
 let synthetic_expression state ~origin type_ kind : Core.expression =
   { id = fresh_node_id state; origin; type_; kind }
 
-let register_expression state (value : expression) kind =
+let register_expression state (value : Syntax.expression) kind =
   state.form.expression_builders.(value.id) <-
     Some
       (fun () ->
@@ -126,13 +129,13 @@ let register_expression state (value : expression) kind =
         | Some type_ -> { Core.id; origin = value.id; type_; kind = kind () }
         | None -> bug "`%s` has a node and no type" (source state (read_span state value.id)))
 
-let was_hole state (table : Tables.t -> Types.ty option array) (id : id) =
+let was_hole state (table : Tables.t -> Types.ty option array) (id : Syntax.id) =
   match state.form.tables_with_holes with
   | Some tables -> (table tables).(id) = Some Types.Hole
   | None -> false
 
-let rec operands state (value : expression) : expression list =
-  let checked (part : expression) =
+let rec operands state (value : Syntax.expression) : Syntax.expression list =
+  let checked (part : Syntax.expression) =
     if Option.is_some state.form.expression_builders.(part.id) then [ part ]
     else operands state part
   in
@@ -147,16 +150,16 @@ let rec operands state (value : expression) : expression list =
           checked_parts := checked part :: !checked_parts);
       List.concat (List.rev !checked_parts)
 
-let rec build_expression state (value : expression) : Core.expression =
+let rec build_expression state (value : Syntax.expression) : Core.expression =
   let evaluated =
     if Option.is_some state.form.tables_with_holes then operands state value else []
   in
   if
     List.exists
-      (fun (operand : expression) -> was_hole state (fun tables -> tables.types) operand.id)
+      (fun (operand : Syntax.expression) -> was_hole state (fun tables -> tables.types) operand.id)
       evaluated
   then begin
-    let evaluate (operand : expression) : Core.statement option =
+    let evaluate (operand : Syntax.expression) : Core.statement option =
       match operand.kind with
       | Lambda _ -> None
       | _ ->
@@ -190,17 +193,17 @@ let rec build_expression state (value : expression) : Core.expression =
     | Some build -> build ()
     | None -> bug "`%s` has no node in the core form" (source state (read_span state value.id))
 
-let register_statement state (written : statement) kind =
+let register_statement state (written : Syntax.statement) kind =
   state.form.statement_builders.(written.id) <-
     Some (fun () -> { Core.id = fresh_node_id state; origin = written.id; kind = kind () })
 
-let build_statement state (written : statement) : Core.statement =
-  let rec without_mode_keyword (value : expression) =
+let build_statement state (written : Syntax.statement) : Core.statement =
+  let rec without_mode_keyword (value : Syntax.expression) =
     match value.kind with
     | Mode (_, inner) | Parenthesized inner -> without_mode_keyword inner
     | _ -> value
   in
-  let hole (value : expression) =
+  let hole (value : Syntax.expression) =
     let value = without_mode_keyword value in
     if was_hole state (fun tables -> tables.types) value.id then Some value else None
   in
@@ -221,7 +224,7 @@ let build_statement state (written : statement) : Core.statement =
       | Some build -> build ()
       | None -> bug "`%s` has no node in the core form" (source state (read_span state written.id)))
 
-let register_pattern state (written : pattern) kind =
+let register_pattern state (written : Syntax.pattern) kind =
   state.form.pattern_builders.(written.id) <-
     Some
       (fun () ->
@@ -230,7 +233,7 @@ let register_pattern state (written : pattern) kind =
         | Some type_ -> { Core.id; origin = written.id; type_; kind = kind () }
         | None -> bug "`%s` has a node and no type" (source state (read_span state written.id)))
 
-let build_pattern state (written : pattern) : Core.pattern =
+let build_pattern state (written : Syntax.pattern) : Core.pattern =
   if was_hole state (fun tables -> tables.scrutinee_types) written.id then
     { id = fresh_node_id state; origin = written.id; type_ = Types.Never; kind = Wildcard }
   else
@@ -238,10 +241,10 @@ let build_pattern state (written : pattern) : Core.pattern =
     | Some build -> build ()
     | None -> bug "`%s` has no node in the core form" (source state (read_span state written.id))
 
-let alias_expression state (value : expression) (inner : expression) =
+let alias_expression state (value : Syntax.expression) (inner : Syntax.expression) =
   state.form.expression_builders.(value.id) <- Some (fun () -> build_expression state inner)
 
-let rec mark_lent_tails state (value : expression) =
+let rec mark_lent_tails state (value : Syntax.expression) =
   match value.kind with
   | Parenthesized inner -> mark_lent_tails state inner
   | If { then_; else_ = Some else_; _ } -> (
@@ -251,14 +254,14 @@ let rec mark_lent_tails state (value : expression) =
       | Else_if nested -> mark_lent_tails state nested)
   | Match { arms; _ } ->
       List.iter
-        (fun (arm : arm) ->
+        (fun (arm : Syntax.arm) ->
           match arm.body.kind with Expression body -> mark_lent_tails state body | _ -> ())
         arms
   | Block body -> mark_lent_block state body
   | Return _ | Todo | Unreachable -> ()
   | _ -> Hashtbl.replace state.lent_tails value.id ()
 
-and mark_lent_block state (body : block) =
+and mark_lent_block state (body : Syntax.block) =
   match List.rev body.statements with
   | { kind = Expression value; _ } :: _ -> mark_lent_tails state value
   | _ -> ()
@@ -276,13 +279,13 @@ let replace = Diagnostic.replace
 let insert position text = Diagnostic.insert (Source.Definition_span.zero_width position) text
 let current_frame state = match state.frames with frame :: _ -> Some frame | [] -> None
 
-let record state (value : expression) type_ =
+let record state (value : Syntax.expression) type_ =
   state.tables.types.(value.id) <- Some type_;
   match current_frame state with
   | Some frame -> frame.recorded_expressions <- value.id :: frame.recorded_expressions
   | None -> ()
 
-let note_compiled_expression state env (value : expression) =
+let note_compiled_expression state env (value : Syntax.expression) =
   match current_frame state with
   | Some frame when is_compiled env ->
       frame.compiled_expressions <- value.id :: frame.compiled_expressions
@@ -313,7 +316,7 @@ let reject_specification_only_type state ~subject span type_ =
              (Types.show specification_type)))
     (Types.find_specification_only_type type_)
 
-let check_compiled_binding state (id : id) =
+let check_compiled_binding state (id : Syntax.id) =
   match state.tables.local_types.(id) with
   | Some type_ -> (
       let span = read_span state id in
@@ -331,7 +334,7 @@ let check_compiled_binding state (id : id) =
       | None -> ())
   | None -> ()
 
-let check_compiled_expression state (id : id) =
+let check_compiled_expression state (id : Syntax.id) =
   Option.iter
     (fun type_ ->
       ignore (reject_specification_only_type state ~subject:"This value" (read_span state id) type_))
@@ -686,7 +689,7 @@ let in_statement state env (span : Source.Definition_span.t) body =
   state.frames <- List.tl state.frames;
   result
 
-let rec diverges ~is_never (written : statement) =
+let rec diverges ~is_never (written : Syntax.statement) =
   match written.kind with
   | Expression value | Let { value; _ } | Assignment { value; _ } -> is_never value
   | While { condition = { kind = True; _ }; body; _ } -> not (Syntax_walk.contains_break body)
@@ -694,13 +697,13 @@ let rec diverges ~is_never (written : statement) =
   | _ -> false
 
 let statement_diverges state =
-  diverges ~is_never:(fun (value : expression) ->
+  diverges ~is_never:(fun (value : Syntax.expression) ->
       match state.tables.types.(value.id) with
       | Some type_ -> resolve state type_ = Types.Never
       | None -> false)
 
-let build_block state (written : block) : Core.block =
-  let rec build_statements (statements : statement list) =
+let build_block state (written : Syntax.block) : Core.block =
+  let rec build_statements (statements : Syntax.statement list) =
     match statements with
     | [] -> ([], None)
     | [ ({ kind = Expression value; _ } as last) ]
@@ -714,7 +717,7 @@ let build_block state (written : block) : Core.block =
   let statements, value = build_statements written.statements in
   { statements; value }
 
-let declare state (name : name) type_ ~is_var ~mode =
+let declare state (name : Syntax.name) type_ ~is_var ~mode =
   Hashtbl.replace state.locals name.id { type_; is_var; mode };
   state.tables.local_types.(name.id) <- Some type_;
   match current_frame state with
@@ -723,7 +726,7 @@ let declare state (name : name) type_ ~is_var ~mode =
       frame.declared <- name.id :: frame.declared
   | None -> ()
 
-let declare_compiled state env (name : name) type_ ~is_var ~mode =
+let declare_compiled state env (name : Syntax.name) type_ ~is_var ~mode =
   declare state name type_ ~is_var ~mode;
   match current_frame state with
   | Some frame when is_compiled env ->
@@ -731,7 +734,7 @@ let declare_compiled state env (name : name) type_ ~is_var ~mode =
       check_compiled_binding state name.id
   | _ -> ()
 
-let target state (name : name) = state.resolved.names.(name.id)
+let target state (name : Syntax.name) = state.resolved.names.(name.id)
 
 let default_literal state ~at type_ =
   let decide default =
@@ -747,9 +750,9 @@ let default_literal state ~at type_ =
   | Types.Literal (Float_literal, _) -> decide (Types.make_builtin Float64)
   | _ -> type_
 
-let head state (value : expression) = Resolve.head state.resolved value
+let head state (value : Syntax.expression) = Resolve.head state.resolved value
 
-let names_variant (member : name) =
+let names_variant (member : Syntax.name) =
   member.text <> "" && member.text.[0] >= 'A' && member.text.[0] <= 'Z'
 
 let show state type_ = Types.show (zonk state type_)
@@ -827,12 +830,12 @@ let mismatched state (span : Source.Definition_span.t) ~expected ~actual =
 
 let mismatch state span ~expected ~actual = ignore (mismatched state span ~expected ~actual)
 
-let is_member_constant state (value : expression) =
+let is_member_constant state (value : Syntax.expression) =
   match state.tables.resolutions.(value.id) with
   | Some (Global { path = Member_constant _; _ }) -> true
   | _ -> false
 
-let rec is_place state (value : expression) =
+let rec is_place state (value : Syntax.expression) =
   match value.kind with
   | Name path -> (
       match target state path.last with
@@ -849,7 +852,7 @@ let rec is_place state (value : expression) =
   | Parenthesized inner -> is_place state inner
   | _ -> false
 
-let rec call_with_mode_keyword state (value : expression) =
+let rec call_with_mode_keyword state (value : Syntax.expression) =
   match value.kind with
   | Call ({ kind = Member (base, _); _ }, _)
   | Call ({ kind = Bracket ({ kind = Member (base, _); _ }, _); _ }, _) ->
@@ -858,7 +861,7 @@ let rec call_with_mode_keyword state (value : expression) =
   | _ -> None
 
 let check_resource state (resource : Syntax.resource) =
-  let capability (path : path_type) (method_ : name option) =
+  let capability (path : Syntax.path_type) (method_ : Syntax.name option) =
     let shown = Interface.Elaborator.show_path path.path in
     match target state path.path.last with
     | Some (Definition (Capability, capability)) -> (

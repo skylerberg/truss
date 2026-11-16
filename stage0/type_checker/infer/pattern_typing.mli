@@ -1,8 +1,3 @@
-module Names = Resolve.Names
-module Environment = Interface.Environment
-module Impls = Interface.Impls
-module Elaborator = Interface.Elaborator
-
 val binding_pattern :
   State.state -> State.env -> Syntax.pattern -> Types.ty -> is_var:bool -> mode:Types.mode -> unit
 

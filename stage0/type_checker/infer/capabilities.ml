@@ -1,19 +1,15 @@
-open Syntax
-module Names = Resolve.Names
 module Environment = Interface.Environment
-module Impls = Interface.Impls
-open State
 
 let panic : Types.capability = Capability (Well_known.path Panic)
 let tasks : Types.capability = Capability (Well_known.path Tasks)
 
 type checking = {
-  state : state;
+  state : State.state;
   mutable provides : (Types.capability_set * Core.implementation list * Core.block) list;
 }
 
 let report checking ?(fixes = []) code (origin : Core.origin) message =
-  let span = read_span checking.state origin in
+  let span = State.read_span checking.state origin in
   checking.state.diagnostics <-
     Diagnostic.make ~fixes ~code:(Capabilities code) span message :: checking.state.diagnostics
 
@@ -164,7 +160,8 @@ let require_callee_uses checking scope (origin : Core.origin) (callee : Core.cal
               Interface.Definition.read_method_signature state.lookups.interface ~owner:trait.trait
                 method_
             in
-            Interface.Impls.normalize_capabilities state.lookups.interface ~bounds:(bounds state)
+            Interface.Impls.normalize_capabilities state.lookups.interface
+              ~bounds:(State.bounds state)
               (Types.substitute_capabilities
                  (Interface.Properties.make_trait_substitution interface ~self:self_type trait
                  @ Option.value ~default:[]
@@ -296,7 +293,7 @@ and check_provide checking scope implementations body =
       in
       let provided_mut = implementation.mode = Mut in
       let is_place = match implementation.value with Place _ -> true | Value _ -> false in
-      let start = (read_span checking.state implementation.origin).start in
+      let start = (State.read_span checking.state implementation.origin).start in
       if is_place && mutates && not provided_mut then
         report checking Provide_mode implementation.origin
           ~fixes:
@@ -335,14 +332,14 @@ and check_provide checking scope implementations body =
     { scope with available = Types.union_capabilities scope.available !provided }
     body
 
-let solve (state : state) =
+let solve (state : State.state) =
   state.capability_constraints <-
     List.map
-      (fun (constraint_ : subset_constraint) ->
+      (fun (constraint_ : State.subset_constraint) ->
         {
           constraint_ with
-          subset = final_capabilities state constraint_.subset;
-          superset = final_capabilities state constraint_.superset;
+          subset = State.final_capabilities state constraint_.subset;
+          superset = State.final_capabilities state constraint_.superset;
         })
       state.capability_constraints;
   let solution = Hashtbl.create 8 in
@@ -354,13 +351,13 @@ let solve (state : state) =
       | Types.Capability_variable variable -> (value_of variable :> Types.capability list)
       | capability -> [ capability ])
   in
-  let missing (constraint_ : subset_constraint) =
+  let missing (constraint_ : State.subset_constraint) =
     Types.subtract_capabilities (substitute constraint_.subset) (substitute constraint_.superset)
   in
   let rec grow () =
     let changed =
       List.fold_left
-        (fun changed (constraint_ : subset_constraint) ->
+        (fun changed (constraint_ : State.subset_constraint) ->
           let variables =
             List.filter_map
               (function Types.Capability_variable variable -> Some variable | _ -> None)
@@ -383,12 +380,12 @@ let solve (state : state) =
   grow ();
   state.capability_solution <- Some solution;
   List.iter
-    (fun (constraint_ : subset_constraint) ->
+    (fun (constraint_ : State.subset_constraint) ->
       let missing = missing constraint_ in
       if missing <> Types.no_capabilities then constraint_.report_missing missing)
     (List.rev state.capability_constraints)
 
-let rec can_call_capability_code (state : state) ~bounds ?(seen = []) (type_ : Types.ty) =
+let rec can_call_capability_code (state : State.state) ~bounds ?(seen = []) (type_ : Types.ty) =
   let inside = can_call_capability_code state ~bounds ~seen in
   let trait_uses (trait : Types.trait_reference) =
     let can_hold_a_capability : Types.capability -> bool = function
@@ -518,7 +515,7 @@ let check_monitor_callbacks checking implementations =
           (Form.find_capability_impls state implementation.type_))
     implementations
 
-let check (state : state) (elaborated : Environment.elaborated_interface) (form : Core.t) =
+let check (state : State.state) (elaborated : Environment.elaborated_interface) (form : Core.t) =
   let checking = { state; provides = [] } in
   let function_body ?implemented_capability available =
     { available; kind = Function_body; implemented_capability }
@@ -568,8 +565,8 @@ let check (state : state) (elaborated : Environment.elaborated_interface) (form 
       Option.iter
         (check_block checking
            (function_body ?implemented_capability
-              (Interface.Impls.normalize_capabilities state.lookups.interface ~bounds:(bounds state)
-                 signature.uses)))
+              (Interface.Impls.normalize_capabilities state.lookups.interface
+                 ~bounds:(State.bounds state) signature.uses)))
         body
   | Test (Some body), _, Test_interface uses ->
       check_block checking

@@ -1,10 +1,8 @@
 module Compatibility = Cli.Compatibility
-open Harness
-open Support
 
 let changes ?(modules = []) before after =
   let package : Path.package = { owner = None; name = "lib" } in
-  let state text = database (setup (("lib::shapes", text) :: modules)) in
+  let state text = Support.database (Support.setup (("lib::shapes", text) :: modules)) in
   Compatibility.compare ~before:(state before) ~after:(state after) package
 
 let show actual =
@@ -18,26 +16,27 @@ let show actual =
 let expect ?modules before after expected =
   let actual = show (changes ?modules before after) in
   if actual <> expected then
-    fail "found [%s], expected [%s]" (String.concat "; " actual) (String.concat "; " expected)
+    Harness.fail "found [%s], expected [%s]" (String.concat "; " actual)
+      (String.concat "; " expected)
 
 let area body = Printf.sprintf "public fn area(side: Int64) -> Int64\n%s{\n  side\n}\n" body
 
 let () =
-  test "a body that changes is no change" (fun () ->
+  Harness.test "a body that changes is no change" (fun () ->
       expect Fixtures.Compatibility.body_that_changes_is_no_change
         Fixtures.Compatibility.body_that_changes_is_no_change_2 []);
-  test "a private or internal definition that changes is no change" (fun () ->
+  Harness.test "a private or internal definition that changes is no change" (fun () ->
       expect Fixtures.Compatibility.private_or_internal_definition_that_changes_is_no
         Fixtures.Compatibility.private_or_internal_definition_that_changes_is_no_2 []);
-  test "a public definition that is added grows the package" (fun () ->
+  Harness.test "a public definition that is added grows the package" (fun () ->
       expect "" Fixtures.Compatibility.public_definition_that_is_added_grows_the_package
         [ "grows: lib::shapes::sides is new" ]);
-  test "a public definition that is removed, or made private, breaks" (fun () ->
+  Harness.test "a public definition that is removed, or made private, breaks" (fun () ->
       let sides = Fixtures.Compatibility.sides in
       expect sides "" [ "breaks: lib::shapes::sides was removed or is no longer public" ];
       expect sides Fixtures.Compatibility.public_definition_that_is_taken_away_or_made
         [ "breaks: lib::shapes::sides was removed or is no longer public" ]);
-  test "a changed parameter type, parameter name, or result breaks" (fun () ->
+  Harness.test "a changed parameter type, parameter name, or result breaks" (fun () ->
       let was = area "" in
       List.iter
         (fun now ->
@@ -48,26 +47,26 @@ let () =
           Fixtures.Compatibility.another_parameter_type_parameter_name_or_result_3;
           Fixtures.Compatibility.another_parameter_type_parameter_name_or_result_4;
         ]);
-  test "a parameter that gains a default grows, and one that loses it breaks" (fun () ->
+  Harness.test "a parameter that gains a default grows, and one that loses it breaks" (fun () ->
       let with_default = Fixtures.Compatibility.with_default in
       expect (area "") with_default [ "grows: lib::shapes::area gained a default" ];
       expect with_default (area "")
         [ "breaks: lib::shapes::area changed its parameters or its result" ]);
-  test "an added capability in uses breaks, and a removed one grows" (fun () ->
+  Harness.test "an added capability in uses breaks, and a removed one grows" (fun () ->
       let pure = Fixtures.Compatibility.pure
       and timed = Fixtures.Compatibility.capability_more_in_uses_breaks_and_one_fewer_grows in
       expect pure timed [ "breaks: lib::shapes::stamp now uses `standard::capabilities::Clock`" ];
       expect timed pure [ "grows: lib::shapes::stamp uses fewer capabilities" ]);
-  test "a requires that is added breaks, and one that is dropped grows" (fun () ->
+  Harness.test "a requires that is added breaks, and one that is dropped grows" (fun () ->
       let guarded = area "  requires side > 0\n" in
       expect (area "") guarded
         [ "breaks: lib::shapes::area has a `requires` clause it did not have" ];
       expect guarded (area "") [ "grows: lib::shapes::area has fewer `requires` clauses" ]);
-  test "an ensures that is added grows, and one that is dropped breaks" (fun () ->
+  Harness.test "an ensures that is added grows, and one that is dropped breaks" (fun () ->
       let promised = area "  ensures result == side\n" in
       expect (area "") promised [ "grows: lib::shapes::area has more `ensures` clauses" ];
       expect promised (area "") [ "breaks: lib::shapes::area lost an `ensures` clause" ]);
-  test "a cost that is added grows, and one that is dropped breaks" (fun () ->
+  Harness.test "a cost that is added grows, and one that is dropped breaks" (fun () ->
       let bounded = area "  cost time O(1)\n" in
       expect (area "") bounded
         [
@@ -79,7 +78,7 @@ let () =
           "breaks: lib::shapes::area no longer promises to terminate";
           "breaks: lib::shapes::area lost a `cost` clause";
         ]);
-  test "a type that made its fields visible keeps them" (fun () ->
+  Harness.test "a type that made its fields visible keeps them" (fun () ->
       let square = "public type Square(side: Int64)\n" in
       expect square "public type Square(side: Int64, depth: Int64)\n"
         [ "breaks: lib::shapes::Square changed its fields or variants" ];
@@ -87,27 +86,27 @@ let () =
         [ "breaks: lib::shapes::Square changed its fields or variants" ];
       expect "public type Shape = Round | Flat\n" "public type Shape = Round | Flat | Bent\n"
         [ "breaks: lib::shapes::Shape changed its fields or variants" ]);
-  test "an opaque type may change everything inside it" (fun () ->
+  Harness.test "an opaque type may change everything inside it" (fun () ->
       expect "public opaque type Square(side: Int64)\n"
         "public opaque type Square(width: Int32, height: Int32)\n" []);
-  test "a type that hid its fields breaks, and one that shows them grows" (fun () ->
+  Harness.test "a type that hid its fields breaks, and one that shows them grows" (fun () ->
       let shown = "public type Square(side: Int64)\n"
       and hidden = "public opaque type Square(side: Int64)\n" in
       expect shown hidden [ "breaks: lib::shapes::Square hid its fields" ];
       expect hidden shown [ "grows: lib::shapes::Square made its fields visible" ]);
-  test "a changed invariant breaks" (fun () ->
+  Harness.test "a changed invariant breaks" (fun () ->
       expect "public type Square(side: Int64)\n  invariant side > 0\n"
         "public type Square(side: Int64)\n  invariant side >= 0\n"
         [ "breaks: lib::shapes::Square changed its invariant" ]);
-  test "invariants written in another order are no change" (fun () ->
+  Harness.test "invariants written in another order are no change" (fun () ->
       expect "public type Square(side: Int64)\n  invariant side > 0\n  invariant side < 100\n"
         "public type Square(side: Int64)\n  invariant side < 100\n  invariant side > 0\n" []);
-  test "a derived trait that is dropped breaks, and one that is added grows" (fun () ->
+  Harness.test "a derived trait that is dropped breaks, and one that is added grows" (fun () ->
       let plain = "public type Square(side: Int64)\n"
       and equal = "public type Square(side: Int64)\n  derives Equal\n" in
       expect equal plain [ "breaks: lib::shapes::Square no longer derives a trait" ];
       expect plain equal [ "grows: lib::shapes::Square derives another trait" ]);
-  test "a trait gains only methods that have bodies" (fun () ->
+  Harness.test "a trait gains only methods that have bodies" (fun () ->
       let was = Fixtures.Compatibility.was in
       expect was Fixtures.Compatibility.trait_gains_only_methods_that_have_bodies
         [ "grows: lib::shapes::Sided gained the method `corners`" ];
@@ -122,28 +121,28 @@ let () =
           "breaks: lib::shapes::Sided gained the method `corners` without a default body, which \
            every `impl` must then define";
         ]);
-  test "a capability's method that changes breaks" (fun () ->
+  Harness.test "a capability's method that changes breaks" (fun () ->
       expect Fixtures.Compatibility.capabilitys_method_that_changes_breaks
         Fixtures.Compatibility.capabilitys_method_that_changes_breaks_2
         [ "breaks: lib::shapes::Ledger its method `record` changed its parameters or its result" ]);
-  test "a constant keeps its type and its value" (fun () ->
+  Harness.test "a constant keeps its type and its value" (fun () ->
       let sides = "public let sides: Int64 = 4\n" in
       expect sides "public let sides: Int64 = 5\n"
         [ "breaks: lib::shapes::sides changed its value" ];
       expect sides "public let sides: Int32 = 4\n" [ "breaks: lib::shapes::sides changed its type" ];
       expect sides "public let sides: Int64 = 2 + 2\n" []);
-  test "an impl that is removed breaks, and one that is added grows" (fun () ->
+  Harness.test "an impl that is removed breaks, and one that is added grows" (fun () ->
       let square = "public type Square(side: Int64)\n" in
       let with_impl =
         square ^ Fixtures.Compatibility.impl_that_is_taken_away_breaks_and_one_that_is
       in
       (match show (changes with_impl square) with
       | [ actual ] when Substring.contains actual "was removed: the `impl` of" -> ()
-      | actual -> fail "found [%s]" (String.concat "; " actual));
+      | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
       match show (changes square with_impl) with
       | [ actual ] when Substring.contains actual "is new: the `impl` of" -> ()
-      | actual -> fail "found [%s]" (String.concat "; " actual));
-  test "an impl whose associated capability set gains a capability breaks" (fun () ->
+      | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
+  Harness.test "an impl whose associated capability set gains a capability breaks" (fun () ->
       let feed uses =
         Printf.sprintf
           "public trait Feed {\n\
@@ -165,15 +164,15 @@ let () =
         when Substring.For_testing.find actual "breaks:" = Some 0
              && Substring.contains actual "added `Clock` to its `Uses`" ->
           ()
-      | actual -> fail "found [%s]" (String.concat "; " actual));
+      | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
       (match show (changes (feed "  capability Uses = Clock\n") (feed "")) with
       | [ actual ]
         when Substring.For_testing.find actual "grows:" = Some 0
              && Substring.contains actual "removed capabilities from its `Uses`" ->
           ()
-      | actual -> fail "found [%s]" (String.concat "; " actual));
+      | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
       expect (feed "  capability Uses = Clock\n") (feed "  capability Uses = Clock\n") []);
-  test "a trait that loses an associated capability set breaks" (fun () ->
+  Harness.test "a trait that loses an associated capability set breaks" (fun () ->
       let feed member =
         Printf.sprintf "public trait Feed {\n%s  fn pull(self) -> Int64\n}\n" member
       in
@@ -193,14 +192,14 @@ let sized law =
     law
 
 let () =
-  test "a requires that only gains parentheses is no change" (fun () ->
+  Harness.test "a requires that only gains parentheses is no change" (fun () ->
       expect (area "  requires side > 0\n") (area "  requires (side > 0)\n") []);
-  test "a dropped requires leaves the ensures after it unchanged" (fun () ->
+  Harness.test "a dropped requires leaves the ensures after it unchanged" (fun () ->
       expect
         (area "  requires side > 0\n  ensures result == side\n")
         (area "  ensures result == side\n")
         [ "grows: lib::shapes::area has fewer `requires` clauses" ]);
-  test "a requires whose name another use makes refer elsewhere breaks" (fun () ->
+  Harness.test "a requires whose name another use makes refer elsewhere breaks" (fun () ->
       let modules =
         [
           ("lib::one::limits", "public let bound: Int64 = 10\n");
@@ -213,22 +212,22 @@ let () =
       in
       expect ~modules (guarded "one") (guarded "two")
         [ "breaks: lib::shapes::area has a `requires` clause it did not have" ]);
-  test "a law whose body changes breaks" (fun () ->
+  Harness.test "a law whose body changes breaks" (fun () ->
       expect (sized "    value.size() >= 0\n") (sized "    value.size() >= 1\n")
         [ "breaks: lib::shapes::Sized changed its laws" ]);
-  test "a law that renames a binder of its body is no change" (fun () ->
+  Harness.test "a law that renames a binder of its body is no change" (fun () ->
       expect
         (sized "    let measured = value.size()\n    measured >= 0\n")
         (sized "    let counted = value.size()\n    counted >= 0\n")
         []);
-  test "a constant the evaluator cannot compute keeps its written value" (fun () ->
+  Harness.test "a constant the evaluator cannot compute keeps its written value" (fun () ->
       let name = "public let name: String = \"square\"\n" in
       expect name "public let name: String = \"cube\"\n"
         [ "breaks: lib::shapes::name changed its value" ];
       expect name "public let name: String = (\"square\")\n" [])
 
 let () =
-  test "an impl moved to another module of its package is no change" (fun () ->
+  Harness.test "an impl moved to another module of its package is no change" (fun () ->
       let package : Path.package = { owner = None; name = "lib" } in
       let square = "public type Square(side: Int64)\n" in
       let moved =
@@ -239,7 +238,7 @@ let () =
         \  }\n\
          }\n"
       in
-      let state files = database (setup files) in
+      let state files = Support.database (Support.setup files) in
       match
         show
           (Compatibility.compare
@@ -255,4 +254,4 @@ let () =
              package)
       with
       | [] -> ()
-      | actual -> fail "found [%s]" (String.concat "; " actual))
+      | actual -> Harness.fail "found [%s]" (String.concat "; " actual))

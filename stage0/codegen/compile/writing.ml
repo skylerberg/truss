@@ -2,7 +2,7 @@ let bug format = Compiler_bug.bug ~stage:"Writing" format
 let output_ty = Storage.make_storage_type (Ground.builtin UInt8)
 let bytes_ty = Storage.make_view_type (Ground.builtin UInt8)
 
-open Emit_c.Builder
+module Builder = Emit_c.Builder
 
 let output_parameter env =
   match Convention.parameter env Mut output_ty with
@@ -21,7 +21,7 @@ let call env builder ~output (writer : Well_known.t) ty (place : Lowered.place) 
     | Some parameter -> (parameter, Copy place)
     | None -> bug "%s is written, and has no size" (Ground.to_string ty)
   in
-  emit builder
+  Builder.emit builder
     (Call
        {
          target =
@@ -35,6 +35,6 @@ let call env builder ~output (writer : Well_known.t) ty (place : Lowered.place) 
        })
 
 let call_with_bytes env builder ~output writer ~elements ~length =
-  let view = local builder (Value bytes_ty) in
-  emit builder (Assign (at view, Storage.build_view bytes_ty ~elements ~length));
-  call env builder ~output writer bytes_ty (at view)
+  let view = Builder.local builder (Value bytes_ty) in
+  Builder.emit builder (Assign (Builder.at view, Storage.build_view bytes_ty ~elements ~length));
+  call env builder ~output writer bytes_ty (Builder.at view)
