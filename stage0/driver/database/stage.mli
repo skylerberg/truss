@@ -12,7 +12,6 @@ type t =
   | Signature_checks
   | Contracts
   | Checked_bodies
-  | Derived_forms
   | Mir
   | Mir_call_edges
   | Body_checks
