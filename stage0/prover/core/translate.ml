@@ -3,7 +3,7 @@ let require_home (source : State.source) =
   | Some key -> key
   | None -> Facts.raise_bug "%s has no definition key" source.name
 
-let make_context (lookups : Lookups.t) ~home ~current ~terminates ~measures =
+let make_context (lookups : Lookups.t) ~home ~current ~terminates ~measures ~inherits_precondition =
   let rec context =
     {
       State.run_body = (fun frame ~lambdas body -> Reader.read_body context frame ~lambdas body);
@@ -53,7 +53,7 @@ let make_context (lookups : Lookups.t) ~home ~current ~terminates ~measures =
       decisions = [];
       entry = [];
       proving = false;
-      inherits_precondition = false;
+      inherits_precondition;
       holes = [];
       unfinished = [];
       call_targets = [];
@@ -185,8 +185,35 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
     | Some (signature : Types.signature) -> signature.terminates
     | None -> false
   in
+  let pair_up terms =
+    match (inherited, parameters, terms) with
+    | Some ((part : State.part), _), { local = Self; _ } :: _, _ :: rest
+      when not
+             (List.exists
+                (fun (parameter : Mir.parameter) -> parameter.local = Self)
+                part.parameters) ->
+        rest
+    | _ -> terms
+  in
+  let has_trait_frame =
+    match inherited with
+    | Some ((part : State.part), _) ->
+        List.length part.parameters = List.length (pair_up parameters)
+    | None -> false
+  in
+  let inherits_precondition =
+    has_trait_frame
+    &&
+    match inherited with
+    | Some ({ callee = { key = Some { path = Method { owner; _ }; _ }; _ }; _ }, _) ->
+        not (Path.equal owner Laws.template_trait)
+    | Some _ | None -> true
+  in
   let home = require_home source in
-  let context = make_context lookups ~home ~current:path ~terminates ~measures:contract.decreases in
+  let context =
+    make_context lookups ~home ~current:path ~terminates ~measures:contract.decreases
+      ~inherits_precondition
+  in
   context.proving <- proof;
   context.callbacks <-
     List.filter_map
@@ -231,7 +258,10 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
           | Some { uses; _ } when not proof -> (
               if Types.may_panic uses then Declared
               else
-                match Interface.Definition.find_capability_declaration lookups.interface path with
+                match
+                  Interface.Impls.find_capability_declaration lookups.interface path
+                    (Capability (Well_known.make_path Panic))
+                with
                 | Some (Declared_by clause) -> Undeclared clause
                 | Some (Fixed_by_trait _) | None -> Undeclarable)
           | Some _ | None -> Undeclarable);
@@ -258,22 +288,11 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
         | local -> Locals.find_opt (Core_local local) at.locals)
       parameters
   in
-  let pair_up terms =
-    match (inherited, parameters, terms) with
-    | Some ((part : State.part), _), { local = Self; _ } :: _, _ :: rest
-      when not
-             (List.exists
-                (fun (parameter : Mir.parameter) -> parameter.local = Self)
-                part.parameters) ->
-        rest
-    | _ -> terms
-  in
   let list_paired_values (at : State.frame) = pair_up (list_values at) in
   let own_terms = list_paired_values start in
   let find_trait_frame (at : State.frame) ~result =
     match inherited with
-    | Some ((part : State.part), substitution)
-      when List.length part.parameters = List.length own_terms ->
+    | Some ((part : State.part), substitution) when has_trait_frame ->
         let locals, types, self, old_locals =
           List.fold_left2
             (fun (locals, types, self, old_locals) (parameter : Mir.parameter) (entry, exit_) ->
@@ -305,13 +324,6 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
             } )
     | _ -> None
   in
-  context.inherits_precondition <-
-    (match find_trait_frame start ~result:None with
-    | Some (part, _) -> (
-        match part.callee.key with
-        | Some { path = Method { owner; _ }; _ } -> not (Path.equal owner Laws.template_trait)
-        | _ -> true)
-    | None -> false);
   let trait_requires =
     match find_trait_frame start ~result:None with
     | Some (part, inside) ->
@@ -519,7 +531,10 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
 let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~for_type ~proofs ~at
     =
   let home = require_home source in
-  let context = make_context lookups ~home ~current:impl ~terminates:false ~measures:[] in
+  let context =
+    make_context lookups ~home ~current:impl ~terminates:false ~measures:[]
+      ~inherits_precondition:false
+  in
   let start = make_empty_frame source in
   let substitution = Contracts.make_trait_substitution lookups trait for_type in
   List.iter
@@ -600,7 +615,10 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
 
 let translate_type (lookups : Lookups.t) (source : State.source) ~path =
   let home = require_home source in
-  let context = make_context lookups ~home ~current:path ~terminates:false ~measures:[] in
+  let context =
+    make_context lookups ~home ~current:path ~terminates:false ~measures:[]
+      ~inherits_precondition:false
+  in
   (match Mir.read_type_clauses lookups.mir path with
   | Some { form = { invariants; potential }; _ } ->
       let ty =
@@ -646,7 +664,10 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
 
 let test (lookups : Lookups.t) (source : State.source) ~path =
   let home = require_home source in
-  let context = make_context lookups ~home ~current:path ~terminates:false ~measures:[] in
+  let context =
+    make_context lookups ~home ~current:path ~terminates:false ~measures:[]
+      ~inherits_precondition:false
+  in
   (match Mir.find_code (lookups.mir.read_body_part home) with
   | Some (mir : Mir.t) ->
       Reader.read_body context (make_empty_frame source) ~lambdas:mir.lambdas mir.body
@@ -655,7 +676,10 @@ let test (lookups : Lookups.t) (source : State.source) ~path =
 
 let translate_constant (lookups : Lookups.t) (source : State.source) ~path =
   let home = require_home source in
-  let context = make_context lookups ~home ~current:path ~terminates:false ~measures:[] in
+  let context =
+    make_context lookups ~home ~current:path ~terminates:false ~measures:[]
+      ~inherits_precondition:false
+  in
   (match Mir.read_initializer lookups.mir path with
   | Some { form = code; _ } ->
       ignore

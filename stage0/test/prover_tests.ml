@@ -108,6 +108,7 @@ let () =
           then Harness.fail "message %S" actual)
         [
           (Fixtures.Prover.increment_in_a_greeter_impl, "`uses Panic` on the `impl`.");
+          (Fixtures.Prover.increment_in_a_describe_impl_whose_trait_allows_panic, "`uses Panic`.");
           ( Fixtures.Prover.decrement_in_a_countdown_cursor,
             "`capability Uses = Panic` in the `impl`." );
         ]);

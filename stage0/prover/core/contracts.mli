@@ -18,7 +18,7 @@ val list_law_proofs :
 val is_impl_unfinished : Lookups.t -> Resolve.Names.key -> bool
 val is_law_unshown : Lookups.t -> Path.t -> Types.trait_reference -> Types.ty -> string -> bool
 val find_function_contract : Lookups.t -> Path.t -> State.contract option
-val find_trait_part : Lookups.t -> Path.t -> string -> Path.receiver -> State.part option
+val find_declared_part : ?inherited:bool -> Lookups.t -> Path.t -> State.part option
 val find_capability_contract : Lookups.t -> Path.t -> string -> State.contract option
 val find_capability_part : Lookups.t -> Path.t -> string -> State.part option
 

@@ -302,13 +302,18 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
     Resolve.Names.is_broken state.lookups.interface.names state.key part
     || (part = Body && not checks_body)
   in
+  let read_effective_signature () =
+    match Interface.Impls.read_signature state.lookups.interface state.key.path with
+    | Some signature -> signature
+    | None -> State.raise_bug "a function with an interface has no signature"
+  in
   if not (is_broken Header) then
     match (definition.kind, elaborated.interface) with
-    | Function { signature; body = written }, Function_interface lowered_signature ->
+    | Function { signature; body = written }, Function_interface _ ->
         check_function state ~broken_body:(is_broken Body) signature (Some written)
-          lowered_signature
-    | Method_declaration signature, Function_interface lowered_signature ->
-        check_function state ~broken_body:true signature None lowered_signature
+          (read_effective_signature ())
+    | Method_declaration signature, Function_interface _ ->
+        check_function state ~broken_body:true signature None (read_effective_signature ())
     | Type_definition { body = type_body; clauses; _ }, Type_interface interface -> (
         let self =
           Types.Named

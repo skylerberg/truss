@@ -17,22 +17,13 @@ type proof =
   | Not_proven_here
 
 let find_inherited_part (lookups : Lookups.t) (path : Path.t) =
-  match path with
-  | Method { owner = impl; name; receiver } -> (
-      match Interface.Definition.find_interface lookups.interface impl with
-      | Some (Interface.Environment.Impl_interface interface) -> (
-          let implemented = interface.implements.trait in
-          let substitution =
-            Option.value ~default:[] (Interface.Impls.make_impl_substitution lookups.interface impl)
-          in
-          match Contracts.find_trait_part lookups implemented name receiver with
-          | Some part -> Some (part, substitution)
-          | None ->
-              Option.map
-                (fun part -> (part, substitution))
-                (Contracts.find_capability_part lookups implemented name))
-      | _ -> None)
-  | _ -> None
+  Option.bind (Interface.Impls.find_implemented_method lookups.interface path)
+    (fun (implemented : Interface.Impls.implemented_method) ->
+      Option.map
+        (fun part -> (part, implemented.implementation.substitution))
+        (Contracts.find_declared_part
+           ~inherited:(not implemented.implementation.trait.is_capability)
+           lookups implemented.declaration))
 
 let translate_impl_laws (lookups : Lookups.t) (key : Resolve.Names.key) source =
   let interface = Interface.Definition.read_impl_interface lookups.interface key.path in
@@ -423,7 +414,7 @@ let list_definition_states (lookups : Lookups.t) (key : Resolve.Names.key) proof
           let others =
             let show_stopping clause =
               "allowed to stop the program with "
-              ^ Interface.Definition.show_declaring_clause clause "Panic"
+              ^ Interface.Impls.show_declaring_clause clause "Panic"
             in
             match (obligation.code, obligation.panic_clause) with
             | (Overflow | Division | Shift), Some clause ->

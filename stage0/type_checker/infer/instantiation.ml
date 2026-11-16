@@ -227,4 +227,4 @@ let find_intrinsic_signature path =
 let find_function_signature (state : State.state) (path : Path.t) =
   match find_intrinsic_signature path with
   | Some signature -> Some signature
-  | None -> Interface.Definition.find_declared_signature state.lookups.interface path
+  | None -> Interface.Impls.read_signature state.lookups.interface path

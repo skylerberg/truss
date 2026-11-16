@@ -332,7 +332,10 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
       let without_self =
         List.fold_left
           (fun methods (bound : Types.trait_reference) ->
-            match Members.find_trait_method state.lookups bound.trait member.text Static with
+            match
+              Interface.Definition.find_trait_method state.lookups.interface bound.trait
+                ~name:member.text ~receiver:Static
+            with
             | Some method_
               when not
                      (List.exists
@@ -454,7 +457,9 @@ and check_trait_call_in_full state env (value : Syntax.expression) trait ~trait_
     | receiver :: _ -> Name_lookup.classify_receiver receiver.value
     | [] -> Read
   in
-  let find_overload = Members.find_trait_method state.lookups trait member.text in
+  let find_overload receiver =
+    Interface.Definition.find_trait_method state.lookups.interface trait ~name:member.text ~receiver
+  in
   match
     match find_overload Static with None -> find_overload wanted | trait_method -> trait_method
   with
@@ -475,7 +480,10 @@ and check_trait_call_in_full state env (value : Syntax.expression) trait ~trait_
 
 and check_capability_call state env (value : Syntax.expression) capability (member : Syntax.name)
     arguments =
-  match Members.find_trait_method state.lookups capability member.text Static with
+  match
+    Interface.Definition.find_trait_method state.lookups.interface capability ~name:member.text
+      ~receiver:Static
+  with
   | Some method_ -> (
       let instance =
         Instantiation.instantiate state (State.read_span state value.id)
