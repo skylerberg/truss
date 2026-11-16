@@ -320,8 +320,7 @@ let stored_in_place (shape : shape) =
 
 let pointee_types = function
   | Data ty | Block (ty, _) -> [ ty ]
-  | Code { parameters; result = Returns result | Lends (_, result); _ } ->
-      result :: List.map snd parameters
+  | Code { parameters; result; _ } -> result :: List.map snd parameters
   | Opaque -> []
 
 let member_reaches = function

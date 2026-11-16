@@ -357,12 +357,7 @@ let adapter context (key : Instance.key) ~(function_ : Instance.key) ~(ty : Grou
   let st = generated_state context ~key ~definition:path ~substitution in
   let builder = st.builder in
   let environment = local builder ~name:"environment" (Raw (Nullable_pointer Opaque)) in
-  let result_ty =
-    match ty.result with
-    | Returns result_type -> result_type
-    | _ -> bug "an adapter for a function that lends"
-  in
-  result_slot st (Convention.result context.env result_ty);
+  result_slot st (Convention.result context.env ty.result);
   let parameter_places =
     List.map
       (fun ((mode : Ground.mode), ty) ->
@@ -374,8 +369,8 @@ let adapter context (key : Instance.key) ~(function_ : Instance.key) ~(ty : Grou
   start builder (block builder);
   call_instance st function_ ~signature ~substitution
     ~arguments:(List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) parameter_places)
-    ~destination:(passed_on st result_ty) ();
-  finish_function st ~returns:(result_ty <> Never) ~first:[ environment ]
+    ~destination:(passed_on st ty.result) ();
+  finish_function st ~returns:(ty.result <> Never) ~first:[ environment ]
     ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ evidence)
     ();
   built st.builder

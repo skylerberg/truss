@@ -388,9 +388,7 @@ and function_type_ context (written : function_type) : Types.function_type =
       List.map
         (fun (input : function_input) -> (mode input.mode, type_ context input.type_))
         written.inputs;
-    output =
-      Types.Returns
-        (match written.output with Some output -> type_ context output | None -> Types.unit);
+    output = (match written.output with Some output -> type_ context output | None -> Types.unit);
     uses = uses context written.clauses;
     costs = costs context written.clauses;
   }
@@ -481,14 +479,8 @@ let generics context owner (written : generic_parameter list) : Types.generic li
       | `Capability -> { Types.generic = parameter; kind = Capability_generic })
     declared
 
-let specification_type (path : Path.t) =
-  match path with Top { module_; _ } -> module_ = Well_known.specification | _ -> false
-
-let mentions_integer =
-  Types.exists (function
-    | Types.Integer -> true
-    | Types.Named { path; _ } -> specification_type path
-    | _ -> false)
+let mentions_specification_only_type type_ =
+  Option.is_some (Types.find_specification_only_type type_)
 
 let terminates (clauses : clause list) =
   List.exists
@@ -539,9 +531,11 @@ let signature context ~owner ~head ~self_type (written : signature) : Types.sign
     uses = uses context written.clauses;
     terminates;
     specification_only =
-      Well_known.is Model owner || mentions_integer result_type
+      Well_known.is Model owner
+      || mentions_specification_only_type result_type
       || List.exists
-           (fun (parameter : Types.parameter_info) -> mentions_integer parameter.type_)
+           (fun (parameter : Types.parameter_info) ->
+             mentions_specification_only_type parameter.type_)
            parameters;
     capture_free_parameters =
       List.filter_map

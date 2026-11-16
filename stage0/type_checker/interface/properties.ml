@@ -167,7 +167,7 @@ let contents lookups ~(facts_of : Path.t -> Environment.type_facts) ~resolve (ty
           (fun (_, input) ->
             inside (if Types.terminates function_ then Function_input else Indirect) input)
           inputs;
-        inside Indirect (Types.result_type output)
+        inside Indirect output
     | Types.Any { trait_arguments; associated; _ } ->
         List.iter (inside Indirect) (type_arguments trait_arguments @ List.map snd associated)
     | Types.Named { path; arguments } -> (

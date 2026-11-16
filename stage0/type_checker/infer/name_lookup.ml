@@ -56,8 +56,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
           Option.iter (explicit_type_arguments state value instance) type_arguments;
           state.tables.resolutions.(value.id) <-
             Some (Global { path; type_arguments = instance.type_arguments });
-          register_expression state value (fun () -> Form.function_value state value);
-          Types.Function (Types.function_type_of instance.signature)
+          function_value state value instance.signature
       | None -> bug "`%s` has no signature" (Path.show path))
   | Definition (Constant, path) -> (
       state.tables.resolutions.(value.id) <- Some (Global { path; type_arguments = [] });
@@ -138,7 +137,7 @@ and variant_value state (value : expression) type_path variant ~arguments =
           Types.Function
             {
               inputs = [ (Types.Own, field.field_type) ];
-              output = Returns type_;
+              output = type_;
               uses = Types.no_capabilities;
               costs = [ { amortized = false; resource = Time; bound = Order_of } ];
             }
@@ -204,6 +203,18 @@ and field state (value : expression) base_type (member : name) =
           else unknown [])
   | _ -> unknown []
 
+and function_value state (value : expression) (signature : Types.signature) =
+  match Types.function_type_of signature with
+  | Some function_type ->
+      register_expression state value (fun () -> Form.function_value state value);
+      Types.Function function_type
+  | None ->
+      error state Not_a_value (read_span state value.id)
+        (Printf.sprintf
+           "`%s` lends a part, and a function value cannot lend. Call it where the part is used, \
+            or write a lambda that returns a copy of the part."
+           (source state (read_span state value.id)))
+
 and static_member state (value : expression) type_ (member : name) =
   match type_ with
   | Types.Named { path; arguments } ->
@@ -229,8 +240,7 @@ and static_member state (value : expression) type_ (member : name) =
                     | None -> ());
                     state.tables.resolutions.(value.id) <-
                       Some (Global { path = method_path; type_arguments = instance.type_arguments });
-                    register_expression state value (fun () -> Form.function_value state value);
-                    Types.Function (Types.function_type_of instance.signature)
+                    function_value state value instance.signature
                 | None -> bug "the method `%s` has no signature" (Path.show method_path))
             | [] ->
                 error state Unknown_member (read_span state member.id)

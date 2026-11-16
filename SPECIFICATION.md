@@ -1009,6 +1009,9 @@ mut grid.cell(position).visit()
   part is then mutated with no keyword of its own.
 - **A lent part is not the caller's to keep.** It is not moved, returned,
   stored, or bound with `let`, except by copying it.
+- **A lending method is not a value.** A function type has a result and
+  never lends, so its caller could keep the part past the statement, a
+  dangling view.
 - The part need not be stored in `self`: the method may lend a value it
   made, which is dropped when the lend ends.
 - **A method lends a part of its first parameter, or a whole value that it
@@ -2159,7 +2162,15 @@ an invariant, a law, or a proof.
   shows that it fits.
 - A function whose signature mentions a type that exists only in
   specifications is for specifications only: it is called only from
-  specifications, never compiled, and its body is a specification.
+  specifications, never compiled, and its body and defaults are
+  specifications.
+- A constant whose type mentions a type that exists only in specifications
+  is for specifications only.
+- **Code that is compiled holds no value of a type that exists only in
+  specifications,** nor of a type that holds one, such as `List[Integer]`:
+  the type has no representation when the code runs.
+- A field never has a type that exists only in specifications, because a
+  value that code holds stores its fields.
 - Float arithmetic in a specification follows IEEE 754.
 
 The prelude types `Sequence`, `FiniteSet`, `FiniteMap`, and `Multiset` exist

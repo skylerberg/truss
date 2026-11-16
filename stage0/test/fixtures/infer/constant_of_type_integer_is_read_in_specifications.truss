@@ -1,0 +1,7 @@
+let limit: Integer = 5
+
+fn below(count: UInt64) -> Bool
+  requires count < limit
+{
+  count < 5
+}

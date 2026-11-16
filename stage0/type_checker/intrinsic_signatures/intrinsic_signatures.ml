@@ -60,7 +60,7 @@ let signature (operation : Intrinsic.operation) : Types.signature =
     Types.Function
       {
         inputs = [ (Read, work_item) ];
-        output = Returns Types.unit;
+        output = Types.unit;
         uses = Types.no_capabilities;
         costs = [];
       }
@@ -217,7 +217,7 @@ let signature (operation : Intrinsic.operation) : Types.signature =
           let change : Types.function_type =
             {
               inputs = [ (Mut, value); (Own, parameter_type "Input") ];
-              output = Returns (parameter_type "Result");
+              output = parameter_type "Result";
               uses = Types.no_capabilities;
               costs = [];
             }

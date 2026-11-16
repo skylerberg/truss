@@ -92,9 +92,7 @@ let rec mangle_ty (ty : Ground.ty) =
       marker "Fn"
       ^ String.concat ""
           (List.map (fun (module_, ty) -> mode module_ ^ mangle_ty ty ^ marker "And") parameters)
-      ^ (match result with
-        | Returns ty -> marker "Returns" ^ mangle_ty ty
-        | Lends (module_, ty) -> marker "Lends" ^ mode module_ ^ mangle_ty ty)
+      ^ marker "Returns" ^ mangle_ty result
       ^ (match uses with
         | [] -> ""
         | uses -> marker "Uses" ^ String.concat (marker "And") (List.map path uses))

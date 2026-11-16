@@ -41,10 +41,21 @@ let fields context (written : field list) =
        (fun (field : field) ->
          match field.kind with
          | Field_declaration { name; type_; default } ->
+             let field_type = Lower.type_ context type_ in
+             let field_type =
+               match Types.find_specification_only_type field_type with
+               | None -> field_type
+               | Some specification_type ->
+                   Lower.error context Specification_only context.spans.(type_.id)
+                     (Printf.sprintf
+                        "`%s` exists only in specifications and has no representation in code that \
+                         runs, so it is not the type of a field."
+                        (Types.show specification_type))
+             in
              Some
                {
                  Types.field_name = name.text;
-                 field_type = Lower.type_ context type_;
+                 field_type;
                  field_has_default = Option.is_some default;
                }
          | Field_error -> None)

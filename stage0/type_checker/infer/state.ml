@@ -17,6 +17,7 @@ type env = {
 }
 
 let runs (env : env) = not (env.specification || env.compile_time)
+let is_compiled (env : env) = not env.specification
 
 type subset_constraint = {
   subset : Types.capability_set;
@@ -31,6 +32,9 @@ type frame = {
   mutable declared : int list;
   mutable deferred_checks : (unit -> bool) list;
   mutable reported_unmet_bounds : (Types.ty * Types.trait_reference) list;
+  mutable compiled_expressions : int list;
+  mutable compiled_bindings : int list;
+  mutable specification_type_report : Diagnostic.reported option;
   frame_specification : bool;
   span : Source.Definition_span.t;
 }
@@ -281,6 +285,66 @@ let record state (value : expression) type_ =
   match current_frame state with
   | Some frame -> frame.recorded_expressions <- value.id :: frame.recorded_expressions
   | None -> ()
+
+let note_compiled_expression state env (value : expression) =
+  match current_frame state with
+  | Some frame when is_compiled env ->
+      frame.compiled_expressions <- value.id :: frame.compiled_expressions
+  | _ -> ()
+
+let reject_specification_only_type state frame ~subject span type_ =
+  match Types.find_specification_only_type type_ with
+  | None -> None
+  | Some specification_type -> (
+      match frame.specification_type_report with
+      | Some report -> Some report
+      | None ->
+          let message =
+            if Types.equal type_ specification_type then
+              Printf.sprintf
+                "%s has the type `%s`, which exists only in specifications and has no \
+                 representation in code that runs."
+                subject (Types.show type_)
+            else
+              Printf.sprintf
+                "%s has the type `%s`, which holds `%s`. `%s` exists only in specifications and \
+                 has no representation in code that runs."
+                subject (Types.show type_) (Types.show specification_type)
+                (Types.show specification_type)
+          in
+          let report = reported state Specification_only span message in
+          frame.specification_type_report <- Some report;
+          Some report)
+
+let check_compiled_binding state frame (id : id) =
+  match state.tables.local_types.(id) with
+  | Some type_ -> (
+      let span = read_span state id in
+      match
+        reject_specification_only_type state frame
+          ~subject:(Printf.sprintf "`%s`" (source state span))
+          span (Unify.zonk state.unifier type_)
+      with
+      | Some report ->
+          let poisoned = Types.Error report in
+          state.tables.local_types.(id) <- Some poisoned;
+          Option.iter
+            (fun local -> Hashtbl.replace state.locals id { local with type_ = poisoned })
+            (Hashtbl.find_opt state.locals id)
+      | None -> ())
+  | None -> ()
+
+let check_compiled_expression state frame (id : id) =
+  Option.iter
+    (fun type_ ->
+      ignore
+        (reject_specification_only_type state frame ~subject:"This value" (read_span state id) type_))
+    state.tables.types.(id)
+
+let compare_in_source_order state left right =
+  let left : Source.Definition_span.t = read_span state left
+  and right : Source.Definition_span.t = read_span state right in
+  compare (left.start, -left.stop) (right.start, -right.stop)
 
 let defer state check =
   match current_frame state with
@@ -580,6 +644,26 @@ let settle state frame =
       parent.recorded_expressions <- id :: parent.recorded_expressions);
   finish state.tables.local_types frame.bindings (fun parent id ->
       parent.bindings <- id :: parent.bindings);
+  let is_settled table id =
+    match table.(id) with
+    | Some type_ -> not (List.exists is_open (Unify.unknowns state.unifier type_))
+    | None -> true
+  in
+  let settled_bindings, open_bindings =
+    List.partition (is_settled state.tables.local_types) (List.rev frame.compiled_bindings)
+  in
+  let settled_expressions, open_expressions =
+    List.partition (is_settled state.tables.types) (List.rev frame.compiled_expressions)
+  in
+  Option.iter
+    (fun parent ->
+      parent.compiled_bindings <- List.rev_append open_bindings parent.compiled_bindings;
+      parent.compiled_expressions <- List.rev_append open_expressions parent.compiled_expressions)
+    parent;
+  List.iter (check_compiled_binding state frame) settled_bindings;
+  List.iter
+    (check_compiled_expression state frame)
+    (List.sort (compare_in_source_order state) settled_expressions);
   match parent with
   | Some parent -> parent.deferred_checks <- frame.deferred_checks @ parent.deferred_checks
   | None -> ()
@@ -593,6 +677,9 @@ let in_statement state env (span : Source.Definition_span.t) body =
       declared = [];
       deferred_checks = [];
       reported_unmet_bounds = [];
+      compiled_expressions = [];
+      compiled_bindings = [];
+      specification_type_report = None;
       frame_specification = env.specification;
       span;
     }
@@ -636,6 +723,14 @@ let declare state (name : name) type_ ~is_var ~mode =
       frame.bindings <- name.id :: frame.bindings;
       frame.declared <- name.id :: frame.declared
   | None -> ()
+
+let declare_compiled state env (name : name) type_ ~is_var ~mode =
+  declare state name type_ ~is_var ~mode;
+  match current_frame state with
+  | Some frame when is_compiled env ->
+      frame.compiled_bindings <- name.id :: frame.compiled_bindings;
+      check_compiled_binding state frame name.id
+  | _ -> ()
 
 let target state (name : name) = state.resolved.names.(name.id)
 

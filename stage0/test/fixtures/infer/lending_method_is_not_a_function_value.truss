@@ -1,0 +1,9 @@
+type Box(value: Int64)
+
+fn Box.get(self) lends Int64 {
+  self.value
+}
+
+fn f() {
+  let _ = Box.get
+}

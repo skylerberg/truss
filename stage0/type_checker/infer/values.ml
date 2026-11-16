@@ -230,7 +230,7 @@ and lambda state env ?expected (value : expression) parameters body =
         List.iter2
           (fun written (mode, input) -> pattern state env written input ~mode)
           parameters function_type.inputs;
-        let output = Types.result_type function_type.output in
+        let output = function_type.output in
         let lambda_env = { env with output = Some (Returns output) } in
         let body_type = block_value state lambda_env ~expected:output body in
         convert state lambda_env ?expression:(block_value_id body) (read_span state body.id)
@@ -282,7 +282,7 @@ and lambda state env ?expected (value : expression) parameters body =
           body = build_block state body;
           result =
             (match Form.type_of state value with
-            | Types.Function function_type -> Types.result_type function_type.output
+            | Types.Function function_type -> function_type.output
             | type_ -> bug "a lambda of type `%s`" (Types.show type_));
         });
   result

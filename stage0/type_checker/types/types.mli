@@ -26,7 +26,7 @@ and trait_reference = {
 
 and function_type = {
   inputs : (mode * ty) list;
-  output : result;
+  output : ty;
   uses : capability_set;
   costs : cost list;
 }
@@ -80,6 +80,7 @@ val result_type : result -> ty
 val show_mode : mode -> string
 val map : ?capabilities:(capability_set -> capability_set) -> (ty -> ty option) -> ty -> ty
 val exists : ?resolve:(ty -> ty) -> (ty -> bool) -> ty -> bool
+val find_specification_only_type : ty -> ty option
 val has_capability_variable : capability_set -> bool
 val capabilities_unsolved : capability_set -> bool
 val equal : ty -> ty -> bool
@@ -120,7 +121,7 @@ val substitute_signature : substitution -> signature -> signature
 val method_in_impl :
   impl_generics:generic list -> impl_uses:capability_set -> signature -> signature
 
-val function_type_of : signature -> function_type
+val function_type_of : signature -> function_type option
 
 type field = { field_name : string; field_type : ty; field_has_default : bool }
 type variant = { variant_name : string; fields : field list option; indirect : bool }

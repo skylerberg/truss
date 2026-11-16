@@ -31,7 +31,7 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
       match target state bound with
       | Some Binding ->
           binds bound.id bound;
-          declare state bound type_ ~is_var ~mode
+          declare_compiled state env bound type_ ~is_var ~mode
       | Some (Local id) -> (
           binds id bound;
           match Hashtbl.find_opt state.locals id with

@@ -244,10 +244,7 @@ let nested_function st ~(function_type : Ground.function_type) ~(output : Types.
       }
   in
   let environment_parameter = local builder ~name:"environment" (Raw (Nullable_pointer Opaque)) in
-  let result_ty =
-    match function_type.result with Returns ty -> ty | _ -> bug "a lambda that lends"
-  in
-  result_slot inner (Convention.result st.context.env result_ty);
+  result_slot inner (Convention.result st.context.env function_type.result);
   let parameter_places =
     List.map
       (fun ((mode : Ground.mode), ty) ->
@@ -286,17 +283,14 @@ let call_indirect st ~(function_type : Ground.function_type) ~(value : Lowered.p
     Lowered.Indirect
       { value = Copy value; signature = Convention.function_value st.context.env function_type }
   in
-  match function_type.result with
-  | Returns ty ->
-      emit st.builder
-        (Call
-           {
-             target;
-             arguments = passed;
-             result = Convention.(destination (result st.context.env ty)) destination;
-           });
-      if ty = Never then unreachable_block st
-  | Lends _ -> bug "a function value that lends"
+  emit st.builder
+    (Call
+       {
+         target;
+         arguments = passed;
+         result = Convention.(destination (result st.context.env function_type.result)) destination;
+       });
+  if function_type.result = Never then unreachable_block st
 
 let call_through_any st ~(any_type : Types.trait_reference) ~trait ~name ~(any : Lowered.place)
     ~(arguments : (Types.mode * Ground.ty * Lowered.place) list) ?(lending = []) destination =

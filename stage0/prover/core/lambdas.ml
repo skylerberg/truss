@@ -6,9 +6,7 @@ open Validity
 
 let applied context (function_type : Types.function_type) callee arguments =
   let inputs = List.map (fun (_, input) -> sort_of context input) function_type.inputs in
-  let output =
-    sort_of context (match function_type.output with Returns output -> output | _ -> Types.unit)
-  in
+  let output = sort_of context function_type.output in
   let value_sort = sort_of context (Types.Function function_type) in
   let symbol = Symbol.Apply ((value_sort :: inputs) @ [ output ]) in
   declare context (Logic.Function (symbol, value_sort :: inputs, output));
@@ -106,7 +104,6 @@ let in_the_logic (function_type : Types.function_type) =
   Types.terminates function_type
   && function_type.uses = Types.no_capabilities
   && List.for_all (fun (mode, _) -> mode <> Types.Mut) function_type.inputs
-  && match function_type.output with Returns _ -> true | _ -> false
 
 let parameters_of context frame (function_type : Types.function_type) =
   let depth = List.length frame.bound in
@@ -427,12 +424,12 @@ let read_lambda ?(capture_free = false) context frame ~(site : Invocation.site)
           @ context.returns;
         List.iter
           (fun ((exit_ : frame), returned) ->
-            (match (returned, function_type.output) with
-            | Some term, Returns output ->
+            Option.iter
+              (fun term ->
                 check_valid context exit_ span
-                  (substituted context frame output)
-                  term ~deep:true ~when_:"for the value this lambda returns"
-            | _ -> ());
+                  (substituted context frame function_type.output)
+                  term ~deep:true ~when_:"for the value this lambda returns")
+              returned;
             List.iter2
               (fun parameter (mode, input) ->
                 match (mode, written.code.locals.(parameter).kind) with

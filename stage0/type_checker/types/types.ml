@@ -26,7 +26,7 @@ and trait_reference = {
 
 and function_type = {
   inputs : (mode * ty) list;
-  output : result;
+  output : ty;
   uses : capability_set;
   costs : cost list;
 }
@@ -167,14 +167,10 @@ and substitute_trait substitution (trait : trait_reference) =
   }
 
 and substitute_function substitution (function_type : function_type) =
-  let result = function
-    | Returns type_ -> Returns (substitute substitution type_)
-    | Lends (mode, type_) -> Lends (mode, substitute substitution type_)
-  in
   {
     inputs =
       List.map (fun (mode, type_) -> (mode, substitute substitution type_)) function_type.inputs;
-    output = result function_type.output;
+    output = substitute substitution function_type.output;
     uses = substitute_capabilities substitution function_type.uses;
     costs = function_type.costs;
   }
@@ -208,10 +204,7 @@ let rec map ?(capabilities = Fun.id) transform type_ =
             {
               function_type with
               inputs = List.map (fun (mode, type_) -> (mode, map type_)) function_type.inputs;
-              output =
-                (match function_type.output with
-                | Returns type_ -> Returns (map type_)
-                | Lends (mode, type_) -> Lends (mode, map type_));
+              output = map function_type.output;
               uses = capabilities function_type.uses;
             }
       | Any reference -> Any (trait reference)
@@ -231,9 +224,24 @@ let rec exists ?(resolve = Fun.id) transform type_ =
   | Named { arguments; _ } -> List.exists argument arguments
   | Projection { base; trait = reference; _ } -> exists base || trait reference
   | Function { inputs; output; _ } ->
-      List.exists (fun (_, type_) -> exists type_) inputs || exists (result_type output)
+      List.exists (fun (_, type_) -> exists type_) inputs || exists output
   | Any reference -> trait reference
   | Parameter _ | Never | Integer | Variable _ | Literal _ | Hole | Error _ -> false
+
+let is_specification_only = function
+  | Integer -> true
+  | Named { path = Top { module_; _ }; _ } -> module_ = Well_known.specification
+  | _ -> false
+
+let find_specification_only_type type_ =
+  let specification_type = ref None in
+  ignore
+    (exists
+       (fun part ->
+         if is_specification_only part then specification_type := Some part;
+         is_specification_only part)
+       type_);
+  !specification_type
 
 let has_capability_variable capabilities =
   List.exists (function Capability_variable _ -> true | _ -> false) capabilities
@@ -246,8 +254,7 @@ let rec contains_unsolved = function
   | Named { arguments; _ } -> List.exists argument_unsolved arguments
   | Projection { base; trait; _ } -> contains_unsolved base || trait_unsolved trait
   | Function { inputs; output; _ } ->
-      List.exists (fun (_, type_) -> contains_unsolved type_) inputs
-      || contains_unsolved (result_type output)
+      List.exists (fun (_, type_) -> contains_unsolved type_) inputs || contains_unsolved output
   | Any trait -> trait_unsolved trait
   | Parameter _ | Never | Integer | Error _ -> false
 
@@ -352,7 +359,7 @@ and show_function (function_type : function_type) =
     String.concat ", "
       (List.map (fun (written, type_) -> show_mode written ^ show type_) function_type.inputs)
   in
-  let base = Printf.sprintf "fn(%s)%s" inputs (show_output function_type.output) in
+  let base = Printf.sprintf "fn(%s)%s" inputs (show_output (Returns function_type.output)) in
   let uses = List.map show_capability function_type.uses in
   let costs =
     List.map
@@ -458,15 +465,21 @@ let function_type_of (signature : signature) =
     | Some (Mut, type_) -> [ (Mut, type_) ]
     | Some (Own, type_) -> [ (Own, type_) ]
   in
-  {
-    inputs =
-      receiver @ List.map (fun parameter -> (parameter.mode, parameter.type_)) signature.parameters;
-    output = signature.output;
-    uses = signature.uses;
-    costs =
-      (if signature.terminates then [ { amortized = false; resource = Time; bound = Finite_cost } ]
-       else []);
-  }
+  match signature.output with
+  | Lends _ -> None
+  | Returns output ->
+      Some
+        {
+          inputs =
+            receiver
+            @ List.map (fun parameter -> (parameter.mode, parameter.type_)) signature.parameters;
+          output;
+          uses = signature.uses;
+          costs =
+            (if signature.terminates then
+               [ { amortized = false; resource = Time; bound = Finite_cost } ]
+             else []);
+        }
 
 type field = { field_name : string; field_type : ty; field_has_default : bool }
 type variant = { variant_name : string; fields : field list option; indirect : bool }

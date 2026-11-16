@@ -107,7 +107,7 @@ let instantiated context (callee : Core.callee) =
       | None -> None)
   | Indirect function_value -> (
       match operand_type function_value with
-      | Function { inputs; output; _ } -> Some (List.map snd inputs, output)
+      | Function { inputs; output; _ } -> Some (List.map snd inputs, Types.Returns output)
       | _ -> None)
 
 let call_types context (node : Core.expression) (call : Core.call) =
@@ -502,7 +502,7 @@ let check (interface : Interface.Lookups.t) (key : Resolve.Names.key) (form : Co
     | Function { inputs; output; uses; _ } ->
         List.iter (fun (_, input) -> type_ subject input) inputs;
         capabilities subject uses;
-        type_ subject (Types.result_type output)
+        type_ subject output
     | Any reference -> trait subject reference
     | Never | Integer -> ()
     | Variable _ | Literal _ | Hole | Error _ ->

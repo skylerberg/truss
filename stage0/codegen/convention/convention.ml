@@ -49,10 +49,7 @@ let evidence = Lowered.Raw (Pointer Opaque)
 
 let function_value env (function_type : Ground.function_type) : Lowered.signature =
   let result_ty, returns =
-    match function_type.result with
-    | Returns Never -> (Nothing, false)
-    | Returns ty -> (result env ty, true)
-    | Lends _ -> Compiler_bug.bug ~stage:"Convention" "a function type that lends"
+    match function_type.result with Never -> (Nothing, false) | ty -> (result env ty, true)
   in
   let written =
     List.filter_map (fun (mode, ty) -> parameter env mode ty) function_type.parameters
