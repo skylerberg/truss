@@ -101,7 +101,7 @@ type evidence =
 type through_any = Callable | Has_generics | Names_self
 
 let classify_through_any lookups ~(trait : Path.t) (method_ : Types.trait_method) : through_any =
-  let self : Types.parameter = { owner = trait; name = "Self" } in
+  let self = Types.make_self_parameter trait in
   let names_self type_ =
     let mentions_self = ref false in
     ignore

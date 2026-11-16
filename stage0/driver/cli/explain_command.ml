@@ -1,5 +1,3 @@
-module Names = Resolve.Names
-
 let parse_position text =
   match List.rev (String.split_on_char ':' text) with
   | column :: line :: (_ :: _ as file) -> (
@@ -30,9 +28,9 @@ let run ~position =
       let names = Database.make_name_lookups database packages in
       let symbol_at =
         List.find_map
-          (fun (declaration : Names.declaration) ->
-            let key = Names.key_of declaration in
-            let ({ base; _ } : Names.place) = names.place key in
+          (fun (declaration : Resolve.Names.declaration) ->
+            let key = Resolve.Names.key_of declaration in
+            let ({ base; _ } : Resolve.Names.place) = names.place key in
             let text = names.text key in
             if base <= offset && offset <= base + String.length text then
               match Database.read_resolved database key with

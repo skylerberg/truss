@@ -1,5 +1,3 @@
-module Names = Resolve.Names
-
 let home (source : State.source) =
   match source.key with Some key -> key | None -> Facts.bug "%s has no definition key" source.name
 
@@ -123,7 +121,7 @@ let promises context (source : State.source) locals (costs : Mir.cost list) ~inh
 let promised_by (lookups : Lookups.t) (source : State.source) =
   match source.key with
   | Some { path = Method { owner; _ }; _ }
-    when Names.kind_of lookups.interface.names owner = Some Names.Capability ->
+    when Resolve.Names.kind_of lookups.interface.names owner = Some Resolve.Names.Capability ->
       "capability"
   | _ -> "trait"
 
@@ -214,7 +212,7 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
                 context.entry <- symbol :: context.entry
             | _ -> ());
             Validity.assume_valid context frame ty term;
-            Facts.bind frame local ty term)
+            Facts.bind frame (Core_local local) ty term)
       { (empty_frame source) with substitution }
       parameters
   in
@@ -233,7 +231,9 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
   let values_of (at : State.frame) =
     List.filter_map
       (fun (parameter : Mir.parameter) ->
-        match parameter.local with Self -> at.self | local -> Locals.find_opt local at.locals)
+        match parameter.local with
+        | Self -> at.self
+        | local -> Locals.find_opt (Core_local local) at.locals)
       parameters
   in
   let paired terms =
@@ -258,10 +258,10 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
               match parameter.local with
               | Self -> (locals, types, Some (exit_, parameter.type_), old_locals)
               | local ->
-                  ( Locals.add local exit_ locals,
-                    Locals.add local parameter.type_ types,
+                  ( Locals.add (Core_local local) exit_ locals,
+                    Locals.add (Core_local local) parameter.type_ types,
                     self,
-                    Locals.add local entry old_locals ))
+                    Locals.add (Core_local local) entry old_locals ))
             (Locals.empty, Locals.empty, None, Locals.empty)
             part.parameters
             (List.combine own_terms (values_of at))
@@ -387,8 +387,8 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
       List.iter
         (fun (parameter : Mir.parameter) ->
           match
-            ( Locals.find_opt parameter.local frame.locals,
-              Facts.local_type context frame parameter.local )
+            ( Locals.find_opt (Core_local parameter.local) frame.locals,
+              Facts.local_type context frame (Core_local parameter.local) )
           with
           | Some term, Some ty ->
               Lambdas.check_valid context frame Whole_definition ty term ~deep:true
@@ -439,9 +439,9 @@ let function_ ?(proof = false) ?(is_updating_helper = false) ?inherited ?(substi
                 match parameter.local with
                 | Self -> (start.self, frame.self, frame.self_type)
                 | local ->
-                    ( Locals.find_opt local start.locals,
-                      Locals.find_opt local frame.locals,
-                      Facts.local_type context frame local )
+                    ( Locals.find_opt (Core_local local) start.locals,
+                      Locals.find_opt (Core_local local) frame.locals,
+                      Facts.local_type context frame (Core_local local) )
               in
               match (parameter.mode, entry, ty) with
               | (Types.Mut | Types.Own), Some entry, Some ty ->
@@ -547,8 +547,8 @@ let laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~for_type ~p
               let locals, types =
                 List.fold_left2
                   (fun (locals, types) (local, type_) term ->
-                    ( Locals.add local term locals,
-                      Locals.add local (Types.substitute renaming type_) types ))
+                    ( Locals.add (Core_local local) term locals,
+                      Locals.add (Core_local local) (Types.substitute renaming type_) types ))
                   (start.locals, start.types) parameters
                   (List.filteri (fun index _ -> index < List.length parameters) terms)
               in

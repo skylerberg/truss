@@ -1,8 +1,6 @@
-module Names = Resolve.Names
-
 let public (lookups : Lookups.t) (module_ : Path.module_) name =
   match lookups.interface.names.find module_ name with
-  | Some entry -> Names.is_public entry.visibility
+  | Some entry -> Resolve.Names.is_public entry.visibility
   | None -> true
 
 let visible_to_other_packages (lookups : Lookups.t) (path : Path.t) =
@@ -13,14 +11,14 @@ let visible_to_other_packages (lookups : Lookups.t) (path : Path.t) =
       public lookups module_ name
       &&
       match Resolve.Names.definition_of_path lookups.interface.names path with
-      | Some (_, definition) -> Names.is_public definition.visibility
+      | Some (_, definition) -> Resolve.Names.is_public definition.visibility
       | None -> true)
   | Method _ | Member_constant _ | Impl _ | Derived _ | Test _ | Law_proof _ -> true
   | Unresolved _ -> false
 
 let called_from_other_packages (state : State.state) =
   match state.lookups.interface.names.container state.key with
-  | None -> Names.is_public state.definition.visibility
+  | None -> Resolve.Names.is_public state.definition.visibility
   | Some container -> (
       match Interface.Definition.read_interface state.lookups.interface container.path with
       | Some (Trait_interface _) -> visible_to_other_packages state.lookups container.path
@@ -32,14 +30,7 @@ let called_from_other_packages (state : State.state) =
           | _ -> true)
       | _ -> false)
 
-let check (state : State.state) =
-  let clauses, name =
-    match state.definition.kind with
-    | Function { signature; _ } | Method_declaration signature ->
-        (signature.clauses, Names.signature_name signature)
-    | Theorem { name; clauses; _ } -> (clauses, name)
-    | _ -> ([], { text = ""; id = state.definition.id })
-  in
+let check_clauses (state : State.state) (name : Syntax.name) clauses =
   let requires_and_costs =
     List.filter_map
       (fun (clause : Syntax.clause) ->
@@ -75,3 +66,10 @@ let check (state : State.state) =
         match resolution with Some (Global { path; _ }) -> named id path | _ -> ())
       state.tables.resolutions
   end
+
+let check (state : State.state) =
+  match state.definition.kind with
+  | Syntax.Function { signature; _ } | Method_declaration signature ->
+      check_clauses state (Resolve.Names.signature_name signature) signature.clauses
+  | Theorem { name; clauses; _ } -> check_clauses state name clauses
+  | _ -> ()

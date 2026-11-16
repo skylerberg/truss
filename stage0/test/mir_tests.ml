@@ -93,7 +93,7 @@ and effects : Mir.basic -> Mir.local list * Mir.local list * Mir.local list = fu
       let read, given = Option.fold ~none:([], []) ~some:written destination in
       (call_locals call @ read, given, [])
   | Lend { part; call } -> (call_locals call, [ part ], [])
-  | Slice { destination; base; call } ->
+  | Slice { destination; base; call; _ } ->
       let read, given = written destination in
       (call_locals call @ place_locals base @ read, given, [])
   | Template { destination; call; _ } ->
@@ -466,10 +466,10 @@ let named (body : Mir.Graph.body) name =
     body.locals;
   match !found with Some local -> local | None -> failwith ("no local is named " ^ name)
 
-let reachable (body : Mir.Graph.body) ~from ?(avoid = []) () =
+let reachable (body : Mir.Graph.body) ~from =
   let seen = Array.make (Array.length body.blocks) false in
   let rec visit block =
-    if (not seen.(block)) && not (List.mem block avoid) then begin
+    if not seen.(block) then begin
       seen.(block) <- true;
       List.iter visit (Mir.Graph.For_testing.successors body.blocks.(block).terminator)
     end
@@ -489,7 +489,7 @@ let terminators (body : Mir.Graph.body) =
 
 let () =
   Harness.test "an assignment evaluates its value, then its target" (fun () ->
-      let mir = mir_of_g Fixtures.Mir.assignment_evaluates_its_value_then_its_target_and in
+      let mir = mir_of_g Fixtures.Mir.indexed_assignments_with_calls_on_both_sides in
       let order =
         List.filter_map
           (fun (statement : Mir.Graph.statement) ->
@@ -514,7 +514,7 @@ let () =
   Harness.test
     "a short-circuit operator evaluates its right operand only where the left does not decide"
     (fun () ->
-      let mir = mir_of_g Fixtures.Mir.short_circuit_operator_jumps_past_its_right in
+      let mir = mir_of_g Fixtures.Mir.short_circuit_and in
       let body = mir.body in
       let a = named body "a" and b = named body "b" in
       let negates (basic : Mir.Graph.basic_block) =
@@ -536,8 +536,7 @@ let () =
       with
       | None -> Harness.fail "nothing branches on a"
       | Some (yes, no) ->
-          let from_yes = reachable body ~from:[ yes ] ()
-          and from_no = reachable body ~from:[ no ] () in
+          let from_yes = reachable body ~from:[ yes ] and from_no = reachable body ~from:[ no ] in
           Array.iteri
             (fun index basic ->
               if negates basic && (from_no.(index) || not from_yes.(index)) then
@@ -545,7 +544,7 @@ let () =
             body.blocks);
   Harness.test "a range loop binds a copy of its counter, and a continue ends the iteration"
     (fun () ->
-      let mir = mir_of_g Fixtures.Mir.range_loop_copies_its_counter_steps_it_at_continue in
+      let mir = mir_of_g Fixtures.Mir.range_loop_with_a_continue in
       let body = mir.body in
       let i = named body "i" in
       match
@@ -571,7 +570,7 @@ let () =
           if List.length ends < 2 then Harness.fail "the continue does not end the iteration");
   Harness.test "a loop over a collection runs its body for each element, and a break exits it"
     (fun () ->
-      let mir = mir_of_g Fixtures.Mir.loop_over_a_collection_runs_its_body_for_each in
+      let mir = mir_of_g Fixtures.Mir.for_loop_with_a_break in
       let body = mir.body in
       match
         List.find_map
@@ -637,15 +636,15 @@ let () =
   in
   Harness.test "a let keeps the temporary that the slice it binds views until its bindings end"
     (fun () ->
-      let mir = mir_of_g Fixtures.Mir.let_keeps_the_base_of_a_slice_it_binds in
+      let mir = mir_of_g Fixtures.Mir.let_of_a_slice_of_a_temporary in
       slice_base_ends mir.body "middle" (fun base_end middle_end ->
           if base_end < middle_end then Harness.fail "the slice's base ends before middle"));
   Harness.test "a let ends a temporary that its bindings do not view with its statement" (fun () ->
-      let mir = mir_of_g Fixtures.Mir.let_ends_the_base_of_a_slice_it_does_not_bind in
+      let mir = mir_of_g Fixtures.Mir.let_of_a_temporary_slices_length in
       slice_base_ends mir.body "count" (fun base_end count_end ->
           if base_end > count_end then Harness.fail "the slice's base outlives its statement"));
   Harness.test "a let with an else binds its pattern only where it matches" (fun () ->
-      let mir = mir_of_g Fixtures.Mir.let_with_an_else_tests_its_pattern_and_the_else in
+      let mir = mir_of_g Fixtures.Mir.let_else_on_an_option in
       let body = mir.body in
       let x = named body "x" in
       let binds (basic : Mir.Graph.basic_block) =
@@ -661,18 +660,16 @@ let () =
       match List.find_opt (fun (_, terminator) -> returns_one terminator) (terminators body) with
       | None -> Harness.fail "the else does not return 1"
       | Some (else_return, _) ->
-          let from_entry = reachable body ~from:[ 0 ] () in
+          let from_entry = reachable body ~from:[ 0 ] in
           Array.iteri
             (fun index basic ->
-              if
-                from_entry.(index) && binds basic
-                && (reachable body ~from:[ index ] ()).(else_return)
+              if from_entry.(index) && binds basic && (reachable body ~from:[ index ]).(else_return)
               then Harness.fail "block %d binds x on the way to the else" index)
             body.blocks;
           if not (Array.exists binds body.blocks) then Harness.fail "x is never bound");
   Harness.test "a match guard that fails ends its arm's bindings before the next arm's test"
     (fun () ->
-      let mir = mir_of_g Fixtures.Mir.match_tests_its_arms_in_order_and_a_guard_that in
+      let mir = mir_of_g Fixtures.Mir.match_with_a_guarded_arm in
       let body = mir.body in
       let x = named body "x" in
       let holding_x =
@@ -753,7 +750,7 @@ let () =
           in
           walk [] failed);
   Harness.test "a functional body's one jump is its return, and its graph branches" (fun () ->
-      let built, graph = both_of_g Fixtures.Mir.functional_body_is_one_block_of_values in
+      let built, graph = both_of_g Fixtures.Mir.if_else_on_two_comparisons in
       let chosen = ref 0 and jumps = ref [] in
       Mir.iter_code
         (fun (statement : Mir.statement) ->
@@ -774,7 +771,7 @@ let () =
              graph.body.blocks)
       then Harness.fail "nothing in the graph branches");
   Harness.test "a loop is one statement that holds its body, and a break is a jump in it" (fun () ->
-      let built, graph = both_of_g Fixtures.Mir.loop_is_one_statement_and_a_break_a_jump in
+      let built, graph = both_of_g Fixtures.Mir.while_loop_with_a_break in
       let loops =
         List.filter_map
           (fun (statement : Mir.statement) ->
@@ -812,14 +809,14 @@ let () =
              (terminators graph.body))
       then Harness.fail "no block of the graph jumps back");
   Harness.test "a name that the alternatives of a pattern bind to a part says so" (fun () ->
-      let mir = mir_of_g Fixtures.Mir.name_that_alternatives_bind_says_so in
+      let mir = mir_of_g Fixtures.Mir.mut_match_whose_alternatives_bind_a_part in
       if not mir.body.locals.(named mir.body "value").has_several_bindings then
         Harness.fail "`value`, which two alternatives bind, does not say so";
       if mir.body.locals.(named mir.body "only").has_several_bindings then
         Harness.fail "`only`, which one pattern binds, says that several statements bind it");
   Harness.test "an argument names the function reference or the lambda expression that it is"
     (fun () ->
-      let mir, _ = both_of_g Fixtures.Mir.argument_names_the_function_written_as_it in
+      let mir, _ = both_of_g Fixtures.Mir.function_and_lambda_passed_to_apply in
       let functions = ref [] in
       Mir.iter_code
         (fun (statement : Mir.statement) ->
@@ -838,7 +835,7 @@ let () =
             Harness.fail "the lambda's body is not functional"
       | _ -> Harness.fail "the calls of `apply` do not name `double` and the lambda");
   Harness.test "a lambda's captures and parameters are locals of its body" (fun () ->
-      let mir = mir_of_g Fixtures.Mir.lambdas_captures_and_parameters_are_its_own_locals in
+      let mir = mir_of_g Fixtures.Mir.lambda_capturing_an_offset in
       match mir.lambdas with
       | [| lambda |] ->
           if lambda.parameters <> [ named lambda "value" ] then
@@ -859,8 +856,7 @@ let () =
       | lambdas -> Harness.fail "%d lambdas" (Array.length lambdas));
   Harness.test "a method an impl inherits shares its trait's default method's MIR" (fun () ->
       let packages =
-        Support.setup
-          [ ("app::main", Fixtures.Mir.method_an_impl_inherits_shares_its_traits_default) ]
+        Support.setup [ ("app::main", Fixtures.Mir.impls_inheriting_a_default_method) ]
       in
       let module_ = Support.module_of "app::main" in
       let method_of owner name : Path.t = Method { owner; name; receiver = Read } in
@@ -902,7 +898,7 @@ let () =
   Harness.test "defaults have bodies of their own, apart from the MIR of any function's body"
     (fun () ->
       let packages =
-        Support.setup [ ("app::main", Fixtures.Mir.defaults_have_bodies_of_their_own) ]
+        Support.setup [ ("app::main", Fixtures.Mir.defaults_of_a_capability_a_type_and_a_method) ]
       in
       let module_ = Support.module_of "app::main" in
       let top name : Path.t = Top { module_; name } in
@@ -940,7 +936,10 @@ let () =
           Harness.fail "`Counter` has %d field defaults" (List.length defaults)
       | Parameter_defaults _ -> Harness.fail "a type with parameter defaults");
   Harness.test "a contract's clauses are formulas that take the function's parameters" (fun () ->
-      let packages = Support.setup [ ("app::main", Fixtures.Mir.contracts_clauses_are_formulas) ] in
+      let packages =
+        Support.setup
+          [ ("app::main", Fixtures.Mir.contract_with_quantified_and_conditional_clauses) ]
+      in
       let g : Path.t = Top { module_ = Support.module_of "app::main"; name = "g" } in
       let parameters (clause : Mir.formula) =
         List.map
@@ -1020,7 +1019,7 @@ let () =
   Harness.test "a loop holds its clauses as formulas, and a `proof` block's statement its body"
     (fun () ->
       let packages =
-        Support.setup [ ("app::main", Fixtures.Mir.loop_holds_its_clauses_as_formulas) ]
+        Support.setup [ ("app::main", Fixtures.Mir.while_loop_with_an_invariant_and_a_proof_block) ]
       in
       let module_ = Support.module_of "app::main" in
       let g : Path.t = Top { module_; name = "g" } in
@@ -1056,7 +1055,7 @@ let () =
       | [ proof ] -> validate "the proof block" (Mir.For_testing.expanded proof).body
       | proofs -> Harness.fail "%d proof blocks" (List.length proofs));
   Harness.test "an early exit from concurrent code ends the tasks it leaves" (fun () ->
-      let mir = mir_of_g Fixtures.Mir.early_exit_from_concurrent_code_ends_the_tasks_it_leaves in
+      let mir = mir_of_g Fixtures.Mir.early_return_from_a_concurrent_loop in
       let blocks = mir.body.blocks in
       let resume winner number =
         Array.to_list blocks

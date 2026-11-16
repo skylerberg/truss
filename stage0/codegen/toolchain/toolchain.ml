@@ -44,7 +44,7 @@ let link_time_optimization toolchain =
 
 let optimization_flag = function O1 -> "-O1" | O2 -> "-O2"
 
-let compile toolchain ~optimization ?(extra = []) ~source ~output () =
+let compile toolchain ~optimization ~extra ~source ~output =
   let arguments =
     (optimization_flag optimization :: required_flags) @ extra @ [ "-c"; source; "-o"; output ]
   in
@@ -63,7 +63,7 @@ let response_word path =
   Buffer.add_char buffer '"';
   Buffer.contents buffer
 
-let link toolchain ?(extra = []) ~objects ~output () =
+let link toolchain ~extra ~objects ~output =
   let response = output ^ ".objects" in
   Out_channel.with_open_bin response (fun channel ->
       List.iter (fun path -> output_string channel (response_word path ^ "\n")) objects);

@@ -101,7 +101,7 @@ let rec place_c context fc (place : Lowered.place) : (string * Lowered.ty) optio
     | Variant_field _, _ -> C_runtime.bug "a variant of a place that is not a value"
   in
   let projected (ty : Lowered.ty) (projection : Lowered.projection) =
-    Lowered.projection_type context.env ~environment:(environment_of context fc) ty projection
+    Lowered.find_projection_type context.env ~environment:(environment_of context fc) ty projection
   in
   let rec walk ((_, ty) as current) = function
     | [] -> Some current

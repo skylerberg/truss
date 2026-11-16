@@ -8,12 +8,7 @@ type undecided =
       right : Tree.block;
       origin : Core.origin;
     }
-  | Undecided_not of {
-      target : Tree.place;
-      negated : Tree.operand;
-      node : Core.id option;
-      origin : Core.origin;
-    }
+  | Undecided_not of { target : Tree.place; negated : Tree.operand; origin : Core.origin }
 
 type jump_targets = {
   break_ : Graph.block option;
@@ -33,7 +28,7 @@ let expanded_body (body : Tree.body) : Graph.body =
       { statements = List.rev emitted; terminator; terminator_origin = origin }
   in
   let assigned target value origin : Graph.statement =
-    { kind = Assign { target; value = Operand value; node = None }; origin }
+    { kind = Assign { target; value = Operand value }; origin }
   in
   let place_local : Tree.place -> Tree.local option = function
     | { root = Local local; projections = [] } -> Some local
@@ -71,16 +66,9 @@ let expanded_body (body : Tree.body) : Graph.body =
             if reads_undecided left then emit targets current (undecided @ [ pending ]) rest
             else emit targets (decided ()) [ pending ] rest
         | Basic
-            (Assign
-               {
-                 target = { root = Local _; projections = [] } as target;
-                 value = Not negated;
-                 node;
-               })
+            (Assign { target = { root = Local _; projections = [] } as target; value = Not negated })
           when reads_undecided negated ->
-            emit targets current
-              (undecided @ [ Undecided_not { target; negated; node; origin } ])
-              rest
+            emit targets current (undecided @ [ Undecided_not { target; negated; origin } ]) rest
         | Choose { target; choice = Conditional { condition; then_; else_; _ } } ->
             let yes = fresh () and no = fresh () and joined = fresh () in
             if reads_undecided condition then
@@ -315,9 +303,9 @@ let expanded_body (body : Tree.body) : Graph.body =
             ] )
           (Goto joined) origin;
         (joined, [])
-    | Undecided_not { target; negated; node; origin } :: before ->
+    | Undecided_not { target; negated; origin } :: before ->
         let index, emitted = with_values targets current (List.rev before) in
-        (index, { kind = Assign { target; value = Not negated; node }; origin } :: emitted)
+        (index, { kind = Assign { target; value = Not negated }; origin } :: emitted)
   and arm targets entry (block : Tree.block) ~target ~joined origin =
     match (emit targets (entry, []) [] block.statements, block.value) with
     | Some (current, undecided), Some value ->

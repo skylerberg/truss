@@ -1,5 +1,3 @@
-module Symbol = Logic.Symbol
-
 let check_callback_requires context frame (site : Invocation.site) through
     (values : State.passed list) =
   match through with
@@ -44,7 +42,7 @@ let law_frame frame source ~substitution (law : Mir.law) terms =
   let locals, types =
     List.fold_left2
       (fun (locals, types_) ((local, _), ty) term ->
-        (Locals.add local term locals, Locals.add local ty types_))
+        (Locals.add (Core_local local) term locals, Locals.add (Core_local local) ty types_))
       (Locals.empty, Locals.empty)
       (List.combine law.parameters types)
       terms
@@ -70,7 +68,7 @@ let law_fact (context : State.context) (frame : State.frame) source ~substitutio
     context.fresh <- context.fresh + 1;
     let symbols =
       List.mapi
-        (fun index _ -> Symbol.Variable { label = "law"; numbers = [ context.fresh; index ] })
+        (fun index _ -> Logic.Symbol.Variable { label = "law"; numbers = [ context.fresh; index ] })
         types
     in
     let inside =

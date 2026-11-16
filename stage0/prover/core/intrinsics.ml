@@ -1,5 +1,3 @@
-module Symbol = Logic.Symbol
-
 let apply_slice context (frame : State.frame) (site : Invocation.site) ~(base_type : Types.ty)
     ~collection ~low ~high =
   let location = Facts.locate context frame.source site.origin in
@@ -115,11 +113,12 @@ let slice_place context (site : Invocation.site) ~(owner : State.passed_place) ~
 
 let handle_descriptor context handle =
   let handle_sort = Facts.sort_of context (Types.make_builtin Handle) in
-  Facts.declare context (Logic.Function (Symbol.Handle_descriptor, [ handle_sort ], Logic.Int));
-  Logic.Apply (Symbol.Handle_descriptor, [ handle ])
+  Facts.declare context
+    (Logic.Function (Logic.Symbol.Handle_descriptor, [ handle_sort ], Logic.Int));
+  Logic.Apply (Logic.Symbol.Handle_descriptor, [ handle ])
 
 let libc_number context frame (number : Libc.number) =
-  let symbol = Symbol.Libc_number number in
+  let symbol = Logic.Symbol.Libc_number number in
   Facts.declare context (Logic.Constant (symbol, Logic.Int));
   let term = Logic.Symbol symbol in
   Facts.assume context frame
@@ -130,7 +129,7 @@ let buffer_capacity context element term =
   let ty =
     Types.Named { path = Intrinsic.builtin_path Storage; arguments = [ Types.Type element ] }
   in
-  let symbol = Symbol.Capacity ty in
+  let symbol = Logic.Symbol.Capacity ty in
   Facts.declare context (Logic.Function (symbol, [ Facts.sort_of context ty ], Logic.Int));
   Logic.Apply (symbol, [ term ])
 
@@ -138,7 +137,7 @@ let buffer_model context (builtin : Intrinsic.builtin) element term =
   let ty =
     Types.Named { path = Intrinsic.builtin_path builtin; arguments = [ Types.Type element ] }
   in
-  let symbol = Symbol.Model ty in
+  let symbol = Logic.Symbol.Model ty in
   Facts.declare context
     (Logic.Function
        (symbol, [ Facts.sort_of context ty ], Facts.sort_of context (Models.sequence_type element)));
@@ -249,7 +248,7 @@ let measure_type element : Types.function_type =
 
 let sequence_sum context element term measure =
   let path = Path.Method { owner = Models.sequence_path; name = "sum"; receiver = Read } in
-  let symbol = Symbol.Function { callee = path; instance = [ Types.Type element ] } in
+  let symbol = Logic.Symbol.Function { callee = path; instance = [ Types.Type element ] } in
   Facts.declare context
     (Logic.Function
        ( symbol,
@@ -302,7 +301,7 @@ let appended context frame element parts part =
 
 let byte_order context left right =
   let sequence = Facts.sort_of context (Models.sequence_type (Types.make_builtin UInt8)) in
-  let symbol = Symbol.Compare_bytes_order in
+  let symbol = Logic.Symbol.Compare_bytes_order in
   let first = not (Tables.Symbol_table.mem context.declared symbol) in
   Facts.declare context (Logic.Function (symbol, [ sequence; sequence ], Logic.Int));
   let order first_term second_term = Logic.Apply (symbol, [ first_term; second_term ]) in
@@ -586,7 +585,7 @@ let intrinsic context frame ~(site : Invocation.site) (operation : Intrinsic.ope
       libc_call context frame ~site function_ operands ~changed (Lazy.force known)
   | Libc_number number, _ -> libc_number context frame number
   | (System_is_os _ | System_is_architecture _), _ ->
-      let symbol operation = Symbol.System operation in
+      let symbol operation = Logic.Symbol.System operation in
       let kind =
         List.filter
           (fun (other : Intrinsic.operation) ->

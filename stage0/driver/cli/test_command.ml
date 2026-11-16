@@ -93,25 +93,19 @@ let print_report tests (records : Compile.record list) ~timings:show_timings tim
     (if records = [] then "No tests" else summary records)
     (seconds timings.total) (seconds timings.check) (seconds timings.build) (seconds timings.tests)
 
-let test_json test (record : Compile.record option) =
+let test_json test (record : Compile.record) =
   Json.Object
-    ([
-       ("module", Json.String (Path.show_module test.module_));
-       ("name", Json.String test.name);
-       ("file", Json.String test.file);
-       ("line", Json.Int test.line);
-     ]
-    @
-    match record with
-    | None -> []
-    | Some record ->
-        [
-          ("outcome", Json.String (Compile.show_outcome record.outcome));
-          ("cached", Json.Bool record.cached);
-          ("microseconds", Json.Int record.microseconds);
-          ("message", Json.option (fun message -> Json.String message) record.message);
-          ("echo", Json.option (fun echo -> Json.String echo) record.echo);
-        ])
+    [
+      ("module", Json.String (Path.show_module test.module_));
+      ("name", Json.String test.name);
+      ("file", Json.String test.file);
+      ("line", Json.Int test.line);
+      ("outcome", Json.String (Compile.show_outcome record.outcome));
+      ("cached", Json.Bool record.cached);
+      ("microseconds", Json.Int record.microseconds);
+      ("message", Json.option (fun message -> Json.String message) record.message);
+      ("echo", Json.option (fun echo -> Json.String echo) record.echo);
+    ]
 
 let timings_json timings =
   Json.Object
@@ -229,9 +223,7 @@ let run ~paths ~match_ ~timings:show_timings ~rerun =
     Json.print
       (Json.document ~diagnostics:[]
          [
-           ( "tests",
-             Json.List (List.map2 (fun test record -> test_json test (Some record)) tests records)
-           );
+           ("tests", Json.List (List.map2 test_json tests records));
            ("timings", timings_json timings);
          ])
   else print_report tests records ~timings:show_timings timings;

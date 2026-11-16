@@ -1,5 +1,3 @@
-module Impls = Interface.Impls
-
 let rec call state env ?expected (value : Syntax.expression) (callee : Syntax.expression)
     (arguments : Syntax.argument list) : Types.ty =
   match callee.kind with
@@ -373,7 +371,7 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : Sy
     | None -> List.map (fun (_ : Types.generic) -> Types.Type (State.fresh state)) trait_generics
   in
   let extra =
-    (({ owner = trait.trait; name = "Self" } : Types.parameter), Types.Type self_type)
+    (Types.make_self_parameter trait.trait, Types.Type self_type)
     :: Option.value ~default:[] (Types.make_substitution trait_generics trait_arguments)
   in
   let signature = Members.method_signature state.lookups trait.trait method_ in
@@ -680,12 +678,14 @@ and trait_method_call state env (value : Syntax.expression) ~(receiver : Syntax.
     else List.map (fun (_ : Types.generic) -> Types.Type (State.fresh state)) trait_generics
   in
   let extra =
-    (({ owner = trait.trait; name = "Self" } : Types.parameter), Types.Type receiver_type)
+    (Types.make_self_parameter trait.trait, Types.Type receiver_type)
     :: Option.value ~default:[] (Types.make_substitution trait_generics trait_arguments)
   in
   (match receiver_type with
   | Types.Any _ -> (
-      match Impls.classify_through_any state.lookups.interface ~trait:trait.trait method_ with
+      match
+        Interface.Impls.classify_through_any state.lookups.interface ~trait:trait.trait method_
+      with
       | Callable -> ()
       | Has_generics ->
           State.report state Not_callable (State.read_span state value.id)

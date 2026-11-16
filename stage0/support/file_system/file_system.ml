@@ -8,7 +8,7 @@ let write_all descriptor text =
   in
   from 0
 
-let write_atomically ?(durable = false) path text =
+let write_atomically path text =
   let temporary, channel =
     Filename.open_temp_file ~mode:[ Open_binary ] ~perms:0o666 ~temp_dir:(Filename.dirname path)
       (Filename.basename path) ".partial"
@@ -17,8 +17,7 @@ let write_atomically ?(durable = false) path text =
     ~finally:(fun () -> close_out channel)
     (fun () ->
       output_string channel text;
-      flush channel;
-      if durable then Unix.fsync (Unix.descr_of_out_channel channel));
+      flush channel);
   Sys.rename temporary path
 
 let make_directory path =

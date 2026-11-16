@@ -1,10 +1,8 @@
-module Symbol = Logic.Symbol
-
 let applied context (function_type : Types.function_type) callee arguments =
   let inputs = List.map (fun (_, input) -> Facts.sort_of context input) function_type.inputs in
   let output = Facts.sort_of context function_type.output in
   let value_sort = Facts.sort_of context (Types.Function function_type) in
-  let symbol = Symbol.Apply ((value_sort :: inputs) @ [ output ]) in
+  let symbol = Logic.Symbol.Apply ((value_sort :: inputs) @ [ output ]) in
   Facts.declare context (Logic.Function (symbol, value_sort :: inputs, output));
   Logic.Apply (symbol, callee :: arguments)
 
@@ -17,7 +15,7 @@ let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_fr
       context.declarations
   in
   let captures_fresh = function
-    | Symbol.Lambda _ as name when not (Tables.Symbol_table.mem context.fresh_order name) -> (
+    | Logic.Symbol.Lambda _ as name when not (Tables.Symbol_table.mem context.fresh_order name) -> (
         match Tables.Symbol_table.find_opt context.lambda_definitions name with
         | Some defined -> Facts.mentions_fresh_after context start_fresh defined
         | None -> false)
@@ -51,14 +49,14 @@ let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_fr
               | None -> captures_fresh name
             in
             if is_fresh_in_body then begin
-              let lifted = Symbol.Lifted name in
+              let lifted = Logic.Symbol.Lifted name in
               Facts.declare context (Logic.Function (lifted, List.map snd parameters, sort));
               Tables.Symbol_table.replace renamed name (Logic.Apply (lifted, variables))
             end
         | Logic.Function (name, inputs, sort) when frame.binders <> [] -> (
             match Tables.Symbol_table.find_opt context.fresh_order name with
             | Some order when order > start_fresh && order <= end_fresh ->
-                let lifted = Symbol.Lifted name in
+                let lifted = Logic.Symbol.Lifted name in
                 Facts.declare context
                   (Logic.Function (lifted, inputs @ List.map snd parameters, sort));
                 Tables.Symbol_table.replace functions name lifted
@@ -110,13 +108,13 @@ let parameters_of context (frame : State.frame) (function_type : Types.function_
   let depth = List.length frame.bound in
   List.mapi
     (fun index (_, input) ->
-      ( Symbol.Variable { label = "parameter"; numbers = [ depth; index ] },
+      ( Logic.Symbol.Variable { label = "parameter"; numbers = [ depth; index ] },
         Facts.sort_of context (Facts.substituted context frame input) ))
     function_type.inputs
 
 let without_temporaries locals =
   Locals.filter
-    (fun key _ -> match key with Core.Synthetic number -> number >= 0 | _ -> true)
+    (fun key _ -> match key with Locals.Mir_local _ -> false | Core_local _ -> true)
     locals
 
 let body_run ?(entering = Fun.id) (context : State.context) (frame : State.frame)
@@ -175,7 +173,7 @@ let canonical_binders term =
     List.fold_right
       (fun (name, sort) (bound, renamed) ->
         incr count;
-        let other = Symbol.Variable { label = "binder"; numbers = [ !count ] } in
+        let other = Logic.Symbol.Variable { label = "binder"; numbers = [ !count ] } in
         ((other, sort) :: bound, (name, other) :: renamed))
       bound ([], renamed)
   in
@@ -199,9 +197,7 @@ let lambda_definition context frame (function_type : Types.function_type)
                   (fun inside parameter (name, _) ->
                     let info = written.code.locals.(parameter) in
                     Facts.bind inside
-                      (match info.kind with
-                      | Source { local; _ } -> local
-                      | Temporary | Lent _ -> Core.Synthetic (-1 - parameter))
+                      (Locals.make_key written.code.locals parameter)
                       (Facts.substituted context inside info.type_)
                       (Logic.Symbol name))
                   inside written.code.parameters bound
@@ -240,7 +236,7 @@ let lambda_definition context frame (function_type : Types.function_type)
               (List.mapi (fun index parameter -> (index, parameter)) bound)
           in
           let symbol =
-            Symbol.Lambda { sorts = List.map snd bound; definition = named_by_position }
+            Logic.Symbol.Lambda { sorts = List.map snd bound; definition = named_by_position }
           in
           let sort = Facts.sort_of context (Types.Function function_type) in
           let term =
@@ -399,23 +395,13 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
         context.counters <- saved_counters)
       (fun () ->
         let finished =
-          let inside =
-            {
-              inside with
-              locals =
-                Locals.filter
-                  (fun key _ -> match key with Core.Synthetic number -> number >= 0 | _ -> true)
-                  inside.locals;
-            }
-          in
+          let inside = { inside with locals = without_temporaries inside.locals } in
           let inside =
             List.fold_left2
               (fun inside parameter argument ->
                 let info = written.code.locals.(parameter) in
                 Facts.bind inside
-                  (match info.kind with
-                  | Source { local; _ } -> local
-                  | Temporary | Lent _ -> Core.Synthetic (-1 - parameter))
+                  (Locals.make_key written.code.locals parameter)
                   (Facts.substituted context inside info.type_)
                   argument)
               inside written.code.parameters arguments
@@ -442,7 +428,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
               (fun parameter (mode, input) ->
                 match (mode, written.code.locals.(parameter).kind) with
                 | Types.Mut, Source { local; _ } -> (
-                    match Locals.find_opt local exit_.locals with
+                    match Locals.find_opt (Core_local local) exit_.locals with
                     | Some term ->
                         check_valid context exit_ location
                           (Facts.substituted context frame input)
@@ -527,7 +513,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
 let lambda context (frame : State.frame) ~(site : Invocation.site) (written : State.lambda_code)
     ~facts =
   let captured (local : Core.local) =
-    match local with Self -> frame.self | local -> Locals.find_opt local frame.locals
+    match local with Self -> frame.self | local -> Locals.find_opt (Core_local local) frame.locals
   in
   if
     frame.bound <> []

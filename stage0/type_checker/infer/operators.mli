@@ -27,7 +27,7 @@ val prefix :
   Types.ty
 
 val operator_call :
-  ?operands:Tables.argument list ->
+  operands:Tables.argument list ->
   State.state ->
   Syntax.expression ->
   trait:Path.t ->

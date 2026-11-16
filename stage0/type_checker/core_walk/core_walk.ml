@@ -264,7 +264,7 @@ let tasks_use ?(solved = fun (_ : int) : Types.capability_set -> Types.no_capabi
     body;
   !usage
 
-let can_use_tasks ?solved (body : Core.block) : bool = tasks_use ?solved body <> No_tasks
+let can_use_tasks (body : Core.block) : bool = tasks_use body <> No_tasks
 
 let traverse_indirect (change : 'a -> 'b option) : 'a Core.target -> 'b Core.target option =
   function
@@ -314,8 +314,9 @@ module For_testing = struct
 
   exception Found
 
-  let expression_exists ?(expression = fun _ -> false) ?(statement = fun _ -> false) node =
-    let test check node = if check node then raise Found in
-    let visit = deep { ignore_all with expression = test expression; statement = test statement } in
+  let expression_exists predicate node =
+    let visit =
+      deep { ignore_all with expression = (fun node -> if predicate node then raise Found) }
+    in
     match visit.expression node with () -> false | exception Found -> true
 end

@@ -1,5 +1,3 @@
-module Symbol = Logic.Symbol
-
 let zero = Logic.Integer Z.zero
 
 type target = Through of Logic.term | Capability of Path.t | Capability_method of Path.t * string
@@ -80,7 +78,7 @@ let rec normalize term =
     in
     (add sums, constant)
   and inner = function
-    | Logic.Apply (Symbol.Cost_most, [ left; right ]) -> (
+    | Logic.Apply (Logic.Symbol.Cost_most, [ left; right ]) -> (
         let left = normalize left and right = normalize right in
         let rec summands coefficient = function
           | Logic.Operation ("+", parts) -> List.concat_map (summands coefficient) parts
@@ -95,7 +93,7 @@ let rec normalize term =
         match
           List.filter (fun part -> List.mem part (summands Z.one right)) (summands Z.one left)
         with
-        | [] -> Logic.Apply (Symbol.Cost_most, [ left; right ])
+        | [] -> Logic.Apply (Logic.Symbol.Cost_most, [ left; right ])
         | common ->
             let shared =
               List.fold_left
@@ -108,7 +106,7 @@ let rec normalize term =
                 [
                   shared;
                   Logic.Apply
-                    ( Symbol.Cost_most,
+                    ( Logic.Symbol.Cost_most,
                       [ normalize (minus left shared); normalize (minus right shared) ] );
                 ] ))
     | Logic.Apply (name, arguments) -> Logic.Apply (name, List.map normalize arguments)
@@ -146,14 +144,14 @@ let flip = function Grows -> Shrinks | Shrinks -> Grows | Both -> Both
 
 let rec choices_as_most = function
   | Logic.Operation ("ite", [ _; left; right ]) ->
-      Logic.Apply (Symbol.Cost_most, [ choices_as_most left; choices_as_most right ])
+      Logic.Apply (Logic.Symbol.Cost_most, [ choices_as_most left; choices_as_most right ])
   | Logic.Apply (name, arguments) -> Logic.Apply (name, List.map choices_as_most arguments)
   | Logic.Operation (name, arguments) -> Logic.Operation (name, List.map choices_as_most arguments)
   | Logic.Is (constructor, argument) -> Logic.Is (constructor, choices_as_most argument)
   | other -> other
 
 let rec most_as_choices = function
-  | Logic.Apply (Symbol.Cost_most, [ left; right ]) ->
+  | Logic.Apply (Logic.Symbol.Cost_most, [ left; right ]) ->
       larger (most_as_choices left) (most_as_choices right)
   | Logic.Apply (name, arguments) -> Logic.Apply (name, List.map most_as_choices arguments)
   | Logic.Operation (name, arguments) -> Logic.Operation (name, List.map most_as_choices arguments)
@@ -186,7 +184,8 @@ let varying_parts varies term =
       | Logic.Operation ("*", [ inner; Logic.Integer factor ]) ->
           walk (if Z.sign factor >= 0 then polarity else flip polarity) inner
       | Logic.Operation ("*", arguments)
-      | Logic.Apply ((Symbol.Cost_most | Symbol.Cost_log | Symbol.Cost_power), arguments) ->
+      | Logic.Apply
+          ((Logic.Symbol.Cost_most | Logic.Symbol.Cost_log | Logic.Symbol.Cost_power), arguments) ->
           List.iter (walk polarity) arguments
       | _ -> add term polarity
   in

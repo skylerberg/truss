@@ -1,6 +1,3 @@
-module Names = Resolve.Names
-module Symbol = Logic.Symbol
-
 let note_place (context : State.context) (frame : State.frame) origin place =
   if
     frame.source.key = Some context.home
@@ -81,7 +78,8 @@ let type_frame context frame source (ty : Types.ty) ~self =
 
 let type_source (context : State.context) (ty : Types.ty) =
   match ty with
-  | Types.Named { path; _ } when Names.kind_of context.lookups.interface.names path = Some Type ->
+  | Types.Named { path; _ }
+    when Resolve.Names.kind_of context.lookups.interface.names path = Some Type ->
       Option.map (fun (source, _, _) -> source) (Contracts.source_at context.lookups path)
   | _ -> None
 
@@ -114,7 +112,7 @@ let rec validity (context : State.context) frame ~assuming ?(deep = true) ?(own 
       match invariants_of context ty with
       | _ when not own -> Logic.Boolean true
       | Some _ when Facts.constructors context ty = None ->
-          let symbol = Symbol.Valid ty in
+          let symbol = Logic.Symbol.Valid ty in
           Facts.declare context (Logic.Function (symbol, [ Facts.sort_of context ty ], Logic.Bool));
           Logic.Apply (symbol, [ term ])
       | Some (source, written) -> (
@@ -170,7 +168,7 @@ let callback_arguments context frame inputs =
 let callback_contract_frame (frame : State.frame) inputs arguments =
   let locals =
     List.fold_left2
-      (fun locals (input, _) term -> Locals.add input term locals)
+      (fun locals (input, _) term -> Locals.add (Core_local input) term locals)
       frame.old_locals inputs arguments
   in
   { frame with locals; self = frame.old_self; makes_obligations = false }
@@ -194,7 +192,7 @@ let check_callback_contract context frame location ~name inputs requires argumen
     requires
 
 let escaping_callback context frame local =
-  match (own_callback context local, Facts.local_type context frame local) with
+  match (own_callback context local, Facts.local_type context frame (Core_local local)) with
   | ( Some (name, ({ inputs; requires = _ :: _ as requires } : Mir.callback)),
       Some (Types.Function function_type) )
     when List.length inputs = List.length function_type.inputs ->
@@ -218,7 +216,9 @@ let part_frame frame (part : State.part) ~arguments ~substitution =
         match (parameter.local, List.assoc_opt position arguments) with
         | Self, Some term -> (locals, types, Some (term, parameter.type_))
         | local, Some term ->
-            (Locals.add local term locals, Locals.add local parameter.type_ types, self)
+            ( Locals.add (Core_local local) term locals,
+              Locals.add (Core_local local) parameter.type_ types,
+              self )
         | _, None -> (locals, types, self))
       (Locals.empty, Locals.empty, None)
       (List.mapi (fun position parameter -> (position, parameter)) part.parameters)
@@ -270,7 +270,7 @@ let callback_facts (context : State.context) frame (invocation : Invocation.t) p
                   inside with
                   locals =
                     List.fold_left2
-                      (fun locals (local, _) term -> Locals.add local term locals)
+                      (fun locals (local, _) term -> Locals.add (Core_local local) term locals)
                       inside.locals inputs arguments;
                 }
               in

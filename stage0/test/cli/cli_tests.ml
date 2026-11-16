@@ -1,17 +1,3 @@
-module Shown_path = Cli__Shown_path
-module Output = Cli__Output
-module Main = Cli__Main
-module Json = Cli__Json
-module Arguments = Cli__Arguments
-module Command_packages = Cli__Command_packages
-module Report = Cli__Report
-module Test_command = Cli__Test_command
-module Program_command = Cli__Program_command
-module Status_line = Cli__Status_line
-module Compiler = Cli__Compiler
-module Lsp_command = Cli__Lsp_command
-module Outcome = Cli__Outcome
-
 let test = Harness.test
 let fail = Harness.fail
 let expect_string = Harness.expect_string
@@ -21,7 +7,7 @@ let contains = Substring.contains
 let directory files =
   let root = Harness.scratch "package" in
   Harness.write_files root files;
-  Shown_path.normalize root
+  Cli.Shown_path.normalize root
 
 let manifest_of name = Printf.sprintf "[package]\nname = \"%s\"\ntruss = \"0.1\"\n" name
 let manifest = ("truss.toml", manifest_of "demo")
@@ -31,7 +17,7 @@ let read root path = In_channel.with_open_bin (Filename.concat root path) In_cha
 let captured work =
   let out = Buffer.create 256 and err = Buffer.create 256 in
   let result =
-    Output.with_
+    Cli.Output.with_
       {
         out = Buffer.add_string out;
         err = Buffer.add_string err;
@@ -45,20 +31,22 @@ let captured work =
   (result, Buffer.contents out ^ Buffer.contents err)
 
 let truss arguments =
-  match captured (fun () -> Main.For_testing.run_command_line arguments) with
-  | Outcome.Exit status, output -> (status, output)
-  | Outcome.Run_program { program; _ }, output ->
+  match captured (fun () -> Cli.Main.For_testing.run_command_line arguments) with
+  | Cli.Outcome.Exit status, output -> (status, output)
+  | Cli.Outcome.Run_program { program; _ }, output ->
       Sys.remove program;
       (0, output)
 
 let quietly arguments = fst (truss arguments)
-let document arguments = Json.parse (snd (truss (arguments @ [ "--json" ])))
-let objects = function Json.List items -> items | _ -> []
-let text_field name value = match Json.field name value with Json.String text -> text | _ -> ""
+let document arguments = Cli.Json.parse (snd (truss (arguments @ [ "--json" ])))
+let objects = function Cli.Json.List items -> items | _ -> []
+
+let text_field name value =
+  match Cli.Json.field name value with Cli.Json.String text -> text | _ -> ""
 
 let shown root path =
   List.map (text_field "text")
-    (objects (Json.field "definitions" (document [ "show"; "-C"; root; path ])))
+    (objects (Cli.Json.field "definitions" (document [ "show"; "-C"; root; path ])))
 
 let () = Unix.putenv "TRUSS_CACHE" (Harness.scratch "store")
 
@@ -66,18 +54,18 @@ let () =
   test "-C before the command is read as an option of the command" (fun () ->
       expect_strings
         ~expected:[ "truss"; "test"; "-C"; "dir"; "--rerun" ]
-        (Arguments.prepare [ "truss"; "-C"; "dir"; "test"; "--rerun" ]));
+        (Cli.Arguments.prepare [ "truss"; "-C"; "dir"; "test"; "--rerun" ]));
   test "the first argument of run that is not one of its options starts the program's" (fun () ->
       expect_strings
         ~expected:[ "truss"; "run"; "--release"; "--"; "input.txt"; "-v" ]
-        (Arguments.prepare [ "truss"; "run"; "--release"; "input.txt"; "-v" ]));
+        (Cli.Arguments.prepare [ "truss"; "run"; "--release"; "input.txt"; "-v" ]));
   test "a -- after run is kept as written" (fun () ->
       expect_strings ~expected:[ "truss"; "run"; "--"; "-x" ]
-        (Arguments.prepare [ "truss"; "run"; "--"; "-x" ]));
+        (Cli.Arguments.prepare [ "truss"; "run"; "--"; "-x" ]));
   test "--no-server after run is an option of run, not the program's" (fun () ->
       expect_strings
         ~expected:[ "truss"; "run"; "--no-server"; "--release"; "--"; "input.txt" ]
-        (Arguments.prepare [ "truss"; "run"; "--no-server"; "--release"; "input.txt" ]))
+        (Cli.Arguments.prepare [ "truss"; "run"; "--no-server"; "--release"; "input.txt" ]))
 
 let () =
   test "a file written in a watched directory is reported after a synchronization" (fun () ->
@@ -121,26 +109,26 @@ let () =
                 fail "exited with %d: %s" status output))
 
 let names (_, packages) = List.sort compare (List.map Path.show_package packages)
-let modules (snapshot, packages) = Command_packages.modules snapshot packages
-let files (snapshot, packages) = Command_packages.files snapshot packages
+let modules (snapshot, packages) = Cli.Command_packages.modules snapshot packages
+let files (snapshot, packages) = Cli.Command_packages.files snapshot packages
 
 let gather ?proofs (snapshot, packages) =
-  Report.gather ?proofs (Workspace.open_database snapshot) snapshot packages
+  Cli.Report.gather ?proofs (Workspace.open_database snapshot) snapshot packages
 
 let select (snapshot, packages) =
-  Test_command.select snapshot (Workspace.open_database snapshot) packages
+  Cli.Test_command.select snapshot (Workspace.open_database snapshot) packages
 
-let mains (snapshot, packages) = Program_command.mains snapshot packages
+let mains (snapshot, packages) = Cli.Program_command.mains snapshot packages
 
 let () =
   test "the package is found from a directory below its manifest" (fun () ->
       let root = package [ ("forecast/hourly.truss", "") ] in
       expect_strings ~expected:[ "demo" ]
-        (names (Command_packages.load (Filename.concat root "forecast"))));
+        (names (Cli.Command_packages.load (Filename.concat root "forecast"))));
   test "a directory with no manifest at or above it cannot run a command" (fun () ->
       let root = directory [ ("main.truss", "") ] in
-      match Command_packages.load root with
-      | exception Outcome.Cannot_run _ -> ()
+      match Cli.Command_packages.load root with
+      | exception Cli.Outcome.Cannot_run _ -> ()
       | _ -> fail "found a package");
   test "a project's root is about every package under it" (fun () ->
       let root =
@@ -151,9 +139,9 @@ let () =
             ("libraries/two/truss.toml", manifest_of "two");
           ]
       in
-      expect_strings ~expected:[ "one"; "two" ] (names (Command_packages.load root));
+      expect_strings ~expected:[ "one"; "two" ] (names (Cli.Command_packages.load root));
       expect_strings ~expected:[ "two" ]
-        (names (Command_packages.load (Filename.concat root "libraries"))));
+        (names (Cli.Command_packages.load (Filename.concat root "libraries"))));
   test "a package under a project's root is in the project, whichever directory a command is in"
     (fun () ->
       let root =
@@ -161,24 +149,23 @@ let () =
           [
             ("truss.toml", "[project]\n");
             ("one/truss.toml", manifest_of "one" ^ "[dependencies]\ntwo = []\n");
-            ("one/main.truss", Fixtures.package_under_a_projects_root_is_in_the_project);
+            ("one/main.truss", Fixtures.four_through_two_numbers);
             ("two/truss.toml", manifest_of "two");
-            ( "two/numbers/numbers.truss",
-              Fixtures.package_under_a_projects_root_is_in_the_project_numbers );
+            ("two/numbers/numbers.truss", Fixtures.public_two);
           ]
       in
-      let project = Command_packages.load (Filename.concat root "one") in
+      let project = Cli.Command_packages.load (Filename.concat root "one") in
       expect_strings ~expected:[ "one" ] (names project);
-      if not (Report.clean (gather project)) then fail "has diagnostics");
+      if not (Cli.Report.clean (gather project)) then fail "has diagnostics");
   test "a dependency's failed proof is the program's" (fun () ->
       let root =
         directory
           [
             ("truss.toml", "[project]\n");
             ("app/truss.toml", manifest_of "app" ^ "[dependencies]\nlib = []\n");
-            ("app/main.truss", Fixtures.dependencys_failed_proof_is_the_programs);
+            ("app/main.truss", Fixtures.two_through_arith);
             ("lib/truss.toml", manifest_of "lib");
-            ("lib/arith/arith.truss", Fixtures.dependencys_failed_proof_is_the_programs_arith);
+            ("lib/arith/arith.truss", Fixtures.public_bump);
           ]
       in
       let status, output = truss [ "check"; "-C"; Filename.concat root "app" ] in
@@ -190,10 +177,9 @@ let () =
           [
             ("truss.toml", "[project]\n");
             ("app/truss.toml", manifest_of "app" ^ "[dependencies]\nlib = []\n");
-            ("app/main.truss", Fixtures.dependencys_type_error_is_reported_without_proofs);
+            ("app/main.truss", Fixtures.main_through_arith);
             ("lib/truss.toml", manifest_of "lib");
-            ( "lib/arith/arith.truss",
-              Fixtures.dependencys_type_error_is_reported_without_proofs_arith );
+            ("lib/arith/arith.truss", Fixtures.public_two_of_a_boolean);
           ]
       in
       let status, output = truss [ "run"; "-C"; Filename.concat root "app" ] in
@@ -207,7 +193,7 @@ let () =
             ("two/truss.toml", manifest_of "two");
           ]
       in
-      let project = Command_packages.load (Filename.concat root "one") in
+      let project = Cli.Command_packages.load (Filename.concat root "one") in
       let problems = Workspace.problems (fst project) in
       if
         not
@@ -216,8 +202,8 @@ let () =
                contains problem.message "`two` is not a package of this project")
              problems)
       then fail "problems: %s" (String.concat "; " (List.map Project.show_problem problems));
-      match Command_packages.load root with
-      | exception Outcome.Cannot_run _ -> ()
+      match Cli.Command_packages.load root with
+      | exception Cli.Outcome.Cannot_run _ -> ()
       | _ -> fail "found a project above the two");
   test "a directory with its own manifest is another package's, not modules of this one" (fun () ->
       let root =
@@ -229,7 +215,7 @@ let () =
             ("vendor/x.truss", "");
           ]
       in
-      let project = Command_packages.load root in
+      let project = Cli.Command_packages.load root in
       expect_strings ~expected:[ "demo"; "other" ]
         (List.sort compare (List.map Path.show_module (modules project))));
   test "a directory with its own [project] is another project's, and so is all under it" (fun () ->
@@ -244,9 +230,9 @@ let () =
           ]
       in
       expect_strings ~expected:[ "demo" ]
-        (List.map Path.show_module (modules (Command_packages.load root)));
+        (List.map Path.show_module (modules (Cli.Command_packages.load root)));
       expect_strings ~expected:[ "hello" ]
-        (names (Command_packages.load (Filename.concat root "examples"))));
+        (names (Cli.Command_packages.load (Filename.concat root "examples"))));
   test "a project manifest with a mistake is still the root of the packages under it" (fun () ->
       let root =
         directory
@@ -256,7 +242,7 @@ let () =
             ("app/main.truss", "");
           ]
       in
-      let project = Command_packages.load (Filename.concat root "app") in
+      let project = Cli.Command_packages.load (Filename.concat root "app") in
       expect_strings ~expected:[ "app" ] (names project);
       let problems = Workspace.problems (fst project) in
       if
@@ -273,25 +259,25 @@ let () =
           [ ("main.truss", ""); ("vendor/truss.toml", manifest_of "other"); ("vendor/x.truss", "") ]
       in
       expect_strings ~expected:[ "demo" ]
-        (List.map Path.show_module (modules (Command_packages.load root)));
+        (List.map Path.show_module (modules (Cli.Command_packages.load root)));
       expect_strings ~expected:[ "other" ]
-        (names (Command_packages.load (Filename.concat root "vendor"))));
+        (names (Cli.Command_packages.load (Filename.concat root "vendor"))));
   test "a directory whose name starts with a dot is not read" (fun () ->
       let root = package [ ("main.truss", ""); (".hidden/x.truss", "") ] in
       expect_strings ~expected:[ "demo" ]
-        (List.map Path.show_module (modules (Command_packages.load root))));
+        (List.map Path.show_module (modules (Cli.Command_packages.load root))));
   test "a path is shown relative to the directory it is read from" (fun () ->
       expect_string ~expected:"../weather/forecast.truss"
-        (Shown_path.relative ~from:"/code/app" "/code/weather/forecast.truss"))
+        (Cli.Shown_path.relative ~from:"/code/app" "/code/weather/forecast.truss"))
 
 let problems files =
-  let project = Command_packages.load (directory files) in
+  let project = Cli.Command_packages.load (directory files) in
   Workspace.problems (fst project)
 
 let report_problems report =
-  match Json.field "problems" (Report.document report []) with
-  | Json.List problems ->
-      List.filter_map (function Json.String problem -> Some problem | _ -> None) problems
+  match Cli.Json.field "problems" (Cli.Report.document report []) with
+  | Cli.Json.List problems ->
+      List.filter_map (function Cli.Json.String problem -> Some problem | _ -> None) problems
   | _ -> []
 
 let expect_problem ?file files message =
@@ -304,7 +290,7 @@ let expect_problem ?file files message =
     fail "problems: [%s]" (String.concat "; " (List.map Project.show_problem problems_reported))
 
 let expect_problem_in root part =
-  let problems_reported = report_problems (gather (Command_packages.load root)) in
+  let problems_reported = report_problems (gather (Cli.Command_packages.load root)) in
   if not (List.exists (fun problem -> contains problem part) problems_reported) then
     fail "problems: [%s]" (String.concat "; " problems_reported)
 
@@ -358,17 +344,15 @@ let () =
             ("truss.toml", "[project]\n");
             ( "app/truss.toml",
               manifest_of "app" ^ "[dependencies]\nlibrary = []\nother = [\n  \"Clock\",\n]\n" );
-            ("app/main.truss", Fixtures.dependency_nothing_uses_is_a_problem_which_check);
+            ("app/main.truss", Fixtures.one_through_numbers);
             ("library/truss.toml", manifest_of "library");
-            ( "library/numbers/numbers.truss",
-              Fixtures.dependency_nothing_uses_is_a_problem_which_check_numbers );
+            ("library/numbers/numbers.truss", Fixtures.public_one);
             ("other/truss.toml", manifest_of "other");
-            ( "other/nothing/nothing.truss",
-              Fixtures.dependency_nothing_uses_is_a_problem_which_check_nothing );
+            ("other/nothing/nothing.truss", Fixtures.public_nothing);
           ]
       in
       let app = Filename.concat root "app" in
-      let problems = report_problems (gather (Command_packages.load app)) in
+      let problems = report_problems (gather (Cli.Command_packages.load app)) in
       if
         not
           (List.exists
@@ -386,17 +370,17 @@ let owned =
   [
     ("truss.toml", "[project]\n");
     ("geometry/truss.toml", manifest_of "acme::geometry");
-    ("geometry/vector/vector.truss", Fixtures.owned_vector);
+    ("geometry/vector/vector.truss", Fixtures.vector_with_length_and_double);
     ("app/truss.toml", manifest_of "app" ^ "[dependencies]\n\"acme::geometry\" = []\n");
-    ("app/main.truss", Fixtures.owned);
+    ("app/main.truss", Fixtures.four_through_vector_double);
   ]
 
 let () =
   test "a project's package with an owner in its name is named by both in a path" (fun () ->
       let root = directory owned in
-      let project = Command_packages.load root in
+      let project = Cli.Command_packages.load root in
       expect_strings ~expected:[ "acme::geometry"; "app" ] (names project);
-      if not (Report.clean (gather ~proofs:true project)) then fail "has diagnostics");
+      if not (Cli.Report.clean (gather ~proofs:true project)) then fail "has diagnostics");
   test "show finds a definition of a package with an owner by its full path" (fun () ->
       match shown (directory owned) "acme::geometry::vector::double" with
       | [ text ] ->
@@ -415,11 +399,11 @@ let () =
             ("one/truss.toml", manifest_of "one");
           ]
       in
-      let project = Command_packages.load (Filename.concat root "one") in
+      let project = Cli.Command_packages.load (Filename.concat root "one") in
       let limit = Workspace.time_limit_ms (fst project) in
       if limit <> 3000 then fail "got %d ms" limit);
   test "a project without a time limit gives tests 10 seconds" (fun () ->
-      let limit = Workspace.time_limit_ms (fst (Command_packages.load (package []))) in
+      let limit = Workspace.time_limit_ms (fst (Cli.Command_packages.load (package []))) in
       if limit <> 10_000 then fail "got %d ms" limit);
   test "a time limit in a package's manifest that is not its project's is a problem" (fun () ->
       let root =
@@ -429,7 +413,7 @@ let () =
             ("one/truss.toml", manifest_of "one" ^ "[test]\ntime_limit = 3\n");
           ]
       in
-      let project = Command_packages.load root in
+      let project = Cli.Command_packages.load root in
       let problems = Workspace.problems (fst project) in
       if
         not
@@ -446,7 +430,7 @@ let () =
 
 let edit start stop replacement = Diagnostic.replace (Source.span start stop) replacement
 
-let diagnostic ?(fixes = []) start stop =
+let diagnostic ~fixes start stop =
   Diagnostic.make ~fixes ~code:(Usage Unused_variable) (Source.span start stop) "x."
 
 let () =
@@ -465,7 +449,7 @@ let () =
       in
       if Diagnostic.machine_applicable [ choice ] <> [] then fail "chose one");
   test "check --fix writes the only fix and leaves no diagnostic" (fun () ->
-      let root = package [ ("main.truss", Fixtures.check_fix_writes_the_only_fix_and_leaves_no) ] in
+      let root = package [ ("main.truss", Fixtures.twice_with_one_fix) ] in
       let status = quietly [ "check"; "-C"; root; "--fix" ] in
       if status <> 0 then fail "status %d" status;
       if not (contains (read root "main.truss") "let _ = value") then
@@ -473,23 +457,17 @@ let () =
 
 let () =
   test "check proves, and reports each unproven obligation" (fun () ->
-      let root =
-        package [ ("main.truss", Fixtures.check_proves_and_reports_each_unproven_obligation) ]
-      in
+      let root = package [ ("main.truss", Fixtures.next_count) ] in
       let status, output = truss [ "check"; "-C"; root ] in
       if status <> 1 then fail "status %d" status;
       if not (contains output "prover.overflow") then fail "%s" output);
   test "check --no-proofs reports no obligation" (fun () ->
-      let root = package [ ("main.truss", Fixtures.check_no_proofs_reports_no_obligation) ] in
+      let root = package [ ("main.truss", Fixtures.next_count) ] in
       let status, output = truss [ "check"; "-C"; root; "--no-proofs" ] in
       if status <> 0 then fail "status %d: %s" status output);
   test "check prints type errors before it proves" (fun () ->
       let root =
-        package
-          [
-            ("a.truss", Fixtures.check_prints_type_errors_before_it_proves_text);
-            ("b.truss", Fixtures.check_prints_type_errors_before_it_proves_b);
-          ]
+        package [ ("a.truss", Fixtures.next_count); ("b.truss", Fixtures.wrong_boolean_return) ]
       in
       let status, output = truss [ "check"; "-C"; root ] in
       if status <> 1 then fail "status %d" status;
@@ -500,9 +478,7 @@ let () =
       | Some type_error, Some overflow when type_error < overflow -> ()
       | _ -> fail "%s" output);
   test "build refuses a program that can reach a hole in a proof" (fun () ->
-      let root =
-        package [ ("main.truss", Fixtures.build_refuses_a_program_that_can_reach_a_hole_in_a) ]
-      in
+      let root = package [ ("main.truss", Fixtures.main_with_a_todo_proof) ] in
       let status, output = truss [ "build"; "-C"; root ] in
       if status <> 1 then fail "did not refuse";
       if not (contains output "main.truss:3:5: `todo` in a proof can be reached") then
@@ -525,40 +501,38 @@ let () =
       | Error message -> fail "%s" message);
   test "a duration is shown in the largest unit under its size" (fun () ->
       expect_strings ~expected:[ "2.31s"; "42ms"; "87µs" ]
-        (List.map Test_command.For_testing.duration [ 2_310_000; 42_000; 87 ]));
+        (List.map Cli.Test_command.For_testing.duration [ 2_310_000; 42_000; 87 ]));
   test "the status line is cut by characters, never inside one" (fun () ->
-      expect_string ~expected:"café" (Status_line.For_testing.cut "café au lait" 4))
+      expect_string ~expected:"café" (Cli.Status_line.For_testing.cut "café au lait" 4))
 
 let suite = Fixtures.suite
 
 let () =
   test "--match keeps the tests whose names contain the text" (fun () ->
-      let project = Command_packages.load (package [ ("main.truss", suite) ]) in
+      let project = Cli.Command_packages.load (package [ ("main.truss", suite) ]) in
       expect_strings
         ~expected:[ "doubles two"; "doubles three" ]
         (List.map
-           (fun (test : Test_command.test) -> test.name)
+           (fun (test : Cli.Test_command.test) -> test.name)
            (select project ~paths:[] ~match_:(Some "doubles"))));
   test "a file narrows the tests to those defined in it" (fun () ->
       let root = package [ ("main.truss", suite); ("other.truss", "test \"elsewhere\" {\n}\n") ] in
-      let project = Command_packages.load root in
+      let project = Cli.Command_packages.load root in
       expect_strings ~expected:[ "elsewhere" ]
         (List.map
-           (fun (test : Test_command.test) -> test.name)
+           (fun (test : Cli.Test_command.test) -> test.name)
            (select project ~paths:[ Filename.concat root "other.truss" ] ~match_:None)))
 
 let () =
   test "a function's signature is its text without its body" (fun () ->
-      let root =
-        package [ ("main.truss", Fixtures.functions_signature_is_its_text_without_its_body) ]
-      in
+      let root = package [ ("main.truss", Fixtures.public_double_with_a_requires) ] in
       match shown root "demo::double" with
       | [ text ] ->
           expect_string ~expected:"public fn double(value: Int64) -> Int64\n  requires value < 100"
             text
       | texts -> fail "found %d" (List.length texts));
   test "a type is shown with its methods" (fun () ->
-      let root = package [ ("main.truss", Fixtures.type_is_shown_with_its_methods) ] in
+      let root = package [ ("main.truss", Fixtures.point_with_a_sum_method) ] in
       expect_strings
         ~expected:[ "public type Point(x: Int64, y: Int64)"; "public fn Point.sum(self) -> Int64" ]
         (shown root "demo::Point"))
@@ -589,13 +563,13 @@ let () =
         fail "the geometry's Point showed %s" (String.concat "; " geometry))
 
 let lowering (snapshot, packages) =
-  Compiler.lowering_only (Workspace.open_database snapshot) packages
+  Cli.Compiler.lowering_only (Workspace.open_database snapshot) packages
 
 let () =
   test "a todo main can reach is refused, with the way from main to it" (fun () ->
       let project =
-        Command_packages.load
-          (package [ ("main.truss", Fixtures.todo_main_can_reach_is_refused_with_the_way_from) ])
+        Cli.Command_packages.load
+          (package [ ("main.truss", Fixtures.main_reaching_a_todo_through_a_helper) ])
       in
       match Compile.unshippable (lowering project) ~main:(List.hd (mains project)) with
       | Ok [ { failure = `Todo; line = 6; way; _ } ] ->
@@ -604,7 +578,7 @@ let () =
       | Error message -> fail "%s" message);
   test "a todo in a capability's method counts only where the method is called" (fun () ->
       let program called =
-        Command_packages.load
+        Cli.Command_packages.load
           (package
              [
                ( "main.truss",
@@ -650,23 +624,19 @@ let () =
           | way -> fail "reached by %s" (String.concat ", " way))
       | unshippable -> fail "found %d" (List.length unshippable));
   test "a package's program is the main of its root module, and of no other" (fun () ->
-      let main_text = Fixtures.main_text in
-      let with_main = Command_packages.load (package [ ("main.truss", main_text) ]) in
+      let main_text = Fixtures.main_returning_success in
+      let with_main = Cli.Command_packages.load (package [ ("main.truss", main_text) ]) in
       expect_strings ~expected:[ "demo::main" ] (List.map Path.show (mains with_main));
-      let elsewhere = Command_packages.load (package [ ("start/start.truss", main_text) ]) in
+      let elsewhere = Cli.Command_packages.load (package [ ("start/start.truss", main_text) ]) in
       if mains elsewhere <> [] then fail "took a main from another module");
   test "a function named main outside the root module is an ordinary function" (fun () ->
       let project =
-        Command_packages.load
-          (package
-             [
-               ("menu/menu.truss", Fixtures.function_named_main_outside_the_root_module_is_an_menu);
-             ])
+        Cli.Command_packages.load (package [ ("menu/menu.truss", Fixtures.menu_main_of_a_course) ])
       in
-      if not (Report.clean (gather project)) then fail "has diagnostics");
+      if not (Cli.Report.clean (gather project)) then fail "has diagnostics");
   test "an echo main can reach is refused" (fun () ->
       let project =
-        Command_packages.load (package [ ("main.truss", Fixtures.echo_main_can_reach_is_refused) ])
+        Cli.Command_packages.load (package [ ("main.truss", Fixtures.main_with_an_echo) ])
       in
       match Compile.unshippable (lowering project) ~main:(List.hd (mains project)) with
       | Ok [ { failure = `Echo; line = 2; _ } ] -> ()
@@ -688,9 +658,7 @@ let () =
           && contains (read root "weather/weather.truss") "public fn sum(")
       then fail "wrote %s" (read root "main.truss"));
   test "a rename that would cause a diagnostic changes nothing" (fun () ->
-      let root =
-        package [ ("main.truss", Fixtures.rename_that_would_cause_a_diagnostic_changes) ]
-      in
+      let root = package [ ("main.truss", Fixtures.first_and_second) ] in
       let before = read root "main.truss" in
       if rename root "demo::first" "second" <> 1 then fail "not refused";
       expect_string ~expected:before (read root "main.truss"));
@@ -727,7 +695,7 @@ let () =
           && contains main "  acme::geometry::arrow::double(2)")
       then fail "wrote %s" main);
   test "renaming a method rewrites its calls" (fun () ->
-      let root = package [ ("main.truss", Fixtures.renaming_a_method_rewrites_its_calls) ] in
+      let root = package [ ("main.truss", Fixtures.point_get_and_its_calls) ] in
       if rename root "demo::Point.get" "value" <> 0 then fail "refused";
       let text = read root "main.truss" in
       if not (contains text "fn Point.value(self)" && contains text "Point(x: 1).value()") then
@@ -780,10 +748,12 @@ let () =
         fail "wrote %s" output)
 
 let strings = function
-  | Json.List items -> List.filter_map (function Json.String text -> Some text | _ -> None) items
+  | Cli.Json.List items ->
+      List.filter_map (function Cli.Json.String text -> Some text | _ -> None) items
   | _ -> []
 
-let reads command root name = objects (Json.field "reads" (document [ command; "-C"; root; name ]))
+let reads command root name =
+  objects (Cli.Json.field "reads" (document [ command; "-C"; root; name ]))
 
 let expect_read lines ~reader ~parts ~reads ~of_ =
   if
@@ -792,13 +762,13 @@ let expect_read lines ~reader ~parts ~reads ~of_ =
          (fun line ->
            text_field "reader" line = reader
            && text_field "of" line = of_
-           && List.mem reads (strings (Json.field "reads" line))
-           && List.for_all (fun part -> List.mem part (strings (Json.field "parts" line))) parts)
+           && List.mem reads (strings (Cli.Json.field "reads" line))
+           && List.for_all (fun part -> List.mem part (strings (Cli.Json.field "parts" line))) parts)
          lines)
   then
     fail "no line says that the %s of %s reads the %s of %s: [%s]" (String.concat ", " parts) reader
       reads of_
-      (String.concat "; " (List.map Json.to_string lines))
+      (String.concat "; " (List.map Cli.Json.to_string lines))
 
 let () =
   test "dependents say which definitions read a definition's interface, and which its contract"
@@ -844,7 +814,7 @@ let () =
           if status <> 0 then fail "%s: status %d: %s" name status output)
         [ "Square.area"; "demo::Square.area"; "Shape.area" ])
 
-let holes root = objects (Json.field "holes" (document [ "holes"; "-C"; root ]))
+let holes root = objects (Cli.Json.field "holes" (document [ "holes"; "-C"; root ]))
 
 let () =
   test "a hole has the type it must have and the names in scope with theirs" (fun () ->
@@ -855,17 +825,16 @@ let () =
             ~expected:[ "count: Int64"; "header: String"; "title: String" ]
             (List.map
                (fun binding -> text_field "name" binding ^ ": " ^ text_field "type" binding)
-               (objects (Json.field "in_scope" hole)))
+               (objects (Cli.Json.field "in_scope" hole)))
       | found -> fail "found %d holes" (List.length found));
   test "a hole blocks the tests that can reach it, and only those" (fun () ->
       match holes (package [ ("main.truss", Fixtures.unfinished) ]) with
       | [ hole ] ->
-          expect_strings ~expected:[ "test demo \"renders\"" ] (strings (Json.field "blocks" hole))
+          expect_strings ~expected:[ "test demo \"renders\"" ]
+            (strings (Cli.Json.field "blocks" hole))
       | found -> fail "found %d holes" (List.length found));
   test "a hole whose type nothing fixes, such as one interpolated, is not decided yet" (fun () ->
-      match
-        holes (package [ ("main.truss", Fixtures.hole_whose_type_nothing_fixes_such_as_one) ])
-      with
+      match holes (package [ ("main.truss", Fixtures.show_of_an_interpolated_todo) ]) with
       | [ hole ] ->
           if text_field "type" hole <> "not decided yet" then
             fail "type %s" (text_field "type" hole)
@@ -879,7 +848,7 @@ let () =
       | [ hole ] ->
           expect_strings
             ~expected:[ "main"; "test demo \"reaches\"" ]
-            (strings (Json.field "blocks" hole))
+            (strings (Cli.Json.field "blocks" hole))
       | found -> fail "found %d holes" (List.length found));
   test "a test that reaches a type defined as todo is incomplete, and the others run" (fun () ->
       let outcomes =
@@ -887,9 +856,11 @@ let () =
           (fun test ->
             ( text_field "name" test,
               text_field "outcome" test,
-              match Json.field "message" test with Json.String message -> message | _ -> "" ))
+              match Cli.Json.field "message" test with
+              | Cli.Json.String message -> message
+              | _ -> "" ))
           (objects
-             (Json.field "tests"
+             (Cli.Json.field "tests"
                 (document [ "test"; "-C"; package [ ("main.truss", Fixtures.unfinished_type) ] ])))
       in
       match outcomes with
@@ -968,7 +939,7 @@ let stocked () =
     geometry;
   registry
 
-let uses_geometry = ("main.truss", Fixtures.uses_geometry)
+let uses_geometry = ("main.truss", Fixtures.length_through_vector)
 let add root names = quietly ([ "add"; "-C"; root ] @ names)
 let lock_lines root = String.split_on_char '\n' (String.trim (read root "truss.lock"))
 
@@ -984,7 +955,7 @@ let expect_versions root expected =
     fail "the lock file has [%s]"
       (String.concat "; " (List.map (fun (name, version) -> name ^ " " ^ version) listed))
 
-let clean root = Report.clean (gather (Command_packages.load root))
+let clean root = Cli.Report.clean (gather (Cli.Command_packages.load root))
 
 let () =
   test "adding a package writes its entry, and a line for it and for each package it brings"
@@ -1003,20 +974,15 @@ let () =
       publish registry "acme::shapes" (1, 0, 0)
         ~dependencies:[ ("acme::units", []) ]
         ~record:[ ({ Path.owner = Some "acme"; name = "units" }, (1, 1, 0)) ]
-        [
-          ("square/square.truss", Fixtures.package_is_added_at_the_version_it_was_published_square);
-        ];
-      rewrite root "main.truss"
-        (snd uses_geometry ^ Fixtures.package_is_added_at_the_version_it_was_published);
+        [ ("square/square.truss", Fixtures.public_sides) ];
+      rewrite root "main.truss" (snd uses_geometry ^ Fixtures.sides_through_square);
       if add root [ "acme::shapes" ] <> 0 then fail "not added";
       expect_versions root
         [ ("acme::geometry", "1.0.0"); ("acme::shapes", "1.0.0"); ("acme::units", "1.1.0") ];
       if not (clean root) then fail "has diagnostics");
   test "a package is added at the version written after @" (fun () ->
       let _ = stocked () in
-      let root =
-        package [ ("main.truss", Fixtures.package_is_added_at_the_version_written_after) ]
-      in
+      let root = package [ ("main.truss", Fixtures.meter_through_lengths) ] in
       if add root [ "acme::units@1.0.0" ] <> 0 then fail "not added";
       expect_versions root [ ("acme::units", "1.0.0") ]);
   test "a package the registry does not hold is not added, and the manifest is left as it was"
@@ -1032,7 +998,7 @@ let () =
       let root =
         directory [ ("truss.toml", manifest_of "demo" ^ "[dependencies]\n\"acme::units\" = []\n") ]
       in
-      let problems = Workspace.problems (fst (Command_packages.load root)) in
+      let problems = Workspace.problems (fst (Cli.Command_packages.load root)) in
       match
         List.filter
           (fun (problem : Project.problem) ->
@@ -1145,15 +1111,14 @@ let () =
             ("app/truss.toml", manifest_of "app" ^ "[dependencies]\n\"acme::geometry\" = []\n");
             ("app/main.truss", snd uses_geometry);
             ("units/truss.toml", manifest_of "acme::units");
-            ( "units/lengths/lengths.truss",
-              Fixtures.projects_package_takes_the_place_of_the_registrys_lengths );
+            ("units/lengths/lengths.truss", Fixtures.public_meter_of_seven);
           ]
       in
       let app = Filename.concat root "app" in
       if add app [ "acme::geometry" ] <> 0 then fail "not added";
       expect_versions root [ ("acme::geometry", "1.0.0") ];
       if not (clean root) then fail "has diagnostics";
-      let project = Command_packages.load root in
+      let project = Cli.Command_packages.load root in
       if
         not
           (List.mem "units/lengths/lengths.truss"
@@ -1182,14 +1147,10 @@ let () =
       expect_string ~expected:before (read root "truss.lock"));
   test "an upgrade says which signatures the project reads change, and which code breaks" (fun () ->
       let registry = stocked () in
-      let root =
-        package [ ("main.truss", Fixtures.upgrade_says_which_signatures_the_project_reads) ]
-      in
+      let root = package [ ("main.truss", Fixtures.meter_through_lengths) ] in
       ignore (add root [ "acme::units" ]);
       publish registry "acme::units" (1, 2, 0)
-        [
-          ("lengths/lengths.truss", Fixtures.upgrade_says_which_signatures_the_project_reads_lengths);
-        ];
+        [ ("lengths/lengths.truss", Fixtures.public_meter_with_a_scale) ];
       let status, output = upgrade root [ "acme::units" ] in
       if status <> 1 then fail "status %d: %s" status output;
       List.iter
@@ -1260,7 +1221,7 @@ let () =
       let registry = registry () in
       let root = angles turn in
       ignore (publish_from root);
-      rewrite root "degrees/degrees.truss" Fixtures.release_that_changes_only_a_body_gets_the_next;
+      rewrite root "degrees/degrees.truss" Fixtures.turn_of_a_sum;
       let status, output = publish_from root in
       if status <> 0 then fail "status %d: %s" status output;
       expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0"; "1.0.1" ]);
@@ -1269,8 +1230,7 @@ let () =
       let registry = registry () in
       let root = angles turn in
       ignore (publish_from root);
-      rewrite root "degrees/degrees.truss"
-        (turn ^ Fixtures.release_that_adds_a_public_definition_gets_the);
+      rewrite root "degrees/degrees.truss" (turn ^ Fixtures.public_half);
       let status, output = publish_from root in
       if status <> 0 then fail "status %d: %s" status output;
       if not (contains output "acme::angles::degrees::half is new") then fail "said %s" output;
@@ -1288,8 +1248,7 @@ let () =
       let registry = registry () in
       let root = angles turn in
       ignore (publish_from root);
-      rewrite root "degrees/degrees.truss"
-        Fixtures.release_that_changes_a_public_signature_is_refused;
+      rewrite root "degrees/degrees.truss" Fixtures.turn_with_a_times_parameter;
       expect_refused root "acme::angles::degrees::turn changed its parameters or its result";
       let _, output = publish_from root in
       List.iter
@@ -1302,15 +1261,15 @@ let () =
       expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0" ]);
   test "a release that takes a public definition away is refused" (fun () ->
       let _ = registry () in
-      let root = angles (turn ^ Fixtures.release_that_takes_a_public_definition_away_is) in
+      let root = angles (turn ^ Fixtures.public_half) in
       ignore (publish_from root);
       rewrite root "degrees/degrees.truss" turn;
       expect_refused root "acme::angles::degrees::half was removed or is no longer public");
   test "a private definition can change freely" (fun () ->
       let registry = registry () in
-      let root = angles (turn ^ Fixtures.private_definition_can_change_freely) in
+      let root = angles (turn ^ Fixtures.private_half) in
       ignore (publish_from root);
-      rewrite root "degrees/degrees.truss" (turn ^ Fixtures.private_definition_can_change_freely_2);
+      rewrite root "degrees/degrees.truss" (turn ^ Fixtures.private_third);
       let status, output = publish_from root in
       if status <> 0 then fail "status %d: %s" status output;
       expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0"; "1.0.1" ]);
@@ -1321,10 +1280,10 @@ let () =
         fail "status %d: %s" status output);
   test "a package with an error is not published" (fun () ->
       let _ = registry () in
-      expect_refused (angles Fixtures.package_with_an_error_is_not_published) "1 error");
+      expect_refused (angles Fixtures.turn_of_a_boolean) "1 error");
   test "a package with a todo or an echo is not published, and each is listed" (fun () ->
       let registry = registry () in
-      let root = angles Fixtures.package_with_a_todo_or_an_echo_is_not_published in
+      let root = angles Fixtures.turn_with_a_todo_and_an_echo in
       expect_refused root "degrees.truss:2:3: `todo` is not finished code";
       expect_refused root "degrees.truss:6:3: `echo` is not finished code";
       expect_refused root "degrees.truss:10:13: `echo` is not finished code";
@@ -1332,12 +1291,12 @@ let () =
       expect_published registry { Path.owner = Some "acme"; name = "angles" } []);
   test "a package whose test fails is not published" (fun () ->
       let registry = registry () in
-      let root = angles (turn ^ Fixtures.package_whose_test_fails_is_not_published) in
+      let root = angles (turn ^ Fixtures.turn_test_of_a_right_angle) in
       expect_refused root "Cannot publish a package whose tests fail";
       expect_published registry { Path.owner = Some "acme"; name = "angles" } []);
   test "a package whose tests pass is published" (fun () ->
       let registry = registry () in
-      let root = angles (turn ^ Fixtures.package_whose_tests_pass_is_published) in
+      let root = angles (turn ^ Fixtures.turn_test_of_a_whole_turn) in
       let status, output = publish_from root in
       if status <> 0 then fail "status %d: %s" status output;
       expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0" ])
@@ -1349,7 +1308,7 @@ let () =
         directory
           [
             ("truss.toml", manifest_of "acme::walls");
-            ("height/height.truss", Fixtures.package_is_published_with_the_versions_of_the_height);
+            ("height/height.truss", Fixtures.height_through_vector);
           ]
       in
       ignore (add root [ "acme::geometry" ]);
@@ -1377,15 +1336,12 @@ let () =
         directory
           [
             ("truss.toml", manifest_of "acme::walls");
-            ( "height/height.truss",
-              Fixtures.published_package_is_used_by_another_project_with_height );
+            ("height/height.truss", Fixtures.height_through_vector);
           ]
       in
       ignore (add walls [ "acme::geometry" ]);
       ignore (publish_from walls);
-      let root =
-        package [ ("main.truss", Fixtures.published_package_is_used_by_another_project_with) ]
-      in
+      let root = package [ ("main.truss", Fixtures.tall_through_walls) ] in
       if add root [ "acme::walls" ] <> 0 then fail "not added";
       expect_versions root
         [ ("acme::geometry", "1.0.0"); ("acme::units", "1.0.0"); ("acme::walls", "1.0.0") ];
@@ -1397,7 +1353,7 @@ let () =
         directory
           [
             ("truss.toml", manifest_of "acme::walls");
-            ("height/height.truss", Fixtures.dependency_that_only_a_packages_tests_use_is_not_height);
+            ("height/height.truss", Fixtures.height_tested_against_a_meter);
           ]
       in
       ignore (add root [ "acme::units@1.0.0" ]);
@@ -1409,12 +1365,10 @@ let () =
              (version_directory { Path.owner = Some "acme"; name = "walls" } (1, 0, 0))
              "truss.lock")
       then fail "published with a package only its test uses";
-      let user =
-        package [ ("main.truss", Fixtures.dependency_that_only_a_packages_tests_use_is_not) ]
-      in
+      let user = package [ ("main.truss", Fixtures.tall_through_walls) ] in
       ignore (add user [ "acme::walls" ]);
       expect_versions user [ ("acme::walls", "1.0.0") ];
-      if not (Report.clean (gather ~proofs:true (Command_packages.load user))) then
+      if not (Cli.Report.clean (gather ~proofs:true (Cli.Command_packages.load user))) then
         fail "has diagnostics");
   test "a package that depends on one of its project's that is not published is refused" (fun () ->
       let _ = registry () in
@@ -1426,7 +1380,7 @@ let () =
             ("angles/degrees/degrees.truss", turn);
             ( "walls/truss.toml",
               manifest_of "acme::walls" ^ "[dependencies]\n\"acme::angles\" = []\n" );
-            ("walls/corner.truss", Fixtures.package_that_depends_on_one_of_its_projects_that_corner);
+            ("walls/corner.truss", Fixtures.corner_through_degrees);
           ]
       in
       let walls = Filename.concat root "walls" in
@@ -1439,11 +1393,11 @@ let () =
   test "a command line is parsed and run as the client would run it" (fun () ->
       let root = package [ ("main.truss", Fixtures.doubling) ] in
       let status, _ =
-        captured (fun () -> Main.client [ "truss"; "--no-server"; "check"; "-C"; root ])
+        captured (fun () -> Cli.Main.client [ "truss"; "--no-server"; "check"; "-C"; root ])
       in
       if status <> 0 then fail "did not succeed");
   test "an unknown command is a bad argument" (fun () ->
-      let status, _ = captured (fun () -> Main.client [ "truss"; "--no-server"; "bogus" ]) in
+      let status, _ = captured (fun () -> Cli.Main.client [ "truss"; "--no-server"; "bogus" ]) in
       if status <> 2 then fail "did not exit with 2")
 
 let () =
@@ -1460,7 +1414,7 @@ let () =
           ]
       in
       let status, output =
-        captured (fun () -> Main.client [ "truss"; "--no-server"; "check"; "-C"; root ])
+        captured (fun () -> Cli.Main.client [ "truss"; "--no-server"; "check"; "-C"; root ])
       in
       if status <> 0 then fail "did not succeed: %s" output);
   test "check rejects an HTML template that interpolates into an event handler or a script"
@@ -1480,7 +1434,7 @@ let () =
               ]
           in
           let status, output =
-            captured (fun () -> Main.client [ "truss"; "--no-server"; "check"; "-C"; root ])
+            captured (fun () -> Cli.Main.client [ "truss"; "--no-server"; "check"; "-C"; root ])
           in
           if status = 0 || not (contains output "is_valid_template") then
             fail "accepted %s: %s" template output)
@@ -1500,65 +1454,59 @@ let () =
   test "a new package with an owner is made in a directory named without it" (fun () ->
       let root = directory [] in
       if quietly [ "new"; "-C"; root; "acme::weather" ] <> 0 then fail "not made";
-      let project = Command_packages.load (Filename.concat root "weather") in
+      let project = Cli.Command_packages.load (Filename.concat root "weather") in
       expect_strings ~expected:[ "acme::weather" ] (names project);
-      if not (Report.clean (gather ~proofs:true project)) then fail "has diagnostics");
+      if not (Cli.Report.clean (gather ~proofs:true project)) then fail "has diagnostics");
   test "a new package checks cleanly" (fun () ->
       let root = directory [] in
       if quietly [ "new"; "-C"; root; "weather" ] <> 0 then fail "not made";
-      let project = Command_packages.load (Filename.concat root "weather") in
-      if not (Report.clean (gather ~proofs:true project)) then fail "has diagnostics")
+      let project = Cli.Command_packages.load (Filename.concat root "weather") in
+      if not (Cli.Report.clean (gather ~proofs:true project)) then fail "has diagnostics")
 
 let () =
   test "JSON with escapes and a surrogate pair is read" (fun () ->
-      match Json.parse {|{"a": [1, -2, true, null], "b": "x\né😀"}|} with
-      | Json.Object [ ("a", Json.List [ Int 1; Int -2; Bool true; Null ]); ("b", String text) ] ->
+      match Cli.Json.parse {|{"a": [1, -2, true, null], "b": "x\né😀"}|} with
+      | Cli.Json.Object
+          [ ("a", Cli.Json.List [ Int 1; Int -2; Bool true; Null ]); ("b", String text) ] ->
           expect_string ~expected:"x\n\xc3\xa9\xf0\x9f\x98\x80" text
       | _ -> fail "not read");
   test "a position counts UTF-16 code units, and an offset is its inverse" (fun () ->
       let text = "a\n\xf0\x9f\x98\x80b" in
       let source = Source.create ~path:"" text in
       let offset = String.length text - 1 in
-      (match Lsp_command.For_testing.position Utf_16 source offset with
+      (match Cli.Lsp_command.For_testing.position Utf_16 source offset with
       | 1, 2 -> ()
       | line, column -> fail "line %d, column %d" line column);
-      if Lsp_command.For_testing.offset Utf_16 source ~line:1 ~column:2 <> offset then
+      if Cli.Lsp_command.For_testing.offset Utf_16 source ~line:1 ~column:2 <> offset then
         fail "not the inverse");
   test "an open file's text is checked in place of the file on disk" (fun () ->
-      let root =
-        package [ ("main.truss", Fixtures.open_files_text_is_checked_in_place_of_the_file_on) ]
-      in
+      let root = package [ ("main.truss", Fixtures.main_returning_success) ] in
       let uri = "file://" ^ Filename.concat root "main.truss" in
       let answer =
-        Json.parse
-          (snd
-             (truss
-                [
-                  "__check-buffers";
-                  root;
-                  "utf-16";
-                  uri;
-                  Fixtures.open_files_text_is_checked_in_place_of_the_file_on_2;
-                ]))
+        Cli.Json.parse (snd (truss [ "__check-buffers"; root; "utf-16"; uri; Fixtures.next_count ]))
       in
-      match Json.field "files" answer with
-      | Json.List [ file ] -> (
-          match (Json.field "diagnostics" file, Json.field "states" file) with
-          | Json.List [ diagnostic ], Json.List [ state ] ->
-              if Json.field "code" diagnostic <> Json.String "prover.overflow" then
-                fail "diagnostic %s" (Json.to_string diagnostic);
-              if Json.field "proven" state <> Json.Bool false then
-                fail "state %s" (Json.to_string state);
+      match Cli.Json.field "files" answer with
+      | Cli.Json.List [ file ] -> (
+          match (Cli.Json.field "diagnostics" file, Cli.Json.field "states" file) with
+          | Cli.Json.List [ diagnostic ], Cli.Json.List [ state ] ->
+              if Cli.Json.field "code" diagnostic <> Cli.Json.String "prover.overflow" then
+                fail "diagnostic %s" (Cli.Json.to_string diagnostic);
+              if Cli.Json.field "proven" state <> Cli.Json.Bool false then
+                fail "state %s" (Cli.Json.to_string state);
               if
-                Json.field "range" diagnostic
-                <> Json.Object
+                Cli.Json.field "range" diagnostic
+                <> Cli.Json.Object
                      [
-                       ("start", Json.Object [ ("line", Json.Int 1); ("character", Json.Int 2) ]);
-                       ("end", Json.Object [ ("line", Json.Int 1); ("character", Json.Int 11) ]);
+                       ( "start",
+                         Cli.Json.Object [ ("line", Cli.Json.Int 1); ("character", Cli.Json.Int 2) ]
+                       );
+                       ( "end",
+                         Cli.Json.Object
+                           [ ("line", Cli.Json.Int 1); ("character", Cli.Json.Int 11) ] );
                      ]
-              then fail "range %s" (Json.to_string (Json.field "range" diagnostic))
-          | _ -> fail "%s" (Json.to_string file))
-      | _ -> fail "%s" (Json.to_string answer));
+              then fail "range %s" (Cli.Json.to_string (Cli.Json.field "range" diagnostic))
+          | _ -> fail "%s" (Cli.Json.to_string file))
+      | _ -> fail "%s" (Cli.Json.to_string answer));
   test "the server answers initialize, an unsupported request, and shutdown" (fun () ->
       let message body = Printf.sprintf "Content-Length: %d\r\n\r\n%s" (String.length body) body in
       let input_file = Filename.temp_file "lsp-input" ""
@@ -1575,7 +1523,7 @@ let () =
       let status =
         In_channel.with_open_bin input_file (fun input ->
             Out_channel.with_open_bin output_file (fun output ->
-                Lsp_command.serve ~input ~output ~check:(fun ~root:_ _ _ -> None)))
+                Cli.Lsp_command.serve ~input ~output ~check:(fun ~root:_ _ _ -> None)))
       in
       let written = In_channel.with_open_bin output_file In_channel.input_all in
       if status <> 0 then fail "status %d" status;
@@ -1593,22 +1541,22 @@ let () =
         Some {|{"files":[{"uri":"file:///project/a%20b.truss","diagnostics":[],"states":[]}]}|}
       in
       let server =
-        Lsp_command.For_testing.create
-          ~write:(fun value -> written := Json.to_string value :: !written)
+        Cli.Lsp_command.For_testing.create
+          ~write:(fun value -> written := Cli.Json.to_string value :: !written)
           ~check
       in
-      let handle text = ignore (Lsp_command.For_testing.handle server (Json.parse text)) in
+      let handle text = ignore (Cli.Lsp_command.For_testing.handle server (Cli.Json.parse text)) in
       handle
         {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":"file:///project"}}|};
       handle
         {|{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///project/a%20b.truss","text":"x"}}}|};
-      Lsp_command.For_testing.refresh server;
+      Cli.Lsp_command.For_testing.refresh server;
       (match !asked with
       | [ ("/project", Utf_16, [ ("file:///project/a%20b.truss", "x") ]) ] -> ()
       | _ -> fail "asked %d times, or with other buffers" (List.length !asked));
       handle
         {|{"jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":"file:///project/a%20b.truss"}}}|};
-      Lsp_command.For_testing.refresh server;
+      Cli.Lsp_command.For_testing.refresh server;
       let all = String.concat "\n" (List.rev !written) in
       List.iter
         (fun part -> if not (contains all part) then fail "no %s in %s" part all)

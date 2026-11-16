@@ -24,17 +24,12 @@ val definition : visit -> Core.definition -> unit
 type tasks_use = Uses_tasks | Through_parameter | No_tasks
 
 val tasks_use : ?solved:(int -> Types.capability_set) -> Core.block -> tasks_use
-val can_use_tasks : ?solved:(int -> Types.capability_set) -> Core.block -> bool
+val can_use_tasks : Core.block -> bool
 val traverse_indirect : ('a -> 'b option) -> 'a Core.target -> 'b Core.target option
 
 module For_testing : sig
   module Local_table : Hashtbl.S with type key = Core.local
 
   val local_names : Core.definition -> string Local_table.t
-
-  val expression_exists :
-    ?expression:(Core.expression -> bool) ->
-    ?statement:(Core.statement -> bool) ->
-    Core.expression ->
-    bool
+  val expression_exists : (Core.expression -> bool) -> Core.expression -> bool
 end

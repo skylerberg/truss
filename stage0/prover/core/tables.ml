@@ -21,7 +21,7 @@ module Type_table = Hashtbl.Make (Structural_key.Make (struct
 end))
 
 module Local_table = Hashtbl.Make (Structural_key.Make (struct
-  type t = Core.local
+  type t = Locals.local
 end))
 
 module Stated_table = Hashtbl.Make (Structural_key.Make (struct

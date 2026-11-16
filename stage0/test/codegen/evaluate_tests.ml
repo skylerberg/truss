@@ -42,19 +42,16 @@ let shout = Fixtures.Evaluate.shout
 
 let () =
   Codegen_support.test "a template check that holds is proven by running it" (fun () ->
-      proven
-        (proven_with_running
-           (shout ^ Fixtures.Evaluate.template_check_that_holds_is_proven_by_running_it)));
+      proven (proven_with_running (shout ^ Fixtures.Evaluate.shout_of_a_name)));
   Codegen_support.test "a template check that does not hold fails, saying it ran" (fun () ->
       fails_saying "Running it on this template's text gives `false`."
-        (proven_with_running
-           (shout ^ Fixtures.Evaluate.template_check_that_does_not_hold_fails_saying_it)));
+        (proven_with_running (shout ^ Fixtures.Evaluate.shout_of_capitals)));
   Codegen_support.test "a template check that reaches a todo fails, saying where" (fun () ->
       fails_saying "Running it on this template's text failed, so it is not known: todo reached"
-        (proven_with_running Fixtures.Evaluate.template_check_that_reaches_a_todo_fails_saying));
+        (proven_with_running Fixtures.Evaluate.shout_with_a_todo_check));
   Codegen_support.test "a check that reads a template's parts is not run" (fun () ->
       let database, compile =
-        Codegen_support.load Fixtures.Evaluate.check_that_reads_a_templates_parts_is_not_run
+        Codegen_support.load Fixtures.Evaluate.count_template_reading_its_parts
       in
       (match
          Database.list_template_checks (Database.prove database [ Codegen_support.example_file ])
@@ -66,10 +63,7 @@ let () =
       let database =
         Codegen_support.database
           (Codegen_support.example_package
-             [
-               ( Codegen_support.example_file,
-                 Fixtures.Evaluate.template_check_whose_code_has_errors_is_not_run );
-             ])
+             [ (Codegen_support.example_file, Fixtures.Evaluate.shout_with_an_ill_typed_check) ])
       in
       let proofs = Database.prove database [ Codegen_support.example_file ] in
       match Database.list_template_checks proofs with
@@ -82,7 +76,7 @@ let () =
   Codegen_support.test "a template's check is done again when the code it runs has changed"
     (fun () ->
       let results = results () in
-      let use = Fixtures.Evaluate.use in
+      let use = Fixtures.Evaluate.shout_of_capitals in
       let refuses = "        quiet = false" in
       let accepts_all =
         match Substring.For_testing.find shout refuses with
@@ -99,10 +93,7 @@ let () =
 let () =
   Codegen_support.test "a template check that timed out is run again on the next check" (fun () ->
       let results = results () in
-      let database, _ =
-        Codegen_support.load
-          (shout ^ Fixtures.Evaluate.template_check_that_timed_out_is_run_again_on_the)
-      in
+      let database, _ = Codegen_support.load (shout ^ Fixtures.Evaluate.shout_of_a_greeting) in
       fails_saying "failed, so it is not known: it ran past the time limit of 0 ms"
         (diagnostics
            (Codegen_support.compile ~results ~evaluation_time_limit_ms:0 database)
@@ -112,8 +103,7 @@ let () =
 let () =
   Codegen_support.test "a state says whether its proof trusts compiled code" (fun () ->
       let database, compile =
-        Codegen_support.load
-          (shout ^ Fixtures.Evaluate.state_says_whether_its_proof_trusts_compiled_code)
+        Codegen_support.load (shout ^ Fixtures.Evaluate.shout_of_a_name_and_an_identity)
       in
       let states = Prover.list_states (verdicts compile database) Codegen_support.example_file in
       let with_code code =

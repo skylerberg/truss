@@ -2,11 +2,9 @@ module State = State
 module Facts = Facts
 module Contracts = Contracts
 module Lookups = Lookups
-module Names = Resolve.Names
-module Symbol = Logic.Symbol
 
 module Key_table = Hashtbl.Make (Structural_key.Make (struct
-  type t = Names.key
+  type t = Resolve.Names.key
 end))
 
 module Template_check_table = Hashtbl.Make (Structural_key.Make (struct
@@ -36,7 +34,7 @@ let inherited (lookups : Lookups.t) (path : Path.t) =
       | _ -> None)
   | _ -> None
 
-let impl_laws (lookups : Lookups.t) (key : Names.key) source =
+let impl_laws (lookups : Lookups.t) (key : Resolve.Names.key) source =
   match Interface.Definition.read_interface lookups.interface key.path with
   | Some (Interface.Environment.Impl_interface interface)
     when not (Contracts.impl_unfinished lookups key) ->
@@ -50,23 +48,7 @@ let impl_laws (lookups : Lookups.t) (key : Names.key) source =
       ]
   | _ -> []
 
-let is_specification_module (key : Names.key) = key.module_ = Well_known.specification
-
-let integer_implementors (bounds : Types.trait_reference list) =
-  let signed = [ Intrinsic.Int8; Int16; Int32; Int64 ]
-  and unsigned = [ Intrinsic.UInt8; UInt16; UInt32; UInt64 ] in
-  List.fold_left
-    (fun found (bound : Types.trait_reference) ->
-      let these =
-        if Well_known.is Signed_integer bound.trait then Some signed
-        else if Well_known.is Unsigned_integer bound.trait then Some unsigned
-        else if Well_known.is Fixed_width_integer bound.trait then Some (signed @ unsigned)
-        else None
-      in
-      match (found, these) with
-      | Some found, Some these -> Some (List.filter (fun builtin -> List.mem builtin these) found)
-      | None, these | these, None -> these)
-    None bounds
+let is_specification_module (key : Resolve.Names.key) = key.module_ = Well_known.specification
 
 let integer_instances (lookups : Lookups.t) (path : Path.t) =
   let generics =
@@ -84,14 +66,14 @@ let integer_instances (lookups : Lookups.t) (path : Path.t) =
     match path with
     | Method { owner; _ } ->
         [
-          ( { Types.owner; name = "Self" },
+          ( Types.make_self_parameter owner,
             [ { Types.trait = owner; trait_arguments = []; associated = [] } ] );
         ]
     | _ -> []
   in
   List.fold_left
     (fun instances ((parameter : Types.parameter), bounds) ->
-      match integer_implementors bounds with
+      match Types.find_bound_integer_implementors bounds with
       | None -> instances
       | Some builtins ->
           List.concat_map
@@ -110,7 +92,7 @@ let integer_instances (lookups : Lookups.t) (path : Path.t) =
     (self @ generics)
   |> List.filter (fun (shown, _) -> shown <> [])
 
-let derived_default (lookups : Lookups.t) (key : Names.key) (source : State.source) =
+let derived_default (lookups : Lookups.t) (key : Resolve.Names.key) (source : State.source) =
   let derives_default =
     match Interface.Definition.read_interface lookups.interface key.path with
     | Some (Interface.Environment.Type_interface interface) ->
@@ -143,7 +125,7 @@ let derived_default (lookups : Lookups.t) (key : Names.key) (source : State.sour
       outcome.obligations
   else []
 
-let proof (lookups : Lookups.t) (key : Names.key) =
+let proof (lookups : Lookups.t) (key : Resolve.Names.key) =
   match (lookups.interface.names.declaration key, Contracts.source_at_key lookups key) with
   | _ when is_specification_module key -> Not_proven_here
   | declaration, source -> (
@@ -354,8 +336,8 @@ let counterexample members (obligation : State.obligation) answer_values =
       (List.mapi
          (fun index (holding, failing, _, _) ->
            match
-             ( List.assoc_opt (Symbol.Reached index) answer_values,
-               List.assoc_opt (Symbol.Condition index) answer_values )
+             ( List.assoc_opt (Logic.Symbol.Reached index) answer_values,
+               List.assoc_opt (Logic.Symbol.Condition index) answer_values )
            with
            | Some "true", Some "true" -> Some holding
            | Some "true", Some "false" -> failing
@@ -367,7 +349,8 @@ let counterexample members (obligation : State.obligation) answer_values =
 
 let diagnostic code span message = Diagnostic.make ~code:(Diagnostic.Code.Prover code) span message
 
-let resolve_location (names : Names.lookups) (key : Names.key) (location : State.location) =
+let resolve_location (names : Resolve.Names.lookups) (key : Resolve.Names.key)
+    (location : State.location) =
   Source.Definition_span.locate (names.spans key)
     (match location with Node origin -> origin | Whole_definition -> (names.definition key).id)
 
@@ -417,7 +400,7 @@ let rendered_fix lookups ({ title; edits } : State.fix) =
          Diagnostic.replace at (render lookups replacement))
        edits)
 
-let cited_place (lookups : Lookups.t) ((key : Names.key), origin) =
+let cited_place (lookups : Lookups.t) ((key : Resolve.Names.key), origin) =
   let place = lookups.interface.names.place key in
   ( place,
     Source.Definition_span.to_file ~base:place.base
@@ -433,9 +416,9 @@ type 'span state = {
   trusts_compiled_code : bool;
 }
 
-type verdict = (Source.Definition_span.t state * (Names.key * Core.origin) option) list
+type verdict = (Source.Definition_span.t state * (Resolve.Names.key * Core.origin) option) list
 
-let definition_states (lookups : Lookups.t) (key : Names.key) proof answers =
+let definition_states (lookups : Lookups.t) (key : Resolve.Names.key) proof answers =
   let resolve location = resolve_location lookups.interface.names key location in
   match proof with
   | Not_proven_here -> []
@@ -509,7 +492,7 @@ let request ~with_locals (obligation : State.obligation) =
       List.concat
         (List.mapi
            (fun index (_, _, reached, condition) ->
-             [ (Symbol.Reached index, reached); (Symbol.Condition index, condition) ])
+             [ (Logic.Symbol.Reached index, reached); (Logic.Symbol.Condition index, condition) ])
            obligation.decisions)
     else []
   in
@@ -620,20 +603,20 @@ let file_states { lookups; verdicts } file =
   let verdict key = Option.value (Key_table.find_opt verdicts key) ~default:[] in
   List.map
     (fun declaration ->
-      let key = Names.key_of declaration in
-      let ({ base; _ } : Names.place) = lookups.interface.names.place key in
+      let key = Resolve.Names.key_of declaration in
+      let ({ base; _ } : Resolve.Names.place) = lookups.interface.names.place key in
       List.map
         (fun (state, cited) ->
           let cited = Option.map (cited_place lookups) cited in
           let note =
             match cited with
-            | Some ((place : Names.place), span) when place.file = file ->
+            | Some ((place : Resolve.Names.place), span) when place.file = file ->
                 Some (span, "This is the clause that must hold.")
             | _ -> None
           in
           let elsewhere =
             match cited with
-            | Some ((place : Names.place), span) when place.file <> file -> (
+            | Some ((place : Resolve.Names.place), span) when place.file <> file -> (
                 match lookups.source place.file with
                 | source ->
                     let line, _ = Source.position source span.start in

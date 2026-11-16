@@ -1,5 +1,3 @@
-module Names = Resolve.Names
-
 type overload =
   | Type_overload of Path.t
   | Trait_overload of Types.trait_reference * Types.trait_method
@@ -368,7 +366,7 @@ and trait_static_method (state : State.state) path name receiver =
               else None
           | None -> None)
         (state.lookups.interface.names.traits_declaring package name))
-    (Names.list_visible_packages state.lookups.interface.names state.package)
+    (Resolve.Names.list_visible_packages state.lookups.interface.names state.package)
 
 and resolve_evidence state (value : Syntax.expression) self_type (reference : Types.trait_reference)
     =
@@ -452,14 +450,14 @@ and trait_candidates (state : State.state) receiver_type name =
                  ignore has_generics;
                  if could_implement state receiver_type trait then with_method reference else None)
                (state.lookups.interface.names.traits_declaring package name))
-           (Names.list_visible_packages state.lookups.interface.names state.package))
+           (Resolve.Names.list_visible_packages state.lookups.interface.names state.package))
 
 and one_family (state : State.state) (traits : Types.trait_reference list) =
   let requires (first : Types.trait_reference) (second : Types.trait_reference) =
     List.exists
       (fun (bound : Types.trait_reference) -> Path.equal bound.trait second.trait)
       (Interface.Properties.list_bound_closure state.lookups.interface
-         ~self:(Types.Parameter { owner = first.trait; name = "Self" })
+         ~self:(Types.Parameter (Types.make_self_parameter first.trait))
          first)
   in
   let related first second = requires first second || requires second first in
@@ -520,7 +518,7 @@ and method_version state (span : Source.Definition_span.t) type_ name (receiver 
   | Some (Trait_overload (trait, method_)) ->
       let instance =
         Instantiation.instantiate state span
-          ~extra:[ ({ owner = trait.trait; name = "Self" }, Types.Type type_) ]
+          ~extra:[ (Types.make_self_parameter trait.trait, Types.Type type_) ]
           (Members.method_signature state.lookups trait.trait method_)
       in
       Some

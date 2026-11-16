@@ -1,6 +1,4 @@
-module Symbol = Logic.Symbol
-
-let variable ?(numbers = []) label = Symbol.Variable { label; numbers }
+let variable ?(numbers = []) label = Logic.Symbol.Variable { label; numbers }
 
 exception Unsupported of State.location * string
 exception Foreign_unsupported of string
@@ -87,7 +85,7 @@ let scope_facts (context : State.context) names =
     (fun (name, facts) -> if List.mem name names then List.rev !facts else [])
     context.scopes
 
-let with_quantifier_facts ?(binders = []) (context : State.context) term =
+let with_quantifier_facts ~binders (context : State.context) term =
   let stated bound fact =
     List.for_all
       (fun name -> List.mem name bound || not (Logic.mentions [ name ] fact))
@@ -190,7 +188,7 @@ let truss_of_value context term =
     | Logic.Operation ("-", [ inner ]) ->
         Option.map (fun printed -> parenthesized level 3 ("-" ^ printed)) (arithmetic 3 inner)
     | Logic.Integer value when Z.sign value < 0 && level > 0 -> Some ("(" ^ Z.to_string value ^ ")")
-    | Logic.Apply (Symbol.Field { field; variant = None; _ }, [ receiver ]) ->
+    | Logic.Apply (Logic.Symbol.Field { field; variant = None; _ }, [ receiver ]) ->
         Option.map (fun receiver -> receiver ^ "." ^ field) (arithmetic 4 receiver)
     | Logic.Symbol symbol -> parameter_name context symbol
     | Logic.Integer value -> Some (Z.to_string value)
@@ -335,8 +333,8 @@ let float_format (ty : Types.ty) =
   match builtin ty with Some Float32 -> Some (8, 24) | Some Float64 -> Some (11, 53) | _ -> None
 
 let is_bool ty = Types.is_builtin Bool ty
-let constructor_name (ty : Types.ty) variant = Symbol.Constructor { type_ = ty; variant }
-let selector_name ty variant field = Symbol.Field { type_ = ty; variant; field }
+let constructor_name (ty : Types.ty) variant = Logic.Symbol.Constructor { type_ = ty; variant }
+let selector_name ty variant field = Logic.Symbol.Field { type_ = ty; variant; field }
 let is_standard_equal = Well_known.is Equal
 let equal_trait = Well_known.path Equal
 
@@ -385,7 +383,8 @@ let rec sort_of (context : State.context) (ty : Types.ty) : Logic.sort =
     | _ when Types.equal ty Types.unit ->
         if not (Tables.Type_table.mem context.datatypes ty) then begin
           Tables.Type_table.replace context.datatypes ty ();
-          context.declarations <- Logic.Datatype (ty, [ (Symbol.Unit, []) ]) :: context.declarations
+          context.declarations <-
+            Logic.Datatype (ty, [ (Logic.Symbol.Unit, []) ]) :: context.declarations
         end;
         Type_sort ty
     | Function function_type, _ -> Function_sort (List.length function_type.inputs)
@@ -467,7 +466,7 @@ let local_type context frame local =
 
 let mentions_potential term =
   let rec walk = function
-    | Logic.Apply ((Symbol.Potential _ | Symbol.Slack _), _) -> true
+    | Logic.Apply ((Logic.Symbol.Potential _ | Logic.Symbol.Slack _), _) -> true
     | Logic.Forall (_, _, body) | Logic.Exists (_, body) -> walk body
     | term -> List.exists walk (Logic.arguments term)
   in

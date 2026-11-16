@@ -1,7 +1,3 @@
-module Names = Resolve.Names
-module Environment = Interface.Environment
-module Elaborator = Interface.Elaborator
-
 type checked = { form : Core.t; tables : Tables.published; evidence_packages : Path.package list }
 
 let no_output : State.env =
@@ -275,7 +271,7 @@ let check_function state ~broken_body (written : Syntax.signature)
         Function { parameters; contract; body });
   match body_block with Some block when not broken_body -> body state env block | _ -> ()
 
-let check_deserialized_invariants state (elaborated : Environment.elaborated_interface)
+let check_deserialized_invariants state (elaborated : Interface.Environment.elaborated_interface)
     (form : Core.t) =
   match (form.definition, elaborated.interface) with
   | Type { invariants; _ }, Type_interface interface
@@ -291,11 +287,12 @@ let check_deserialized_invariants state (elaborated : Environment.elaborated_int
         invariants
   | _ -> ()
 
-let check_definition (state : State.state) (elaborated : Environment.elaborated_interface)
+let check_definition (state : State.state) (elaborated : Interface.Environment.elaborated_interface)
     ~checks_body =
   let definition = state.definition in
   let broken (part : Resolve.Parts.part) =
-    Names.is_broken state.lookups.interface.names state.key part || (part = Body && not checks_body)
+    Resolve.Names.is_broken state.lookups.interface.names state.key part
+    || (part = Body && not checks_body)
   in
   if not (broken Header) then
     match (definition.kind, elaborated.interface) with
@@ -407,7 +404,7 @@ let check_definition (state : State.state) (elaborated : Environment.elaborated_
               variants
         | _ -> ())
     | Trait { members; _ }, Trait_interface _ ->
-        let self = Types.Parameter { owner = state.key.path; name = "Self" } in
+        let self = Types.Parameter (Types.make_self_parameter state.key.path) in
         state.form.definition_builder <-
           Some
             (fun ~holds_body:_ ->
@@ -457,7 +454,7 @@ let check_definition (state : State.state) (elaborated : Environment.elaborated_
                       match parameter.kind with
                       | Named_parameter { name; type_; _ } ->
                           State.declare state name
-                            (Elaborator.elaborate_type state.context type_)
+                            (Interface.Elaborator.elaborate_type state.context type_)
                             ~is_var:false ~mode:Types.Read
                       | _ -> ())
                     law.parameters;
@@ -647,24 +644,8 @@ let finalize (state : State.state) =
         part_conversions = List.map (Option.map call) template.part_conversions;
       })
 
-let integer_literal_range (bounds : Types.trait_reference list) =
-  let signed = [ Intrinsic.Int8; Int16; Int32; Int64 ]
-  and unsigned = [ Intrinsic.UInt8; UInt16; UInt32; UInt64 ] in
-  let implementors =
-    List.fold_left
-      (fun found (bound : Types.trait_reference) ->
-        let these =
-          if Well_known.is Signed_integer bound.trait then Some signed
-          else if Well_known.is Unsigned_integer bound.trait then Some unsigned
-          else if Well_known.is Fixed_width_integer bound.trait then Some (signed @ unsigned)
-          else None
-        in
-        match (found, these) with
-        | Some found, Some these -> Some (List.filter (fun builtin -> List.mem builtin these) found)
-        | None, these | these, None -> these)
-      None bounds
-  in
-  Option.bind implementors (fun builtins ->
+let integer_literal_range bounds =
+  Option.bind (Types.find_bound_integer_implementors bounds) (fun builtins ->
       List.fold_left
         (fun range builtin ->
           match (range, Types.find_integer_range (Types.make_builtin builtin)) with
@@ -673,7 +654,7 @@ let integer_literal_range (bounds : Types.trait_reference list) =
           | None, found | found, None -> found)
         None builtins)
 
-let check (lookups : Lookups.t) (key : Names.key) ~checks_body =
+let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
   let resolved =
     Resolve.merge
       (List.map
@@ -758,8 +739,8 @@ let check (lookups : Lookups.t) (key : Names.key) ~checks_body =
   in
   let is_clean () =
     state.diagnostics = []
-    && (not (Names.is_broken lookups.interface.names key Header))
-    && (not (checks_body && Names.is_broken lookups.interface.names key Body))
+    && (not (Resolve.Names.is_broken lookups.interface.names key Header))
+    && (not (checks_body && Resolve.Names.is_broken lookups.interface.names key Body))
     && not (any_type Types.is_error)
   in
   let build () : Core.t =

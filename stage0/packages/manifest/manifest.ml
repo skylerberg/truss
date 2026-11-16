@@ -131,6 +131,7 @@ let end_of_line line = function
   | _ -> malformed line "Expected the line to end here."
 
 let tables text =
+  let final_line = List.length (String.split_on_char '\n' text) in
   let rec statements tables current = function
     | [] -> List.rev (close tables current)
     | (Line_break, _) :: rest -> statements tables current rest
@@ -141,7 +142,7 @@ let tables text =
     | (((Bare key | Quoted key) as token), line) :: (Equals, _) :: rest -> (
         let parsed, rest = value line rest in
         let quoted = match token with Quoted _ -> true | _ -> false in
-        let last_line = match rest with (_, last) :: _ -> last | [] -> max_int in
+        let last_line = match rest with (_, last) :: _ -> last | [] -> final_line in
         match current with
         | Some table ->
             statements tables
@@ -334,7 +335,6 @@ let with_dependency text (package : Path.package) =
       let after =
         match List.rev table.entries with last :: _ -> last.last_line | [] -> table.line
       in
-      let after = min after (List.length lines) in
       String.concat "\n"
         (List.concat
            (List.mapi

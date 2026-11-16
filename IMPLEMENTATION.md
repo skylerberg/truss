@@ -45,30 +45,19 @@ develop as well as make it easier to bootstrap the compiler in parts.
   suite, and proves the standard library, on every pull request and every
   push to `main`. It must stay fast: it installs nothing in an ordinary run,
   restores dune's cache, the solver's answers, and compiled objects from
-  `main`, and gives the longest suites runners of their own. When the
-  proofs' jobs become the longest again, add an entry to the `share` matrix
-  of the `proofs` job.
+  `main`, and gives the longest suites runners of their own.
 
 ### Libraries
 
 - **A library is a contract with more than one consumer, or a unit that
-  must not see its consumer's dependencies.** Code that one library alone uses
-  is a module of that library, so that nothing else can come to depend on
-  it. It stays a library of its own when its short dependency list
-  keeps it independent of a layer, as `cache` knows no compiler stage and the
-  move analysis, `moves`, knows nothing of code generation.
+  must not see its consumer's dependencies,** as `parser` lists `token` but
+  not `lexer`, so it cannot call the scanner.
 - **Each library belongs to one area of stage0,** a directory under
   `stage0`. The dependencies between areas form no cycle.
 - **A unit of several modules inside a library is a subdirectory.** The
   library's `dune` file sets `(include_subdirs qualified)`, the
   subdirectory's module of its own name is its interface, and its other
   modules are hidden from the rest of the library, as `lexer/scanner` is.
-- **Every dependency is listed.** `dune-project` sets
-  `(implicit_transitive_deps false)`, so a module names only the libraries
-  its own `dune` file lists, and those lists are the whole graph.
-- **Tests reach internal values through `For_testing`,** a submodule of an
-  interface that exports only the values tests and tools read. CI rejects a
-  use anywhere else.
 
 ### The lexer
 
@@ -79,85 +68,27 @@ develop as well as make it easier to bootstrap the compiler in parts.
   wherever such a form can start. A habit reports the form and lexes it as
   the Truss token it stands for. A change to Truss's grammar edits the core,
   and a new form of another language edits only the habits.
-- **A decision about a token looks at the next token, not at bytes.** `1.`
-  is a float unless a word follows the `.`, and `...` is a range, `todo`, or
-  nothing, by the operands on its two sides. The scanner scans the next token
-  with its own scanning function and holds it, so the decision sees the
-  token that follows in fact, inside an interpolation as well. A token
-  carries the trivia before it, so a token scanned ahead never takes a line
-  break that precedes the token before it.
-- **A token says what the lexer inserted.** A closer that the lexer inserts
-  for an unclosed bracket is marked, and an interpolation records whether
-  its `}` closed it. The parser reads these marks, never zero widths or
-  the text.
 
 ### The parser
 
-- **The parser reads tokens, never the source text.** A fix, and a message
-  that quotes code, spell tokens: names, keywords, and punctuation
-  exactly, and literals by value. A fix that would move code edits around
-  it instead, as `x as T` becomes `T.from(x)` by inserting `T.from(` and
-  replacing ` as T` with `)`.
-- **A habit recovers with the nodes its own tokens write,** or with an
-  error node. It never builds the tree its fix writes: such a tree drifted
-  from the fix's text and put nodes out of source order.
+- **The parser reads tokens, never the source text.** A fix that would move
+  code edits around it instead, so the fix never respells the code: `x as T`
+  becomes `T.from(x)` by inserting `T.from(` and replacing ` as T` with `)`.
 - **The tree holds no positions.** A node holds an id, and its item's span
-  table holds the node's span at that index. The parser fills the table as
-  it allocates ids, so the definition's id is the last. A definition that
-  only moved parses to an equal tree, so a change to positions alone
-  re-runs only the parts that report positions, and no stage strips spans
-  to compare two trees.
+  table holds the node's span at that index. A definition that only moved
+  parses to an equal tree, so a change to positions alone re-runs only the
+  parts that report positions, and no stage strips spans to compare two
+  trees.
 
 ### Stages
 
-- **Elaboration turns resolved syntax into a typed internal form.**
-  `interface` elaborates a definition's declaration into its interface. It
-  infers nothing, because every type in a declaration is written. `infer`
-  infers the types of a contract or a body and elaborates it into Core.
-  Lowering is the later translation of one internal form into a lower one:
-  Core into the MIR, and the MIR into C.
 - **Every stage after the type checker reads the MIR.** Ownership, the
   prover, and code generation read no core expression.
-- **The MIR is a tree, and the builder lowers each expression once.** A
-  body's code is a block: statements, and the block's value where control
-  reaches its end. An `if`, a `match`, and a short-circuit operator are each
-  one `Choose` statement, of a `Conditional`, `Cases`, or a `Connective`,
-  with its operands as blocks. A loop is one statement that holds its body.
-  A `return`, a `break`, and a `continue` are each a `Jump`, the last
-  statement of its block. A clause that can run is one formula. A quantifier
-  that runs is its loop, whose body holds the quantifier's body.
-- **A MIR part holds the control-flow graph beside the tree.** Ownership and
-  code generation read the graph, a `Mir.Graph.t`: blocks and terminators. A
-  graph's block holds only `basic` statements, which run in sequence and
-  hold no jump, so no stage that reads a graph meets a choice or a loop. It
-  is derived once for a definition, a default, and a constant. No stage
-  builds a graph but the expansion, and no stage finds a loop in a graph.
-  Where a `Connective` or its negation decides a branch, control goes
-  straight to the branch's target, so a name that `is` binds is read only
-  where it is bound.
-- **The prover reads the tree by structural recursion.** The frame after
-  an `if` is the merge of the frames after its two blocks, under the
-  `if`'s condition and its negation. A jump takes its frame to the loop or
-  the return that it leaves by, so paths are joined only there: after a
-  loop, at the end of a branch of tasks, and where a body returns.
-- **No stage rebuilds what an earlier stage had.** The builder records a
-  fact where it has it: a loop's condition and body, a loop's collection,
-  the operands of a loop's comparison, the function reference or the
-  lambda expression that an argument is. A stage that needs a value in
-  another state runs the MIR's statements in that state.
-- **What a path knows is in the path's frame.** In the prover, the place
-  of a `mut` binding, the collection of a local's slice, and the
-  write-back of a part lent `mut` are merged with the paths, and a loop's
-  head forgets the slice of a local that the loop assigns. One table for a
-  body gave every path the answer of one path.
-- **`Mir` is the one module of the MIR library that other libraries
-  name,** and it includes `Tree` and `Walk`. The emitter's state is
-  abstract: the lowering changes it through the emitter's operations
-  alone, and passes what a callee needs to know as an argument.
-- **The prover's one cycle runs through the context.** A rule reads a body
-  or a formula by calling the context's `run_body` or `formula_term`, which
-  `Reader` fills, so the cycle between a call and a formula that holds calls
-  is in one place.
+- **No stage rebuilds what an earlier stage had,** since a rebuilt fact can
+  disagree with the original. The builder lowers each expression once and
+  records each fact where it has it, and no stage finds a loop in the
+  control-flow graph. A stage that needs a value in another state runs the
+  MIR's statements in that state.
 
 ### Documents
 
@@ -195,21 +126,22 @@ file with `stage0/tools/comments`. The tool also rejects a file type that it
 has no comment syntax for, so a new type of file cannot add comments
 unchecked.
 
-### Opens
+### Module names
 
-Code has no `open`. A qualified name, such as `Facts.visible_type`, names
-the module that defines it, so a reader finds the definition without
-searching every opened module. No `open` can shadow a name in scope. A
-file that names a module often gives it an alias, as in
-`module Names = Resolve.Names`. A function that reads the fields of a
-record from another module annotates the parameter, as in
-`(context : State.context)`, instead of qualifying a field, as in
-`context.State.lookups`.
+Code names each module by its path, such as `Resolve.Names` or
+`Emit_c.Builder`, so a reader finds a definition without searching for the
+module a short name stands for. Code has no `open`: a name from another
+module is qualified, as in `Facts.visible_type`, and no `open` can shadow a
+name in scope. Code has no module alias either. Many modules share a name,
+such as the scanner's `Names` and `Resolve.Names`, so an alias's short name
+does not say which module it is. A library's main module exposes a
+submodule with `module Names = Names`; that line is the library's
+interface, not an alias.
 
 An expression may open a module for its infix operators: `Logic`, or
 Cmdliner's `Arg` or `Term`, as in `Logic.(a &&& b)`. Warnings 44 and 45
 reject such an open when it shadows a name in scope. CI rejects every other
-open with `stage0/tools/opens`.
+open, and every alias, with `stage0/tools/qualified_names`.
 
 ### Testing
 
@@ -237,13 +169,6 @@ Every stage of stage0 is tested the same way:
   A test must not give a new database the library's sources: that parses
   and checks the whole library again, so every such test gets slower each
   time the library grows.
-- **A test run reuses the previous run's results.** Two results are
-  keyed by their inputs alone, so they hold for every compiler and are
-  kept between runs in the user's cache, as the `truss` command
-  keeps them: the solver's answer to a query, as a result of kind
-  `solver`, and the object compiled from a file of generated C, in the
-  cache's `caches/objects`. A run solves and compiles only what no earlier
-  run did, and CI restores the caches of `main`'s last run.
 - **The standard library's own tests are written in Truss.** Each file of
   `stage0/test/codegen/library/` is a module of tests for one module of the
   library, named after it. `library_tests` builds every file's tests into
@@ -257,11 +182,11 @@ Every stage of stage0 is tested the same way:
   text a test checks lives in `fixtures/<suite>/<name>.truss` beside the
   suite, where it can be read, edited, and renamed as Truss.
   `embed_fixtures` compiles each directory of fixtures into the module
-  `Fixtures`, so the test names one as `Fixtures.Prover.overflow`, and a
-  fixture that is missing fails to compile. A fixture is named after its
-  test. Text that is not a whole module stays in OCaml: a template with a
-  hole that the test fills, a line given to the lexer or the parser, and a
-  snippet of one or two lines.
+  `Fixtures`, so the test names one as
+  `Fixtures.Prover.addition_that_can_overflow`, and a fixture that is
+  missing fails to compile. Text that is not a whole module stays in OCaml:
+  a template with a hole that the test fills, a line given to the lexer or
+  the parser, and a snippet of one or two lines.
 - **Checks against the documents are tests,** as long as each one states a
   single property, such as "SPECIFICATION.md's keyword list matches the lexer's",
   or "every example in the documents lexes cleanly".

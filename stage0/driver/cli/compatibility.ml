@@ -1,13 +1,11 @@
-module Names = Resolve.Names
-
 type change = Breaks of string | Grows of string
 type public_change = { path : Path.t; change : change }
 type side = { database : Database.t; lookups : Interface.Lookups.t }
 
-let public (side : side) (declaration : Names.declaration) =
+let public (side : side) (declaration : Resolve.Names.declaration) =
   declaration.ordinal = 0
-  && side.lookups.names.container (Names.key_of declaration) = None
-  && Names.is_public declaration.visibility
+  && side.lookups.names.container (Resolve.Names.key_of declaration) = None
+  && Resolve.Names.is_public declaration.visibility
 
 let declarations (side : side) package = side.lookups.names.package_declarations package
 
@@ -222,7 +220,7 @@ let is_same_impl (before : Path.t) (after : Path.t) =
 
 let impls (side : side) package =
   List.filter_map
-    (fun (declaration : Names.declaration) ->
+    (fun (declaration : Resolve.Names.declaration) ->
       if declaration.kind = Impl && declaration.ordinal = 0 then
         match Interface.Definition.read_impl_interface side.lookups declaration.path with
         | Some (impl : Types.impl_interface) ->
@@ -244,14 +242,16 @@ let compare ~before ~after package =
   let public_change path change = { path; change } in
   let definitions =
     List.concat_map
-      (fun (was : Names.declaration) ->
+      (fun (was : Resolve.Names.declaration) ->
         let path = was.path in
-        match List.find_opt (fun (other : Names.declaration) -> Path.equal other.path path) now with
+        match
+          List.find_opt (fun (other : Resolve.Names.declaration) -> Path.equal other.path path) now
+        with
         | None -> [ public_change path (Breaks "was removed or is no longer public") ]
         | Some is when is.kind <> was.kind ->
             [ public_change path (Breaks "became another kind of definition") ]
         | Some is ->
-            let before_key = Names.key_of was and after_key = Names.key_of is in
+            let before_key = Resolve.Names.key_of was and after_key = Resolve.Names.key_of is in
             List.map (public_change path)
               (match
                  ( Interface.Definition.read_interface before.lookups path,
@@ -289,8 +289,9 @@ let compare ~before ~after package =
   in
   let added =
     List.filter_map
-      (fun (is : Names.declaration) ->
-        if List.exists (fun (was : Names.declaration) -> Path.equal was.path is.path) old then None
+      (fun (is : Resolve.Names.declaration) ->
+        if List.exists (fun (was : Resolve.Names.declaration) -> Path.equal was.path is.path) old
+        then None
         else Some (public_change is.path (Grows "is new")))
       now
   in

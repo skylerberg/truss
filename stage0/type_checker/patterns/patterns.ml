@@ -357,15 +357,17 @@ let rec show context type_ (pattern : space) =
           (if List.length arguments = List.length fields then arguments
            else List.map (fun _ -> Wild) fields)
       in
-      let name = match constructor with Variant name -> name | _ -> "" in
-      match (fields, shown) with
-      | [], _ -> if name = "" then "()" else name
-      | [ _ ], [ "_" ] -> if name = "" then "_" else Printf.sprintf "%s(_)" name
-      | _, _ when List.for_all (fun shown -> shown = "_") shown ->
-          if name = "" then "_" else Printf.sprintf "%s(..)" name
-      | [ _ ], [ only ] -> Printf.sprintf "%s(%s)" name only
+      let prefix = match constructor with Variant name -> name | _ -> "" in
+      let is_wild = List.for_all (fun shown -> shown = "_") shown in
+      match (constructor, fields, shown) with
+      | Variant name, [], _ -> name
+      | _, [], _ -> "()"
+      | Variant name, [ _ ], [ "_" ] -> Printf.sprintf "%s(_)" name
+      | Variant name, _, _ when is_wild -> Printf.sprintf "%s(..)" name
+      | _, _, _ when is_wild -> "_"
+      | _, [ _ ], [ only ] -> Printf.sprintf "%s(%s)" prefix only
       | _ ->
-          Printf.sprintf "%s(%s)" name
+          Printf.sprintf "%s(%s)" prefix
             (String.concat ", "
                (List.map2
                   (fun (field : Types.field) shown ->

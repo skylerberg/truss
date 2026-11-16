@@ -1,5 +1,3 @@
-module Names = Resolve.Names
-
 module Parameter_table = Hashtbl.Make (Structural_key.Make (struct
   type t = Types.parameter
 end))
@@ -95,7 +93,7 @@ let show_path (path : Syntax.path) =
     (List.map (fun (name : Syntax.name) -> name.text) (path.modules @ [ path.last ]))
 
 let is_uint64 (lookups : Lookups.t) path =
-  match Names.definition_of_path lookups.names path with
+  match Resolve.Names.definition_of_path lookups.names path with
   | Some (key, { kind = Constant { type_ = { kind = Path_type written; _ }; _ }; _ }) ->
       (lookups.resolved Interface key).names.(written.path.last.id)
       = Some (Definition (Type, Intrinsic.builtin_path UInt64))
@@ -287,7 +285,8 @@ and elaborate_path_type context (path : Syntax.path_type) : Types.ty =
       | Some Never -> Types.Never
       | Some Integer -> Types.Integer
       | Some _ | None ->
-          check_arity context path shown (Names.generics_of context.lookups.names definition_path);
+          check_arity context path shown
+            (Resolve.Names.generics_of context.lookups.names definition_path);
           let type_ =
             Types.Named { path = definition_path; arguments = elaborate_arguments context path }
           in
@@ -307,7 +306,7 @@ and elaborate_trait_reference ?(capability = false) context (path : Syntax.path_
     (Types.trait_reference, Diagnostic.reported) Stdlib.result =
   let shown = show_path path.path in
   let trait_reference_of trait : (Types.trait_reference, Diagnostic.reported) Stdlib.result =
-    check_arity context path shown (Names.generics_of context.lookups.names trait);
+    check_arity context path shown (Resolve.Names.generics_of context.lookups.names trait);
     let associated =
       List.sort compare
         (List.filter_map
@@ -589,7 +588,7 @@ let elaborate_type_head context owner (head : Syntax.type_head) =
   let generics = elaborate_generics context owner head.generics in
   match find_target context head.path.last with
   | Some (Definition (Type, type_path)) ->
-      (match Names.generics_of context.lookups.names type_path with
+      (match Resolve.Names.generics_of context.lookups.names type_path with
       | Some expected when List.length expected <> List.length generics ->
           report context Arity context.spans.(head.id)
             (Printf.sprintf "`%s` takes %d generic %s, and this head names %d."
@@ -610,11 +609,9 @@ let elaborate_type_head context owner (head : Syntax.type_head) =
         report_error_type context Not_a_type context.spans.(head.id)
           (Printf.sprintf "`%s` is %s, not a type, so it has no methods, constants, or `impl`s."
              (show_path head.path)
-             (Names.kind_name (Names.kind_of_named kind))) )
+             (Resolve.Names.kind_name (Resolve.Names.kind_of_named kind))) )
   | Some (Unknown report) -> (generics, Types.Error report)
   | _ -> bug "the type head `%s` is not resolved" (show_path head.path)
-
-let make_self_parameter trait : Types.parameter = { owner = trait; name = "Self" }
 
 let elaborate_fields context (written : Syntax.field list) =
   List.stable_sort
@@ -649,7 +646,7 @@ let elaborate_container (context : t) (path : Path.t) (definition : Syntax.defin
   match definition.kind with
   | Trait { generics; requires; members; _ } ->
       let trait_generics = elaborate_generics context path generics in
-      let self_parameter = make_self_parameter path in
+      let self_parameter = Types.make_self_parameter path in
       let self_trait : Types.trait_reference =
         {
           trait = path;
@@ -788,9 +785,9 @@ let elaborate_container (context : t) (path : Path.t) (definition : Syntax.defin
             context ))
   | _ -> (Ok Capability_parts, context)
 
-let elaborate_header (lookups : Lookups.t) (key : Names.key) =
+let elaborate_header (lookups : Lookups.t) (key : Resolve.Names.key) =
   let resolved = lookups.resolved Interface key in
-  if Names.is_broken lookups.names key Header then Error []
+  if Resolve.Names.is_broken lookups.names key Header then Error []
   else
     match
       elaborate_container
@@ -817,7 +814,7 @@ let make_elaborated_interface context interface : Environment.elaborated_interfa
 
 let list_methods (lookups : Lookups.t) key =
   List.filter_map
-    (fun (member : Names.key) ->
+    (fun (member : Resolve.Names.key) ->
       match (member.path, lookups.names.definition member) with
       | Method { name; receiver; _ }, { kind = Function _; _ } ->
           Some { Types.method_name = name; method_receiver = receiver; provided = true }
@@ -905,19 +902,19 @@ let elaborate_member (lookups : Lookups.t) ~path ~spans resolved (definition : S
       make_elaborated_interface context
         (Error_interface (Resolve.Parts.recovery_report spans.(definition.id)))
 
-let elaborate_definition (lookups : Lookups.t) (key : Names.key) =
+let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
   let resolved = lookups.resolved Interface key in
   let definition = lookups.names.definition key in
   let spans = lookups.names.spans key in
   let path = key.path in
-  Compiler_bug.while_doing ~stage:"Interface" (Names.show_key key) (fun () ->
+  Compiler_bug.while_doing ~stage:"Interface" (Resolve.Names.show_key key) (fun () ->
       let context = create lookups resolved ~spans empty_scope in
       let recovered () =
         make_elaborated_interface context
           (Error_interface (Resolve.Parts.recovery_report spans.(definition.id)))
       in
       match
-        ( Names.recovery_report lookups.names key Header,
+        ( Resolve.Names.recovery_report lookups.names key Header,
           Option.map lookups.header (lookups.names.container key) )
       with
       | Some report, _ -> make_elaborated_interface context (Error_interface report)
@@ -928,7 +925,7 @@ let elaborate_definition (lookups : Lookups.t) (key : Names.key) =
           | Trait _ | Capability _ | Impl _ -> (
               match lookups.header key with
               | Some header -> make_container_interface lookups key header
-              | None -> bug "`%s` has no header" (Names.show_key key))
+              | None -> bug "`%s` has no header" (Resolve.Names.show_key key))
           | Method_declaration _ | Definition_error _ -> recovered ()
           | Function { signature; _ } ->
               let head, self_type =
@@ -993,15 +990,9 @@ let elaborate_definition (lookups : Lookups.t) (key : Names.key) =
           | Test { uses; _ } ->
               make_elaborated_interface context
                 (Test_interface (elaborate_capabilities context uses))
-          | Theorem { generics; parameters; clauses; _ } ->
+          | Theorem { name; generics; parameters; clauses; _ } ->
               let signature : Syntax.signature =
-                {
-                  name = Plain_name { text = ""; id = definition.id };
-                  generics;
-                  parameters;
-                  result = None;
-                  clauses;
-                }
+                { name = Plain_name name; generics; parameters; result = None; clauses }
               in
               make_elaborated_interface context
                 (Theorem_interface

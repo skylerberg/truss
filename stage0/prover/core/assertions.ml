@@ -127,7 +127,7 @@ let bit_vector_assertion (context : State.context) frame ~named ~origin
         Facts.assume context inside (Facts.in_range ty symbol);
         match local with
         | Core.Self -> { inside with self = Some symbol }
-        | _ -> { inside with locals = Locals.add local symbol inside.locals })
+        | _ -> { inside with locals = Locals.add (Core_local local) symbol inside.locals })
       isolated named
   in
   let term = read isolated in

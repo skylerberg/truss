@@ -531,8 +531,8 @@ let elements_so_far context (head : State.frame) ~element ~collection ~count yie
           (Models.model_of context collection_type collected ~element)
   | None -> ()
 
-let receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) ?(most = []) ~(for_loop : for_loop)
-    context frame ~element_type ~changed ~holds ~start ~receive =
+let receiving_loop ~each_iteration ~most ~(for_loop : for_loop) context frame ~element_type ~changed
+    ~holds ~start ~receive =
   let clauses = for_loop.for_clauses in
   let entry =
     { frame with State.yielded = Some (Amounts.empty_parts context frame element_type) }
@@ -627,9 +627,7 @@ let own_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
   let path = Path.Method { owner = impl; name = "next"; receiver = Mut } in
   let option_type = Types.Named { path = option_path; arguments = [ Types.Type element_type ] } in
   let invocation : Invocation.t = { callee = next; lends = None; uses = Types.no_capabilities } in
-  let pulling : Invocation.site =
-    { id = for_loop.for_at; origin = for_loop.for_at; type_ = option_type }
-  in
+  let pulling : Invocation.site = { origin = for_loop.for_at; type_ = option_type } in
   let measures = measures_of clauses in
   if context.terminates && not (Laws.signature_terminates context path) then
     Facts.oblige context frame Termination location
@@ -711,8 +709,7 @@ let own_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
           ]
           ~havoc_mut
           ~substitution_of:(fun _ ->
-            impl_arguments
-            @ [ ({ Types.owner = cursor_trait; name = "Self" }, Types.Type cursor_type) ])
+            impl_arguments @ [ (Types.make_self_parameter cursor_trait, Types.Type cursor_type) ])
           ~instance:[ Types.Type cursor_type ]
       in
       let has_another = Logic.Is (Facts.constructor_name option_type (Some "Some"), pulled) in

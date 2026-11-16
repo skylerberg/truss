@@ -1,5 +1,3 @@
-module Names = Resolve.Names
-
 let list_bound_diagnostics lookups ~package ~bounds ~spans named =
   List.concat_map
     (fun (id, (type_ : Types.ty)) ->
@@ -60,7 +58,7 @@ let find_visibility (state : Checking.state) (path : Path.t) =
   | _ -> None
 
 let check_private_in_public state ~visibility types (span : Source.Definition_span.t) =
-  if Names.is_public visibility then
+  if Resolve.Names.is_public visibility then
     List.iter
       (fun path ->
         match find_visibility state path with
@@ -197,7 +195,7 @@ let check_derives state (interface : Types.type_interface) (clauses : Syntax.typ
                   let shown = Elaborator.show_path written.path in
                   if
                     not
-                      (Names.derivable trait || Well_known.is Copyable trait
+                      (Resolve.Names.derivable trait || Well_known.is Copyable trait
                      || Well_known.is Plain trait)
                   then
                     Checking.report state Not_derivable state.spans.(written.id)
@@ -325,7 +323,7 @@ let check_redeclared (state : Checking.state) (name : Syntax.name) (receiver : P
                   interface.methods
             | None -> [])
           (Properties.list_bound_closure state.lookups
-             ~self:(Types.Parameter { owner = trait_path; name = "Self" })
+             ~self:(Types.Parameter (Types.make_self_parameter trait_path))
              required))
       trait.requires
   in
@@ -384,7 +382,7 @@ let check_proof_bounds (state : Checking.state) (written : Syntax.type_head)
 let check (state : Checking.state) =
   let lookups = state.lookups in
   let definition = state.definition in
-  let is_broken part = Names.is_broken lookups.names state.key part in
+  let is_broken part = Resolve.Names.is_broken lookups.names state.key part in
   check_bounds state;
   let resolved = lookups.resolved Interface state.key in
   if not (is_broken Header) then
@@ -392,19 +390,19 @@ let check (state : Checking.state) =
     | ( Some container,
         (Function { signature; _ } | Method_declaration signature),
         Function_interface written ) -> (
-        let name = Names.signature_name signature in
+        let name = Resolve.Names.signature_name signature in
         match
           (lookups.names.definition container, (lookups.elaborated_interface container).interface)
         with
         | { kind = Trait _; visibility; _ }, Trait_interface trait ->
             check_redeclared state name
-              (Names.receiver signature.parameters)
+              (Resolve.Names.receiver signature.parameters)
               ~trait_path:container.path trait;
             check_private_in_public state ~visibility (list_signature_types written)
               state.spans.(name.id)
         | { kind = Impl { trait_; _ }; _ }, Impl_interface impl ->
             Impl_checks.check_impl_method state name
-              (Names.receiver signature.parameters)
+              (Resolve.Names.receiver signature.parameters)
               written impl
               ~trait_span:(lookups.names.spans container).(trait_.id)
               trait_
@@ -431,7 +429,7 @@ let check (state : Checking.state) =
         let arity_matches =
           match for_type with
           | Types.Named { path; _ } -> (
-              match Names.generics_of lookups.names path with
+              match Resolve.Names.generics_of lookups.names path with
               | Some expected -> List.length expected = List.length generics
               | None -> true)
           | _ -> true

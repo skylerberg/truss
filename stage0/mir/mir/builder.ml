@@ -199,7 +199,7 @@ let lower_range_bound (pattern : Core.pattern) (bound : Core.range_bound) : Tree
 
 let rec expression builder (node : Core.expression) : Tree.operand option =
   let origin = node.origin in
-  let hold value = Emitter.hold ~node:node.id builder node.type_ origin value in
+  let hold value = Emitter.hold builder node.type_ origin value in
   if not (Emitter.reaches builder) then None
   else
     match node.kind with
@@ -280,6 +280,7 @@ let rec expression builder (node : Core.expression) : Tree.operand option =
                 {
                   destination = Emitter.at local;
                   base = Emitter.borrowed_place builder base_place;
+                  base_type = Core_walk.place_type base;
                   call;
                 }))
           origin;
@@ -493,7 +494,7 @@ and yielded builder (mode : Types.mode) (part : Core.operand) : Tree.yielded opt
         match field with
         | Value ({ kind = Construct { variant; fields }; _ } as node) when lends field ->
             In_order.map
-              (fun fields -> Tree.Built { variant; fields; type_ = node.type_; node = node.id })
+              (fun fields -> Tree.Built { variant; fields; type_ = node.type_ })
               (In_order.all
                  (List.map
                     (fun (name, field) ->
@@ -570,11 +571,11 @@ and lent builder (lending : Core.expression) ~duration : Tree.place option =
 and function_expression builder (node : Core.expression) ~is_argument :
     (Tree.operand * Tree.function_argument) option =
   let origin = node.origin in
-  let hold value = Emitter.hold ~node:node.id builder node.type_ origin value in
+  let hold value = Emitter.hold builder node.type_ origin value in
   match node.kind with
   | Function_value { path; type_arguments } ->
       let* value = hold (Function_value { path; type_arguments; is_argument }) in
-      Some (value, Tree.Function_reference { path; node = node.id; origin })
+      Some (value, Tree.Function_reference { path; origin })
   | Lambda { parameters; captures; body; _ } ->
       let index = lambda builder parameters captures body in
       let* value =
@@ -596,8 +597,7 @@ and function_expression builder (node : Core.expression) ~is_argument :
                    captures;
              })
       in
-      Some
-        (value, Tree.Lambda_expression { body = index; node = node.id; origin; type_ = node.type_ })
+      Some (value, Tree.Lambda_expression { body = index; origin; type_ = node.type_ })
   | Convert { conversion = Widen as conversion; value = converted } ->
       let* value, function_ = function_expression builder converted ~is_argument in
       let* value =
@@ -653,8 +653,7 @@ and call_value builder (node : Core.expression) (called : Core.call) =
                   | Default -> bug "a primitive operation with a default argument")
                 called.arguments))
       in
-      Emitter.hold ~node:node.id builder node.type_ origin
-        (Operation { operation; type_arguments; operands })
+      Emitter.hold builder node.type_ origin (Operation { operation; type_arguments; operands })
   | _ ->
       let* call = call_of builder called ~node:node.id ~origin:node.origin in
       if diverges node.type_ then begin
@@ -696,8 +695,7 @@ and truth builder (node : Core.expression) : Tree.operand option =
           match_patterns builder [ pattern ] [ scrutinee ] node.origin)
   | _ -> bug "a condition that is no short-circuit operator and no `is`"
 
-and pattern_tests ?(matched = ignore) builder (patterns : Core.pattern list) places :
-    Tree.operand option =
+and pattern_tests ~matched builder (patterns : Core.pattern list) places : Tree.operand option =
   let tested = ref [] in
   let branch_on value origin =
     match value with
@@ -1416,7 +1414,7 @@ and quantified builder (node : Core.expression) (quantifier : Core.quantifier)
               match_patterns builder [ pattern ] [ Emitter.at parameter ] origin) )
   in
   let body = Emitter.block_of builder (fun () -> expression builder body) in
-  Emitter.hold ~node:node.id builder node.type_ origin
+  Emitter.hold builder node.type_ origin
     (Specification (Quantified { quantifier; range; parameter; matches; body }))
 
 and lambda builder (parameters : Core.pattern list) (captures : Core.capture list)
@@ -1511,25 +1509,14 @@ and loop_clauses builder (clauses : Core.loop_clause list) : Tree.loop_clause li
           Cost { origin; amortized; resource; bound = bound written })
     clauses
 
-let of_expression ?(parameters = []) (written : Core.expression) =
-  let builder =
-    Emitter.create
-      ~entry_locals:(List.map (fun (parameter : Core.parameter) -> parameter.local) parameters)
-      ()
-  in
-  let parameters =
-    List.map
-      (fun (parameter : Core.parameter) ->
-        Emitter.bind_source ~name:parameter.name builder parameter.local parameter.mode
-          parameter.type_ 0)
-      parameters
-  in
+let of_expression (written : Core.expression) =
+  let builder = Emitter.create ~entry_locals:[] () in
   Emitter.in_scope builder written.origin (fun () ->
       Emitter.in_statement builder written.origin (fun () ->
           Option.iter
             (fun value -> Emitter.return_ builder (Some value) written.origin)
             (expression builder written)));
-  let body = Emitter.finish builder ~parameters in
+  let body = Emitter.finish builder ~parameters:[] in
   { Tree.body; lambdas = Emitter.lambdas builder }
 
 let of_clause ?(is_executable = false) ~(parameters : Core.parameter list)
@@ -1549,7 +1536,7 @@ let of_clause ?(is_executable = false) ~(parameters : Core.parameter list)
   Emitter.formula builder ~origin:written.origin ~type_:written.type_ (fun () ->
       (locals, expression builder written))
 
-let of_definition ?(is_specification = false) (definition : Core.definition) =
+let of_definition ~is_specification (definition : Core.definition) =
   let code =
     match definition with
     | Function { parameters; body = Some body; _ } -> Some (parameters, body, true)

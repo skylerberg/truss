@@ -111,25 +111,24 @@ let constant_int32 number = Lowered.Constant (Integer (Int32, Z.of_int number))
 let constant_int64 number = Lowered.Constant (Integer (Int64, Z.of_int number))
 let block statements terminator = { statements; terminator }
 
-let function_ ?(parameters = []) ?result ?(returns = true) ?(environment = []) locals blocks =
-  { parameters; result; returns; environment; locals; blocks }
+let function_ ?(parameters = []) ?result ?(environment = []) locals blocks =
+  { parameters; result; returns = true; environment; locals; blocks }
 
 let key name = Instance.Code { path = definition name; type_arguments = [] }
 
 let write builder (function_ : function_) =
-  let module Builder = Emit_c.Builder in
   List.iter
-    (fun (info : local_info) -> ignore (Builder.local builder ?name:info.name info.ty))
+    (fun (info : local_info) -> ignore (Emit_c.Builder.local builder ?name:info.name info.ty))
     function_.locals;
-  List.iter (fun _ -> ignore (Builder.block builder)) function_.blocks;
+  List.iter (fun _ -> ignore (Emit_c.Builder.block builder)) function_.blocks;
   List.iteri
     (fun index (block : block) ->
-      Builder.start builder index;
-      List.iter (Builder.emit builder) block.statements;
-      Builder.finish builder block.terminator)
+      Emit_c.Builder.start builder index;
+      List.iter (Emit_c.Builder.emit builder) block.statements;
+      Emit_c.Builder.finish builder block.terminator)
     function_.blocks;
   ({ parameters = function_.parameters; result = function_.result; returns = function_.returns }
-    : Builder.prototype)
+    : Emit_c.Builder.prototype)
 
 let instance ?(nested = []) name main : instance =
  fun env ->

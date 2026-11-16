@@ -1,7 +1,7 @@
 type t
 
 val create :
-  ?is_specification:bool -> ?entry_locals:Core.local list -> ?takes_free_locals:bool -> unit -> t
+  ?is_specification:bool -> entry_locals:Core.local list -> ?takes_free_locals:bool -> unit -> t
 
 val for_lambda : t -> t
 val is_specification : t -> bool
@@ -16,7 +16,7 @@ val add_source : t -> Core.local -> Tree.local -> unit
 val free_source : t -> Core.local -> type_:Types.ty -> origin:Core.origin -> Tree.local
 
 val bind_source :
-  ?name:string ->
+  name:string ->
   ?is_var:bool ->
   t ->
   Core.local ->
@@ -30,8 +30,8 @@ val note_bound_to_place : t -> Tree.local -> unit
 val place_temporary : t -> node:Core.id -> Types.ty -> Core.origin -> Tree.local
 val free_locals : t -> Tree.local list
 val emit : t -> Tree.statement_kind -> Core.origin -> unit
-val assign : ?node:Core.id -> t -> Tree.place -> Tree.rvalue -> Core.origin -> unit
-val hold : ?node:Core.id -> t -> Types.ty -> Core.origin -> Tree.rvalue -> Tree.operand option
+val assign : t -> Tree.place -> Tree.rvalue -> Core.origin -> unit
+val hold : t -> Types.ty -> Core.origin -> Tree.rvalue -> Tree.operand option
 val hold_choice : t -> Types.ty -> Core.origin -> Tree.choice -> Tree.operand option
 val held : t -> Tree.operand -> Types.ty -> Core.origin -> Tree.operand
 val borrowed_place : t -> Tree.place -> Tree.place

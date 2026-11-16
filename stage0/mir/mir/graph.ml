@@ -72,12 +72,14 @@ let canonical (blocks : basic_block array) =
     end
   in
   visit 0;
-  let renumbered = Array.make (Array.length blocks) (-1) in
-  List.iteri (fun index block -> renumbered.(block) <- index) !order;
-  let target block = renumbered.(block) in
-  let reached blocks =
-    List.filter_map (fun block -> if visited.(block) then Some (target block) else None) blocks
+  let renumbered = Array.make (Array.length blocks) None in
+  List.iteri (fun index block -> renumbered.(block) <- Some index) !order;
+  let target block =
+    match renumbered.(block) with
+    | Some index -> index
+    | None -> bug "a jump to block %d, which is unreachable" block
   in
+  let reached blocks = List.filter_map (fun block -> renumbered.(block)) blocks in
   let innermost = Hashtbl.create 4 in
   List.iter
     (fun loop ->
@@ -114,14 +116,12 @@ let canonical (blocks : basic_block array) =
             fork with
             branches =
               List.filter_map
-                (fun branch ->
-                  if visited.(branch.entry) then
-                    Some { entry = target branch.entry; blocks = reached branch.blocks }
-                  else None)
+                (fun (branch : branch) ->
+                  Option.map
+                    (fun entry -> { entry; blocks = reached branch.blocks })
+                    renumbered.(branch.entry))
                 fork.branches;
-            join =
-              Option.bind fork.join (fun join ->
-                  if visited.(join) then Some (target join) else None);
+            join = Option.bind fork.join (fun join -> renumbered.(join));
           }
     | Join { fork; next } -> Join { fork; next = target next }
     | Yield yielded -> Yield { yielded with resume = target yielded.resume }
@@ -129,9 +129,7 @@ let canonical (blocks : basic_block array) =
         Cancel
           {
             cancel with
-            task_end =
-              Option.bind cancel.task_end (fun task_end ->
-                  if visited.(task_end) then Some (target task_end) else None);
+            task_end = Option.bind cancel.task_end (fun task_end -> renumbered.(task_end));
           }
     | Resume { winner; exits; next } ->
         Resume

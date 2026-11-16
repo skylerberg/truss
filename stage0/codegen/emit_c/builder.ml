@@ -176,7 +176,7 @@ let finish builder (terminator : Lowered.terminator) =
       in
       function_.returns <- gives :: function_.returns
   | _ -> ());
-  Dynarray.set builder.successors builder.current (Lowered.successors terminator);
+  Dynarray.set builder.successors builder.current (Lowered.list_successors terminator);
   function_.size <- function_.size + 2;
   in_block_facts builder context (fun () ->
       C_code.terminator_c context fc builder.pending terminator);
@@ -190,11 +190,8 @@ let in_block builder block body =
   builder.current <- current;
   builder.pending <- pending
 
-let at = Lowered.local_place
-let constant_uint64 number = Lowered.Constant (Integer (UInt64, Z.of_int number))
-
 let branch builder value ~yes ~no =
-  finish builder (Switch { value; cases = [ (Z.one, yes) ]; default = Some no })
+  finish builder (Switch { value; cases = [ (Z.one, yes) ]; default = no })
 
 let when_ builder condition then_ =
   let inside = block builder in
@@ -212,14 +209,19 @@ let loop builder ?(integer = Memory_layout.UInt64) ~count body =
   let test = block builder in
   let inside = block builder in
   let after = block builder in
-  emit builder (Assign (at index, Use (constant 0)));
+  emit builder (Assign (Lowered.make_local_place index, Use (constant 0)));
   finish builder (Goto test);
   start builder test;
-  emit builder (Assign (at going, Binary (Less, Copy (at index), count)));
-  branch builder (Copy (at going)) ~yes:inside ~no:after;
+  emit builder
+    (Assign
+       (Lowered.make_local_place going, Binary (Less, Copy (Lowered.make_local_place index), count)));
+  branch builder (Copy (Lowered.make_local_place going)) ~yes:inside ~no:after;
   start builder inside;
   body index;
-  emit builder (Assign (at index, Binary (Add, Copy (at index), constant 1)));
+  emit builder
+    (Assign
+       ( Lowered.make_local_place index,
+         Binary (Add, Copy (Lowered.make_local_place index), constant 1) ));
   finish builder (Goto test);
   start builder after
 
@@ -248,7 +250,7 @@ let outline builder ~index ~parts body =
   C_code.statement_c code.context
     (prologue_context builder function_)
     function_.prologue
-    (Assign (at environment, Use (Copy (at arrives))));
+    (Assign (Lowered.make_local_place environment, Use (Copy (Lowered.make_local_place arrives))));
   write_in builder number (fun () ->
       start builder entry;
       body ());
@@ -344,7 +346,7 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
   let is_own number local =
     List.mem local (parameters_of number)
     || Hashtbl.find_opt home local = Some number
-    || Lowered.erased builder.env (local_type builder local)
+    || Lowered.is_erased builder.env (local_type builder local)
   in
   let captured = Array.make count Locals.empty in
   Array.iteri
@@ -396,7 +398,7 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
                 fills.(parent_number)
                 (Assign
                    ( { root = Local holder; projections = [ Field field ] },
-                     Use (Address { place = at local; writable = true }) )))
+                     Use (Address { place = Lowered.make_local_place local; writable = true }) )))
             (captures number)
       | Own -> ())
     functions;

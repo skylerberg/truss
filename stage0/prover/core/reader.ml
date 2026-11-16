@@ -1,5 +1,3 @@
-module Symbol = Logic.Symbol
-
 let ( let* ) = Option.bind
 
 type loop_exits = {
@@ -27,11 +25,6 @@ let unit_callee : _ Core.target -> Invocation.callee = function
 
 let invocation_of (call : Mir.call) ~lends : Invocation.t =
   { callee = unit_callee call.callee; lends; uses = call.uses }
-
-let local_key run local =
-  match run.infos.(local).kind with
-  | Source { local = core; _ } -> core
-  | Temporary | Lent _ -> Core.Synthetic (-1 - local)
 
 let declared_fields context ty variant =
   match Facts.visible_type context ty with
@@ -78,7 +71,7 @@ let rec place_type context frame run (place : Mir.place) =
 let rec aliased (frame : State.frame) run (place : Mir.place) : (Logic.term * Mir.place) list =
   match place.Mir.root with
   | Local local -> (
-      match Locals.find_opt (local_key run local) frame.aliases with
+      match Locals.find_opt (Locals.make_key run.infos local) frame.aliases with
       | Some bound ->
           List.concat_map
             (fun (bound_on, bound_place) ->
@@ -106,14 +99,16 @@ let read_root context frame run (root : Mir.root) =
   | Literal { text; type_ } ->
       Values.text_value context frame (Facts.substituted context frame type_) text
   | Local local -> (
-      match local_key run local with
-      | Self -> (
+      match Locals.make_key run.infos local with
+      | Core_local Self -> (
           match frame.self with
           | Some self -> self
           | None -> raise (Facts.Foreign_unsupported "`self` outside a method"))
       | key -> (
-          if frame.makes_obligations && not context.reading_callback then
-            Validity.escaping_callback context frame key;
+          (match key with
+          | Core_local core when frame.makes_obligations && not context.reading_callback ->
+              Validity.escaping_callback context frame core
+          | Core_local _ | Mir_local _ -> ());
           match Locals.find_opt key frame.locals with
           | Some term -> term
           | None
@@ -201,8 +196,8 @@ let write_resolved context frame run (place : Mir.place) new_value =
         if place.Mir.projections = [] then new_value
         else rebuilt [] (read_root context frame run place.Mir.root) place.Mir.projections
       in
-      match local_key run local with
-      | Self -> { frame with self = Some whole }
+      match Locals.make_key run.infos local with
+      | Core_local Self -> { frame with self = Some whole }
       | key -> Facts.bind frame key (Facts.substituted context frame run.infos.(local).type_) whole)
 
 let write_place context frame run (place : Mir.place) new_value =
@@ -215,8 +210,8 @@ let write_place context frame run (place : Mir.place) new_value =
           match place.Mir.root with
           | Constant _ | Literal _ -> written
           | Local local -> (
-              match local_key run local with
-              | Self -> (
+              match Locals.make_key run.infos local with
+              | Core_local Self -> (
                   match (written.self, frame.self) with
                   | Some after, Some before ->
                       { frame with self = Some (Logic.ite condition after before) }
@@ -237,8 +232,8 @@ let changes ?(also = []) run (frame : State.frame) (blocks : Mir.block list) : S
       (fun (_, (place : Mir.place)) ->
         match place.Mir.root with
         | Local local -> (
-            match local_key run local with
-            | Self -> self := true
+            match Locals.make_key run.infos local with
+            | Core_local Self -> self := true
             | key -> if Locals.mem key frame.locals then locals := key :: !locals)
         | Constant _ | Literal _ -> ())
       (aliased frame run place)
@@ -246,8 +241,8 @@ let changes ?(also = []) run (frame : State.frame) (blocks : Mir.block list) : S
   let assigned (place : Mir.place) =
     (match place with
     | { root = Local local; projections = [] } -> (
-        match local_key run local with
-        | Self -> ()
+        match Locals.make_key run.infos local with
+        | Core_local Self -> ()
         | key -> if Locals.mem key frame.locals then reassigned := key :: !reassigned)
     | _ -> ());
     note place
@@ -319,7 +314,7 @@ let read_operand context frame run (operand : Mir.operand) =
       match value with
       | Unit ->
           ignore (Facts.sort_of context Types.unit);
-          Logic.Apply (Symbol.Unit, [])
+          Logic.Apply (Logic.Symbol.Unit, [])
       | Integer number -> Logic.Integer number
       | Float number -> (
           match Facts.float_format ty with
@@ -348,8 +343,7 @@ let passed_place_of context run place =
 
 let shape_of run ?function_ (value : Mir.operand) : Invocation.shape =
   match (function_, whole_local value) with
-  | Some (Mir.Function_reference { path; node; origin }), _ ->
-      Named_function { id = node; origin; path }
+  | Some (Mir.Function_reference { path; origin }), _ -> Named_function { origin; path }
   | (Some (Lambda_expression _) | None), Some local -> (
       match run.infos.(local).kind with
       | Source { local = core; _ } -> Forwarded core
@@ -381,7 +375,7 @@ let one_place context (places : (Logic.term * State.passed_place) list) : State.
 let argument_place context (frame : State.frame) run (mode : Types.mode) (value : Mir.operand) =
   let held =
     Option.bind (whole_local value) (fun local ->
-        Locals.find_opt (local_key run local) frame.slices)
+        Locals.find_opt (Locals.make_key run.infos local) frame.slices)
   in
   match (mode, held) with
   | Types.Mut, Some (Slices slices) ->
@@ -415,13 +409,13 @@ let call_values context frame run (invocation : Invocation.t) (arguments : Mir.a
             match argument with
             | Passed { mode; value; function_; _ } -> (
                 match function_ with
-                | Some (Lambda_expression { body; node; origin; type_ }) ->
+                | Some (Lambda_expression { body; origin; type_ }) ->
                     [
                       State.Lambda_argument
                         {
                           position;
                           mode;
-                          site = { id = node; origin; type_ };
+                          site = { origin; type_ };
                           lambda = { code = run.lambdas.(body); lambdas = run.lambdas };
                         };
                     ]
@@ -472,15 +466,13 @@ let read_call context frame run (call : Mir.call) ~result_type =
       in
       let values = call_values context frame run invocation call.arguments in
       Calls.apply_call context frame
-        { id = call.node; origin = call.origin; type_ = result_type }
+        { origin = call.origin; type_ = result_type }
         invocation ~through values
 
 let read_lend context (frame : State.frame) run part (call : Mir.call) =
   let mode = match run.infos.(part).kind with Lent mode -> mode | _ -> Types.Read in
   let invocation = invocation_of call ~lends:(Some mode) in
-  let site : Invocation.site =
-    { id = call.node; origin = call.origin; type_ = run.infos.(part).type_ }
-  in
+  let site : Invocation.site = { origin = call.origin; type_ = run.infos.(part).type_ } in
   let location = Facts.locate context frame.source call.origin in
   let values = call_values context frame run invocation call.arguments in
   let lend ?lent_final frame =
@@ -527,7 +519,10 @@ let read_lend context (frame : State.frame) run part (call : Mir.call) =
       | Some write_back ->
           {
             lent with
-            lends = Locals.add (local_key run part) [ (Logic.Boolean true, write_back) ] lent.lends;
+            lends =
+              Locals.add (Locals.make_key run.infos part)
+                [ (Logic.Boolean true, write_back) ]
+                lent.lends;
           }
       | None -> lent)
     lent
@@ -543,7 +538,7 @@ let lends_places (part : Mir.yielded) =
 let rec yielded_value context frame run ~origin (part : Mir.yielded) =
   match part with
   | Part operand -> (frame, read_operand context frame run operand)
-  | Built { variant; fields; node; type_ } ->
+  | Built { variant; fields; type_ } ->
       let frame, values =
         List.fold_left
           (fun (frame, values) (name, field) ->
@@ -554,7 +549,7 @@ let rec yielded_value context frame run ~origin (part : Mir.yielded) =
             | None -> (frame, values @ [ (name, None) ]))
           (frame, []) fields
       in
-      Values.apply_construct context frame { id = node; origin; type_ } variant values
+      Values.apply_construct context frame { origin; type_ } variant values
 
 let rec written_back context run ty (part : Mir.yielded) frame after =
   match part with
@@ -589,7 +584,7 @@ let bind_parts context (frame : State.frame) run =
   Locals.fold
     (fun key parts (frame : State.frame) ->
       match (key, Locals.find_opt key frame.types, List.rev parts) with
-      | Core.Synthetic number, _, _ when number < 0 -> frame
+      | Locals.Mir_local _, _, _ -> frame
       | _, Some ty, (_, first) :: later -> (
           let read = read_place context { frame with makes_obligations = false } run in
           try
@@ -731,8 +726,8 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
       | Some result -> (frame, result)
       | None -> Facts.unsupported location "`result` here")
   | Specification (Entry local) -> (
-      match local_key run local with
-      | Self -> (
+      match Locals.make_key run.infos local with
+      | Core_local Self -> (
           match frame.old_self with
           | Some self -> (frame, self)
           | None -> raise (Facts.Foreign_unsupported "`self` outside a method"))
@@ -789,7 +784,9 @@ and quantifier_value context frame run ~location quantifier range ~parameter ~(m
     Models.quantified_over context frame quantifier range
       ~bind:(fun inner value ty ->
         let after, matched =
-          read_value context (Facts.bind inner (local_key run parameter) ty value) run matches
+          read_value context
+            (Facts.bind inner (Locals.make_key run.infos parameter) ty value)
+            run matches
         in
         (matched, after))
       ~read:(fun body_frame _ ->
@@ -962,13 +959,15 @@ and read_statement context frame run (statement : Mir.statement) =
           | [] -> Facts.bug "a `continue` outside a loop")
       | Cancel { task; winner; number; returned } -> (
           let frame =
-            Facts.bind frame (local_key run winner) (Types.make_builtin UInt32)
+            Facts.bind frame
+              (Locals.make_key run.infos winner)
+              (Types.make_builtin UInt32)
               (Logic.Integer (Z.of_int number))
           in
           let frame =
             match returned with
             | Some (value, local) ->
-                Facts.bind frame (local_key run local)
+                Facts.bind frame (Locals.make_key run.infos local)
                   (operand_type context frame value)
                   (read_operand context frame run value)
             | None -> frame
@@ -1106,7 +1105,7 @@ and read_statement context frame run (statement : Mir.statement) =
       in
       let run_body inside element =
         let inside =
-          Facts.bind inside (local_key run part)
+          Facts.bind inside (Locals.make_key run.infos part)
             (Facts.substituted context inside run.infos.(part).type_)
             element
         in
@@ -1120,7 +1119,7 @@ and read_statement context frame run (statement : Mir.statement) =
       and after_bindings = List.filteri (fun index _ -> index >= binding_count) body.statements in
       let bind_element frame element =
         let frame =
-          Facts.bind frame (local_key run part)
+          Facts.bind frame (Locals.make_key run.infos part)
             (Facts.substituted context frame run.infos.(part).type_)
             element
         in
@@ -1205,7 +1204,7 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
         value = Operand (Borrow { place; mode = Mut; _ });
         _;
       } ->
-      let key = local_key run local in
+      let key = Locals.make_key run.infos local in
       Some
         {
           frame with
@@ -1217,17 +1216,12 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
       Some
         (write_place context frame run target
            (Facts.arrive context frame "lambda" (place_type context frame run target)))
-  | Assign { target; value; node } ->
+  | Assign { target; value } ->
       write_assignment context run target
         ~copied:(match value with Operand copied -> [ copied ] | _ -> [])
         (Some
            (read_rvalue context frame run value
-              ~site:
-                {
-                  id = Option.value node ~default:(-1);
-                  origin = statement.origin;
-                  type_ = target_type context frame run target;
-                }))
+              ~site:{ origin = statement.origin; type_ = target_type context frame run target }))
   | Call { destination; call } -> (
       let result_type =
         match destination with
@@ -1243,7 +1237,8 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
               Some
                 {
                   written with
-                  slices = Locals.add (local_key run local) State.Unknown_slice written.slices;
+                  slices =
+                    Locals.add (Locals.make_key run.infos local) State.Unknown_slice written.slices;
                 }
           | Some destination -> Some (write_place context after run destination term)
           | None -> Some after)
@@ -1253,7 +1248,7 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
       let frame =
         List.fold_left
           (fun (frame : State.frame) local ->
-            match Locals.find_opt (local_key run local) frame.lends with
+            match Locals.find_opt (Locals.make_key run.infos local) frame.lends with
             | Some lent ->
                 let final =
                   read_place context
@@ -1279,7 +1274,9 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
           frame (List.rev locals)
       in
       let without map =
-        List.fold_left (fun map local -> Locals.remove (local_key run local) map) map locals
+        List.fold_left
+          (fun map local -> Locals.remove (Locals.make_key run.infos local) map)
+          map locals
       in
       Some
         {
@@ -1327,7 +1324,7 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
             Logic.Boolean true )
           :: context.decisions;
       Some frame
-  | Slice { destination; base; call } ->
+  | Slice { destination; base; base_type; call } ->
       let values = call_values context frame run (invocation_of call ~lends:None) call.arguments in
       let argument position =
         Option.map
@@ -1336,9 +1333,9 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
       in
       let low = Option.value (argument 1) ~default:(Logic.int 0) in
       let site : Invocation.site =
-        { id = call.node; origin = call.origin; type_ = target_type context frame run destination }
+        { origin = call.origin; type_ = target_type context frame run destination }
       in
-      let base_type = place_type context frame run base in
+      let base_type = Facts.substituted context frame base_type in
       let collection = read_place context frame run base in
       let frame, viewed, low, high =
         Intrinsics.apply_slice context frame site ~base_type ~collection ~low ~high:(argument 2)
@@ -1351,7 +1348,7 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
             {
               written with
               slices =
-                Locals.add (local_key run local)
+                Locals.add (Locals.make_key run.infos local)
                   (State.Slices
                      [
                        (Logic.Boolean true, { made_at = site; collection; start = low; stop = high });
@@ -1364,11 +1361,7 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
       | Trait_method { trait; name; receiver; evidence; _ }, [ Passed { value = template; _ } ] ->
           let frame, tagged =
             Values.apply_template context frame
-              {
-                id = call.node;
-                origin = call.origin;
-                type_ = target_type context frame run destination;
-              }
+              { origin = call.origin; type_ = target_type context frame run destination }
               ~trait ~name ~receiver ~evidence ~literals
               (read_operand context frame run template)
           in
@@ -1405,17 +1398,18 @@ and write_assignment context run (target : Mir.place) ~(copied : Mir.operand lis
       match run.infos.(local).kind with
       | Source { local = (Named _ | Synthetic _) as core; name = Some name; _ }
         when frame.source.key = Some context.home ->
-          Tables.Local_table.replace context.local_names core name
+          Tables.Local_table.replace context.local_names (Core_local core) name
       | Source _ | Temporary | Lent _ -> ())
   | Constant _ | Literal _ -> ());
   let copied_slice =
-    Option.bind copied (fun source -> Locals.find_opt (local_key run source) frame.slices)
+    Option.bind copied (fun source ->
+        Locals.find_opt (Locals.make_key run.infos source) frame.slices)
   in
   let written = write_place context frame run target term in
   Some
     (match target with
     | { root = Local local; projections = [] } ->
-        let key = local_key run local in
+        let key = Locals.make_key run.infos local in
         {
           written with
           slices =
@@ -1446,7 +1440,8 @@ let formula_term context (frame : State.frame) (formula : Mir.formula) ~argument
     else
       List.fold_left2
         (fun inside parameter argument ->
-          Facts.bind inside (local_key run parameter)
+          Facts.bind inside
+            (Locals.make_key run.infos parameter)
             (Facts.substituted context inside formula.locals.(parameter).type_)
             argument)
         inside formula.parameters arguments
@@ -1476,7 +1471,8 @@ let read_body context start ~(lambdas : Mir.body array) (body : Mir.body) =
     List.fold_left
       (fun frame local ->
         let ty = Facts.substituted context frame body.locals.(local).type_ in
-        Facts.bind frame (local_key run local) ty (Facts.arrive context frame "returned" ty))
+        Facts.bind frame (Locals.make_key run.infos local) ty
+          (Facts.arrive context frame "returned" ty))
       start (returned_locals body.code)
   in
   match read_statements context start run body.code.statements with

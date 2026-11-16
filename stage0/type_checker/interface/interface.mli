@@ -2,7 +2,8 @@ module Environment = Environment
 module Lookups = Lookups
 
 module Elaborator : sig
-  module Parameter_table = Elaborator.Parameter_table
+  module Parameter_table :
+    Hashtbl.S with type key = Types.parameter and type 'a t = 'a Elaborator.Parameter_table.t
 
   type t = Elaborator.t = {
     lookups : Lookups.t;

@@ -1,6 +1,5 @@
-module Names = Resolve.Names
-
-let source_of (key : Names.key) = { State.key = Some key; name = Names.show_key key }
+let source_of (key : Resolve.Names.key) =
+  { State.key = Some key; name = Resolve.Names.show_key key }
 
 let source_at_key (lookups : Lookups.t) key =
   ignore (lookups.mir.body_part key);
@@ -29,8 +28,7 @@ let trait_substitution (lookups : Lookups.t) (trait : Types.trait_reference) (ty
     | generic :: generics, argument :: arguments -> (generic, argument) :: pair generics arguments
     | _ -> []
   in
-  ({ Types.owner = trait.trait; name = "Self" }, Types.Type ty)
-  :: pair generics trait.trait_arguments
+  (Types.make_self_parameter trait.trait, Types.Type ty) :: pair generics trait.trait_arguments
 
 let part_of ?(inherited = false) (lookups : Lookups.t) path callee =
   Option.map
@@ -53,7 +51,7 @@ let part_of ?(inherited = false) (lookups : Lookups.t) path callee =
        (fun ({ form; _ } : Mir.contract Mir.sourced) -> form)
        (Mir.contract_of_path lookups.mir path))
 
-let holds_todo (lookups : Lookups.t) (key : Names.key) =
+let holds_todo (lookups : Lookups.t) (key : Resolve.Names.key) =
   match Mir.code (lookups.mir.body_part key) with
   | Some code ->
       let holds = ref false in
@@ -78,7 +76,7 @@ let law_proofs (lookups : Lookups.t) package (trait : Types.trait_reference) (fo
     | _ -> []
   in
   List.filter_map
-    (fun (key : Names.key) ->
+    (fun (key : Resolve.Names.key) ->
       match Interface.Definition.read_interface lookups.interface key.path with
       | Some (Interface.Environment.Law_proof_interface proven) -> (
           let variables =
@@ -94,7 +92,7 @@ let law_proofs (lookups : Lookups.t) package (trait : Types.trait_reference) (fo
       | _ -> None)
     named_laws
 
-let impl_unfinished (lookups : Lookups.t) (key : Names.key) =
+let impl_unfinished (lookups : Lookups.t) (key : Resolve.Names.key) =
   List.exists (holds_todo lookups) (lookups.interface.names.contained key)
 
 let law_unshown (lookups : Lookups.t) (impl : Path.t) (trait : Types.trait_reference) for_type name
@@ -183,7 +181,9 @@ let resource_of (cost : Mir.cost) ~locals : Costs.resource option =
   | Allocations -> Some Allocations
   | Allocated_bytes -> Some Allocated_bytes
   | Calls (Function_parameter local) ->
-      Option.map (fun term -> Costs.Calls (Through term)) (Locals.find_opt local locals)
+      Option.map
+        (fun term -> Costs.Calls (Through term))
+        (Locals.find_opt (Core_local local) locals)
   | Calls (Capability path) -> Some (Calls (Capability path))
   | Calls (Capability_method (path, name)) -> Some (Calls (Capability_method (path, name)))
 

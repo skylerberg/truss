@@ -1,5 +1,3 @@
-module Builder = Emit_c.Builder
-
 type unsupported = Lowering.unsupported = { construct : string; at : Lowered.site option }
 
 exception Unsupported = Lowering.Unsupported
@@ -45,26 +43,28 @@ let begin_body (st : Lowering.state) ~(body : Mir.Graph.body) ~defaults =
   let bound = bind_parameters st body ~defaults in
   let places = List.map (fun (_, _, place) -> place) bound in
   let mask =
-    if code.has_defaults then Some (Builder.local st.builder ~name:"passed" (Raw (Integer UInt64)))
+    if code.has_defaults then
+      Some (Emit_c.Builder.local st.builder ~name:"passed" (Raw (Integer UInt64)))
     else None
   in
   let evidence =
     Lowering.evidence_parameters st
       (Definitions.evidence_for st.context code.substitution code.uses)
   in
-  Builder.start st.builder (Builder.block st.builder);
+  Emit_c.Builder.start st.builder (Emit_c.Builder.block st.builder);
   st.evidence <-
     st.evidence @ Generated.real_implementations st ~user:(Path.show code.definition) code.real;
   let places =
     match mask with
-    | Some mask -> Mir_form.fill_defaults st (Builder.at mask) body ~defaults places
+    | Some mask -> Mir_form.fill_defaults st (Lowered.make_local_place mask) body ~defaults places
     | None -> places
   in
   (List.filter_map (fun (arrives, _, _) -> arrives) bound @ Option.to_list mask @ evidence, places)
 
 let code_state context ~key path =
   let code = Definitions.code_of context path [] in
-  (Lowering.enter context ~builder:(Builder.create context.env ~key) (Lowering.frame_of code), code)
+  ( Lowering.enter context ~builder:(Emit_c.Builder.create context.env ~key) (Lowering.frame_of code),
+    code )
 
 let lower_template_check context ~from_template ~literals ~clauses : Emit_c.Builder.instance =
   let key = Instance.Template_check { from_template; literals; clauses } in
@@ -74,7 +74,7 @@ let lower_template_check context ~from_template ~literals ~clauses : Emit_c.Buil
     | [ (_, template_type) ] -> template_type
     | _ -> Definitions.bug "%s does not take one template" (Path.show from_template)
   in
-  Builder.start st.builder (Builder.block st.builder);
+  Emit_c.Builder.start st.builder (Emit_c.Builder.block st.builder);
   Lowering.in_scope st (fun () ->
       let template =
         Targets.template_value st
@@ -98,7 +98,7 @@ let lower_template_check context ~from_template ~literals ~clauses : Emit_c.Buil
 let lower_call_evaluation context ~function_ ~arguments : Emit_c.Builder.instance =
   let key = Instance.Call_evaluation { function_; arguments } in
   let st, _ = code_state context ~key function_ in
-  Builder.start st.builder (Builder.block st.builder);
+  Emit_c.Builder.start st.builder (Emit_c.Builder.block st.builder);
   let signature = Definitions.signature_of context function_ in
   Lowering.in_scope st (fun () ->
       let passed =
@@ -112,7 +112,7 @@ let lower_call_evaluation context ~function_ ~arguments : Emit_c.Builder.instanc
               | Bool -> Lowered.Constant (Bool (not (Z.equal value Z.zero)))
               | _ -> Definitions.bug "an evaluated call's argument of type %s" (Ground.to_string ty)
             in
-            Builder.emit st.builder (Assign (place, Use constant));
+            Emit_c.Builder.emit st.builder (Assign (place, Use constant));
             (mode, ty, place))
           (Definitions.interface_parameters signature)
           arguments
@@ -138,7 +138,9 @@ let lower_source_code context ~path ~type_arguments : Emit_c.Builder.instance =
   let code = Definitions.code_of context path type_arguments in
   let body = (Mir_form.mir_of context path).body in
   let st =
-    Lowering.enter context ~builder:(Builder.create context.env ~key) (Lowering.frame_of code)
+    Lowering.enter context
+      ~builder:(Emit_c.Builder.create context.env ~key)
+      (Lowering.frame_of code)
   in
   let convention, returns = Definitions.result_of context code.substitution code.result in
   Lowering.result_slot st convention;
@@ -147,7 +149,7 @@ let lower_source_code context ~path ~type_arguments : Emit_c.Builder.instance =
   in
   let lending_locals =
     List.map
-      (fun ty -> Builder.local st.builder ~name:"lend" ty)
+      (fun ty -> Emit_c.Builder.local st.builder ~name:"lend" ty)
       (Definitions.lending_parameters context code.substitution code.result)
   in
   let lending : Lowering.lending option =
@@ -155,10 +157,10 @@ let lower_source_code context ~path ~type_arguments : Emit_c.Builder.instance =
     | Lends (_, ty), site :: record :: slot ->
         Some
           {
-            slot = (match slot with [ slot ] -> Some (Builder.at slot) | _ -> None);
+            slot = (match slot with [ slot ] -> Some (Lowered.make_local_place slot) | _ -> None);
             part = Lowering.ground st ty;
-            record = Copy (Builder.at record);
-            site = Copy (Builder.at site);
+            record = Copy (Lowered.make_local_place record);
+            site = Copy (Lowered.make_local_place site);
           }
     | _ -> None
   in

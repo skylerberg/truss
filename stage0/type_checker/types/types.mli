@@ -53,6 +53,8 @@ and cost_bound = Finite_cost | Order_of | No_more_than of Z.t option | Exactly_c
 val unit : ty
 val bool : ty
 val make_builtin : Intrinsic.builtin -> ty
+val make_self_parameter : Path.t -> parameter
+val is_self_parameter : parameter -> bool
 val make_named : Path.t -> ty list -> ty
 val is_builtin : Intrinsic.builtin -> ty -> bool
 val find_builtin : ty -> Intrinsic.builtin option
@@ -60,6 +62,8 @@ val is_well_known : Well_known.t -> ty -> bool
 val find_integer_bits : ty -> (int * bool) option
 val find_integer_range : ty -> (Z.t * Z.t) option
 val is_integer_type : ty -> bool
+val find_integer_implementors : Path.t -> Intrinsic.builtin list option
+val find_bound_integer_implementors : trait_reference list -> Intrinsic.builtin list option
 val is_signed : ty -> bool
 val is_float_type : ty -> bool
 val make_capability_set : capability list -> capability_set

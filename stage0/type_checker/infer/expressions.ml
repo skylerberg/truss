@@ -1,5 +1,3 @@
-module Elaborator = Interface.Elaborator
-
 let rec expression (state : State.state) env ?expected (value : Syntax.expression) : Types.ty =
   let type_ =
     if Hashtbl.mem state.lent_tails value.id then lent_part state env value
@@ -162,7 +160,7 @@ and expression_kind state env ?expected (value : Syntax.expression) : Types.ty =
               "A quantifier over a whole type cannot run, so it is only for specifications and the \
                bodies of functions for specifications only. Quantify over a range or a collection.";
           State.declare state bound
-            (Elaborator.elaborate_type state.context written)
+            (Interface.Elaborator.elaborate_type state.context written)
             ~is_var:false ~mode:Types.Read);
       check state { env with in_quantifier = true } body Types.bool;
       State.register_expression state value (fun () ->

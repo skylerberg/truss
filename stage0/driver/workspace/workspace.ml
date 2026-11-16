@@ -789,10 +789,7 @@ let serve ~key ~handle =
       reset ());
   is_serving := false
 
-let call ?program ?start_server ?key ~progress request =
-  let key = match key with Some key -> key | None -> make_server_key (Sys.getcwd ()) in
-  Server.call ?program ?start_server ~key ~progress request
-
+let call = Server.call
 let list_servers = Server.serving
 let stop = Server.stop
 let wait_until_ended = Server.wait_until_ended

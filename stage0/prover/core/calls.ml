@@ -1,6 +1,3 @@
-module Names = Resolve.Names
-module Symbol = Logic.Symbol
-
 let argument_at_index (values : State.passed list) index =
   match
     List.find_map
@@ -15,7 +12,7 @@ let requires_fix (context : State.context) (frame : State.frame) (part : State.p
   let clause = requirement.clause in
   let fixed name =
     List.mem name context.entry
-    || match name with Symbol.Constant _ | Symbol.Text_literal _ -> true | _ -> false
+    || match name with Logic.Symbol.Constant _ | Logic.Symbol.Text_literal _ -> true | _ -> false
   in
   let simple text =
     String.for_all
@@ -59,13 +56,13 @@ let requires_fix (context : State.context) (frame : State.frame) (part : State.p
 
 let named_term context ty term =
   let rec holds_call = function
-    | Logic.Apply ((Symbol.Function _ | Symbol.Limited _), _) -> true
+    | Logic.Apply ((Logic.Symbol.Function _ | Logic.Symbol.Limited _), _) -> true
     | Logic.Forall (_, _, body) | Logic.Exists (_, body) -> holds_call body
     | term -> List.exists holds_call (Logic.arguments term)
   in
   if not (holds_call term) then term
   else
-    let symbol = Symbol.Named_term term in
+    let symbol = Logic.Symbol.Named_term term in
     let named = Logic.Symbol symbol in
     Facts.once context (Value_of symbol) (fun () ->
         Facts.declare context (Logic.Constant (symbol, Facts.sort_of context ty));
@@ -74,7 +71,7 @@ let named_term context ty term =
 
 let default_value (context : State.context) frame (part : State.part) position =
   match
-    Option.bind part.callee.key (fun (key : Names.key) ->
+    Option.bind part.callee.key (fun (key : Resolve.Names.key) ->
         Mir.defaults_of_path context.lookups.mir key.path)
   with
   | Some { form = Parameter_defaults defaults; _ } -> (
@@ -99,7 +96,8 @@ let structural_parameters context (frame : State.frame) (own : State.part) =
              | _ -> [])
          | local -> (
              match
-               (Locals.find_opt local frame.old_locals, Facts.local_type context frame local)
+               ( Locals.find_opt (Core_local local) frame.old_locals,
+                 Facts.local_type context frame (Core_local local) )
              with
              | Some entry, Some ty when is_datatype ty -> [ (ty, entry, index) ]
              | _ -> []))
@@ -154,7 +152,9 @@ let contract_call context (frame : State.frame) (site : Invocation.site) (invoca
         match (parameter.local, term) with
         | Self, Some term -> (locals, types, Some (term, parameter.type_))
         | local, Some term ->
-            (Locals.add local term locals, Locals.add local parameter.type_ types, self)
+            ( Locals.add (Core_local local) term locals,
+              Locals.add (Core_local local) parameter.type_ types,
+              self )
         | _, None -> (locals, types, self))
       (Locals.empty, Locals.empty, None)
       bindings
@@ -311,7 +311,7 @@ let contract_call context (frame : State.frame) (site : Invocation.site) (invoca
   let is_limited_call = ref false in
   let result =
     if contract.is_logic_function && List.length own_arguments = List.length own_bound then begin
-      let function_symbol = Symbol.Function { callee = path; instance } in
+      let function_symbol = Logic.Symbol.Function { callee = path; instance } in
       let sorts =
         List.mapi
           (fun index ((parameter : Mir.parameter), _) ->
@@ -336,13 +336,13 @@ let contract_call context (frame : State.frame) (site : Invocation.site) (invoca
       let symbol =
         if List.mem function_symbol context.axiomatizing then begin
           is_limited_call := true;
-          let limited = Symbol.Limited { callee = path; instance } in
+          let limited = Logic.Symbol.Limited { callee = path; instance } in
           Facts.declare context (Logic.Function (limited, sorts, result_sort));
           Facts.once context (Limited_link function_symbol) (fun () ->
               let parameters =
                 List.mapi
                   (fun index sort ->
-                    (Symbol.Variable { label = "linked"; numbers = [ index ] }, sort))
+                    (Logic.Symbol.Variable { label = "linked"; numbers = [ index ] }, sort))
                   sorts
               in
               let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
@@ -362,7 +362,7 @@ let contract_call context (frame : State.frame) (site : Invocation.site) (invoca
             let parameters =
               List.mapi
                 (fun index sort ->
-                  (Symbol.Variable { label = "ranged"; numbers = [ index ] }, sort))
+                  (Logic.Symbol.Variable { label = "ranged"; numbers = [ index ] }, sort))
                 sorts
             in
             Facts.add_fact context
@@ -416,7 +416,7 @@ let contract_call context (frame : State.frame) (site : Invocation.site) (invoca
       context.fresh <- context.fresh + 1;
       let axiom = context.fresh in
       List.mapi
-        (fun index sort -> (Symbol.Variable { label; numbers = [ axiom; index ] }, sort))
+        (fun index sort -> (Logic.Symbol.Variable { label; numbers = [ axiom; index ] }, sort))
         sorts
     in
     let readable_clause mark clause inside =
@@ -680,7 +680,7 @@ let contract_call context (frame : State.frame) (site : Invocation.site) (invoca
 
 let time_of context frame (ty : Types.ty) term =
   let sort = Facts.sort_of context ty in
-  let symbol = Symbol.Time sort in
+  let symbol = Logic.Symbol.Time sort in
   Facts.declare context (Logic.Function (symbol, [ sort ], Logic.Int));
   let time = Logic.Apply (symbol, [ term ]) in
   Facts.fact context frame (Logic.Operation ("<=", [ Logic.int 1; time ]));

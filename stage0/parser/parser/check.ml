@@ -274,12 +274,9 @@ let signature cursor (signature : Syntax.signature) =
   | None -> ());
   clauses cursor signature.clauses
 
-let function_ cursor (declared : Syntax.signature) body =
-  signature cursor declared;
-  Option.iter (block cursor { plain with is_function_body = true }) body
-
 let function_definition cursor (definition : Syntax.function_definition) =
-  function_ cursor definition.signature (Some definition.body)
+  signature cursor definition.signature;
+  block cursor { plain with is_function_body = true } definition.body
 
 let fields cursor (fields : Syntax.field list) =
   List.iter

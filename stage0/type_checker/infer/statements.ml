@@ -1,6 +1,3 @@
-module Impls = Interface.Impls
-module Elaborator = Interface.Elaborator
-
 let bit_vector_names state (value : Core.expression) =
   Core_walk.expression
     (Core_walk.deep
@@ -66,7 +63,7 @@ and statement state env (written : Syntax.statement) ~last : unit =
       let type_ =
         match annotation with
         | Some annotation ->
-            let annotated = Elaborator.elaborate_type state.context annotation in
+            let annotated = Interface.Elaborator.elaborate_type state.context annotation in
             Hooks.check state env value annotated;
             annotated
         | None -> Hooks.expression state env value
@@ -166,7 +163,9 @@ and statement state env (written : Syntax.statement) ~last : unit =
           let element, variable_mode = loop_iterable state env written ~mode inner in
           (match annotation with
           | Some written_annotation ->
-              let annotated = Elaborator.elaborate_type state.context written_annotation in
+              let annotated =
+                Interface.Elaborator.elaborate_type state.context written_annotation
+              in
               if not (State.unify state element annotated) then
                 ignore
                   (State.reported_mismatch state Mismatch
@@ -253,7 +252,8 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
         ( State.implements state base_type trait,
           Members.trait_method state.lookups trait.trait "assign" Mut )
       with
-      | Some ((Impls.From_impl _ | From_bound | From_any) as evidence_source), Some method_ ->
+      | ( Some ((Interface.Impls.From_impl _ | From_bound | From_any) as evidence_source),
+          Some method_ ) ->
           let index = State.trait_reference (Well_known.path Index) in
           let parameter name type_ : Types.parameter_info =
             { name; mode = Own; type_; has_default = false }

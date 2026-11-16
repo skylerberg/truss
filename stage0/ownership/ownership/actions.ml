@@ -217,20 +217,16 @@ let viewable_argument builder (argument : Mir.argument) =
 let viewable_arguments builder (call : Mir.call) =
   List.filter_map (viewable_argument builder) call.arguments
 
-let written_slice builder ~whole (place : Mir.place) type_ =
-  if whole && Place.is_slice_type type_ then tracked builder place
-  else
-    match place.root with
-    | Local local -> (
-        match (held builder local).collection with
-        | Some (collection, collection_type) when Place.is_slice_type collection_type -> collection
-        | _ -> None)
-    | Constant _ | Literal _ -> None
+let written_slice builder (place : Mir.place) =
+  match place.root with
+  | Local local -> (
+      match (held builder local).collection with
+      | Some (collection, collection_type) when Place.is_slice_type collection_type -> collection
+      | _ -> None)
+  | Constant _ | Literal _ -> None
 
-let writes_through builder ~whole (place : Mir.place) type_ origin =
-  Option.iter
-    (fun slice -> emit builder (Write_through slice) origin)
-    (written_slice builder ~whole place type_)
+let writes_through builder slice origin =
+  Option.iter (fun slice -> emit builder (Write_through slice) origin) slice
 
 let is_captured builder (place : Place.t) =
   match place.root with
@@ -261,7 +257,9 @@ let evaluate builder ~is_returned (use : Moves.use) =
 let borrow_mut builder (operand : Mir.operand) =
   match operand with
   | Borrow { place; type_; mode = Mut; origin } ->
-      writes_through builder ~whole:true place type_ origin;
+      writes_through builder
+        (if Place.is_slice_type type_ then tracked builder place else written_slice builder place)
+        origin;
       Option.iter (fun tracked -> emit builder (Mutate tracked) origin) (tracked builder place)
   | Use { place; origin; _ } -> (
       match place.root with
@@ -608,7 +606,7 @@ let statement builder (statement : Mir.Graph.statement) =
       match tracked builder target with
       | Some place -> (
           let type_ = match value with Operand operand -> operand_type operand | _ -> None in
-          writes_through builder ~whole:false target (Option.value ~default:Types.unit type_) origin;
+          writes_through builder (written_slice builder target) origin;
           emit builder (Assign place) origin;
           match type_ with
           | Some type_ when Context.is_view builder.context type_ ->
@@ -681,14 +679,9 @@ let statement builder (statement : Mir.Graph.statement) =
               (lent_part builder called ~part_type:(local_info builder part).type_) with
               is_loop_part = is_loop_element;
             })
-  | Slice { destination; base; call = called } ->
+  | Slice { destination; base; base_type; call = called } ->
       read_uses builder uses;
       call builder called origin;
-      let base_type =
-        match called.arguments with
-        | Passed { value = Borrow { type_; _ }; _ } :: _ -> Some type_
-        | _ -> None
-      in
       let elements =
         Option.map
           (fun (place : Place.t) ->
@@ -696,10 +689,10 @@ let statement builder (statement : Mir.Graph.statement) =
           (tracked builder base)
       in
       let views =
-        match (elements, base_type) with
-        | Some place, Some base_type when Place.is_slice_type base_type -> [ Copy_of_view_in place ]
-        | Some place, _ -> [ Borrow_of place ]
-        | None, _ -> views_of_borrow builder base (Option.value ~default:Types.unit base_type)
+        match elements with
+        | Some place when Place.is_slice_type base_type -> [ Copy_of_view_in place ]
+        | Some place -> [ Borrow_of place ]
+        | None -> views_of_borrow builder base base_type
       in
       hold builder destination { nothing with views; slice = elements }
   | Assert _ | Echo _ -> read_uses builder uses

@@ -76,9 +76,9 @@ type frame = {
 }
 
 type changed = {
-  changed_locals : Core.local list;
+  changed_locals : Locals.local list;
   changes_self : bool;
-  reassigned : Core.local list;
+  reassigned : Locals.local list;
 }
 
 type place_value = One of Logic.term | Run of Logic.term * Logic.term

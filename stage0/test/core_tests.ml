@@ -136,7 +136,7 @@ let shape = Fixtures.Core.shape
 
 let () =
   expect "a match on a local borrows the local: its scrutinee is a place"
-    (shape ^ Fixtures.Core.match_on_a_place_borrows_the_place)
+    (shape ^ Fixtures.Core.match_on_a_shape_parameter)
     (fun form ->
       List.concat_map
         (fun (node : Core.expression) ->
@@ -219,7 +219,7 @@ let () =
       (calls form)
   in
   expect "a capability parameter is inferred as the set of capabilities that a lambda uses"
-    (apply ^ Fixtures.Core.capability_parameter_is_inferred_as_the_set_of)
+    (apply ^ Fixtures.Core.lambda_using_console_passed_to_apply)
     granted
     [ "standard::capabilities::Console" ];
   expect "a capability parameter is inferred as the set of capabilities that a named function uses"
@@ -229,7 +229,7 @@ let () =
   Harness.test
     "a call's `uses` and a lambda's type contain the inferred set, not the callee's parameter"
     (fun () ->
-      let text = apply ^ Fixtures.Core.calls_uses_and_a_lambdas_type_contain_the_inferred in
+      let text = apply ^ Fixtures.Core.lambda_using_console_passed_to_apply in
       let packages = Support.setup [ ("app::main", text) ] in
       let actual = ref [] in
       List.iter
@@ -258,7 +258,7 @@ let () =
         Harness.fail "found [%s]" (String.concat "; " !actual));
   Harness.test "a capability parameter in a result type is inferred separately for each call"
     (fun () ->
-      let text = Fixtures.Core.capability_parameter_in_a_result_type_is_inferred in
+      let text = Fixtures.Core.two_calls_of_later_with_different_capabilities in
       let packages = Support.setup [ ("app::main", text) ] in
       let actual = ref [] in
       List.iter
@@ -285,7 +285,7 @@ let () =
 
 let () =
   Harness.test "a node's origin gives its source span" (fun () ->
-      let text = Fixtures.Core.nodes_origin_gives_its_source_span in
+      let text = Fixtures.Core.loop_summing_a_list in
       let packages = Support.setup [ ("app::main", text) ] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
@@ -331,7 +331,7 @@ let () =
         | _ -> None)
       (expressions form)
   in
-  expect "a cost clause names its resource" Fixtures.Core.cost_clause_names_its_resource
+  expect "a cost clause names its resource" Fixtures.Core.cost_clauses_of_calls_and_time
     (fun form ->
       List.map
         (fun (cost : Core.cost) ->
@@ -359,12 +359,11 @@ let () =
       "time of an order";
     ];
   expect "`log` and `power` are specification functions outside a cost bound too"
-    Fixtures.Core.log_and_power_are_specification_functions_outside applied [ "log"; "power" ];
+    Fixtures.Core.ensures_with_log_and_power applied [ "log"; "power" ];
   expect "a function of the file named `power` is called in a specification"
-    Fixtures.Core.function_of_the_file_named_power_is_called_in_a applied
-    [ "call app::main::power" ];
+    Fixtures.Core.function_named_power applied [ "call app::main::power" ];
   expect "the time of a method of a type parameter's bound names the trait method"
-    Fixtures.Core.time_of_a_method_of_a_type_parameters_bound_names
+    Fixtures.Core.cost_naming_time_of_a_bounds_method
     (fun form ->
       List.filter_map
         (fun (node : Core.expression) ->
@@ -386,11 +385,11 @@ let () =
         ~check:(fun packages module_ ->
           Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ]
             (Support.database packages) module_)
-        [ ("app::main", Fixtures.Core.in_a_trait_time_self_method_names_the_traits_own) ])
+        [ ("app::main", Fixtures.Core.trait_method_costing_time_of_self_size) ])
 
 let () =
   Harness.test "the origin of a cost is its cost clause" (fun () ->
-      let text = Fixtures.Core.origin_of_a_cost_is_its_cost_clause in
+      let text = Fixtures.Core.cost_linear_in_a_lists_length in
       let packages = Support.setup [ ("app::main", text) ] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->

@@ -34,7 +34,6 @@ val has_reported : t -> bool
 
 val report :
   t ->
-  ?notes:(Source.span * string) list ->
   ?fixes:Source.span Diagnostic.fix list ->
   Diagnostic.Code.parser ->
   Source.span ->

@@ -96,13 +96,12 @@ val unsupported : ?at:Lowered.site -> ('a, unit, string, 'b) format4 -> 'a
 val require_written : state -> Definitions.written
 val source : state -> Source.Definition_span.t -> string
 val innermost_scope : state -> scope
-val temporary : state -> ?name:string -> Ground.ty -> Lowered.place
+val temporary : state -> Ground.ty -> Lowered.place
 val binding : state -> ?name:string -> Ground.ty -> Lowered.place
 val flagged_binding : state -> Ground.ty -> flag:Lowered.place -> Lowered.place
 
 val parameter :
   state ->
-  ?how:(Ground.mode -> Ground.ty -> Lowered.ty option) ->
   ?in_scope:bool ->
   owned:bool ->
   Ground.mode ->

@@ -1,6 +1,4 @@
 module Lookups = Lookups
-module Names = Resolve.Names
-module Properties = Interface.Properties
 module Path_table = Hashtbl.Make (Path)
 
 module Parameter_table = Hashtbl.Make (Structural_key.Make (struct
@@ -8,7 +6,7 @@ module Parameter_table = Hashtbl.Make (Structural_key.Make (struct
 end))
 
 module Occurrence_table = Hashtbl.Make (Structural_key.Make (struct
-  type t = Path.t * Properties.occurrence
+  type t = Path.t * Interface.Properties.occurrence
 end))
 
 module Grown_node_table = Hashtbl.Make (Structural_key.Make (struct
@@ -19,13 +17,16 @@ module Field_default_table = Hashtbl.Make (Structural_key.Make (struct
   type t = Path.t * string option * string
 end))
 
-type placed = { key : Names.key; diagnostic : Diagnostic.in_definition }
+let bug format = Compiler_bug.bug ~stage:"Package_checks" format
 
-let diagnostic_at (key : Names.key) ?(fixes = []) code (span : Source.Definition_span.t) message =
+type placed = { key : Resolve.Names.key; diagnostic : Diagnostic.in_definition }
+
+let diagnostic_at (key : Resolve.Names.key) ?(fixes = []) code (span : Source.Definition_span.t)
+    message =
   { key; diagnostic = Diagnostic.make ~fixes ~code:(Package code) span message }
 
-let read_definition (lookups : Lookups.t) (declaration : Names.declaration) =
-  let key = Names.key_of declaration in
+let read_definition (lookups : Lookups.t) (declaration : Resolve.Names.declaration) =
+  let key = Resolve.Names.key_of declaration in
   (lookups.interface.names.definition key, lookups.interface.names.spans key)
 
 let header_span (spans : Source.Definition_span.t array) (definition : Syntax.definition) =
@@ -41,9 +42,9 @@ let outer_packages (impl : Types.impl_interface) =
       (function Types.Type (Types.Named { path; _ }) -> Some (Path.package path) | _ -> None)
       impl.implements.trait_arguments
 
-let check_location (declaration : Names.declaration) spans (definition : Syntax.definition)
+let check_location (declaration : Resolve.Names.declaration) spans (definition : Syntax.definition)
     (impl : Types.impl_interface) =
-  let key = Names.key_of declaration in
+  let key = Resolve.Names.key_of declaration in
   let package = declaration.module_.package in
   if List.mem package (outer_packages impl) then None
   else
@@ -55,7 +56,7 @@ let check_location (declaration : Names.declaration) spans (definition : Syntax.
             (Types.show_trait impl.implements)
             (Types.show impl.for_type)))
 
-let check_sealed (lookups : Lookups.t) (declaration : Names.declaration) =
+let check_sealed (lookups : Lookups.t) (declaration : Resolve.Names.declaration) =
   let package = declaration.module_.package in
   match
     ( List.find_opt
@@ -64,23 +65,13 @@ let check_sealed (lookups : Lookups.t) (declaration : Names.declaration) =
       read_definition lookups declaration )
   with
   | Some ((trait, type_), _), (definition, spans) -> (
-      let implementors =
-        if Well_known.is Signed_integer trait then Some [ Intrinsic.Int8; Int16; Int32; Int64 ]
-        else if Well_known.is Unsigned_integer trait then
-          Some [ Intrinsic.UInt8; UInt16; UInt32; UInt64 ]
-        else if Well_known.is Fixed_width_integer trait then
-          Some
-            (List.filter
-               (fun builtin -> Types.is_integer_type (Types.make_builtin builtin))
-               Intrinsic.builtins)
-        else None
-      in
-      match (implementors, Intrinsic.builtin_of_path type_) with
+      match (Types.find_integer_implementors trait, Intrinsic.builtin_of_path type_) with
       | Some builtins, Some builtin when List.mem builtin builtins -> []
       | Some _, _ ->
           [
-            diagnostic_at (Names.key_of declaration) Sealed_trait_impl
-              (header_span spans definition)
+            diagnostic_at
+              (Resolve.Names.key_of declaration)
+              Sealed_trait_impl (header_span spans definition)
               (Printf.sprintf
                  "Only the built-in integer types implement `%s`, so `%s` cannot: generic code \
                   over the trait is proven for each of them."
@@ -136,7 +127,7 @@ let overlap (first : Types.impl_interface) (second : Types.impl_interface) =
   && List.length first.implements.trait_arguments = List.length second.implements.trait_arguments
   && List.for_all2 argument first.implements.trait_arguments second.implements.trait_arguments
 
-let check_method_names (lookups : Lookups.t) (declaration : Names.declaration) spans
+let check_method_names (lookups : Lookups.t) (declaration : Resolve.Names.declaration) spans
     (definition : Syntax.definition) (impl : Types.impl_interface) =
   match
     ( impl.for_type,
@@ -146,7 +137,7 @@ let check_method_names (lookups : Lookups.t) (declaration : Names.declaration) s
       List.filter_map
         (fun (method_ : Types.trait_method) ->
           let own = lookups.interface.names.members path method_.method_name in
-          let same_version (key : Names.key) =
+          let same_version (key : Resolve.Names.key) =
             match key.path with
             | Method { receiver; _ } -> receiver = method_.method_receiver
             | _ -> true
@@ -159,8 +150,9 @@ let check_method_names (lookups : Lookups.t) (declaration : Names.declaration) s
           in
           let clash message =
             Some
-              (diagnostic_at (Names.key_of declaration) Method_name_clash
-                 (header_span spans definition) message)
+              (diagnostic_at
+                 (Resolve.Names.key_of declaration)
+                 Method_name_clash (header_span spans definition) message)
           in
           if own = [] then None
           else if List.exists same_version own then
@@ -226,7 +218,7 @@ let contained_types (lookups : Lookups.t) path =
               Some
                 ( written,
                   path,
-                  Properties.compose_occurrences
+                  Interface.Properties.compose_occurrences
                     (if indirect then Indirect else In_place)
                     occurrence )
           | _ -> None)
@@ -253,7 +245,8 @@ let self_occurrences ~contained (start : Path.t) =
     else begin
       Occurrence_table.replace visited (path, occurrence) ();
       List.concat_map
-        (fun (_, target, step) -> from target (Properties.compose_occurrences occurrence step))
+        (fun (_, target, step) ->
+          from target (Interface.Properties.compose_occurrences occurrence step))
         (contained path)
     end
   in
@@ -308,82 +301,90 @@ let not_strictly_positive_message =
    function with a `time` clause might not terminate. Remove the `time` clause from the function \
    type, or pass the function the fields that it needs instead of the whole value."
 
+let find_written_variant (variants : Syntax.variant list) (variant : Types.variant) =
+  match
+    List.find_opt
+      (fun (written : Syntax.variant) -> written.name.text = variant.variant_name)
+      variants
+  with
+  | Some written -> written
+  | None -> bug "the variant `%s` is not in its type's definition" variant.variant_name
+
 let field_span (spans : Source.Definition_span.t array) (body : Syntax.type_body)
     ((variant : Types.variant option), (field : Types.field)) =
+  let missing () = bug "the field `%s` is not in its type's definition" field.field_name in
   let among (fields : Syntax.field list) =
-    List.find_map
-      (fun (written : Syntax.field) ->
-        match written.kind with
-        | Field_declaration { name; _ } when name.text = field.field_name -> Some spans.(written.id)
-        | _ -> None)
-      fields
+    match
+      List.find_map
+        (fun (written : Syntax.field) ->
+          match written.kind with
+          | Field_declaration { name; _ } when name.text = field.field_name ->
+              Some spans.(written.id)
+          | _ -> None)
+        fields
+    with
+    | Some span -> span
+    | None -> missing ()
   in
   match (body, variant) with
   | Fields fields, None -> among fields
-  | Variants variants, Some variant ->
-      Option.bind
-        (List.find_opt
-           (fun (written : Syntax.variant) -> written.name.text = variant.variant_name)
-           variants)
-        (fun written -> Option.bind written.fields among)
-  | _ -> None
+  | Variants variants, Some variant -> (
+      match (find_written_variant variants variant).fields with
+      | Some fields -> among fields
+      | None -> missing ())
+  | _ -> missing ()
 
-let check_recursion lookups ~contained (declaration : Names.declaration) spans
+let check_recursion lookups ~contained (declaration : Resolve.Names.declaration) spans
     (definition : Syntax.definition) =
   match definition.kind with
   | Type_definition _ when grows lookups declaration.path ->
       [
-        diagnostic_at (Names.key_of declaration) Growing_type (header_span spans definition)
+        diagnostic_at
+          (Resolve.Names.key_of declaration)
+          Growing_type (header_span spans definition)
           "This type contains itself with different type arguments, so it has no fixed set of \
            instances, and generic code is compiled once for each set of arguments.";
       ]
   | Type_definition { name; body; _ } ->
-      let key = Names.key_of declaration in
+      let key = Resolve.Names.key_of declaration in
       let occurrences = self_occurrences ~contained declaration.path in
-      let first (wanted : Properties.occurrence) =
+      let first (wanted : Interface.Properties.occurrence) =
         List.find_map
           (fun (field, occurrence) -> if occurrence = wanted then Some field else None)
           occurrences
       in
       let in_place =
-        Option.bind (first In_place) (fun (variant, _) ->
-            let variant_span =
-              match (body, variant) with
-              | Variants variants, Some (variant : Types.variant) ->
-                  Option.map
-                    (fun (written : Syntax.variant) -> spans.(written.name.id))
-                    (List.find_opt
-                       (fun (written : Syntax.variant) -> written.name.text = variant.variant_name)
-                       variants)
-              | _ -> None
-            in
-            match variant_span with
-            | Some span ->
-                Some
-                  (diagnostic_at key Needs_indirect span
-                     ~fixes:
-                       [
-                         Diagnostic.fix "Declare the variant `indirect`."
-                           [
-                             Diagnostic.insert
-                               (Source.Definition_span.zero_width span.start)
-                               "indirect ";
-                           ];
-                       ]
-                     "This type contains itself in place, so it would be infinitely large. Declare \
-                      the variant `indirect` to keep its fields on the heap.")
-            | None ->
-                Some
-                  (diagnostic_at key Needs_indirect (header_span spans definition)
-                     "This record contains itself in place, so it would be infinitely large. A \
-                      record has no variant to declare `indirect`; use a sum type with an \
-                      `indirect` variant, or a collection."))
+        Option.map
+          (fun ((variant : Types.variant option), _) ->
+            match (body, variant) with
+            | Variants variants, Some variant ->
+                let span = spans.((find_written_variant variants variant).name.id) in
+                diagnostic_at key Needs_indirect span
+                  ~fixes:
+                    [
+                      Diagnostic.fix "Declare the variant `indirect`."
+                        [
+                          Diagnostic.insert
+                            (Source.Definition_span.zero_width span.start)
+                            "indirect ";
+                        ];
+                    ]
+                  "This type contains itself in place, so it would be infinitely large. Declare \
+                   the variant `indirect` to keep its fields on the heap."
+            | Fields _, None ->
+                diagnostic_at key Needs_indirect (header_span spans definition)
+                  "This record contains itself in place, so it would be infinitely large. A record \
+                   has no variant to declare `indirect`; use a sum type with an `indirect` \
+                   variant, or a collection."
+            | _ ->
+                bug "the interface of `%s` and its definition disagree on whether it is a sum type"
+                  name.text)
+          (first In_place)
       in
       let function_input =
         Option.map
           (fun field ->
-            diagnostic_at key Not_strictly_positive
-              (Option.value ~default:(header_span spans definition) (field_span spans body field))
+            diagnostic_at key Not_strictly_positive (field_span spans body field)
               (Printf.sprintf
                  "Through this field, `%s` contains a function type that has a `time` clause and \
                   whose input contains `%s`. %s"
@@ -393,9 +394,10 @@ let check_recursion lookups ~contained (declaration : Names.declaration) spans
       Option.to_list in_place @ Option.to_list function_input
   | _ -> []
 
-let check_associated_types (lookups : Lookups.t) ~contained (declaration : Names.declaration) spans
-    (definition : Syntax.definition) (impl : Types.impl_interface) =
-  let key = Names.key_of declaration in
+let check_associated_types (lookups : Lookups.t) ~contained
+    (declaration : Resolve.Names.declaration) spans (definition : Syntax.definition)
+    (impl : Types.impl_interface) =
+  let key = Resolve.Names.key_of declaration in
   let bounds = Types.list_bounds impl.impl_generics in
   let written name =
     match definition.kind with
@@ -408,7 +410,7 @@ let check_associated_types (lookups : Lookups.t) ~contained (declaration : Names
           members
     | _ -> None
   in
-  let reported_at_definition (recursion : Properties.recursion) =
+  let reported_at_definition (recursion : Interface.Properties.recursion) =
     match recursion.recursive with
     | Types.Named { path; _ } ->
         List.exists
@@ -418,9 +420,13 @@ let check_associated_types (lookups : Lookups.t) ~contained (declaration : Names
   in
   List.concat_map
     (fun (name, type_) ->
-      let span = Option.value ~default:(header_span spans definition) (written name) in
+      let span =
+        match written name with
+        | Some span -> span
+        | None -> bug "the associated type `%s` is not in its impl's definition" name
+      in
       List.filter_map
-        (fun (recursive, (occurrence : Properties.occurrence)) ->
+        (fun (recursive, (occurrence : Interface.Properties.occurrence)) ->
           match occurrence with
           | In_place ->
               Some
@@ -441,7 +447,7 @@ let check_associated_types (lookups : Lookups.t) ~contained (declaration : Names
           | Indirect -> None)
         (List.sort_uniq compare
            (List.filter_map
-              (fun (recursion : Properties.recursion) ->
+              (fun (recursion : Interface.Properties.recursion) ->
                 if
                   List.exists (Path.equal declaration.path) recursion.defining
                   && not (reported_at_definition recursion)
@@ -450,7 +456,7 @@ let check_associated_types (lookups : Lookups.t) ~contained (declaration : Names
               (Interface.Impls.list_contents lookups.interface ~bounds type_).recursions)))
     impl.implements.associated
 
-let instantiation_edges (lookups : Lookups.t) (key : Names.key) =
+let instantiation_edges (lookups : Lookups.t) (key : Resolve.Names.key) =
   let form = lookups.core key in
   let grows = function
     | Types.Type (Types.Named { arguments; _ }) ->
@@ -475,16 +481,16 @@ let instantiation_edges (lookups : Lookups.t) (key : Names.key) =
 let check_instantiation (lookups : Lookups.t) (package : Path.package) =
   let generic =
     List.filter
-      (fun (declaration : Names.declaration) ->
+      (fun (declaration : Resolve.Names.declaration) ->
         declaration.generic && declaration.ordinal = 0
         && (declaration.kind = Function || declaration.kind = Method))
       (lookups.interface.names.package_declarations package)
   in
   let edges = Path_table.create 64 in
   List.iter
-    (fun (declaration : Names.declaration) ->
+    (fun (declaration : Resolve.Names.declaration) ->
       Path_table.replace edges declaration.path
-        (instantiation_edges lookups (Names.key_of declaration)))
+        (instantiation_edges lookups (Resolve.Names.key_of declaration)))
     generic;
   let outgoing path = Option.value ~default:[] (Path_table.find_opt edges path) in
   let component_index = Path_table.create 64 in
@@ -494,17 +500,18 @@ let check_instantiation (lookups : Lookups.t) (package : Path.package) =
     (Strongly_connected.find_components
        (module Path)
        ~successors:(fun path -> List.map fst (outgoing path))
-       (List.map (fun (declaration : Names.declaration) -> declaration.path) generic));
+       (List.map (fun (declaration : Resolve.Names.declaration) -> declaration.path) generic));
   let grows_on_cycle path (callee, grows) =
     grows && Path_table.find component_index callee = Path_table.find component_index path
   in
   List.filter_map
-    (fun (declaration : Names.declaration) ->
+    (fun (declaration : Resolve.Names.declaration) ->
       if List.exists (grows_on_cycle declaration.path) (outgoing declaration.path) then
         let definition, spans = read_definition lookups declaration in
         Some
-          (diagnostic_at (Names.key_of declaration) Instantiation_cycle
-             (header_span spans definition)
+          (diagnostic_at
+             (Resolve.Names.key_of declaration)
+             Instantiation_cycle (header_span spans definition)
              "This generic code instantiates itself with type arguments that grow each time \
               around, so it would be compiled without end.")
       else None)
@@ -513,25 +520,28 @@ let check_instantiation (lookups : Lookups.t) (package : Path.package) =
 let check_tests (lookups : Lookups.t) (package : Path.package) =
   let tests =
     List.filter
-      (fun (declaration : Names.declaration) -> declaration.kind = Test && declaration.ordinal = 0)
+      (fun (declaration : Resolve.Names.declaration) ->
+        declaration.kind = Test && declaration.ordinal = 0)
       (lookups.interface.names.package_declarations package)
   in
   snd
     (List.fold_left
-       (fun (seen, diagnostics) (declaration : Names.declaration) ->
+       (fun (seen, diagnostics) (declaration : Resolve.Names.declaration) ->
          let name = match declaration.path with Test { name; _ } -> name | _ -> "" in
          if List.mem name seen then
            let definition, spans = read_definition lookups declaration in
            ( seen,
              diagnostics
              @ [
-                 diagnostic_at (Names.key_of declaration) Duplicate_test spans.(definition.id)
+                 diagnostic_at
+                   (Resolve.Names.key_of declaration)
+                   Duplicate_test spans.(definition.id)
                    (Printf.sprintf "Another test of this package is named %S." name);
                ] )
          else (name :: seen, diagnostics))
        ([], []) tests)
 
-let check_overlaps (lookups : Lookups.t) (declaration : Names.declaration) spans definition
+let check_overlaps (lookups : Lookups.t) (declaration : Resolve.Names.declaration) spans definition
     (impl : Types.impl_interface) =
   let package = declaration.module_.package in
   match Interface.Impls.find_head impl.for_type with
@@ -558,14 +568,15 @@ let check_overlaps (lookups : Lookups.t) (declaration : Names.declaration) spans
             List.filter_map
               (Interface.Definition.read_impl_interface lookups.interface)
               (Interface.Impls.list_impls_of_trait_for_type lookups.interface ~trait ~type_ name))
-          (Names.list_transitive_dependencies lookups.interface.names package)
+          (Resolve.Names.list_transitive_dependencies lookups.interface.names package)
       in
       List.filter_map
         (fun (other : Types.impl_interface) ->
           if overlap impl other then
             Some
-              (diagnostic_at (Names.key_of declaration) Overlapping_impls
-                 (header_span spans definition)
+              (diagnostic_at
+                 (Resolve.Names.key_of declaration)
+                 Overlapping_impls (header_span spans definition)
                  (Printf.sprintf
                     "This `impl` overlaps another `impl` of `%s` for `%s`: a type has at most one \
                      `impl` of a trait for each set of its arguments."
@@ -575,7 +586,7 @@ let check_overlaps (lookups : Lookups.t) (declaration : Names.declaration) spans
         (earlier @ dependencies)
   | _ -> []
 
-let check_impl (lookups : Lookups.t) ~contained (declaration : Names.declaration) =
+let check_impl (lookups : Lookups.t) ~contained (declaration : Resolve.Names.declaration) =
   match
     ( Interface.Definition.read_impl_interface lookups.interface declaration.path,
       read_definition lookups declaration )
@@ -587,7 +598,7 @@ let check_impl (lookups : Lookups.t) ~contained (declaration : Names.declaration
       @ check_associated_types lookups ~contained declaration spans definition impl
   | _ -> []
 
-let check_type lookups ~contained (declaration : Names.declaration) =
+let check_type lookups ~contained (declaration : Resolve.Names.declaration) =
   let definition, spans = read_definition lookups declaration in
   check_recursion lookups ~contained declaration spans definition
 
@@ -676,7 +687,7 @@ let describe_constant_cycle ~cyclic (named : named_constant) =
          `%s`, %s"
         field constant constant cyclic consequence
 
-let check_constant (lookups : Lookups.t) (declaration : Names.declaration) =
+let check_constant (lookups : Lookups.t) (declaration : Resolve.Names.declaration) =
   let path = declaration.path in
   match read_constant_value lookups path with
   | None -> []
@@ -695,7 +706,7 @@ let check_constant (lookups : Lookups.t) (declaration : Names.declaration) =
              | None -> false
            end
       in
-      let key = Names.key_of declaration in
+      let key = Resolve.Names.key_of declaration in
       let spans = lookups.interface.names.spans key in
       List.filter_map
         (fun (named : named_constant) ->
@@ -707,23 +718,24 @@ let check_constant (lookups : Lookups.t) (declaration : Names.declaration) =
         (list_named_constants lookups value)
 
 type check =
-  | Sealed of Names.key
-  | Impl of Names.key
-  | Type of Names.key
-  | Constant of Names.key
+  | Sealed of Resolve.Names.key
+  | Impl of Resolve.Names.key
+  | Type of Resolve.Names.key
+  | Constant of Resolve.Names.key
   | Instantiations
   | Tests
   | Dependencies
 
-let list_checks (declarations : Names.declaration list) =
+let list_checks (declarations : Resolve.Names.declaration list) =
   List.concat_map
-    (fun (declaration : Names.declaration) ->
+    (fun (declaration : Resolve.Names.declaration) ->
       if declaration.ordinal <> 0 then []
       else
         match declaration.kind with
-        | Impl -> [ Sealed (Names.key_of declaration); Impl (Names.key_of declaration) ]
-        | Type -> [ Type (Names.key_of declaration) ]
-        | Constant | Member_constant -> [ Constant (Names.key_of declaration) ]
+        | Impl ->
+            [ Sealed (Resolve.Names.key_of declaration); Impl (Resolve.Names.key_of declaration) ]
+        | Type -> [ Type (Resolve.Names.key_of declaration) ]
+        | Constant | Member_constant -> [ Constant (Resolve.Names.key_of declaration) ]
         | _ -> [])
     declarations
   @ [ Instantiations; Tests; Dependencies ]
@@ -756,7 +768,8 @@ let describe_unused_dependency ~package dependency =
 let list_unused_dependencies (lookups : Lookups.t) package =
   let used =
     List.concat_map
-      (fun (declaration : Names.declaration) -> lookups.used_packages (Names.key_of declaration))
+      (fun (declaration : Resolve.Names.declaration) ->
+        lookups.used_packages (Resolve.Names.key_of declaration))
       (lookups.interface.names.package_declarations package)
   in
   List.filter

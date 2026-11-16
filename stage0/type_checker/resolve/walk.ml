@@ -154,8 +154,8 @@ let module_of_names state (first : Syntax.name) (rest : Syntax.name list) =
   then (current state).used_imports <- first.text :: (current state).used_imports;
   begin match
     Names.lookup_module state.lookups ~from:state.key.module_
-      ~imports:(state.lookups.imports state.key)
-      (List.map (fun (name : Syntax.name) -> name.text) (first :: rest))
+      ~imports:(state.lookups.imports state.key) first.text
+      (List.map (fun (name : Syntax.name) -> name.text) rest)
   with
   | Found_module (module_, `Package)
     when module_ = Intrinsic.module_ && state.key.module_.package <> Path.standard_package ->

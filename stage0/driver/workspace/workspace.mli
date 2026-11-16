@@ -32,7 +32,7 @@ val serve : key:string -> handle:(progress:(string -> unit) -> 'request -> 'resp
 val call :
   ?program:string ->
   ?start_server:bool ->
-  ?key:string ->
+  key:string ->
   progress:(string -> unit) ->
   'request ->
   ('response, string) result
