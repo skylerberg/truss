@@ -109,6 +109,40 @@ let () =
               if status <> 2 || not (String.includes ~affix:"is open in another process" output)
               then fail "exited with %d: %s" status output))
 
+let other_build =
+  lazy
+    (Unix.realpath
+       (Filename.concat (Filename.dirname Sys.executable_name) "../../driver/truss/truss.exe"))
+
+let is_database_open_elsewhere root =
+  let descriptor = Unix.openfile (Filename.concat root ".truss/lock") [ O_RDWR; O_CLOEXEC ] 0 in
+  Fun.protect
+    ~finally:(fun () -> Unix.close descriptor)
+    (fun () ->
+      match Unix.lockf descriptor F_TEST 0 with () -> false | exception Unix.Unix_error _ -> true)
+
+let make_package_served_by_other_build () =
+  let root = make_package [ ("one.truss", "fn one() -> Int64 { 1 }\n") ] in
+  Unix.putenv "TRUSS_NO_SERVER" "";
+  (match Process.run (Lazy.force other_build) [ "check"; "-C"; root ] with
+  | 0, _, _ -> ()
+  | status, out, err -> fail "the other build exited with %d: %s%s" status out err);
+  if not (is_database_open_elsewhere root) then
+    fail "the other build's background process is not running";
+  root
+
+let () =
+  test "a command takes the project's database from a background process of another build"
+    (fun () ->
+      let root = make_package_served_by_other_build () in
+      let status, output = run_truss [ "check"; "-C"; root ] in
+      if status <> 0 then fail "exited with %d: %s" status output);
+  test "stop ends the background process of another build" (fun () ->
+      let root = make_package_served_by_other_build () in
+      let status, output = capture (fun () -> Cli.Main.run_client [ "truss"; "stop" ]) in
+      if status <> 0 then fail "exited with %d: %s" status output;
+      if is_database_open_elsewhere root then fail "the background process still runs")
+
 let () =
   test "a command refuses a cache that other users can write, and exits with 2" (fun () ->
       let root = make_package [ ("main.truss", "fn main() {}\n") ] in

@@ -1,7 +1,9 @@
 (test
  (name cli_tests)
+ (deps ../../driver/truss/truss.exe)
  (libraries
   harness
+  process
   unix
   cli
   path

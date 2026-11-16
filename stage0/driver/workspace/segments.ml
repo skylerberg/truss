@@ -50,26 +50,36 @@ let parse_list text =
         (List.fold_left parse_line (Some ([], [])) lines)
   | _ -> None
 
-let open_ directory =
+let open_ directory ~stop_holder =
   File_system.make_directory directory;
   let ignored = Filename.concat directory ".gitignore" in
   if not (Sys.file_exists ignored) then File_system.write ignored "*\n";
   let lock =
     Unix.openfile (Filename.concat directory "lock") [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644
   in
-  match Unix.lockf lock F_TLOCK 0 with
-  | exception Unix.Unix_error ((EAGAIN | EACCES), _, _) ->
-      Unix.close lock;
-      Error `Open_elsewhere
-  | () ->
-      let t = { directory; lock; header = None; segments = [] } in
-      (match parse_list (File_system.read (make_list_path t)) with
-      | Some (header, segments) ->
-          t.header <- Some header;
-          t.segments <- segments
-      | None -> ()
-      | exception Sys_error _ -> ());
-      Ok t
+  let has_lock =
+    match Unix.lockf lock F_TLOCK 0 with
+    | () -> true
+    | exception Unix.Unix_error ((EAGAIN | EACCES), _, _) ->
+        stop_holder ()
+        && begin
+          Unix.lockf lock F_LOCK 0;
+          true
+        end
+  in
+  if not has_lock then begin
+    Unix.close lock;
+    Error `Open_elsewhere
+  end
+  else
+    let t = { directory; lock; header = None; segments = [] } in
+    (match parse_list (File_system.read (make_list_path t)) with
+    | Some (header, segments) ->
+        t.header <- Some header;
+        t.segments <- segments
+    | None -> ()
+    | exception Sys_error _ -> ());
+    Ok t
 
 let header t = t.header
 

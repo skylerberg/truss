@@ -232,7 +232,8 @@ let new_ =
     Cmdliner.Term.(const (fun () name -> Outcome.Exit (New_command.run ~name)) $ common $ name)
 
 let status =
-  make_command "status" ~doc:"List the package databases that the background process holds."
+  make_command "status"
+    ~doc:"List the package databases that the background processes of this build of truss hold."
     Cmdliner.Term.(
       const (fun () ->
           List.iter Output.print_line (Workspace.list_package_databases ());
@@ -240,10 +241,11 @@ let status =
       $ common)
 
 let stop =
-  make_command "stop" ~doc:"Stop the background process."
+  make_command "stop" ~doc:"Stop the background processes of every build of truss."
     Cmdliner.Term.(
       const (fun () ->
-          Workspace.stop ();
+          if not (Workspace.stop_servers ()) then
+            Output.eprint_line "No background process is running.";
           Outcome.Exit 0)
       $ common)
 
@@ -397,21 +399,8 @@ let request arguments =
     columns = Output.columns ();
   }
 
-let ask_running arguments : (string * (response, string) result) list =
-  List.map
-    (fun key ->
-      ( key,
-        Workspace.call ~start_server:false ~key ~report_progress:Output.eprint (request arguments)
-      ))
-    (Workspace.list_servers ())
-
-let wait_until_stopped answers =
-  List.iter
-    (fun (key, answer) -> if Result.is_ok answer then Workspace.wait_until_ended ~key)
-    answers
-
 let clean_cache () =
-  wait_until_stopped (ask_running [ "stop" ]);
+  ignore (Workspace.stop_servers ());
   Workspace.reset ();
   match Cache.locate_default_directory () with
   | Error message ->
@@ -466,28 +455,28 @@ let run_client argv =
   match find_command arguments with
   | Some "clean" -> clean_cache ()
   | Some "lsp" -> run_language_server ~no_server
-  | None | Some "new" -> run_locally ()
+  | None | Some ("new" | "stop") -> run_locally ()
   | _ when no_server -> run_locally ()
-  | Some (("status" | "stop") as command) -> (
-      match ask_running arguments with
+  | Some "status" -> (
+      match Workspace.list_servers () with
       | [] ->
-          Output.eprint_line "No background process is running.";
+          Output.eprint_line "No background process of this build of truss is running.";
           0
-      | answers ->
-          let status =
-            List.fold_left
-              (fun status (_, answer) ->
-                match answer with
-                | Ok response ->
-                    Output.print response.output;
-                    max status (finish response.outcome)
-                | Error message ->
-                    Output.eprint_line message;
-                    status)
-              0 answers
-          in
-          if command = "stop" then wait_until_stopped answers;
-          status)
+      | keys ->
+          List.fold_left
+            (fun status key ->
+              match
+                (Workspace.call ~start_server:false ~key ~report_progress:Output.eprint
+                   (request arguments)
+                  : (response, string) result)
+              with
+              | Ok response ->
+                  Output.print response.output;
+                  max status (finish response.outcome)
+              | Error message ->
+                  Output.eprint_line message;
+                  status)
+            0 keys)
   | Some _ -> (
       match
         (Workspace.call

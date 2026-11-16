@@ -59,16 +59,22 @@ let make_servers_directory () =
   Result.bind (make_cache_root ()) (fun root ->
       make_private_directory (Filename.concat root "servers"))
 
+let hash_key key = Blake3.hash_to_hex ~digits:16 key
+
 let make_server_path directory identity key =
-  Filename.concat directory (shorten identity ^ "-" ^ Blake3.hash_to_hex ~digits:16 key)
+  Filename.concat directory (shorten identity ^ "-" ^ hash_key key)
+
+let locate_socket server_path =
+  let path = server_path ^ ".socket" in
+  if String.length path < 100 then path
+  else
+    Filename.concat
+      (Printf.sprintf "/tmp/truss-%d" (Unix.getuid ()))
+      (Blake3.hash_to_hex ~digits:16 path ^ ".socket")
 
 let make_socket_path server_path =
-  let path = server_path ^ ".socket" in
-  if String.length path < 100 then Ok path
-  else
-    Result.map
-      (fun directory -> Filename.concat directory (Blake3.hash_to_hex ~digits:16 path ^ ".socket"))
-      (make_private_directory (Printf.sprintf "/tmp/truss-%d" (Unix.getuid ())))
+  let path = locate_socket server_path in
+  Result.map (fun _ -> path) (make_private_directory (Filename.dirname path))
 
 let make_server_paths identity key =
   Result.bind (make_servers_directory ()) (fun directory ->
@@ -96,33 +102,39 @@ let with_lock path work =
 
 let served : string option ref = ref None
 
-let is_running key =
-  !served = Some key
-  ||
-  match make_servers_directory () with
-  | Ok directory ->
-      is_locked (make_server_path directory (compute_executable_identity ()) key ^ ".lock")
-  | Error _ -> false
+let list_other_servers directory ~suffix =
+  Array.to_list (Sys.readdir directory)
+  |> List.filter_map (fun entry ->
+      if Filename.check_suffix entry (suffix ^ ".key") then
+        let server_path = Filename.concat directory (Filename.chop_suffix entry ".key") in
+        if !served <> Some server_path && is_locked (server_path ^ ".lock") then Some server_path
+        else None
+      else None)
 
 let list_servers () =
   match make_servers_directory () with
   | Error _ -> []
   | Ok directory ->
-      let prefix = shorten (compute_executable_identity ()) ^ "-" in
-      Array.to_list (Sys.readdir directory)
-      |> List.filter_map (fun entry ->
-          if String.starts_with ~prefix entry && Filename.check_suffix entry ".key" then
-            let path = Filename.concat directory entry in
-            match File_system.read path with
-            | key when is_running key -> Some key
-            | _ | (exception Sys_error _) -> None
-          else None)
+      let identity = compute_executable_identity () in
+      list_other_servers directory ~suffix:""
+      |> List.filter_map (fun server_path ->
+          match File_system.read (server_path ^ ".key") with
+          | key when make_server_path directory identity key = server_path -> Some key
+          | _ | (exception Sys_error _) -> None)
       |> List.sort compare
 
-let wait_until_ended ~key =
-  match make_server_paths (compute_executable_identity ()) key with
-  | Ok (_, server_path, _) -> with_lock (server_path ^ ".lock") ignore
-  | Error _ -> ()
+let stop_servers ?key ~wait () =
+  match make_servers_directory () with
+  | Error _ -> false
+  | Ok directory ->
+      let suffix = Option.fold ~none:"" ~some:(fun key -> "-" ^ hash_key key) key in
+      let running = list_other_servers directory ~suffix in
+      List.iter
+        (fun server_path ->
+          try Unix.unlink (locate_socket server_path) with Unix.Unix_error (ENOENT, _, _) -> ())
+        running;
+      if wait then List.iter (fun server_path -> with_lock (server_path ^ ".lock") ignore) running;
+      running <> []
 
 let idle_limit = 3. *. 3600.
 let backlog = 128
@@ -152,19 +164,17 @@ let send channel value =
 
 type 'response message = Progress of string | Final of 'response
 
-let stopping = ref false
-let stop () = stopping := true
-
 let serve_on ~key ~identity ~is_alive ~collect ~list_watcher_descriptors ~propagate ~handle ~save
     ~close server_path path socket =
   let lock = Unix.openfile (server_path ^ ".lock") [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644 in
   Unix.lockf lock F_LOCK 0;
-  served := Some key;
+  served := Some server_path;
   Out_channel.with_open_bin (server_path ^ ".key") (fun out -> output_string out key);
   let last = ref (Unix.time ()) in
   let last_collection = ref 0. in
+  let is_replaced = ref false in
   while
-    (not !stopping) && Unix.time () -. !last < idle_limit && is_alive () && Sys.file_exists path
+    (not !is_replaced) && Unix.time () -. !last < idle_limit && is_alive () && Sys.file_exists path
   do
     match Unix.select (socket :: list_watcher_descriptors ()) [] [] 1.0 with
     | exception Unix.Unix_error (EINTR, _, _) -> ()
@@ -172,7 +182,7 @@ let serve_on ~key ~identity ~is_alive ~collect ~list_watcher_descriptors ~propag
         let now = Unix.time () in
         if now -. !last_collection > 60. then begin
           last_collection := now;
-          if compute_executable_identity () <> identity then stopping := true;
+          is_replaced := compute_executable_identity () <> identity;
           collect ()
         end
     | ready, _, _ when not (List.mem socket ready) -> List.iter propagate ready
@@ -195,7 +205,8 @@ let serve_on ~key ~identity ~is_alive ~collect ~list_watcher_descriptors ~propag
   Unix.close socket;
   close ();
   (try Sys.remove (server_path ^ ".key") with Sys_error _ -> ());
-  Unix.close lock
+  Unix.close lock;
+  served := None
 
 let find_inherited_socket () =
   match Unix.fstat Unix.stdin with
