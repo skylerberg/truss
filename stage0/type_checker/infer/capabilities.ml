@@ -113,20 +113,18 @@ let require_available checking scope (origin : Core.origin) ?(for_implementation
         | Function_body when for_implementation ->
             report checking Not_available origin
               (Printf.sprintf "This implementation uses `%s`, which is not available here." shown)
-        | Function_body -> (
-            match capability with
-            | Types.Capability _ ->
-                report checking Not_available origin
-                  (Printf.sprintf
-                     "This call uses `%s`, which is not available here. Declare it with `uses %s`, \
-                      or `provide` an implementation."
-                     shown shown)
-            | Capability_parameter _ | Capability_projection _ | Capability_variable _ ->
-                report checking Not_available origin
-                  (Printf.sprintf
-                     "This call uses `%s`, which is not available here. Declare it with `uses %s`."
-                     shown shown)
-            | Capability_error _ -> State.raise_bug "a capability with an error is missing"))
+        | Function_body ->
+            let can_provide =
+              match capability with
+              | Types.Capability path -> not (Well_known.is Panic path)
+              | Capability_parameter _ | Capability_projection _ | Capability_variable _ -> false
+              | Capability_error _ -> State.raise_bug "a capability with an error is missing"
+            in
+            report checking Not_available origin
+              (Printf.sprintf
+                 "This call uses `%s`, which is not available here. Declare it with `uses %s`%s."
+                 shown shown
+                 (if can_provide then ", or `provide` an implementation" else "")))
       (missing :> Types.capability list)
   in
   if required <> Types.no_capabilities then
