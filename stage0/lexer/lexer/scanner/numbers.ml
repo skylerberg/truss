@@ -21,11 +21,11 @@ let compute_name_end text position =
       match text.[position] with
       | '0' .. '9' | 'a' .. 'z' | 'A' .. 'Z' | '_' -> loop (position + 1)
       | character when Char.code character >= 0x80 ->
-          let decoded = Unicode.decode text position in
+          let decoded = String.get_utf_8_uchar text position in
           if
-            Unicode.Decoded.is_valid decoded
-            && Unicode.is_xid_continue (Unicode.Decoded.code_point decoded)
-          then loop (position + Unicode.Decoded.length decoded)
+            Uchar.utf_decode_is_valid decoded
+            && Unicode.is_xid_continue (Uchar.utf_decode_uchar decoded)
+          then loop (position + Uchar.utf_decode_length decoded)
           else position
       | _ -> position
   in
@@ -78,8 +78,8 @@ let make_underscore_issue offset =
   make_issue Number_underscore "`_` can only go between digits." offset (offset + 1)
 
 let measure_character text offset =
-  let decoded = Unicode.decode text offset in
-  if Unicode.Decoded.is_valid decoded then Unicode.Decoded.length decoded else 1
+  let decoded = String.get_utf_8_uchar text offset in
+  if Uchar.utf_decode_is_valid decoded then Uchar.utf_decode_length decoded else 1
 
 let choose_problem value issues ~fixed =
   let leftmost issues =

@@ -11,12 +11,14 @@ let quote_joins_before cursor index =
   touches_word_before cursor index || (index > 0 && Cursor.is_at cursor (index - 1) '"')
 
 let is_name_character cursor position =
+  (not (Cursor.is_at_end cursor position))
+  &&
   let decoded = Cursor.decode cursor position in
-  Unicode.Decoded.is_valid decoded
+  Uchar.utf_decode_is_valid decoded
   &&
   let current = Cursor.lookup_char cursor position in
   if Cursor.is_ascii current then Cursor.is_ascii_name_byte current
-  else Unicode.is_xid_continue (Unicode.Decoded.code_point decoded)
+  else Unicode.is_xid_continue (Uchar.utf_decode_uchar decoded)
 
 let find_character_literal_end ?(after_prefix = false) cursor start =
   if (not after_prefix) && touches_word_before cursor start then None
@@ -37,10 +39,10 @@ let find_character_literal_end ?(after_prefix = false) cursor start =
       else
         let decoded = Cursor.decode cursor content in
         if
-          (not (Unicode.Decoded.is_valid decoded))
-          || Unicode.is_forbidden (Unicode.Decoded.code_point decoded)
+          (not (Uchar.utf_decode_is_valid decoded))
+          || Unicode.is_forbidden (Uchar.utf_decode_uchar decoded)
         then None
-        else Some (content + Unicode.Decoded.length decoded)
+        else Some (content + Uchar.utf_decode_length decoded)
     in
     match close with
     | Some close when Cursor.is_at cursor close '\'' && not (is_name_character cursor (close + 1))
@@ -63,7 +65,10 @@ let lex_character_literal (cursor : Cursor.t) ~tag ~literal_start ~stop =
     | "\\'" -> "'"
     | escape when String.starts_with ~prefix:"\\u{" escape -> (
         match int_of_string_opt ("0x" ^ String.sub escape 3 (String.length escape - 4)) with
-        | Some value when Uchar.is_valid value -> Unicode.of_code_points [ value ]
+        | Some value when Uchar.is_valid value ->
+            let encoded = Buffer.create 4 in
+            Buffer.add_utf_8_uchar encoded (Uchar.of_int value);
+            Buffer.contents encoded
         | _ -> "")
     | other -> other
   in

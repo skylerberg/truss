@@ -247,8 +247,8 @@ and scan_escape cursor buffer =
   in
   let unknown () =
     let decoded = Cursor.decode cursor (start + 1) in
-    let is_valid = Unicode.Decoded.is_valid decoded in
-    let length = if is_valid then Unicode.Decoded.length decoded else 1 in
+    let is_valid = Uchar.utf_decode_is_valid decoded in
+    let length = if is_valid then Uchar.utf_decode_length decoded else 1 in
     let written =
       if not is_valid then
         Printf.sprintf "`\\` followed by %s" (Cursor.show_character cursor (start + 1))
@@ -300,14 +300,14 @@ and scan_escape cursor buffer =
           else
             let digits = String.sub cursor.text digits_start count in
             let value = int_of_string ("0x" ^ digits) in
-            if value > 0x10FFFF || (value >= 0xD800 && value <= 0xDFFF) then
+            if not (Uchar.is_valid value) then
               problem (stop + 1)
                 (Printf.sprintf
                    "`\\u{%s}` is not a Unicode scalar value: surrogates and values above 10FFFF \
                     have no character."
                    digits)
             else begin
-              Unicode.encode buffer value;
+              Buffer.add_utf_8_uchar buffer (Uchar.of_int value);
               cursor.position <- stop + 1;
               `Continue
             end

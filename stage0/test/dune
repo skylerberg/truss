@@ -36,7 +36,6 @@
   diagnostic
   token
   lexer
-  unicode
   zarith
   documents
   file_system

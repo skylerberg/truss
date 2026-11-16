@@ -21,7 +21,7 @@ let scan (cursor : Cursor.t) buffer =
          "`%s` is not an escape in Truss. A character is written by its code point: `%s`."
          (String.sub cursor.text start (stop - start))
          replacement);
-    Unicode.encode buffer value;
+    Buffer.add_utf_8_uchar buffer (Uchar.of_int value);
     cursor.position <- stop;
     true
   in
