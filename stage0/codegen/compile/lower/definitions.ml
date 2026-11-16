@@ -39,10 +39,12 @@ let context (settings : Lookups.settings) ~constant ~env (lookups : Lookups.t) =
 
 let test_key path = Instance.Code { path; type_arguments = [] }
 
+type written = { spans : Source.Definition_span.t array; text : string }
+
 type code = {
-  definition_key : Names.key;
+  definition : Path.t;
+  written : written option;
   enclosing_impl : Path.t option;
-  text : string;
   result : Types.result;
   substitution : Types.substitution;
   uses : Types.capability_set;
@@ -50,16 +52,22 @@ type code = {
   has_defaults : bool;
 }
 
-let unwritten ~definition_key ~substitution ~result =
+let unwritten ~definition ~substitution ~result =
   {
-    definition_key;
+    definition;
+    written = None;
     enclosing_impl = None;
-    text = "";
     result;
     substitution;
     uses = Types.no_capabilities;
     real = [];
     has_defaults = false;
+  }
+
+let read_written context key =
+  {
+    spans = context.lookups.interface.names.spans key;
+    text = context.lookups.interface.names.text key;
   }
 
 let key_of context path =
@@ -90,11 +98,12 @@ let written context path =
   | _ -> None
 
 let code_of context (path : Path.t) type_arguments : code =
-  let function_code ~enclosing_impl (key, _, _) ~(interface : Types.signature) ~substitution =
+  let function_code ~enclosing_impl ((key : Names.key), _, _) ~(interface : Types.signature)
+      ~substitution =
     {
-      definition_key = key;
+      definition = key.path;
+      written = Some (read_written context key);
       enclosing_impl;
-      text = context.lookups.interface.names.text key;
       result = interface.output;
       substitution;
       uses = interface.uses;
@@ -110,8 +119,8 @@ let code_of context (path : Path.t) type_arguments : code =
       match Resolve.Names.definition_of_path context.lookups.interface.names path with
       | Some (key, { kind = Test _; _ }) ->
           {
-            (unwritten ~definition_key:key ~substitution:[] ~result:(Returns Types.unit)) with
-            text = context.lookups.interface.names.text key;
+            (unwritten ~definition:path ~substitution:[] ~result:(Returns Types.unit)) with
+            written = Some (read_written context key);
             real =
               (match Interface.Definition.test_uses context.lookups.interface path with
               | Some uses ->
@@ -134,8 +143,8 @@ let code_of context (path : Path.t) type_arguments : code =
       | None, Method { owner = Derived { type_; _ }; _ }
         when Mir.is_generated context.lookups.mir path ->
           {
-            (unwritten ~definition_key:(key_of context type_) ~substitution ~result:interface.output)
-            with
+            (unwritten ~definition:type_ ~substitution ~result:interface.output) with
+            written = Some (read_written context (key_of context type_));
             enclosing_impl;
           }
       | None, Method { owner = (Impl _ | Derived _) as impl; name; receiver } -> (

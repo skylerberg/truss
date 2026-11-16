@@ -340,9 +340,9 @@ let in_type_definition st (ty : Ground.ty) nested_function =
       code =
         {
           caller.code with
-          definition_key = key;
+          definition = path;
+          written = Some (read_written st.context key);
           enclosing_impl = None;
-          text = st.context.lookups.interface.names.text key;
           substitution = bind interface.type_generics arguments;
         };
       self_place = None;

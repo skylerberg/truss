@@ -156,8 +156,8 @@ let constant_state context path =
   in
   let code =
     {
-      (unwritten ~definition_key:key ~substitution:[] ~result:(Returns Types.unit)) with
-      text = context.lookups.interface.names.text key;
+      (unwritten ~definition:path ~substitution:[] ~result:(Returns Types.unit)) with
+      written = Some (read_written context key);
     }
   in
   let st = enter context ~builder:(create context.env ~key:(Evaluator path)) (frame_of code) in

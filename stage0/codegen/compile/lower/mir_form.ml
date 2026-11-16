@@ -21,7 +21,7 @@ let parameter_of (body : Mir.Graph.body) local =
   | { kind = Source { mode; name; _ }; type_; _ } -> (mode, Option.value name ~default:"_", type_)
   | _ -> bug "a parameter that is no source local"
 
-let spans st = st.context.lookups.interface.names.spans st.frame.code.definition_key
+let spans st = (require_written st).spans
 
 let site_of st (origin : Core.origin) =
   let spans = spans st in
@@ -31,7 +31,7 @@ let site_of st (origin : Core.origin) =
 let reported_site st : Lowered.operand option =
   match st.frame.mir with
   | Some { lending = Some { site; _ }; _ }
-    when Path.package st.frame.code.definition_key.path = Path.standard_package ->
+    when Path.package st.frame.code.definition = Path.standard_package ->
       Some site
   | _ -> None
 
@@ -1473,9 +1473,9 @@ and capability_defaults st ~capability ~name (arguments : Mir.argument list) eva
         code =
           {
             caller.code with
-            definition_key = key;
+            definition = capability;
+            written = Some (read_written st.context key);
             enclosing_impl = None;
-            text = st.context.lookups.interface.names.text key;
             substitution = [];
           };
         self_place = None;

@@ -115,7 +115,7 @@ let is_trivial st ty = Drop_and_copy.is_trivial st.context.drop_and_copy ty
 let is_zero_size st = Memory_layout.has_zero_size st.context.env
 
 let site st (span : Source.Definition_span.t) : Lowered.site =
-  { definition = st.frame.code.definition_key.path; offset = span.start }
+  { definition = st.frame.code.definition; offset = span.start }
 
 type unsupported = { construct : string; at : Lowered.site option }
 
@@ -124,8 +124,13 @@ exception Unsupported of unsupported
 let unsupported ?at format =
   Printf.ksprintf (fun construct -> raise (Unsupported { construct; at })) format
 
+let require_written st =
+  match st.frame.code.written with
+  | Some written -> written
+  | None -> bug "%s is generated code, which has no source" (Path.show st.frame.code.definition)
+
 let source st (span : Source.Definition_span.t) =
-  let text = st.frame.code.text in
+  let text = (require_written st).text in
   let start = min span.start (String.length text) in
   String.sub text start (min span.stop (String.length text) - start)
 
