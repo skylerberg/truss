@@ -281,6 +281,7 @@ val replace : 'span -> string -> 'span edit
 val insert : 'span -> string -> 'span edit
 val delete : 'span -> 'span edit
 val find_closest : string -> string list -> string option
+val show_count : int -> string -> string -> string
 
 type reported
 

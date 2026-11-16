@@ -549,7 +549,7 @@ let list_changed_files root files paths =
     files
   @ List.concat_map list_with_prefix prefixes
 
-let refresh worktree =
+let refresh ~(read : Watcher.t -> Watcher.changes) worktree =
   let root = worktree.root in
   let update files =
     let before = worktree.snapshot in
@@ -563,7 +563,7 @@ let refresh worktree =
           (apply_changes worktree.database after changes);
         `Changed
   in
-  match Option.map Watcher.read_changes worktree.watcher with
+  match Option.map read worktree.watcher with
   | Some Removed -> `Removed
   | Some Overflow | None -> update (Registry.Content.list_input_files root)
   | Some (Changed []) -> `Unchanged
@@ -606,7 +606,7 @@ let rec load_worktree_snapshot root =
   match Hashtbl.find_opt worktrees root with
   | None -> Result.map (fun worktree -> worktree.snapshot) (open_worktree root)
   | Some worktree -> (
-      match refresh worktree with
+      match refresh ~read:Watcher.read_changes worktree with
       | `Removed ->
           close worktree;
           load_worktree_snapshot root
@@ -635,7 +635,7 @@ let propagate_changes descriptor =
   Hashtbl.iter
     (fun _ worktree ->
       if Option.map Watcher.extract_descriptor worktree.watcher = Some descriptor then
-        match refresh worktree with
+        match refresh ~read:Watcher.read_pending_changes worktree with
         | `Removed -> close worktree
         | `Unchanged -> ()
         | `Changed -> (
@@ -811,6 +811,7 @@ module For_testing = struct
   let collect_cache = collect
   let listen = Server.listen
   let call_starting = Server.For_testing.call_starting
+  let remove_ended_servers = Server.For_testing.remove_ended_servers
 
   let interrupt_commit root =
     match Hashtbl.find_opt worktrees root with

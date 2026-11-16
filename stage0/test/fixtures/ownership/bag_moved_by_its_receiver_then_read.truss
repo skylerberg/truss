@@ -1,0 +1,10 @@
+type Bag(items: List[Int64])
+
+fn Bag.into_items(own self) -> List[Int64] {
+  self.items
+}
+
+fn f(bag: own Bag) -> UInt64 {
+  let items = own bag.into_items()
+  items.length() + bag.items.length()
+}

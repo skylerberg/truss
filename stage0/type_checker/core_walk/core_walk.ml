@@ -127,9 +127,6 @@ let walk_expression_children visit (node : Core.expression) =
           visit.expression start;
           visit.expression stop;
           visit.pattern pattern
-      | Over_collection { pattern; collection } ->
-          visit.expression collection;
-          visit.pattern pattern
       | Over_elements { pattern; elements = { count; position; element } } ->
           visit.expression count;
           visit.pattern position;

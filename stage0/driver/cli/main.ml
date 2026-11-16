@@ -270,9 +270,11 @@ let truss =
                each kind of part that the database computed or wrote during the command. A row \
                counts the parts computed, the computed parts whose value came out unchanged, the \
                writes, the reads that the computations made, and the distinct parts that each \
-               computation read. A write is a changed value or a removed part. The table omits the \
-               work that the background process did before the command, such as propagating a \
-               saved file.");
+               computation read. A write is a changed value or a removed part. A last row, \
+               untracked, counts the reads that no part records: the command's own reads of the \
+               database, and the reads that order the parts of a stage. The table omits the work \
+               that the background process did before the command, such as propagating a saved \
+               file.");
          ]
        ~doc:"Check, test, build, and change Truss code.")
     [

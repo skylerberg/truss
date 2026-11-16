@@ -24,4 +24,6 @@ module For_testing : sig
     report_progress:(string -> unit) ->
     'a ->
     ('b, string) result
+
+  val remove_ended_servers : unit -> unit
 end

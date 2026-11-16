@@ -1,0 +1,11 @@
+capability Greeter {
+  fn greet() -> Int64
+}
+
+type Loud()
+
+impl Greeter for Loud {
+  fn greet(self) -> Int64 {
+    Panic.crash("no")
+  }
+}

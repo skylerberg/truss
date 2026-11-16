@@ -1,7 +1,5 @@
 let maximum_nesting = 32
 
-type scan = Cursor.t -> inline:bool -> nesting:int -> Cursor.item
-
 type builder = {
   buffer : Buffer.t;
   mutable text_start : int;
@@ -586,9 +584,8 @@ and build_multi_line cursor ~tag ~form ~quotes ~delimiter_stop lines closing =
           in
           let next = stop index in
           let count = next - index in
-          Printf.sprintf "%d %s%s" count
-            (if character = '\t' then "tab" else "space")
-            (if count = 1 then "" else "s")
+          (if character = '\t' then Diagnostic.show_count count "tab" "tabs"
+           else Diagnostic.show_count count "space" "spaces")
           :: list_groups next
       in
       String.concat " then " (list_groups 0)

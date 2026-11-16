@@ -101,10 +101,10 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
               Identical (first, State.build_expression state second.value));
           Types.bool
       | _ ->
-          State.report state
-            (if List.length arguments < 2 then Missing_argument else Too_many_arguments)
-            (State.read_span state value.id) "`identical` takes two values of one type.";
-          Calls.check_arguments_alone state env arguments Types.bool)
+          Calls.check_arguments_alone state env arguments
+            (State.make_error_type state
+               (if List.length arguments < 2 then Missing_argument else Too_many_arguments)
+               (State.read_span state value.id) "`identical` takes two values of one type."))
   | Specification_function function_ -> (
       let bound_method =
         match (function_, arguments) with
@@ -132,7 +132,11 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
                         State.build_expression state argument.value)
                       arguments;
                 });
-          Calls.check_arguments_alone state env arguments Types.Integer)
+          List.iter
+            (fun (argument : Syntax.argument) ->
+              ignore (Hooks.check_expression state env argument.value))
+            arguments;
+          Types.Integer)
   | Definition (Type, path) -> (
       match Instantiation.check_named_type state callee path type_arguments with
       | Types.Named { arguments = type_arguments; _ } ->
@@ -290,7 +294,9 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                   | receiver :: rest, Some (Type_overload method_path) ->
                       let inner =
                         match receiver.value.kind with
-                        | Mode (_, inner) -> inner
+                        | Mode (mode, inner) ->
+                            State.note_mode_keyword state receiver.value mode inner;
+                            inner
                         | _ -> receiver.value
                       in
                       let receiver_type = Hooks.check_expression state env inner in
@@ -364,7 +370,7 @@ and check_trait_method_through_type state env ?expected:_ ?trait_arguments
     (value : Syntax.expression) self_type (trait : Types.trait_reference)
     (method_ : Types.trait_method) arguments =
   let trait_generics =
-    match Interface.Definition.read_trait_interface state.lookups.interface trait.trait with
+    match Interface.Definition.find_trait_interface state.lookups.interface trait.trait with
     | Some interface -> interface.trait_generics
     | None -> []
   in
@@ -372,11 +378,9 @@ and check_trait_method_through_type state env ?expected:_ ?trait_arguments
   | Some written when List.length written <> List.length trait_generics ->
       Calls.check_arguments_alone state env arguments
         (State.make_error_type state Arity (State.read_span state value.id)
-           (Printf.sprintf "`%s` takes %d type %s, and %d %s given." (Types.show_trait trait)
-              (List.length trait_generics)
-              (if List.length trait_generics = 1 then "argument" else "arguments")
-              (List.length written)
-              (if List.length written = 1 then "is" else "are")))
+           (Printf.sprintf "`%s` takes %s, and %s given." (Types.show_trait trait)
+              (Diagnostic.show_count (List.length trait_generics) "type argument" "type arguments")
+              (Diagnostic.show_count (List.length written) "is" "are")))
   | Some trait_arguments ->
       check_trait_method_call state env value self_type trait method_ arguments ~trait_generics
         ~trait_arguments
@@ -407,15 +411,7 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
             let mode = Calls.check_argument state env first.value parameter in
             ignore
               (State.decide_default_literal state ~at:(State.read_span state value.id) self_type);
-            ( [
-                {
-                  Tables.expression = first.value.id;
-                  core_argument_index = 0;
-                  mode;
-                  mode_keyword = None;
-                };
-              ],
-              rest )
+            ([ { Tables.expression = first.value.id; core_argument_index = 0; mode } ], rest)
         | [] -> ([], []))
     | None -> ([], arguments)
   in
@@ -528,9 +524,15 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
     | Some method_path -> Some (wanted, method_path)
     | None when lent_mode = Some Types.Mut && List.mem_assoc Path.Read overloads ->
         Some (Path.Read, List.assoc Path.Read overloads)
-    | None when (not has_mode_keyword) && ((not place) || State.is_plain state receiver_type) -> (
+    | None
+      when (not has_mode_keyword)
+           && ((not place)
+              || State.is_plain state receiver_type
+              || not (List.mem_assoc Path.Mut overloads)) -> (
         match List.assoc_opt Path.Own overloads with
-        | Some method_path -> Some (Path.Own, method_path)
+        | Some method_path ->
+            if State.is_place state base then Modes.note_place_without_own state env base;
+            Some (Path.Own, method_path)
         | None -> None)
     | None -> None
   in
@@ -554,19 +556,14 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
   in
   let report_missing_receiver_mode : 'a. (Path.receiver * 'a) list -> Types.ty =
    fun overloads ->
-    let has receiver = List.exists (fun (overload, _) -> overload = receiver) overloads in
-    if (not has_mode_keyword) && place && (has Path.Mut || has Path.Own) then begin
-      let keyword = if has Path.Mut then "mut" else "own" in
+    if (not has_mode_keyword) && place && List.mem_assoc Path.Mut overloads then
       State.make_error_type state Missing_mode (State.read_span state base.id)
         ~fixes:
           [
-            State.fix
-              (Printf.sprintf "Pass it `%s`." keyword)
-              [ State.insert (State.read_span state base.id).start (keyword ^ " ") ];
+            State.fix "Pass it `mut`." [ State.insert (State.read_span state base.id).start "mut " ];
           ]
-        (Printf.sprintf "`%s` takes `%s self`, so the call site passes its receiver `%s`."
-           member.text keyword keyword)
-    end
+        (Printf.sprintf "`%s` takes `mut self`, so the call site passes its receiver `mut`."
+           member.text)
     else report_wrong_receiver (List.map (fun (receiver, _) -> (receiver, ())) overloads)
   in
   match receiver_type with
@@ -684,7 +681,6 @@ and check_method_with_receiver state env ?expected ?(type_arguments = [])
                     | Some (Mut, _) -> Mut
                     | Some (Own, _) -> Own
                     | _ -> Read);
-                  mode_keyword = None;
                 }
               in
               Name_lookup.finish_call state env value method_path
@@ -695,7 +691,7 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
     ~(receiver : Syntax.expression) ~receiver_type (trait : Types.trait_reference)
     (method_ : Types.trait_method) ~type_arguments arguments =
   let trait_generics =
-    match Interface.Definition.read_trait_interface state.lookups.interface trait.trait with
+    match Interface.Definition.find_trait_interface state.lookups.interface trait.trait with
     | Some interface -> interface.trait_generics
     | None -> []
   in
@@ -750,7 +746,6 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
                   Tables.expression = receiver.id;
                   core_argument_index = 0;
                   mode = (match method_.method_receiver with Mut -> Mut | Own -> Own | _ -> Read);
-                  mode_keyword = None;
                 }
               in
               let evidence =

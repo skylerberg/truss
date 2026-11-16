@@ -11,7 +11,7 @@ let find_own_constant (lookups : Lookups.t) owner name =
     (lookups.interface.names.list_members owner name)
 
 let list_trait_methods (lookups : Lookups.t) trait name =
-  match Interface.Definition.read_trait_interface lookups.interface trait with
+  match Interface.Definition.find_trait_interface lookups.interface trait with
   | Some interface ->
       List.filter
         (fun (method_ : Types.trait_method) -> method_.method_name = name)
@@ -24,15 +24,15 @@ let find_trait_method lookups trait name receiver =
     (list_trait_methods lookups trait name)
 
 let find_fields (lookups : Lookups.t) path arguments =
-  Option.bind (Interface.Definition.read_type_interface lookups.interface path) (fun interface ->
+  Option.bind (Interface.Definition.find_type_interface lookups.interface path) (fun interface ->
       Types.instantiate_fields interface arguments)
 
 let find_variants (lookups : Lookups.t) path arguments =
-  Option.bind (Interface.Definition.read_type_interface lookups.interface path) (fun interface ->
+  Option.bind (Interface.Definition.find_type_interface lookups.interface path) (fun interface ->
       Types.instantiate_variants interface arguments)
 
 let are_fields_visible (lookups : Lookups.t) ~package (path : Path.t) =
-  match Interface.Definition.read_type_interface lookups.interface path with
+  match Interface.Definition.find_type_interface lookups.interface path with
   | Some { opaque = true; _ } -> Path.locate_package path = package
   | _ -> true
 

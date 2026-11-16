@@ -194,7 +194,18 @@ let () =
       (match list_server_files_added ~before with
       | [] -> ()
       | added -> fail "left %s" (String.concat ", " added));
-      if Sys.file_exists root then fail "made the project's directory again")
+      if Sys.file_exists root then fail "made the project's directory again");
+  test "a background process that has answered a command removes the files of an ended one"
+    (fun () ->
+      let servers = Filename.concat (Sys.getenv "TRUSS_CACHE") "servers" in
+      (try Unix.mkdir servers 0o700 with Unix.Unix_error (EEXIST, _, _) -> ());
+      let ended = Filename.concat servers "0123456789abcdef-0123456789abcdef" in
+      let paths = List.map (fun suffix -> ended ^ suffix) [ ".key"; ".lock"; ".start" ] in
+      List.iter (fun path -> Out_channel.with_open_bin path ignore) paths;
+      ignore (make_package_served_by_other_build ());
+      let is_removed () = not (List.exists Sys.file_exists paths) in
+      wait_until_deadline ~is_done:is_removed;
+      if not (is_removed ()) then fail "the ended process's files are still there")
 
 let () =
   test "a command refuses a cache that other users can write, and exits with 2" (fun () ->
@@ -1054,6 +1065,12 @@ let () =
                (List.map
                   (fun (name, outcome, message) -> String.concat " " [ name; outcome; message ])
                   outcomes)));
+  test "truss test shows the echo output of a passing test" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.passing_test_reaching_an_echo) ] in
+      let status, output = run_truss [ "test"; "-C"; root ] in
+      if status <> 0 then fail "status %d: %s" status output;
+      if not (String.includes ~affix:"\"triples\": passed\n    main.truss:2:3: 6\n\n" output) then
+        fail "%s" output);
   test "truss test shows a failed test's output, and --json gives each test's output" (fun () ->
       let root = make_package [ ("main.truss", Fixtures.tests_printing_to_the_console) ] in
       let status, output = run_truss [ "test"; "-C"; root ] in

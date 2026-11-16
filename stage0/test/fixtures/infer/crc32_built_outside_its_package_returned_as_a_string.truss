@@ -1,0 +1,5 @@
+use standard::checksum
+
+fn f() -> String {
+  checksum::Crc32(state: 0)
+}

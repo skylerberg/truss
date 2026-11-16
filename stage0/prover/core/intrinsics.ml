@@ -54,7 +54,7 @@ let apply_slice context (frame : State.frame) (site : Invocation.site) ~(base_ty
 let index_element context element term index =
   match Models.index_sequence context element term index with
   | Some term -> term
-  | None -> raise (Facts.Foreign_unsupported "the elements of a sequence")
+  | None -> Facts.raise_unsupported Whole_definition "the elements of a sequence"
 
 let assume_unchanged_outside context frame element ~before ~after ~start ~stop =
   let length sequence = Models.make_sequence_length context element sequence in
@@ -76,8 +76,7 @@ let write_sliced_owner context frame ~(owner : State.passed_place) ~owner_type ~
   let element =
     match owner_type with
     | Types.Named { arguments = Types.Type element :: _; _ } -> element
-    | _ ->
-        raise (Facts.Foreign_unsupported (Printf.sprintf "a slice of `%s`" (Types.show owner_type)))
+    | _ -> Facts.raise_unsupported Whole_definition "a slice of `%s`" (Types.show owner_type)
   in
   let before_value = owner.read frame in
   let changed = Facts.arrive context frame "changed" owner_type in
@@ -89,8 +88,7 @@ let write_sliced_owner context frame ~(owner : State.passed_place) ~owner_type ~
       assume_unchanged_outside context frame element ~before ~after ~start ~stop;
       Validity.assume_valid context frame owner_type changed;
       owner.write frame changed
-  | _ ->
-      raise (Facts.Foreign_unsupported (Printf.sprintf "a slice of `%s`" (Types.show owner_type)))
+  | _ -> Facts.raise_unsupported Whole_definition "a slice of `%s`" (Types.show owner_type)
 
 let slice_place context (site : Invocation.site) ~(owner : State.passed_place) ~owner_type ~low
     ~high =
@@ -108,7 +106,7 @@ let slice_place context (site : Invocation.site) ~(owner : State.passed_place) ~
         try
           write_sliced_owner context frame ~owner ~owner_type:(owner_type frame) ~start:low
             ~stop:high
-        with Facts.Unsupported _ | Facts.Foreign_unsupported _ ->
+        with Facts.Unsupported _ ->
           owner.write frame (Facts.arrive context frame "changed" (owner_type frame)));
   }
 
@@ -822,9 +820,7 @@ let update_array context frame (array_type : Types.ty) array index part =
         ~after:(Models.make_array_model context frame array_type updated)
         index part;
       updated
-  | _ ->
-      raise
-        (Facts.Foreign_unsupported (Printf.sprintf "the elements of `%s`" (Types.show array_type)))
+  | _ -> Facts.raise_unsupported Whole_definition "the elements of `%s`" (Types.show array_type)
 
 let write_element_back context frame ~(lend : Intrinsic.lend) ~type_arguments
     ~(receiver : State.passed_place) ~receiver_type index final =

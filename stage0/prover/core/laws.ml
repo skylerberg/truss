@@ -96,7 +96,7 @@ let make_law_fact (context : State.context) (frame : State.frame) source ~substi
         (Logic.forall
            ( List.map2 (fun symbol ty -> (symbol, Facts.declare_sort context ty)) symbols types,
              Logic.( ==> ) (Logic.( &&& ) range premise) holds ))
-    with Facts.Unsupported _ | Facts.Foreign_unsupported _ -> None
+    with Facts.Unsupported _ -> None
   end
 
 let assume_laws (context : State.context) frame ~at (trait : Types.trait_reference) (ty : Types.ty)
