@@ -515,7 +515,7 @@ and expression state scope (value : expression) =
           | Update { value = Some value; _ } -> expression state scope value
           | Update { value = None; _ } | Update_error -> ())
         updates
-  | Binary { operator = And; _ } | Is _ -> ignore (condition state scope value)
+  | Binary { operator = Connective And; _ } | Is _ -> ignore (condition state scope value)
   | Binary { left; right; _ } ->
       expression state scope left;
       expression state scope right
@@ -564,7 +564,7 @@ and expression state scope (value : expression) =
 
 and condition state scope (value : expression) =
   match value.kind with
-  | Binary { operator = And; left; right; _ } ->
+  | Binary { operator = Connective And; left; right; _ } ->
       let after_left = condition state scope left in
       condition state after_left right
   | Is { value = tested; pattern = pattern_; _ } ->

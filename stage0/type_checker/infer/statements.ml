@@ -117,36 +117,15 @@ and statement state env (written : statement) ~last : unit =
               Assign { target; value = build_expression state value });
           check state env value target_type;
           check_owned state env value target_type
-      | _ -> (
+      | Compound operation -> (
           let right_type = expression state env ~expected:target_type value in
           literal_operands state ~left:target_type ~right:right_type;
-          let binary_operator : binary =
-            match operator with
-            | Add_assign -> Add
-            | Subtract_assign -> Subtract
-            | Multiply_assign -> Multiply
-            | Divide_assign -> Divide
-            | Remainder_assign -> Remainder
-            | Bit_and_assign -> Bit_and
-            | Bit_or_assign -> Bit_or
-            | Bit_xor_assign -> Bit_xor
-            | Shift_left_assign -> Shift_left
-            | Shift_right_assign -> Shift_right
-            | Assign -> Add
-          in
           register_statement state written (fun () ->
-              Form.build_compound_assign state written written_target value binary_operator);
-          match binary_operator with
-          | Add | Subtract | Multiply | Divide | Remainder ->
-              let trait, method_ =
-                match binary_operator with
-                | Add -> (Well_known.path Add, "add")
-                | Subtract -> (Well_known.path Subtract, "subtract")
-                | Multiply -> (Well_known.path Multiply, "multiply")
-                | Divide -> (Well_known.path Divide, "divide")
-                | _ -> (Well_known.path Remainder, "remainder")
-              in
-              let fake : expression = { kind = Expression_error; id = written.id } in
+              Form.build_compound_assign state written written_target value operation);
+          match operation with
+          | Arithmetic arithmetic ->
+              let trait, method_ = select_arithmetic_trait arithmetic in
+              let call_site : expression = { kind = Expression_error; id = written.id } in
               let result =
                 operator_call
                   ~operands:
@@ -164,48 +143,18 @@ and statement state env (written : statement) ~last : unit =
                         mode_keyword = None;
                       };
                     ]
-                  state fake ~trait ~method_ ~left:target_type ~right:(Some right_type)
+                  state call_site ~trait ~method_ ~left:target_type ~right:(Some right_type)
               in
               if not (unify state result target_type) then
                 mismatch state (read_span state value.id) ~expected:target_type ~actual:result
-          | Shift_left | Shift_right ->
-              (match resolve state right_type with
-              | Types.Literal (Integer_literal, _) ->
-                  ignore (unify state right_type (Types.builtin UInt64))
-              | _ -> ());
-              defer state (fun () ->
-                  match (normalize state target_type, normalize state right_type) with
-                  | (Types.Literal _ | Types.Variable _), _ | _, (Types.Literal _ | Types.Variable _)
-                    ->
-                      false
-                  | left, right ->
-                      if not (integer_type state left || Types.is_error left) then
-                        report state No_impl
-                          (read_span state written_target.id)
-                          (Printf.sprintf "Shifts work on built-in integers, not `%s`."
-                             (Types.show left));
-                      if
-                        not
-                          ((integer_type state right && not (signed_type state right))
-                          || Types.is_error right)
-                      then
-                        report state Mismatch (read_span state value.id)
-                          (Printf.sprintf "A shift amount is an unsigned integer, not `%s`."
-                             (Types.show right));
-                      true)
-          | _ ->
+          | Shift _ ->
+              check_shift_operands state
+                ~left:(read_span state written_target.id, target_type)
+                ~right:(read_span state value.id, right_type)
+          | Bitwise _ ->
               if not (unify state target_type right_type) then
                 mismatch state (read_span state value.id) ~expected:target_type ~actual:right_type;
-              defer state (fun () ->
-                  match normalize state target_type with
-                  | Types.Literal _ | Types.Variable _ -> false
-                  | resolved ->
-                      if not (integer_type state resolved || Types.is_error resolved) then
-                        report state No_impl
-                          (read_span state written_target.id)
-                          (Printf.sprintf "Bitwise operators work on built-in integers, not `%s`."
-                             (Types.show resolved));
-                      true)))
+              check_bitwise_operand state (read_span state written_target.id) target_type))
   | For { mode = running; pattern = written_pattern; annotation; iterable; clauses; body } ->
       reject_in_formula state env (read_span state written.id) "A `for` loop";
       let mode, inner =

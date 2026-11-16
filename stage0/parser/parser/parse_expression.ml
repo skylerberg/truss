@@ -12,16 +12,16 @@ let comparison_level = 3
 let range_level = 4
 
 let binary_level = function
-  | Implies -> 0
-  | Or -> 1
-  | And -> 2
-  | Equal | Not_equal | Less | Less_equal | Greater | Greater_equal -> comparison_level
-  | Bit_or -> 5
-  | Bit_xor -> 6
-  | Bit_and -> 7
-  | Shift_left | Shift_right -> 8
-  | Add | Subtract -> 9
-  | Multiply | Divide | Remainder -> 10
+  | Connective Implies -> 0
+  | Connective Or -> 1
+  | Connective And -> 2
+  | Comparison _ -> comparison_level
+  | Operation (Bitwise Bit_or) -> 5
+  | Operation (Bitwise Bit_xor) -> 6
+  | Operation (Bitwise Bit_and) -> 7
+  | Operation (Shift _) -> 8
+  | Operation (Arithmetic (Add | Subtract)) -> 9
+  | Operation (Arithmetic (Multiply | Divide | Remainder)) -> 10
 
 let operator_level = function
   | Binary_operator binary -> binary_level binary
@@ -29,42 +29,42 @@ let operator_level = function
   | Range_operator _ -> range_level
 
 let operator = function
-  | Punctuation Implies -> Some (Binary_operator Implies)
-  | Punctuation Or_or -> Some (Binary_operator Or)
-  | Punctuation And_and -> Some (Binary_operator And)
-  | Punctuation Equal_equal -> Some (Binary_operator Equal)
-  | Punctuation Not_equal -> Some (Binary_operator Not_equal)
-  | Punctuation Less -> Some (Binary_operator Less)
-  | Punctuation Less_equal -> Some (Binary_operator Less_equal)
-  | Punctuation Greater -> Some (Binary_operator Greater)
-  | Punctuation Greater_equal -> Some (Binary_operator Greater_equal)
+  | Punctuation Implies -> Some (Binary_operator (Connective Implies))
+  | Punctuation Or_or -> Some (Binary_operator (Connective Or))
+  | Punctuation And_and -> Some (Binary_operator (Connective And))
+  | Punctuation Equal_equal -> Some (Binary_operator (Comparison Equal))
+  | Punctuation Not_equal -> Some (Binary_operator (Comparison Not_equal))
+  | Punctuation Less -> Some (Binary_operator (Comparison Less))
+  | Punctuation Less_equal -> Some (Binary_operator (Comparison Less_equal))
+  | Punctuation Greater -> Some (Binary_operator (Comparison Greater))
+  | Punctuation Greater_equal -> Some (Binary_operator (Comparison Greater_equal))
   | Keyword Is -> Some Is_operator
   | Punctuation Dot_dot -> Some (Range_operator false)
   | Punctuation Dot_dot_equal -> Some (Range_operator true)
-  | Punctuation Bar -> Some (Binary_operator Bit_or)
-  | Punctuation Caret -> Some (Binary_operator Bit_xor)
-  | Punctuation Ampersand -> Some (Binary_operator Bit_and)
-  | Punctuation Shift_left -> Some (Binary_operator Shift_left)
-  | Punctuation Shift_right -> Some (Binary_operator Shift_right)
-  | Punctuation Plus -> Some (Binary_operator Add)
-  | Punctuation Minus -> Some (Binary_operator Subtract)
-  | Punctuation Star -> Some (Binary_operator Multiply)
-  | Punctuation Slash -> Some (Binary_operator Divide)
-  | Punctuation Percent -> Some (Binary_operator Remainder)
+  | Punctuation Bar -> Some (Binary_operator (Operation (Bitwise Bit_or)))
+  | Punctuation Caret -> Some (Binary_operator (Operation (Bitwise Bit_xor)))
+  | Punctuation Ampersand -> Some (Binary_operator (Operation (Bitwise Bit_and)))
+  | Punctuation Shift_left -> Some (Binary_operator (Operation (Shift Shift_left)))
+  | Punctuation Shift_right -> Some (Binary_operator (Operation (Shift Shift_right)))
+  | Punctuation Plus -> Some (Binary_operator (Operation (Arithmetic Add)))
+  | Punctuation Minus -> Some (Binary_operator (Operation (Arithmetic Subtract)))
+  | Punctuation Star -> Some (Binary_operator (Operation (Arithmetic Multiply)))
+  | Punctuation Slash -> Some (Binary_operator (Operation (Arithmetic Divide)))
+  | Punctuation Percent -> Some (Binary_operator (Operation (Arithmetic Remainder)))
   | _ -> None
 
 let assignment_operator = function
   | Punctuation Equal -> Some Assign
-  | Punctuation Plus_equal -> Some Add_assign
-  | Punctuation Minus_equal -> Some Subtract_assign
-  | Punctuation Star_equal -> Some Multiply_assign
-  | Punctuation Slash_equal -> Some Divide_assign
-  | Punctuation Percent_equal -> Some Remainder_assign
-  | Punctuation Ampersand_equal -> Some Bit_and_assign
-  | Punctuation Bar_equal -> Some Bit_or_assign
-  | Punctuation Caret_equal -> Some Bit_xor_assign
-  | Punctuation Shift_left_equal -> Some Shift_left_assign
-  | Punctuation Shift_right_equal -> Some Shift_right_assign
+  | Punctuation Plus_equal -> Some (Compound (Arithmetic Add))
+  | Punctuation Minus_equal -> Some (Compound (Arithmetic Subtract))
+  | Punctuation Star_equal -> Some (Compound (Arithmetic Multiply))
+  | Punctuation Slash_equal -> Some (Compound (Arithmetic Divide))
+  | Punctuation Percent_equal -> Some (Compound (Arithmetic Remainder))
+  | Punctuation Ampersand_equal -> Some (Compound (Bitwise Bit_and))
+  | Punctuation Bar_equal -> Some (Compound (Bitwise Bit_or))
+  | Punctuation Caret_equal -> Some (Compound (Bitwise Bit_xor))
+  | Punctuation Shift_left_equal -> Some (Compound (Shift Shift_left))
+  | Punctuation Shift_right_equal -> Some (Compound (Shift Shift_right))
   | _ -> None
 
 let angle_closer cursor =

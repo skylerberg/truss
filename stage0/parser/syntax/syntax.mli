@@ -3,41 +3,14 @@ type name = { text : string; id : id }
 type path = { modules : name list; last : name }
 type mode = Mut | Own
 type prefix = Negate | Not | Complement
-
-type binary =
-  | Multiply
-  | Divide
-  | Remainder
-  | Add
-  | Subtract
-  | Shift_left
-  | Shift_right
-  | Bit_and
-  | Bit_xor
-  | Bit_or
-  | Equal
-  | Not_equal
-  | Less
-  | Less_equal
-  | Greater
-  | Greater_equal
-  | And
-  | Or
-  | Implies
-
-type assignment =
-  | Assign
-  | Add_assign
-  | Subtract_assign
-  | Multiply_assign
-  | Divide_assign
-  | Remainder_assign
-  | Bit_and_assign
-  | Bit_or_assign
-  | Bit_xor_assign
-  | Shift_left_assign
-  | Shift_right_assign
-
+type arithmetic = Multiply | Divide | Remainder | Add | Subtract
+type bitwise = Bit_and | Bit_xor | Bit_or
+type shift = Shift_left | Shift_right
+type operation = Arithmetic of arithmetic | Bitwise of bitwise | Shift of shift
+type comparison = Equal | Not_equal | Less | Less_equal | Greater | Greater_equal
+type connective = And | Or | Implies
+type binary = Operation of operation | Comparison of comparison | Connective of connective
+type assignment = Assign | Compound of operation
 type quantifier = Forall | Exists
 type 'kind node = { kind : 'kind; id : id }
 

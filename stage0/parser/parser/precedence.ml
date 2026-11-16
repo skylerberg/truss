@@ -3,7 +3,7 @@ open Syntax
 type group =
   | Arithmetic
   | Shift
-  | Bitwise of binary
+  | Bitwise of bitwise
   | Range_group
   | Comparison
   | And_group
@@ -11,14 +11,14 @@ type group =
   | Implies_group
   | Lowest
 
-let binary_group = function
-  | Multiply | Divide | Remainder | Add | Subtract -> Arithmetic
-  | Shift_left | Shift_right -> Shift
-  | (Bit_and | Bit_xor | Bit_or) as operator -> Bitwise operator
-  | Equal | Not_equal | Less | Less_equal | Greater | Greater_equal -> Comparison
-  | And -> And_group
-  | Or -> Or_group
-  | Implies -> Implies_group
+let binary_group : binary -> group = function
+  | Operation (Arithmetic _) -> Arithmetic
+  | Operation (Shift _) -> Shift
+  | Operation (Bitwise bitwise) -> Bitwise bitwise
+  | Comparison _ -> Comparison
+  | Connective And -> And_group
+  | Connective Or -> Or_group
+  | Connective Implies -> Implies_group
 
 let group (value : expression) =
   match value.kind with
@@ -40,25 +40,25 @@ let operator_id (value : expression) =
   | Binary { operator_id; _ } | Is { operator_id; _ } | Range { operator_id; _ } -> operator_id
   | _ -> value.id
 
-let level language operator =
+let level language (operator : binary) =
   match (language, operator) with
   | `Truss, operator -> Parse_expression.binary_level operator
-  | _, (And | Or | Implies) -> 0
-  | `C, (Multiply | Divide | Remainder) -> 10
-  | `C, (Add | Subtract) -> 9
-  | `C, (Shift_left | Shift_right) -> 8
-  | `C, (Less | Less_equal | Greater | Greater_equal) -> 7
-  | `C, (Equal | Not_equal) -> 6
-  | `C, Bit_and -> 5
-  | `C, Bit_xor -> 4
-  | `C, Bit_or -> 3
-  | `Go, (Multiply | Divide | Remainder | Shift_left | Shift_right | Bit_and) -> 10
-  | `Go, (Add | Subtract | Bit_or | Bit_xor) -> 9
-  | `Go, (Equal | Not_equal | Less | Less_equal | Greater | Greater_equal) -> 4
-  | `Swift, (Shift_left | Shift_right) -> 11
-  | `Swift, (Multiply | Divide | Remainder | Bit_and) -> 10
-  | `Swift, (Add | Subtract | Bit_or | Bit_xor) -> 9
-  | `Swift, (Equal | Not_equal | Less | Less_equal | Greater | Greater_equal) -> 4
+  | _, Connective _ -> 0
+  | `C, Operation (Arithmetic (Multiply | Divide | Remainder)) -> 10
+  | `C, Operation (Arithmetic (Add | Subtract)) -> 9
+  | `C, Operation (Shift _) -> 8
+  | `C, Comparison (Less | Less_equal | Greater | Greater_equal) -> 7
+  | `C, Comparison (Equal | Not_equal) -> 6
+  | `C, Operation (Bitwise Bit_and) -> 5
+  | `C, Operation (Bitwise Bit_xor) -> 4
+  | `C, Operation (Bitwise Bit_or) -> 3
+  | `Go, Operation (Arithmetic (Multiply | Divide | Remainder) | Shift _ | Bitwise Bit_and) -> 10
+  | `Go, Operation (Arithmetic (Add | Subtract) | Bitwise (Bit_or | Bit_xor)) -> 9
+  | `Go, Comparison _ -> 4
+  | `Swift, Operation (Shift _) -> 11
+  | `Swift, Operation (Arithmetic (Multiply | Divide | Remainder) | Bitwise Bit_and) -> 10
+  | `Swift, Operation (Arithmetic (Add | Subtract) | Bitwise (Bit_or | Bit_xor)) -> 9
+  | `Swift, Comparison _ -> 4
 
 let applies_first language ~first ~second = level language first >= level language second
 
@@ -209,7 +209,7 @@ let report_problem cursor ?context (whole : expression) (operand : expression) ~
   | Chained message ->
       let fixes =
         match (whole.kind, operand.kind) with
-        | Binary { operator = Implies; _ }, _ -> List.rev (both ())
+        | Binary { operator = Connective Implies; _ }, _ -> List.rev (both ())
         | Binary _, Binary { right = middle; _ } when (not right) && is_name_or_literal middle -> (
             let middle_span = Cursor.read_file_span cursor middle.id in
             match Cursor.spelling cursor middle_span with

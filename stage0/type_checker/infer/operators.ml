@@ -9,6 +9,46 @@ open Hooks
 open Name_lookup
 open Pattern_typing
 
+let select_arithmetic_trait : arithmetic -> Path.t * string = function
+  | Add -> (Well_known.path Add, "add")
+  | Subtract -> (Well_known.path Subtract, "subtract")
+  | Multiply -> (Well_known.path Multiply, "multiply")
+  | Divide -> (Well_known.path Divide, "divide")
+  | Remainder -> (Well_known.path Remainder, "remainder")
+
+let check_bitwise_operand state span type_ =
+  defer state (fun () ->
+      match normalize state type_ with
+      | Types.Literal _ | Types.Variable _ -> false
+      | resolved ->
+          if not (integer_type state resolved || Types.is_error resolved) then
+            report state No_impl span
+              (Printf.sprintf "Bitwise operators work on built-in integers, not `%s`."
+                 (Types.show resolved));
+          true)
+
+let check_shift_operands state ~left:(left_span, left_type) ~right:(right_span, right_type) =
+  (match resolve state right_type with
+  | Types.Literal (Integer_literal, _) -> ignore (unify state right_type (Types.builtin UInt64))
+  | _ -> ());
+  defer state (fun () ->
+      match (normalize state left_type, normalize state right_type) with
+      | (Types.Literal _ | Types.Variable _), _ | _, (Types.Literal _ | Types.Variable _) -> false
+      | left_resolved, right_resolved ->
+          if not (integer_type state left_resolved || Types.is_error left_resolved) then
+            report state No_impl left_span
+              (Printf.sprintf "Shifts work on built-in integers, not `%s`."
+                 (Types.show left_resolved));
+          if
+            not
+              ((integer_type state right_resolved && not (signed_type state right_resolved))
+              || Types.is_error right_resolved)
+          then
+            report state Mismatch right_span
+              (Printf.sprintf "A shift amount is an unsigned integer, not `%s`."
+                 (Types.show right_resolved));
+          true)
+
 let rec try_ state env (value : expression) (inner : expression) =
   reject_in_formula state env (read_span state value.id) "`?`";
   let inner_type = normalize state (expression state env inner) in
@@ -311,8 +351,8 @@ and is_string state type_ =
 and binary state env ?expected (value : expression) operator (left : expression)
     (right : expression) =
   match operator with
-  | And | Or | Implies ->
-      if operator = Implies && not env.specification then
+  | Connective connective ->
+      if connective = Implies && not env.specification then
         report state Specification_only (read_span state value.id)
           "`==>` is only for specifications and the bodies of functions for specifications only; \
            in code, write `!a || b`.";
@@ -322,64 +362,37 @@ and binary state env ?expected (value : expression) operator (left : expression)
       register_expression state value (fun () ->
           let first = build_expression state left in
           let second = build_expression state right in
-          match operator with
+          match connective with
           | And -> And (first, second)
           | Or -> Or (first, second)
-          | _ -> Implies (first, second));
+          | Implies -> Implies (first, second));
       Types.bool
-  | Bit_and | Bit_or | Bit_xor ->
+  | Operation (Bitwise _ as operation) ->
       let left_type = expression state env ?expected left in
       let right_type = expression state env ~expected:left_type right in
       built_in_operator state value [ left; right ] left_type;
       register_expression state value (fun () ->
-          Form.build_operator state value (Form.convert_to_operation operator) [ left; right ]);
+          Form.build_operator state value (Form.convert_to_operation operation) [ left; right ]);
       literal_operands state ~left:left_type ~right:right_type;
       if not (unify state left_type right_type) then
         mismatch state (read_span state right.id) ~expected:left_type ~actual:right_type;
-      defer state (fun () ->
-          match normalize state left_type with
-          | Types.Literal _ | Types.Variable _ -> false
-          | resolved ->
-              if not (integer_type state resolved || Types.is_error resolved) then
-                report state No_impl (read_span state value.id)
-                  (Printf.sprintf "Bitwise operators work on built-in integers, not `%s`."
-                     (Types.show resolved));
-              true);
+      check_bitwise_operand state (read_span state value.id) left_type;
       left_type
-  | Shift_left | Shift_right ->
+  | Operation (Shift _ as operation) ->
       let left_type = expression state env ?expected left in
       let right_type = expression state env right in
       built_in_operator state value [ left; right ] left_type;
       register_expression state value (fun () ->
-          Form.build_operator state value (Form.convert_to_operation operator) [ left; right ]);
-      (match resolve state right_type with
-      | Types.Literal (Integer_literal, _) -> ignore (unify state right_type (Types.builtin UInt64))
-      | _ -> ());
-      defer state (fun () ->
-          match (normalize state left_type, normalize state right_type) with
-          | (Types.Literal _ | Types.Variable _), _ | _, (Types.Literal _ | Types.Variable _) ->
-              false
-          | left_resolved, right_resolved ->
-              if not (integer_type state left_resolved || Types.is_error left_resolved) then
-                report state No_impl (read_span state left.id)
-                  (Printf.sprintf "Shifts work on built-in integers, not `%s`."
-                     (Types.show left_resolved));
-              if
-                not
-                  ((integer_type state right_resolved && not (signed_type state right_resolved))
-                  || Types.is_error right_resolved)
-              then
-                report state Mismatch (read_span state right.id)
-                  (Printf.sprintf "A shift amount is an unsigned integer, not `%s`."
-                     (Types.show right_resolved));
-              true);
+          Form.build_operator state value (Form.convert_to_operation operation) [ left; right ]);
+      check_shift_operands state
+        ~left:(read_span state left.id, left_type)
+        ~right:(read_span state right.id, right_type);
       left_type
-  | (Equal | Not_equal | Less | Less_equal | Greater | Greater_equal)
-    when operands_hole state env left right ->
+  | Comparison comparison when operands_hole state env left right ->
       register_expression state value (fun () ->
-          Form.build_built_in_comparison state operator left right);
+          Form.build_built_in_comparison state comparison left right);
       Types.bool
-  | Equal | Not_equal | Less | Less_equal | Greater | Greater_equal ->
+  | Comparison comparison ->
       let left_type = Option.get state.tables.types.(left.id) in
       let right_type = Option.get state.tables.types.(right.id) in
       literal_operands state ~left:left_type ~right:right_type;
@@ -390,18 +403,19 @@ and binary state env ?expected (value : expression) operator (left : expression)
       in
       if env.specification && integers left_type && integers right_type then begin
         register_expression state value (fun () ->
-            Form.build_built_in_comparison state operator left right);
+            Form.build_built_in_comparison state comparison left right);
         Types.bool
       end
       else begin
         register_expression state value (fun () ->
-            Form.build_comparison state value operator left right);
+            Form.build_comparison state value comparison left right);
         if not (unify state left_type right_type) then
           ignore (mismatched_operands state value left right ~left_type ~right_type);
         let trait, method_, result =
-          match operator with
+          match comparison with
           | Equal | Not_equal -> (Well_known.path Equal, "equal", Types.bool)
-          | _ -> (Well_known.path Ordered, "compare", Types.named (Well_known.path Ordering) [])
+          | Less | Less_equal | Greater | Greater_equal ->
+              (Well_known.path Ordered, "compare", Types.named (Well_known.path Ordering) [])
         in
         state.tables.calls.(value.id) <-
           Some
@@ -438,15 +452,15 @@ and binary state env ?expected (value : expression) operator (left : expression)
         resolve_evidence state value left_type (trait_reference trait);
         Types.bool
       end
-  | (Add | Subtract | Multiply | Divide | Remainder) when operands_hole state env left right ->
+  | Operation (Arithmetic _ as operation) when operands_hole state env left right ->
       register_expression state value (fun () ->
-          Form.build_operator state value (Form.convert_to_operation operator) [ left; right ]);
+          Form.build_operator state value (Form.convert_to_operation operation) [ left; right ]);
       Types.Hole
-  | Add | Subtract | Multiply | Divide | Remainder ->
+  | Operation (Arithmetic arithmetic as operation) ->
       let left_type = Option.get state.tables.types.(left.id) in
       let right_type = Option.get state.tables.types.(right.id) in
       literal_operands state ~left:left_type ~right:right_type;
-      if operator = Add && (is_string state left_type || is_string state right_type) then begin
+      if arithmetic = Add && (is_string state left_type || is_string state right_type) then begin
         let piece (side : expression) =
           match side.kind with
           | String { tag = None; form = Ordinary; first; rest = []; _ } ->
@@ -486,7 +500,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
             | Types.Literal _ -> unify state right_type Types.Integer
             | _ -> true);
           register_expression state value (fun () ->
-              Form.build_operator state value (Form.convert_to_operation operator) [ left; right ]);
+              Form.build_operator state value (Form.convert_to_operation operation) [ left; right ]);
           Types.Integer
         end
         else
@@ -497,14 +511,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
                 (integer_type state left_resolved || Types.is_float_type left_resolved)
                 && Types.equal left_resolved right_resolved
           in
-          let trait, method_ =
-            match operator with
-            | Add -> (Well_known.path Add, "add")
-            | Subtract -> (Well_known.path Subtract, "subtract")
-            | Multiply -> (Well_known.path Multiply, "multiply")
-            | Divide -> (Well_known.path Divide, "divide")
-            | _ -> (Well_known.path Remainder, "remainder")
-          in
+          let trait, method_ = select_arithmetic_trait arithmetic in
           if
             (integer_type state (normalize state left_type)
             && integer_type state (normalize state right_type))
