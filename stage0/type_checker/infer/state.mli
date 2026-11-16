@@ -32,7 +32,7 @@ type frame = {
   mutable reported_unmet_bounds : (Types.ty * Types.trait_reference) list;
   mutable compiled_expressions : int list;
   mutable compiled_bindings : int list;
-  mutable specification_type_report : Diagnostic.reported option;
+  mutable specification_only_report : Diagnostic.reported option;
   frame_specification : bool;
   span : Source.Definition_span.t;
 }
@@ -135,6 +135,7 @@ val insert : int -> string -> Source.Definition_span.t Diagnostic.edit
 val current_frame : state -> frame option
 val record : state -> Syntax.expression -> Types.ty -> unit
 val note_compiled_expression : state -> env -> Syntax.expression -> unit
+val report_specification_only : state -> Source.Definition_span.t -> string -> Diagnostic.reported
 val defer : state -> (unit -> bool) -> unit
 val resolve : state -> Types.ty -> Types.ty
 val zonk : state -> Types.ty -> Types.ty

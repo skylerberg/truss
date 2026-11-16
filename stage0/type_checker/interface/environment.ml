@@ -53,8 +53,8 @@ type type_facts = {
 type grant = { capabilities : Path.t list; unknown : string list }
 
 let is_specification = function
-  | Function_interface signature -> signature.specification_only
-  | Theorem_interface _ | Law_proof_interface _ -> true
+  | Function_interface signature | Theorem_interface signature -> signature.specification_only
+  | Law_proof_interface _ -> true
   | Type_interface _ | Trait_interface _ | Impl_interface _ | Constant_interface _
   | Test_interface _ | Error_interface _ ->
       false

@@ -49,7 +49,11 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
   | Type_parameter _ | Capability_parameter _ ->
       error state Not_a_value (read_span state value.id)
         (Printf.sprintf "`%s` is a type, not a value." text)
-  | Definition ((Function | Theorem), path) -> (
+  | Definition (Theorem, _) ->
+      error state Not_a_value (read_span state value.id)
+        (Printf.sprintf
+           "`%s` is a theorem, so it is not a value. Call it in a proof to use its `ensures`." text)
+  | Definition (Function, path) -> (
       match function_signature state path with
       | Some signature ->
           let instance = instantiate state (read_span state value.id) signature in
@@ -283,7 +287,8 @@ and explicit_type_arguments ?(head = 0) state (value : expression) instance item
         written own
   end
 
-and finish_call state (value : expression) callee (instance : instance) arguments left_out =
+and finish_call state env (value : expression) path callee (instance : instance) arguments left_out
+    =
   let result = Types.result_type instance.signature.output in
   state.tables.calls.(value.id) <-
     Some
@@ -296,12 +301,40 @@ and finish_call state (value : expression) callee (instance : instance) argument
       };
   note_lending state value instance.signature.output;
   Form.register_call state value;
-  result
+  Option.value (reject_specification_call state env value path instance.signature) ~default:result
 
-and check_specification_call state env (value : expression) (signature : Types.signature) =
-  if signature.specification_only && not env.specification then
-    report state Specification_only (read_span state value.id)
-      "This function mentions `Integer`, so it can be called only in specifications."
+and reject_specification_call state env (value : expression) (path : Path.t)
+    (signature : Types.signature) =
+  if (not signature.specification_only) || env.specification then None
+  else
+    let name =
+      match path with Top { name; _ } | Method { name; _ } -> name | path -> Path.show path
+    in
+    let specification_type =
+      List.find_map Types.find_specification_only_type
+        (Types.result_type signature.output
+        :: List.map (fun (parameter : Types.parameter_info) -> parameter.type_) signature.parameters
+        )
+    in
+    Some
+      (Types.Error
+         (report_specification_only state (read_span state value.id)
+            (match
+               (Interface.Definition.interface state.lookups.interface path, specification_type)
+             with
+            | Some (Theorem_interface _), _ ->
+                Printf.sprintf
+                  "`%s` is a theorem, so it is called only in specifications and proofs, which are \
+                   not compiled."
+                  name
+            | _, Some specification_type ->
+                Printf.sprintf
+                  "`%s` mentions `%s`, which exists only in specifications, so it is called only \
+                   in specifications."
+                  name (Types.show specification_type)
+            | _, None ->
+                Printf.sprintf
+                  "`%s` is for specifications only, so it is called only in specifications." name)))
 
 and could_implement state type_ trait =
   let arguments =

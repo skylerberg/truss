@@ -2107,6 +2107,9 @@ proof Ordered.transitive for Box[Item: Ordered] {
   empty body asks the prover to prove it alone.
 - Calling a theorem makes its `ensures` available. A theorem that calls
   itself on smaller input is a proof by induction.
+- **A theorem is called only in specifications and proofs, and is not a
+  value.** It has no compiled body, so a call in code that runs, or a
+  function value of it, would reach a function the program does not hold.
 - A `proof { }` block in a function body holds the statements that a
   theorem's body holds, and is removed from the compiled program.
 - A law proof's body is checked as the law's body is: it names the law's

@@ -1,0 +1,19 @@
+theorem positive(value: UInt64)
+  ensures value >= 0
+{
+}
+
+theorem also_positive(value: UInt64)
+  ensures value >= 0
+{
+  positive(value)
+}
+
+fn double(value: UInt64) -> UInt64
+  requires value < 100
+{
+  proof {
+    positive(value)
+  }
+  value * 2
+}
