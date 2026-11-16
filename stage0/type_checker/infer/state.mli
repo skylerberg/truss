@@ -156,6 +156,7 @@ val evidence_of : Impls.evidence -> Tables.evidence
 val trait_reference : ?arguments:Types.argument list -> Path.t -> Types.trait_reference
 val string_type : Types.ty
 val in_statement : state -> env -> Source.Definition_span.t -> (unit -> 'a) -> 'a
+val diverges : is_never:(Syntax.expression -> bool) -> Syntax.statement -> bool
 val statement_diverges : state -> Syntax.statement -> bool
 val build_block : state -> Syntax.block -> Core.block
 val declare : state -> Syntax.name -> Types.ty -> is_var:bool -> mode:Types.mode -> unit

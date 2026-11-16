@@ -18,6 +18,8 @@ type tables = Tables.published = {
   callees : Path.t option array;
 }
 
+val statement_diverges : tables -> Syntax.statement -> bool
+
 type checked = Body.checked = {
   form : Core.t;
   tables : tables;
