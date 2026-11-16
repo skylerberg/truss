@@ -1,7 +1,7 @@
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
-module Elaborate = Interface.Elaborate
+module Elaborator = Interface.Elaborator
 
 type local = { type_ : Types.ty; is_var : bool; mode : Types.mode }
 
@@ -68,7 +68,7 @@ type state = {
   package : Path.package;
   definition : Syntax.definition;
   resolved : Resolve.resolved;
-  context : Elaborate.context;
+  context : Elaborator.t;
   text : string Lazy.t;
   mutable tables : Tables.t;
   form : form;

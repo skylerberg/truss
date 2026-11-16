@@ -2,7 +2,7 @@ open Syntax
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
-module Elaborate = Interface.Elaborate
+module Elaborator = Interface.Elaborator
 
 type local = { type_ : Types.ty; is_var : bool; mode : Types.mode }
 
@@ -65,7 +65,7 @@ type state = {
   package : Path.package;
   definition : definition;
   resolved : Resolve.resolved;
-  context : Elaborate.context;
+  context : Elaborator.t;
   text : string Lazy.t;
   mutable tables : Tables.t;
   form : form;
@@ -863,7 +863,7 @@ let rec call_with_mode_keyword state (value : expression) =
 
 let check_resource state (resource : Syntax.resource) =
   let capability (path : path_type) (method_ : name option) =
-    let shown = Interface.Elaborate.show_path path.path in
+    let shown = Interface.Elaborator.show_path path.path in
     match target state path.path.last with
     | Some (Definition (Capability, capability)) -> (
         match method_ with

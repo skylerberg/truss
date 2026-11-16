@@ -2,7 +2,7 @@ open Syntax
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
-module Elaborate = Interface.Elaborate
+module Elaborator = Interface.Elaborator
 open State
 open Modes
 open Instantiation
@@ -170,7 +170,9 @@ and expression_kind state env ?expected (value : expression) : Types.ty =
             report state Specification_only (read_span state value.id)
               "A quantifier over a whole type cannot run, so it is only for specifications and the \
                bodies of functions for specifications only. Quantify over a range or a collection.";
-          declare state bound (Elaborate.type_ state.context written) ~is_var:false ~mode:Types.Read);
+          declare state bound
+            (Elaborator.elaborate_type state.context written)
+            ~is_var:false ~mode:Types.Read);
       check state { env with in_quantifier = true } body Types.bool;
       register_expression state value (fun () ->
           let quantifier : Core.quantifier =

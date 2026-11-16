@@ -1366,7 +1366,7 @@ let compute_part database (part : Part.computed) =
           Some
             (match
                computed
-                 (Interface.Elaborate.header
+                 (Interface.Elaborator.elaborate_header
                     (make_interface_lookups database note ~is_checked:false))
                  key
              with
@@ -1378,7 +1378,7 @@ let compute_part database (part : Part.computed) =
           Some
             (match
                computed
-                 (Interface.Elaborate.definition
+                 (Interface.Elaborator.elaborate_definition
                     (make_interface_lookups database note ~is_checked:false))
                  key
              with
