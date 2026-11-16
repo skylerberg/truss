@@ -1,0 +1,6 @@
+fn has_zero(numbers: List[Int64]) -> Bool
+  requires numbers.length() > 0
+  ensures result
+{
+  exists number in numbers => number == 0
+}

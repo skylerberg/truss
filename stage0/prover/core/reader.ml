@@ -1095,20 +1095,29 @@ and read_statement context frame run (statement : Mir.statement) =
         }
   | For
       {
-        loop =
-          { quantified = Some { quantifier; binding_count = bound; decision; holds; decides }; _ };
+        loop = { quantified = Some { quantifier; binding_count; decision; holds; decides }; _ };
         iteration;
         part;
         lent;
-        binding_count = positioned;
         body;
+        _;
       } ->
-      let slice_statements start stop =
-        List.take (stop - start) (List.drop start body.statements)
-      in
-      let range, parameter, binding =
+      let bindings = List.take binding_count body.statements in
+      let range, parameter, bindings =
         match (lent, iteration) with
         | Some { element; collection; _ }, _ ->
+            let pattern_bindings =
+              match
+                List.find_index
+                  (fun (statement : Mir.statement) ->
+                    match statement.kind with
+                    | Basic (Lend { part; _ }) -> part = element
+                    | _ -> false)
+                  bindings
+              with
+              | Some lend_index -> List.drop (lend_index + 1) bindings
+              | None -> Facts.raise_bug "a quantifier over elements that no statement lends"
+            in
             ( Models.Range_of_collection
                 {
                   collection_type = compute_place_type context frame run collection;
@@ -1117,10 +1126,7 @@ and read_statement context frame run (statement : Mir.statement) =
                   location;
                 },
               element,
-              List.filter
-                (fun (statement : Mir.statement) ->
-                  match statement.kind with Basic (Lend _) -> false | _ -> true)
-                (slice_statements positioned bound) )
+              pattern_bindings )
         | None, Range { start; stop; inclusive } ->
             ( Range_of_integers
                 {
@@ -1130,7 +1136,7 @@ and read_statement context frame run (statement : Mir.statement) =
                   type_ = compute_operand_type context frame start;
                 },
               part,
-              slice_statements 0 bound )
+              bindings )
         | None, Pull _ ->
             Facts.raise_unsupported location "a quantifier over the values of a cursor"
       in
@@ -1138,10 +1144,15 @@ and read_statement context frame run (statement : Mir.statement) =
         translate_quantifier_value context frame run ~location quantifier range ~parameter
           ~matches:
             {
-              statements = binding;
+              statements = bindings;
               value = Some (Constant { value = Boolean true; type_ = Types.bool });
             }
-          ~body:{ statements = slice_statements bound decision; value = Some holds }
+          ~body:
+            {
+              statements =
+                List.take (decision - binding_count) (List.drop binding_count body.statements);
+              value = Some holds;
+            }
       in
       Some (write_place context after run { root = Local decides; projections = [] } term)
   | For { loop; iteration; part; lent; binding_count; body } ->
