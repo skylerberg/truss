@@ -1,7 +1,7 @@
 type argument = Place of Lowered.place | Value of Lowered.operand
 type types = { uint64 : Ground.ty; string_slice : Ground.ty }
 
-val consumed_places : Intrinsic.operation -> int list
+val list_consumed_places : Intrinsic.operation -> int list
 
 val lower :
   ?checks:bool ->

@@ -72,7 +72,7 @@ let () =
       let env = Codegen_support.shape_env ~extra () in
       let c =
         Emit_c.For_testing.c
-          (Emit_c.fragment env
+          (Emit_c.make_fragment env
              (Code
                 (Compile.For_testing.drop
                    (Compile.For_testing.drop_and_copy env)
@@ -86,7 +86,7 @@ let () =
     (fun () ->
       let c =
         Emit_c.For_testing.c
-          (Emit_c.fragment (Codegen_support.shape_env ())
+          (Emit_c.make_fragment (Codegen_support.shape_env ())
              (Code (Compile.For_testing.copy drop_and_copy (storage Codegen_support.int32))))
       in
       let count text =

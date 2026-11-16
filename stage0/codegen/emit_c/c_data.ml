@@ -1,9 +1,9 @@
-let static_name (context : C_types.context) =
+let allocate_static_name (context : C_types.context) =
   let name = Printf.sprintf "%s_static_%d" context.prefix (List.length context.statics) in
   name
 
-let rec initializer_c context ty (value : Lowered.static_value) : string option =
-  let layout = C_types.layout context ty in
+let rec render_initializer context ty (value : Lowered.static_value) : string option =
+  let layout = C_types.compute_layout context ty in
   let fields_c (fields : Memory_layout.field list) (values : (string * Lowered.static_value) list)
       prefix =
     String.concat ", "
@@ -13,7 +13,7 @@ let rec initializer_c context ty (value : Lowered.static_value) : string option 
            | Some value, Typed field_ty ->
                Option.map
                  (Printf.sprintf "%s.f_%s = %s" prefix field.name)
-                 (initializer_c context field_ty value)
+                 (render_initializer context field_ty value)
            | _ -> None)
          fields)
   in
@@ -21,28 +21,28 @@ let rec initializer_c context ty (value : Lowered.static_value) : string option 
     let key = C_types.Block (ty, variant) in
     C_types.register context key;
     let block_fields =
-      match (Memory_layout.block context.env ty variant).form with
+      match (Memory_layout.lay_out_block context.env ty variant).form with
       | Struct fields -> fields
       | _ -> []
     in
     let block_value = fields_c block_fields fields "" in
-    let name = static_name context in
+    let name = allocate_static_name context in
     context.statics <-
-      Printf.sprintf "static const %s %s = { %s };\n" (C_types.key_name key) name block_value
+      Printf.sprintf "static const %s %s = { %s };\n" (C_types.render_key_name key) name block_value
       :: context.statics;
-    Printf.sprintf "((%s *)&%s)" (C_types.key_name key) name
+    Printf.sprintf "((%s *)&%s)" (C_types.render_key_name key) name
   in
   match (layout.form, value) with
   | Zero_size, _ -> None
   | _, Static_storage { element; elements } ->
-      let element_c = C_types.value_c context element in
+      let element_c = C_types.render_value_type context element in
       let count = List.length elements in
       let buffer =
         if count = 0 || Memory_layout.has_zero_size context.env element then
-          "((void *)" ^ C_values.bytes_name context "" ^ ")"
+          "((void *)" ^ C_values.render_bytes_name context "" ^ ")"
         else begin
-          let values = List.filter_map (initializer_c context element) elements in
-          let name = static_name context in
+          let values = List.filter_map (render_initializer context element) elements in
+          let name = allocate_static_name context in
           context.statics <-
             Printf.sprintf "static const %s %s[%d] = { %s };\n" element_c name count
               (String.concat ", " values)
@@ -53,12 +53,12 @@ let rec initializer_c context ty (value : Lowered.static_value) : string option 
       Some
         (Printf.sprintf "{ .f_%s = %s, .f_%s = %d, .f_%s = %d }" Storage.buffer_field buffer
            Storage.length_field count Storage.capacity_field count)
-  | Scalar _, Static_scalar constant -> Some (fst (C_values.constant_c context constant))
+  | Scalar _, Static_scalar constant -> Some (fst (C_values.render_constant context constant))
   | Struct fields, Static_record values -> Some ("{ " ^ fields_c fields values "" ^ " }")
   | Array { element; _ }, Static_array values ->
       Some
         ("{ .items = { "
-        ^ String.concat ", " (List.filter_map (initializer_c context element) values)
+        ^ String.concat ", " (List.filter_map (render_initializer context element) values)
         ^ " } }")
   | Tag_only { variants; _ }, Static_variant (name, _) -> (
       match List.find_index (String.equal name) variants with
@@ -93,31 +93,33 @@ let rec initializer_c context ty (value : Lowered.static_value) : string option 
             match List.assoc_opt name niche_values with
             | None -> C_runtime.bug "no variant %s" name
             | Some value -> (
-                let stored = C_values.niche_value context niche value in
+                let stored = C_values.render_niche_value context niche value in
                 match niche.path with
                 | [] -> Some stored
-                | path -> Some (Printf.sprintf "{ %s = %s }" (C_values.path_c "" path) stored)))
+                | path -> Some (Printf.sprintf "{ %s = %s }" (C_values.render_path "" path) stored))
+            )
         | None -> C_runtime.bug "no variant %s" name
         end
   | _ -> C_runtime.bug "static data that does not fit %s" (Ground.to_string ty)
 
-let table_c context (table : Lowered.table) =
+let render_table context (table : Lowered.table) =
   let entries =
     List.map
       (fun (key, signature) ->
-        let symbol = Instance.symbol key in
+        let symbol = Instance.make_symbol key in
         C_values.declare_prototype context symbol
-          (C_values.prototype context "" symbol ~linkage:External signature ^ ";\n");
+          (C_values.render_prototype context "" symbol ~linkage:External signature ^ ";\n");
         Printf.sprintf "(const void *)&%s" symbol)
       table.entries
   in
-  Printf.sprintf "const void *const %s[%d] = { %s };\n" (Instance.symbol table.table_key)
+  Printf.sprintf "const void *const %s[%d] = { %s };\n"
+    (Instance.make_symbol table.table_key)
     (max 1 (List.length entries))
     (if entries = [] then "0" else String.concat ", " entries)
 
-let data_c context (data : Lowered.data) =
-  let symbol = Instance.symbol data.data_key in
-  match initializer_c context data.ty data.value with
+let render_data context (data : Lowered.data) =
+  let symbol = Instance.make_symbol data.data_key in
+  match render_initializer context data.ty data.value with
   | None -> ""
   | Some value ->
-      Printf.sprintf "const %s %s = %s;\n" (C_types.value_c context data.ty) symbol value
+      Printf.sprintf "const %s %s = %s;\n" (C_types.render_value_type context data.ty) symbol value

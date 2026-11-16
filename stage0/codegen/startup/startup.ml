@@ -2004,7 +2004,7 @@ const t_test *t_runtime_tests;
 void t_runtime_run_test(uint32_t index) { t_runtime_tests[index](); }
 |}
 
-let runtime ~tests =
+let render_runtime ~tests =
   String.concat ""
     [
       (if tests then "#define T_TESTS 1\n" else "");
@@ -2017,7 +2017,7 @@ let runtime ~tests =
       (if tests then tests_table else "");
     ]
 
-let starting ?(before_start = "") ~declarations ~requested_workers root_call =
+let render_start ?(before_start = "") ~declarations ~requested_workers root_call =
   Printf.sprintf
     "typedef __INT32_TYPE__ int32_t;\n\
      typedef __UINT32_TYPE__ uint32_t;\n\
@@ -2041,17 +2041,17 @@ let starting ?(before_start = "") ~declarations ~requested_workers root_call =
      }\n"
     declarations root_call before_start requested_workers
 
-let main_calling entry =
-  starting
+let render_main_start entry =
+  render_start
     ~declarations:(Printf.sprintf "int32_t %s(void);\n" entry)
     ~requested_workers:0
     (Printf.sprintf "program->status = %s()" entry)
 
-let tests_calling ~time_limit_ms ~runner tests =
+let render_tests_start ~time_limit_ms ~runner tests =
   let test_declarations =
     String.concat "" (List.map (fun symbol -> Printf.sprintf "void %s(void);\n" symbol) tests)
   in
-  starting
+  render_start
     ~declarations:
       (Printf.sprintf
          "typedef void (*t_test)(void);\n\
@@ -2063,18 +2063,18 @@ let tests_calling ~time_limit_ms ~runner tests =
     ~before_start:"  t_runtime_tests = t_tests;\n" ~requested_workers:1
     (Printf.sprintf "program->status = %s(%d, %d)" runner (List.length tests) time_limit_ms)
 
-let evaluator_calling entry =
-  starting
+let render_evaluator_start entry =
+  render_start
     ~declarations:(Printf.sprintf "void %s(void);\n" entry)
     ~requested_workers:1
     (Printf.sprintf "(void)program;\n  %s()" entry)
 
-let program_calling entry =
-  starting
+let render_program_start entry =
+  render_start
     ~declarations:(Printf.sprintf "int32_t %s(int32_t count, void *arguments);\n" entry)
     ~requested_workers:0
     (Printf.sprintf "program->status = %s(program->count, program->arguments)" entry)
 
 module For_testing = struct
-  let main_calling = main_calling
+  let main_calling = render_main_start
 end

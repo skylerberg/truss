@@ -26,7 +26,7 @@ let development_settings () : Build.settings =
 let lowering_only database packages =
   Compile.create ~results:(results ()) (requests database packages)
     { compiler = "cc"; identity = "lowering only" }
-    (Build.cache (Cache.make_objects_directory (Workspace.open_cache ())))
+    (Build.make_cache (Cache.make_objects_directory (Workspace.open_cache ())))
     (development_settings ())
 
 let create database snapshot packages build =
@@ -52,5 +52,5 @@ let create database snapshot packages build =
     ~programs:(Cache.make_programs_directory (Workspace.open_cache ()))
     ~worked_on:(fun package -> List.mem package own)
     (requests database packages) toolchain
-    (Build.cache (Cache.make_objects_directory (Workspace.open_cache ())))
+    (Build.make_cache (Cache.make_objects_directory (Workspace.open_cache ())))
     settings

@@ -1,17 +1,18 @@
 type cache = { directory : string }
 
-let cache directory =
+let make_cache directory =
   File_system.make_directory directory;
   { directory }
 
 type settings = { build : Emit_c.build; optimization : Toolchain.optimization; extra : string list }
 
-let flags settings =
-  (Toolchain.optimization_flag settings.optimization :: Toolchain.required_flags) @ settings.extra
+let list_flags settings =
+  (Toolchain.show_optimization_flag settings.optimization :: Toolchain.required_flags)
+  @ settings.extra
 
 let derive_object_key = Blake3.derive_key ~context:"truss 2026-11-12 object key"
 
-let object_key (toolchain : Toolchain.t) settings text =
+let make_object_key (toolchain : Toolchain.t) settings text =
   Blake3.to_hex
     (derive_object_key
        (Cbor.encode
@@ -19,14 +20,14 @@ let object_key (toolchain : Toolchain.t) settings text =
              [
                Bytes text;
                Text toolchain.identity;
-               Cbor.Array (List.map (fun flag -> Cbor.Text flag) (flags settings));
+               Cbor.Array (List.map (fun flag -> Cbor.Text flag) (list_flags settings));
              ])))
 
-let object_path cache key = Filename.concat cache.directory (key ^ ".o")
+let make_object_path cache key = Filename.concat cache.directory (key ^ ".o")
 
 let compile_one toolchain cache settings (name, text) =
-  let key = object_key toolchain settings text in
-  let output = object_path cache key in
+  let key = make_object_key toolchain settings text in
+  let output = make_object_path cache key in
   if Sys.file_exists output then begin
     (try Unix.utimes output 0. 0. with Unix.Unix_error _ -> ());
     Ok output
@@ -48,7 +49,7 @@ let compile_one toolchain cache settings (name, text) =
     | Error message ->
         Error (Printf.sprintf "%s does not compile (kept as %s):\n%s" name source message)
 
-let parallel jobs run_job =
+let run_parallel jobs run_job =
   let jobs = Array.of_list jobs in
   let results = Array.make (Array.length jobs) None in
   let workers = max 1 (min (Array.length jobs) (Domain.recommended_domain_count () - 1)) in
@@ -66,12 +67,12 @@ let parallel jobs run_job =
   List.iter Domain.join domains;
   Array.to_list (Array.map Option.get results)
 
-let objects ?progress toolchain cache settings sources =
+let compile_objects ?progress toolchain cache settings sources =
   let missing =
     List.length
       (List.filter
          (fun (_, text) ->
-           not (Sys.file_exists (object_path cache (object_key toolchain settings text))))
+           not (Sys.file_exists (make_object_path cache (make_object_key toolchain settings text))))
          sources)
   in
   let compiled = Atomic.make 0 in
@@ -83,7 +84,9 @@ let objects ?progress toolchain cache settings sources =
   in
   if missing > 0 then report ();
   let compile source =
-    let cached = Sys.file_exists (object_path cache (object_key toolchain settings (snd source))) in
+    let cached =
+      Sys.file_exists (make_object_path cache (make_object_key toolchain settings (snd source)))
+    in
     let result = compile_one toolchain cache settings source in
     if not cached then begin
       Atomic.incr compiled;
@@ -91,7 +94,7 @@ let objects ?progress toolchain cache settings sources =
     end;
     result
   in
-  let results = parallel sources compile in
+  let results = run_parallel sources compile in
   List.fold_right
     (fun result acc ->
       match (result, acc) with
@@ -99,8 +102,8 @@ let objects ?progress toolchain cache settings sources =
       | Error message, _ | _, Error message -> Error message)
     results (Ok [])
 
-let program ?progress ?(tests = false) ?(copied = fun _ -> []) toolchain cache env settings ~files
-    ~sources ~output =
+let build_program ?progress ?(tests = false) ?(copied = fun _ -> []) toolchain cache env settings
+    ~files ~sources ~output =
   let emitted =
     List.mapi
       (fun part_index fragments ->
@@ -117,17 +120,17 @@ let program ?progress ?(tests = false) ?(copied = fun _ -> []) toolchain cache e
             (List.concat_map copied fragments)
         in
         ( Printf.sprintf "file %d" part_index,
-          Emit_c.file env settings.build
+          Emit_c.render_file env settings.build
             (List.map (fun fragment -> (fragment, Emit_c.External)) fragments
             @ List.map (fun fragment -> (fragment, Emit_c.Internal)) copies) ))
       files
   in
 
-  let runtime = ("the runtime", Startup.runtime ~tests) in
-  match objects ?progress toolchain cache settings ((runtime :: emitted) @ sources) with
+  let runtime = ("the runtime", Startup.render_runtime ~tests) in
+  match compile_objects ?progress toolchain cache settings ((runtime :: emitted) @ sources) with
   | Error message -> Error message
   | Ok objects -> Toolchain.link toolchain ~extra:settings.extra ~objects ~output
 
 module For_testing = struct
-  let objects = objects
+  let objects = compile_objects
 end
