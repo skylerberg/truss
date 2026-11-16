@@ -9,16 +9,39 @@ let find_mode_keyword (value : Syntax.expression) : Core.mode_keyword option =
   | Mode (_, operand) -> Some { written = value.id; operand = operand.id }
   | _ -> None
 
+let make_arity_error state ?constructor ~has_receiver (value : Syntax.expression) ~parameter_count
+    ~argument_count =
+  let show_count count singular plural =
+    Printf.sprintf "%d %s" count (if count = 1 then singular else plural)
+  in
+  let verb = if argument_count = 1 then "is" else "are" in
+  State.make_error_type state
+    (if argument_count < parameter_count then Missing_argument else Too_many_arguments)
+    (State.read_span state value.id)
+    (match constructor with
+    | Some name ->
+        Printf.sprintf "`%s` has %s, and %s %s given." name
+          (show_count parameter_count "field" "fields")
+          (show_count argument_count "argument" "arguments")
+          verb
+    | None when has_receiver ->
+        Printf.sprintf "This method takes %s besides `self`, and %d %s given."
+          (show_count parameter_count "argument" "arguments")
+          argument_count verb
+    | None ->
+        Printf.sprintf "This function takes %s, and %d %s given."
+          (show_count parameter_count "argument" "arguments")
+          argument_count verb)
+
 let rec check_function_value_call state env (value : Syntax.expression) (callee : Syntax.expression)
     arguments =
   let callee_type = State.normalize state (Hooks.check_expression state env callee) in
   match callee_type with
   | Types.Function function_type when List.length function_type.inputs <> List.length arguments ->
       check_arguments_alone state env arguments
-        (State.make_error_type state Too_many_arguments (State.read_span state value.id)
-           (Printf.sprintf "This function takes %d arguments, and %d are given."
-              (List.length function_type.inputs)
-              (List.length arguments)))
+        (make_arity_error state ~has_receiver:false value
+           ~parameter_count:(List.length function_type.inputs)
+           ~argument_count:(List.length arguments))
   | Types.Function function_type ->
       let checked =
         List.mapi
@@ -90,20 +113,22 @@ and check_argument state env (value : Syntax.expression) (parameter : Types.para
   Modes.check_mode state env value parameter actual;
   parameter.mode
 
-and match_arguments state (value : Syntax.expression) (parameters : Types.parameter_info list)
-    (arguments : Syntax.argument list) ~record =
+and match_arguments state ?constructor (value : Syntax.expression)
+    (parameters : Types.parameter_info list) (arguments : Syntax.argument list) =
   let named =
     List.mapi (fun index (parameter : Types.parameter_info) -> (parameter.name, index)) parameters
   in
-  let find_bare_name (argument : Syntax.argument) =
+  let find_bare_name_index (argument : Syntax.argument) =
     let rec find_name (expression : Syntax.expression) =
       match expression.kind with
       | Name { modules = []; last } -> Some last.text
       | Mode (_, inner) -> find_name inner
       | _ -> None
     in
-    find_name argument.value
+    Option.bind (find_name argument.value) (fun name -> List.assoc_opt name named)
   in
+  let has_several_fields = Option.is_some constructor && List.length parameters > 1 in
+  let takes_bare_value position = position = 0 && not has_several_fields in
   let assigned = Hashtbl.create 8 in
   let matched =
     List.mapi
@@ -127,14 +152,10 @@ and match_arguments state (value : Syntax.expression) (parameters : Types.parame
                     (Printf.sprintf "No parameter is named `%s`." label.text);
                   None)
           | None -> (
-              match
-                Option.bind (find_bare_name argument) (fun name -> List.assoc_opt name named)
-              with
+              match find_bare_name_index argument with
               | Some index -> Some index
               | None ->
-                  if position = 0 && (not record) && parameters <> [] then Some 0
-                  else if record && List.length parameters = 1 && List.length arguments = 1 then
-                    Some 0
+                  if takes_bare_value position then Some 0
                   else begin
                     let claimed =
                       List.concat
@@ -143,12 +164,9 @@ and match_arguments state (value : Syntax.expression) (parameters : Types.parame
                              match other.label with
                              | Some label -> Option.to_list (List.assoc_opt label.text named)
                              | None -> (
-                                 match
-                                   Option.bind (find_bare_name other) (fun name ->
-                                       List.assoc_opt name named)
-                                 with
+                                 match find_bare_name_index other with
                                  | Some index -> [ index ]
-                                 | None -> if position = 0 && not record then [ 0 ] else []))
+                                 | None -> if takes_bare_value position then [ 0 ] else []))
                            arguments)
                     in
                     let unlabeled =
@@ -156,10 +174,8 @@ and match_arguments state (value : Syntax.expression) (parameters : Types.parame
                         (List.filteri
                            (fun position (other : Syntax.argument) ->
                              other.label = None
-                             && Option.is_none
-                                  (Option.bind (find_bare_name other) (fun name ->
-                                       List.assoc_opt name named))
-                             && (position > 0 || record))
+                             && Option.is_none (find_bare_name_index other)
+                             && not (takes_bare_value position))
                            arguments)
                     in
                     let open_parameters =
@@ -181,12 +197,15 @@ and match_arguments state (value : Syntax.expression) (parameters : Types.parame
                     State.report state Missing_label
                       (State.read_span state argument.value.id)
                       ~fixes
-                      (if record then
-                         "Every field after the first needs a label or a variable of its name, \
-                          since fields have no order."
-                       else
-                         "Every argument after the first needs a label, or a variable with its \
-                          parameter's name.");
+                      (match constructor with
+                      | Some name ->
+                          Printf.sprintf
+                            "`%s` has %d fields, and fields have no order. Every argument needs a \
+                             label, or a variable with its field's name."
+                            name (List.length parameters)
+                      | None ->
+                          "Every argument after the first needs a label, or a variable with its \
+                           parameter's name.");
                     None
                   end)
         in
@@ -202,7 +221,7 @@ and match_arguments state (value : Syntax.expression) (parameters : Types.parame
         (argument, parameter_index))
       arguments
   in
-  (if not record then
+  (if Option.is_none constructor then
      let indexes = List.filter_map snd matched in
      let sorted = List.sort compare indexes in
      if indexes <> sorted && List.length matched = List.length indexes then
@@ -266,47 +285,61 @@ and match_arguments state (value : Syntax.expression) (parameters : Types.parame
       matched,
     left_out )
 
-and check_arguments state env (parameters : Types.parameter_info list) matched ~offset =
-  let is_lambda ((argument : Syntax.argument), _) =
-    match argument.value.kind with Lambda _ -> true | _ -> false
-  in
-  let check ((argument : Syntax.argument), index) =
-    let parameter = List.nth parameters index in
-    let mode = check_argument state env argument.value parameter in
-    {
-      Tables.expression = argument.value.id;
-      core_argument_index = index + offset;
-      mode;
-      mode_keyword = find_mode_keyword argument.value;
-    }
-  in
-  let first = List.map check (List.filter (fun pair -> not (is_lambda pair)) matched) in
-  let lambdas = List.map check (List.filter is_lambda matched) in
-  let order = List.map (fun ((argument : Syntax.argument), _) -> argument.value.id) matched in
-  List.filter_map
-    (fun id ->
-      List.find_opt (fun (checked : Tables.argument) -> checked.expression = id) (first @ lambdas))
-    order
+and check_arguments state env ?constructor (value : Syntax.expression)
+    (parameters : Types.parameter_info list) (arguments : Syntax.argument list) ~has_receiver =
+  if List.length arguments > List.length parameters then
+    Error
+      (check_arguments_alone state env arguments
+         (make_arity_error state ?constructor ~has_receiver value
+            ~parameter_count:(List.length parameters) ~argument_count:(List.length arguments)))
+  else
+    let matched, left_out = match_arguments state ?constructor value parameters arguments in
+    let is_lambda ((argument : Syntax.argument), _) =
+      match argument.value.kind with Lambda _ -> true | _ -> false
+    in
+    let check ((argument : Syntax.argument), index) =
+      let parameter = List.nth parameters index in
+      let mode = check_argument state env argument.value parameter in
+      {
+        Tables.expression = argument.value.id;
+        core_argument_index = (if has_receiver then index + 1 else index);
+        mode;
+        mode_keyword = find_mode_keyword argument.value;
+      }
+    in
+    let non_lambdas = List.map check (List.filter (fun pair -> not (is_lambda pair)) matched) in
+    let lambdas = List.map check (List.filter is_lambda matched) in
+    let order = List.map (fun ((argument : Syntax.argument), _) -> argument.value.id) matched in
+    Ok
+      ( List.filter_map
+          (fun id ->
+            List.find_opt
+              (fun (checked : Tables.argument) -> checked.expression = id)
+              (non_lambdas @ lambdas))
+          order,
+        left_out )
 
 and check_named_call state env ?expected (value : Syntax.expression) path
     (signature : Types.signature) ~type_arguments arguments =
   let instance = Instantiation.instantiate state (State.read_span state value.id) signature in
   match Name_lookup.check_explicit_type_arguments state value instance type_arguments with
   | Error error -> check_arguments_alone state env arguments error
-  | Ok () ->
+  | Ok () -> (
       (match (expected, instance.signature.output) with
       | Some expected, Returns output -> State.unify_as_hint state output expected
       | _ -> ());
-      let matched, left_out =
-        match_arguments state value instance.signature.parameters arguments ~record:false
-      in
-      let checked = check_arguments state env instance.signature.parameters matched ~offset:0 in
-      let callee =
-        match Intrinsic.operation_of_path path with
-        | Some operation -> Tables.Intrinsic { operation; type_arguments = instance.type_arguments }
-        | None -> Tables.Function { path; type_arguments = instance.type_arguments }
-      in
-      Name_lookup.finish_call state env value path callee instance checked left_out
+      match
+        check_arguments state env value instance.signature.parameters arguments ~has_receiver:false
+      with
+      | Error error -> error
+      | Ok (checked, left_out) ->
+          let callee =
+            match Intrinsic.operation_of_path path with
+            | Some operation ->
+                Tables.Intrinsic { operation; type_arguments = instance.type_arguments }
+            | None -> Tables.Function { path; type_arguments = instance.type_arguments }
+          in
+          Name_lookup.finish_call state env value path callee instance checked left_out)
 
 and construct state env ?expected ?type_arguments (value : Syntax.expression) type_path variant
     arguments =
@@ -354,7 +387,7 @@ and construct state env ?expected ?type_arguments (value : Syntax.expression) ty
          (State.show state type_));
   match fields with
   | Error error -> check_arguments_alone state env arguments error
-  | Ok fields ->
+  | Ok fields -> (
       let parameters =
         List.map
           (fun (field : Types.field) ->
@@ -366,7 +399,6 @@ and construct state env ?expected ?type_arguments (value : Syntax.expression) ty
             })
           fields
       in
-      let matched, left_out = match_arguments state value parameters arguments ~record:true in
       Option.iter
         (fun mode ->
           List.iter
@@ -374,15 +406,24 @@ and construct state env ?expected ?type_arguments (value : Syntax.expression) ty
               Hashtbl.replace state.yielded argument.value.id mode)
             arguments)
         (Hashtbl.find_opt state.yielded value.id);
-      let checked = check_arguments state env parameters matched ~offset:0 in
-      state.tables.calls.(value.id) <-
-        Some
-          {
-            callee = Constructor { type_ = type_path; variant; type_arguments };
-            arguments = checked;
-            omitted_defaults = left_out;
-            uses = Types.no_capabilities;
-            callee_result = type_;
-          };
-      Form.register_call state value;
-      type_
+      let constructor =
+        match variant with
+        | Some variant -> variant
+        | None -> Types.show (Types.Named { path = type_path; arguments = [] })
+      in
+      match
+        check_arguments state env ~constructor value parameters arguments ~has_receiver:false
+      with
+      | Error error -> error
+      | Ok (checked, left_out) ->
+          state.tables.calls.(value.id) <-
+            Some
+              {
+                callee = Constructor { type_ = type_path; variant; type_arguments };
+                arguments = checked;
+                omitted_defaults = left_out;
+                uses = Types.no_capabilities;
+                callee_result = type_;
+              };
+          Form.register_call state value;
+          type_)
