@@ -2,6 +2,7 @@ type input =
   | Source of Path.file
   | Packages
   | Modules of Path.package
+  | Files of Path.package
   | Dependencies of Path.package
 
 type name =

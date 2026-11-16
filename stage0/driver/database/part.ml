@@ -2,6 +2,7 @@ type input =
   | Source of Path.file
   | Packages
   | Modules of Path.package
+  | Files of Path.package
   | Dependencies of Path.package
 
 type name =
@@ -122,6 +123,7 @@ let show_input = function
   | Source file -> "source " ^ Path.show_file file
   | Packages -> "packages"
   | Modules package -> "modules " ^ Path.show_package package
+  | Files package -> "files " ^ Path.show_package package
   | Dependencies package -> "dependencies " ^ Path.show_package package
 
 let show_name = function
@@ -324,6 +326,7 @@ let show_kind = function
   | Input (Source _) -> "source"
   | Input Packages -> "packages"
   | Input (Modules _) -> "modules"
+  | Input (Files _) -> "files"
   | Input (Dependencies _) -> "dependencies"
   | Name part -> show_name_kind part
   | Stored (Computed part) -> show_computed_kind part

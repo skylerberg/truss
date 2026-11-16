@@ -2036,6 +2036,7 @@ data, and not on the database.
 |---|---|
 | A program is built by following the references of its code. | A reference missing from a definition's output would leave a test's key unchanged by an edit to the code it calls. The program built from the same references fails to link, so the omission cannot go unnoticed. |
 | Lowering checks each call it emits against the caller's call edges. | A call edge missing from the termination check hides a recursive call, and the prover accepts a recursion that it never proved ends. The check makes the omission a compiler error at the first build. |
+| A read that no part records, by a request or by the ordering of a stage, is checked. Reading a stale part is a compiler bug, and so is reading a name from a stale namespace. | No propagation corrects such a read. A request that drained too little would report a value that the files no longer give. |
 
 ### References to names
 

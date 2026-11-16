@@ -941,3 +941,34 @@ let () =
       let interfaces = extract_counts counts "interface" in
       if (interfaces.computed, interfaces.writes) <> (0, 1) then
         Harness.fail "counted %s" (show_counts interfaces))
+
+let () =
+  Harness.test "adding a file to a module recomputes the namespace, which reads the files"
+    (fun () ->
+      expect_included
+        (list_propagated
+           ~before:[ ("app::main", "fn first() -> Int64 { 1 }\n") ]
+           ~after:
+             [
+               ("app::main", "fn first() -> Int64 { 1 }\n");
+               ("app::main/second", "fn second() -> Int64 { first() }\n");
+             ])
+        ~parts:[ "namespace app"; "checked body app::main::second" ]);
+  Harness.test "a request that reads a name whose namespace is stale is a compiler bug" (fun () ->
+      let database = build [ ("app::main", callee_and_caller) ] in
+      Database.update database
+        [ (Support.parse_file "app::main/extra", Some "fn extra() -> Int64 { 3 }\n") ];
+      let names = Database.make_name_lookups database [] in
+      match names.list_declarations (Support.parse_module "app::main") with
+      | _ -> Harness.fail "the stale namespace was read"
+      | exception Compiler_bug.Bug _ -> ());
+  Harness.test "a request's reads are counted as untracked, and the request computes nothing"
+    (fun () ->
+      let database = build [ ("app::main", callee_and_caller) ] in
+      match
+        snd
+          (Database.count (fun () ->
+               ignore (Database.list_file_diagnostics database (Support.parse_file "app::main"))))
+      with
+      | [ { kind = "untracked"; computed = 0; writes = 0; reads; _ } ] when reads > 0 -> ()
+      | counts -> Harness.fail "counted %s" (String.concat "; " (List.map show_counts counts)))
