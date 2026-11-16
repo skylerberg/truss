@@ -27,8 +27,8 @@ type operand =
 type callee = operand Core.target
 
 type function_argument =
-  | Function_reference of { path : Path.t; node : Core.id; origin : Core.origin }
-  | Lambda_expression of { body : int; node : Core.id; origin : Core.origin; type_ : Types.ty }
+  | Function_reference of { path : Path.t; origin : Core.origin }
+  | Lambda_expression of { body : int; origin : Core.origin; type_ : Types.ty }
 
 type argument =
   | Passed of {
@@ -51,12 +51,7 @@ type capture = { local : Core.local; type_ : Types.ty; place : place }
 
 type yielded =
   | Part of operand
-  | Built of {
-      variant : string option;
-      fields : (string * yielded option) list;
-      type_ : Types.ty;
-      node : Core.id;
-    }
+  | Built of { variant : string option; fields : (string * yielded option) list; type_ : Types.ty }
 
 type provided = {
   mode : Types.mode;
@@ -172,10 +167,10 @@ and early_exit = { resumed : block; returned : local option }
 and statement = { kind : statement_kind; origin : Core.origin }
 
 and basic =
-  | Assign of { target : place; value : rvalue; node : Core.id option }
+  | Assign of { target : place; value : rvalue }
   | Call of { destination : place option; call : call }
   | Lend of { part : local; call : call }
-  | Slice of { destination : place; base : place; call : call }
+  | Slice of { destination : place; base : place; base_type : Types.ty; call : call }
   | Template of { destination : place; literals : string list; call : call }
   | Live of local list
   | Dead of local list

@@ -93,7 +93,7 @@ and effects : Mir.basic -> Mir.local list * Mir.local list * Mir.local list = fu
       let read, given = Option.fold ~none:([], []) ~some:written destination in
       (call_locals call @ read, given, [])
   | Lend { part; call } -> (call_locals call, [ part ], [])
-  | Slice { destination; base; call } ->
+  | Slice { destination; base; call; _ } ->
       let read, given = written destination in
       (call_locals call @ place_locals base @ read, given, [])
   | Template { destination; call; _ } ->

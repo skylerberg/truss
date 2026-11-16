@@ -348,8 +348,7 @@ let passed_place_of context run place =
 
 let shape_of run ?function_ (value : Mir.operand) : Invocation.shape =
   match (function_, whole_local value) with
-  | Some (Mir.Function_reference { path; node; origin }), _ ->
-      Named_function { id = node; origin; path }
+  | Some (Mir.Function_reference { path; origin }), _ -> Named_function { origin; path }
   | (Some (Lambda_expression _) | None), Some local -> (
       match run.infos.(local).kind with
       | Source { local = core; _ } -> Forwarded core
@@ -415,13 +414,13 @@ let call_values context frame run (invocation : Invocation.t) (arguments : Mir.a
             match argument with
             | Passed { mode; value; function_; _ } -> (
                 match function_ with
-                | Some (Lambda_expression { body; node; origin; type_ }) ->
+                | Some (Lambda_expression { body; origin; type_ }) ->
                     [
                       State.Lambda_argument
                         {
                           position;
                           mode;
-                          site = { id = node; origin; type_ };
+                          site = { origin; type_ };
                           lambda = { code = run.lambdas.(body); lambdas = run.lambdas };
                         };
                     ]
@@ -472,15 +471,13 @@ let read_call context frame run (call : Mir.call) ~result_type =
       in
       let values = call_values context frame run invocation call.arguments in
       Calls.apply_call context frame
-        { id = call.node; origin = call.origin; type_ = result_type }
+        { origin = call.origin; type_ = result_type }
         invocation ~through values
 
 let read_lend context (frame : State.frame) run part (call : Mir.call) =
   let mode = match run.infos.(part).kind with Lent mode -> mode | _ -> Types.Read in
   let invocation = invocation_of call ~lends:(Some mode) in
-  let site : Invocation.site =
-    { id = call.node; origin = call.origin; type_ = run.infos.(part).type_ }
-  in
+  let site : Invocation.site = { origin = call.origin; type_ = run.infos.(part).type_ } in
   let location = Facts.locate context frame.source call.origin in
   let values = call_values context frame run invocation call.arguments in
   let lend ?lent_final frame =
@@ -543,7 +540,7 @@ let lends_places (part : Mir.yielded) =
 let rec yielded_value context frame run ~origin (part : Mir.yielded) =
   match part with
   | Part operand -> (frame, read_operand context frame run operand)
-  | Built { variant; fields; node; type_ } ->
+  | Built { variant; fields; type_ } ->
       let frame, values =
         List.fold_left
           (fun (frame, values) (name, field) ->
@@ -554,7 +551,7 @@ let rec yielded_value context frame run ~origin (part : Mir.yielded) =
             | None -> (frame, values @ [ (name, None) ]))
           (frame, []) fields
       in
-      Values.apply_construct context frame { id = node; origin; type_ } variant values
+      Values.apply_construct context frame { origin; type_ } variant values
 
 let rec written_back context run ty (part : Mir.yielded) frame after =
   match part with
@@ -1217,17 +1214,12 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
       Some
         (write_place context frame run target
            (Facts.arrive context frame "lambda" (place_type context frame run target)))
-  | Assign { target; value; node } ->
+  | Assign { target; value } ->
       write_assignment context run target
         ~copied:(match value with Operand copied -> [ copied ] | _ -> [])
         (Some
            (read_rvalue context frame run value
-              ~site:
-                {
-                  id = Option.value node ~default:(-1);
-                  origin = statement.origin;
-                  type_ = target_type context frame run target;
-                }))
+              ~site:{ origin = statement.origin; type_ = target_type context frame run target }))
   | Call { destination; call } -> (
       let result_type =
         match destination with
@@ -1327,7 +1319,7 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
             Logic.Boolean true )
           :: context.decisions;
       Some frame
-  | Slice { destination; base; call } ->
+  | Slice { destination; base; base_type; call } ->
       let values = call_values context frame run (invocation_of call ~lends:None) call.arguments in
       let argument position =
         Option.map
@@ -1336,9 +1328,9 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
       in
       let low = Option.value (argument 1) ~default:(Logic.int 0) in
       let site : Invocation.site =
-        { id = call.node; origin = call.origin; type_ = target_type context frame run destination }
+        { origin = call.origin; type_ = target_type context frame run destination }
       in
-      let base_type = place_type context frame run base in
+      let base_type = Facts.substituted context frame base_type in
       let collection = read_place context frame run base in
       let frame, viewed, low, high =
         Intrinsics.apply_slice context frame site ~base_type ~collection ~low ~high:(argument 2)
@@ -1364,11 +1356,7 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
       | Trait_method { trait; name; receiver; evidence; _ }, [ Passed { value = template; _ } ] ->
           let frame, tagged =
             Values.apply_template context frame
-              {
-                id = call.node;
-                origin = call.origin;
-                type_ = target_type context frame run destination;
-              }
+              { origin = call.origin; type_ = target_type context frame run destination }
               ~trait ~name ~receiver ~evidence ~literals
               (read_operand context frame run template)
           in

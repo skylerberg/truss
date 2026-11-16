@@ -2,6 +2,8 @@ module Lookups = Lookups
 module Names = Resolve.Names
 module Properties = Interface.Properties
 
+let bug format = Compiler_bug.bug ~stage:"Package_checks" format
+
 type placed = { key : Names.key; diagnostic : Diagnostic.in_definition }
 
 let diagnostic_at (key : Names.key) ?(fixes = []) code (span : Source.Definition_span.t) message =
@@ -288,25 +290,38 @@ let not_strictly_positive_message =
    function with a `time` clause might not terminate. Remove the `time` clause from the function \
    type, or pass the function the fields that it needs instead of the whole value."
 
+let find_written_variant (variants : Syntax.variant list) (variant : Types.variant) =
+  match
+    List.find_opt
+      (fun (written : Syntax.variant) -> written.name.text = variant.variant_name)
+      variants
+  with
+  | Some written -> written
+  | None -> bug "the variant `%s` is not in its type's definition" variant.variant_name
+
 let field_span (spans : Source.Definition_span.t array) (body : Syntax.type_body)
     ((variant : Types.variant option), (field : Types.field)) =
+  let missing () = bug "the field `%s` is not in its type's definition" field.field_name in
   let among (fields : Syntax.field list) =
-    List.find_map
-      (fun (written : Syntax.field) ->
-        match written.kind with
-        | Field_declaration { name; _ } when name.text = field.field_name -> Some spans.(written.id)
-        | _ -> None)
-      fields
+    match
+      List.find_map
+        (fun (written : Syntax.field) ->
+          match written.kind with
+          | Field_declaration { name; _ } when name.text = field.field_name ->
+              Some spans.(written.id)
+          | _ -> None)
+        fields
+    with
+    | Some span -> span
+    | None -> missing ()
   in
   match (body, variant) with
   | Fields fields, None -> among fields
-  | Variants variants, Some variant ->
-      Option.bind
-        (List.find_opt
-           (fun (written : Syntax.variant) -> written.name.text = variant.variant_name)
-           variants)
-        (fun written -> Option.bind written.fields among)
-  | _ -> None
+  | Variants variants, Some variant -> (
+      match (find_written_variant variants variant).fields with
+      | Some fields -> among fields
+      | None -> missing ())
+  | _ -> missing ()
 
 let check_recursion lookups ~contained (declaration : Names.declaration) spans
     (definition : Syntax.definition) =
@@ -326,44 +341,37 @@ let check_recursion lookups ~contained (declaration : Names.declaration) spans
           occurrences
       in
       let in_place =
-        Option.bind (first In_place) (fun (variant, _) ->
-            let variant_span =
-              match (body, variant) with
-              | Variants variants, Some (variant : Types.variant) ->
-                  Option.map
-                    (fun (written : Syntax.variant) -> spans.(written.name.id))
-                    (List.find_opt
-                       (fun (written : Syntax.variant) -> written.name.text = variant.variant_name)
-                       variants)
-              | _ -> None
-            in
-            match variant_span with
-            | Some span ->
-                Some
-                  (diagnostic_at key Needs_indirect span
-                     ~fixes:
-                       [
-                         Diagnostic.fix "Declare the variant `indirect`."
-                           [
-                             Diagnostic.insert
-                               (Source.Definition_span.zero_width span.start)
-                               "indirect ";
-                           ];
-                       ]
-                     "This type contains itself in place, so it would be infinitely large. Declare \
-                      the variant `indirect` to keep its fields on the heap.")
-            | None ->
-                Some
-                  (diagnostic_at key Needs_indirect (header_span spans definition)
-                     "This record contains itself in place, so it would be infinitely large. A \
-                      record has no variant to declare `indirect`; use a sum type with an \
-                      `indirect` variant, or a collection."))
+        Option.map
+          (fun ((variant : Types.variant option), _) ->
+            match (body, variant) with
+            | Variants variants, Some variant ->
+                let span = spans.((find_written_variant variants variant).name.id) in
+                diagnostic_at key Needs_indirect span
+                  ~fixes:
+                    [
+                      Diagnostic.fix "Declare the variant `indirect`."
+                        [
+                          Diagnostic.insert
+                            (Source.Definition_span.zero_width span.start)
+                            "indirect ";
+                        ];
+                    ]
+                  "This type contains itself in place, so it would be infinitely large. Declare \
+                   the variant `indirect` to keep its fields on the heap."
+            | Fields _, None ->
+                diagnostic_at key Needs_indirect (header_span spans definition)
+                  "This record contains itself in place, so it would be infinitely large. A record \
+                   has no variant to declare `indirect`; use a sum type with an `indirect` \
+                   variant, or a collection."
+            | _ ->
+                bug "the interface of `%s` and its definition disagree on whether it is a sum type"
+                  name.text)
+          (first In_place)
       in
       let function_input =
         Option.map
           (fun field ->
-            diagnostic_at key Not_strictly_positive
-              (Option.value ~default:(header_span spans definition) (field_span spans body field))
+            diagnostic_at key Not_strictly_positive (field_span spans body field)
               (Printf.sprintf
                  "Through this field, `%s` contains a function type that has a `time` clause and \
                   whose input contains `%s`. %s"
@@ -398,7 +406,11 @@ let check_associated_types (lookups : Lookups.t) ~contained (declaration : Names
   in
   List.concat_map
     (fun (name, type_) ->
-      let span = Option.value ~default:(header_span spans definition) (written name) in
+      let span =
+        match written name with
+        | Some span -> span
+        | None -> bug "the associated type `%s` is not in its impl's definition" name
+      in
       List.filter_map
         (fun (recursive, (occurrence : Properties.occurrence)) ->
           match occurrence with

@@ -86,13 +86,13 @@ let closing_position source tokens ~closers ~is_unterminated_string (opener : op
       let (token : Token.t) = Dynarray.get tokens index in
       match token.kind with
       | Newline -> scan (index + 1)
-      | Punctuation (Open _) ->
-          let closer = Dynarray.get closers index in
-          if closer >= 0 then begin
-            element ~start:token.span.start ~stop:(Dynarray.get tokens closer).span.stop
-              ~contains_closer:false;
-            scan (closer + 1)
-          end
+      | Punctuation (Open _) -> (
+          match Dynarray.get closers index with
+          | Some closer ->
+              element ~start:token.span.start ~stop:(Dynarray.get tokens closer).span.stop
+                ~contains_closer:false;
+              scan (closer + 1)
+          | None -> ())
       | _ ->
           element ~start:token.span.start ~stop:token.span.stop
             ~contains_closer:(is_unterminated_string token.span);
@@ -136,7 +136,7 @@ let run ~source ~diagnostics ~mode next_input =
   let is_unterminated_string (span : Source.span) = Hashtbl.mem unterminated_strings span.start in
   let emit (token : Token.t) =
     Dynarray.add_last output token;
-    Dynarray.add_last closers (-1);
+    Dynarray.add_last closers None;
     previous := Some token.kind
   in
   let report diagnostic = Diagnostic.Collector.add diagnostics diagnostic in
@@ -149,7 +149,7 @@ let run ~source ~diagnostics ~mode next_input =
     | opener :: rest ->
         stack := rest;
         open_count.(bracket_index opener.bracket) <- open_count.(bracket_index opener.bracket) - 1;
-        Dynarray.set closers opener.index (Dynarray.length output);
+        Dynarray.set closers opener.index (Some (Dynarray.length output));
         emit closer
     | [] -> ()
   in

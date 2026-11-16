@@ -128,18 +128,17 @@ let list_transitive_dependencies lookups package =
   let standard = if package = Path.standard_package then [] else [ Path.standard_package ] in
   List.filter (fun name -> name <> package) (close [] (standard @ lookups.dependency_names package))
 
-let full_module lookups ~(from : Path.module_) (names : string list) : Path.module_ =
+let full_module lookups ~(from : Path.module_) first rest : Path.module_ =
   let known = list_visible_packages lookups from.package in
-  match Path.split_module ~is_package:(fun package -> List.mem package known) names with
+  match Path.split_module ~is_package:(fun package -> List.mem package known) (first :: rest) with
   | Some module_ -> module_
-  | None -> (
-      match names with
-      | name :: modules -> { package = { owner = None; name }; modules }
-      | [] -> { package = { owner = None; name = "" }; modules = [] })
+  | None -> { package = { owner = None; name = first }; modules = rest }
 
 let used_module lookups ~from (path : Syntax.path) =
-  full_module lookups ~from
-    (List.map (fun (name : Syntax.name) -> name.text) path.modules @ [ path.last.text ])
+  let texts = List.map (fun (name : Syntax.name) -> name.text) in
+  match path.modules with
+  | [] -> full_module lookups ~from path.last.text []
+  | first :: rest -> full_module lookups ~from first.text (texts rest @ [ path.last.text ])
 
 let is_visible_module lookups ~(from : Path.module_) (module_ : Path.module_) =
   module_ = Intrinsic.module_
@@ -151,24 +150,21 @@ type module_lookup =
   | Ambiguous_module of Path.module_ * Path.module_
   | No_module of string
 
-let lookup_module lookups ~(from : Path.module_) ~imports (names : string list) =
-  match names with
-  | [] -> No_module ""
-  | first :: rest -> (
-      let imported =
-        Option.map
-          (fun (module_ : Path.module_) : Path.module_ ->
-            { module_ with modules = module_.modules @ rest })
-          (List.assoc_opt first imports)
-      in
-      let package = Some (full_module lookups ~from names) in
-      let exists module_ = is_visible_module lookups ~from module_ in
-      match (imported, package) with
-      | Some imported, Some package when exists imported && exists package && imported <> package ->
-          Ambiguous_module (imported, package)
-      | Some imported, _ when exists imported -> Found_module (imported, `Import first)
-      | _, Some package when exists package -> Found_module (package, `Package)
-      | _ -> No_module (String.concat "::" names))
+let lookup_module lookups ~(from : Path.module_) ~imports first rest =
+  let imported =
+    Option.map
+      (fun (module_ : Path.module_) : Path.module_ ->
+        { module_ with modules = module_.modules @ rest })
+      (List.assoc_opt first imports)
+  in
+  let package = full_module lookups ~from first rest in
+  let exists module_ = is_visible_module lookups ~from module_ in
+  match imported with
+  | Some imported when exists imported && exists package && imported <> package ->
+      Ambiguous_module (imported, package)
+  | Some imported when exists imported -> Found_module (imported, `Import first)
+  | _ when exists package -> Found_module (package, `Package)
+  | _ -> No_module (String.concat "::" (first :: rest))
 
 let top module_ name : Path.t = Top { module_; name }
 
@@ -308,10 +304,10 @@ let find_bare_type lookups ~(from : Path.module_) name =
 let head_type lookups ~(from : Path.module_) ~imports (path : Syntax.path) =
   match path.modules with
   | [] -> find_bare_type lookups ~from path.last.text
-  | modules -> (
+  | first :: rest -> (
       match
-        lookup_module lookups ~from ~imports
-          (List.map (fun (name : Syntax.name) -> name.text) modules)
+        lookup_module lookups ~from ~imports first.text
+          (List.map (fun (name : Syntax.name) -> name.text) rest)
       with
       | Found_module (module_, _) -> (
           match find_in lookups ~from module_ path.last.text ~is_kind:is_type_kind with

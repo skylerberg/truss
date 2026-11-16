@@ -625,9 +625,7 @@ let own_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
   let path = Path.Method { owner = impl; name = "next"; receiver = Mut } in
   let option_type = Types.Named { path = option_path; arguments = [ Types.Type element_type ] } in
   let invocation : Invocation.t = { callee = next; lends = None; uses = Types.no_capabilities } in
-  let pulling : Invocation.site =
-    { id = for_loop.for_at; origin = for_loop.for_at; type_ = option_type }
-  in
+  let pulling : Invocation.site = { origin = for_loop.for_at; type_ = option_type } in
   let measures = measures_of clauses in
   if context.terminates && not (Laws.signature_terminates context path) then
     Facts.oblige context frame Termination location

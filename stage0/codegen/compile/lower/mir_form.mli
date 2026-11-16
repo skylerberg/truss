@@ -1,6 +1,6 @@
 val mir_of : Definitions.context -> Path.t -> Mir.Graph.t
 val parameter_defaults : Definitions.context -> Path.t -> (int * Mir.Graph.t) list Mir.sourced
-val parameter_of : Mir.Graph.body -> Mir.local -> Types.mode * string * Types.ty
+val parameter_of : Mir.Graph.body -> Mir.local -> Types.mode * string option * Types.ty
 
 val mir_into :
   ?arguments:Lowered.place list -> Lowering.state -> Mir.Graph.t -> Lowered.place -> unit
