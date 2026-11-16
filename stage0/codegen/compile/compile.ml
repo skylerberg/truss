@@ -119,20 +119,20 @@ let bound_methods (interface : Interface.Lookups.t) path type_arguments =
         (pairs signature.generics type_arguments)
   | None -> []
 
-let check_calls (interface : Interface.Lookups.t) ~list_callees (key : Instance.key) lowered =
+let check_calls (interface : Interface.Lookups.t) ~list_call_edges (key : Instance.key) lowered =
   match (key, lowered) with
   | Code { path = caller; type_arguments }, Compiled fragment -> (
       match caller with
       | Method { owner = Derived _; _ } -> ()
       | _ -> (
-          match list_callees (call_node interface caller) with
+          match list_call_edges (call_node interface caller) with
           | None -> ()
-          | Some callees ->
+          | Some call_edges ->
               let allowed =
-                callees
+                call_edges
                 @ List.concat_map
-                    (fun callee -> Option.value (list_callees callee) ~default:[])
-                    callees
+                    (fun callee -> Option.value (list_call_edges callee) ~default:[])
+                    call_edges
                 @ bound_methods interface caller type_arguments
               in
               List.iter
@@ -143,7 +143,7 @@ let check_calls (interface : Interface.Lookups.t) ~list_callees (key : Instance.
                            (is_runtime_call callee
                            || List.exists (Path.equal callee) allowed
                            || List.exists (Path.equal (call_node interface callee)) allowed) ->
-                      bug "%s calls %s, which is not among its callees" (Instance.to_string key)
+                      bug "%s calls %s, which is not among its call edges" (Instance.to_string key)
                         (Instance.to_string called)
                   | _ -> ())
                 (Emit_c.called fragment)))
