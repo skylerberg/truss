@@ -965,7 +965,7 @@ fn List[Element].zip[Other](self, other: Slice[Other]) -> Zipped[Element, Other]
 ### Overloads by receiver mode
 
 ```truss
-fn List[Element: Copyable].filter(self, keep: fn(Element) -> Bool) -> List[Element]
+fn Slice[Element: Copyable].filter(self, keep: fn(Element) -> Bool) -> List[Element]
 fn List[Element].filter(own self, keep: fn(Element) -> Bool) -> List[Element]
 ```
 
@@ -974,7 +974,8 @@ A method can have up to three overloads that differ only in the mode of
 selects the read-only one, and a temporary receiver takes the `own` overload
 if there is one. An overload may come from a trait that the type implements
 in its own package, or from the type's view (see
-[Method lookup](#method-lookup)). Truss has no other overloading.
+[Method lookup](#method-lookup)): a `List` has both overloads of `filter`
+above. Truss has no other overloading.
 
 ### Lending methods
 

@@ -318,6 +318,43 @@ let () =
       match locate_core_call text "name.to_string()" 1 with
       | { arguments = [ receiver ]; _ }, _ when is_view receiver -> ()
       | _ -> Harness.fail "no conversion recorded");
+  Harness.test "a `List` receiver finds a method of `Slice` and is viewed" (fun () ->
+      let text = Fixtures.Infer.contains_of_a_list in
+      match locate_core_call text "items.contains(1)" 1 with
+      | { arguments = [ receiver; _ ]; _ }, _ when is_view receiver -> ()
+      | _ -> Harness.fail "no conversion recorded");
+  Harness.test "a `List` receiver passed `mut` to a method of `Slice` is sliced whole" (fun () ->
+      let text = Fixtures.Infer.sort_of_a_mut_list in
+      match locate_core_call text "items.sort()" 1 with
+      | ( {
+            arguments =
+              [
+                Passed
+                  {
+                    mode = Mut;
+                    value =
+                      Value
+                        {
+                          kind =
+                            Slice
+                              {
+                                callee = Function { path = Method { name = "slice_from"; _ }; _ };
+                                _;
+                              };
+                          _;
+                        };
+                  };
+              ];
+            _;
+          },
+          _ ) ->
+          ()
+      | _ -> Harness.fail "the receiver is not a slice of the whole list");
+  Harness.test
+    "a `List` calling a method of `Slice` that takes `mut self` needs the mode keyword, with a fix \
+     that adds it" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.sort_of_a_list_without_mut "types.missing_mode"
+        ~fixed:Fixtures.Infer.sort_of_a_mut_list);
   Harness.test "a string literal receiver finds a method of `StringSlice` and is viewed" (fun () ->
       let text = Fixtures.Infer.to_string_of_a_string_and_of_a_literal in
       match locate_core_call text "\"x\".to_string()" 1 with
