@@ -10,7 +10,7 @@ let head_type context owner (head : type_head) =
       | Some expected when List.length expected <> List.length generics ->
           Lower.report context Arity context.spans.(head.id)
             (Printf.sprintf "`%s` takes %d generic %s, and this head names %d."
-               (Names.spell_path head.path) (List.length expected)
+               (Lower.show_path head.path) (List.length expected)
                (if List.length expected = 1 then "parameter" else "parameters")
                (List.length generics))
       | _ -> ());
@@ -26,10 +26,10 @@ let head_type context owner (head : type_head) =
       ( generics,
         Lower.error context Not_a_type context.spans.(head.id)
           (Printf.sprintf "`%s` is %s, not a type, so it has no methods, constants, or `impl`s."
-             (Names.spell_path head.path)
+             (Lower.show_path head.path)
              (Names.kind_name (Names.kind_of_named kind))) )
   | Some (Unknown report) -> (generics, Types.Error report)
-  | _ -> Lower.bug "the type head `%s` is not resolved" (Names.spell_path head.path)
+  | _ -> Lower.bug "the type head `%s` is not resolved" (Lower.show_path head.path)
 
 let trait_self_parameter trait : Types.parameter = { owner = trait; name = "Self" }
 

@@ -205,7 +205,7 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
             (fun (written : path_type) ->
               match (resolved : Resolve.resolved).names.(written.path.last.id) with
               | Some (Definition (_, trait)) ->
-                  let shown = Names.spell_path written.path in
+                  let shown = Lower.show_path written.path in
                   if
                     not
                       (Names.derivable trait || Well_known.is Copyable trait

@@ -35,7 +35,7 @@ let no_diagnostics text diagnostics =
 let definitions text expected =
   let file, diagnostics = parse text in
   no_diagnostics text diagnostics;
-  let actual = Syntax_print.For_testing.definitions file.definitions in
+  let actual = Syntax_print.definitions file.definitions in
   expect_strings ~expected actual
 
 let definition text expected = definitions text [ expected ]
@@ -50,7 +50,7 @@ let body_of text =
 let statements text expected =
   let statements, diagnostics = body_of text in
   no_diagnostics text diagnostics;
-  let actual = List.map Syntax_print.For_testing.statement statements in
+  let actual = List.map Syntax_print.statement statements in
   expect_strings ~expected actual
 
 let statement text expected = statements text [ expected ]
@@ -93,3 +93,16 @@ let body_error ?fixed ?alternatives ?occurrence text ~code ~at =
   error ?fixed:(Option.map wrap fixed)
     ?alternatives:(Option.map (List.map wrap) alternatives)
     ?occurrence (wrap text) ~code ~at
+
+let expect_codes expected diagnostics =
+  Option.iter (fun expected -> expect_strings ~expected (codes diagnostics)) expected
+
+let recovered_definitions ?codes:expected_codes text expected =
+  let file, diagnostics = parse text in
+  expect_codes expected_codes diagnostics;
+  expect_strings ~expected (Syntax_print.definitions file.definitions)
+
+let recovered_statements ?codes:expected_codes text expected =
+  let statements, diagnostics = body_of text in
+  expect_codes expected_codes diagnostics;
+  expect_strings ~expected (List.map Syntax_print.statement statements)

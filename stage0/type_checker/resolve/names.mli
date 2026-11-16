@@ -30,7 +30,6 @@ type place = { file : Path.file; base : int }
 
 val key_of : declaration -> key
 val show_key : key -> string
-val spell_path : Syntax.path -> string
 val signature_name : Syntax.signature -> Syntax.name
 val receiver : Syntax.parameter list -> Path.receiver
 val last_name : Path.module_ -> string
