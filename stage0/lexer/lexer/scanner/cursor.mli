@@ -29,9 +29,8 @@ type t = {
 }
 
 val create : foreign_escape:(t -> Buffer.t -> bool) -> Source.t -> Diagnostic.Collector.t -> t
-val span : int -> int -> Source.span
-val at_end : t -> int -> bool
-val char : t -> int -> char
+val is_at_end : t -> int -> bool
+val lookup_char : t -> int -> char
 val is_at : t -> int -> char -> bool
 val satisfies : t -> int -> (char -> bool) -> bool
 
@@ -52,14 +51,14 @@ val is_hexadecimal_digit : char -> bool
 val is_ascii_letter : char -> bool
 val is_ascii_name_byte : char -> bool
 val is_ascii : char -> bool
-val code_fixes : t -> Source.span -> string list -> Source.span Diagnostic.fix list
+val list_code_fixes : t -> Source.span -> string list -> Source.span Diagnostic.fix list
 val decode : t -> int -> Unicode.Decoded.t
 val run_length : t -> int -> char -> int
 val skip_spaces : t -> int -> int
-val end_of_line : t -> int -> int
-val line_break_length : t -> int -> int
-val indentation : t -> int -> string
-val spaces_before : t -> int -> int
-val only_spaces_before : t -> int -> bool
+val compute_end_of_line : t -> int -> int
+val measure_line_break : t -> int -> int
+val extract_indentation : t -> int -> string
+val count_spaces_before : t -> int -> int
+val has_only_spaces_before : t -> int -> bool
 val describe_code_point : int -> string
 val show_character : t -> int -> string

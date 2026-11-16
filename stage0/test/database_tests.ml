@@ -65,7 +65,7 @@ let expect_recomputed recomputed ~exactly =
 let expect_untouched recomputed ~names =
   List.iter
     (fun part ->
-      if List.exists (fun name -> Substring.contains part name) names then
+      if List.exists (fun name -> String.includes ~affix:name part) names then
         Harness.fail "recomputed %s; it recomputed %s" part (String.concat ", " recomputed))
     recomputed
 
@@ -219,7 +219,7 @@ let () =
           Unix.close socket;
           Harness.fail "listened"
       | Error message ->
-          if not (Substring.contains message cache) then Harness.fail "refused with: %s" message);
+          if not (String.includes ~affix:cache message) then Harness.fail "refused with: %s" message);
   Harness.test "the background process answers each request and sends its progress" (fun () ->
       let key = Harness.scratch "served" in
       let socket =

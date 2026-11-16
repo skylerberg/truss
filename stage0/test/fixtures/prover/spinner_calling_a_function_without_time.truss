@@ -1,0 +1,16 @@
+capability Ping {
+  fn ping() -> UInt64
+    cost time finite
+}
+
+type Spinner()
+
+impl Ping for Spinner {
+  fn ping(self) -> UInt64 {
+    spin()
+  }
+}
+
+fn spin() -> UInt64 {
+  spin()
+}

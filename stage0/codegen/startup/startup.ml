@@ -295,6 +295,10 @@ void *__tsan_get_current_fiber(void);
 void *__tsan_create_fiber(unsigned flags);
 void __tsan_destroy_fiber(void *fiber);
 void __tsan_switch_to_fiber(void *fiber, unsigned flags);
+const char *__tsan_default_options(void);
+__attribute__((visibility("default"), used)) const char *__tsan_default_options(void) {
+  return "halt_on_error=1";
+}
 #endif
 
 #define T_STACK_CACHE 64

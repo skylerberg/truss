@@ -831,10 +831,8 @@ let emit_terminator builder ~returns_to_caller (basic : Mir.Graph.basic_block) =
       emit builder (Yield_point { views; parts; forwarded }) origin
   | Return value -> returning value
   | Cancel { returned; _ } -> returning (Option.map fst returned)
-  | Iteration_end { loop } -> (
-      match builder.body.blocks.(loop).terminator with
-      | For { iteration; _ } -> pull builder iteration origin
-      | _ -> ())
+  | Iteration_end { loop } ->
+      pull builder (Mir.Graph.read_loop_head builder.body loop).iteration origin
   | Join _ | Goto _ | Fork _ | Resume _ | Unreachable | Written_unreachable | Todo -> ()
 
 let of_body context moves (body : Mir.Graph.body) ~returns_to_caller : t =

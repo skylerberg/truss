@@ -8,11 +8,11 @@ type builder = {
   mutable pairs : (Token.text * Token.interpolation) list;
 }
 
-let builder start = { buffer = Buffer.create 32; text_start = start; pairs = [] }
+let make_builder start = { buffer = Buffer.create 32; text_start = start; pairs = [] }
 
 let take_text builder stop =
   let text =
-    { Token.value = Buffer.contents builder.buffer; span = Cursor.span builder.text_start stop }
+    { Token.value = Buffer.contents builder.buffer; span = Source.span builder.text_start stop }
   in
   Buffer.clear builder.buffer;
   text
@@ -32,7 +32,7 @@ let finish builder stop =
         Array.of_list
           (List.map2 (fun (_, interpolation) text -> (interpolation, text)) pairs following) )
 
-let literal ~tag ~form builder stop =
+let make_literal ~tag ~form builder stop =
   let first, rest = finish builder stop in
   Token.String { tag; form; first; rest }
 
@@ -40,14 +40,14 @@ let opens_raw_string cursor index =
   let dollars = Cursor.run_length cursor index '$' in
   Cursor.run_length cursor (index + dollars) '"' >= 3
 
-let ordinary_special character = character = '"' || character = '\\' || character = '$'
-let raw_special character = character = '"' || character = '$'
+let is_ordinary_special character = character = '"' || character = '\\' || character = '$'
+let is_raw_special character = character = '"' || character = '$'
 
-let next kind start stop ~ending =
+let make_next_input kind start stop ~ending =
   Layout.Next
     {
       kind;
-      span = Cursor.span start stop;
+      span = Source.span start stop;
       first_line_break = None;
       blank_line = false;
       unterminated_string = ending = Cursor.Unterminated;
@@ -55,20 +55,20 @@ let next kind start stop ~ending =
 
 let ends_in_closer cursor ~text_start stop =
   let rec last position =
-    if position > text_start && Cursor.is_space (Cursor.char cursor (position - 1)) then
+    if position > text_start && Cursor.is_space (Cursor.lookup_char cursor (position - 1)) then
       last (position - 1)
     else position - 1
   in
   let index = last stop in
-  index >= text_start && String.contains ")]}" (Cursor.char cursor index)
+  index >= text_start && String.contains ")]}" (Cursor.lookup_char cursor index)
 
 let rec scan_interpolation (cursor : Cursor.t) ~scan ~nesting ~delimiter_length =
   let start = cursor.position in
   if nesting + 1 > maximum_nesting then begin
     Cursor.report cursor ~code:Interpolation_too_deep
-      (Cursor.span start (start + delimiter_length))
+      (Source.span start (start + delimiter_length))
       (Printf.sprintf "Interpolations can nest at most %d deep." maximum_nesting);
-    cursor.position <- Cursor.end_of_line cursor start;
+    cursor.position <- Cursor.compute_end_of_line cursor start;
     let end_of_input = Source.zero_width cursor.position in
     ( {
         Token.tokens =
@@ -81,7 +81,7 @@ let rec scan_interpolation (cursor : Cursor.t) ~scan ~nesting ~delimiter_length 
               is_inserted_closer = false;
             };
           |];
-        span = Cursor.span start cursor.position;
+        span = Source.span start cursor.position;
         is_closed = false;
       },
       Cursor.Unterminated )
@@ -106,7 +106,7 @@ let rec scan_interpolation (cursor : Cursor.t) ~scan ~nesting ~delimiter_length 
         match scan cursor ~inline:true ~nesting:(nesting + 1) with
         | Cursor.Line_end | End ->
             Cursor.report cursor ~code:Line_break_in_interpolation
-              (Cursor.span start cursor.position)
+              (Source.span start cursor.position)
               "An interpolation cannot contain a line break. Move the expression into a `let` \
                before the string.";
             finished := true;
@@ -126,16 +126,16 @@ let rec scan_interpolation (cursor : Cursor.t) ~scan ~nesting ~delimiter_length 
               finished := true;
               ending := Unterminated
             end;
-            next token.kind token.start token.stop ~ending:token.ending
+            make_next_input token.kind token.start token.stop ~ending:token.ending
     in
     let tokens =
-      Layout.interpolation ~source:cursor.source ~diagnostics:cursor.diagnostics next_input
+      Layout.lex_interpolation ~source:cursor.source ~diagnostics:cursor.diagnostics next_input
     in
-    let interpolation_span = Cursor.span start cursor.position in
+    let interpolation_span = Source.span start cursor.position in
     if !closed && !count = 0 then begin
       let rec is_blank position =
         position >= cursor.position - 1
-        || (Cursor.is_space (Cursor.char cursor position) && is_blank (position + 1))
+        || (Cursor.is_space (Cursor.lookup_char cursor position) && is_blank (position + 1))
       in
       Cursor.report cursor ~code:Empty_interpolation
         ~fixes:
@@ -161,7 +161,7 @@ and scan_string (cursor : Cursor.t) ~scan ~tag ~nesting =
         {
           tag;
           form = Ordinary;
-          first = { value = ""; span = Cursor.span (start + 1) (start + 1) };
+          first = { value = ""; span = Source.span (start + 1) (start + 1) };
           rest = [||];
         },
       Cursor.Closed )
@@ -174,10 +174,10 @@ and scan_ordinary ?(closing = '"') cursor ~scan ~tag ~nesting =
     match tag with Some (_, (tag_span : Source.span)) -> tag_span.start | None -> open_quote
   in
   cursor.position <- open_quote + 1;
-  let builder = builder cursor.position in
+  let builder = make_builder cursor.position in
   let rec loop () =
     Source_text.copy_plain cursor builder.buffer ~special:(fun character ->
-        ordinary_special character || character = closing);
+        is_ordinary_special character || character = closing);
     let position = cursor.position in
     if Cursor.is_end_of_line cursor position then begin
       let message =
@@ -193,12 +193,12 @@ and scan_ordinary ?(closing = '"') cursor ~scan ~tag ~nesting =
                  Diagnostic.fix "Close the string"
                    [ Diagnostic.insert (Source.zero_width position) "\"" ];
                ])
-          (Cursor.span literal_start position)
+          (Source.span literal_start position)
           message;
         (Cursor.Unterminated, position)
       end
       else begin
-        Cursor.report cursor ~code:Unterminated_string (Cursor.span literal_start position) message;
+        Cursor.report cursor ~code:Unterminated_string (Source.span literal_start position) message;
         (Unterminated, position)
       end
     end
@@ -226,7 +226,7 @@ and scan_ordinary ?(closing = '"') cursor ~scan ~tag ~nesting =
     end
   in
   let ending, stop = loop () in
-  (literal ~tag ~form:Ordinary builder stop, ending)
+  (make_literal ~tag ~form:Ordinary builder stop, ending)
 
 and scan_escape cursor buffer =
   let start = cursor.position in
@@ -236,7 +236,7 @@ and scan_escape cursor buffer =
     `Continue
   in
   let problem stop message =
-    Cursor.report cursor ~code:Invalid_escape (Cursor.span start stop) message;
+    Cursor.report cursor ~code:Invalid_escape (Source.span start stop) message;
     cursor.position <- stop;
     `Continue
   in
@@ -259,14 +259,14 @@ and scan_escape cursor buffer =
   in
   if Cursor.is_end_of_line cursor (start + 1) then begin
     Cursor.report cursor ~code:Invalid_escape
-      (Cursor.span start (start + 1))
+      (Source.span start (start + 1))
       "A `\\` at the end of a line does not continue the string. Text that spans lines goes in a \
        raw string, between `\"\"\"`s.";
     cursor.position <- start + 1;
     `End_of_line
   end
   else
-    match Cursor.char cursor (start + 1) with
+    match Cursor.lookup_char cursor (start + 1) with
     | 'n' -> simple '\n'
     | 't' -> simple '\t'
     | 'r' -> simple '\r'
@@ -314,7 +314,7 @@ and scan_raw cursor ~scan ~tag ~nesting ~dollars ~quotes =
     match tag with Some (_, (tag_span : Source.span)) -> tag_span.start | None -> delimiter_start
   in
   let delimiter_stop = delimiter_start + dollars + quotes in
-  let line_end = Cursor.end_of_line cursor delimiter_stop in
+  let line_end = Cursor.compute_end_of_line cursor delimiter_stop in
   let multi_line = Cursor.skip_spaces cursor delimiter_stop = line_end in
   let form = Token.Raw { quotes; dollars; multi_line } in
   if not multi_line then begin
@@ -323,18 +323,18 @@ and scan_raw cursor ~scan ~tag ~nesting ~dollars ~quotes =
   end
   else if nesting > 0 then begin
     Cursor.report cursor ~code:Line_break_in_interpolation
-      (Cursor.span literal_start line_end)
+      (Source.span literal_start line_end)
       "An interpolation cannot contain a line break, so it cannot hold a multi-line string. Move \
        the expression into a `let` before the string.";
     cursor.position <- line_end;
-    (literal ~tag ~form (builder delimiter_stop) delimiter_stop, Unterminated)
+    (make_literal ~tag ~form (make_builder delimiter_stop) delimiter_stop, Unterminated)
   end
   else
     ( scan_multi_line_raw cursor ~scan ~tag ~form ~literal_start ~dollars ~quotes ~delimiter_stop
         ~line_end,
       Closed )
 
-and raw_dollars (cursor : Cursor.t) builder ~scan ~dollars ~nesting =
+and lex_raw_dollars (cursor : Cursor.t) builder ~scan ~dollars ~nesting =
   let start = cursor.position in
   let run = Cursor.run_length cursor start '$' in
   let needed = max dollars 1 in
@@ -353,9 +353,9 @@ and raw_dollars (cursor : Cursor.t) builder ~scan ~dollars ~nesting =
     Closed
   end
 
-and too_many_quotes cursor ~start ~run ~quotes ~multi_line =
+and report_too_many_quotes cursor ~start ~run ~quotes ~multi_line =
   Cursor.report cursor ~code:Raw_string_quotes
-    (Cursor.span start (start + run))
+    (Source.span start (start + run))
     (Printf.sprintf "A run of %d `\"`s is longer than this string's delimiter of %d.%s" run quotes
        (if multi_line then " Open the string with a longer delimiter."
         else
@@ -363,16 +363,16 @@ and too_many_quotes cursor ~start ~run ~quotes ~multi_line =
            longer delimiter."))
 
 and scan_one_line_raw cursor ~scan ~tag ~form ~nesting ~literal_start ~dollars ~quotes =
-  let builder = builder cursor.position in
+  let builder = make_builder cursor.position in
   let delimiter = String.make quotes '"' in
   let rec loop () =
-    Source_text.copy_plain cursor builder.buffer ~special:raw_special;
+    Source_text.copy_plain cursor builder.buffer ~special:is_raw_special;
     let position = cursor.position in
     if Cursor.is_end_of_line cursor position then begin
       let fixes =
         if
           nesting = 0
-          && Cursor.char cursor (position - 1) <> '"'
+          && Cursor.lookup_char cursor (position - 1) <> '"'
           && not (ends_in_closer cursor ~text_start:builder.text_start position)
         then
           [
@@ -383,7 +383,7 @@ and scan_one_line_raw cursor ~scan ~tag ~form ~nesting ~literal_start ~dollars ~
         else []
       in
       Cursor.report cursor ~code:Unterminated_string ~fixes
-        (Cursor.span literal_start position)
+        (Source.span literal_start position)
         (Printf.sprintf
            "This raw string is not closed on its line. A raw string with text after its opening \
             `%s` is a one-line string. For several lines, start the text on the line after the \
@@ -395,7 +395,8 @@ and scan_one_line_raw cursor ~scan ~tag ~form ~nesting ~literal_start ~dollars ~
       let run = Cursor.run_length cursor position '"' in
       cursor.position <- position + run;
       if run >= quotes then begin
-        if run > quotes then too_many_quotes cursor ~start:position ~run ~quotes ~multi_line:false;
+        if run > quotes then
+          report_too_many_quotes cursor ~start:position ~run ~quotes ~multi_line:false;
         (Closed, position)
       end
       else begin
@@ -404,7 +405,7 @@ and scan_one_line_raw cursor ~scan ~tag ~form ~nesting ~literal_start ~dollars ~
       end
     end
     else if Cursor.is_at cursor position '$' then
-      match raw_dollars cursor builder ~scan ~dollars ~nesting with
+      match lex_raw_dollars cursor builder ~scan ~dollars ~nesting with
       | Closed -> loop ()
       | Unterminated -> (Unterminated, cursor.position)
     else begin
@@ -413,7 +414,7 @@ and scan_one_line_raw cursor ~scan ~tag ~form ~nesting ~literal_start ~dollars ~
     end
   in
   let ending, stop = loop () in
-  (literal ~tag ~form builder stop, ending)
+  (make_literal ~tag ~form builder stop, ending)
 
 and scan_multi_line_raw cursor ~scan ~tag ~form ~literal_start ~dollars ~quotes ~delimiter_stop
     ~line_end =
@@ -435,13 +436,13 @@ and scan_multi_line_raw cursor ~scan ~tag ~form ~literal_start ~dollars ~quotes 
         @
         if quotes = 6 && dollars = 0 then
           [
-            ( Cursor.span (delimiter_stop - quotes) delimiter_stop,
+            ( Source.span (delimiter_stop - quotes) delimiter_stop,
               "For an empty string, write `\"\"`." );
           ]
         else []
       in
       Cursor.report cursor ~code:Unterminated_string ~notes
-        (Cursor.span literal_start delimiter_stop)
+        (Source.span literal_start delimiter_stop)
         (Printf.sprintf
            "This raw string is never closed, so it runs to the end of the file. Close it with `%s` \
             on a line of its own."
@@ -460,21 +461,22 @@ and read_raw_lines cursor ~scan ~dollars ~quotes ~line_end =
       let first = Cursor.skip_spaces cursor line_start in
       if Cursor.run_length cursor first '"' >= quotes then begin
         let run = Cursor.run_length cursor first '"' in
-        if run > quotes then too_many_quotes cursor ~start:first ~run ~quotes ~multi_line:true;
+        if run > quotes then
+          report_too_many_quotes cursor ~start:first ~run ~quotes ~multi_line:true;
         cursor.position <- first + run;
         `Closed
           ( List.rev !lines,
             `Own_line (String.sub cursor.text line_start (first - line_start), first) )
       end
       else
-        let builder = builder line_start in
+        let builder = make_builder line_start in
         let record stop = lines := finish builder stop :: !lines in
         let rec content () =
-          Source_text.copy_plain cursor builder.buffer ~special:raw_special;
+          Source_text.copy_plain cursor builder.buffer ~special:is_raw_special;
           let position = cursor.position in
           if Cursor.is_end_of_line cursor position then begin
             record position;
-            if Cursor.at_end cursor position then `Unterminated (List.rev !lines)
+            if Cursor.is_at_end cursor position then `Unterminated (List.rev !lines)
             else begin
               ignore (Source_text.consume_line_break cursor);
               line ()
@@ -489,13 +491,13 @@ and read_raw_lines cursor ~scan ~dollars ~quotes ~line_end =
             end
             else begin
               if run > quotes then
-                too_many_quotes cursor ~start:position ~run ~quotes ~multi_line:true;
+                report_too_many_quotes cursor ~start:position ~run ~quotes ~multi_line:true;
               Buffer.add_string builder.buffer (String.make run '"');
               content ()
             end
           end
           else if Cursor.is_at cursor position '$' then begin
-            ignore (raw_dollars cursor builder ~scan ~dollars ~nesting:0);
+            ignore (lex_raw_dollars cursor builder ~scan ~dollars ~nesting:0);
             content ()
           end
           else begin
@@ -507,7 +509,7 @@ and read_raw_lines cursor ~scan ~dollars ~quotes ~line_end =
   in
   line ()
 
-and leading_whitespace ((first : Token.text), rest) =
+and find_leading_whitespace ((first : Token.text), rest) =
   let value = first.value in
   let rec count index =
     if index < String.length value && (value.[index] = ' ' || value.[index] = '\t') then
@@ -518,7 +520,7 @@ and leading_whitespace ((first : Token.text), rest) =
   if length = String.length value && Array.length rest = 0 then None
   else Some (String.sub value 0 length)
 
-and common_indentation lines =
+and compute_common_indentation lines =
   let common first second =
     let length = min (String.length first) (String.length second) in
     let rec loop index =
@@ -528,7 +530,7 @@ and common_indentation lines =
   in
   List.fold_left
     (fun so_far line ->
-      match (leading_whitespace line, so_far) with
+      match (find_leading_whitespace line, so_far) with
       | None, _ -> so_far
       | Some prefix, None -> Some prefix
       | Some prefix, Some so_far -> Some (common prefix so_far))
@@ -541,7 +543,7 @@ and guess_raw_string_end cursor ~literal_start ~line_end =
   let rec search position =
     if position >= cursor.length then None
     else
-      let line_start = position + Cursor.line_break_length cursor position in
+      let line_start = position + Cursor.measure_line_break cursor position in
       if line_start >= cursor.length then None
       else
         let first = Cursor.skip_spaces cursor line_start in
@@ -550,7 +552,7 @@ and guess_raw_string_end cursor ~literal_start ~line_end =
           ((not blank) && first - line_start < opener_indentation)
           || Layout.starts_definition cursor.source line_start
         then Some line_start
-        else search (Cursor.end_of_line cursor line_start)
+        else search (Cursor.compute_end_of_line cursor line_start)
   in
   search line_end
 
@@ -559,17 +561,17 @@ and build_multi_line cursor ~tag ~form ~quotes ~delimiter_stop lines closing =
     match closing with
     | `Own_line (indentation, delimiter_start) -> (indentation, delimiter_start)
     | `After_text start ->
-        let indentation = common_indentation lines in
+        let indentation = compute_common_indentation lines in
         Cursor.report cursor ~code:Raw_string_closing_not_alone
           ~fixes:
             [
               Diagnostic.fix "Move the closing delimiter to its own line"
                 [ Diagnostic.insert (Source.zero_width start) ("\n" ^ indentation) ];
             ]
-          (Cursor.span start (start + quotes))
+          (Source.span start (start + quotes))
           "The closing delimiter of a multi-line raw string goes on a line of its own.";
         (indentation, start)
-    | `Unterminated position -> (common_indentation lines, position)
+    | `Unterminated position -> (compute_common_indentation lines, position)
   in
   let describe_whitespace whitespace =
     if whitespace = "" then "no indentation"
@@ -592,7 +594,7 @@ and build_multi_line cursor ~tag ~form ~quotes ~delimiter_stop lines closing =
       in
       String.concat " then " (groups 0)
   in
-  let joined = builder delimiter_stop in
+  let joined = make_builder delimiter_stop in
   List.iteri
     (fun index (((first : Token.text), rest) as line) ->
       if index > 0 then Buffer.add_char joined.buffer '\n';
@@ -601,7 +603,7 @@ and build_multi_line cursor ~tag ~form ~quotes ~delimiter_stop lines closing =
         if String.starts_with ~prefix:indentation value then
           String.sub value (String.length indentation)
             (String.length value - String.length indentation)
-        else if leading_whitespace line = None then ""
+        else if find_leading_whitespace line = None then ""
         else begin
           let first_difference text =
             let length = min (String.length text) (String.length indentation) in
@@ -612,7 +614,7 @@ and build_multi_line cursor ~tag ~form ~quotes ~delimiter_stop lines closing =
             differs 0
           in
           let at = first_difference value in
-          let line_whitespace = Option.value (leading_whitespace line) ~default:"" in
+          let line_whitespace = Option.value (find_leading_whitespace line) ~default:"" in
           let whitespace_stop = Cursor.skip_spaces cursor first.span.start in
           let source_at =
             first.span.start
@@ -623,9 +625,9 @@ and build_multi_line cursor ~tag ~form ~quotes ~delimiter_stop lines closing =
             ~fixes:
               [
                 Diagnostic.fix "Indent the line like the closing delimiter"
-                  [ Diagnostic.replace (Cursor.span first.span.start whitespace_stop) indentation ];
+                  [ Diagnostic.replace (Source.span first.span.start whitespace_stop) indentation ];
               ]
-            (Cursor.span source_at (source_at + 1))
+            (Source.span source_at (source_at + 1))
             (Printf.sprintf
                "Every line of a multi-line raw string starts with the indentation of its closing \
                 delimiter, which is %s. This line starts with %s."
@@ -641,4 +643,4 @@ and build_multi_line cursor ~tag ~form ~quotes ~delimiter_stop lines closing =
           Buffer.add_string joined.buffer text.value)
         rest)
     lines;
-  literal ~tag ~form joined delimiter_start
+  make_literal ~tag ~form joined delimiter_start

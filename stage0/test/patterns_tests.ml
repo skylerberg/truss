@@ -18,7 +18,7 @@ let () =
       let text = priority ^ Fixtures.Patterns.option_match_missing_urgent in
       let actual = message text in
       let expected = "`Some(Urgent(_))` is not covered" in
-      if not (Substring.contains actual expected) then Harness.fail "message %S" actual);
+      if not (String.includes ~affix:expected actual) then Harness.fail "message %S" actual);
   Harness.test "a missing case's fix adds an arm with todo" (fun () ->
       one_diagnostic Fixtures.Patterns.bool_match_missing_false "patterns.not_covered"
         ~fixed:Fixtures.Patterns.bool_match_missing_false_fixed);
@@ -33,7 +33,7 @@ let () =
       fine Fixtures.Patterns.byte_ranges_covering_the_type);
   Harness.test "integer ranges that leave a gap name it" (fun () ->
       let actual = message Fixtures.Patterns.byte_ranges_with_a_gap in
-      if not (Substring.contains actual "`100`") then Harness.fail "message %S" actual);
+      if not (String.includes ~affix:"`100`" actual) then Harness.fail "message %S" actual);
   Harness.test "a match on a string needs a pattern that matches everything" (fun () ->
       one_diagnostic Fixtures.Patterns.string_match_without_a_wildcard "patterns.not_covered");
   Harness.test "a match over several values is checked as one" (fun () ->

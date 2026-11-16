@@ -11,6 +11,7 @@ val require :
   unmet:(Types.ty -> (string * Types.ty) option -> unit) ->
   unit
 
+val make_fresh_generic_arguments : State.state -> Types.generic list -> Types.argument list
 val make_fresh_arguments : State.state -> Path.t -> Types.argument list
 val make_fresh_trait_reference : State.state -> Path.t -> Types.trait_reference
 val instantiate_type : State.state -> Source.Definition_span.t -> Path.t -> Types.argument list

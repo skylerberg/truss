@@ -559,7 +559,10 @@ let check_definition context (definition : Core.definition) =
           match node.kind with
           | Let { pattern; else_ = None; _ } | For { pattern; _ } ->
               check_irrefutable context pattern
-          | _ -> ());
+          | Let { else_ = Some _; _ }
+          | Evaluate _ | Assign _ | Compound_assign _ | While _ | Parallel _ | Concurrent _
+          | Proof _ | Assert _ | Yield _ ->
+              ());
     }
     definition
 

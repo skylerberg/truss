@@ -1,6 +1,6 @@
 type piece = Split.piece = { first : int; stop : int }
 
-let split = Split.pieces
+let split = Split.split_pieces
 let is_use (tokens : Token.t array) piece = tokens.(piece.first).kind = Keyword Use
 
 let parse_piece (tokens : Token.t array) piece parse =
@@ -22,7 +22,7 @@ let overlaps (tokens : Token.t array) piece (span : Source.span) =
   if span.start = span.stop then start <= span.start && span.start <= stop
   else span.start < stop && start < span.stop
 
-let with_lexer_errors tokens ~lexer_diagnostics ~nested piece
+let attach_lexer_errors tokens ~lexer_diagnostics ~nested piece
     ((item : _ Syntax.item), (diagnostics : Diagnostic.t list)) =
   let errors =
     List.filter
@@ -51,9 +51,9 @@ let with_lexer_errors tokens ~lexer_diagnostics ~nested piece
         },
         List.map (fun (diagnostic : Diagnostic.t) -> { diagnostic with fixes = [] }) diagnostics )
 
-let checked cursor (definition : Syntax.definition) =
-  Precedence.definition cursor definition;
-  Check.definition cursor definition;
+let check_definition cursor (definition : Syntax.definition) =
+  Precedence.check_definition cursor definition;
+  Check.check_definition cursor definition;
   definition
 
 let parse_methods tokens ~lexer_diagnostics (container : Syntax.definition) pieces =
@@ -68,22 +68,23 @@ let parse_methods tokens ~lexer_diagnostics (container : Syntax.definition) piec
   | Some kind ->
       List.map
         (fun piece ->
-          with_lexer_errors tokens ~lexer_diagnostics ~nested:[] piece
+          attach_lexer_errors tokens ~lexer_diagnostics ~nested:[] piece
             (parse_piece tokens piece (fun cursor ->
-                 checked cursor
-                   (Parse_definition.method_ cursor ~container:kind ~visibility:container.visibility))))
+                 check_definition cursor
+                   (Parse_definition.parse_method cursor ~container:kind
+                      ~visibility:container.visibility))))
         pieces
   | None -> []
 
 let parse_definition tokens ~lexer_diagnostics piece : Syntax.top_level * Diagnostic.t list =
   let parsed, diagnostics =
     parse_piece tokens piece (fun cursor ->
-        let definition, methods = Parse_definition.definition cursor in
-        (checked cursor definition, methods))
+        let definition, methods = Parse_definition.parse_definition cursor in
+        (check_definition cursor definition, methods))
   in
   let definition, method_pieces = parsed.value in
   let definition, diagnostics =
-    with_lexer_errors tokens ~lexer_diagnostics ~nested:method_pieces piece
+    attach_lexer_errors tokens ~lexer_diagnostics ~nested:method_pieces piece
       ({ parsed with value = definition }, diagnostics)
   in
   let methods = parse_methods tokens ~lexer_diagnostics definition.value method_pieces in
@@ -94,10 +95,10 @@ let use_path cursor : Syntax.path option =
     Cursor.expect_keyword cursor Use;
     let names =
       List.rev
-        (Cursor.separated cursor ~separator:Colon_colon (fun cursor ->
+        (Cursor.parse_separated cursor ~separator:Colon_colon (fun cursor ->
              Atoms.lower_name cursor "a module name"))
     in
-    if not (Cursor.at_end cursor) then Cursor.fail cursor "a line break after the module path";
+    if not (Cursor.is_at_end cursor) then Cursor.fail cursor "a line break after the module path";
     names
   with
   | last :: modules -> Some { modules = List.rev modules; last }
@@ -106,20 +107,20 @@ let use_path cursor : Syntax.path option =
 
 let parse_use_line tokens piece = parse_piece tokens piece use_path
 
-let line_stop (tokens : Token.t array) piece =
+let compute_line_stop (tokens : Token.t array) piece =
   match tokens.(piece.stop).kind with
   | Newline -> tokens.(piece.stop).span.stop
   | _ -> tokens.(piece.stop - 1).span.stop
 
 let use_after_definition (tokens : Token.t array) piece (line : _ Syntax.item) ~destination =
   let fixes =
-    match Token.spelling (Array.sub tokens piece.first (piece.stop - piece.first)) with
+    match Token.spell_tokens (Array.sub tokens piece.first (piece.stop - piece.first)) with
     | Some spelling ->
         [
           Diagnostic.fix "Move it up to the other `use` lines"
             [
               Diagnostic.insert (Source.zero_width destination) (spelling ^ "\n");
-              Diagnostic.delete (Source.span line.base (line_stop tokens piece));
+              Diagnostic.delete (Source.span line.base (compute_line_stop tokens piece));
             ];
         ]
     | None -> []
@@ -135,7 +136,7 @@ let parse tokens ~lexer_diagnostics =
         let line, line_diagnostics = parse_use_line tokens piece in
         let moved, destination =
           match (definitions, destination) with
-          | [], _ -> ([], Some (line_stop tokens piece))
+          | [], _ -> ([], Some (compute_line_stop tokens piece))
           | _ :: _, Some destination ->
               ([ use_after_definition tokens piece line ~destination ], Some destination)
           | _ :: _, None -> ([], None)
@@ -177,12 +178,14 @@ module For_testing = struct
   let parse_example_definition tokens piece =
     let parsed, diagnostics =
       parse_piece tokens piece (fun cursor ->
-          match Parse_definition.example cursor with
+          match Parse_definition.parse_example cursor with
           | Whole (definition, methods) ->
-              (Example_definition, Some (checked cursor definition, methods))
+              (Example_definition, Some (check_definition cursor definition, methods))
           | Signature_alone (_, signature) ->
-              Syntax_walk.signature (fun value -> Precedence.expression cursor value) signature;
-              Check.signature cursor signature;
+              Syntax_walk.visit_signature
+                (fun value -> Precedence.check_expression cursor value)
+                signature;
+              Check.check_signature cursor signature;
               (Example_signature, None))
     in
     let example, container = parsed.value in
@@ -198,12 +201,15 @@ module For_testing = struct
     let _, diagnostics =
       parse_piece tokens piece (fun cursor ->
           match
-            let statement = Parse_expression.statement_line cursor ~previous:None in
-            if not (Cursor.at_end cursor) then Cursor.fail cursor "a line break after the statement";
+            let statement = Parse_expression.parse_statement_line cursor ~previous:None in
+            if not (Cursor.is_at_end cursor) then
+              Cursor.fail cursor "a line break after the statement";
             statement
           with
           | statement ->
-              Syntax_walk.statement (fun value -> Precedence.expression cursor value) statement
+              Syntax_walk.visit_statement
+                (fun value -> Precedence.check_expression cursor value)
+                statement
           | exception Cursor.Failed -> ())
     in
     diagnostics

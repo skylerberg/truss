@@ -47,7 +47,7 @@ let requires_fix (context : State.context) (frame : State.frame) (part : State.p
           requirement.names
       in
       if List.for_all Option.is_some replacements then
-        Facts.add_requires context
+        Facts.add_requires context frame
           [
             Substituted
               { key; clause = clause.origin; replacements = List.filter_map Fun.id replacements };
@@ -856,12 +856,7 @@ let apply_call ?lent_final context (frame : State.frame) (site : Invocation.site
         (Logic.Boolean false);
     List.iter
       (fun impl ->
-        let reaches_here =
-          List.exists
-            (Facts.is_in_recursion_group context)
-            (Mir.Call_edges.list_written_methods context.lookups.interface.names impl)
-        in
-        if reaches_here then
+        if Facts.has_method_in_recursion_group context impl then
           Facts.oblige context frame Termination location
             [
               Text

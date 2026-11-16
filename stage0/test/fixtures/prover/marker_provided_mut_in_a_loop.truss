@@ -1,0 +1,24 @@
+capability Mark {
+  fn mark()
+}
+
+type Marker(marked: Bool)
+
+impl Mark for Marker {
+  fn mark(mut self) {
+    self.marked = true
+  }
+}
+
+fn f(count: UInt32) -> Bool {
+  var marker = Marker(marked: false)
+  for _ in 0..count {
+    provide mut marker {
+      Mark.mark()
+    }
+  }
+  proof {
+    assert !marker.marked
+  }
+  marker.marked
+}

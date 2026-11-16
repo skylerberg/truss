@@ -1,0 +1,7 @@
+trait Sized[count: UInt64] {
+  fn size(self) -> Array[UInt64, count]
+}
+
+fn sizes[Item: Sized[3]](value: Item) -> Array[UInt64, 3] {
+  Sized.size(value)
+}

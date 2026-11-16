@@ -42,7 +42,7 @@ let () =
         Codegen_support.run_main Fixtures.Parallel.parallel_for_with_a_panic
       in
       Codegen_support.expect_int ~expected:101 status;
-      if not (Codegen_support.contains errors "the last one ran") then
+      if not (String.includes ~affix:"the last one ran" errors) then
         Codegen_support.fail "reported %s" errors);
   Codegen_support.test "an empty range and a range of one run their bodies no times and once"
     (fun () ->
@@ -51,7 +51,7 @@ let () =
         Codegen_support.run_main Fixtures.Parallel.parallel_for_over_empty_and_single_ranges
       in
       Codegen_support.expect_int ~expected:101 status;
-      if not (Codegen_support.contains errors "minus three ran") then
+      if not (String.includes ~affix:"minus three ran" errors) then
         Codegen_support.fail "reported %s" errors)
 
 let () =
@@ -63,7 +63,7 @@ let () =
           Fixtures.Parallel.parallel_for_over_characters_around_the_surrogates
       in
       Codegen_support.expect_int ~expected:101 status;
-      if not (Codegen_support.contains errors "the last character ran") then
+      if not (String.includes ~affix:"the last character ran" errors) then
         Codegen_support.fail "reported %s" errors)
 
 let () =
@@ -112,9 +112,9 @@ let () =
       let c = Emit_c.For_testing.c (Emit_c.make_fragment env (Code instance)) in
       List.iter
         (fun text ->
-          if not (Codegen_support.contains c text) then Codegen_support.fail "no %s in:\n%s" text c)
+          if not (String.includes ~affix:text c) then Codegen_support.fail "no %s in:\n%s" text c)
         [ "f_capture0"; "f_capture1"; "int32_t l6_own;" ];
-      if Codegen_support.contains c "f_capture2" then
+      if String.includes ~affix:"f_capture2" c then
         Codegen_support.fail "a function reaches three locals:\n%s" c;
       Codegen_support.expect_status 20 [ Codegen_support.printed instance ])
 

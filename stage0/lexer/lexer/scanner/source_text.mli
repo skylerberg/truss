@@ -3,8 +3,8 @@ type context = Code | Ordinary_string | Raw_string
 val remove_trivia :
   Cursor.t -> start:int -> stop:int -> line_break:bool -> Source.span Diagnostic.edit
 
-val forbidden_run : Cursor.t -> context:context -> unit
-val invalid_run : Cursor.t -> unit
+val report_forbidden_run : Cursor.t -> context:context -> unit
+val report_invalid_run : Cursor.t -> unit
 val copy_plain : Cursor.t -> Buffer.t -> special:(char -> bool) -> unit
 val read_character : Cursor.t -> Buffer.t -> context:context -> unit
 val consume_line_break : Cursor.t -> Source.span
