@@ -19,19 +19,19 @@ let create () =
     code_literals = Hashtbl.create 4;
   }
 
-let fresh unifier =
+let make_fresh_type unifier =
   unifier.next <- unifier.next + 1;
   Types.Variable unifier.next
 
-let fresh_literal unifier kind =
+let make_fresh_literal unifier kind =
   unifier.next <- unifier.next + 1;
   Types.Literal (kind, unifier.next)
 
-let fresh_value unifier =
+let make_fresh_value unifier =
   unifier.next <- unifier.next + 1;
   Types.Value_variable unifier.next
 
-let fresh_capability_variable unifier =
+let make_fresh_capability_variable unifier =
   unifier.capability_variable_count <- unifier.capability_variable_count + 1;
   Types.make_capability_set [ Types.Capability_variable unifier.capability_variable_count ]
 
@@ -125,7 +125,7 @@ type unknown =
   | Unknown_literal of Types.literal_kind * int
   | Unknown_value of int
 
-let unknowns unifier (type_ : Types.ty) =
+let list_unknowns unifier (type_ : Types.ty) =
   let unknowns = ref [] in
   let rec collect (type_ : Types.ty) =
     match resolve unifier type_ with
@@ -154,8 +154,8 @@ let unknowns unifier (type_ : Types.ty) =
   collect type_;
   List.sort_uniq compare !unknowns
 
-let argument_unknowns unifier = function
-  | Types.Type type_ -> unknowns unifier type_
+let list_argument_unknowns unifier = function
+  | Types.Type type_ -> list_unknowns unifier type_
   | Types.Value value -> (
       match resolve_value unifier value with
       | Value_variable index -> [ Unknown_value index ]
@@ -176,7 +176,7 @@ let rec unify unifier (left : Types.ty) (right : Types.ty) =
           | Unknown_type index | Unknown_literal (_, index) ->
               Hashtbl.replace unifier.type_solutions index unknown
           | Unknown_value _ -> ())
-        (unknowns unifier other);
+        (list_unknowns unifier other);
       true
   | Variable left_index, Variable right_index when left_index = right_index -> true
   | Variable index, other | other, Variable index -> bind unifier index other

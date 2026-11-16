@@ -2779,20 +2779,14 @@ fn is_retryable_error(error: Error, method: Method) -> Bool {
 }
 
 fn longest_wait(policy: RetryPolicy) -> Int64
-  ensures result >= 0 && result <= 86400000
+  ensures result >= 0
 {
-  if policy.maximum_milliseconds < 0 {
-    0
-  } else if policy.maximum_milliseconds > 86400000 {
-    86400000
-  } else {
-    policy.maximum_milliseconds
-  }
+  if policy.maximum_milliseconds < 0 { 0 } else { policy.maximum_milliseconds }
 }
 
 fn backoff_milliseconds(policy: RetryPolicy, attempt: UInt64) -> Int64
   uses Random
-  ensures result >= 0 && result <= 86400000
+  ensures result >= 0
 {
   let longest = longest_wait(policy)
   var ceiling = if policy.base_milliseconds > 0 { policy.base_milliseconds } else { 0 }
@@ -2813,7 +2807,7 @@ fn backoff_milliseconds(policy: RetryPolicy, attempt: UInt64) -> Int64
 fn retry_after_milliseconds(headers: Headers, now: Instant) -> Option[Int64] {
   let value = headers.get("Retry-After")?
   match Int64.parse(value.trim()) {
-    Ok(seconds) => if seconds >= 0 && seconds <= 1000000000 { Some(seconds * 1000) } else { None }
+    Ok(seconds) => if seconds >= 0 { Some(seconds.saturating_multiply(1000)) } else { None }
     Err(_) => match parse_date(value) {
       Some(moment) => {
         let wait = moment.unix_milliseconds().saturating_subtract(now.unix_milliseconds())
@@ -2878,7 +2872,7 @@ public fn Client.stream[Output, capability Granted](
       Ok(opened) => own opened
       Err(error) => {
         if attempt < self.options.retry.attempts && is_retryable_error(error, method: current_method) {
-          Clock.sleep(Duration.milliseconds(backoff_milliseconds(self.options.retry, attempt: attempt)))
+          Clock.sleep(Duration.milliseconds(1) * backoff_milliseconds(self.options.retry, attempt: attempt))
           attempt += 1
           continue
         }
@@ -2932,7 +2926,7 @@ public fn Client.stream[Output, capability Granted](
       }
       if delay >= 0 && delay <= longest_wait(self.options.retry) {
         mut self.discard(target.origin.copy(), body: own opened.body)
-        Clock.sleep(Duration.milliseconds(delay))
+        Clock.sleep(Duration.milliseconds(1) * delay)
         attempt += 1
         continue
       }

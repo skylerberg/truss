@@ -9,7 +9,7 @@ let record_head_width = length_position + length_width
 let entry_width = key_width + offset_width + length_width
 let seal_size = 64 * 1024 * 1024
 
-let fnv hash bytes =
+let hash_fnv hash bytes =
   let hash = ref hash in
   for index = 0 to String.length bytes - 1 do
     hash :=
@@ -19,9 +19,9 @@ let fnv hash bytes =
   done;
   !hash
 
-let checksum parts =
+let compute_checksum parts =
   let buffer = Bytes.create checksum_width in
-  Bytes.set_int64_le buffer 0 (List.fold_left fnv 0xcbf29ce484222325L parts);
+  Bytes.set_int64_le buffer 0 (List.fold_left hash_fnv 0xcbf29ce484222325L parts);
   Bytes.to_string buffer
 
 type location = { offset : int; length : int }
@@ -49,20 +49,53 @@ type t = {
   used : (string, unit) Hashtbl.t;
 }
 
-let segments_directory cache = Filename.concat cache.root "segments"
+let make_segments_directory cache = Filename.concat cache.root "segments"
 let directory cache = cache.root
 
-let default_directory () =
+let find_home_directory () =
+  match Sys.getenv_opt "HOME" with
+  | Some home when home <> "" -> Some home
+  | _ -> (
+      match Unix.getpwuid (Unix.getuid ()) with
+      | { pw_dir; _ } when pw_dir <> "" -> Some pw_dir
+      | _ | (exception Not_found) -> None)
+
+let locate_default_directory () =
   match Sys.getenv_opt "TRUSS_CACHE" with
-  | Some directory when directory <> "" -> directory
+  | Some directory when directory <> "" -> Ok directory
   | _ -> (
       match Sys.getenv_opt "XDG_CACHE_HOME" with
-      | Some cache when cache <> "" -> Filename.concat cache "truss"
-      | _ ->
-          let home =
-            Option.value (Sys.getenv_opt "HOME") ~default:(Filename.get_temp_dir_name ())
-          in
-          Filename.concat (Filename.concat home ".cache") "truss")
+      | Some cache when cache <> "" -> Ok (Filename.concat cache "truss")
+      | _ -> (
+          match find_home_directory () with
+          | Some home -> Ok (Filename.concat (Filename.concat home ".cache") "truss")
+          | None ->
+              Error "This user has no home directory for the cache; set TRUSS_CACHE to a directory."
+          ))
+
+let make_root root =
+  match
+    File_system.make_directory (Filename.dirname root);
+    (try Unix.mkdir root 0o700 with Unix.Unix_error (EEXIST, _, _) -> ());
+    Unix.stat root
+  with
+  | { st_kind = S_DIR; st_uid; _ } when st_uid <> Unix.getuid () ->
+      Error
+        (Printf.sprintf
+           "The cache %s belongs to another user, who could plant results in it that this user's \
+            builds would trust. Set TRUSS_CACHE to a directory of this user's own."
+           root)
+  | { st_kind = S_DIR; st_perm; _ } when st_perm land 0o022 <> 0 ->
+      Error
+        (Printf.sprintf
+           "Users other than its owner can write the cache %s, so they could plant results in it \
+            that this user's builds would trust. Delete it with `truss clean`, or set TRUSS_CACHE \
+            to another directory."
+           root)
+  | { st_kind = S_DIR; _ } -> Ok root
+  | _ -> Error (Printf.sprintf "The cache %s is not a directory." root)
+  | exception Unix.Unix_error (error, _, _) ->
+      Error (Printf.sprintf "Cannot make the cache %s: %s." root (Unix.error_message error))
 
 let close_channel segment =
   Option.iter close_in_noerr segment.channel;
@@ -71,7 +104,7 @@ let close_channel segment =
 let open_segments : segment list ref = ref []
 let open_limit = 64
 
-let channel segment =
+let obtain_channel segment =
   match segment.channel with
   | Some channel -> channel
   | None ->
@@ -93,12 +126,12 @@ let read_record channel ~offset =
     else
       let value = really_input_string channel length in
       let check = really_input_string channel checksum_width in
-      if checksum [ head; value ] = check then
+      if compute_checksum [ head; value ] = check then
         Some (head.[0], String.sub head kind_width key_width, value)
       else None
   with End_of_file | Sys_error _ -> None
 
-let record_size length = record_head_width + length + checksum_width
+let compute_record_size length = record_head_width + length + checksum_width
 
 let scan segment =
   match open_in_bin segment.path with
@@ -119,7 +152,7 @@ let scan segment =
               match read_record channel ~offset with
               | Some (_, key, value) ->
                   Hashtbl.replace segment.table key { offset; length = String.length value };
-                  loop (offset + record_size (String.length value))
+                  loop (offset + compute_record_size (String.length value))
               | None -> offset
             else offset
           in
@@ -136,7 +169,7 @@ let compare_key index position key =
   in
   loop 0
 
-let entry_location index position =
+let make_entry_location index position =
   {
     offset = Int64.to_int (String.get_int64_le index (position + key_width));
     length = Int32.to_int (String.get_int32_le index (position + key_width + offset_width));
@@ -149,7 +182,7 @@ let search index key =
       let middle = (low + high) / 2 in
       let position = middle * entry_width in
       let order = compare_key index position key in
-      if order = 0 then Some (entry_location index position)
+      if order = 0 then Some (make_entry_location index position)
       else if order < 0 then halve (middle + 1) high
       else halve low middle
   in
@@ -168,7 +201,7 @@ let load_segment path =
   segment
 
 let refresh cache =
-  let directory = segments_directory cache in
+  let directory = make_segments_directory cache in
   let own = Option.map (fun writer -> writer.segment.path) cache.writer in
   let present =
     match Sys.readdir directory with
@@ -205,13 +238,13 @@ let refresh cache =
   cache.segments <- fresh @ known;
   cache.refreshed <- Unix.gettimeofday ()
 
-let writer_name () =
+let make_writer_name () =
   Random.self_init ();
   Printf.sprintf "%d-%d-%06x" (Unix.getpid ()) (int_of_float (Unix.time ())) (Random.bits ())
 
 let new_writer cache =
-  File_system.make_directory (segments_directory cache);
-  let path = Filename.concat (segments_directory cache) (writer_name () ^ ".segment") in
+  File_system.make_directory (make_segments_directory cache);
+  let path = Filename.concat (make_segments_directory cache) (make_writer_name () ^ ".segment") in
   let descriptor = Unix.openfile path [ O_WRONLY; O_CREAT; O_EXCL; O_CLOEXEC ] 0o644 in
   Unix.lockf descriptor F_LOCK 0;
   File_system.write_all descriptor header;
@@ -268,7 +301,7 @@ let () =
   at_exit (fun () ->
       List.iter (fun cache -> try seal cache with Sys_error _ | Unix.Unix_error _ -> ()) !writing)
 
-let writer cache =
+let obtain_writer cache =
   match cache.writer with
   | Some writer when writer.size < seal_size -> writer
   | full_writer ->
@@ -279,7 +312,7 @@ let writer cache =
       writer
 
 let append_record cache kind key value =
-  let writer = writer cache in
+  let writer = obtain_writer cache in
   let head = Bytes.create record_head_width in
   Bytes.set head 0 kind;
   Bytes.blit_string key 0 head kind_width key_width;
@@ -288,15 +321,19 @@ let append_record cache kind key value =
   Hashtbl.replace writer.segment.table key { offset = writer.size; length = String.length value };
   Buffer.add_string writer.pending head;
   Buffer.add_string writer.pending value;
-  Buffer.add_string writer.pending (checksum [ head; value ]);
-  writer.size <- writer.size + record_size (String.length value);
+  Buffer.add_string writer.pending (compute_checksum [ head; value ]);
+  writer.size <- writer.size + compute_record_size (String.length value);
   if Buffer.length writer.pending >= pending_limit then drain writer
 
 let open_ root =
-  File_system.make_directory root;
-  let cache = { root; segments = []; refreshed = 0.; writer = None; used = Hashtbl.create 64 } in
-  refresh cache;
-  cache
+  Result.map
+    (fun root ->
+      let cache =
+        { root; segments = []; refreshed = 0.; writer = None; used = Hashtbl.create 64 }
+      in
+      refresh cache;
+      cache)
+    (make_root root)
 
 let close cache =
   seal cache;
@@ -310,7 +347,7 @@ let flush cache =
     cache.writer
 
 let read_from segment key location =
-  match read_record (channel segment) ~offset:location.offset with
+  match read_record (obtain_channel segment) ~offset:location.offset with
   | Some (_, record_key, value) when record_key = key -> Some value
   | Some _ | None -> None
   | exception Sys_error _ -> None
@@ -345,7 +382,7 @@ let lookup cache key =
       end
       else None
 
-let present cache key =
+let is_present cache key =
   (match cache.writer with Some writer -> Hashtbl.mem writer.segment.table key | None -> false)
   || List.exists (fun segment -> find_in segment key <> None) cache.segments
 
@@ -353,16 +390,16 @@ let derive_result_key = Blake3.derive_key ~context:"truss 2026-11-12 store resul
 
 type result_kind = Package_database | Test_result | Solver_answer
 
-let result_tag = function
+let show_result_tag = function
   | Package_database -> "package"
   | Test_result -> "tests"
   | Solver_answer -> "solver"
 
-let result_key ~kind ~key =
-  derive_result_key (Cbor.encode (Cbor.Array [ Cbor.Text (result_tag kind); Cbor.Bytes key ]))
+let make_result_key ~kind ~key =
+  derive_result_key (Cbor.encode (Cbor.Array [ Cbor.Text (show_result_tag kind); Cbor.Bytes key ]))
 
 let find_result cache ~kind ~key =
-  let name = result_key ~kind ~key in
+  let name = make_result_key ~kind ~key in
   match lookup cache name with
   | Some value ->
       Hashtbl.replace cache.used name ();
@@ -370,18 +407,18 @@ let find_result cache ~kind ~key =
   | None -> None
 
 let add_result cache ~kind ~key value =
-  let name = result_key ~kind ~key in
+  let name = make_result_key ~kind ~key in
   Hashtbl.replace cache.used name ();
-  if not (present cache name) then append_record cache 'r' name value
+  if not (is_present cache name) then append_record cache 'r' name value
 
 let make_directory path =
   File_system.make_directory path;
   path
 
-let evictable_directory cache = Filename.concat cache.root "caches"
+let make_evictable_directory cache = Filename.concat cache.root "caches"
 
 let make_objects_directory cache =
-  make_directory (Filename.concat (evictable_directory cache) "objects")
+  make_directory (Filename.concat (make_evictable_directory cache) "objects")
 
 let make_packages_directory cache = make_directory (Filename.concat cache.root "packages")
 let make_programs_directory cache = make_directory (Filename.concat cache.root "programs")
@@ -401,17 +438,17 @@ let list_evictable_files cache =
             | exception Unix.Unix_error _ -> files)
           files names
   in
-  walk (evictable_directory cache) []
+  walk (make_evictable_directory cache) []
 
-let file_size path = try (Unix.stat path).st_size with Unix.Unix_error _ -> 0
+let measure_file path = try (Unix.stat path).st_size with Unix.Unix_error _ -> 0
 
-let size cache =
+let measure_size cache =
   refresh cache;
-  List.fold_left (fun total segment -> total + file_size segment.path) 0 cache.segments
+  List.fold_left (fun total segment -> total + measure_file segment.path) 0 cache.segments
   + List.fold_left (fun total (_, size, _) -> total + size) 0 (list_evictable_files cache)
   + match cache.writer with Some writer -> writer.size | None -> 0
 
-let abandoned segment =
+let is_abandoned segment =
   segment.index <> None
   ||
   match Unix.openfile segment.path [ O_RDWR; O_CLOEXEC ] 0 with
@@ -424,14 +461,14 @@ let abandoned segment =
           | () -> true
           | exception Unix.Unix_error _ -> false)
 
-let entries segment =
+let list_entries segment =
   match segment.index with
   | Some index ->
       List.init
         (String.length index / entry_width)
         (fun entry ->
           let position = entry * entry_width in
-          (String.sub index position key_width, entry_location index position))
+          (String.sub index position key_width, make_entry_location index position))
   | None -> Hashtbl.fold (fun key location acc -> (key, location) :: acc) segment.table []
 
 let rewrite cache candidates ~keep =
@@ -439,7 +476,7 @@ let rewrite cache candidates ~keep =
     (fun segment ->
       List.iter
         (fun (key, location) ->
-          match read_record (channel segment) ~offset:location.offset with
+          match read_record (obtain_channel segment) ~offset:location.offset with
           | Some (kind, record_key, value) when record_key = key ->
               if
                 keep key
@@ -449,7 +486,7 @@ let rewrite cache candidates ~keep =
                      | None -> false)
               then append_record cache kind key value
           | Some _ | None | (exception Sys_error _) -> ())
-        (entries segment))
+        (list_entries segment))
     candidates;
   flush cache;
   List.iter
@@ -461,18 +498,19 @@ let rewrite cache candidates ~keep =
     candidates;
   cache.segments <- List.filter (fun segment -> not (List.memq segment candidates)) cache.segments
 
-let modified path =
+let read_modified_time path =
   match Unix.stat path with stat -> stat.st_mtime | exception Unix.Unix_error _ -> 0.
 
 type evictable = Segment of segment | Cache_file of string
 
 let collect cache ~budget =
-  let excess = size cache - budget in
+  let excess = measure_size cache - budget in
   if excess > 0 then begin
     let entries =
       List.map
-        (fun segment -> (modified segment.path, file_size segment.path, Segment segment))
-        (List.filter abandoned cache.segments)
+        (fun segment ->
+          (read_modified_time segment.path, measure_file segment.path, Segment segment))
+        (List.filter is_abandoned cache.segments)
       @ List.map
           (fun (path, size, modified) -> (modified, size, Cache_file path))
           (list_evictable_files cache)
@@ -500,6 +538,8 @@ let many = 32
 let compact cache =
   refresh cache;
   let candidates =
-    List.filter (fun segment -> file_size segment.path < small && abandoned segment) cache.segments
+    List.filter
+      (fun segment -> measure_file segment.path < small && is_abandoned segment)
+      cache.segments
   in
   if List.length candidates >= many then rewrite cache candidates ~keep:(fun _ -> true)

@@ -1,6 +1,7 @@
 (library
  (name emit_c)
  (libraries
+  structural_key
   storage
   compiler_bug
   path

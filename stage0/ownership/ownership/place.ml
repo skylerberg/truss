@@ -3,7 +3,7 @@ type step = Field of string | Element of { node : Core.id; origin : Core.origin 
 type t = { root : root; steps : step list }
 type overlap = Disjoint | Overlapping | Maybe_disjoint of Core.origin * Core.origin
 
-let overlap left right =
+let classify_overlap left right =
   if left.root <> right.root then Disjoint
   else
     let rec steps_overlap left right =

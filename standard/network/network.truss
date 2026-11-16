@@ -389,7 +389,7 @@ internal fn address_within(text: StringSlice, from: UInt64, to: UInt64) -> Resul
 internal fn parse_number(text: StringSlice, from: UInt64, to: UInt64, limit: UInt32) -> Result[UInt32, AddressError]
   requires from <= to
   requires to <= text.length()
-  requires limit <= 65535
+  requires limit * 10 + 9 <= UInt32.maximum
   ensures !(result is Ok(value) && value > limit)
   ensures !(result is Err(error) && error.offset > text.length())
   cost time O(to - from)

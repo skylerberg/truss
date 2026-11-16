@@ -48,12 +48,12 @@ type head = {
   type_arguments : Syntax.bracket_item list option;
 }
 
-val head : resolved -> Syntax.expression -> head option
+val find_head : resolved -> Syntax.expression -> head option
 
 val resolve :
   Names.lookups -> Names.key -> section -> (resolved, Diagnostic.in_definition list) result option
 
-val file_diagnostics :
+val list_file_diagnostics :
   Names.lookups ->
   Path.file ->
   Syntax.file ->
@@ -68,4 +68,4 @@ type trait_header = {
   laws : string list;
 }
 
-val trait_header : Syntax.definition -> resolved -> trait_header option
+val make_trait_header : Syntax.definition -> resolved -> trait_header option

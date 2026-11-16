@@ -6,6 +6,7 @@ exception Foreign_unsupported of string
 val unsupported : State.location -> ('a, unit, string, 'b) format4 -> 'a
 val bug : ('a, unit, string, 'b) format4 -> 'a
 val is_in_recursion_group : State.context -> Path.t -> bool
+val has_method_in_recursion_group : State.context -> Path.t -> bool
 val list_clauses : Mir.requirement list -> Mir.formula list
 val declare : State.context -> Logic.declaration -> unit
 val add_fact : State.context -> Logic.term -> unit
@@ -16,11 +17,22 @@ val mentions_fresh_after : State.context -> int -> Logic.term -> bool
 val close_over_binders : State.frame -> Logic.term -> Logic.term option
 val add_frame_fact : State.context -> State.frame -> Logic.term -> unit
 val assume : State.context -> State.frame -> Logic.term -> unit
-val add_requires : State.context -> State.message -> State.fix list
+val add_requires : State.context -> State.frame -> State.message -> State.fix list
 val truss_of_value : State.context -> Logic.term -> string option
 
 val oblige :
   ?template_clause:State.template_clause ->
+  ?cited:Resolve.Names.key * Core.origin ->
+  ?fixes:State.fix list ->
+  State.context ->
+  State.frame ->
+  Diagnostic.Code.prover ->
+  State.location ->
+  State.message ->
+  Logic.term ->
+  unit
+
+val oblige_safe_operation :
   ?cited:Resolve.Names.key * Core.origin ->
   ?fixes:State.fix list ->
   State.context ->

@@ -1,3 +1,7 @@
+module Package_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Path.package
+end))
+
 type package = {
   name : Path.package;
   version : Version.t;
@@ -11,7 +15,7 @@ type problem =
   | Cannot_load of { name : Path.package; version : Version.t; reason : string }
   | Two_contents of { name : Path.package; version : Version.t; recorded_by : Path.package }
 
-let sentence problem =
+let describe_problem problem =
   let show = Path.show_package in
   match problem with
   | No_version { name; wanted_by } ->
@@ -28,7 +32,7 @@ let sentence problem =
          has one content, so one of the two is wrong."
         (show recorded_by) (show name) (Version.show version)
 
-let manifest_and_record ~read name =
+let read_manifest_and_record ~read name =
   match
     ( Option.map Manifest.parse (read "truss.toml"),
       Lock.parse (Option.value ~default:"" (read "truss.lock")) )
@@ -42,30 +46,31 @@ let manifest_and_record ~read name =
       Error (Printf.sprintf "its manifest does not name the package `%s`" (Path.show_package name))
 
 let choose ~lock ~roots ~local ~load =
-  let chosen = Hashtbl.create 16 in
+  let chosen = Package_table.create 16 in
   List.iter
-    (fun (entry : Lock.entry) -> Hashtbl.replace chosen entry.name (entry.version, entry.hash))
+    (fun (entry : Lock.entry) ->
+      Package_table.replace chosen entry.name (entry.version, entry.hash))
     lock;
   let rec pass () =
-    let seen = Hashtbl.create 16 in
+    let seen = Package_table.create 16 in
     let changed = ref false and selected = ref [] and problems = ref [] in
     let problem new_problem =
       if not (List.mem new_problem !problems) then problems := new_problem :: !problems
     in
     let record_of ~recorded_by (entry : Lock.entry) =
-      match Hashtbl.find_opt chosen entry.name with
+      match Package_table.find_opt chosen entry.name with
       | Some (version, _) when Version.compare version entry.version > 0 -> ()
       | Some (version, hash) when Version.compare version entry.version = 0 ->
           if hash <> entry.hash then
             problem (Two_contents { name = entry.name; version; recorded_by })
       | _ ->
-          Hashtbl.replace chosen entry.name (entry.version, entry.hash);
+          Package_table.replace chosen entry.name (entry.version, entry.hash);
           changed := true
     in
     let rec visit wanted_by name =
-      if not (local name || Hashtbl.mem seen name) then begin
-        Hashtbl.replace seen name ();
-        match Hashtbl.find_opt chosen name with
+      if not (local name || Package_table.mem seen name) then begin
+        Package_table.replace seen name ();
+        match Package_table.find_opt chosen name with
         | None -> problem (No_version { name; wanted_by })
         | Some (version, hash) -> (
             match load name version ~hash with
@@ -89,8 +94,8 @@ let choose ~lock ~roots ~local ~load =
   pass ()
 
 let holds ~project packages =
-  let held = Hashtbl.create 16 in
-  let of_ name = Option.value ~default:[] (Hashtbl.find_opt held name) in
+  let held = Package_table.create 16 in
+  let of_ name = Option.value ~default:[] (Package_table.find_opt held name) in
   let in_build name = List.exists (fun package -> package.name = name) packages in
   let grant ~holder (dependency : Manifest.dependency) =
     in_build dependency.package
@@ -104,7 +109,7 @@ let holds ~project packages =
     let now = List.sort_uniq String.compare (offered @ of_ dependency.package) in
     now <> of_ dependency.package
     && begin
-      Hashtbl.replace held dependency.package now;
+      Package_table.replace held dependency.package now;
       true
     end
   in
@@ -139,7 +144,7 @@ let lock ~project packages : Lock.t =
       })
     packages
 
-let differences ~(written : Lock.t) ~(current : Lock.t) =
+let list_differences ~(written : Lock.t) ~(current : Lock.t) =
   let capabilities = function [] -> "nothing" | held -> String.concat ", " held in
   List.filter_map
     (fun (entry : Lock.entry) ->

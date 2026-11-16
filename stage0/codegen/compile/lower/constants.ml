@@ -1,6 +1,6 @@
 let ( let* ) = Option.bind
 
-let all values =
+let collect_all values =
   List.fold_right
     (fun value rest ->
       let* value = value in
@@ -8,26 +8,26 @@ let all values =
       Some (value :: rest))
     values (Some [])
 
-let integer (kind : Memory_layout.integer) value =
-  let low, high = Memory_layout.integer_range kind in
+let make_static_integer (kind : Memory_layout.integer) value =
+  let low, high = Memory_layout.compute_integer_range kind in
   if Z.leq low value && Z.leq value high then Some (Lowered.Static_scalar (Integer (kind, value)))
   else None
 
-let integer_kind (st : Lowering.state) ty =
+let find_integer_kind (st : Lowering.state) ty =
   match (Memory_layout.of_type st.context.env ty).form with
   | Scalar (Integer kind) -> Some kind
   | _ -> None
 
-let truth value = Some (Lowered.Static_scalar (Bool value))
+let make_static_bool value = Some (Lowered.Static_scalar (Bool value))
 
-let arithmetic st ty (operation : Intrinsic.operation) (left : Lowered.static_value)
+let fold_arithmetic st ty (operation : Intrinsic.operation) (left : Lowered.static_value)
     (right : Lowered.static_value) =
   match (left, right) with
   | Static_scalar (Integer (kind, x)), Static_scalar (Integer (_, y)) -> (
-      let bits = 8 * Memory_layout.integer_size kind in
+      let bits = 8 * Memory_layout.compute_integer_size kind in
       let number value =
-        let* kind = integer_kind st ty in
-        integer kind value
+        let* kind = find_integer_kind st ty in
+        make_static_integer kind value
       in
       let shift by =
         if Z.sign y >= 0 && Z.lt y (Z.of_int bits) then number (by x (Z.to_int y)) else None
@@ -64,9 +64,9 @@ let arithmetic st ty (operation : Intrinsic.operation) (left : Lowered.static_va
       | _ -> None)
   | _ -> None
 
-let negated (value : Lowered.static_value) =
+let fold_negation (value : Lowered.static_value) =
   match value with
-  | Static_scalar (Integer (kind, x)) -> integer kind (Z.neg x)
+  | Static_scalar (Integer (kind, x)) -> make_static_integer kind (Z.neg x)
   | Static_scalar (Float64 x) ->
       Some
         (Lowered.Static_scalar (Float64 (Int64.bits_of_float (Float.neg (Int64.float_of_bits x)))))
@@ -75,11 +75,11 @@ let negated (value : Lowered.static_value) =
         (Lowered.Static_scalar (Float32 (Int32.bits_of_float (Float.neg (Int32.float_of_bits x)))))
   | _ -> None
 
-let compared (comparison : Core.comparison) (left : Lowered.static_value)
+let fold_comparison (comparison : Core.comparison) (left : Lowered.static_value)
     (right : Lowered.static_value) =
   match (left, right) with
   | Static_scalar (Integer (_, x)), Static_scalar (Integer (_, y)) ->
-      truth
+      make_static_bool
         (match comparison with
         | Equal -> Z.equal x y
         | Not_equal -> not (Z.equal x y)
@@ -89,39 +89,39 @@ let compared (comparison : Core.comparison) (left : Lowered.static_value)
         | Greater_equal -> Z.geq x y)
   | Static_scalar (Bool x), Static_scalar (Bool y) -> (
       match comparison with
-      | Equal -> truth (x = y)
-      | Not_equal -> truth (x <> y)
+      | Equal -> make_static_bool (x = y)
+      | Not_equal -> make_static_bool (x <> y)
       | Less | Less_equal | Greater | Greater_equal -> None)
   | _ -> None
 
 let call_depth = 8
 let step_limit = 10_000
 
-let rec part (value : Lowered.static_value) (projections : Mir.projection list) =
+let rec project_static_value (value : Lowered.static_value) (projections : Mir.projection list) =
   match (projections, value) with
   | [], _ -> Some value
   | Field name :: rest, Static_record fields ->
       let* field = List.assoc_opt name fields in
-      part field rest
+      project_static_value field rest
   | Variant_field { variant; field } :: rest, Static_variant (built, fields) when built = variant ->
       let* field = List.assoc_opt field fields in
-      part field rest
+      project_static_value field rest
   | _ -> None
 
-let literal st ty (constant : Mir.constant) =
+let fold_literal st ty (constant : Mir.constant) =
   let number literal =
-    match Targets.constant_of st ty literal with
+    match Targets.lower_literal st ty literal with
     | Constant scalar -> Some (Lowered.Static_scalar scalar)
     | _ -> None
   in
   match constant with
   | Integer integer -> number (Integer_value integer)
   | Float float -> number (Float_value float)
-  | Boolean boolean -> truth boolean
+  | Boolean boolean -> make_static_bool boolean
   | Unit -> None
 
-let literal_value (st : Lowering.state) ty text =
-  match Monomorphic.shape st.context.monomorphic ty with
+let fold_literal_value (st : Lowering.state) ty text =
+  match Monomorphic.compute_shape st.context.monomorphic ty with
   | Record [ (field, Typed storage) ] when Option.is_some (Storage.match_storage_element storage) ->
       let bytes =
         List.init (String.length text) (fun index ->
@@ -129,12 +129,12 @@ let literal_value (st : Lowering.state) ty text =
       in
       Some
         (Lowered.Static_record
-           [ (field, Static_storage { element = Ground.builtin UInt8; elements = bytes }) ])
+           [ (field, Static_storage { element = Ground.make_builtin UInt8; elements = bytes }) ])
   | _ -> None
 
-let constant_state (context : Definitions.context) path =
+let make_constant_state (context : Definitions.context) path =
   let ({ source; form = mir } : Mir.Graph.t Mir.sourced) =
-    match Mir.initializer_graph_of_path context.lookups.mir path with
+    match Mir.read_initializer_graph context.lookups.mir path with
     | Some graph -> graph
     | None -> Definitions.bug "%s is not a constant" (Path.show path)
   in
@@ -145,19 +145,21 @@ let constant_state (context : Definitions.context) path =
   in
   let code =
     {
-      (Definitions.unwritten ~definition:source.path ~substitution:[] ~result:(Returns Types.unit)) with
+      (Definitions.make_unwritten_code ~definition:source.path ~substitution:[]
+         ~result:(Returns Types.unit))
+      with
       written = Some (Definitions.read_written context source);
     }
   in
   let st =
     Lowering.enter context
       ~builder:(Emit_c.Builder.create context.env ~key:(Evaluator path))
-      (Lowering.frame_of code)
+      (Lowering.make_frame code)
   in
   (st, mir, ty)
 
 let rec fold_initializer context ~visiting path =
-  let st, mir, ty = constant_state context path in
+  let st, mir, ty = make_constant_state context path in
   (ty, fold_body ~visiting:(path :: visiting) ~depth:call_depth ~steps:(ref step_limit) st mir [])
 
 and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowered.static_value list)
@@ -179,33 +181,33 @@ and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowere
       | Constant path ->
           if List.exists (Path.equal path) visiting then None
           else snd (fold_initializer st.context ~visiting path)
-      | Literal { text; type_ } -> literal_value st (Lowering.ground st type_) text
+      | Literal { text; type_ } -> fold_literal_value st (Lowering.ground st type_) text
     in
-    part whole place.projections
+    project_static_value whole place.projections
   in
   let operand : Mir.operand -> Lowered.static_value option = function
     | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> read place
-    | Constant { value; type_ } -> literal st (Lowering.ground st type_) value
+    | Constant { value; type_ } -> fold_literal st (Lowering.ground st type_) value
   in
   let rvalue target : Mir.rvalue -> Lowered.static_value option = function
     | Operand value | Copy value -> operand value
     | Operation { operation = Negate; operands = [ inner ]; _ } ->
         let* inner = operand inner in
-        negated inner
+        fold_negation inner
     | Operation { operation; operands = [ left; right ]; _ } ->
         let* left = operand left in
         let* right = operand right in
-        arithmetic st (type_of target) operation left right
+        fold_arithmetic st (type_of target) operation left right
     | Compare { comparison; left; right } ->
         let* left = operand left in
         let* right = operand right in
-        compared comparison left right
+        fold_comparison comparison left right
     | Not inner -> (
         let* inner = operand inner in
-        match inner with Static_scalar (Bool x) -> truth (not x) | _ -> None)
+        match inner with Static_scalar (Bool x) -> make_static_bool (not x) | _ -> None)
     | Construct { variant; fields } -> (
         let* fields =
-          all
+          collect_all
             (List.map
                (fun (name, field) ->
                  let* field = field in
@@ -217,7 +219,7 @@ and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowere
         | Some variant -> Some (Lowered.Static_variant (variant, fields))
         | None -> Some (Static_record fields))
     | Array elements ->
-        let* elements = all (List.map operand elements) in
+        let* elements = collect_all (List.map operand elements) in
         Some (Lowered.Static_array elements)
     | Operation _ | Is_variant _ | Convert _ | To_any _ | Function_value _ | Lambda _
     | Value_parameter _ | Specification _ ->
@@ -249,7 +251,7 @@ and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowere
             Some ()
         | _ -> None)
     | Function { path; type_arguments }, arguments when depth > 0 ->
-        let* { form = callee_mir; _ } = Mir.graph_of_path st.context.lookups.mir path in
+        let* { form = callee_mir; _ } = Mir.read_graph st.context.lookups.mir path in
         let type_arguments =
           List.map
             (Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution)
@@ -257,11 +259,11 @@ and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowere
         in
         let callee =
           Lowering.enter st.context ~builder:st.builder
-            (Lowering.frame_of (Definitions.code_of st.context path type_arguments))
+            (Lowering.make_frame (Definitions.make_code st.context path type_arguments))
         in
-        let defaults = (Mir_form.parameter_defaults st.context path).form in
+        let defaults = (Mir_form.read_parameter_defaults st.context path).form in
         let* values =
-          all
+          collect_all
             (List.mapi
                (fun position (argument : Mir.argument) ->
                  match argument with
@@ -291,7 +293,7 @@ and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowere
     else begin
       decr steps;
       let basic = body.blocks.(block) in
-      let* _ = all (List.map statement basic.statements) in
+      let* _ = collect_all (List.map statement basic.statements) in
       match basic.terminator with
       | Goto target -> run target
       | Branch { condition; yes; no; _ } -> (
@@ -310,18 +312,19 @@ and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowere
 
 type constant = Folded of Lowered.data | Run of Ground.ty
 
-let constant context path =
+let compile_constant context path =
   match fold_initializer context ~visiting:[] path with
   | ty, Some value -> Folded { data_key = Constant path; ty; value }
   | ty, None -> Run ty
 
-let write_fully = Well_known.path Write_fully
+let write_fully = Well_known.make_path Write_fully
 
 let write_output (st : Lowering.state) output =
   let builder = st.builder in
-  let int32 = Ground.builtin Int32 in
-  let view_ty = Storage.make_view_type (Ground.builtin UInt8) in
-  let descriptor = Lowering.temporary st int32 and view = Lowering.temporary st view_ty in
+  let int32 = Ground.make_builtin Int32 in
+  let view_ty = Storage.make_view_type (Ground.make_builtin UInt8) in
+  let descriptor = Lowering.allocate_temporary st int32
+  and view = Lowering.allocate_temporary st view_ty in
   Emit_c.Builder.emit builder (Assign (descriptor, Use (Constant (Integer (Int32, Z.one)))));
   Emit_c.Builder.emit builder
     (Assign
@@ -329,24 +332,25 @@ let write_output (st : Lowering.state) output =
          Storage.build_view view_ty
            ~elements:(Copy (Storage.project_buffer output))
            ~length:(Copy (Storage.project_length output)) ));
-  let signature = Definitions.signature_of st.context write_fully in
+  let signature = Definitions.read_signature st.context write_fully in
   let result =
     match signature.output with
     | Returns ty -> Monomorphic.ground st.context.monomorphic [] ty
     | Lends _ -> Definitions.bug "write_fully does not return"
   in
-  Targets.call_instance st
+  Targets.lower_instance_call st
     (Code { path = write_fully; type_arguments = [] })
     ~signature ~substitution:[]
     ~arguments:[ (Read, int32, descriptor); (Read, view_ty, view) ]
-    ~destination:(Lowering.temporary st result) ()
+    ~destination:(Lowering.allocate_temporary st result)
+    ()
 
-let evaluator context path : Emit_c.Builder.instance =
-  let st, mir, ty = constant_state context path in
-  Emit_c.Builder.start st.builder (Emit_c.Builder.block st.builder);
+let build_evaluator context path : Emit_c.Builder.instance =
+  let st, mir, ty = make_constant_state context path in
+  Emit_c.Builder.start st.builder (Emit_c.Builder.allocate_block st.builder);
   Lowering.in_scope st (fun () ->
-      let place = Lowering.temporary st ty in
-      Mir_form.mir_into st mir place;
+      let place = Lowering.allocate_temporary st ty in
+      Mir_form.lower_mir_into st mir place;
       let output = Targets.begin_output st in
       Encoding.encode_call context.env st.builder
         ~output:(Address { place = output; writable = true })

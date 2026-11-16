@@ -1,4 +1,4 @@
-let round ~precision ~minimum ~maximum ~(significand : Z.t) ~(exponent : Z.t) : float option =
+let round_float ~precision ~minimum ~maximum ~(significand : Z.t) ~(exponent : Z.t) : float option =
   if Z.equal significand Z.zero then Some 0.0
   else
     let negative = Z.sign significand < 0 in
@@ -34,8 +34,8 @@ let round ~precision ~minimum ~maximum ~(significand : Z.t) ~(exponent : Z.t) : 
       let value = Float.ldexp (Z.to_float rounded) scale in
       Some (if negative then -.value else value)
 
-let float32 ~significand ~exponent =
-  round ~precision:24 ~minimum:(-126) ~maximum:127 ~significand ~exponent
+let round_float32 ~significand ~exponent =
+  round_float ~precision:24 ~minimum:(-126) ~maximum:127 ~significand ~exponent
 
-let float64 ~significand ~exponent =
-  round ~precision:53 ~minimum:(-1022) ~maximum:1023 ~significand ~exponent
+let round_float64 ~significand ~exponent =
+  round_float ~precision:53 ~minimum:(-1022) ~maximum:1023 ~significand ~exponent

@@ -10,26 +10,26 @@ let parse_position text =
 let run ~position =
   let json = Output.json () in
   let file, line, column = parse_position position in
-  let snapshot, packages = Command_packages.worktree () in
-  let path = Shown_path.real file in
+  let snapshot, packages = Command_packages.load_worktree () in
+  let path = Shown_path.resolve_real_path file in
   match
     List.find_opt
-      (fun written -> Command_packages.path snapshot written = path)
-      (Command_packages.files snapshot packages)
+      (fun written -> Command_packages.locate_file snapshot written = path)
+      (Command_packages.list_files snapshot packages)
   with
   | None -> Outcome.cannot_run "%s is not a file of a package in this worktree." file
   | Some written -> (
       let database = Workspace.open_database snapshot in
       let offset =
-        Source.offset Source.Scalar_values
-          (Workspace.source snapshot written)
+        Source.compute_offset Source.Scalar_values
+          (Workspace.read_source snapshot written)
           ~line:(line - 1) ~column:(column - 1)
       in
       let names = Database.make_name_lookups database packages in
       let symbol_at =
         List.find_map
           (fun (declaration : Resolve.Names.declaration) ->
-            let key = Resolve.Names.key_of declaration in
+            let key = Resolve.Names.make_key declaration in
             let ({ base; _ } : Resolve.Names.place) = names.place key in
             let text = names.text key in
             if base <= offset && offset <= base + String.length text then
@@ -48,28 +48,32 @@ let run ~position =
       in
       match symbol_at with
       | None ->
-          if json then Json.print (Json.document ~diagnostics:[] [ ("found", Json.Null) ])
+          if json then Json.print (Json.make_document ~diagnostics:[] [ ("found", Json.Null) ])
           else Output.print_line "Nothing there.";
           0
       | Some explanation ->
-          let signature = Option.bind explanation.refers_to (Signatures.of_path names) in
+          let signature = Option.bind explanation.refers_to (Signatures.find_signature names) in
           if json then
             Json.print
-              (Json.document ~diagnostics:[]
+              (Json.make_document ~diagnostics:[]
                  [
                    ( "found",
                      Json.Object
                        [
                          ("text", Json.String explanation.text);
                          ( "meaning",
-                           Json.option (fun meaning -> Json.String meaning) explanation.meaning );
+                           Json.encode_option
+                             (fun meaning -> Json.String meaning)
+                             explanation.meaning );
                          ( "refers_to",
-                           Json.option
+                           Json.encode_option
                              (fun target -> Json.String (Path.show target))
                              explanation.refers_to );
                          ( "type",
-                           Json.option (fun type_text -> Json.String type_text) explanation.type_ );
-                         ("signature", Json.option (fun text -> Json.String text) signature);
+                           Json.encode_option
+                             (fun type_text -> Json.String type_text)
+                             explanation.type_ );
+                         ("signature", Json.encode_option (fun text -> Json.String text) signature);
                        ] );
                  ])
           else begin

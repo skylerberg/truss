@@ -13,7 +13,7 @@ let is_radix_prefix text start =
   && text.[start] = '0'
   && match text.[start + 1] with 'x' | 'b' | 'o' -> true | _ -> false
 
-let name_end text position =
+let compute_name_end text position =
   let length = String.length text in
   let rec loop position =
     if position >= length then position
@@ -33,7 +33,7 @@ let name_end text position =
 
 let scan_end text start =
   let length = String.length text in
-  let stop = name_end text start in
+  let stop = compute_name_end text start in
   let only_digits =
     String.for_all
       (fun character -> is_digit character || character = '_')
@@ -41,7 +41,7 @@ let scan_end text start =
   in
   let stop =
     if only_digits && stop + 1 < length && text.[stop] = '.' && is_digit text.[stop + 1] then
-      name_end text (stop + 1)
+      compute_name_end text (stop + 1)
     else stop
   in
   if
@@ -50,7 +50,7 @@ let scan_end text start =
     && stop + 1 < length
     && (text.[stop] = '+' || text.[stop] = '-')
     && is_digit text.[stop + 1]
-  then name_end text (stop + 1)
+  then compute_name_end text (stop + 1)
   else stop
 
 let clean_underscores group =
@@ -67,17 +67,17 @@ let clean_underscores group =
     in
     (cleaned, first_bad 0)
 
-let without_underscores group = String.concat "" (String.split_on_char '_' group)
+let remove_underscores group = String.concat "" (String.split_on_char '_' group)
 
 type issue = { problem : problem; fixable : bool }
 
-let issue ?(fixable = true) code message start stop =
+let make_issue ?(fixable = true) code message start stop =
   { problem = { code; message; start; stop }; fixable }
 
-let underscore_issue offset =
-  issue Number_underscore "`_` can only go between digits." offset (offset + 1)
+let make_underscore_issue offset =
+  make_issue Number_underscore "`_` can only go between digits." offset (offset + 1)
 
-let character_length text offset =
+let measure_character text offset =
   let decoded = Unicode.decode text offset in
   if Unicode.Decoded.is_valid decoded then Unicode.Decoded.length decoded else 1
 
@@ -118,28 +118,28 @@ let check_radix text =
   let stop = digits_end 2 in
   let group = String.sub text 2 (stop - 2) in
   let cleaned, bad_underscore = clean_underscores group in
-  let digits = without_underscores group in
+  let digits = remove_underscores group in
   let issues =
     List.concat
       [
         (if digits = "" && stop = length then
            [
-             issue ~fixable:false Number_missing_digits
+             make_issue ~fixable:false Number_missing_digits
                (Printf.sprintf "`%s` must be followed by %s digits." (String.sub text 0 2) name)
                0 stop;
            ]
          else []);
         (match bad_underscore with
-        | Some offset when digits <> "" -> [ underscore_issue (2 + offset) ]
+        | Some offset when digits <> "" -> [ make_underscore_issue (2 + offset) ]
         | _ -> []);
         (if stop < length then
            [
-             issue ~fixable:false Number_invalid_digit
+             make_issue ~fixable:false Number_invalid_digit
                (Printf.sprintf "`%s` is not a %s digit."
-                  (String.sub text stop (character_length text stop))
+                  (String.sub text stop (measure_character text stop))
                   name)
                stop
-               (stop + character_length text stop);
+               (stop + measure_character text stop);
            ]
          else []);
       ]
@@ -178,7 +178,7 @@ let check_decimal text =
   let rest = match exponent with Some (_, _, digits) -> after digits | None -> position in
   let underscore (offset, group) =
     match snd (clean_underscores group) with
-    | Some bad -> [ underscore_issue (offset + bad) ]
+    | Some bad -> [ make_underscore_issue (offset + bad) ]
     | None -> []
   in
   let cleaned (_, group) = fst (clean_underscores group) in
@@ -189,21 +189,21 @@ let check_decimal text =
         Option.fold ~none:[] ~some:underscore fraction;
         (match exponent with
         | Some (marker, _, digits) ->
-            if without_underscores (snd digits) = "" then
+            if remove_underscores (snd digits) = "" then
               [
-                issue ~fixable:false Number_missing_digits "The exponent needs digits after `e`."
-                  marker (fst digits);
+                make_issue ~fixable:false Number_missing_digits
+                  "The exponent needs digits after `e`." marker (fst digits);
               ]
             else underscore digits
         | None -> []);
         (if rest < length then
            [
-             issue ~fixable:false Number_followed_by_name
+             make_issue ~fixable:false Number_followed_by_name
                (Printf.sprintf
                   "A number cannot be followed directly by a name character such as `%s`."
-                  (String.sub text rest (character_length text rest)))
+                  (String.sub text rest (measure_character text rest)))
                rest
-               (rest + character_length text rest);
+               (rest + measure_character text rest);
            ]
          else []);
       ]
@@ -213,17 +213,17 @@ let check_decimal text =
     ^ Option.fold ~none:"" ~some:(fun fraction -> "." ^ cleaned fraction) fraction
     ^ Option.fold ~none:"" ~some:(fun (_, sign, digits) -> "e" ^ sign ^ cleaned digits) exponent
   in
-  let whole_digits = without_underscores (snd whole) in
+  let whole_digits = remove_underscores (snd whole) in
   let value =
     if fraction = None && exponent = None then Token.Integer (Z.of_string whole_digits)
     else
       let fraction_digits =
-        Option.fold ~none:"" ~some:(fun (_, group) -> without_underscores group) fraction
+        Option.fold ~none:"" ~some:(fun (_, group) -> remove_underscores group) fraction
       in
       let exponent_value =
         match exponent with
-        | Some (_, sign, (_, group)) when without_underscores group <> "" ->
-            let magnitude = Z.of_string (without_underscores group) in
+        | Some (_, sign, (_, group)) when remove_underscores group <> "" ->
+            let magnitude = Z.of_string (remove_underscores group) in
             if sign = "-" then Z.neg magnitude else magnitude
         | _ -> Z.zero
       in

@@ -33,10 +33,10 @@ let find code_point : entry option =
   if code_point >= 0x2000 && code_point <= 0x200A then Some Space
   else List.assoc_opt code_point table
 
-let token spelling : Token.kind option =
+let find_confusable_token spelling : Token.kind option =
   match List.assoc_opt spelling Token.punctuation with
   | Some punctuation -> Some (Punctuation punctuation)
-  | None -> Token.word spelling
+  | None -> Token.find_word spelling
 
 type scanned = Lexed of Token.kind | Spaced
 
@@ -57,8 +57,9 @@ let scan (cursor : Cursor.t) ~value ~length =
     Cursor.report cursor ~code:Confusable_character
       ~fixes:
         (if follows_joining_confusable cursor start replacement then []
-         else Cursor.code_fixes cursor (Cursor.span start (start + length)) [ replacement ])
-      (Cursor.span start (start + length))
+         else
+           Cursor.list_code_fixes cursor (Source.make_span start (start + length)) [ replacement ])
+      (Source.make_span start (start + length))
       (Printf.sprintf "%s is not %s. Truss is written with ASCII punctuation."
          (Cursor.show_character cursor start)
          name);
@@ -70,7 +71,7 @@ let scan (cursor : Cursor.t) ~value ~length =
       report ~replacement:" " ~name:"the space character";
       Some Spaced
   | Some (Spelled spelling) -> (
-      match token spelling with
+      match find_confusable_token spelling with
       | Some kind ->
           report ~replacement:spelling ~name:("`" ^ spelling ^ "`");
           Some (Lexed kind)
@@ -78,5 +79,5 @@ let scan (cursor : Cursor.t) ~value ~length =
   | Some (Opening_quote closing) ->
       Option.map
         (fun kind -> Lexed kind)
-        (String_forms.curly_quoted_string cursor ~opening_length:length ~closing)
+        (String_forms.lex_curly_quoted_string cursor ~opening_length:length ~closing)
   | None -> None

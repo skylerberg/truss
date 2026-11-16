@@ -40,10 +40,10 @@ let find_part ?(inherited = false) (lookups : Lookups.t) path callee =
       })
     (Option.map
        (fun ({ form; _ } : Mir.contract Mir.sourced) -> form)
-       (Mir.contract_of_path lookups.mir path))
+       (Mir.read_contract lookups.mir path))
 
 let holds_todo (lookups : Lookups.t) (key : Resolve.Names.key) =
-  match Mir.code (lookups.mir.body_part key) with
+  match Mir.find_code (lookups.mir.body_part key) with
   | Some code ->
       let holds = ref false in
       Mir.iter_code
@@ -95,7 +95,7 @@ let law_unshown (lookups : Lookups.t) (impl : Path.t) (trait : Types.trait_refer
       || List.exists
            (fun (law, ((proof : State.source), _)) ->
              law = name && Option.fold ~none:false ~some:(holds_todo lookups) proof.key)
-           (list_law_proofs lookups (Path.package impl) trait for_type)
+           (list_law_proofs lookups (Path.locate_package impl) trait for_type)
   | None -> false
 
 let make_contract (lookups : Lookups.t) path ~own ~others =

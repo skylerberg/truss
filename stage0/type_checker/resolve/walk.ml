@@ -78,7 +78,7 @@ type state = {
   mutable section : section;
 }
 
-let section_names size =
+let make_section_names size =
   {
     names = Array.make size None;
     brackets = Array.make size None;
@@ -93,19 +93,19 @@ let create lookups key ~spans ~walked =
     lookups;
     key;
     spans;
-    interface = section_names size;
-    contract = section_names size;
-    body = section_names size;
+    interface = make_section_names size;
+    contract = make_section_names size;
+    body = make_section_names size;
     walked;
     section = Interface;
   }
 
-let names_of state = function
+let lookup_section_names state = function
   | Interface -> state.interface
   | Contract -> state.contract
   | Body -> state.body
 
-let current state = names_of state state.section
+let lookup_current_names state = lookup_section_names state state.section
 let read_span state id = state.spans.(id)
 
 let in_section state section walk =
@@ -116,18 +116,20 @@ let in_section state section walk =
     state.section <- enclosing
   end
 
-let reported state ?fixes code (span : Source.Definition_span.t) message =
+let add_diagnostic state ?fixes code (span : Source.Definition_span.t) message =
   let diagnostic = Diagnostic.make ?fixes ~code:(Resolve code) span message in
-  let names = current state in
+  let names = lookup_current_names state in
   names.diagnostics <- diagnostic :: names.diagnostics;
-  Diagnostic.reported diagnostic
+  Diagnostic.make_reported diagnostic
 
-let report state ?fixes code span message = ignore (reported state ?fixes code span message)
-let set state (name : Syntax.name) target = (current state).names.(name.id) <- Some target
+let report state ?fixes code span message = ignore (add_diagnostic state ?fixes code span message)
 
-let unknown state (name : Syntax.name) ~expected candidates =
+let set_target state (name : Syntax.name) target =
+  (lookup_current_names state).names.(name.id) <- Some target
+
+let report_unknown state (name : Syntax.name) ~expected candidates =
   let fixes =
-    match Diagnostic.closest name.text candidates with
+    match Diagnostic.find_closest name.text candidates with
     | Some candidate ->
         [
           Diagnostic.fix
@@ -136,22 +138,24 @@ let unknown state (name : Syntax.name) ~expected candidates =
         ]
     | None -> []
   in
-  set state name
+  set_target state name
     (Unknown
-       (reported state ~fixes Unknown_name (read_span state name.id)
+       (add_diagnostic state ~fixes Unknown_name (read_span state name.id)
           (Printf.sprintf "Nothing named `%s` is %s." name.text expected)))
 
-let module_item state text = state.lookups.find state.key.module_ text
+let find_module_item state text = state.lookups.find state.key.module_ text
 
-let module_of_names state (first : Syntax.name) (rest : Syntax.name list) =
+let resolve_module_names state (first : Syntax.name) (rest : Syntax.name list) =
   let failed report =
-    set state first (Unknown report);
+    set_target state first (Unknown report);
     Error report
   in
   if
     List.mem_assoc first.text (state.lookups.imports state.key)
-    && not (List.mem first.text (current state).used_imports)
-  then (current state).used_imports <- first.text :: (current state).used_imports;
+    && not (List.mem first.text (lookup_current_names state).used_imports)
+  then
+    (lookup_current_names state).used_imports <-
+      first.text :: (lookup_current_names state).used_imports;
   begin match
     Names.lookup_module state.lookups ~from:state.key.module_
       ~imports:(state.lookups.imports state.key) first.text
@@ -160,34 +164,34 @@ let module_of_names state (first : Syntax.name) (rest : Syntax.name list) =
   | Found_module (module_, `Package)
     when module_ = Intrinsic.module_ && state.key.module_.package <> Path.standard_package ->
       failed
-        (reported state Intrinsic_import (read_span state first.id)
+        (add_diagnostic state Intrinsic_import (read_span state first.id)
            "Only the `standard` package can use `standard::intrinsic`.")
   | Found_module (module_, _) ->
-      set state first (Module module_);
+      set_target state first (Module module_);
       Ok module_
   | Ambiguous_module (imported, package) ->
       failed
-        (reported state Ambiguous_module (read_span state first.id)
+        (add_diagnostic state Ambiguous_module (read_span state first.id)
            (Printf.sprintf
               "`%s` could be the imported module `%s` or the module `%s`. Write the imported one's \
                full path, or remove its `use`."
               first.text (Path.show_module imported) (Path.show_module package)))
   | No_module text ->
       failed
-        (reported state Unknown_module (read_span state first.id)
+        (add_diagnostic state Unknown_module (read_span state first.id)
            (Printf.sprintf "No module `%s` is imported or exists." text))
   end
 
-let in_module state module_ (name : Syntax.name) ~types =
+let find_in_module state module_ (name : Syntax.name) ~types =
   let is_kind = if types then Names.is_type_kind else Names.is_value_kind in
   match Names.find_in state.lookups ~from:state.key.module_ module_ name.text ~is_kind with
   | Found_name (item, path) ->
-      set state name (Definition (item.kind, path));
+      set_target state name (Definition (item.kind, path));
       Some (path, item)
   | Hidden_name item ->
-      set state name
+      set_target state name
         (Unknown
-           (reported state Not_visible (read_span state name.id)
+           (add_diagnostic state Not_visible (read_span state name.id)
               (Printf.sprintf "`%s::%s` is %s." (Path.show_module module_) name.text
                  (match item.visibility with
                  | Private -> "private to its module, so it cannot be used here"
@@ -199,127 +203,127 @@ let in_module state module_ (name : Syntax.name) ~types =
           (fun (item : Names.entry) ->
             if
               (if types then Names.is_type_kind item.kind else Names.is_value_kind item.kind)
-              && Names.visible ~from:state.key.module_ module_ item.visibility
+              && Names.is_visible ~from:state.key.module_ module_ item.visibility
             then Some item.name
             else None)
           (state.lookups.entries module_)
       in
-      unknown state name ~expected:("in `" ^ Path.show_module module_ ^ "`") candidates;
+      report_unknown state name ~expected:("in `" ^ Path.show_module module_ ^ "`") candidates;
       None
 
-let type_candidates state scope =
+let list_type_candidates state scope =
   List.map fst (String_map.bindings scope.types)
   @ List.filter_map
       (fun (item : Names.entry) -> if Names.is_type_kind item.kind then Some item.name else None)
       (state.lookups.entries state.key.module_)
   @ List.map fst Prelude.types
 
-let type_name state scope ?(variants = false) (path : Syntax.path) =
+let resolve_type_name state scope ?(variants = false) (path : Syntax.path) =
   match path.modules with
   | first :: rest -> (
-      match module_of_names state first rest with
-      | Ok module_ -> ignore (in_module state module_ path.last ~types:true)
-      | Error report -> set state path.last (Unknown report))
+      match resolve_module_names state first rest with
+      | Ok module_ -> ignore (find_in_module state module_ path.last ~types:true)
+      | Error report -> set_target state path.last (Unknown report))
   | [] -> (
       let text = path.last.text in
       match String_map.find_opt text scope.types with
-      | Some parameter -> set state path.last parameter
+      | Some parameter -> set_target state path.last parameter
       | None -> (
           match Names.find_bare_type state.lookups ~from:state.key.module_ text with
-          | Some (item, found) -> set state path.last (Definition (item.kind, found))
+          | Some (item, found) -> set_target state path.last (Definition (item.kind, found))
           | None -> (
               match if variants then Prelude.find_variant text else None with
-              | Some (type_, variant) -> set state path.last (Variant (type_, variant))
+              | Some (type_, variant) -> set_target state path.last (Variant (type_, variant))
               | None ->
-                  unknown state path.last ~expected:"a type here"
-                    (type_candidates state scope
+                  report_unknown state path.last ~expected:"a type here"
+                    (list_type_candidates state scope
                     @ if variants then List.map fst Prelude.variants else []))))
 
-let target_of state (name : Syntax.name) = (current state).names.(name.id)
+let find_target state (name : Syntax.name) = (lookup_current_names state).names.(name.id)
 
-let rec type_expression state scope (type_ : Syntax.type_expression) =
+let rec resolve_type_expression state scope (type_ : Syntax.type_expression) =
   match type_.kind with
-  | Path_type path -> path_type state scope path
-  | Any_type path -> path_type state scope path
+  | Path_type path -> resolve_path_type state scope path
+  | Any_type path -> resolve_path_type state scope path
   | Self_type _ -> ()
-  | Associated (base, member) -> associated_base state scope base member "type"
+  | Associated (base, member) -> resolve_associated_base state scope base member "type"
   | Function_type { inputs; output; clauses } ->
       List.iter
-        (fun (input : Syntax.function_input) -> type_expression state scope input.type_)
+        (fun (input : Syntax.function_input) -> resolve_type_expression state scope input.type_)
         inputs;
-      Option.iter (type_expression state scope) output;
+      Option.iter (resolve_type_expression state scope) output;
       let named =
         List.fold_left
           (fun scope (input : Syntax.function_input) ->
             Option.fold ~none:scope ~some:(declare_parameter state scope) input.name)
           scope inputs
       in
-      List.iter (clause state named) clauses
+      List.iter (resolve_clause state named) clauses
   | Type_error -> ()
 
-and associated_base state scope (base : Syntax.name) (member : Syntax.name) kind =
+and resolve_associated_base state scope (base : Syntax.name) (member : Syntax.name) kind =
   match String_map.find_opt base.text scope.types with
-  | Some parameter -> set state base parameter
+  | Some parameter -> set_target state base parameter
   | None ->
-      set state base
+      set_target state base
         (Unknown
-           (reported state Not_a_generic_parameter (read_span state base.id)
+           (add_diagnostic state Not_a_generic_parameter (read_span state base.id)
               (Printf.sprintf
                  "`%s.%s` names an associated %s, so `%s` must be a generic parameter here."
                  base.text member.text kind base.text)))
 
-and capability_reference state scope (reference : Syntax.capability_reference) =
+and resolve_capability_reference state scope (reference : Syntax.capability_reference) =
   match reference.kind with
-  | Capability_path path -> path_type state scope path
+  | Capability_path path -> resolve_path_type state scope path
   | Self_capabilities _ -> ()
   | Associated_capabilities (base, member) ->
-      associated_base state scope base member "capability set"
+      resolve_associated_base state scope base member "capability set"
 
-and path_type state scope (path : Syntax.path_type) =
-  type_name state scope path.path;
-  List.iter (type_argument state scope) path.arguments
+and resolve_path_type state scope (path : Syntax.path_type) =
+  resolve_type_name state scope path.path;
+  List.iter (resolve_type_argument state scope) path.arguments
 
-and type_argument state scope = function
-  | Type_argument type_ -> type_expression state scope type_
+and resolve_type_argument state scope = function
+  | Type_argument type_ -> resolve_type_expression state scope type_
   | Count _ -> ()
   | Count_name name -> count_name state scope name
-  | Constraint (_, type_) -> type_expression state scope type_
+  | Constraint (_, type_) -> resolve_type_expression state scope type_
 
 and count_name state scope (name : Syntax.name) =
   match String_map.find_opt name.text scope.values with
-  | Some (Value_generic parameter, _) -> set state name (Value_parameter parameter)
+  | Some (Value_generic parameter, _) -> set_target state name (Value_parameter parameter)
   | shadowing -> (
-      match module_item state name.text with
+      match find_module_item state name.text with
       | Some item when item.kind = Constant && shadowing = None ->
-          set state name
+          set_target state name
             (Definition (Constant, Top { module_ = state.key.module_; name = name.text }))
       | _ ->
-          set state name
+          set_target state name
             (Unknown
-               (reported state Not_a_constant (read_span state name.id)
+               (add_diagnostic state Not_a_constant (read_span state name.id)
                   (Printf.sprintf
                      "`%s` in a type argument must be a value generic parameter or a constant."
                      name.text))))
 
-and clause state scope (clause : Syntax.clause) =
+and resolve_clause state scope (clause : Syntax.clause) =
   let specification = { scope with specification = in_specification } in
   match clause.kind with
-  | Uses capabilities -> List.iter (capability_reference state scope) capabilities
-  | Requires value -> expression state specification value
+  | Uses capabilities -> List.iter (resolve_capability_reference state scope) capabilities
+  | Requires value -> resolve_expression state specification value
   | Ensures value ->
-      expression state
+      resolve_expression state
         {
           specification with
           specification =
             { in_specification with names_result = true; names_final = scope.is_lending_method };
         }
         value
-  | Decreases measures -> List.iter (expression state specification) measures
+  | Decreases measures -> List.iter (resolve_expression state specification) measures
   | Cost cost -> (
       (match cost.resource with
-      | Calls (Call_parameter name) -> local_value state scope name
-      | Calls (Call_capability path) -> path_type state scope path
-      | Calls (Call_method (path, _)) -> path_type state scope path
+      | Calls (Call_parameter name) -> resolve_local_value state scope name
+      | Calls (Call_capability path) -> resolve_path_type state scope path
+      | Calls (Call_method (path, _)) -> resolve_path_type state scope path
       | Time | Allocations | Allocated_bytes -> ());
       let bound =
         {
@@ -329,42 +333,44 @@ and clause state scope (clause : Syntax.clause) =
         }
       in
       match cost.bound with
-      | Big_o value | At_most value | Exactly value -> expression state bound value
+      | Big_o value | At_most value | Exactly value -> resolve_expression state bound value
       | Finite -> ())
   | Clause_error -> ()
 
-and local_value state scope (name : Syntax.name) =
+and resolve_local_value state scope (name : Syntax.name) =
   let text = name.text in
   match String_map.find_opt text scope.values with
-  | Some (Value_local id, _) -> set state name (Local id)
-  | Some (Value_generic parameter, _) -> set state name (Value_parameter parameter)
-  | Some (Value_field field, _) -> set state name (Field field)
-  | Some (Value_law_parameter index, _) -> set state name (Law_parameter index)
+  | Some (Value_local id, _) -> set_target state name (Local id)
+  | Some (Value_generic parameter, _) -> set_target state name (Value_parameter parameter)
+  | Some (Value_field field, _) -> set_target state name (Field field)
+  | Some (Value_law_parameter index, _) -> set_target state name (Law_parameter index)
   | None ->
-      if scope.specification.active && text = "old" then set state name Old
-      else if scope.specification.names_visited && text = "visited" then set state name Visited
-      else if scope.specification.names_final && text = "final" then set state name Final
-      else if scope.specification.active && text = "identical" then set state name Identical
-      else if scope.specification.names_result && text = "result" then set state name Result_value
+      if scope.specification.active && text = "old" then set_target state name Old
+      else if scope.specification.names_visited && text = "visited" then
+        set_target state name Visited
+      else if scope.specification.names_final && text = "final" then set_target state name Final
+      else if scope.specification.active && text = "identical" then set_target state name Identical
+      else if scope.specification.names_result && text = "result" then
+        set_target state name Result_value
       else if List.mem text scope.specification.elements then
-        set state name
+        set_target state name
           (Unknown
-             (reported state Unknown_name (read_span state name.id)
+             (add_diagnostic state Unknown_name (read_span state name.id)
                 (Printf.sprintf
                    "`%s` is the loop's element, which is bound only in the loop's body: the loop's \
                     clauses hold before the first element and after the last. Name the elements so \
                     far with `visited`."
                    text)))
       else
-        begin match module_item state text with
+        begin match find_module_item state text with
         | Some item when Names.is_value_kind item.kind ->
-            set state name
+            set_target state name
               (Definition (item.kind, Top { module_ = state.key.module_; name = text }))
         | _ ->
             if text = "null" || text = "nil" then begin
-              set state name
+              set_target state name
                 (Unknown
-                   (reported state Null (read_span state name.id)
+                   (add_diagnostic state Null (read_span state name.id)
                       ~fixes:
                         [
                           Diagnostic.fix "Write `None`."
@@ -376,7 +382,7 @@ and local_value state scope (name : Syntax.name) =
                          text)))
             end
             else
-              unknown state name ~expected:"a value here"
+              report_unknown state name ~expected:"a value here"
                 (List.map fst (String_map.bindings scope.values)
                 @ List.filter_map
                     (fun (item : Names.entry) ->
@@ -384,32 +390,32 @@ and local_value state scope (name : Syntax.name) =
                     (state.lookups.entries state.key.module_))
         end
 
-and name_expression state scope (path : Syntax.path) =
+and resolve_name_expression state scope (path : Syntax.path) =
   match path.modules with
   | first :: rest -> (
-      match module_of_names state first rest with
+      match resolve_module_names state first rest with
       | Ok module_ ->
           let upper = path.last.text.[0] >= 'A' && path.last.text.[0] <= 'Z' in
-          ignore (in_module state module_ path.last ~types:upper)
-      | Error report -> set state path.last (Unknown report))
+          ignore (find_in_module state module_ path.last ~types:upper)
+      | Error report -> set_target state path.last (Unknown report))
   | [] ->
       if path.last.text.[0] >= 'A' && path.last.text.[0] <= 'Z' then
-        type_name state scope ~variants:true path
-      else local_value state scope path.last
+        resolve_type_name state scope ~variants:true path
+      else resolve_local_value state scope path.last
 
-and name_target state (value : Syntax.expression) =
+and find_name_target state (value : Syntax.expression) =
   match value.kind with
-  | Name path -> target_of state path.last
-  | Parenthesized inner -> name_target state inner
+  | Name path -> find_target state path.last
+  | Parenthesized inner -> find_name_target state inner
   | _ -> None
 
-and bracket state scope (value : Syntax.expression) base items =
-  expression state scope base;
+and resolve_bracket state scope (value : Syntax.expression) base items =
+  resolve_expression state scope base;
   let decision =
     match base.kind with
     | Member _ -> Method_bracket
     | _ -> (
-        match name_target state base with
+        match find_name_target state base with
         | Some (Definition ((Type | Trait | Capability), _))
         | Some (Type_parameter _ | Capability_parameter _) ->
             Type_arguments
@@ -426,11 +432,11 @@ and bracket state scope (value : Syntax.expression) base items =
             Type_arguments
         | _ -> Index)
   in
-  (current state).brackets.(value.id) <- Some decision;
+  (lookup_current_names state).brackets.(value.id) <- Some decision;
   List.iter
     (function
-      | Syntax.Item item -> expression state scope item
-      | Item_constraint (_, type_) -> type_expression state scope type_)
+      | Syntax.Item item -> resolve_expression state scope item
+      | Item_constraint (_, type_) -> resolve_type_expression state scope type_)
     items
 
 and check_place state (written : Syntax.expression) (inner : Syntax.expression) =
@@ -439,7 +445,7 @@ and check_place state (written : Syntax.expression) (inner : Syntax.expression) 
     | Member (base, _) -> head base
     | Parenthesized inner -> head inner
     | Bracket (base, _) -> (
-        match (current state).brackets.(value.id) with
+        match (lookup_current_names state).brackets.(value.id) with
         | Some (Index | Method_bracket) -> head base
         | _ -> `Not_a_place value)
     | Call ({ kind = Member (base, _); _ }, _)
@@ -448,7 +454,7 @@ and check_place state (written : Syntax.expression) (inner : Syntax.expression) 
     | Try base -> ( match head base with `Place false -> `Not_a_place value | other -> other)
     | Self_value -> `Place false
     | Name path -> (
-        match target_of state path.last with
+        match find_target state path.last with
         | Some (Local _ | Field _) -> `Place false
         | Some (Definition (Constant, _)) -> `Place false
         | Some (Unknown _) -> `Unknown
@@ -471,10 +477,10 @@ and check_place state (written : Syntax.expression) (inner : Syntax.expression) 
         "Only a place, such as a variable, a field, or an element, can take `mut` or `own`. A \
          temporary value is always passed as owned."
 
-and expression state scope (value : Syntax.expression) =
+and resolve_expression state scope (value : Syntax.expression) =
   match value.kind with
   | Todo ->
-      let names = current state in
+      let names = lookup_current_names state in
       names.holes <-
         ( value.id,
           List.map (fun (name, (value, _)) -> (name, value)) (String_map.bindings scope.values) )
@@ -482,114 +488,116 @@ and expression state scope (value : Syntax.expression) =
   | Integer _ | Float _ | True | False | Unreachable | Break | Continue | Self_value
   | Self_type_value | Expression_error ->
       ()
-  | String literal -> string_literal state scope literal
-  | Name path -> name_expression state scope path
-  | Member (base, _) -> expression state scope base
-  | Bracket (base, items) -> bracket state scope value base items
+  | String literal -> resolve_string_literal state scope literal
+  | Name path -> resolve_name_expression state scope path
+  | Member (base, _) -> resolve_expression state scope base
+  | Bracket (base, items) -> resolve_bracket state scope value base items
   | Call ({ kind = Name { modules = []; last }; _ }, arguments)
     when (scope.specification.cost_bound && List.mem last.text [ "log"; "power"; "time"; "calls" ])
          || scope.specification.active
             && List.mem last.text [ "log"; "power" ]
             && (not (String_map.mem last.text scope.values))
             &&
-            match module_item state last.text with
+            match find_module_item state last.text with
             | Some item -> not (Names.is_value_kind item.kind)
             | None -> true ->
-      set state last
+      set_target state last
         (Specification_function
            (match last.text with "log" -> Log | "power" -> Power | "time" -> Time | _ -> Calls));
       List.iter
-        (fun (argument : Syntax.argument) -> expression state scope argument.value)
+        (fun (argument : Syntax.argument) -> resolve_expression state scope argument.value)
         arguments
   | Call (callee, arguments) ->
-      expression state scope callee;
+      resolve_expression state scope callee;
       List.iter
-        (fun (argument : Syntax.argument) -> expression state scope argument.value)
+        (fun (argument : Syntax.argument) -> resolve_expression state scope argument.value)
         arguments
   | Try inner | Prefix (_, inner) | Any inner | Echo inner | Parenthesized inner ->
-      expression state scope inner
+      resolve_expression state scope inner
   | Mode (_, inner) ->
-      expression state scope inner;
+      resolve_expression state scope inner;
       check_place state value inner
   | With (base, updates) ->
-      expression state scope base;
+      resolve_expression state scope base;
       List.iter
         (fun (update : Syntax.update) ->
           match update.kind with
-          | Update { field; value = None; path = [] } -> local_value state scope field
-          | Update { value = Some value; _ } -> expression state scope value
+          | Update { field; value = None; path = [] } -> resolve_local_value state scope field
+          | Update { value = Some value; _ } -> resolve_expression state scope value
           | Update { value = None; _ } | Update_error -> ())
         updates
-  | Binary { operator = Connective And; _ } | Is _ -> ignore (condition state scope value)
+  | Binary { operator = Connective And; _ } | Is _ -> ignore (resolve_condition state scope value)
   | Binary { left; right; _ } ->
-      expression state scope left;
-      expression state scope right
+      resolve_expression state scope left;
+      resolve_expression state scope right
   | Range { start; stop; _ } ->
-      Option.iter (expression state scope) start;
-      Option.iter (expression state scope) stop
+      Option.iter (resolve_expression state scope) start;
+      Option.iter (resolve_expression state scope) stop
   | Quantified { binder; body; _ } ->
       let inner =
         match binder with
         | Binder_in (pattern_, collection) ->
-            expression state scope collection;
+            resolve_expression state scope collection;
             bind_pattern state scope pattern_
         | Binder_type (name, type_) ->
-            type_expression state scope type_;
+            resolve_type_expression state scope type_;
             declare_value state scope name
       in
-      expression state inner body
-  | Return inner -> Option.iter (expression state scope) inner
-  | List items -> List.iter (expression state scope) items
+      resolve_expression state inner body
+  | Return inner -> Option.iter (resolve_expression state scope) inner
+  | List items -> List.iter (resolve_expression state scope) items
   | Map entries ->
       List.iter
         (fun (key, item) ->
-          expression state scope key;
-          expression state scope item)
+          resolve_expression state scope key;
+          resolve_expression state scope item)
         entries
   | Lambda { parameters; body } ->
       let inner =
         List.fold_left (fun scope pattern_ -> bind_pattern state scope pattern_) scope parameters
       in
-      block state inner body
+      resolve_block state inner body
   | If { condition = test; then_; else_ } ->
-      let inner = condition state scope test in
-      block state inner then_;
+      let inner = resolve_condition state scope test in
+      resolve_block state inner then_;
       Option.iter
         (function
-          | Syntax.Else block_ -> block state scope block_
-          | Else_if branch -> expression state scope branch)
+          | Syntax.Else block_ -> resolve_block state scope block_
+          | Else_if branch -> resolve_expression state scope branch)
         else_
   | Match { scrutinees; arms } ->
-      List.iter (expression state scope) scrutinees;
-      List.iter (arm state scope) arms
+      List.iter (resolve_expression state scope) scrutinees;
+      List.iter (resolve_arm state scope) arms
   | Provide { implementations; body } ->
-      List.iter (expression state scope) implementations;
-      block state scope body
-  | Block body -> block state scope body
+      List.iter (resolve_expression state scope) implementations;
+      resolve_block state scope body
+  | Block body -> resolve_block state scope body
 
-and condition state scope (value : Syntax.expression) =
+and resolve_condition state scope (value : Syntax.expression) =
   match value.kind with
   | Binary { operator = Connective And; left; right; _ } ->
-      let after_left = condition state scope left in
-      condition state after_left right
+      let after_left = resolve_condition state scope left in
+      resolve_condition state after_left right
   | Is { value = tested; pattern = pattern_; _ } ->
-      expression state scope tested;
+      resolve_expression state scope tested;
       bind_pattern state scope pattern_
-  | Parenthesized inner -> condition state scope inner
+  | Parenthesized inner -> resolve_condition state scope inner
   | _ ->
-      expression state scope value;
+      resolve_expression state scope value;
       scope
 
-and string_literal state scope (literal : Syntax.string_literal) =
-  Option.iter (fun tag -> type_name state scope tag) literal.tag;
-  List.iter (fun (value, _) -> expression state scope value) literal.rest
+and resolve_string_literal state scope (literal : Syntax.string_literal) =
+  Option.iter (fun tag -> resolve_type_name state scope tag) literal.tag;
+  List.iter (fun (value, _) -> resolve_expression state scope value) literal.rest
 
-and arm state scope (arm_ : Syntax.arm) =
+and resolve_arm state scope (arm_ : Syntax.arm) =
   let inner =
     List.fold_left (fun scope pattern_ -> bind_pattern state scope pattern_) scope arm_.patterns
   in
-  let guarded = match arm_.guard with Some guard -> condition state inner guard | None -> inner in
-  ignore (statement state guarded arm_.body)
+  let guarded =
+    match arm_.guard with Some guard -> resolve_condition state inner guard | None -> inner
+  in
+  ignore (resolve_statement state guarded arm_.body)
 
 and declare_value state scope (name : Syntax.name) =
   let shadows existing =
@@ -600,7 +608,7 @@ and declare_value state scope (name : Syntax.name) =
   (match String_map.find_opt name.text scope.values with
   | Some (_, existing) -> shadows existing
   | None -> ());
-  set state name Binding;
+  set_target state name Binding;
   {
     scope with
     values = String_map.add name.text (Value_local name.id, "a local here") scope.values;
@@ -612,28 +620,29 @@ and declare_parameter state scope (name : Syntax.name) =
 
 and bind_pattern state scope (pattern_ : Syntax.pattern) =
   let bound = ref [] in
-  pattern state scope bound pattern_;
+  resolve_pattern state scope bound pattern_;
   List.fold_left
     (fun scope (name : Syntax.name) -> declare_value state scope name)
     scope (List.rev !bound)
 
-and pattern state scope bound (pattern_ : Syntax.pattern) =
+and resolve_pattern state scope bound (pattern_ : Syntax.pattern) =
   match pattern_.kind with
   | Wildcard | Pattern_error -> ()
   | Binding name -> bound := name :: !bound
-  | Qualified_constant constant_ -> qualified_constant state scope constant_
-  | Literal literal -> literal_pattern state scope literal
+  | Qualified_constant constant_ -> resolve_qualified_constant state scope constant_
+  | Literal literal -> resolve_literal_pattern state scope literal
   | Pattern_range { start; stop; _ } ->
-      range_end state scope start;
-      range_end state scope stop
-  | Variant { fields; _ } -> Option.iter (List.iter (pattern_field state scope bound)) fields
-  | Record fields -> List.iter (pattern_field state scope bound) fields
+      resolve_range_end state scope start;
+      resolve_range_end state scope stop
+  | Variant { fields; _ } ->
+      Option.iter (List.iter (resolve_pattern_field state scope bound)) fields
+  | Record fields -> List.iter (resolve_pattern_field state scope bound) fields
   | Alternatives alternatives -> (
       let each =
         List.map
           (fun alternative ->
             let names = ref [] in
-            pattern state scope names alternative;
+            resolve_pattern state scope names alternative;
             (alternative, List.rev !names))
           alternatives
       in
@@ -663,57 +672,57 @@ and pattern state scope bound (pattern_ : Syntax.pattern) =
                     match
                       List.find_opt (fun (other : Syntax.name) -> other.text = name.text) first
                     with
-                    | Some other -> set state name (Local other.id)
+                    | Some other -> set_target state name (Local other.id)
                     | None -> ())
                   names)
             rest)
 
-and pattern_field state scope bound (field : Syntax.pattern_field) =
+and resolve_pattern_field state scope bound (field : Syntax.pattern_field) =
   match field.kind with
-  | Named_field (_, inner) | Field inner -> pattern state scope bound inner
+  | Named_field (_, inner) | Field inner -> resolve_pattern state scope bound inner
   | Rest -> ()
 
-and literal_pattern state scope = function
-  | Literal_string literal -> string_literal state scope literal
+and resolve_literal_pattern state scope = function
+  | Literal_string literal -> resolve_string_literal state scope literal
   | Literal_integer _ | Literal_true | Literal_false -> ()
 
-and qualified_constant state scope = function
+and resolve_qualified_constant state scope = function
   | Module_constant { modules = []; last } ->
-      unknown state last ~expected:"a constant in a module here" []
+      report_unknown state last ~expected:"a constant in a module here" []
   | Module_constant { modules = first :: rest; last } -> (
-      match module_of_names state first rest with
-      | Ok module_ -> ignore (in_module state module_ last ~types:false)
-      | Error report -> set state last (Unknown report))
-  | Type_constant (path, _) -> type_name state scope path
+      match resolve_module_names state first rest with
+      | Ok module_ -> ignore (find_in_module state module_ last ~types:false)
+      | Error report -> set_target state last (Unknown report))
+  | Type_constant (path, _) -> resolve_type_name state scope path
 
-and range_end state scope (end_ : Syntax.range_end) =
+and resolve_range_end state scope (end_ : Syntax.range_end) =
   match end_.kind with
-  | End_literal literal -> literal_pattern state scope literal
-  | End_constant constant_ -> qualified_constant state scope constant_
+  | End_literal literal -> resolve_literal_pattern state scope literal
+  | End_constant constant_ -> resolve_qualified_constant state scope constant_
 
-and block state scope (block_ : Syntax.block) =
+and resolve_block state scope (block_ : Syntax.block) =
   ignore
     (List.fold_left
-       (fun scope statement_ -> statement state scope statement_)
+       (fun scope statement_ -> resolve_statement state scope statement_)
        scope block_.statements)
 
-and statement state scope (statement_ : Syntax.statement) =
+and resolve_statement state scope (statement_ : Syntax.statement) =
   match statement_.kind with
   | Let { pattern = pattern_; annotation; value; else_; _ } ->
-      Option.iter (type_expression state scope) annotation;
-      expression state scope value;
-      Option.iter (block state scope) else_;
+      Option.iter (resolve_type_expression state scope) annotation;
+      resolve_expression state scope value;
+      Option.iter (resolve_block state scope) else_;
       bind_pattern state scope pattern_
   | Expression value ->
-      expression state scope value;
+      resolve_expression state scope value;
       scope
   | Assignment { target; value; _ } ->
-      expression state scope target;
-      expression state scope value;
+      resolve_expression state scope target;
+      resolve_expression state scope value;
       scope
   | For { pattern = pattern_; annotation; iterable; clauses; body; _ } ->
-      Option.iter (type_expression state scope) annotation;
-      expression state scope iterable;
+      Option.iter (resolve_type_expression state scope) annotation;
+      resolve_expression state scope iterable;
       let inner = bind_pattern state scope pattern_ in
       let elements, clause_scope =
         match iterable.kind with
@@ -726,19 +735,19 @@ and statement state scope (statement_ : Syntax.statement) =
                 inner.values [],
               scope )
       in
-      List.iter (loop_clause ~for_loop:true ~elements state clause_scope) clauses;
-      block state inner body;
+      List.iter (resolve_loop_clause ~for_loop:true ~elements state clause_scope) clauses;
+      resolve_block state inner body;
       scope
   | While { condition = test; clauses; body } ->
-      let inner = condition state scope test in
-      List.iter (loop_clause state scope) clauses;
-      block state inner body;
+      let inner = resolve_condition state scope test in
+      List.iter (resolve_loop_clause state scope) clauses;
+      resolve_block state inner body;
       scope
   | Parallel body | Concurrent body ->
       let word = match statement_.kind with Concurrent _ -> "concurrent" | _ -> "parallel" in
       List.fold_left
         (fun (after : scope) (branch : Syntax.statement) ->
-          let branch_scope = statement state scope branch in
+          let branch_scope = resolve_statement state scope branch in
           let bound =
             String_map.filter
               (fun key _ -> not (String_map.mem key scope.values))
@@ -756,14 +765,15 @@ and statement state scope (statement_ : Syntax.statement) =
           { after with values = String_map.union (fun _ left _ -> Some left) after.values bound })
         scope body.statements
   | Proof body ->
-      block state { scope with specification = in_specification } body;
+      resolve_block state { scope with specification = in_specification } body;
       scope
   | Assert { value; _ } ->
-      expression state scope value;
+      resolve_expression state scope value;
       scope
   | Statement_error -> scope
 
-and loop_clause ?(for_loop = false) ?(elements = []) state scope (written : Syntax.loop_clause) =
+and resolve_loop_clause ?(for_loop = false) ?(elements = []) state scope
+    (written : Syntax.loop_clause) =
   let scope =
     if for_loop then
       { scope with specification = { scope.specification with names_visited = true; elements } }
@@ -773,9 +783,9 @@ and loop_clause ?(for_loop = false) ?(elements = []) state scope (written : Synt
     { scope with specification = { in_specification with names_visited = for_loop; elements } }
   in
   match written.kind with
-  | Invariant value -> expression state specification value
-  | Loop_decreases measures -> List.iter (expression state specification) measures
-  | Loop_cost cost -> clause state scope { kind = Cost cost; id = written.id }
+  | Invariant value -> resolve_expression state specification value
+  | Loop_decreases measures -> List.iter (resolve_expression state specification) measures
+  | Loop_cost cost -> resolve_clause state scope { kind = Cost cost; id = written.id }
 
 let declare_type state scope (name : Syntax.name) target =
   let shadows existing =
@@ -785,14 +795,14 @@ let declare_type state scope (name : Syntax.name) target =
   in
   (if String_map.mem name.text scope.types then shadows "a generic parameter here"
    else
-     match module_item state name.text with
+     match find_module_item state name.text with
      | Some item when Names.is_type_kind item.kind ->
-         shadows (Names.kind_name (Names.kind_of_named item.kind) ^ " of this module")
+         shadows (Names.show_kind (Names.kind_of_named item.kind) ^ " of this module")
      | _ -> if List.mem name.text Prelude.names then shadows "a name in the prelude");
-  set state name Binding;
+  set_target state name Binding;
   { scope with types = String_map.add name.text target scope.types }
 
-let generics state scope ~(owner : Path.t) (generics : Syntax.generic_parameter list) =
+let resolve_generics state scope ~(owner : Path.t) (generics : Syntax.generic_parameter list) =
   let parameter (name : Syntax.name) : Types.parameter = { owner; name = name.text } in
   let scope =
     List.fold_left
@@ -817,27 +827,28 @@ let generics state scope ~(owner : Path.t) (generics : Syntax.generic_parameter 
   List.iter
     (fun (generic : Syntax.generic_parameter) ->
       match generic.kind with
-      | Type_parameter (_, bounds) -> List.iter (path_type state scope) bounds
-      | Value_parameter (_, type_) -> type_expression state scope type_
+      | Type_parameter (_, bounds) -> List.iter (resolve_path_type state scope) bounds
+      | Value_parameter (_, type_) -> resolve_type_expression state scope type_
       | Capability_parameter _ | Generic_error -> ())
     generics;
   scope
 
-let parameters state scope (parameters_ : Syntax.parameter list) =
+let resolve_parameters state scope (parameters_ : Syntax.parameter list) =
   List.fold_left
     (fun scope (parameter : Syntax.parameter) ->
       match parameter.kind with
       | Named_parameter { name; type_; default; _ } ->
-          type_expression state scope type_;
+          resolve_type_expression state scope type_;
           Option.iter
-            (fun default -> in_section state Contract (fun () -> expression state scope default))
+            (fun default ->
+              in_section state Contract (fun () -> resolve_expression state scope default))
             default;
           declare_parameter state scope name
       | Self_parameter _ | Parameter_error -> scope)
     scope parameters_
 
-let result state scope = function
-  | Some (Syntax.Returns type_ | Lends (_, type_)) -> type_expression state scope type_
+let resolve_result state scope = function
+  | Some (Syntax.Returns type_ | Lends (_, type_)) -> resolve_type_expression state scope type_
   | None -> ()
 
 let empty_scope =
@@ -848,55 +859,56 @@ let empty_scope =
     is_lending_method = false;
   }
 
-let head state scope ~owner = function
+let resolve_head state scope ~owner = function
   | Syntax.Plain_name _ -> scope
   | Member_name (head_, _) ->
-      type_name state scope head_.path;
-      generics state scope ~owner head_.generics
+      resolve_type_name state scope head_.path;
+      resolve_generics state scope ~owner head_.generics
 
-let clauses state scope (clauses_ : Syntax.clause list) =
+let resolve_clauses state scope (clauses_ : Syntax.clause list) =
   List.iter
     (fun (clause_ : Syntax.clause) ->
       match clause_.kind with
       | Requires _ | Ensures _ | Decreases _ ->
-          in_section state Contract (fun () -> clause state scope clause_)
-      | Uses _ | Cost _ | Clause_error -> clause state scope clause_)
+          in_section state Contract (fun () -> resolve_clause state scope clause_)
+      | Uses _ | Cost _ | Clause_error -> resolve_clause state scope clause_)
     clauses_
 
-let signature state scope ~owner ~(broken : bool) (signature_ : Syntax.signature) =
+let resolve_signature state scope ~owner ~(broken : bool) (signature_ : Syntax.signature) =
   if broken then None
   else begin
-    let scope = generics state scope ~owner signature_.generics in
-    let scope = parameters state scope signature_.parameters in
-    result state scope signature_.result;
+    let scope = resolve_generics state scope ~owner signature_.generics in
+    let scope = resolve_parameters state scope signature_.parameters in
+    resolve_result state scope signature_.result;
     let scope =
       match signature_.result with
       | Some (Lends _) -> { scope with is_lending_method = true }
       | _ -> scope
     in
-    clauses state scope signature_.clauses;
+    resolve_clauses state scope signature_.clauses;
     Some scope
   end
 
-let fields state scope (fields_ : Syntax.field list) =
+let resolve_fields state scope (fields_ : Syntax.field list) =
   List.iter
     (fun (field : Syntax.field) ->
       match field.kind with
       | Field_declaration { type_; default; _ } ->
-          type_expression state scope type_;
+          resolve_type_expression state scope type_;
           Option.iter
-            (fun default -> in_section state Contract (fun () -> expression state scope default))
+            (fun default ->
+              in_section state Contract (fun () -> resolve_expression state scope default))
             default
       | Field_error -> ())
     fields_
 
-let field_names (fields_ : Syntax.field list) =
+let list_field_names (fields_ : Syntax.field list) =
   List.filter_map
     (fun (field : Syntax.field) ->
       match field.kind with Field_declaration { name; _ } -> Some name.text | Field_error -> None)
     fields_
 
-let inherited scope ~(owner : Path.t) (generics : Syntax.generic_parameter list) =
+let resolve_inherited scope ~(owner : Path.t) (generics : Syntax.generic_parameter list) =
   List.fold_left
     (fun scope (generic : Syntax.generic_parameter) ->
       let parameter (name : Syntax.name) : Types.parameter = { owner; name = name.text } in
@@ -917,37 +929,42 @@ let inherited scope ~(owner : Path.t) (generics : Syntax.generic_parameter list)
       | Generic_error -> scope)
     scope generics
 
-let definition state ~(path : Path.t) ?(container : (Path.t * Syntax.definition) option)
+let resolve_definition state ~(path : Path.t) ?(container : (Path.t * Syntax.definition) option)
     (definition_ : Syntax.definition) =
   let broken part = Names.is_broken state.lookups state.key part in
   let header_broken = broken Header and body_broken = broken Body in
   let scope =
     match container with
     | Some (owner, { kind = Trait { generics = generics_; _ }; _ }) ->
-        inherited empty_scope ~owner generics_
-    | Some (owner, { kind = Impl { type_; _ }; _ }) -> inherited empty_scope ~owner type_.generics
+        resolve_inherited empty_scope ~owner generics_
+    | Some (owner, { kind = Impl { type_; _ }; _ }) ->
+        resolve_inherited empty_scope ~owner type_.generics
     | _ -> empty_scope
   in
   match definition_.kind with
   | Function { signature = signature_; body } ->
       if not header_broken then begin
-        let scope = head state scope ~owner:path signature_.name in
-        match signature state scope ~owner:path ~broken:false signature_ with
+        let scope = resolve_head state scope ~owner:path signature_.name in
+        match resolve_signature state scope ~owner:path ~broken:false signature_ with
         | Some scope ->
-            if not body_broken then in_section state Body (fun () -> block state scope body)
+            if not body_broken then in_section state Body (fun () -> resolve_block state scope body)
         | None -> ()
       end
   | Method_declaration signature_ ->
-      if not header_broken then ignore (signature state scope ~owner:path ~broken:false signature_)
+      if not header_broken then
+        ignore (resolve_signature state scope ~owner:path ~broken:false signature_)
   | Type_definition { generics = generics_; body; clauses; _ } ->
       if not header_broken then begin
-        let scope = generics state scope ~owner:path generics_ in
-        let record_fields = match body with Fields fields_ -> field_names fields_ | _ -> [] in
+        let scope = resolve_generics state scope ~owner:path generics_ in
+        let record_fields =
+          match body with Fields fields_ -> list_field_names fields_ | _ -> []
+        in
         (match body with
-        | Fields fields_ -> fields state scope fields_
+        | Fields fields_ -> resolve_fields state scope fields_
         | Variants variants ->
             List.iter
-              (fun (variant : Syntax.variant) -> Option.iter (fields state scope) variant.fields)
+              (fun (variant : Syntax.variant) ->
+                Option.iter (resolve_fields state scope) variant.fields)
               variants
         | Type_todo -> ());
         let clause_scope =
@@ -964,75 +981,80 @@ let definition state ~(path : Path.t) ?(container : (Path.t * Syntax.definition)
           (fun (clause : Syntax.type_clause) ->
             match clause.kind with
             | Type_invariant value | Potential value ->
-                in_section state Contract (fun () -> expression state clause_scope value)
-            | Derives traits -> List.iter (path_type state scope) traits)
+                in_section state Contract (fun () -> resolve_expression state clause_scope value)
+            | Derives traits -> List.iter (resolve_path_type state scope) traits)
           clauses
       end
   | Trait { generics = generics_; requires; members; _ } ->
       if not header_broken then begin
-        let scope = generics state scope ~owner:path generics_ in
-        List.iter (path_type state scope) requires;
+        let scope = resolve_generics state scope ~owner:path generics_ in
+        List.iter (resolve_path_type state scope) requires;
         List.iteri
           (fun index (line : Syntax.trait_member Syntax.node) ->
             if not (broken (Member_header index)) then
               match line.kind with
-              | Associated_type (_, bounds) -> List.iter (path_type state scope) bounds
+              | Associated_type (_, bounds) -> List.iter (resolve_path_type state scope) bounds
               | Law { parameters = parameters_; requires; body; _ } ->
                   let inner =
-                    parameters state { scope with specification = in_specification } parameters_
+                    resolve_parameters state
+                      { scope with specification = in_specification }
+                      parameters_
                   in
                   in_section state Contract (fun () ->
-                      List.iter (expression state inner) requires;
-                      if not (broken (Member_body index)) then block state inner body)
+                      List.iter (resolve_expression state inner) requires;
+                      if not (broken (Member_body index)) then resolve_block state inner body)
               | Associated_capability _ | Trait_member_error -> ())
           members
       end
   | Impl { trait_; type_; uses; members } ->
       if not header_broken then begin
-        type_name state scope type_.path;
-        let scope = generics state scope ~owner:path type_.generics in
-        path_type state scope trait_;
-        List.iter (capability_reference state scope) uses;
+        resolve_type_name state scope type_.path;
+        let scope = resolve_generics state scope ~owner:path type_.generics in
+        resolve_path_type state scope trait_;
+        List.iter (resolve_capability_reference state scope) uses;
         List.iteri
           (fun index (line : Syntax.impl_member Syntax.node) ->
             if not (broken (Member_header index)) then
               match line.kind with
-              | Associated_definition (_, type_) -> type_expression state scope type_
+              | Associated_definition (_, type_) -> resolve_type_expression state scope type_
               | Capability_definition (_, capabilities) ->
-                  List.iter (capability_reference state scope) capabilities
+                  List.iter (resolve_capability_reference state scope) capabilities
               | Impl_member_error -> ())
           members
       end
   | Capability _ -> ()
   | Constant { name; type_; value } ->
       if not header_broken then begin
-        let scope = head state scope ~owner:path name in
-        type_expression state scope type_;
-        if not body_broken then in_section state Body (fun () -> expression state scope value)
+        let scope = resolve_head state scope ~owner:path name in
+        resolve_type_expression state scope type_;
+        if not body_broken then
+          in_section state Body (fun () -> resolve_expression state scope value)
       end
   | Test { uses; body; _ } ->
       if not header_broken then begin
-        List.iter (capability_reference state scope) uses;
-        if not body_broken then in_section state Body (fun () -> block state scope body)
+        List.iter (resolve_capability_reference state scope) uses;
+        if not body_broken then in_section state Body (fun () -> resolve_block state scope body)
       end
   | Theorem { generics = generics_; parameters = parameters_; clauses = clauses_; body; _ } ->
       if not header_broken then begin
         let scope =
-          generics state { scope with specification = in_specification } ~owner:path generics_
+          resolve_generics state
+            { scope with specification = in_specification }
+            ~owner:path generics_
         in
-        let scope = parameters state scope parameters_ in
-        clauses state scope clauses_;
-        if not body_broken then in_section state Body (fun () -> block state scope body)
+        let scope = resolve_parameters state scope parameters_ in
+        resolve_clauses state scope clauses_;
+        if not body_broken then in_section state Body (fun () -> resolve_block state scope body)
       end
   | Law_proof { trait_; law; type_; body } ->
       if not header_broken then begin
-        type_name state scope type_.path;
-        let scope = generics state scope ~owner:path type_.generics in
-        path_type state scope trait_;
+        resolve_type_name state scope type_.path;
+        let scope = resolve_generics state scope ~owner:path type_.generics in
+        resolve_path_type state scope trait_;
         let law_parameters =
-          match (current state).names.(trait_.path.last.id) with
+          match (lookup_current_names state).names.(trait_.path.last.id) with
           | Some (Definition (Trait, trait)) ->
-              Option.value ~default:[] (Names.law_parameters state.lookups trait law.text)
+              Option.value ~default:[] (Names.find_law_parameters state.lookups trait law.text)
           | _ -> []
         in
         let values =
@@ -1044,6 +1066,6 @@ let definition state ~(path : Path.t) ?(container : (Path.t * Syntax.definition)
         in
         if not body_broken then
           in_section state Body (fun () ->
-              block state { scope with values; specification = in_specification } body)
+              resolve_block state { scope with values; specification = in_specification } body)
       end
   | Definition_error _ -> ()

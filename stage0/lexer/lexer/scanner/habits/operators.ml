@@ -2,8 +2,8 @@ type scanned = Lexed of Token.kind | Ellipsis
 
 let replace cursor ~start ~length ~replacements ~code message =
   Cursor.report cursor ~code
-    ~fixes:(Cursor.code_fixes cursor (Cursor.span start (start + length)) replacements)
-    (Cursor.span start (start + length))
+    ~fixes:(Cursor.list_code_fixes cursor (Source.make_span start (start + length)) replacements)
+    (Source.make_span start (start + length))
     message
 
 let scan (cursor : Cursor.t) =
@@ -43,7 +43,7 @@ let scan (cursor : Cursor.t) =
   end
   else None
 
-let ellipsis cursor ~start ~follows_operand ~operand_follows =
+let lex_ellipsis cursor ~start ~follows_operand ~operand_follows =
   let replaced ~replacements message kind =
     replace cursor ~start ~length:3 ~replacements ~code:Foreign_operator message;
     Some kind
@@ -59,7 +59,7 @@ let ellipsis cursor ~start ~follows_operand ~operand_follows =
         "Truss has no `...`; code that is not written yet is `todo`." (Token.Keyword Todo)
   | _ ->
       Cursor.report cursor ~code:Foreign_operator
-        (Cursor.span start (start + 3))
+        (Source.make_span start (start + 3))
         "Truss has no `...`: it has no spread or rest operator, and a function takes a list where \
          it takes any number of values.";
       None

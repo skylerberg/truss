@@ -1,6 +1,6 @@
 type part = Header | Body | Member_header of int | Member_body of int
 
-let part_spans (spans : Source.Definition_span.t array) (definition : Syntax.definition) =
+let list_part_spans (spans : Source.Definition_span.t array) (definition : Syntax.definition) =
   let split header body (whole : Source.Definition_span.t) (body_span : Source.Definition_span.t) =
     [ (header, Source.Definition_span.make whole.start body_span.start); (body, body_span) ]
   in
@@ -45,12 +45,10 @@ let lies_in all (recovered : Source.Definition_span.t) (part_span : Source.Defin
       part_span.start = position
     else part_span.start <= position && position < part_span.stop
 
-let recovery_report (span : Source.Definition_span.t) = Diagnostic.recovered span
-
-let reported ~spans ~recovered definition part =
-  let all = part_spans spans definition in
+let find_recovered_report ~spans ~recovered definition part =
+  let all = list_part_spans spans definition in
   match List.assoc_opt part all with
   | None -> None
   | Some span ->
-      Option.map recovery_report
+      Option.map Diagnostic.make_recovered
         (List.find_opt (fun recovered -> lies_in all recovered span) recovered)

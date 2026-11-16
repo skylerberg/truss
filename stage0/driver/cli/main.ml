@@ -18,7 +18,7 @@ let common =
         Output.set_json json)
     $ directory $ json)
 
-let paths items =
+let make_paths_argument items =
   Cmdliner.Arg.(
     value & pos_all string []
     & info [] ~docv:"FILE_OR_DIRECTORY"
@@ -33,7 +33,7 @@ let exits =
     Cmdliner.Cmd.Exit.info 2 ~doc:"when the command could not run.";
   ]
 
-let command name ~doc ?(man = []) term =
+let make_command name ~doc ?(man = []) term =
   Cmdliner.Cmd.v (Cmdliner.Cmd.info name ~doc ~man ~exits) term
 
 let check =
@@ -51,7 +51,7 @@ let check =
       & info [ "no-proofs" ]
           ~doc:"Skip the prover: report every other diagnostic, without the pinned solver.")
   in
-  command "check"
+  make_command "check"
     ~doc:"Report every diagnostic of the packages and of the project's packages they depend on."
     Cmdliner.Term.(
       const (fun () fix no_proofs -> Outcome.Exit (Check_command.run ~fix ~proofs:(not no_proofs)))
@@ -78,20 +78,20 @@ let test =
       & info [ "rerun" ]
           ~doc:"Run every selected test without reading cached results, and cache the new ones.")
   in
-  command "test" ~doc:"Check the packages, then run the tests without a cached result."
+  make_command "test" ~doc:"Check the packages, then run the tests without a cached result."
     Cmdliner.Term.(
       const (fun () paths match_ timings rerun ->
           Outcome.Exit (Test_command.run ~paths ~match_ ~timings ~rerun))
-      $ common $ paths "tests" $ match_ $ timings $ rerun)
+      $ common $ make_paths_argument "tests" $ match_ $ timings $ rerun)
 
-let release_flag doc = Cmdliner.Arg.(value & flag & info [ "release" ] ~doc)
+let make_release_flag doc = Cmdliner.Arg.(value & flag & info [ "release" ] ~doc)
 
 let run =
   let arguments =
     Cmdliner.Arg.(
       value & pos_all string [] & info [] ~docv:"ARGUMENT" ~doc:"The program's arguments.")
   in
-  command "run"
+  make_command "run"
     ~doc:"Check the package, build its program for development, and run it with the arguments."
     ~man:
       [
@@ -103,7 +103,7 @@ let run =
     Cmdliner.Term.(
       const (fun () release arguments -> Program_command.run ~release ~arguments)
       $ common
-      $ release_flag "Build as $(b,truss build) does, then run the program."
+      $ make_release_flag "Build as $(b,truss build) does, then run the program."
       $ arguments)
 
 let build =
@@ -116,19 +116,20 @@ let build =
             "Write the program to $(docv) instead of a file named after the package in the current \
              directory.")
   in
-  command "build"
+  make_command "build"
     ~doc:
       "Check the package and build its program for release, rejecting a program whose $(b,main) \
        reaches a $(b,todo) or an $(b,echo)."
     Cmdliner.Term.(const (fun () output -> Program_command.build ~output) $ common $ output)
 
 let holes =
-  command "holes"
+  make_command "holes"
     ~doc:
       "List every $(b,todo) with its expected type, the bindings in scope, and the tests and \
        $(b,main) that reach it."
     Cmdliner.Term.(
-      const (fun () paths -> Outcome.Exit (Holes_command.run ~paths)) $ common $ paths "holes")
+      const (fun () paths -> Outcome.Exit (Holes_command.run ~paths))
+      $ common $ make_paths_argument "holes")
 
 let show =
   let paths =
@@ -141,7 +142,7 @@ let show =
              $(b,weather::forecast::Forecast.summary).")
   in
   let body = Cmdliner.Arg.(value & flag & info [ "body" ] ~doc:"Print whole definitions.") in
-  command "show" ~doc:"Print the signatures of a package, module, type, or definition."
+  make_command "show" ~doc:"Print the signatures of a package, module, type, or definition."
     Cmdliner.Term.(
       const (fun () paths body -> Outcome.Exit (Show_command.run ~paths ~body))
       $ common $ paths $ body)
@@ -153,7 +154,7 @@ let explain =
       & pos 0 (some string) None
       & info [] ~docv:"FILE:LINE:COLUMN" ~doc:"A position, written as diagnostics write it.")
   in
-  command "explain"
+  make_command "explain"
     ~doc:
       "Describe the name or expression at a position: its meaning, its type, and the signature of \
        its definition."
@@ -170,14 +171,14 @@ let name_argument =
            $(b,Forecast.summary).")
 
 let dependents =
-  command "dependents"
+  make_command "dependents"
     ~doc:"List the parts of other definitions that read a part of a definition, by kind of part."
     Cmdliner.Term.(
       const (fun () name -> Outcome.Exit (Graph_command.run ~direction:Dependents ~name))
       $ common $ name_argument)
 
 let dependencies =
-  command "dependencies"
+  make_command "dependencies"
     ~doc:"List the parts of other definitions that a definition's parts read, by kind of part."
     Cmdliner.Term.(
       const (fun () name -> Outcome.Exit (Graph_command.run ~direction:Dependencies ~name))
@@ -186,39 +187,40 @@ let dependencies =
 let rename =
   let from_ = Cmdliner.Arg.(required & pos 0 (some string) None & info [] ~docv:"FROM") in
   let to_ = Cmdliner.Arg.(required & pos 1 (some string) None & info [] ~docv:"TO") in
-  command "rename"
+  make_command "rename"
     ~doc:
       "Rename a definition, method, or module, and every reference to it in the project's packages."
     Cmdliner.Term.(
       const (fun () from_ to_ -> Outcome.Exit (Rename_command.run ~from_ ~to_))
       $ common $ from_ $ to_)
 
-let packages_argument ~doc = Cmdliner.Arg.(value & pos_all string [] & info [] ~docv:"PACKAGE" ~doc)
+let make_packages_argument ~doc =
+  Cmdliner.Arg.(value & pos_all string [] & info [] ~docv:"PACKAGE" ~doc)
 
 let add =
-  command "add"
+  make_command "add"
     ~doc:
       "Add registry packages as dependencies of the package, each granted nothing, at the version \
        written after $(b,@) or the newest."
     Cmdliner.Term.(
       const (fun () names -> Outcome.Exit (Add_command.run ~names))
       $ common
-      $ packages_argument
+      $ make_packages_argument
           ~doc:"A package, such as $(b,acme::geometry) or $(b,acme::geometry@1.4.2).")
 
 let upgrade =
-  command "upgrade"
+  make_command "upgrade"
     ~doc:
       "Change the project's registry packages, or only the named ones, to their newest versions or \
        the version written after $(b,@), and report the effect."
     Cmdliner.Term.(
       const (fun () names -> Outcome.Exit (Upgrade_command.run ~names))
       $ common
-      $ packages_argument
+      $ make_packages_argument
           ~doc:"A package, such as $(b,acme::geometry) or $(b,acme::geometry@1.4.2).")
 
 let publish =
-  command "publish"
+  make_command "publish"
     ~doc:
       "Publish the package to the registry as its next version, if it is complete and compatible \
        with its previous version."
@@ -226,11 +228,11 @@ let publish =
 
 let new_ =
   let name = Cmdliner.Arg.(required & pos 0 (some string) None & info [] ~docv:"NAME") in
-  command "new" ~doc:"Create a package in a directory named $(i,NAME)."
+  make_command "new" ~doc:"Create a package in a directory named $(i,NAME)."
     Cmdliner.Term.(const (fun () name -> Outcome.Exit (New_command.run ~name)) $ common $ name)
 
 let status =
-  command "status" ~doc:"List the package databases that the background process holds."
+  make_command "status" ~doc:"List the package databases that the background process holds."
     Cmdliner.Term.(
       const (fun () ->
           List.iter Output.print_line (Workspace.list_package_databases ());
@@ -238,7 +240,7 @@ let status =
       $ common)
 
 let stop =
-  command "stop" ~doc:"Stop the background process."
+  make_command "stop" ~doc:"Stop the background process."
     Cmdliner.Term.(
       const (fun () ->
           Workspace.stop ();
@@ -306,9 +308,9 @@ let evaluate arguments =
     | outcome -> outcome
     | exception Outcome.Stop status -> Outcome.Exit status
     | exception Report.Errors report ->
-        if Output.json () then Json.print (Report.document report []) else Report.print report;
+        if Output.json () then Json.print (Report.make_document report []) else Report.print report;
         Outcome.Exit 1
-    | exception Outcome.Cannot_run message ->
+    | exception (Outcome.Cannot_run message | Workspace.Unusable_cache message) ->
         Output.eprint_line message;
         Outcome.Exit 2
     | exception Compiler_bug.Bug bug ->
@@ -374,7 +376,7 @@ let handle ~progress request =
 
 let serve key = Workspace.serve ~key ~handle
 
-let command_of arguments =
+let find_command arguments =
   List.find_opt (fun argument -> not (String.starts_with ~prefix:"-" argument)) arguments
 
 let finish (outcome : Outcome.t) =
@@ -409,14 +411,18 @@ let wait_until_stopped answers =
 let clean_cache () =
   wait_until_stopped (ask_running [ "stop" ]);
   Workspace.reset ();
-  let directory = Cache.default_directory () in
-  match File_system.remove directory with
-  | () -> 0
-  | exception Unix.Unix_error (error, _, _) ->
-      Output.eprintf "Cannot delete %s: %s\n" directory (Unix.error_message error);
+  match Cache.locate_default_directory () with
+  | Error message ->
+      Output.eprint_line message;
       2
+  | Ok directory -> (
+      match File_system.remove directory with
+      | () -> 0
+      | exception Unix.Unix_error (error, _, _) ->
+          Output.eprintf "Cannot delete %s: %s\n" directory (Unix.error_message error);
+          2)
 
-let directory_of arguments =
+let locate_directory arguments =
   let rec named = function
     | "-C" :: directory :: _ -> Some directory
     | option :: _ when String.length option > 2 && String.starts_with ~prefix:"-C" option ->
@@ -429,7 +435,7 @@ let directory_of arguments =
   | Some directory -> directory
   | None -> Sys.getcwd ()
 
-let language_server ~no_server =
+let run_language_server ~no_server =
   let check ~root encoding buffers =
     let request =
       { (request (Lsp_command.check_arguments ~root encoding buffers)) with directory = root }
@@ -446,7 +452,7 @@ let language_server ~no_server =
   in
   Lsp_command.serve ~input:stdin ~output:stdout ~check
 
-let client argv =
+let run_client argv =
   let arguments = List.tl (Arguments.prepare argv) in
   let no_server = List.mem "--no-server" arguments || Sys.getenv_opt "TRUSS_NO_SERVER" = Some "1" in
   let arguments = List.filter (( <> ) "--no-server") arguments in
@@ -455,9 +461,9 @@ let client argv =
     Workspace.flush ();
     finish outcome
   in
-  match command_of arguments with
+  match find_command arguments with
   | Some "clean" -> clean_cache ()
-  | Some "lsp" -> language_server ~no_server
+  | Some "lsp" -> run_language_server ~no_server
   | None | Some "new" -> local ()
   | _ when no_server -> local ()
   | Some (("status" | "stop") as command) -> (
@@ -483,7 +489,7 @@ let client argv =
   | Some _ -> (
       match
         (Workspace.call
-           ~key:(Workspace.make_server_key (directory_of arguments))
+           ~key:(Workspace.make_server_key (locate_directory arguments))
            ~progress:Output.eprint (request arguments)
           : (response, string) result)
       with

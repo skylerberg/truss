@@ -1,8 +1,12 @@
+module Local_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Core.local
+end))
+
 let callee_name : Core.callee -> string = function
   | Function { path; _ } -> Path.show path
   | Trait_method { trait; name; _ } -> Path.show trait.trait ^ "." ^ name
   | Capability_method { capability; name } -> Path.show capability ^ "." ^ name
-  | Intrinsic { operation; _ } -> "intrinsic::" ^ Intrinsic.operation_name operation
+  | Intrinsic { operation; _ } -> "intrinsic::" ^ Intrinsic.show_operation operation
   | Indirect _ -> "a function value"
 
 let method_signature interface owner name receiver =
@@ -48,7 +52,9 @@ let excerpt text =
   if String.length line > 60 then String.sub line 0 57 ^ "..." else line
 
 let operand_type (operand : Core.operand) =
-  match operand with Place place -> Core_walk.place_type place | Value value -> value.type_
+  match operand with
+  | Place place -> Core_walk.compute_place_type place
+  | Value value -> value.type_
 
 let normal context ty = Interface.Impls.normalize context.interface ~bounds:context.bounds ty
 
@@ -86,7 +92,7 @@ let instantiated context (callee : Core.callee) =
           of_signature (substitution context signature.generics type_arguments ~subject) signature
       | None -> None)
   | Intrinsic { operation; type_arguments } ->
-      let signature = Intrinsic_signatures.signature operation in
+      let signature = Intrinsic_signatures.make_signature operation in
       of_signature (substitution context signature.generics type_arguments ~subject) signature
   | Trait_method { trait = reference; name; receiver; self_type; type_arguments; _ } -> (
       match
@@ -170,7 +176,7 @@ let operator_types context (node : Core.expression) (operation : Intrinsic.opera
     (fun (operand : Core.expression) ->
       if not (fits context ~expected:node.type_ ~found:operand.type_) then
         context.wrong "an operand of `%s` has the type `%s`, and the operator `%s`"
-          (Intrinsic.operation_name operation)
+          (Intrinsic.show_operation operation)
           (Types.show operand.type_) (Types.show node.type_))
     operands
 
@@ -242,9 +248,9 @@ let construct_fields context (node : Core.expression) variant fields =
         (Types.show node.type_)
 
 let free_locals (parameters : Core.pattern list) (body : Core.block) =
-  let bound = Hashtbl.create 8 and read = ref [] in
+  let bound = Local_table.create 8 and read = ref [] in
   let bind_pattern (pattern : Core.pattern) =
-    match pattern.kind with Bind { local; _ } -> Hashtbl.replace bound local () | _ -> ()
+    match pattern.kind with Bind { local; _ } -> Local_table.replace bound local () | _ -> ()
   in
   let visit =
     {
@@ -253,25 +259,25 @@ let free_locals (parameters : Core.pattern list) (body : Core.block) =
       statement =
         (fun (node : Core.statement) ->
           match node.kind with
-          | Compound_assign { bound = local; _ } -> Hashtbl.replace bound local ()
+          | Compound_assign { bound = local; _ } -> Local_table.replace bound local ()
           | _ -> ());
       expression =
         (fun (node : Core.expression) ->
           match node.kind with
-          | Quantified { binder = Over_type { local; _ }; _ } -> Hashtbl.replace bound local ()
+          | Quantified { binder = Over_type { local; _ }; _ } -> Local_table.replace bound local ()
           | _ -> ());
     }
   in
-  List.iter (fun pattern -> (Core_walk.deep visit).pattern pattern) parameters;
-  Core_walk.block (Core_walk.deep visit) body;
-  Core_walk.block
-    (Core_walk.deep
+  List.iter (fun pattern -> (Core_walk.make_deep_visitor visit).pattern pattern) parameters;
+  Core_walk.walk_block (Core_walk.make_deep_visitor visit) body;
+  Core_walk.walk_block
+    (Core_walk.make_deep_visitor
        {
          Core_walk.ignore_all with
          place =
            (fun (place : Core.place) ->
              match place with
-             | Local { local; _ } when not (Hashtbl.mem bound local || List.mem local !read) ->
+             | Local { local; _ } when not (Local_table.mem bound local || List.mem local !read) ->
                  read := local :: !read
              | _ -> ());
        })
@@ -296,7 +302,7 @@ let is_executable context (condition : Core.expression) =
 let specification_expressions (definition : Core.definition) =
   let ids = Hashtbl.create 64 in
   let mark =
-    Core_walk.deep
+    Core_walk.make_deep_visitor
       {
         Core_walk.ignore_all with
         expression = (fun (node : Core.expression) -> Hashtbl.replace ids node.id ());
@@ -328,20 +334,20 @@ let specification_expressions (definition : Core.definition) =
       List.iter
         (fun (law : Core.law) ->
           List.iter mark.expression law.requires;
-          Core_walk.block mark law.body)
+          Core_walk.walk_block mark law.body)
         laws
   | Constant _ | Test _ | Law_proof _ | Empty -> ());
-  Core_walk.definition
+  Core_walk.walk_definition
     {
       Core_walk.ignore_all with
       statement =
         (fun (node : Core.statement) ->
           match node.kind with
-          | Proof body -> Core_walk.block mark body
+          | Proof body -> Core_walk.walk_block mark body
           | Assert { condition; _ } -> (
               match definition with Test _ -> () | _ -> mark.expression condition.value)
           | For { clauses; _ } | While { clauses; _ } ->
-              List.iter (Core_walk.loop_clause mark) clauses
+              List.iter (Core_walk.walk_loop_clause mark) clauses
           | _ -> ());
     }
     definition;
@@ -358,7 +364,7 @@ let check_semantics context (form : Core.t) =
   | Function { contract; _ } -> List.iter (executable "a `requires` clause") contract.requires
   | Type { invariants; _ } -> List.iter (executable "an `invariant` clause") invariants
   | _ -> ());
-  Core_walk.definition
+  Core_walk.walk_definition
     (located context.at
        {
          Core_walk.ignore_all with
@@ -579,11 +585,11 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
           (of_signature ~has_receiver:false)
           (method_signature interface capability name Static)
     | Intrinsic { operation; _ } ->
-        Some (of_signature ~has_receiver:true (Intrinsic_signatures.signature operation))
+        Some (of_signature ~has_receiver:true (Intrinsic_signatures.make_signature operation))
     | Indirect function_value -> (
         let function_type =
           match function_value with
-          | Place core_place -> Core_walk.place_type core_place
+          | Place core_place -> Core_walk.compute_place_type core_place
           | Value value -> value.type_
         in
         match function_type with
@@ -611,16 +617,16 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
           (List.combine parameters call.arguments)
   in
   let compound_assignments = ref 0 and current_targets = ref 0 in
-  let local_types : (Core.local, Types.ty) Hashtbl.t = Hashtbl.create 16 in
+  let local_types : Types.ty Local_table.t = Local_table.create 16 in
   let parameters =
     List.iter (fun (parameter : Core.parameter) ->
-        Hashtbl.replace local_types parameter.local parameter.type_)
+        Local_table.replace local_types parameter.local parameter.type_)
   in
   (match form.definition with
   | Function { parameters = declared; _ } -> parameters declared
   | Trait laws -> List.iter (fun (law : Core.law) -> parameters law.parameters) laws
   | Type _ | Constant _ | Test _ | Law_proof _ | Empty -> ());
-  Core_walk.definition
+  Core_walk.walk_definition
     (located at
        {
          Core_walk.ignore_all with
@@ -628,12 +634,12 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
            (fun (node : Core.expression) ->
              match node.kind with
              | Quantified { binder = Over_type { local; type_; _ }; _ } ->
-                 Hashtbl.replace local_types local type_
+                 Local_table.replace local_types local type_
              | _ -> ());
          pattern =
            (fun (node : Core.pattern) ->
              match node.kind with
-             | Bind { local; _ } -> Hashtbl.replace local_types local node.type_
+             | Bind { local; _ } -> Local_table.replace local_types local node.type_
              | _ -> ());
        })
     form.definition;
@@ -641,7 +647,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
     match core_place with
     | Local { local; type_ = used; _ } -> (
         type_ "a local" used;
-        match Hashtbl.find_opt local_types local with
+        match Local_table.find_opt local_types local with
         | Some bound when not (Types.equal (normalize bound) (normalize used)) ->
             wrong "a local is used with the type `%s` and bound with the type `%s`"
               (Types.show used) (Types.show bound)
@@ -676,7 +682,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
         List.iter (fun (_, field) -> Option.iter (yielded_operand mode) field) fields
     | Value _ -> ()
   in
-  Core_walk.definition
+  Core_walk.walk_definition
     (located at
        {
          Core_walk.ignore_all with
@@ -701,7 +707,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
           wrong "%s on a value binds a name that is not `own`" subject
     | Place _ -> ()
   in
-  Core_walk.definition
+  Core_walk.walk_definition
     (located at
        {
          expression =
@@ -852,7 +858,7 @@ let check_derived interface path form = check_form interface ~path ~key:None for
 let check_file (interface : Interface.Lookups.t) ~core (file : Path.file) =
   List.fold_left
     (fun count (declaration : Resolve.Names.declaration) ->
-      let key = Resolve.Names.key_of declaration in
+      let key = Resolve.Names.make_key declaration in
       match core key with
       | Some form ->
           check interface key form;

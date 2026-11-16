@@ -8,11 +8,11 @@ let fine text = no_diagnostics [ ("app::main", text) ]
 let expression_at text written occurrence =
   let packages = Support.setup [ ("app::main", text) ] in
   let file = Support.file_of "app::main" in
-  let offset = Option.get (Substring.For_testing.find ~occurrence text written) in
+  let offset = Support.find_occurrence ~sub:written ~occurrence text in
   let actual =
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
-        let key = Resolve.Names.key_of declaration in
+        let key = Resolve.Names.make_key declaration in
         match
           ( (Support.names packages key.module_.package).definition key,
             (Support.names packages key.module_.package).spans key,
@@ -33,9 +33,9 @@ let expression_at text written occurrence =
                    when exact other || ((not (exact value)) && length other <= length value) ->
                      ()
                  | _ -> best := Some value);
-              Syntax_walk.children visit value
+              Syntax_walk.visit_children visit value
             in
-            Syntax_walk.definition visit definition;
+            Syntax_walk.visit_definition visit definition;
             Option.map (fun value -> (value, result)) !best
         | _ -> None)
       ((Support.names packages file.module_.package).declarations_in file)
@@ -54,7 +54,7 @@ let core_at text written occurrence =
   let value, (result : Infer.checked) = expression_at text written occurrence in
   let form = result.form in
   let nodes = ref [] in
-  Core_walk.definition
+  Core_walk.walk_definition
     {
       Core_walk.ignore_all with
       expression =
@@ -529,7 +529,7 @@ let () =
       let type_check_result () =
         let packages = Support.setup [ ("app::main", text) ] in
         let key =
-          Resolve.Names.key_of
+          Resolve.Names.make_key
             (List.hd (Support.declarations packages (Support.module_of "app::main")))
         in
         Database.read_checked_body (Support.database packages) key
@@ -545,7 +545,7 @@ let () =
             (fun (declaration : Resolve.Names.declaration) ->
               match
                 Database.read_checked_body (Support.database packages)
-                  (Resolve.Names.key_of declaration)
+                  (Resolve.Names.make_key declaration)
               with
               | Some { tables; _ } ->
                   List.iter
@@ -810,6 +810,10 @@ let () =
       fine Fixtures.Infer.add_of_two_literals_written_in_full);
   Harness.test "a generic parameter takes no type arguments" (fun () ->
       one_diagnostic Fixtures.Infer.generic_parameter_given_type_arguments "types.arity");
+  Harness.test "a trait's count argument is a value inferred from a call written in full" (fun () ->
+      fine Fixtures.Infer.full_call_of_a_trait_with_a_count);
+  Harness.test "a bound with a count argument gives an associated type its methods" (fun () ->
+      fine Fixtures.Infer.method_of_an_associated_type_bounded_by_a_count);
   Harness.test "a generic parameter given type arguments is an error type, not the parameter"
     (fun () ->
       one_diagnostic Fixtures.Infer.method_of_a_parameter_given_type_arguments "types.arity");

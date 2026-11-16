@@ -82,7 +82,7 @@ let rec list_evidence_uses lookups ~bounds (evidence : Impls.evidence) =
 let describe_missing_in_impls lookups ~package impls =
   List.concat_map
     (fun (impl, (interface : Types.impl_interface), uses) ->
-      let of_ = Path.package impl in
+      let of_ = Path.locate_package impl in
       List.map
         (describe_missing
            ~subject:

@@ -389,7 +389,9 @@ let list_validity_obligations context (entry : State.frame) (changed : State.cha
       match (Facts.find_local_type context entry local, Locals.find_opt local entry.locals) with
       | Some ty, Some before ->
           obligation
-            (Option.value (Hashtbl.find_opt context.local_names local) ~default:"a local")
+            (Option.value
+               (Tables.Local_table.find_opt context.local_names local)
+               ~default:"a local")
             ty before
             (fun (at : State.frame) -> Locals.find_opt local at.locals)
       | _ -> None)
@@ -498,7 +500,9 @@ let compute_iterations_so_far context head costs =
   else None
 
 let make_step_cost (counter : Costs.counter) =
-  match counter.resource with Time -> Logic.int 1 | _ -> Costs.zero
+  match counter.resource with
+  | Time -> Logic.int 1
+  | Allocations | Allocated_bytes | Calls _ -> Costs.zero
 
 let declare_elements_so_far context (head : State.frame) ~element ~collection ~count yielded
     element_at =
@@ -529,7 +533,7 @@ let declare_elements_so_far context (head : State.frame) ~element ~collection ~c
           (Projection
              {
                base = collection_type;
-               trait = { trait = Well_known.path Model; trait_arguments = []; associated = [] };
+               trait = { trait = Well_known.make_path Model; trait_arguments = []; associated = [] };
                name = "Value";
              })
       in
@@ -591,8 +595,8 @@ let receiving_loop ~each_iteration ~most ~(for_loop : for_loop) context frame ~e
        (fun (exit_frame : State.frame) -> { exit_frame with yielded = frame.yielded })
        (exit_ :: left))
 
-let cursor_trait : Path.t = Well_known.path Cursor
-let option_path : Path.t = Well_known.path Option
+let cursor_trait : Path.t = Well_known.make_path Cursor
+let option_path : Path.t = Well_known.make_path Option
 
 let declare_some_parts context frame element =
   let parts =

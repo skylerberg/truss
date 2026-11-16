@@ -2,17 +2,17 @@ let is_borrow_of_root (root : Place.root) (view : Actions.view) =
   match view with Borrow_of place -> place.root = root | Copy_of_view_in _ -> false
 
 let lifetime_ends_at_return (context : Context.context) (view : Actions.view) =
-  let place = Actions.viewed_place view in
+  let place = Actions.extract_viewed_place view in
   match place.root with
   | Constant _ -> false
   | Temporary _ | Environment -> true
   | Local local ->
       if local = Self || List.mem local context.parameters then
-        Context.binding_mode context place.root = Own && is_borrow_of_root place.root view
+        Context.classify_binding_mode context place.root = Own && is_borrow_of_root place.root view
       else true
 
 let outlives_function context (place : Place.t) =
-  Context.binding_mode context place.root = Mut
+  Context.classify_binding_mode context place.root = Mut
   &&
   match place.root with
   | Local local -> List.mem local context.parameters
@@ -25,7 +25,7 @@ type here = {
   origin : Core.origin;
 }
 
-let loan_message context (loan : Actions.loan) ~is_through_view (place : Place.t) ~verb =
+let describe_loan context (loan : Actions.loan) ~is_through_view (place : Place.t) ~verb =
   let lender =
     match loan.duration with
     | Loop_body -> "the loop"
@@ -47,7 +47,9 @@ let loan_message context (loan : Actions.loan) ~is_through_view (place : Place.t
 
 let report_dangling_view context at ~views ~doing ~fix =
   let report_view = Context.report context View_escapes at in
-  match Option.map Actions.viewed_place (List.find_opt (lifetime_ends_at_return context) views) with
+  match
+    Option.map Actions.extract_viewed_place (List.find_opt (lifetime_ends_at_return context) views)
+  with
   | Some { root = Environment; _ } ->
       report_view
         (Printf.sprintf
@@ -74,7 +76,7 @@ let report_dangling_view context at ~views ~doing ~fix =
   | None -> false
 
 let check_disjoint (context : Context.context) first second ~on_overlap =
-  match Place.overlap first second with
+  match Place.classify_overlap first second with
   | Overlapping -> on_overlap ()
   | Maybe_disjoint (first, second) ->
       context.must_be_disjoint <- (min first second, max first second) :: context.must_be_disjoint
@@ -82,21 +84,21 @@ let check_disjoint (context : Context.context) first second ~on_overlap =
 
 let check_body context (actions : Actions.t) moves =
   let states = Dataflow.forward context actions in
-  let live_after = Moves.live_after moves actions.body in
-  let mir_local = Hashtbl.create 16 in
+  let live_after = Moves.compute_live_after moves actions.body in
+  let mir_local = Context.Local_table.create 16 in
   Array.iteri
     (fun local (info : Mir.local_info) ->
       match info.kind with
-      | Source { local = core; _ } -> Hashtbl.replace mir_local core local
+      | Source { local = core; _ } -> Context.Local_table.replace mir_local core local
       | Temporary | Lent _ -> ())
     actions.body.locals;
   let is_live_after ({ block; index } : Actions.position) core =
-    match Hashtbl.find_opt mir_local core with
+    match Context.Local_table.find_opt mir_local core with
     | Some local -> live_after block index local
     | None -> false
   in
   let resolve = Dataflow.resolve context in
-  let viewed_places here views = List.map Actions.viewed_place (resolve here.views views) in
+  let viewed_places here views = List.map Actions.extract_viewed_place (resolve here.views views) in
   let each_step positions check_step =
     List.iter
       (fun ({ block; index } as position : Actions.position) ->
@@ -127,10 +129,10 @@ let check_body context (actions : Actions.t) moves =
   let covering (here : here) (place : Place.t) =
     List.filter_map
       (fun (loan : Actions.loan) ->
-        if Place.overlap loan.borrowed place <> Disjoint then Some (loan, false)
+        if Place.classify_overlap loan.borrowed place <> Disjoint then Some (loan, false)
         else if
           List.exists
-            (fun viewed -> Place.overlap viewed place <> Disjoint)
+            (fun viewed -> Place.classify_overlap viewed place <> Disjoint)
             (viewed_places here [ Borrow_of loan.borrowed ])
         then Some (loan, true)
         else None)
@@ -142,20 +144,20 @@ let check_body context (actions : Actions.t) moves =
     match List.find_opt is_mut (covering here place) with
     | Some (loan, is_through_view) ->
         Context.report context Conflicting_loan
-          (Context.span context here.origin)
-          (loan_message context loan ~is_through_view place ~verb:"be used")
+          (Context.locate_origin context here.origin)
+          (describe_loan context loan ~is_through_view place ~verb:"be used")
     | None -> ()
   in
   let check_mutation (here : here) (place : Place.t) ~verb =
-    let at = Context.span context here.origin in
+    let at = Context.locate_origin context here.origin in
     let covering = covering here place in
     match (List.find_opt is_mut covering, covering) with
     | Some (loan, is_through_view), _ ->
         Context.report context Conflicting_loan at
-          (loan_message context loan ~is_through_view place ~verb)
+          (describe_loan context loan ~is_through_view place ~verb)
     | None, (loan, is_through_view) :: _ ->
         Context.report context Mutated_while_viewed at
-          (loan_message context loan ~is_through_view place ~verb)
+          (describe_loan context loan ~is_through_view place ~verb)
     | None, [] ->
         List.iter
           (fun ((holder : Place.root), viewed) ->
@@ -168,7 +170,8 @@ let check_body context (actions : Actions.t) moves =
             if
               in_use
               && List.exists
-                   (fun view -> Place.overlap (Actions.viewed_place view) place <> Disjoint)
+                   (fun view ->
+                     Place.classify_overlap (Actions.extract_viewed_place view) place <> Disjoint)
                    viewed
             then
               Context.report context Mutated_while_viewed at
@@ -178,7 +181,7 @@ let check_body context (actions : Actions.t) moves =
           here.views
   in
   each_step all_positions (fun here (step : Actions.step) ->
-      let at = Context.span context here.origin in
+      let at = Context.locate_origin context here.origin in
       match step.action with
       | Read place -> check_use here place
       | Mutate place ->
@@ -187,7 +190,7 @@ let check_body context (actions : Actions.t) moves =
       | Assign place -> check_mutation here place ~verb:"be assigned"
       | Move { place; type_; is_returned; is_captured } -> (
           check_use here place;
-          match Move_rules.verdict context place ~type_ ~is_returned ~is_captured with
+          match Move_rules.decide_move context place ~type_ ~is_returned ~is_captured with
           | Moves -> check_mutation here place ~verb:"be moved"
           | Reads -> ()
           | Refused refuse -> refuse context at type_)
@@ -207,7 +210,7 @@ let check_body context (actions : Actions.t) moves =
                           if first.mode = Mut then (first, second) else (second, first)
                         in
                         Context.report context Conflicting_loan
-                          (Context.span_with_mode_keyword context second.origin)
+                          (Context.locate_with_mode_keyword context second.origin)
                           (Printf.sprintf
                              (if is_yielded then
                                 format_of_string
@@ -230,7 +233,7 @@ let check_body context (actions : Actions.t) moves =
                       (fun viewed_place ->
                         check_disjoint context viewed_place passed.place ~on_overlap:(fun () ->
                             Context.report context Conflicting_loan
-                              (Context.span_with_mode_keyword context argument.origin)
+                              (Context.locate_with_mode_keyword context argument.origin)
                               (Printf.sprintf
                                  "`%s` is borrowed `mut` by this call, so the call cannot also \
                                   take a view of it."
@@ -254,7 +257,7 @@ let check_body context (actions : Actions.t) moves =
                   Hashtbl.replace reported_owners dropped.origin ();
                   let named_holder =
                     match holder with
-                    | Local local when Hashtbl.mem context.names local ->
+                    | Local local when Context.Local_table.mem context.names local ->
                         Some (Context.show_root context holder)
                     | _ -> None
                   in
@@ -266,7 +269,7 @@ let check_body context (actions : Actions.t) moves =
                   match dropped.owner with
                   | Temporary _ ->
                       Context.report context Views_temporary
-                        (Context.span context dropped.origin)
+                        (Context.locate_origin context dropped.origin)
                         (Printf.sprintf
                            "This temporary is dropped while %s may still store a view of it, which \
                             would dangle. Bind the temporary to a name with `let`%s, so that it \
@@ -277,7 +280,7 @@ let check_body context (actions : Actions.t) moves =
                            | None -> ""))
                   | Local _ | Constant _ | Environment ->
                       Context.report context View_escapes
-                        (Context.span context dropped.origin)
+                        (Context.locate_origin context dropped.origin)
                         (Printf.sprintf
                            "`%s` is dropped at the end of its scope while %s may still store a \
                             view of it, which would dangle."
@@ -297,7 +300,7 @@ let check_body context (actions : Actions.t) moves =
                 match viewed.root with
                 | Environment -> true
                 | Temporary _ | Constant _ -> false
-                | Local _ -> Context.binding_mode context viewed.root <> Own)
+                | Local _ -> Context.classify_binding_mode context viewed.root <> Own)
               (viewed_places here views)
           with
           | Some { root = Environment; _ } ->
@@ -330,9 +333,9 @@ let check_body context (actions : Actions.t) moves =
           if outlives_function context place then
             let resolved = resolve here.views views in
             let views_borrowed_parameter (view : Actions.view) =
-              match (Actions.viewed_place view).root with
+              match (Actions.extract_viewed_place view).root with
               | Local local when local = Self || List.mem local context.parameters -> (
-                  match Hashtbl.find_opt context.types local with
+                  match Context.Local_table.find_opt context.types local with
                   | Some type_ -> not (Context.is_view context type_)
                   | None -> false)
               | Local _ | Temporary _ | Constant _ | Environment -> false
@@ -340,7 +343,7 @@ let check_body context (actions : Actions.t) moves =
             let stores_argument_view (view : Actions.view) =
               context.implements_capability && place.root = Local Self
               &&
-              match (Actions.viewed_place view).root with
+              match (Actions.extract_viewed_place view).root with
               | Local local -> local <> Self && List.mem local context.parameters
               | Temporary _ | Constant _ | Environment -> false
             in
@@ -363,7 +366,7 @@ let check_body context (actions : Actions.t) moves =
                        "This stores a view of `%s` in a capability implementation. The caller \
                         cannot see the implementation, so it could mutate or drop the view's \
                         original while the implementation still stores the view. Store a copy."
-                       (Context.show_root context (Actions.viewed_place stored_view).root))
+                       (Context.show_root context (Actions.extract_viewed_place stored_view).root))
               | None, true, _ ->
                   Context.report context Self_referential at
                     (Printf.sprintf
@@ -373,7 +376,9 @@ let check_body context (actions : Actions.t) moves =
                        (Context.show_root context place.root)
                        (Context.show_root context place.root))
               | None, false, Some parameter ->
-                  let parameter = Context.show_root context (Actions.viewed_place parameter).root in
+                  let parameter =
+                    Context.show_root context (Actions.extract_viewed_place parameter).root
+                  in
                   Context.report context View_escapes at
                     (Printf.sprintf
                        "This stores a view of `%s` in `%s`, which outlives this function, but `%s` \
@@ -390,7 +395,7 @@ let check_body context (actions : Actions.t) moves =
             | Temporary _ -> true
             | Constant _ | Environment -> false
             | Local local -> (
-                match Context.binding_mode context root with
+                match Context.classify_binding_mode context root with
                 | Mut -> true
                 | Own -> List.mem local context.mutable_locals
                 | Read -> false)
@@ -427,7 +432,7 @@ let check_body context (actions : Actions.t) moves =
           let owned =
             List.find_opt
               (fun (part : Place.t) ->
-                part.steps <> [] && Context.binding_mode context part.root = Own)
+                part.steps <> [] && Context.classify_binding_mode context part.root = Own)
               parts
           in
           let receiver =
@@ -440,10 +445,10 @@ let check_body context (actions : Actions.t) moves =
                 | Local local
                   when (local = Self || List.mem local context.parameters)
                        && Some local <> receiver
-                       && Context.binding_mode context part.root <> Own ->
+                       && Context.classify_binding_mode context part.root <> Own ->
                     Some part.root
                 | _ -> None)
-              (parts @ List.map Actions.viewed_place forwarded)
+              (parts @ List.map Actions.extract_viewed_place forwarded)
           in
           match (owned, other_parameter) with
           | Some part, _ when not is_dangling ->
@@ -479,10 +484,13 @@ let check_body context (actions : Actions.t) moves =
         | Assign place -> mutations := (place, here.origin) :: !mutations
         | Move { place; type_; is_returned; is_captured } -> (
             uses := place :: !uses;
-            match Move_rules.verdict context place ~type_ ~is_returned ~is_captured with
+            match Move_rules.decide_move context place ~type_ ~is_returned ~is_captured with
             | Moves -> mutations := (place, here.origin) :: !mutations
             | Reads | Refused _ -> ())
-        | _ -> ());
+        | Move_out_of_lent _ | Bind _ | Yield_point _ | Bind_views _ | Store _ | Return_view _
+        | Drop _ | Bind_lent_part _ | Pass_owned_function _ | Start_loan _ | End_loans _
+        | Arguments _ ->
+            ());
     (!mutations, !uses)
   in
   List.iter
@@ -499,7 +507,8 @@ let check_body context (actions : Actions.t) moves =
                     List.iter
                       (fun used_place ->
                         check_disjoint context place used_place ~on_overlap:(fun () ->
-                            Context.report context Data_race (Context.span context origin)
+                            Context.report context Data_race
+                              (Context.locate_origin context origin)
                               (Printf.sprintf
                                  "Data race: one branch of this `%s` block mutates `%s`, and \
                                   another branch uses it."
@@ -525,7 +534,8 @@ let check_body context (actions : Actions.t) moves =
             | Temporary local -> not (List.mem local temporaries)
           in
           if is_outside_iteration then
-            Context.report context Data_race (Context.span context origin)
+            Context.report context Data_race
+              (Context.locate_origin context origin)
               (Printf.sprintf
                  "Data race: the iterations of a `%s for` run at the same time, so the body can \
                   mutate only its own element and its own locals."

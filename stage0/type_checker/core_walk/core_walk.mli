@@ -7,27 +7,29 @@ type visit = {
 }
 
 val ignore_all : visit
-val callees : (Core.callee -> unit) -> visit
-val place_type : Core.place -> Types.ty
-val place_origin : Core.place -> Core.origin
-val place : visit -> Core.place -> unit
-val operand : visit -> Core.operand -> unit
-val block : visit -> Core.block -> unit
-val loop_clause : visit -> Core.loop_clause -> unit
-val expression_children : visit -> Core.expression -> unit
-val statement_children : visit -> Core.statement -> unit
-val pattern_children : visit -> Core.pattern -> unit
-val deep : visit -> visit
-val expression : visit -> Core.expression -> unit
-val definition : visit -> Core.definition -> unit
+val make_callee_visitor : (Core.callee -> unit) -> visit
+val compute_place_type : Core.place -> Types.ty
+val compute_place_origin : Core.place -> Core.origin
+val walk_place : visit -> Core.place -> unit
+val walk_operand : visit -> Core.operand -> unit
+val walk_block : visit -> Core.block -> unit
+val walk_loop_clause : visit -> Core.loop_clause -> unit
+val walk_expression_children : visit -> Core.expression -> unit
+val walk_statement_children : visit -> Core.statement -> unit
+val walk_pattern_children : visit -> Core.pattern -> unit
+val make_deep_visitor : visit -> visit
+val walk_expression : visit -> Core.expression -> unit
+val walk_definition : visit -> Core.definition -> unit
 
 type tasks_use = Uses_tasks | Through_parameter | No_tasks
 
-val tasks_use : ?solved:(int -> Types.capability_set) -> Core.block -> tasks_use
+val compute_tasks_use : ?solved:(int -> Types.capability_set) -> Core.block -> tasks_use
 val can_use_tasks : Core.block -> bool
 val traverse_indirect : ('a -> 'b option) -> 'a Core.target -> 'b Core.target option
 
 module For_testing : sig
-  val local_names : Core.definition -> (Core.local, string) Hashtbl.t
+  module Local_table : Hashtbl.S with type key = Core.local
+
+  val local_names : Core.definition -> string Local_table.t
   val expression_exists : (Core.expression -> bool) -> Core.expression -> bool
 end

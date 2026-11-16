@@ -1,11 +1,15 @@
+module Local_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Core.local
+end))
+
 type context = {
   lookups : Lookups.t;
   bounds : Types.parameter -> Types.trait_reference list;
   spans : Source.Definition_span.t array Lazy.t;
   mode_keywords : (Core.origin, Types.mode * Core.mode_keyword) Hashtbl.t;
-  names : (Core.local, string) Hashtbl.t;
-  binding_modes : (Core.local, Types.mode) Hashtbl.t;
-  types : (Core.local, Types.ty) Hashtbl.t;
+  names : string Local_table.t;
+  binding_modes : Types.mode Local_table.t;
+  types : Types.ty Local_table.t;
   mutable parameters : Core.local list;
   implements_capability : bool;
   mutable mutable_locals : Core.local list;
@@ -13,10 +17,10 @@ type context = {
   mutable must_be_disjoint : (Core.origin * Core.origin) list;
 }
 
-let plain context type_ =
+let is_plain context type_ =
   Interface.Impls.is_plain context.lookups.interface ~bounds:context.bounds type_
 
-let copyable context type_ =
+let is_copyable context type_ =
   Interface.Impls.is_copyable context.lookups.interface ~bounds:context.bounds type_
 
 let is_view context type_ =
@@ -25,7 +29,7 @@ let is_view context type_ =
 let holds_function context type_ =
   Interface.Impls.holds_function context.lookups.interface ~bounds:context.bounds type_
 
-let callee_signatures context (callee : Mir.callee) : Types.signature list =
+let list_callee_signatures context (callee : Mir.callee) : Types.signature list =
   let signature path =
     Option.to_list (Interface.Impls.read_signature context.lookups.interface path)
   in
@@ -51,9 +55,9 @@ let stores_function context (callee : Mir.callee) position =
   in
   match callee with
   | Indirect _ -> true
-  | _ -> List.exists declared (callee_signatures context callee)
+  | _ -> List.exists declared (list_callee_signatures context callee)
 
-let span context (origin : Core.origin) : Source.Definition_span.t =
+let locate_origin context (origin : Core.origin) : Source.Definition_span.t =
   Source.Definition_span.locate (Lazy.force context.spans) origin
 
 let report context ?(fixes = []) ?(notes = []) code (at : Source.Definition_span.t) message =
@@ -66,16 +70,17 @@ let report context ?(fixes = []) ?(notes = []) code (at : Source.Definition_span
     context.diagnostics <-
       Diagnostic.make ~fixes ~notes ~code:(Ownership code) at message :: context.diagnostics
 
-let binding_mode context (root : Place.root) : Types.mode =
+let classify_binding_mode context (root : Place.root) : Types.mode =
   match root with
   | Constant _ -> Read
   | Environment | Temporary _ -> Own
-  | Local local -> Option.value ~default:Types.Own (Hashtbl.find_opt context.binding_modes local)
+  | Local local ->
+      Option.value ~default:Types.Own (Local_table.find_opt context.binding_modes local)
 
 let show_root context (root : Place.root) =
   match root with
   | Local Self -> "self"
-  | Local local -> Option.value ~default:"this" (Hashtbl.find_opt context.names local)
+  | Local local -> Option.value ~default:"this" (Local_table.find_opt context.names local)
   | Temporary _ -> "temporary"
   | Constant (Top { name; _ } | Member_constant { name; _ }) -> name
   | Constant path -> Path.show path
@@ -106,9 +111,9 @@ let collect context (mir : Mir.Graph.t) =
         match info.kind with
         | Source { local = core; mode; name = Some name; is_var }
           when not (List.mem local body.captures) ->
-            Hashtbl.replace context.names core name;
-            Hashtbl.replace context.binding_modes core mode;
-            Hashtbl.replace context.types core info.type_;
+            Local_table.replace context.names core name;
+            Local_table.replace context.binding_modes core mode;
+            Local_table.replace context.types core info.type_;
             if is_var then context.mutable_locals <- core :: context.mutable_locals
         | Source _ | Temporary | Lent _ -> ())
       body.locals;
@@ -119,7 +124,9 @@ let collect context (mir : Mir.Graph.t) =
             match statement.kind with
             | Call { call; _ } | Lend { call; _ } | Slice { call; _ } | Template { call; _ } ->
                 record_mode_keywords call
-            | _ -> ())
+            | Assign _ | Live _ | Dead _ | Assert _ | Echo _ | Provide _ | Provide_end
+            | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ ->
+                ())
           block.statements)
       body.blocks
   in
@@ -139,12 +146,17 @@ let copy_edits context (moved : Core.origin) =
     | Some (Own, { written; operand }) ->
         [
           Diagnostic.delete
-            (Source.Definition_span.make (span context written).start (span context operand).start);
+            (Source.Definition_span.make (locate_origin context written).start
+               (locate_origin context operand).start);
         ]
     | Some ((Read | Mut), _) | None -> [])
-  @ [ Diagnostic.insert (Source.Definition_span.zero_width (span context moved).stop) ".copy()" ]
+  @ [
+      Diagnostic.insert
+        (Source.Definition_span.zero_width (locate_origin context moved).stop)
+        ".copy()";
+    ]
 
-let span_with_mode_keyword context (place : Core.origin) : Source.Definition_span.t =
+let locate_with_mode_keyword context (place : Core.origin) : Source.Definition_span.t =
   match Hashtbl.find_opt context.mode_keywords place with
-  | Some (_, { written; _ }) -> span context written
-  | None -> span context place
+  | Some (_, { written; _ }) -> locate_origin context written
+  | None -> locate_origin context place

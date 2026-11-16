@@ -4,8 +4,8 @@ type failure = Echo | Todo
 
 let bug format = Compiler_bug.bug ~stage:"Emit_c" format
 
-let site_symbol (site : Lowered.site) =
-  Printf.sprintf "t_Site_%s_%d" (Instance.path_symbol site.definition) site.offset
+let render_site_symbol (site : Lowered.site) =
+  Printf.sprintf "t_Site_%s_%d" (Instance.mangle_path site.definition) site.offset
 
 let site_struct =
   "struct t_site {\n\
@@ -15,7 +15,7 @@ let site_struct =
   \  uint32_t column;\n\
    };\n"
 
-let integer_c : Memory_layout.integer -> string = function
+let render_integer_type : Memory_layout.integer -> string = function
   | Int8 -> "int8_t"
   | Int16 -> "int16_t"
   | Int32 -> "int32_t"
@@ -25,13 +25,13 @@ let integer_c : Memory_layout.integer -> string = function
   | UInt32 -> "uint32_t"
   | UInt64 -> "uint64_t"
 
-let unsigned_c : Memory_layout.integer -> string = function
+let render_unsigned_type : Memory_layout.integer -> string = function
   | Int8 | UInt8 -> "uint8_t"
   | Int16 | UInt16 -> "uint16_t"
   | Int32 | UInt32 -> "uint32_t"
   | Int64 | UInt64 -> "uint64_t"
 
-let signed : Memory_layout.integer -> bool = function
+let is_signed : Memory_layout.integer -> bool = function
   | Int8 | Int16 | Int32 | Int64 -> true
   | UInt8 | UInt16 | UInt32 | UInt64 -> false
 

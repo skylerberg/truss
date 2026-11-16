@@ -1,5 +1,5 @@
 let apply_slice context (frame : State.frame) (site : Invocation.site) ~(base_type : Types.ty)
-    ~collection ~low ~high =
+    ~collection ~low ~high ~is_checked =
   let location = Facts.locate context frame.source site.origin in
   let element =
     match base_type with
@@ -19,7 +19,8 @@ let apply_slice context (frame : State.frame) (site : Invocation.site) ~(base_ty
         Facts.assume context frame (Operation ("<=", [ Logic.int 0; length ]));
         length
   in
-  Facts.oblige context frame Requires location
+  (if is_checked then Facts.oblige_safe_operation context else Facts.oblige context)
+    frame Requires location
     [ Text "`"; Facts.quote frame.source site.origin; Text "` may not be within the collection." ]
     Logic.(
       Operation ("<=", [ int 0; low ])
@@ -99,7 +100,7 @@ let slice_place context (site : Invocation.site) ~(owner : State.passed_place) ~
         let frame = { frame with makes_obligations = false } in
         let _, viewed, _, _ =
           apply_slice context frame site ~base_type:(owner_type frame)
-            ~collection:(owner.read frame) ~low ~high:(Some high)
+            ~collection:(owner.read frame) ~low ~high:(Some high) ~is_checked:false
         in
         viewed);
     write =
@@ -123,13 +124,13 @@ let declare_libc_number context frame (number : Libc.number) =
   let term = Logic.Symbol symbol in
   Facts.assume context frame
     (Facts.make_in_range
-       (Types.make_builtin (Intrinsic.libc_builtin (Libc.number_type number)))
+       (Types.make_builtin (Intrinsic.builtin_of_libc (Libc.classify_number number)))
        term);
   term
 
 let make_buffer_capacity context element term =
   let ty =
-    Types.Named { path = Intrinsic.builtin_path Storage; arguments = [ Types.Type element ] }
+    Types.Named { path = Intrinsic.make_builtin_path Storage; arguments = [ Types.Type element ] }
   in
   let symbol = Logic.Symbol.Capacity ty in
   Facts.declare context (Logic.Function (symbol, [ Facts.declare_sort context ty ], Logic.Int));
@@ -137,7 +138,7 @@ let make_buffer_capacity context element term =
 
 let make_buffer_model context (builtin : Intrinsic.builtin) element term =
   let ty =
-    Types.Named { path = Intrinsic.builtin_path builtin; arguments = [ Types.Type element ] }
+    Types.Named { path = Intrinsic.make_builtin_path builtin; arguments = [ Types.Type element ] }
   in
   let symbol = Logic.Symbol.Model ty in
   Facts.declare context
@@ -149,7 +150,7 @@ let make_buffer_model context (builtin : Intrinsic.builtin) element term =
 
 let libc_call context frame ~(site : Invocation.site) (function_ : Libc.function_) operands ~changed
     known =
-  let { Libc.parameters; at_most; _ } = Libc.signature function_ in
+  let { Libc.parameters; at_most; _ } = Libc.make_signature function_ in
   let arguments =
     List.concat_map
       (fun (name, (passes : Libc.passes)) ->
@@ -185,7 +186,7 @@ let libc_call context frame ~(site : Invocation.site) (function_ : Libc.function
       ]
       condition
   in
-  let element_of scalar = Types.make_builtin (Intrinsic.libc_builtin scalar) in
+  let element_of scalar = Types.make_builtin (Intrinsic.builtin_of_libc scalar) in
   let length element sequence = Models.make_sequence_length context element sequence in
   List.iteri
     (fun position (_, passes) ->
@@ -312,7 +313,7 @@ let make_byte_order context left right =
     Facts.declare_sort context (Models.make_sequence_type (Types.make_builtin UInt8))
   in
   let symbol = Logic.Symbol.Compare_bytes_order in
-  let first = not (Hashtbl.mem context.declared symbol) in
+  let first = not (Tables.Symbol_table.mem context.declared symbol) in
   Facts.declare context (Logic.Function (symbol, [ sequence; sequence ], Logic.Int));
   let order first_term second_term = Logic.Apply (symbol, [ first_term; second_term ]) in
   if first then begin
@@ -369,14 +370,16 @@ let buffer_operation context frame ~(site : Invocation.site) (operation : Intrin
     sequence
   in
   let needs ?(requirement = "have the room it writes into") condition =
-    Facts.oblige context frame Requires
-      (Facts.locate context frame.source site.origin)
-      [
-        Text "`";
-        Facts.quote frame.source site.origin;
-        Text (Printf.sprintf "` may not %s." requirement);
-      ]
-      condition
+    if frame.makes_obligations then
+      Facts.oblige context frame Requires
+        (Facts.locate context frame.source site.origin)
+        [
+          Text "`";
+          Facts.quote frame.source site.origin;
+          Text (Printf.sprintf "` may not %s." requirement);
+        ]
+        condition
+    else Facts.assume context frame condition
   in
   let keeps_capacity () =
     Facts.assume context frame
@@ -391,6 +394,9 @@ let buffer_operation context frame ~(site : Invocation.site) (operation : Intrin
     Logic.forall ([ (name, Logic.Int) ], Logic.(in_interval (Symbol name) low high ==> body))
   in
   let in_bounds index sequence = in_interval index (Logic.int 0) (length sequence) in
+  let needs_element index sequence =
+    needs ~requirement:"have an element at its index" (in_bounds index sequence)
+  in
   let each_sum relation =
     let measure = Facts.make_fresh_name context "measure" in
     Logic.forall
@@ -451,21 +457,23 @@ let buffer_operation context frame ~(site : Invocation.site) (operation : Intrin
       let longer = append_part context frame element (storage buffer) value in
       Facts.assume context frame (Logic.equal (changed_storage ()) longer);
       known
-  | Storage_pop, [ _ ] ->
+  | Storage_pop, [ buffer ] ->
+      needs ~requirement:"have an element to pop"
+        (Logic.Operation (">", [ length (storage buffer); Logic.int 0 ]));
       keeps_capacity ();
       let longer = append_part context frame element (changed_storage ()) known in
-      Facts.assume context frame (Logic.equal (storage (List.hd operands)) longer);
+      Facts.assume context frame (Logic.equal (storage buffer) longer);
       known
   | Storage_insert, [ buffer; index; value ] ->
       let before = storage buffer and after = changed_storage () in
+      needs ~requirement:"be given an index at most the storage's length"
+        Logic.(Operation ("<=", [ int 0; index ]) &&& Operation ("<=", [ index; length before ]));
       needs (Logic.Operation ("<", [ length before; capacity buffer ]));
       keeps_capacity ();
       let limit = bound () in
       Facts.assume context frame
         (Logic.conjunction
            [
-             Logic.Operation ("<=", [ Logic.int 0; index ]);
-             Logic.Operation ("<=", [ index; length before ]);
              Logic.equal (length after) (Logic.Operation ("+", [ length before; Logic.int 1 ]));
              Logic.equal (at after index) value;
            ]);
@@ -492,11 +500,11 @@ let buffer_operation context frame ~(site : Invocation.site) (operation : Intrin
   | Storage_remove, [ buffer; index ] ->
       keeps_capacity ();
       let before = storage buffer and after = changed_storage () in
+      needs_element index before;
       let limit = bound () in
       Facts.assume context frame
         (Logic.conjunction
            [
-             in_bounds index before;
              Logic.equal (length after) (Logic.Operation ("-", [ length before; Logic.int 1 ]));
              Logic.equal known (at before index);
            ]);
@@ -520,12 +528,12 @@ let buffer_operation context frame ~(site : Invocation.site) (operation : Intrin
           (storage buffer, changed_storage ())
         end
       in
+      needs ~requirement:"have elements at both of its indexes"
+        Logic.(in_bounds first before &&& in_bounds second before);
       let limit = bound () in
       Facts.assume context frame
         (Logic.conjunction
            [
-             in_bounds first before;
-             in_bounds second before;
              Logic.equal (length after) (length before);
              Logic.equal (at after first) (at before second);
              Logic.equal (at after second) (at before first);
@@ -539,13 +547,10 @@ let buffer_operation context frame ~(site : Invocation.site) (operation : Intrin
       Facts.assume context frame (each_sum (fun sum _ -> Logic.equal (sum after) (sum before)));
       known
   | (Storage_at | Storage_at_mut), [ buffer; index ] ->
-      Facts.assume context frame (in_bounds index (storage buffer));
+      needs_element index (storage buffer);
       at (storage buffer) index
-  | View_at_mut, [ buffer; index ] ->
-      Facts.assume context frame (in_bounds index (view buffer));
-      at (view buffer) index
-  | View_at, [ buffer; index ] ->
-      Facts.assume context frame (in_bounds index (view buffer));
+  | (View_at | View_at_mut), [ buffer; index ] ->
+      needs_element index (view buffer);
       at (view buffer) index
   | Storage_view, [ buffer ] ->
       Facts.assume context frame (Logic.equal (view known) (storage buffer));
@@ -553,15 +558,14 @@ let buffer_operation context frame ~(site : Invocation.site) (operation : Intrin
   | Compare_bytes, [ left; right ] -> make_byte_order context (view left) (view right)
   | View_slice, [ buffer; start; stop ] ->
       let whole = view buffer and part = view known in
+      needs ~requirement:"be given a range within the view"
+        Logic.(
+          Operation ("<=", [ int 0; start ])
+          &&& Operation ("<=", [ start; stop ])
+          &&& Operation ("<=", [ stop; length whole ]));
       let limit = bound () in
       Facts.assume context frame
-        (Logic.conjunction
-           [
-             Logic.Operation ("<=", [ Logic.int 0; start ]);
-             Logic.Operation ("<=", [ start; stop ]);
-             Logic.Operation ("<=", [ stop; length whole ]);
-             Logic.equal (length part) (Logic.Operation ("-", [ stop; start ]));
-           ]);
+        (Logic.equal (length part) (Logic.Operation ("-", [ stop; start ])));
       Facts.assume context frame
         (all limit (Logic.int 0) (length part)
            (Logic.equal (at part (Logic.Symbol limit))
@@ -695,7 +699,7 @@ let replace_element context frame element ~before ~after index part =
 
 let update_storage context frame element storage index part =
   let storage_type =
-    Types.Named { path = Intrinsic.builtin_path Storage; arguments = [ Types.Type element ] }
+    Types.Named { path = Intrinsic.make_builtin_path Storage; arguments = [ Types.Type element ] }
   in
   let updated = Facts.arrive context frame "changed" storage_type in
   replace_element context frame element

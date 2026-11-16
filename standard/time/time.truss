@@ -689,7 +689,7 @@ internal fn parse_iso_date(text: StringSlice, from: UInt64) -> Result[ParsedDate
   let day_start = expect_byte(text, at: month_start + 2, byte: 45)?
   let day = parse_field(text, from: day_start, width: 2)?
   let signed_year = if negative { -year.value } else { year.value }
-  if signed_year <= -5900000 || signed_year >= 5900000 || month < 1 || month > 12 || day < 1 {
+  if month < 1 || month > 12 || day < 1 {
     return Err(ParseTimeError.OutOfRange)
   }
   if day > days_in_month(month, leap: is_leap(signed_year)) {
@@ -1252,7 +1252,7 @@ internal fn civil_from_days(days: Int64) -> Civil
   requires Int32.minimum <= days && days <= Int32.maximum
   ensures 1 <= result.month && result.month <= 12
   ensures 1 <= result.day && result.day <= 31
-  ensures -5900000 < result.year && result.year < 5900000
+  ensures Int32.minimum <= result.year && result.year <= Int32.maximum
   cost time O(1)
 {
   let shifted = days + 719468
@@ -1273,10 +1273,10 @@ internal fn civil_from_days(days: Int64) -> Civil
 }
 
 internal fn days_from_civil(year: Int64, month: Int64, day: Int64) -> Int64
-  requires -6000000 < year && year < 6000000
+  requires Int32.minimum <= year && year <= Int32.maximum
   requires 1 <= month && month <= 12
   requires 1 <= day && day <= 31
-  ensures -2200000000 < result && result < 2200000000
+  ensures Int32.minimum * 366 <= result && result <= Int32.maximum * 366
   cost time O(1)
 {
   let from_march = if month > 2 { month - 3 } else { month + 9 }
@@ -1289,7 +1289,7 @@ internal fn days_from_civil(year: Int64, month: Int64, day: Int64) -> Int64
 }
 
 internal fn checked_date(year: Int64, month: Int64, day: Int64) -> Option[Date]
-  requires -6000000 < year && year < 6000000
+  requires Int32.minimum <= year && year <= Int32.maximum
   requires 1 <= month && month <= 12
   requires 1 <= day && day <= 31
   cost time O(1)
@@ -1305,7 +1305,7 @@ internal fn checked_date(year: Int64, month: Int64, day: Int64) -> Option[Date]
 internal fn Date.civil(self) -> Civil
   ensures 1 <= result.month && result.month <= 12
   ensures 1 <= result.day && result.day <= 31
-  ensures -5900000 < result.year && result.year < 5900000
+  ensures Int32.minimum <= result.year && result.year <= Int32.maximum
   cost time O(1)
 {
   civil_from_days(intrinsic::convert(self.days_since_epoch))
@@ -1330,26 +1330,26 @@ internal fn ordinal_day(civil: Civil) -> Int64
 }
 
 internal fn Date.plus_months_wide(self, months: Int64) -> Option[Date]
-  requires -30000000000 < months && months < 30000000000
   cost time O(1)
 {
   let civil = self.civil()
-  let total = civil.year * 12 + civil.month - 1 + months
-  let year = total.floor_divide(12)
-  let month = total - year * 12 + 1
-  if year <= -5900000 || year >= 5900000 {
+  let month_index = civil.month - 1 + months.floor_modulo(12)
+  let year = civil.year + months.floor_divide(12) + month_index / 12
+  let month = month_index % 12 + 1
+  if !intrinsic::fits[Int64, Int32](year) {
     return None
   }
   checked_date(year, month: month, day: min_of(civil.day, second: days_in_month(month, leap: is_leap(year))))
 }
 
 internal fn weeks_in_year(year: Int64) -> Int64
-  requires -6000000 < year && year < 6000000
   ensures result == 52 || result == 53
   cost time O(1)
 {
-  let previous = year - 1
-  let this_year = (year + year.floor_divide(4) - year.floor_divide(100) + year.floor_divide(400)).floor_modulo(7)
+  let year_of_era = year.floor_modulo(400)
+  let previous = year_of_era - 1
+  let this_year =
+    (year_of_era + year_of_era.floor_divide(4) - year_of_era.floor_divide(100) + year_of_era.floor_divide(400)).floor_modulo(7)
   let last_year =
     (previous + previous.floor_divide(4) - previous.floor_divide(100) + previous.floor_divide(400)).floor_modulo(7)
   if this_year == 4 || last_year == 3 { 53 } else { 52 }
@@ -1358,7 +1358,7 @@ internal fn weeks_in_year(year: Int64) -> Int64
 internal fn iso_week(ordinal: Int64, weekday: Int64, year: Int64) -> Int64
   requires 1 <= ordinal && ordinal <= 366
   requires 1 <= weekday && weekday <= 7
-  requires -5900000 < year && year < 5900000
+  requires Int32.minimum <= year && year <= Int32.maximum
   ensures 1 <= result && result <= 53
   cost time O(1)
 {
@@ -1390,7 +1390,7 @@ public fn Date.new(year: Int32, month: UInt8, day: UInt8) -> Option[Date]
   let wide_year: Int64 = intrinsic::convert(year)
   let wide_month: Int64 = intrinsic::convert(month)
   let wide_day: Int64 = intrinsic::convert(day)
-  if wide_year <= -5900000 || wide_year >= 5900000 || wide_day > days_in_month(wide_month, leap: is_leap(wide_year)) {
+  if wide_day > days_in_month(wide_month, leap: is_leap(wide_year)) {
     return None
   }
   checked_date(wide_year, month: wide_month, day: wide_day)
@@ -1402,7 +1402,7 @@ public fn Date.from_day_of_year(year: Int32, day_of_year: UInt16) -> Option[Date
   let wide_year: Int64 = intrinsic::convert(year)
   let ordinal: Int64 = intrinsic::convert(day_of_year)
   let length: Int64 = if is_leap(wide_year) { 366 } else { 365 }
-  if wide_year <= -5900000 || wide_year >= 5900000 || ordinal < 1 || ordinal > length {
+  if ordinal < 1 || ordinal > length {
     return None
   }
   let days = days_from_civil(wide_year, month: 1, day: 1) + ordinal - 1
@@ -1706,14 +1706,15 @@ type RuleDay(by_weekday: Bool, counts_leap_day: Bool, month: Int64, week: Int64,
   invariant 1 <= month && month <= 12
   invariant 1 <= week && week <= 5
   invariant 0 <= day && day <= 365
+  invariant counts_leap_day || 1 <= day
 
 type DaylightRule(offset: Int64, start: RuleDay, start_time: Int64, end: RuleDay, end_time: Int64)
-  invariant -1000000 < offset && offset < 1000000
-  invariant -1000000 < start_time && start_time < 1000000
-  invariant -1000000 < end_time && end_time < 1000000
+  invariant -7 * 86400 < offset && offset < 7 * 86400 + 3600
+  invariant -7 * 86400 < start_time && start_time < 7 * 86400
+  invariant -7 * 86400 < end_time && end_time < 7 * 86400
 
 type ZoneRule(standard: Int64, daylight: Option[DaylightRule])
-  invariant -1000000 < standard && standard < 1000000
+  invariant -7 * 86400 < standard && standard < 7 * 86400
 
 public opaque type TimeZone(
   name: String,
@@ -1725,39 +1726,41 @@ public opaque type TimeZone(
   invariant offsets.length() == transitions.length()
   derives Copyable
 
-fn RuleDay.days(self, year: Int64) -> Int64
-  requires -6000000 < year && year < 6000000
-  ensures -2200001000 < result && result < 2200001000
+fn RuleDay.day_of_year(self, year: Int64) -> Int64
+  requires Int32.minimum <= year && year <= Int32.maximum
+  ensures 0 <= result && result <= 365
   cost time O(1)
 {
+  let leap = is_leap(year)
   if !self.by_weekday {
-    let leap_day: Int64 = if !self.counts_leap_day && self.day >= 60 && is_leap(year) { 1 } else { 0 }
+    let leap_day: Int64 = if !self.counts_leap_day && self.day >= 60 && leap { 1 } else { 0 }
     let from_one: Int64 = if self.counts_leap_day { 0 } else { 1 }
-    return days_from_civil(year, month: 1, day: 1) + self.day - from_one + leap_day
+    return self.day - from_one + leap_day
   }
-  let first = days_from_civil(year, month: self.month, day: 1)
-  let weekday_of_first = (first + 4).floor_modulo(7)
+  let month_start = january_start(self.month) + (if self.month > 2 && leap { 1 } else { 0 })
+  let weekday_of_first = (days_from_civil(year, month: self.month, day: 1) + 4).floor_modulo(7)
   let to_weekday = (self.day - weekday_of_first).floor_modulo(7)
-  let length = days_in_month(self.month, leap: is_leap(year))
+  let length = days_in_month(self.month, leap: leap)
   let wanted = to_weekday + 7 * (self.week - 1)
-  first + (if wanted >= length { wanted - 7 } else { wanted })
+  month_start + (if wanted >= length { wanted - 7 } else { wanted })
 }
 
 fn ZoneRule.offset_at(self, seconds: Int64) -> Int64
-  requires -100000000000 < seconds && seconds < 100000000000
-  ensures -1000000 < result && result < 1000000
+  ensures -7 * 86400 < result && result < 7 * 86400 + 3600
   cost time O(1)
 {
   match self.daylight {
     None => self.standard
     Some(daylight) => {
-      let year = civil_from_days((seconds + self.standard).floor_divide(86400)).year
-      let start = daylight.start.days(year) * 86400 + daylight.start_time - self.standard
-      let end = daylight.end.days(year) * 86400 + daylight.end_time - daylight.offset
+      let within_era = seconds.floor_modulo(146097 * 86400)
+      let year = civil_from_days((within_era + self.standard).floor_divide(86400)).year
+      let january_first = days_from_civil(year, month: 1, day: 1)
+      let start = (january_first + daylight.start.day_of_year(year)) * 86400 + daylight.start_time - self.standard
+      let end = (january_first + daylight.end.day_of_year(year)) * 86400 + daylight.end_time - daylight.offset
       let in_daylight = if start < end {
-        start <= seconds && seconds < end
+        start <= within_era && within_era < end
       } else {
-        !(end <= seconds && seconds < start)
+        !(end <= within_era && within_era < start)
       }
       if in_daylight { daylight.offset } else { self.standard }
     }
@@ -1787,7 +1790,6 @@ fn transitions_at_or_before(transitions: Slice[Int64], seconds: Int64) -> UInt64
 }
 
 fn TimeZone.offset_seconds(self, seconds: Int64) -> Int64
-  requires -100000000000 < seconds && seconds < 100000000000
   ensures Int32.minimum <= result && result <= Int32.maximum
   cost time O(log(self.transitions.length()))
 {
@@ -1808,7 +1810,7 @@ public fn TimeZone.utc() -> TimeZone
 }
 
 fn write_offset(output: mut TextBuilder, seconds: Int64)
-  requires -360000 < seconds && seconds < 360000
+  requires -100 * 3600 < seconds && seconds < 100 * 3600
   cost time finite
 {
   if seconds == 0 {
@@ -1880,10 +1882,9 @@ fn count_at(bytes: Slice[UInt8], at: UInt64) -> Option[UInt64]
 }
 
 fn read_header(bytes: Slice[UInt8], at: UInt64, time_width: UInt64) -> Option[ZoneHeader]
-  requires at <= 1099511627776
   requires time_width == 4 || time_width == 8
-  ensures !(result is Some(header) && (header.time_count > UInt32.maximum || header.type_count > UInt32.maximum
-    || header.block > 1000000000000))
+  ensures !(result is Some(header) && (at + 44 > bytes.length()
+    || header.time_count * time_width + header.time_count + header.type_count * 6 > header.block))
   cost time O(1)
 {
   if at > bytes.length() || bytes.length() - at < 44 {
@@ -1912,7 +1913,7 @@ type ParsedNumber(value: Int64, end: UInt64)
 fn posix_number(bytes: Slice[UInt8], from: UInt64, to: UInt64, most: Int64) -> Option[ParsedNumber]
   requires from <= to
   requires to <= bytes.length()
-  requires 0 <= most && most <= 100000
+  requires 0 <= most && most * 10 + 9 <= Int64.maximum
   ensures !(result is Some(number) && (number.value < 0 || number.value > most || number.end <= from || number.end > to))
   cost time finite
 {
@@ -1940,7 +1941,8 @@ fn posix_number(bytes: Slice[UInt8], from: UInt64, to: UInt64, most: Int64) -> O
 fn posix_time(bytes: Slice[UInt8], from: UInt64, to: UInt64) -> Option[ParsedNumber]
   requires from <= to
   requires to <= bytes.length()
-  ensures !(result is Some(time) && (time.value <= -700000 || time.value >= 700000 || time.end <= from || time.end > to))
+  ensures !(result is Some(time) && (time.value <= -7 * 86400 || time.value >= 7 * 86400 || time.end <= from
+    || time.end > to))
   cost time finite
 {
   var index = from
@@ -2003,7 +2005,7 @@ type ParsedRuleDay(day: RuleDay, time: Int64, end: UInt64)
 fn posix_rule_day(bytes: Slice[UInt8], from: UInt64, to: UInt64) -> Option[ParsedRuleDay]
   requires from <= to
   requires to <= bytes.length()
-  ensures !(result is Some(parsed) && (parsed.time <= -700000 || parsed.time >= 700000 || parsed.end <= from
+  ensures !(result is Some(parsed) && (parsed.time <= -7 * 86400 || parsed.time >= 7 * 86400 || parsed.end <= from
     || parsed.end > to))
   cost time finite
 {
@@ -2113,9 +2115,6 @@ fn footer_rule(rules: Slice[UInt8], from: UInt64) -> Result[Option[ZoneRule], Zo
 public fn TimeZone.from_rules(name: StringSlice, rules: Slice[UInt8]) -> Result[TimeZone, ZoneError]
   cost time finite
 {
-  if rules.length() > 1099511627776 {
-    return Err(ZoneError.MalformedRules)
-  }
   var header = match read_header(rules, at: 0, time_width: 4) {
     Some(header) => header
     None => return Err(ZoneError.MalformedRules)
@@ -2123,14 +2122,18 @@ public fn TimeZone.from_rules(name: StringSlice, rules: Slice[UInt8]) -> Result[
   var start: UInt64 = 44
   var time_width: UInt64 = 4
   if header.version != 0 {
-    start = 44 + header.block + 44
-    time_width = 8
-    header = match read_header(rules, at: 44 + header.block, time_width: 8) {
+    if rules.length() - 44 < header.block {
+      return Err(ZoneError.MalformedRules)
+    }
+    let wide_at = 44 + header.block
+    header = match read_header(rules, at: wide_at, time_width: 8) {
       Some(wide_header) => wide_header
       None => return Err(ZoneError.MalformedRules)
     }
+    start = wide_at + 44
+    time_width = 8
   }
-  if header.type_count == 0 || start > rules.length() || rules.length() - start < header.block {
+  if header.type_count == 0 || rules.length() - start < header.block {
     return Err(ZoneError.MalformedRules)
   }
   let kinds_start = start + header.time_count * time_width
@@ -2225,9 +2228,6 @@ public fn TimeZone.to_instant(self, local: DateTime) -> Option[LocalInstant]
 {
   let days: Int64 = intrinsic::convert(local.date.days_since_epoch)
   let nanoseconds_of_day: Int64 = intrinsic::convert(local.time.nanoseconds_since_midnight)
-  if days < -110000 || days > 110000 {
-    return None
-  }
   let seconds = days * 86400 + nanoseconds_of_day / 1000000000
   let fraction = nanoseconds_of_day % 1000000000
   let before = self.offset_seconds(seconds - 86400)
@@ -2258,7 +2258,7 @@ public fn TimeZone.format(self, instant: Instant) -> String
   var output = TextBuilder.new()
   self.to_local(instant).display(mut output)
   let offset = self.offset_seconds(instant.unix_seconds())
-  if -360000 < offset && offset < 360000 {
+  if -100 * 3600 < offset && offset < 100 * 3600 {
     write_offset(mut output, seconds: offset)
   }
   own output.finish()

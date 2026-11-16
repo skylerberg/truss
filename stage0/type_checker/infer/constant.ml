@@ -1,5 +1,6 @@
-let rec offending (state : State.state) (value : Syntax.expression) : Syntax.expression option =
-  let first = List.find_map (offending state) in
+let rec find_offending_expression (state : State.state) (value : Syntax.expression) :
+    Syntax.expression option =
+  let first = List.find_map (find_offending_expression state) in
   let built_in (operand : Syntax.expression) =
     match state.tables.types.(operand.id) with
     | Some type_ ->
@@ -11,14 +12,15 @@ let rec offending (state : State.state) (value : Syntax.expression) : Syntax.exp
   | Integer _ | Float _ | True | False | Todo | Expression_error -> None
   | String { rest = []; _ } -> None
   | String { rest = (interpolated, _) :: _; _ } -> Some interpolated
-  | Parenthesized inner -> offending state inner
-  | Prefix (_, inner) -> if built_in inner then offending state inner else Some value
+  | Parenthesized inner -> find_offending_expression state inner
+  | Prefix (_, inner) ->
+      if built_in inner then find_offending_expression state inner else Some value
   | Binary { left; right; _ } ->
       if built_in left && built_in right then first [ left; right ] else Some value
   | Name _ | Member _ | Bracket _ -> (
       match (state.tables.resolutions.(value.id), value.kind) with
       | Some (Global _ | Variant_value _ | Type_name _), _ -> None
-      | Some (Field_access _), Member (base, _) -> offending state base
+      | Some (Field_access _), Member (base, _) -> find_offending_expression state base
       | _ -> Some value)
   | Call (_, arguments) -> (
       match state.tables.calls.(value.id) with
@@ -47,10 +49,10 @@ let rec check_arithmetic (state : State.state) (value : Syntax.expression) =
             "This divides by zero."
       | _ -> ())
   | _ -> ());
-  Syntax_walk.expression_parts ~expression:(check_arithmetic state) ~statement:ignore value
+  Syntax_walk.visit_expression_parts ~expression:(check_arithmetic state) ~statement:ignore value
 
 let check state ~default (value : Syntax.expression) =
-  (match offending state value with
+  (match find_offending_expression state value with
   | Some part ->
       if default then
         State.report state Default_not_constant (State.read_span state part.id)

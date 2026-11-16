@@ -12,7 +12,7 @@ let rec holds_elements (layout : Memory_layout.t) =
   | Niche_encoded { dataful; _ } -> holds_elements dataful.payload
   | Zero_size | Scalar _ | Tag_only _ -> false
 
-let parameter env (mode : Ground.mode) ty =
+let classify_parameter env (mode : Ground.mode) ty =
   let layout = Memory_layout.of_type env ty in
   if layout.size = 0 then None
   else
@@ -27,7 +27,7 @@ let parameter env (mode : Ground.mode) ty =
 
 type result = Nothing | Returned of Lowered.ty | Through_pointer of Lowered.ty
 
-let result env (ty : Ground.ty) =
+let classify_result env (ty : Ground.ty) =
   match ty with
   | Never -> Nothing
   | _ ->
@@ -36,30 +36,32 @@ let result env (ty : Ground.ty) =
       else if layout.size <= by_value_limit then Returned (Value ty)
       else Through_pointer (Pointer { target = Value ty; writable = true })
 
-let signature ?(returns = true) parameters result : Lowered.signature =
+let make_signature ?(returns = true) parameters result : Lowered.signature =
   match result with
   | Nothing -> { parameters; result = None; returns }
   | Returned ty -> { parameters; result = Some ty; returns }
   | Through_pointer pointer -> { parameters = pointer :: parameters; result = None; returns }
 
-let destination result place : Lowered.destination =
+let make_destination result place : Lowered.destination =
   match result with Through_pointer _ -> Written place | Returned _ | Nothing -> Returned place
 
 let evidence = Lowered.Raw (Pointer Opaque)
 
-let function_value env (function_type : Ground.function_type) : Lowered.signature =
+let make_function_value_signature env (function_type : Ground.function_type) : Lowered.signature =
   let result_ty, returns =
-    match function_type.result with Never -> (Nothing, false) | ty -> (result env ty, true)
+    match function_type.result with
+    | Never -> (Nothing, false)
+    | ty -> (classify_result env ty, true)
   in
   let written =
-    List.filter_map (fun (mode, ty) -> parameter env mode ty) function_type.parameters
+    List.filter_map (fun (mode, ty) -> classify_parameter env mode ty) function_type.parameters
   in
   let evidence = List.map (fun _ -> evidence) function_type.uses in
   let environment = Lowered.Raw (Nullable_pointer Opaque) in
-  let signature = signature ~returns (written @ evidence) result_ty in
+  let signature = make_signature ~returns (written @ evidence) result_ty in
   { signature with parameters = environment :: signature.parameters }
 
-let function_value_shape function_type : Memory_layout.shape =
+let make_function_value_shape function_type : Memory_layout.shape =
   Record
     [ ("code", Raw (Pointer (Code function_type))); ("environment", Raw (Nullable_pointer Opaque)) ]
 

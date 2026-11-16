@@ -2,7 +2,7 @@ type t = { enabled : bool; mutable drawn : bool }
 
 let create ~enabled = { enabled = enabled && Output.terminal (); drawn = false }
 
-let width () =
+let measure_width () =
   match Output.columns () with Some columns when columns > 10 -> columns - 1 | _ -> 79
 
 let cut text limit =
@@ -18,7 +18,7 @@ let erase_line = "\r\027[K"
 
 let show status text =
   if status.enabled then begin
-    Output.eprint (erase_line ^ cut text (width ()));
+    Output.eprint (erase_line ^ cut text (measure_width ()));
     status.drawn <- true
   end
 

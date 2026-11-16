@@ -40,19 +40,19 @@ let required_flags =
 type optimization = O1 | O2
 
 let link_time_optimization toolchain =
-  if Substring.contains toolchain.identity "clang" then [ "-flto=thin" ] else [ "-flto" ]
+  if String.includes ~affix:"clang" toolchain.identity then [ "-flto=thin" ] else [ "-flto" ]
 
-let optimization_flag = function O1 -> "-O1" | O2 -> "-O2"
+let show_optimization_flag = function O1 -> "-O1" | O2 -> "-O2"
 
 let compile toolchain ~optimization ~extra ~source ~output =
   let arguments =
-    (optimization_flag optimization :: required_flags) @ extra @ [ "-c"; source; "-o"; output ]
+    (show_optimization_flag optimization :: required_flags) @ extra @ [ "-c"; source; "-o"; output ]
   in
   match Process.run toolchain.compiler arguments with
   | 0, _, _ -> Ok ()
   | _, out, err -> Error (out ^ err)
 
-let response_word path =
+let quote_response_word path =
   let buffer = Buffer.create (String.length path + 2) in
   Buffer.add_char buffer '"';
   String.iter
@@ -66,7 +66,7 @@ let response_word path =
 let link toolchain ~extra ~objects ~output =
   let response = output ^ ".objects" in
   Out_channel.with_open_bin response (fun channel ->
-      List.iter (fun path -> output_string channel (response_word path ^ "\n")) objects);
+      List.iter (fun path -> output_string channel (quote_response_word path ^ "\n")) objects);
   let result =
     Process.run toolchain.compiler (extra @ [ "@" ^ response; "-o"; output; "-lm"; "-pthread" ])
   in

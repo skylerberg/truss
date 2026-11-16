@@ -44,12 +44,9 @@ and dataless = { niche : niche; niche_values : (string * Z.t) list }
 and niche = { path : step list; scalar : scalar; start : Z.t; count : Z.t }
 and step = Field of string | Tag
 
-module Type_table = Hashtbl.Make (struct
+module Type_table = Hashtbl.Make (Structural_key.Make (struct
   type t = Ground.ty
-
-  let equal left right = Ground.compare left right = 0
-  let hash = Hashtbl.hash_param 64 256
-end)
+end))
 
 exception Infinite_size of Ground.ty
 
@@ -66,21 +63,21 @@ let create system ~shape_of =
 let system env = env.system
 let shape env ty = env.shape_of ty
 
-let integer_size = function
+let compute_integer_size = function
   | Int8 | UInt8 -> 1
   | Int16 | UInt16 -> 2
   | Int32 | UInt32 -> 4
   | Int64 | UInt64 -> 8
 
-let integer_range integer =
-  let bits = 8 * integer_size integer in
+let compute_integer_range integer =
+  let bits = 8 * compute_integer_size integer in
   match integer with
   | Int8 | Int16 | Int32 | Int64 ->
       (Z.neg (Z.shift_left Z.one (bits - 1)), Z.pred (Z.shift_left Z.one (bits - 1)))
   | UInt8 | UInt16 | UInt32 | UInt64 -> (Z.zero, Z.pred (Z.shift_left Z.one bits))
 
-let scalar_size = function
-  | Integer integer -> integer_size integer
+let compute_scalar_size = function
+  | Integer integer -> compute_integer_size integer
   | Float32 -> 4
   | Float64 -> 8
   | Bool -> 1
@@ -89,39 +86,44 @@ let scalar_size = function
 
 let zero_size = { size = 0; alignment = 1; form = Zero_size; niche = None }
 let round_up value alignment = (value + alignment - 1) / alignment * alignment
-let bits bytes = Z.shift_left Z.one (8 * bytes)
+let count_values bytes = Z.shift_left Z.one (8 * bytes)
 
-let scalar_niche = function
+let find_scalar_niche = function
   | Bool -> Some { path = []; scalar = Bool; start = Z.of_int 2; count = Z.of_int 254 }
   | Character ->
       let start = Z.of_int 0x110000 in
-      Some { path = []; scalar = Character; start; count = Z.sub (bits 4) start }
+      Some { path = []; scalar = Character; start; count = Z.sub (count_values 4) start }
   | Pointer _ as scalar -> Some { path = []; scalar; start = Z.zero; count = Z.one }
   | Integer _ | Float32 | Float64 | Nullable_pointer _ -> None
 
 let of_scalar scalar =
-  let size = scalar_size scalar in
-  { size; alignment = size; form = Scalar scalar; niche = scalar_niche scalar }
+  let size = compute_scalar_size scalar in
+  { size; alignment = size; form = Scalar scalar; niche = find_scalar_niche scalar }
 
-let tag_for count = if count <= 0x100 then UInt8 else if count <= 0x10000 then UInt16 else UInt32
+let choose_tag count = if count <= 0x100 then UInt8 else if count <= 0x10000 then UInt16 else UInt32
 
-let tag_niche tag count path =
+let make_tag_niche tag count path =
   let start = Z.of_int count in
-  { path; scalar = Integer tag; start; count = Z.sub (bits (integer_size tag)) start }
+  {
+    path;
+    scalar = Integer tag;
+    start;
+    count = Z.sub (count_values (compute_integer_size tag)) start;
+  }
 
-let under name niche = { niche with path = Field name :: niche.path }
+let nest_niche name niche = { niche with path = Field name :: niche.path }
 
-let best_niche (fields : field list) =
+let choose_best_niche (fields : field list) =
   List.fold_left
     (fun best (field : field) ->
       match (field.layout.niche, best) with
       | None, _ -> best
-      | Some niche, None -> Some (under field.name niche)
+      | Some niche, None -> Some (nest_niche field.name niche)
       | Some niche, Some current ->
-          if Z.gt niche.count current.count then Some (under field.name niche) else best)
+          if Z.gt niche.count current.count then Some (nest_niche field.name niche) else best)
     None fields
 
-let place (fields : (string * member * t) list) =
+let place_fields (fields : (string * member * t) list) =
   let sized = List.filter (fun (_, _, (layout : t)) -> layout.size > 0) fields in
   let ordered =
     List.stable_sort
@@ -142,7 +144,12 @@ let place (fields : (string * member * t) list) =
   let placed = List.rev placed in
   if placed = [] then zero_size
   else
-    { size = round_up offset alignment; alignment; form = Struct placed; niche = best_niche placed }
+    {
+      size = round_up offset alignment;
+      alignment;
+      form = Struct placed;
+      niche = choose_best_niche placed;
+    }
 
 let rec of_type env ty =
   match Type_table.find_opt env.layouts ty with
@@ -160,13 +167,13 @@ let rec of_type env ty =
 
 and of_member env = function Typed ty -> of_type env ty | Raw scalar -> of_scalar scalar
 
-and fields env fields =
-  place (List.map (fun (name, member) -> (name, member, of_member env member)) fields)
+and lay_out_fields env fields =
+  place_fields (List.map (fun (name, member) -> (name, member, of_member env member)) fields)
 
 and lay_out env ty (shape : shape) =
   match shape with
   | Scalar scalar -> of_scalar scalar
-  | Record fields' -> fields env fields'
+  | Record fields' -> lay_out_fields env fields'
   | Array (_, 0) -> zero_size
   | Array (element, count) ->
       let element_layout = of_type env element in
@@ -180,15 +187,15 @@ and lay_out env ty (shape : shape) =
         }
   | Sum variants -> of_sum env ty variants
 
-and payload env ty (variant : variant_shape) =
+and lay_out_payload env ty (variant : variant_shape) =
   if variant.indirect then of_scalar (Pointer (Block (ty, variant.name)))
-  else fields env variant.fields
+  else lay_out_fields env variant.fields
 
 and of_sum env ty shapes =
   let variants =
     List.mapi
       (fun index (shape : variant_shape) ->
-        { name = shape.name; index; payload = payload env ty shape })
+        { name = shape.name; index; payload = lay_out_payload env ty shape })
       shapes
   in
   let count = List.length variants in
@@ -196,14 +203,14 @@ and of_sum env ty shapes =
   match dataful with
   | [] when count <= 1 -> zero_size
   | [] ->
-      let tag = tag_for count in
-      let size = integer_size tag in
+      let tag = choose_tag count in
+      let size = compute_integer_size tag in
       {
         size;
         alignment = size;
         form =
           Tag_only { tag; variants = List.map (fun (variant : variant) -> variant.name) variants };
-        niche = Some (tag_niche tag count []);
+        niche = Some (make_tag_niche tag count []);
       }
   | [ only ]
     when match only.payload.niche with
@@ -234,8 +241,8 @@ and of_sum env ty shapes =
         niche;
       }
   | _ ->
-      let tag = tag_for count in
-      let tag_size = integer_size tag in
+      let tag = choose_tag count in
+      let tag_size = compute_integer_size tag in
       let union_size, union_alignment =
         List.fold_left
           (fun (size, alignment) variant ->
@@ -248,14 +255,14 @@ and of_sum env ty shapes =
         size = round_up (payload_offset + union_size) alignment;
         alignment;
         form = Tagged { tag; payload_offset; variants };
-        niche = Some (tag_niche tag count [ Tag ]);
+        niche = Some (make_tag_niche tag count [ Tag ]);
       }
 
-let block env ty name =
+let lay_out_block env ty name =
   match env.shape_of ty with
   | Sum variants -> (
       match List.find_opt (fun (variant : variant_shape) -> variant.name = name) variants with
-      | Some { indirect = true; fields = fields'; _ } -> fields env fields'
+      | Some { indirect = true; fields = fields'; _ } -> lay_out_fields env fields'
       | Some _ -> bug "variant %s is not indirect" name
       | None -> bug "no variant %s" name)
   | _ -> bug "a block of a type that is not a sum type"
@@ -282,7 +289,7 @@ let list_tagged_values tag variants =
 let find_tag_value values name =
   match List.assoc_opt name values with Some value -> value | None -> bug "no variant %s" name
 
-let discriminant layout name =
+let compute_discriminant layout name =
   let tag_value (tag, values) = Tag_value { tag; value = find_tag_value values name } in
   match layout.form with
   | Zero_size -> Only
@@ -307,7 +314,7 @@ let dispatch layout cases =
   | Tag_only { tag; variants } -> switch (list_tag_only_values tag variants)
   | Tagged { tag; variants; _ } -> switch (list_tagged_values tag variants)
   | Zero_size | Niche_encoded _ | Scalar _ | Struct _ | Array _ ->
-      Tests (List.map (fun (name, case) -> (discriminant layout name, case)) cases)
+      Tests (List.map (fun (name, case) -> (compute_discriminant layout name, case)) cases)
 
 let integer_to_string = function
   | Int8 -> "Int8"

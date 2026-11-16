@@ -1,0 +1,5 @@
+use standard::intrinsic
+
+fn sixth(storage: intrinsic::Storage[UInt8]) -> UInt8 {
+  intrinsic::storage_at(storage, index: 5)
+}

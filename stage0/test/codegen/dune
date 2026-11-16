@@ -36,9 +36,9 @@
   lowering_tests
   library_tests)
  (libraries
+  structural_key
   harness
   core_lint
-  substring
   compiler_bug
   zarith
   path

@@ -6,7 +6,9 @@ let rec holds_break (block : Tree.block) =
       match statement.kind with
       | Jump Break -> true
       | While _ | For _ -> false
-      | _ -> List.exists holds_break (Walk.nested_blocks statement))
+      | Basic _ | Choose _ | Assert_by_bit_vector _ | Fork _ | Resume _ | Yield _
+      | Jump (Return _ | Continue | Cancel _ | Unreachable | Written_unreachable | Todo) ->
+          List.exists holds_break (Walk.list_nested_blocks statement))
     block.statements
 
 let project (place : Tree.place) projection =
@@ -14,12 +16,12 @@ let project (place : Tree.place) projection =
 
 let ( let* ) = Option.bind
 
-let core_operand_type : Core.operand -> Types.ty = function
-  | Place place -> Core_walk.place_type place
+let compute_core_operand_type : Core.operand -> Types.ty = function
+  | Place place -> Core_walk.compute_place_type place
   | Value value -> value.type_
 
-let operand_origin : Core.operand -> Core.origin = function
-  | Place place -> Core_walk.place_origin place
+let compute_operand_origin : Core.operand -> Core.origin = function
+  | Place place -> Core_walk.compute_place_origin place
   | Value value -> value.origin
 
 module In_order = struct
@@ -40,7 +42,7 @@ module In_order = struct
         (fun ~count ~index ~loans ->
           let* value, extra = evaluate () in
           if count > 1 then begin
-            let value = Emitter.held builder value type_ origin in
+            let value = Emitter.hold_operand builder value type_ origin in
             (match value with
             | Constant _ | Take _ -> ()
             | _ ->
@@ -100,28 +102,32 @@ let rec is_function_expression (written : Core.expression) =
 let is_unit (type_ : Types.ty) = Types.equal type_ Types.unit
 let diverges (type_ : Types.ty) = type_ = Types.Never
 
-let rec field_path (place : Tree.place) = function
+let rec make_field_path (place : Tree.place) = function
   | [] -> place
-  | field :: rest -> field_path (project place (Field field)) rest
+  | field :: rest -> make_field_path (project place (Field field)) rest
 
-let rec extended_temporaries (value : Core.operand) =
-  match value with Place base -> extended_base base | Value value -> extended_by value
+let rec list_extended_temporaries (value : Core.operand) =
+  match value with
+  | Place base -> list_extended_by_base base
+  | Value value -> list_extended_by value
 
-and extended_by (value : Core.expression) =
+and list_extended_by (value : Core.expression) =
   match value.kind with
-  | Slice { base; _ } -> extended_base base
+  | Slice { base; _ } -> list_extended_by_base base
   | Construct { fields; _ } ->
       List.concat_map
-        (fun (_, field) -> Option.fold ~none:[] ~some:extended_temporaries field)
+        (fun (_, field) -> Option.fold ~none:[] ~some:list_extended_temporaries field)
         fields
-  | Record_update { updates; _ } -> List.concat_map (fun (_, update) -> extended_by update) updates
-  | Collection_literal { elements; construction = Array } -> List.concat_map extended_by elements
+  | Record_update { updates; _ } ->
+      List.concat_map (fun (_, update) -> list_extended_by update) updates
+  | Collection_literal { elements; construction = Array } ->
+      List.concat_map list_extended_by elements
   | _ -> []
 
-and extended_base (base : Core.place) =
+and list_extended_by_base (base : Core.place) =
   match base with
-  | Temporary written -> written.id :: extended_by written
-  | Field { base; _ } -> extended_base base
+  | Temporary written -> written.id :: list_extended_by written
+  | Field { base; _ } -> list_extended_by_base base
   | Local _ | Constant _ | Lent _ -> []
 
 let is_functional walk =
@@ -142,20 +148,20 @@ let is_functional walk =
                     | Core.Passed _ | Core.Default -> false)
                   arguments
               then fine := false;
-              Core_walk.expression_children visit node
-          | _ -> Core_walk.expression_children visit node);
+              Core_walk.walk_expression_children visit node
+          | _ -> Core_walk.walk_expression_children visit node);
       statement =
         (fun (node : Core.statement) ->
           match node.kind with
           | Let { pattern; else_ = None; _ } when not (binds_variable pattern) ->
-              Core_walk.statement_children visit node
-          | Evaluate _ -> Core_walk.statement_children visit node
+              Core_walk.walk_statement_children visit node
+          | Evaluate _ -> Core_walk.walk_statement_children visit node
           | _ -> fine := false);
-      pattern = (fun node -> Core_walk.pattern_children visit node);
+      pattern = (fun node -> Core_walk.walk_pattern_children visit node);
     }
   and binds_variable (pattern : Core.pattern) =
     let child_binds = ref false in
-    Core_walk.pattern_children
+    Core_walk.walk_pattern_children
       {
         Core_walk.ignore_all with
         pattern = (fun inner -> if binds_variable inner then child_binds := true);
@@ -166,9 +172,9 @@ let is_functional walk =
   walk visit;
   !fine
 
-let names_of (written : Core.expression) =
+let list_names (written : Core.expression) =
   let names = ref [] in
-  Core_walk.expression
+  Core_walk.walk_expression
     {
       Core_walk.ignore_all with
       place =
@@ -177,10 +183,10 @@ let names_of (written : Core.expression) =
     written;
   List.rev !names
 
-let literal_place text type_ = { Tree.root = Literal { text; type_ }; projections = [] }
+let make_literal_place text type_ = { Tree.root = Literal { text; type_ }; projections = [] }
 
 let read_literal text type_ origin =
-  Tree.Borrow { place = literal_place text type_; type_; mode = Read; origin }
+  Tree.Borrow { place = make_literal_place text type_; type_; mode = Read; origin }
 
 let lower_pattern_constant (pattern : Core.pattern) (value : Core.pattern_constant) : Tree.operand =
   let type_ = pattern.type_ in
@@ -197,7 +203,7 @@ let lower_range_bound (pattern : Core.pattern) (bound : Core.range_bound) : Tree
     | Integer_bound value -> Integer_constant value
     | Constant_bound path -> Named_constant path)
 
-let rec expression builder (node : Core.expression) : Tree.operand option =
+let rec lower_expression builder (node : Core.expression) : Tree.operand option =
   let origin = node.origin in
   let hold value = Emitter.hold builder node.type_ origin value in
   if not (Emitter.reaches builder) then None
@@ -208,27 +214,29 @@ let rec expression builder (node : Core.expression) : Tree.operand option =
     | Boolean value -> Some (Constant { value = Boolean value; type_ = node.type_ })
     | String text -> hold (Copy (read_literal text node.type_ origin))
     | Template { literals; call = { kind = Call called; _ } } ->
-        let* call = call_of builder called ~node:node.id ~origin:node.origin in
-        let local = Emitter.temporary builder node.type_ origin in
+        let* call = lower_call builder called ~node:node.id ~origin:node.origin in
+        let local = Emitter.allocate_temporary builder node.type_ origin in
         Emitter.emit builder
-          (Basic (Template { destination = Emitter.at local; literals; call }))
+          (Basic (Template { destination = Emitter.make_local_place local; literals; call }))
           origin;
-        Some (Tree.Use { place = Emitter.at local; type_ = node.type_; origin = node.origin })
+        Some
+          (Tree.Use
+             { place = Emitter.make_local_place local; type_ = node.type_; origin = node.origin })
     | Template _ -> bug "a tagged template whose value is not a call"
     | Use place_ ->
-        let* place_ = place builder place_ in
+        let* place_ = lower_place builder place_ in
         Some (Tree.Use { place = place_; type_ = node.type_; origin = node.origin })
     | Copy copied ->
-        let* copied = operand builder Read copied in
+        let* copied = lower_operand builder Read copied in
         hold (Copy copied)
     | Function_value _ | Lambda _ ->
-        Option.map fst (function_expression builder node ~is_argument:false)
+        Option.map fst (lower_function_expression builder node ~is_argument:false)
     | Value_parameter parameter -> hold (Value_parameter parameter)
     | Construct { variant; fields } ->
         let* fields = construct_fields builder fields in
         hold (Construct { variant; fields })
     | Collection_literal { elements; construction = Array } ->
-        let* elements = operands builder elements in
+        let* elements = lower_operands builder elements in
         hold (Array elements)
     | Record_update { base; updates } ->
         let* base_value, update_values =
@@ -244,17 +252,19 @@ let rec expression builder (node : Core.expression) : Tree.operand option =
                          (plan_expression builder written))
                      updates)))
         in
-        let local = Emitter.temporary builder node.type_ origin in
-        Emitter.assign builder (Emitter.at local) (Operand base_value) origin;
+        let local = Emitter.allocate_temporary builder node.type_ origin in
+        Emitter.assign builder (Emitter.make_local_place local) (Operand base_value) origin;
         List.iter
           (fun (fields, (written : Core.expression), value) ->
             Emitter.assign builder
-              (field_path (Emitter.at local) fields)
+              (make_field_path (Emitter.make_local_place local) fields)
               (Operand value) written.origin)
           update_values;
-        Some (Tree.Use { place = Emitter.at local; type_ = node.type_; origin = node.origin })
+        Some
+          (Tree.Use
+             { place = Emitter.make_local_place local; type_ = node.type_; origin = node.origin })
     | Slice { base; callee; bounds } ->
-        let* callee = callee_of builder callee in
+        let* callee = lower_callee builder callee in
         let* (receiver, base_place), bounds =
           In_order.run builder
             (In_order.map2
@@ -273,21 +283,23 @@ let rec expression builder (node : Core.expression) : Tree.operand option =
             origin = node.origin;
           }
         in
-        let local = Emitter.temporary builder node.type_ origin in
+        let local = Emitter.allocate_temporary builder node.type_ origin in
         Emitter.emit builder
           (Basic
              (Slice
                 {
-                  destination = Emitter.at local;
-                  base = Emitter.borrowed_place builder base_place;
-                  base_type = Core_walk.place_type base;
+                  destination = Emitter.make_local_place local;
+                  base = Emitter.borrow_place builder base_place;
+                  base_type = Core_walk.compute_place_type base;
                   call;
                 }))
           origin;
-        Some (Tree.Use { place = Emitter.at local; type_ = node.type_; origin = node.origin })
-    | Call called -> call_value builder node called
+        Some
+          (Tree.Use
+             { place = Emitter.make_local_place local; type_ = node.type_; origin = node.origin })
+    | Call called -> lower_call_value builder node called
     | Operator { operation; arguments } ->
-        let* operands = operands builder arguments in
+        let* operands = lower_operands builder arguments in
         let type_arguments =
           List.map (fun (argument : Core.expression) -> Types.Type argument.type_) arguments
         in
@@ -296,42 +308,44 @@ let rec expression builder (node : Core.expression) : Tree.operand option =
         let* left, right = evaluate_pair builder left right in
         hold (Compare { comparison; left; right })
     | Not inner ->
-        let* inner = expression builder inner in
+        let* inner = lower_expression builder inner in
         hold (Not inner)
-    | And _ | Or _ | Implies _ | Matches _ -> truth builder node
+    | And _ | Or _ | Implies _ | Matches _ -> lower_truth builder node
     | Convert { conversion = Widen; value = converted } when is_function_expression converted ->
-        Option.map fst (function_expression builder node ~is_argument:false)
+        Option.map fst (lower_function_expression builder node ~is_argument:false)
     | Convert { conversion; value = converted } ->
-        let* value = expression builder converted in
+        let* value = lower_expression builder converted in
         hold (Convert { conversion; value; converts_function_expression = false })
     | To_any { value; trait; evidence } ->
-        let* value = expression builder value in
+        let* value = lower_expression builder value in
         hold (To_any { value; trait; evidence })
     | If { condition = tested; then_; else_; binds_lent_part } ->
         let condition, on_true, on_false, held =
           Emitter.in_condition_scope builder
             ~lends:(if binds_lent_part then For_block else For_condition)
-            (fun () -> expression builder tested)
+            (fun () -> lower_expression builder tested)
         in
         let* condition = condition in
-        let result = value_local builder node in
+        let result = allocate_value_local builder node in
         let arm ?held ended (body : Core.block option) =
-          Emitter.block_of builder (fun () ->
+          Emitter.build_block builder (fun () ->
               Emitter.end_scope builder ended tested.origin;
               Emitter.in_scope ?held builder origin (fun () ->
-                  match (Option.map (block builder) body, result) with
+                  match (Option.map (lower_block builder) body, result) with
                   | Some (Some value), Some local ->
-                      Emitter.assign builder (Emitter.at local) (Operand value) origin;
-                      Some (Tree.Use { place = Emitter.at local; type_ = node.type_; origin })
+                      Emitter.assign builder (Emitter.make_local_place local) (Operand value) origin;
+                      Some
+                        (Tree.Use
+                           { place = Emitter.make_local_place local; type_ = node.type_; origin })
                   | Some None, _ -> None
                   | (Some (Some _) | None), _ -> Some Emitter.unit_value))
         in
         let then_ = arm ~held on_true (Some then_) in
         let else_ = arm on_false else_ in
-        chosen builder node [ then_; else_ ]
+        lower_choice builder node [ then_; else_ ]
           (Tree.Conditional { condition; then_; else_; if_condition = Some tested.origin })
     | Match { scrutinees; arms } -> match_ builder node scrutinees arms
-    | Block inner -> Emitter.in_value_scope builder origin (fun () -> block builder inner)
+    | Block inner -> Emitter.in_value_scope builder origin (fun () -> lower_block builder inner)
     | Provide { implementations; body } ->
         let* provided =
           In_order.run builder
@@ -348,7 +362,7 @@ let rec expression builder (node : Core.expression) : Tree.operand option =
                           origin = implementation.origin;
                         })
                       (In_order.operand builder
-                         (fun () -> operand builder implementation.mode implementation.value)
+                         (fun () -> lower_operand builder implementation.mode implementation.value)
                          implementation.type_ implementation.origin))
                   implementations))
         in
@@ -366,14 +380,14 @@ let rec expression builder (node : Core.expression) : Tree.operand option =
                          Provide_body provided.origin)
                 | _ -> ())
               provided;
-            block builder body)
+            lower_block builder body)
     | Return returned ->
         (match returned with
         | None -> Emitter.return_ builder None origin
         | Some returned ->
             Option.iter
               (fun value -> Emitter.return_ builder (Some value) origin)
-              (expression builder returned));
+              (lower_expression builder returned));
         None
     | Break ->
         Emitter.break_ builder origin;
@@ -388,28 +402,37 @@ let rec expression builder (node : Core.expression) : Tree.operand option =
         Emitter.jump builder Written_unreachable origin;
         None
     | Echo inner ->
-        let* value = expression builder inner in
-        let local = Emitter.temporary builder inner.type_ origin in
-        Emitter.assign builder (Emitter.at local) (Operand value) origin;
+        let* value = lower_expression builder inner in
+        let local = Emitter.allocate_temporary builder inner.type_ origin in
+        Emitter.assign builder (Emitter.make_local_place local) (Operand value) origin;
         Emitter.emit builder
           (Basic
-             (Echo (Borrow { place = Emitter.at local; type_ = inner.type_; mode = Read; origin })))
+             (Echo
+                (Borrow
+                   {
+                     place = Emitter.make_local_place local;
+                     type_ = inner.type_;
+                     mode = Read;
+                     origin;
+                   })))
           origin;
-        Some (Tree.Use { place = Emitter.at local; type_ = node.type_; origin = node.origin })
+        Some
+          (Tree.Use
+             { place = Emitter.make_local_place local; type_ = node.type_; origin = node.origin })
     | Current_target -> (
         match Emitter.compound_target builder with
         | Some target -> Some (Take { place = target; type_ = node.type_; origin = node.origin })
         | None -> bug "the old value of a target outside a compound assignment")
     | Quantified { quantifier; binder; body } when Emitter.is_specification builder ->
-        quantified builder node quantifier binder body
+        lower_quantified builder node quantifier binder body
     | Quantified { quantifier; binder = Over_range { pattern; start; stop; inclusive }; body } ->
-        quantifier_loop builder node quantifier body (fun ~loop ~each ->
-            range_loop builder ~origin ~pattern ~start ~stop ~inclusive ~loop ~each)
+        lower_quantifier_loop builder node quantifier body (fun ~loop ~each ->
+            lower_range_loop builder ~origin ~pattern ~start ~stop ~inclusive ~loop ~each)
     | Quantified { quantifier; binder = Over_elements { pattern; elements }; body } ->
-        quantifier_loop builder node quantifier body (fun ~loop ~each ->
-            elements_loop builder ~origin ~pattern ~elements ~loop ~each)
+        lower_quantifier_loop builder node quantifier body (fun ~loop ~each ->
+            lower_elements_loop builder ~origin ~pattern ~elements ~loop ~each)
     | Collection_literal { elements; construction = Specification_only } ->
-        let* elements = operands builder elements in
+        let* elements = lower_operands builder elements in
         hold (Array elements)
     | Map_literal { entries } ->
         let* entries =
@@ -425,7 +448,7 @@ let rec expression builder (node : Core.expression) : Tree.operand option =
         hold (Specification (Map entries))
     | Result -> hold (Specification Result)
     | Yielded -> hold (Specification Yielded)
-    | Old inner -> Emitter.in_old builder (fun () -> expression builder inner)
+    | Old inner -> Emitter.in_old builder (fun () -> lower_expression builder inner)
     | Identical (first, second) ->
         let* first, second = evaluate_pair builder first second in
         hold (Specification (Identical (first, second)))
@@ -436,22 +459,23 @@ let rec expression builder (node : Core.expression) : Tree.operand option =
           | _ -> argument.type_
         in
         let unconverted = List.map unconverted arguments in
-        let* arguments = operands builder arguments in
+        let* arguments = lower_operands builder arguments in
         hold (Specification (Applied { function_; arguments; unconverted }))
     | Method_time callee ->
-        let* callee = callee_of builder callee in
+        let* callee = lower_callee builder callee in
         hold (Specification (Method_time callee))
     | Quantified _ -> bug "a quantifier over a type or a collection in code that runs"
 
 and plan_expression builder (node : Core.expression) =
-  In_order.operand builder (fun () -> expression builder node) node.type_ node.origin
+  In_order.operand builder (fun () -> lower_expression builder node) node.type_ node.origin
 
 and plan_operand builder mode (passed : Core.operand) =
   In_order.operand builder
-    (fun () -> operand builder mode passed)
-    (core_operand_type passed) (operand_origin passed)
+    (fun () -> lower_operand builder mode passed)
+    (compute_core_operand_type passed)
+    (compute_operand_origin passed)
 
-and operands builder nodes =
+and lower_operands builder nodes =
   In_order.run builder (In_order.all (List.map (plan_expression builder) nodes))
 
 and evaluate_pair builder (first : Core.expression) (second : Core.expression) =
@@ -477,11 +501,11 @@ and construct_fields builder fields =
                            bug
                              "a constructor field that is a place, in a construct that no lending \
                               method lends"
-                       | Value value -> expression builder value)
-                     (core_operand_type field) (operand_origin field)))
+                       | Value value -> lower_expression builder value)
+                     (compute_core_operand_type field) (compute_operand_origin field)))
           fields))
 
-and yielded builder (mode : Types.mode) (part : Core.operand) : Tree.yielded option =
+and lower_yielded builder (mode : Types.mode) (part : Core.operand) : Tree.yielded option =
   let rec lends : Core.operand -> bool = function
     | Place _ -> true
     | Value { kind = Construct { fields; _ }; _ } ->
@@ -506,55 +530,63 @@ and yielded builder (mode : Types.mode) (part : Core.operand) : Tree.yielded opt
         | _ -> In_order.map (fun value -> Tree.Part value) (plan_operand builder mode field)
       in
       In_order.run builder (plan_part part)
-  | _ -> Option.map (fun value -> Tree.Part value) (operand builder mode part)
+  | _ -> Option.map (fun value -> Tree.Part value) (lower_operand builder mode part)
 
-and operand builder (mode : Types.mode) (passed : Core.operand) =
+and lower_operand builder (mode : Types.mode) (passed : Core.operand) =
   match passed with
   | Place written ->
-      let* passed = place builder written in
-      Some (borrow written passed mode)
-  | Value value -> expression builder value
+      let* passed = lower_place builder written in
+      Some (make_borrow written passed mode)
+  | Value value -> lower_expression builder value
 
-and borrow (written : Core.place) (place : Tree.place) mode =
+and make_borrow (written : Core.place) (place : Tree.place) mode =
   Borrow
-    { place; type_ = Core_walk.place_type written; mode; origin = Core_walk.place_origin written }
+    {
+      place;
+      type_ = Core_walk.compute_place_type written;
+      mode;
+      origin = Core_walk.compute_place_origin written;
+    }
 
 and plan_borrow builder (written : Core.place) =
   In_order.operand_with builder
     (fun () ->
-      let* place = place builder written in
-      Some (borrow written place Read, place))
-    (Core_walk.place_type written) (Core_walk.place_origin written)
+      let* place = lower_place builder written in
+      Some (make_borrow written place Read, place))
+    (Core_walk.compute_place_type written)
+    (Core_walk.compute_place_origin written)
 
-and place builder (written : Core.place) : Tree.place option =
+and lower_place builder (written : Core.place) : Tree.place option =
   if not (Emitter.reaches builder) then None
   else
     match written with
     | Local { local; type_; origin } when Emitter.reads_entry builder local ->
-        let entry = Emitter.temporary builder type_ origin in
-        Emitter.assign builder (Emitter.at entry)
-          (Specification (Entry (Emitter.free_source builder local ~type_ ~origin)))
+        let entry = Emitter.allocate_temporary builder type_ origin in
+        Emitter.assign builder (Emitter.make_local_place entry)
+          (Specification (Entry (Emitter.obtain_free_source builder local ~type_ ~origin)))
           origin;
-        Some (Emitter.at entry)
+        Some (Emitter.make_local_place entry)
     | Local { local; type_; origin } ->
-        Some (Emitter.at (Emitter.free_source builder local ~type_ ~origin))
+        Some (Emitter.make_local_place (Emitter.obtain_free_source builder local ~type_ ~origin))
     | Constant { path; _ } -> Some { root = Constant path; projections = [] }
     | Field { base; field; _ } ->
-        let* base = place builder base in
+        let* base = lower_place builder base in
         Some (project base (Field field))
-    | Lent lending -> lent builder lending ~duration:Tree.Rest_of_statement
-    | Temporary { kind = String text; type_; _ } -> Some (literal_place text type_)
+    | Lent lending -> lower_lent builder lending ~duration:Tree.Rest_of_statement
+    | Temporary { kind = String text; type_; _ } -> Some (make_literal_place text type_)
     | Temporary written ->
-        let* value = expression builder written in
-        let local = Emitter.place_temporary builder ~node:written.id written.type_ written.origin in
-        Emitter.assign builder (Emitter.at local) (Operand value) written.origin;
-        Some (Emitter.at local)
+        let* value = lower_expression builder written in
+        let local =
+          Emitter.allocate_place_temporary builder ~node:written.id written.type_ written.origin
+        in
+        Emitter.assign builder (Emitter.make_local_place local) (Operand value) written.origin;
+        Some (Emitter.make_local_place local)
 
-and lent builder (lending : Core.expression) ~duration : Tree.place option =
+and lower_lent builder (lending : Core.expression) ~duration : Tree.place option =
   match lending.kind with
   | Call ({ lends = Some mode; _ } as called) ->
-      let* call = call_of builder called ~node:lending.id ~origin:lending.origin in
-      let part = Emitter.new_local builder (Lent mode) lending.type_ lending.origin in
+      let* call = lower_call builder called ~node:lending.id ~origin:lending.origin in
+      let part = Emitter.allocate_local builder (Lent mode) lending.type_ lending.origin in
       Emitter.add_temporary builder part;
       Emitter.emit builder (Basic (Lend { part; call })) lending.origin;
       (match call.arguments with
@@ -564,11 +596,11 @@ and lent builder (lending : Core.expression) ~duration : Tree.place option =
                (if mode = Mut then Mut else Read)
                duration lending.origin)
       | _ -> ());
-      Some (Emitter.at part)
+      Some (Emitter.make_local_place part)
   | Call _ -> bug "a lent place whose call does not lend"
   | _ -> bug "a lent place that is not a call"
 
-and function_expression builder (node : Core.expression) ~is_argument :
+and lower_function_expression builder (node : Core.expression) ~is_argument :
     (Tree.operand * Tree.function_argument) option =
   let origin = node.origin in
   let hold value = Emitter.hold builder node.type_ origin value in
@@ -577,7 +609,7 @@ and function_expression builder (node : Core.expression) ~is_argument :
       let* value = hold (Function_value { path; type_arguments; is_argument }) in
       Some (value, Tree.Function_reference { path; origin })
   | Lambda { parameters; captures; body; _ } ->
-      let index = lambda builder parameters captures body in
+      let index = lower_lambda builder parameters captures body in
       let* value =
         hold
           (Lambda
@@ -591,15 +623,16 @@ and function_expression builder (node : Core.expression) ~is_argument :
                        Tree.local = capture.local;
                        type_ = capture.type_;
                        place =
-                         Emitter.at
-                           (Emitter.free_source builder capture.local ~type_:capture.type_ ~origin);
+                         Emitter.make_local_place
+                           (Emitter.obtain_free_source builder capture.local ~type_:capture.type_
+                              ~origin);
                      })
                    captures;
              })
       in
       Some (value, Tree.Lambda_expression { body = index; origin; type_ = node.type_ })
   | Convert { conversion = Widen as conversion; value = converted } ->
-      let* value, function_ = function_expression builder converted ~is_argument in
+      let* value, function_ = lower_function_expression builder converted ~is_argument in
       let* value =
         hold
           (Convert
@@ -613,11 +646,11 @@ and function_expression builder (node : Core.expression) ~is_argument :
       Some (value, function_)
   | _ -> bug "a function expression that is no function and no lambda"
 
-and callee_of builder (callee : Core.callee) : Tree.callee option =
-  Core_walk.traverse_indirect (operand builder Read) callee
+and lower_callee builder (callee : Core.callee) : Tree.callee option =
+  Core_walk.traverse_indirect (lower_operand builder Read) callee
 
-and call_of builder (called : Core.call) ~node ~origin : Tree.call option =
-  let* callee = callee_of builder called.callee in
+and lower_call builder (called : Core.call) ~node ~origin : Tree.call option =
+  let* callee = lower_callee builder called.callee in
   let* arguments =
     In_order.run builder (In_order.all (List.map (plan_argument builder) called.arguments))
   in
@@ -635,15 +668,15 @@ and plan_argument builder (argument : Core.argument) =
              | Value written when is_function_expression written ->
                  Option.map
                    (fun (passed, function_) -> (passed, Some function_))
-                   (function_expression builder written ~is_argument:true)
+                   (lower_function_expression builder written ~is_argument:true)
              | Place _ | Value _ ->
-                 Option.map (fun passed -> (passed, None)) (operand builder mode value))
-           (core_operand_type value) (operand_origin value))
+                 Option.map (fun passed -> (passed, None)) (lower_operand builder mode value))
+           (compute_core_operand_type value) (compute_operand_origin value))
 
-and call_value builder (node : Core.expression) (called : Core.call) =
+and lower_call_value builder (node : Core.expression) (called : Core.call) =
   let origin = node.origin in
   match called.callee with
-  | Intrinsic { operation; type_arguments } when Intrinsic.primitive operation ->
+  | Intrinsic { operation; type_arguments } when Intrinsic.is_primitive operation ->
       let* operands =
         In_order.run builder
           (In_order.all
@@ -655,7 +688,7 @@ and call_value builder (node : Core.expression) (called : Core.call) =
       in
       Emitter.hold builder node.type_ origin (Operation { operation; type_arguments; operands })
   | _ ->
-      let* call = call_of builder called ~node:node.id ~origin:node.origin in
+      let* call = lower_call builder called ~node:node.id ~origin:node.origin in
       if diverges node.type_ then begin
         Emitter.emit builder (Basic (Call { destination = None; call })) origin;
         Emitter.jump builder Unreachable origin;
@@ -666,11 +699,14 @@ and call_value builder (node : Core.expression) (called : Core.call) =
         Some (Tree.Constant { value = Unit; type_ = Types.unit })
       end
       else
-        let local = Emitter.temporary builder node.type_ origin in
-        Emitter.emit builder (Basic (Call { destination = Some (Emitter.at local); call })) origin;
-        Some (Use { place = Emitter.at local; type_ = node.type_; origin = node.origin })
+        let local = Emitter.allocate_temporary builder node.type_ origin in
+        Emitter.emit builder
+          (Basic (Call { destination = Some (Emitter.make_local_place local); call }))
+          origin;
+        Some
+          (Use { place = Emitter.make_local_place local; type_ = node.type_; origin = node.origin })
 
-and chosen builder (node : Core.expression) (blocks : Tree.block list) choice =
+and lower_choice builder (node : Core.expression) (blocks : Tree.block list) choice =
   let type_ = if diverges node.type_ then Types.unit else node.type_ in
   let held = Emitter.hold_choice builder type_ node.origin choice in
   if List.exists (fun (block : Tree.block) -> block.value <> None) blocks then held
@@ -679,10 +715,10 @@ and chosen builder (node : Core.expression) (blocks : Tree.block list) choice =
     None
   end
 
-and truth builder (node : Core.expression) : Tree.operand option =
+and lower_truth builder (node : Core.expression) : Tree.operand option =
   let connective connective (left : Core.expression) (right : Core.expression) =
-    let* left = expression builder left in
-    let right = Emitter.block_of builder (fun () -> expression builder right) in
+    let* left = lower_expression builder left in
+    let right = Emitter.build_block builder (fun () -> lower_expression builder right) in
     Emitter.hold_choice builder node.type_ node.origin (Connective { connective; left; right })
   in
   match node.kind with
@@ -690,12 +726,13 @@ and truth builder (node : Core.expression) : Tree.operand option =
   | Or (left, right) -> connective Or left right
   | Implies (left, right) -> connective Implies left right
   | Matches { value; pattern } ->
-      let* scrutinee = scrutinee builder value in
+      let* scrutinee = lower_scrutinee builder value in
       Emitter.binding_to_statement builder (fun () ->
           match_patterns builder [ pattern ] [ scrutinee ] node.origin)
   | _ -> bug "a condition that is no short-circuit operator and no `is`"
 
-and pattern_tests ~matched builder (patterns : Core.pattern list) places : Tree.operand option =
+and lower_pattern_tests ~matched builder (patterns : Core.pattern list) places : Tree.operand option
+    =
   let tested = ref [] in
   let branch_on value origin =
     match value with
@@ -725,13 +762,13 @@ and match_patterns ?(covers = false) builder (patterns : Core.pattern list) plac
     | [ patterns ] when covers ->
         matched patterns ();
         Some (Tree.Constant { value = Boolean true; type_ = Types.bool })
-    | [ patterns ] -> pattern_tests builder patterns places ~matched:(matched patterns)
+    | [ patterns ] -> lower_pattern_tests builder patterns places ~matched:(matched patterns)
     | patterns :: later ->
-        let* left = pattern_tests builder patterns places ~matched:(matched patterns) in
-        let right = Emitter.block_of builder (fun () -> any later) in
+        let* left = lower_pattern_tests builder patterns places ~matched:(matched patterns) in
+        let right = Emitter.build_block builder (fun () -> any later) in
         Emitter.hold_choice builder Types.bool origin (Connective { connective = Or; left; right })
   in
-  any (expansions patterns)
+  any (expand_patterns patterns)
 
 and match_ builder (node : Core.expression) scrutinees (arms : Core.arm list) : Tree.operand option
     =
@@ -748,15 +785,17 @@ and match_ builder (node : Core.expression) scrutinees (arms : Core.arm list) : 
   let places =
     List.map
       (fun ((scrutinee : Core.operand), value) ->
-        scrutinee_place builder value (core_operand_type scrutinee) (operand_origin scrutinee))
+        lower_scrutinee_place builder value
+          (compute_core_operand_type scrutinee)
+          (compute_operand_origin scrutinee))
       scrutinee_values
   in
-  let result = value_local builder node in
+  let result = allocate_value_local builder node in
   let left_by_arm_before = ref [] in
   let case (arm : Core.arm) : Tree.case =
     Emitter.in_arm_scope builder @@ fun scope ->
     let tests =
-      Emitter.block_of builder (fun () ->
+      Emitter.build_block builder (fun () ->
           List.iter
             (fun (ended : Tree.statement) -> Emitter.emit builder ended.kind ended.origin)
             !left_by_arm_before;
@@ -765,7 +804,7 @@ and match_ builder (node : Core.expression) scrutinees (arms : Core.arm list) : 
     let guard =
       Option.map
         (fun (guard : Core.expression) ->
-          Emitter.block_of builder (fun () ->
+          Emitter.build_block builder (fun () ->
               let loans =
                 List.filter_map
                   (fun value ->
@@ -777,14 +816,20 @@ and match_ builder (node : Core.expression) scrutinees (arms : Core.arm list) : 
               in
               let holds, ended, _, _ =
                 Emitter.in_condition_scope ~lends:For_statement builder (fun () ->
-                    expression builder guard)
+                    lower_expression builder guard)
               in
               let holds =
                 Option.map
                   (fun value ->
-                    let local = Emitter.temporary builder Types.bool guard.origin in
-                    Emitter.assign builder (Emitter.at local) (Operand value) guard.origin;
-                    Tree.Use { place = Emitter.at local; type_ = Types.bool; origin = guard.origin })
+                    let local = Emitter.allocate_temporary builder Types.bool guard.origin in
+                    Emitter.assign builder (Emitter.make_local_place local) (Operand value)
+                      guard.origin;
+                    Tree.Use
+                      {
+                        place = Emitter.make_local_place local;
+                        type_ = Types.bool;
+                        origin = guard.origin;
+                      })
                   holds
               in
               Emitter.end_scope builder ended guard.origin;
@@ -793,7 +838,7 @@ and match_ builder (node : Core.expression) scrutinees (arms : Core.arm list) : 
         arm.guard
     in
     let value =
-      Emitter.block_of builder (fun () ->
+      Emitter.build_block builder (fun () ->
           if arm.patterns <> [] then
             Emitter.emit builder
               (Basic
@@ -804,51 +849,57 @@ and match_ builder (node : Core.expression) scrutinees (arms : Core.arm list) : 
                     }))
               arm.origin;
           let value =
-            match (block builder arm.body, result) with
+            match (lower_block builder arm.body, result) with
             | Some value, Some local ->
-                Emitter.assign builder (Emitter.at local) (Operand value) arm.origin;
-                Some (Tree.Use { place = Emitter.at local; type_ = node.type_; origin })
+                Emitter.assign builder (Emitter.make_local_place local) (Operand value) arm.origin;
+                Some
+                  (Tree.Use { place = Emitter.make_local_place local; type_ = node.type_; origin })
             | Some _, None -> Some Emitter.unit_value
             | None, _ -> None
           in
           Emitter.end_scope builder scope arm.origin;
           value)
     in
-    left_by_arm_before := Emitter.dead_in scope arm.origin;
+    left_by_arm_before := Emitter.make_dead_statements scope arm.origin;
     { Tree.tests; guard; value }
   in
   let cases = List.map case arms in
-  chosen builder node (List.map (fun (case : Tree.case) -> case.value) cases) (Cases cases)
+  lower_choice builder node (List.map (fun (case : Tree.case) -> case.value) cases) (Cases cases)
 
-and value_local builder (node : Core.expression) =
+and allocate_value_local builder (node : Core.expression) =
   if is_unit node.type_ || diverges node.type_ then None
-  else Some (Emitter.temporary builder node.type_ node.origin)
+  else Some (Emitter.allocate_temporary builder node.type_ node.origin)
 
-and block builder (body : Core.block) : Tree.operand option =
-  List.iter (statement builder) body.statements;
+and lower_block builder (body : Core.block) : Tree.operand option =
+  List.iter (lower_statement builder) body.statements;
   match body.value with
-  | Some value -> expression builder value
+  | Some value -> lower_expression builder value
   | None -> if Emitter.reaches builder then Some Emitter.unit_value else None
 
-and scrutinee builder (matched : Core.operand) : Tree.place option =
+and lower_scrutinee builder (matched : Core.operand) : Tree.place option =
   match matched with
-  | Place written -> place builder written
+  | Place written -> lower_place builder written
   | Value value ->
-      let* value = expression builder value in
-      let local = Emitter.temporary builder (core_operand_type matched) (operand_origin matched) in
-      Emitter.assign builder (Emitter.at local) (Operand value) (operand_origin matched);
-      Some (Emitter.at local)
+      let* value = lower_expression builder value in
+      let local =
+        Emitter.allocate_temporary builder
+          (compute_core_operand_type matched)
+          (compute_operand_origin matched)
+      in
+      Emitter.assign builder (Emitter.make_local_place local) (Operand value)
+        (compute_operand_origin matched);
+      Some (Emitter.make_local_place local)
 
-and scrutinee_place builder (value : Tree.operand) type_ origin : Tree.place =
+and lower_scrutinee_place builder (value : Tree.operand) type_ origin : Tree.place =
   match value with
   | Borrow { place; _ } -> place
   | Use { place = { root = Local local; projections = [] } as place; _ }
-    when (Emitter.local_info builder local).kind = Temporary ->
+    when (Emitter.lookup_local_info builder local).kind = Temporary ->
       place
   | Use _ | Take _ | Constant _ ->
-      let local = Emitter.temporary builder type_ origin in
-      Emitter.assign builder (Emitter.at local) (Operand value) origin;
-      Emitter.at local
+      let local = Emitter.allocate_temporary builder type_ origin in
+      Emitter.assign builder (Emitter.make_local_place local) (Operand value) origin;
+      Emitter.make_local_place local
 
 and test builder (pattern : Core.pattern) (scrutinee : Tree.place) ~branch_on =
   let origin = pattern.origin in
@@ -885,14 +936,14 @@ and test builder (pattern : Core.pattern) (scrutinee : Tree.place) ~branch_on =
                 right = lower_range_bound pattern stop;
               }))
   | Equal_to { value; equal } -> (
-      match callee_of builder equal with
+      match lower_callee builder equal with
       | Some callee when Emitter.reaches builder ->
-          let local = Emitter.temporary builder Types.bool origin in
+          let local = Emitter.allocate_temporary builder Types.bool origin in
           Emitter.emit builder
             (Basic
                (Call
                   {
-                    destination = Some (Emitter.at local);
+                    destination = Some (Emitter.make_local_place local);
                     call =
                       {
                         callee;
@@ -927,7 +978,13 @@ and test builder (pattern : Core.pattern) (scrutinee : Tree.place) ~branch_on =
                   }))
             origin;
           branch
-            (Some (Use { place = Emitter.at local; type_ = Types.bool; origin = pattern.origin }))
+            (Some
+               (Use
+                  {
+                    place = Emitter.make_local_place local;
+                    type_ = Types.bool;
+                    origin = pattern.origin;
+                  }))
       | _ -> ())
   | Alternatives _ -> bug "alternatives are expanded before they are tested"
 
@@ -946,7 +1003,7 @@ and bind ?(owned = false) builder (pattern : Core.pattern) (scrutinee : Tree.pla
           Emitter.note_bound_to_place builder bound
       | _ -> ());
       Emitter.emit builder (Basic (Live [ bound ])) pattern.origin;
-      Emitter.assign builder (Emitter.at bound)
+      Emitter.assign builder (Emitter.make_local_place bound)
         (Operand
            (match mode with
            | Own -> Use { place = scrutinee; type_ = pattern.type_; origin = pattern.origin }
@@ -964,7 +1021,7 @@ and bind ?(owned = false) builder (pattern : Core.pattern) (scrutinee : Tree.pla
       List.iter (fun (field, inner) -> bind builder inner (project scrutinee (Field field))) fields
   | Alternatives _ -> bug "alternatives are expanded before they are bound"
 
-and expansions (patterns : Core.pattern list) : Core.pattern list list =
+and expand_patterns (patterns : Core.pattern list) : Core.pattern list list =
   let rec expand (pattern : Core.pattern) : Core.pattern list =
     match pattern.kind with
     | Alternatives alternatives -> List.concat_map expand alternatives
@@ -988,14 +1045,14 @@ and expansions (patterns : Core.pattern list) : Core.pattern list list =
       List.concat_map (fun pattern -> List.map (fun rest -> pattern :: rest) rest) (expand pattern))
     patterns [ [] ]
 
-and statement builder (node : Core.statement) =
+and lower_statement builder (node : Core.statement) =
   let origin = node.origin in
   Emitter.in_statement builder origin (fun () ->
       match node.kind with
       | Let { pattern; value; else_ } -> (
           let scrutinee =
-            Emitter.extending builder (extended_temporaries value) (fun () ->
-                scrutinee builder value)
+            Emitter.extending builder (list_extended_temporaries value) (fun () ->
+                lower_scrutinee builder value)
           in
           match (scrutinee, else_) with
           | None, _ -> ()
@@ -1008,10 +1065,11 @@ and statement builder (node : Core.statement) =
               in
               Option.iter
                 (fun condition ->
-                  let then_ = Emitter.block_of builder (fun () -> Some Emitter.unit_value) in
+                  let then_ = Emitter.build_block builder (fun () -> Some Emitter.unit_value) in
                   let else_ =
-                    Emitter.block_of builder (fun () ->
-                        ignore (Emitter.in_scope builder origin (fun () -> block builder else_));
+                    Emitter.build_block builder (fun () ->
+                        ignore
+                          (Emitter.in_scope builder origin (fun () -> lower_block builder else_));
                         Emitter.jump builder Unreachable origin;
                         None)
                   in
@@ -1020,19 +1078,20 @@ and statement builder (node : Core.statement) =
                        (Conditional { condition; then_; else_; if_condition = None })))
                 matches;
               List.iter (Emitter.register_binding builder) bound)
-      | Evaluate value -> ignore (expression builder value)
+      | Evaluate value -> ignore (lower_expression builder value)
       | Assign { target; value = written; _ } -> (
-          match expression builder written with
+          match lower_expression builder written with
           | Some value -> (
               let value =
-                if runs_code target then Emitter.held builder value written.type_ origin else value
+                if runs_code target then Emitter.hold_operand builder value written.type_ origin
+                else value
               in
               let loans =
                 match value with
                 | Constant _ -> []
                 | _ -> [ Emitter.start_loan builder value Read Operand_evaluation origin ]
               in
-              let target = place builder target in
+              let target = lower_place builder target in
               Emitter.end_loans builder loans origin;
               match target with
               | Some target -> Emitter.assign builder target (Operand value) origin
@@ -1040,40 +1099,47 @@ and statement builder (node : Core.statement) =
           | None -> ())
       | Compound_assign { target; operand = right; bound; value } -> (
           let mode : Types.mode = match right with Place _ -> Read | Value _ -> Own in
-          match operand builder mode right with
+          match lower_operand builder mode right with
           | None -> ()
           | Some right_value -> (
               let local =
-                Emitter.new_local builder
+                Emitter.allocate_local builder
                   (Source { local = bound; mode; name = None; is_var = false })
-                  (core_operand_type right) origin
+                  (compute_core_operand_type right) origin
               in
               Emitter.add_source builder bound local;
               Emitter.add_temporary builder local;
               Emitter.emit builder (Basic (Live [ local ])) origin;
-              Emitter.assign builder (Emitter.at local) (Operand right_value) origin;
+              Emitter.assign builder (Emitter.make_local_place local) (Operand right_value) origin;
               let bound_value =
                 match right_value with
                 | Borrow _ ->
                     Tree.Borrow
                       {
-                        place = Emitter.at local;
-                        type_ = core_operand_type right;
+                        place = Emitter.make_local_place local;
+                        type_ = compute_core_operand_type right;
                         mode = Read;
                         origin;
                       }
-                | _ -> Use { place = Emitter.at local; type_ = core_operand_type right; origin }
+                | _ ->
+                    Use
+                      {
+                        place = Emitter.make_local_place local;
+                        type_ = compute_core_operand_type right;
+                        origin;
+                      }
               in
               let loans =
                 [ Emitter.start_loan builder bound_value Read Operand_evaluation origin ]
               in
-              let target = place builder target in
+              let target = lower_place builder target in
               Emitter.end_loans builder loans origin;
               match target with
               | None -> ()
               | Some target -> (
                   let updated =
-                    Emitter.with_compound_target builder target (fun () -> expression builder value)
+                    Emitter.with_compound_target builder target (fun () ->
+                        lower_expression builder value)
                   in
                   match updated with
                   | Some updated -> Emitter.assign builder target (Operand updated) origin
@@ -1081,7 +1147,7 @@ and statement builder (node : Core.statement) =
       | For { pattern; iteration; clauses; body; mode } -> (
           let loop =
             {
-              Tree.clauses = loop_clauses builder clauses;
+              Tree.clauses = lower_loop_clauses builder clauses;
               schedule = mode;
               origin;
               quantified = None;
@@ -1091,7 +1157,7 @@ and statement builder (node : Core.statement) =
             let iteration () =
               Emitter.in_scope builder origin (fun () ->
                   bind_part ();
-                  ignore (block builder body))
+                  ignore (lower_block builder body))
             in
             if mode = Concurrent_loop then
               Emitter.in_task builder (Tree.Iteration { loop = origin }) iteration
@@ -1099,21 +1165,21 @@ and statement builder (node : Core.statement) =
           in
           match iteration with
           | Integer_range { start; stop; inclusive } ->
-              range_loop builder ~origin ~pattern ~start ~stop ~inclusive
+              lower_range_loop builder ~origin ~pattern ~start ~stop ~inclusive
                 ~loop:(fun () -> loop)
                 ~each:(fun bind_part -> each ~bind_part)
           | Elements elements ->
-              elements_loop builder ~origin ~pattern ~elements
+              lower_elements_loop builder ~origin ~pattern ~elements
                 ~loop:(fun () -> loop)
                 ~each:(fun bind_part -> each ~bind_part)
           | Cursor { cursor; next } ->
-              cursor_loop builder ~origin ~pattern ~cursor ~next
+              lower_cursor_loop builder ~origin ~pattern ~cursor ~next
                 ~loop:(fun () -> loop)
                 ~each:(fun bind_part -> each ~bind_part))
       | While { condition = tested; clauses; body; binds_lent_part } ->
           let loop =
             {
-              Tree.clauses = loop_clauses builder clauses;
+              Tree.clauses = lower_loop_clauses builder clauses;
               schedule = Sequential;
               origin;
               quantified = None;
@@ -1121,11 +1187,11 @@ and statement builder (node : Core.statement) =
           in
           let ends = ref None in
           let condition =
-            Emitter.block_of builder (fun () ->
+            Emitter.build_block builder (fun () ->
                 let value, on_true, on_false, held =
                   Emitter.in_condition_scope builder
                     ~lends:(if binds_lent_part then For_block else For_condition)
-                    (fun () -> expression builder tested)
+                    (fun () -> lower_expression builder tested)
                 in
                 ends := Some (on_true, on_false, held);
                 value)
@@ -1142,21 +1208,22 @@ and statement builder (node : Core.statement) =
                       _;
                     }
                     :: _ )
-                  when is_functional (fun visit -> Core_walk.expression visit left)
-                       && is_functional (fun visit -> Core_walk.expression visit right) ->
+                  when is_functional (fun visit -> Core_walk.walk_expression visit left)
+                       && is_functional (fun visit -> Core_walk.walk_expression visit right) ->
                     Some { Tree.comparison; left = low; right = high }
                 | _ -> None
               in
               let body =
-                Emitter.block_of builder (fun () ->
+                Emitter.build_block builder (fun () ->
                     Emitter.end_scope builder on_true tested.origin;
                     Emitter.looping builder (fun () ->
                         ignore
-                          (Emitter.in_scope ~held builder origin (fun () -> block builder body)));
+                          (Emitter.in_scope ~held builder origin (fun () ->
+                               lower_block builder body)));
                     if Emitter.reaches builder then Some Emitter.unit_value else None)
               in
               let failed =
-                Emitter.block_of builder (fun () ->
+                Emitter.build_block builder (fun () ->
                     Emitter.end_scope builder on_false tested.origin;
                     Some Emitter.unit_value)
               in
@@ -1179,12 +1246,12 @@ and statement builder (node : Core.statement) =
           let branches =
             List.mapi
               (fun index (branch : Core.statement) ->
-                Emitter.block_of builder (fun () ->
+                Emitter.build_block builder (fun () ->
                     if concurrent then
                       Emitter.in_task builder
                         (Tree.Branch { block = origin; index })
-                        (fun () -> statement builder branch)
-                    else statement builder branch;
+                        (fun () -> lower_statement builder branch)
+                    else lower_statement builder branch;
                     if Emitter.reaches builder then Some Emitter.unit_value else None))
               branches
           in
@@ -1198,36 +1265,37 @@ and statement builder (node : Core.statement) =
             (Basic (Proof (of_proof ~entry_locals:(Emitter.entry_locals builder) proof)))
             origin
       | Assert { condition = { value; executable = true }; by_bit_vector = false } -> (
-          match expression builder value with
+          match lower_expression builder value with
           | Some condition -> Emitter.emit builder (Basic (Assert condition)) origin
           | None -> ())
       | Assert { condition = { value; executable = true }; by_bit_vector = true } -> (
-          let code = Emitter.block_of builder (fun () -> expression builder value) in
+          let code = Emitter.build_block builder (fun () -> lower_expression builder value) in
           match code.value with
           | Some condition ->
               let names =
                 List.sort_uniq compare
                   (List.filter_map
-                     (fun (local, _) -> Emitter.source builder local)
-                     (names_of value))
+                     (fun (local, _) -> Emitter.find_source builder local)
+                     (list_names value))
               in
               Emitter.emit builder (Assert_by_bit_vector { condition; names; code }) origin
           | None -> ())
       | Assert { condition = { value; executable = false }; by_bit_vector } ->
           Emitter.emit builder
-            (Basic (Ghost_assert { condition = attached builder value; by_bit_vector }))
+            (Basic
+               (Ghost_assert { condition = lower_attached_formula builder value; by_bit_vector }))
             origin
       | Yield { mode; part = written } -> (
-          match yielded builder mode written with
+          match lower_yielded builder mode written with
           | Some part -> Emitter.emit builder (Yield { mode; part }) origin
           | None -> ()))
 
-and for_loop ?cursor_type ?(lent = ref None) builder ~origin ~(pattern : Core.pattern) ~iteration
-    ~loop ~each =
-  let part = Emitter.new_local builder Temporary pattern.type_ origin in
+and lower_for_loop ?cursor_type ?(lent = ref None) builder ~origin ~(pattern : Core.pattern)
+    ~iteration ~loop ~each =
+  let part = Emitter.allocate_local builder Temporary pattern.type_ origin in
   let binding_count = ref 0 in
   let body =
-    Emitter.block_of builder (fun () ->
+    Emitter.build_block builder (fun () ->
         Emitter.looping builder (fun () ->
             each (fun () ->
                 (match iteration with
@@ -1244,8 +1312,8 @@ and for_loop ?cursor_type ?(lent = ref None) builder ~origin ~(pattern : Core.pa
                          Read Loop_body origin)
                 | Range _ -> ());
                 (match iteration with
-                | Range _ -> bind ~owned:true builder pattern (Emitter.at part)
-                | Pull _ -> bind builder pattern (Emitter.at part));
+                | Range _ -> bind ~owned:true builder pattern (Emitter.make_local_place part)
+                | Pull _ -> bind builder pattern (Emitter.make_local_place part));
                 binding_count := List.length (Emitter.emitted builder)));
         if Emitter.reaches builder then Some Emitter.unit_value else None)
   in
@@ -1255,28 +1323,30 @@ and for_loop ?cursor_type ?(lent = ref None) builder ~origin ~(pattern : Core.pa
     origin;
   Emitter.resume_group builder origin origin
 
-and range_loop builder ~origin ~pattern ~start:low ~stop:high ~inclusive ~loop ~each =
-  match (expression builder low, expression builder high) with
+and lower_range_loop builder ~origin ~pattern ~start:low ~stop:high ~inclusive ~loop ~each =
+  match (lower_expression builder low, lower_expression builder high) with
   | Some start, Some stop ->
-      let start = Emitter.held builder start low.type_ origin
-      and stop = Emitter.held builder stop high.type_ origin in
-      for_loop builder ~origin ~pattern ~iteration:(Range { start; stop; inclusive }) ~loop ~each
+      let start = Emitter.hold_operand builder start low.type_ origin
+      and stop = Emitter.hold_operand builder stop high.type_ origin in
+      lower_for_loop builder ~origin ~pattern
+        ~iteration:(Range { start; stop; inclusive })
+        ~loop ~each
   | _ -> ()
 
-and elements_loop builder ~origin ~(pattern : Core.pattern) ~(elements : Core.elements) ~loop ~each
-    =
+and lower_elements_loop builder ~origin ~(pattern : Core.pattern) ~(elements : Core.elements) ~loop
+    ~each =
   let { Core.count; position; element } = elements in
   let counted =
-    Emitter.block_of builder (fun () ->
+    Emitter.build_block builder (fun () ->
         Option.map
-          (fun stop -> Emitter.held builder stop count.type_ origin)
-          (expression builder count))
+          (fun stop -> Emitter.hold_operand builder stop count.type_ origin)
+          (lower_expression builder count))
   in
   match (counted.value, element) with
   | Some stop, Lent lending ->
       let start = Tree.Constant { value = Integer Z.zero; type_ = count.type_ } in
       let lent_part = ref None in
-      for_loop ~lent:lent_part builder ~origin ~pattern:position
+      lower_for_loop ~lent:lent_part builder ~origin ~pattern:position
         ~iteration:(Range { start; stop; inclusive = false })
         ~loop
         ~each:(fun bind_position ->
@@ -1286,17 +1356,17 @@ and elements_loop builder ~origin ~(pattern : Core.pattern) ~(elements : Core.el
                 (fun (part : Tree.place) ->
                   (match part.root with
                   | Local element -> (
-                      match lent_from builder element with
+                      match find_lent_place builder element with
                       | Some collection ->
                           lent_part := Some { element; collection; count = counted }
                       | None -> bug "a loop over elements whose collection no call borrows")
                   | Constant _ | Literal _ -> bug "a loop over elements that a constant lends");
                   bind builder pattern part)
-                (lent builder lending ~duration:Loop_body)))
+                (lower_lent builder lending ~duration:Loop_body)))
   | Some _, _ -> bug "a loop over elements that no call lends"
   | None, _ -> ()
 
-and lent_from builder part =
+and find_lent_place builder part =
   List.find_map
     (fun (statement : Tree.statement) ->
       match statement.kind with
@@ -1311,30 +1381,30 @@ and lent_from builder part =
                  };
              })
         when lent = part ->
-          Some (Emitter.borrowed_place builder place)
+          Some (Emitter.borrow_place builder place)
       | _ -> None)
     (Emitter.emitted builder)
 
-and cursor_loop builder ~origin ~pattern ~cursor ~next ~loop ~each =
-  match place builder cursor with
+and lower_cursor_loop builder ~origin ~pattern ~cursor ~next ~loop ~each =
+  match lower_place builder cursor with
   | None -> ()
   | Some place_ ->
-      let cursor_type = Core_walk.place_type cursor in
+      let cursor_type = Core_walk.compute_place_type cursor in
       let cursor = place_ in
       Option.iter
         (fun next ->
-          for_loop ~cursor_type builder ~origin ~pattern
+          lower_for_loop ~cursor_type builder ~origin ~pattern
             ~iteration:(Pull { cursor; next })
             ~loop ~each)
-        (callee_of builder next)
+        (lower_callee builder next)
 
-and quantifier_loop builder (node : Core.expression) (quantifier : Core.quantifier)
+and lower_quantifier_loop builder (node : Core.expression) (quantifier : Core.quantifier)
     (body : Core.expression) run =
   let origin = node.origin in
-  let result = Emitter.temporary builder Types.bool origin in
+  let result = Emitter.allocate_temporary builder Types.bool origin in
   let quantified = ref None in
   let deciding = quantifier = Exists in
-  Emitter.assign builder (Emitter.at result)
+  Emitter.assign builder (Emitter.make_local_place result)
     (Operand (Constant { value = Boolean (not deciding); type_ = Types.bool }))
     origin;
   let loop_of () = { Tree.clauses = []; schedule = Sequential; origin; quantified = !quantified } in
@@ -1354,13 +1424,13 @@ and quantifier_loop builder (node : Core.expression) (quantifier : Core.quantifi
                     decides = result;
                   };
               let decided =
-                Emitter.block_of builder (fun () ->
-                    Emitter.assign builder (Emitter.at result)
+                Emitter.build_block builder (fun () ->
+                    Emitter.assign builder (Emitter.make_local_place result)
                       (Operand (Constant { value = Boolean deciding; type_ = Types.bool }))
                       origin;
                     Emitter.break_ builder origin;
                     None)
-              and undecided = Emitter.block_of builder (fun () -> Some Emitter.unit_value) in
+              and undecided = Emitter.build_block builder (fun () -> Some Emitter.unit_value) in
               ignore
                 (Emitter.hold_choice builder Types.unit origin
                    (Conditional
@@ -1370,10 +1440,10 @@ and quantifier_loop builder (node : Core.expression) (quantifier : Core.quantifi
                         else_ = (if deciding then undecided else decided);
                         if_condition = None;
                       })))
-            (expression builder body)));
-  Some (Use { place = Emitter.at result; type_ = Types.bool; origin })
+            (lower_expression builder body)));
+  Some (Use { place = Emitter.make_local_place result; type_ = Types.bool; origin })
 
-and quantified builder (node : Core.expression) (quantifier : Core.quantifier)
+and lower_quantified builder (node : Core.expression) (quantifier : Core.quantifier)
     (binder : Core.binder) (body : Core.expression) =
   let origin = node.origin in
   let range, value_type =
@@ -1387,14 +1457,14 @@ and quantified builder (node : Core.expression) (quantifier : Core.quantifier)
     | Over_collection { pattern; collection } ->
         ( Option.map
             (fun collection -> Tree.Over_collection collection)
-            (expression builder collection),
+            (lower_expression builder collection),
           pattern.type_ )
     | Over_elements { pattern; elements } -> (
         match elements.count.kind with
         | Call { arguments = [ Passed { value = collection; _ } ]; _ } ->
             ( Option.map
                 (fun collection -> Tree.Over_collection collection)
-                (operand builder Read collection),
+                (lower_operand builder Read collection),
               pattern.type_ )
         | _ -> bug "a quantifier over elements whose count takes no collection")
   in
@@ -1408,28 +1478,32 @@ and quantified builder (node : Core.expression) (quantifier : Core.quantifier)
             value = Some (Constant { value = Boolean true; type_ = Types.bool });
           } )
     | Over_range { pattern; _ } | Over_collection { pattern; _ } | Over_elements { pattern; _ } ->
-        let parameter = Emitter.new_local builder Temporary value_type origin in
+        let parameter = Emitter.allocate_local builder Temporary value_type origin in
         ( parameter,
-          Emitter.block_of builder (fun () ->
-              match_patterns builder [ pattern ] [ Emitter.at parameter ] origin) )
+          Emitter.build_block builder (fun () ->
+              match_patterns builder [ pattern ] [ Emitter.make_local_place parameter ] origin) )
   in
-  let body = Emitter.block_of builder (fun () -> expression builder body) in
+  let body = Emitter.build_block builder (fun () -> lower_expression builder body) in
   Emitter.hold builder node.type_ origin
     (Specification (Quantified { quantifier; range; parameter; matches; body }))
 
-and lambda builder (parameters : Core.pattern list) (captures : Core.capture list)
+and lower_lambda builder (parameters : Core.pattern list) (captures : Core.capture list)
     (body : Core.block) =
-  let inner = Emitter.for_lambda builder in
+  let inner = Emitter.make_lambda_builder builder in
   let capture_locals =
     List.map
       (fun (capture : Core.capture) ->
         let name =
-          match Option.map (Emitter.local_info builder) (Emitter.source builder capture.local) with
+          match
+            Option.map
+              (Emitter.lookup_local_info builder)
+              (Emitter.find_source builder capture.local)
+          with
           | Some { kind = Source { name; _ }; _ } -> name
           | _ -> None
         in
         let local =
-          Emitter.new_local inner
+          Emitter.allocate_local inner
             (Source { local = capture.local; mode = Read; name; is_var = false })
             capture.type_ 0
         in
@@ -1445,14 +1519,16 @@ and lambda builder (parameters : Core.pattern list) (captures : Core.capture lis
               match pattern.kind with
               | Bind { local; mode; name; is_var } ->
                   Emitter.bind_source ~name ~is_var inner local mode pattern.type_ pattern.origin
-              | _ -> Emitter.new_local inner Temporary pattern.type_ pattern.origin)
+              | _ -> Emitter.allocate_local inner Temporary pattern.type_ pattern.origin)
             parameters
         in
         List.iter2
           (fun (pattern : Core.pattern) local ->
-            match pattern.kind with Bind _ -> () | _ -> bind inner pattern (Emitter.at local))
+            match pattern.kind with
+            | Bind _ -> ()
+            | _ -> bind inner pattern (Emitter.make_local_place local))
           parameters locals;
-        Option.iter (fun value -> Emitter.return_ inner (Some value) 0) (block inner body);
+        Option.iter (fun value -> Emitter.return_ inner (Some value) 0) (lower_block inner body);
         locals)
   in
   let rec unconverted (value : Core.expression) =
@@ -1462,49 +1538,51 @@ and lambda builder (parameters : Core.pattern list) (captures : Core.capture lis
   in
   let body =
     Emitter.finish inner ~parameters:parameter_locals ~captures:capture_locals
-      ~is_functional:(is_functional (fun visit -> Core_walk.block visit body))
+      ~is_functional:(is_functional (fun visit -> Core_walk.walk_block visit body))
       ?value_type:(Option.map unconverted body.value)
   in
   Emitter.add_lambda builder body
 
-and block_type (body : Core.block) =
+and compute_block_type (body : Core.block) =
   match body.value with Some value -> value.type_ | None -> Types.unit
 
 and of_proof ~entry_locals (written : Core.block) =
   let builder = Emitter.create ~is_specification:true ~entry_locals ~takes_free_locals:true () in
   Emitter.in_scope builder 0 (fun () ->
-      Option.iter (fun value -> Emitter.return_ builder (Some value) 0) (block builder written));
+      Option.iter
+        (fun value -> Emitter.return_ builder (Some value) 0)
+        (lower_block builder written));
   let body = Emitter.finish builder ~parameters:(Emitter.free_locals builder) in
   { body; lambdas = Emitter.lambdas builder }
 
-and free_formula ~entry_locals ~origin ~type_ (build : Emitter.t -> Tree.operand option) =
+and lower_free_formula ~entry_locals ~origin ~type_ (build : Emitter.t -> Tree.operand option) =
   let builder = Emitter.create ~is_specification:true ~entry_locals ~takes_free_locals:true () in
-  Emitter.formula builder ~origin ~type_ (fun () ->
+  Emitter.build_formula builder ~origin ~type_ (fun () ->
       let value = build builder in
       (Emitter.free_locals builder, value))
 
 and of_specification ~entry_locals (written : Core.expression) =
-  free_formula ~entry_locals ~origin:written.origin ~type_:written.type_ (fun builder ->
-      expression builder written)
+  lower_free_formula ~entry_locals ~origin:written.origin ~type_:written.type_ (fun builder ->
+      lower_expression builder written)
 
 and of_law_statement ~entry_locals (written : Core.block) =
-  free_formula ~entry_locals ~origin:0 ~type_:(block_type written) (fun builder ->
-      block builder written)
+  lower_free_formula ~entry_locals ~origin:0 ~type_:(compute_block_type written) (fun builder ->
+      lower_block builder written)
 
-and attached builder (written : Core.expression) =
+and lower_attached_formula builder (written : Core.expression) =
   of_specification ~entry_locals:(Emitter.entry_locals builder) written
 
-and loop_clauses builder (clauses : Core.loop_clause list) : Tree.loop_clause list =
+and lower_loop_clauses builder (clauses : Core.loop_clause list) : Tree.loop_clause list =
   let bound : Core.bound -> Tree.bound = function
     | Finite -> Finite
-    | Order_of amount -> Order_of (attached builder amount)
-    | At_most amount -> At_most (attached builder amount)
-    | Exactly amount -> Exactly (attached builder amount)
+    | Order_of amount -> Order_of (lower_attached_formula builder amount)
+    | At_most amount -> At_most (lower_attached_formula builder amount)
+    | Exactly amount -> Exactly (lower_attached_formula builder amount)
   in
   List.map
     (function
-      | Core.Invariant invariant -> Tree.Invariant (attached builder invariant)
-      | Decreases measures -> Decreases (List.map (attached builder) measures)
+      | Core.Invariant invariant -> Tree.Invariant (lower_attached_formula builder invariant)
+      | Decreases measures -> Decreases (List.map (lower_attached_formula builder) measures)
       | Cost { origin; amortized; resource; bound = written } ->
           Cost { origin; amortized; resource; bound = bound written })
     clauses
@@ -1515,7 +1593,7 @@ let of_expression (written : Core.expression) =
       Emitter.in_statement builder written.origin (fun () ->
           Option.iter
             (fun value -> Emitter.return_ builder (Some value) written.origin)
-            (expression builder written)));
+            (lower_expression builder written)));
   let body = Emitter.finish builder ~parameters:[] in
   { Tree.body; lambdas = Emitter.lambdas builder }
 
@@ -1533,8 +1611,8 @@ let of_clause ?(is_executable = false) ~(parameters : Core.parameter list)
           parameter.type_ 0)
       parameters
   in
-  Emitter.formula builder ~origin:written.origin ~type_:written.type_ (fun () ->
-      (locals, expression builder written))
+  Emitter.build_formula builder ~origin:written.origin ~type_:written.type_ (fun () ->
+      (locals, lower_expression builder written))
 
 let of_definition ~is_specification (definition : Core.definition) =
   let code =
@@ -1565,6 +1643,6 @@ let of_definition ~is_specification (definition : Core.definition) =
       Emitter.in_scope builder 0 (fun () ->
           Option.iter
             (fun value -> Emitter.return_ builder (if returns then Some value else None) 0)
-            (block builder body));
+            (lower_block builder body));
       { Tree.body = Emitter.finish builder ~parameters:locals; lambdas = Emitter.lambdas builder })
     code

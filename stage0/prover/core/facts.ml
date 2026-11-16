@@ -11,14 +11,18 @@ let bug format = Compiler_bug.bug ~stage:"Prover" format
 let is_in_recursion_group (context : State.context) path =
   List.exists (Path.equal path) (context.lookups.recursion_group context.current)
 
+let has_method_in_recursion_group (context : State.context) impl =
+  List.exists (is_in_recursion_group context)
+    (Mir.Call_edges.list_written_methods context.lookups.interface.names impl)
+
 let list_clauses (requires : Mir.requirement list) =
   List.map (fun (requirement : Mir.requirement) -> requirement.clause) requires
 
 let declare (context : State.context) (declaration : Logic.declaration) =
   match declaration with
   | Constant (name, _) | Function (name, _, _) ->
-      if not (Hashtbl.mem context.declared name) then begin
-        Hashtbl.replace context.declared name ();
+      if not (Tables.Symbol_table.mem context.declared name) then begin
+        Tables.Symbol_table.replace context.declared name ();
         context.declarations <- declaration :: context.declarations
       end
   | Datatype _ -> invalid_arg "Translate.declare: a datatype is declared by its sort"
@@ -41,12 +45,12 @@ let make_fresh_name (context : State.context) label =
 
 let declare_fresh context frame label sort =
   let name = make_fresh_name context label in
-  Hashtbl.replace context.fresh_order name context.fresh;
+  Tables.Symbol_table.replace context.fresh_order name context.fresh;
   declare_value_symbol context frame name sort
 
 let mentions_fresh_after (context : State.context) mark term =
   let is_fresh_after name =
-    match Hashtbl.find_opt context.fresh_order name with
+    match Tables.Symbol_table.find_opt context.fresh_order name with
     | Some order -> order > mark
     | None -> false
   in
@@ -96,7 +100,7 @@ let add_quantifier_facts ~binders (context : State.context) term =
       let bound = List.map fst symbols @ bound in
       ( bound,
         List.filter (stated bound)
-          (Option.value ~default:[] (Hashtbl.find_opt context.quantifier_facts term)) )
+          (Option.value ~default:[] (Tables.Term_table.find_opt context.quantifier_facts term)) )
     in
     match term with
     | Logic.Forall (symbols, trigger, body) when positive ->
@@ -138,7 +142,7 @@ let assume context (frame : State.frame) term =
 let locate (context : State.context) (source : State.source) origin =
   if source.key = Some context.home then State.Node origin else Whole_definition
 
-let add_requires (context : State.context) required =
+let make_requires_fix (context : State.context) required =
   let names = context.lookups.interface.names in
   let text = names.text context.home in
   let brace =
@@ -230,33 +234,18 @@ let truss_of_goal context term =
     printed
   else None
 
-let rec oblige ?template_clause ?cited ?(fixes = []) context (frame : State.frame) code location
-    message goal =
-  match
-    make_closed_obligation ?template_clause context frame code location message
-      (add_quantifier_facts
-         ~binders:(List.map (fun (name, _, _) -> name) frame.binders)
-         context goal)
-  with
-  | Some obligation ->
-      let fixes =
-        match fixes with
-        | [] when frame.source.key = Some context.home && frame.makes_obligations -> (
-            let goal =
-              match frame.condition with
-              | Logic.Boolean true -> goal
-              | condition -> Logic.( ==> ) condition goal
-            in
-            match truss_of_goal context goal with
-            | Some required -> add_requires context [ Text required ]
-            | None -> [])
-        | fixes -> fixes
-      in
-      context.obligations <- { obligation with cited; fixes } :: context.obligations;
-      assume context frame goal
-  | None -> ()
+let add_requires context (frame : State.frame) (required : State.message) =
+  match frame.condition with
+  | Logic.Boolean true -> make_requires_fix context required
+  | condition -> (
+      match truss_of_goal context condition with
+      | Some premise ->
+          make_requires_fix context
+            ((State.Text ("(" ^ premise ^ ") ==> (") :: required) @ [ State.Text ")" ])
+      | None -> make_requires_fix context required)
 
-and make_closed_obligation ?template_clause context frame code location message goal =
+let rec make_closed_obligation ?template_clause context (frame : State.frame) code location message
+    goal =
   if not frame.makes_obligations then None
   else if not (Logic.mentions frame.bound goal || Logic.mentions frame.bound frame.condition) then
     Some (make_obligation ?template_clause context frame code location message goal)
@@ -275,7 +264,8 @@ and make_closed_obligation ?template_clause context frame code location message 
              code location message closed)
     | None -> None
 
-and make_obligation ?template_clause context frame code location message goal =
+and make_obligation ?template_clause (context : State.context) (frame : State.frame) code location
+    message goal : State.obligation =
   let query =
     Logic.prune
       {
@@ -296,7 +286,7 @@ and make_obligation ?template_clause context frame code location message goal =
     locals =
       Locals.fold
         (fun local term shown ->
-          match (term, Hashtbl.find_opt context.local_names local) with
+          match (term, Tables.Local_table.find_opt context.local_names local) with
           | Logic.Symbol symbol, Some name
             when not (List.mem_assoc symbol context.values || List.mem_assoc symbol shown) ->
               (symbol, name) :: shown
@@ -307,7 +297,43 @@ and make_obligation ?template_clause context frame code location message goal =
             [ (symbol, "result") ]
         | _ -> []);
     template_clause;
+    may_stop_with_panic = false;
   }
+
+let record_obligation ?template_clause ?cited ~fixes ~may_stop_with_panic context
+    (frame : State.frame) code location message goal =
+  match
+    make_closed_obligation ?template_clause context frame code location message
+      (add_quantifier_facts
+         ~binders:(List.map (fun (name, _, _) -> name) frame.binders)
+         context goal)
+  with
+  | Some obligation ->
+      let fixes =
+        match fixes with
+        | [] when frame.source.key = Some context.home && frame.makes_obligations -> (
+            match truss_of_goal context goal with
+            | Some required -> add_requires context frame [ Text required ]
+            | None -> [])
+        | fixes -> fixes
+      in
+      context.obligations <-
+        { obligation with cited; fixes; may_stop_with_panic } :: context.obligations;
+      assume context frame goal
+  | None -> ()
+
+let oblige ?template_clause ?cited ?(fixes = []) context frame code location message goal =
+  record_obligation ?template_clause ?cited ~fixes ~may_stop_with_panic:false context frame code
+    location message goal
+
+let oblige_safe_operation ?cited ?(fixes = []) (context : State.context) (frame : State.frame) code
+    location message goal =
+  match frame.panic with
+  | Declared when frame.source.key = Some context.home ->
+      if frame.makes_obligations then assume context frame goal
+  | Declared | Undeclared | Undeclarable ->
+      record_obligation ?cited ~fixes ~may_stop_with_panic:(frame.panic = Undeclared) context frame
+        code location message goal
 
 let quote (source : State.source) origin =
   match source.key with Some key -> State.Quote (key, origin) | None -> Text "this expression"
@@ -341,14 +367,15 @@ let make_constructor_symbol (ty : Types.ty) variant =
 
 let make_selector_symbol ty variant field = Logic.Symbol.Field { type_ = ty; variant; field }
 let is_standard_equal = Well_known.is Equal
-let equal_trait = Well_known.path Equal
+let equal_trait = Well_known.make_path Equal
 
 let find_visible_type (context : State.context) (ty : Types.ty) =
   match ty with
   | Named { path; arguments } when Types.find_builtin ty = None -> (
       match Interface.Definition.read_interface context.lookups.interface path with
       | Some (Interface.Environment.Type_interface interface)
-        when (not interface.opaque) || Path.package path = Path.package context.current ->
+        when (not interface.opaque)
+             || Path.locate_package path = Path.locate_package context.current ->
           let substitution = Types.make_substitution interface.type_generics arguments in
           Some (interface, substitution)
       | _ -> None)
@@ -384,18 +411,18 @@ let rec declare_sort (context : State.context) (ty : Types.ty) : Logic.sort =
     match (ty, find_float_format ty) with
     | _, Some (exponent, significand) -> Float (exponent, significand)
     | _ when Types.equal ty Types.unit ->
-        if not (Hashtbl.mem context.datatypes ty) then begin
-          Hashtbl.replace context.datatypes ty ();
+        if not (Tables.Type_table.mem context.datatypes ty) then begin
+          Tables.Type_table.replace context.datatypes ty ();
           context.declarations <-
             Logic.Datatype (ty, [ (Logic.Symbol.Unit, []) ]) :: context.declarations
         end;
         Type_sort ty
     | Function function_type, _ -> Function_sort (List.length function_type.inputs)
     | _ -> begin
-        (if not (Hashtbl.mem context.datatypes ty) then
+        (if not (Tables.Type_table.mem context.datatypes ty) then
            match find_constructors context ty with
            | Some shape ->
-               Hashtbl.replace context.datatypes ty ();
+               Tables.Type_table.replace context.datatypes ty ();
                let declaration =
                  Logic.Datatype
                    ( ty,
@@ -444,8 +471,8 @@ let make_in_range ty term =
   | None -> Logic.Boolean true
 
 let run_once (context : State.context) stated make =
-  if not (Hashtbl.mem context.stated stated) then begin
-    Hashtbl.replace context.stated stated ();
+  if not (Tables.Stated_table.mem context.stated stated) then begin
+    Tables.Stated_table.replace context.stated stated ();
     make ()
   end
 
@@ -697,7 +724,8 @@ let merge context ?value_type ~condition
         Some
           (define "parts"
              (declare_sort context
-                (Types.Named { path = Well_known.path Sequence; arguments = [ Types.Type part ] }))
+                (Types.Named
+                   { path = Well_known.make_path Sequence; arguments = [ Types.Type part ] }))
              values)
     | _ -> first.yielded_so_far
   in

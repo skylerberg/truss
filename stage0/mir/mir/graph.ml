@@ -5,19 +5,21 @@ type early_exit = { resume : block; returned : Tree.local option }
 type branch = { entry : block; blocks : block list }
 type statement = { kind : Tree.basic; origin : Core.origin }
 
+type loop_head = {
+  iteration : Tree.iteration;
+  part : Tree.local;
+  lent : Tree.lent_element option;
+  body : block;
+  binding_count : int;
+  blocks : block list;
+  after : block;
+  loop : Tree.loop;
+}
+
 type terminator =
   | Goto of block
   | Branch of { condition : Tree.operand; yes : block; no : block; is_if_condition : bool }
-  | For of {
-      iteration : Tree.iteration;
-      part : Tree.local;
-      lent : Tree.lent_element option;
-      body : block;
-      binding_count : int;
-      blocks : block list;
-      after : block;
-      loop : Tree.loop;
-    }
+  | For of loop_head
   | Fork of { fork : Core.origin; concurrent : bool; branches : branch list; join : block option }
   | Join of { fork : Core.origin; next : block }
   | Iteration_end of { loop : block }
@@ -50,7 +52,7 @@ type body = {
 
 type t = { body : body; lambdas : body array }
 
-let successors = function
+let list_successors = function
   | Goto block -> [ block ]
   | Branch { yes; no; _ } -> [ yes; no ]
   | For { body; after; _ } -> [ body; after ]
@@ -62,12 +64,12 @@ let successors = function
   | Resume { exits; next; _ } -> List.map (fun exit -> exit.resume) exits @ [ next ]
   | Iteration_end _ | Return _ | Unreachable | Written_unreachable | Todo -> []
 
-let canonical (blocks : basic_block array) =
+let canonicalize (blocks : basic_block array) =
   let visited = Array.make (Array.length blocks) false and order = ref [] in
   let rec visit block =
     if not visited.(block) then begin
       visited.(block) <- true;
-      List.iter visit (successors blocks.(block).terminator);
+      List.iter visit (list_successors blocks.(block).terminator);
       order := block :: !order
     end
   in
@@ -147,15 +149,22 @@ let canonical (blocks : basic_block array) =
          { (blocks.(block)) with terminator = renumber block blocks.(block).terminator })
        !order)
 
-let iteration_loop = function Iteration_end { loop } -> Some loop | _ -> None
+let find_iteration_loop = function Iteration_end { loop } -> Some loop | _ -> None
 
-let block_successors (body : body) block =
+let read_loop_head (body : body) loop =
+  match body.blocks.(loop).terminator with
+  | For head -> head
+  | _ -> bug "the end of an iteration names block %d, which is no loop" loop
+
+let list_block_successors (body : body) block =
   let terminator = body.blocks.(block).terminator in
-  (match Option.map (fun loop -> body.blocks.(loop).terminator) (iteration_loop terminator) with
-    | Some (For { body = first; after; _ }) -> [ first; after ]
-    | _ -> [])
-  @ successors terminator
+  (match find_iteration_loop terminator with
+    | Some loop ->
+        let head = read_loop_head body loop in
+        [ head.body; head.after ]
+    | None -> [])
+  @ list_successors terminator
 
 module For_testing = struct
-  let successors = successors
+  let successors = list_successors
 end

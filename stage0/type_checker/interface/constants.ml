@@ -31,7 +31,7 @@ let rec evaluate_expression lookups ~visiting resolved (value : Syntax.expressio
 and evaluate_path (lookups : Lookups.t) ~visiting path =
   if List.exists (Path.equal path) visiting then None
   else
-    match Resolve.Names.definition_of_path lookups.names path with
+    match Resolve.Names.find_definition lookups.names path with
     | Some (key, { kind = Constant { value; _ }; _ }) ->
         evaluate_expression lookups ~visiting:(path :: visiting) (lookups.resolved Body key) value
     | _ -> None

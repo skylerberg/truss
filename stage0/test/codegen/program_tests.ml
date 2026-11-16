@@ -53,15 +53,10 @@ let () =
     "a build checks each primitive operation that could fail, and evaluates no requires clause"
     (fun () ->
       let output = Codegen_support.run_source Fixtures.Program.pick_and_primitive_operations in
-      let contains text =
-        let text_length = String.length text and output_length = String.length output in
-        let rec occurs_at position =
-          position + text_length <= output_length
-          && (String.sub output position text_length = text || occurs_at (position + 1))
-        in
-        if not (occurs_at 0) then Codegen_support.fail "%S is not in the output:\n%s" text output
-      in
-      List.iter contains
+      List.iter
+        (fun text ->
+          if not (String.includes ~affix:text output) then
+            Codegen_support.fail "%S is not in the output:\n%s" text output)
         [
           "test 0 passed\n";
           "test 1 panicked\n";
@@ -86,6 +81,40 @@ let () =
       in
       Codegen_support.expect_int ~expected:3 status;
       Codegen_support.expect_string ~expected:"hello\n3 arguments, then one\n" output)
+
+let () =
+  Codegen_support.test
+    "a release build stops a function that declares `uses Panic` at an operation that fails"
+    (fun () ->
+      let _, compile =
+        Codegen_support.load ~checks:false Fixtures.Program.operations_that_stop_the_program
+      in
+      let run operation =
+        match
+          Compile.For_testing.run_program compile
+            ~main:(Top { module_ = Codegen_support.example; name = "main" })
+            ~arguments:[ operation ]
+        with
+        | Ok result -> result
+        | Error message -> failwith message
+      in
+      List.iter
+        (fun (operation, failure) ->
+          let status, _, errors = run operation in
+          Codegen_support.expect_int ~expected:101 status;
+          if not (String.includes ~affix:("panic: " ^ failure) errors) then
+            Codegen_support.fail "%s stopped with %S" operation errors)
+        [
+          ("overflow", "arithmetic overflow");
+          ("division", "division by zero");
+          ("shift", "shift amount out of range");
+          ("index", "index out of bounds");
+          ("slice", "slice out of bounds");
+          ("key", "index out of bounds");
+        ];
+      let status, output, _ = run "none" in
+      Codegen_support.expect_int ~expected:0 status;
+      Codegen_support.expect_string ~expected:"9223372036854775807 0 1\n" output)
 
 let () =
   Codegen_support.test "a program writes a file, reads it back, and reports a missing one"
@@ -624,7 +653,7 @@ let () =
       match Codegen_support.run_main ~arguments:[ "a"; "b"; "c"; "d" ] source with
       | 101, output, errors ->
           Codegen_support.expect_string ~expected:"counted 5\n" output;
-          if not (Codegen_support.contains errors "many arguments") then
+          if not (String.includes ~affix:"many arguments" errors) then
             Codegen_support.fail "panicked with %S" errors
       | status, _, errors -> Codegen_support.fail "ended with status %d: %s" status errors)
 
@@ -641,6 +670,5 @@ let () =
       | Error message ->
           if
             not
-              (Codegen_support.contains message
-                 "main uses Greeter, which has no real implementation")
+              (String.includes ~affix:"main uses Greeter, which has no real implementation" message)
           then Codegen_support.fail "failed with: %s" message)

@@ -1,2 +1,2 @@
-val expanded : Tree.t -> Graph.t
-val code_of_formula : Tree.formula -> Graph.t
+val expand : Tree.t -> Graph.t
+val expand_formula : Tree.formula -> Graph.t

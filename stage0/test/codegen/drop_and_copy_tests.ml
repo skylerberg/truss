@@ -72,37 +72,24 @@ let () =
       let env = Codegen_support.shape_env ~extra () in
       let c =
         Emit_c.For_testing.c
-          (Emit_c.fragment env
+          (Emit_c.make_fragment env
              (Code
                 (Compile.For_testing.drop
                    (Compile.For_testing.drop_and_copy env)
                    (Codegen_support.named "Holder"))))
       in
-      if not (Codegen_support.contains c "f_items") then
+      if not (String.includes ~affix:"f_items" c) then
         Codegen_support.fail "the drop does not drop the items:\n%s" c;
-      if Codegen_support.contains c "f_count" then
+      if String.includes ~affix:"f_count" c then
         Codegen_support.fail "the drop reads the count:\n%s" c);
   Codegen_support.test "a copy of storage of plain data is one allocation and one memory copy"
     (fun () ->
       let c =
         Emit_c.For_testing.c
-          (Emit_c.fragment (Codegen_support.shape_env ())
+          (Emit_c.make_fragment (Codegen_support.shape_env ())
              (Code (Compile.For_testing.copy drop_and_copy (storage Codegen_support.int32))))
       in
-      let count text =
-        let rec from position =
-          match String.index_from_opt c position text.[0] with
-          | None -> 0
-          | Some found ->
-              (if
-                 found + String.length text <= String.length c
-                 && String.sub c found (String.length text) = text
-               then 1
-               else 0)
-              + from (found + 1)
-        in
-        from 0
-      in
+      let count sub = String.find_all ~sub (fun _ matches -> matches + 1) c 0 in
       if count "t_runtime_allocate(" <> 1 || count "__builtin_memcpy(" <> 1 then
         Codegen_support.fail "the copy does not allocate and copy once:\n%s" c);
   Codegen_support.test "a copy of storage keeps its values when the original is mutated" (fun () ->

@@ -3,6 +3,6 @@ type step = Field of string | Element of { node : Core.id; origin : Core.origin 
 type t = { root : root; steps : step list }
 type overlap = Disjoint | Overlapping | Maybe_disjoint of Core.origin * Core.origin
 
-val overlap : t -> t -> overlap
+val classify_overlap : t -> t -> overlap
 val is_slice_type : Types.ty -> bool
 val is_storage_type : Types.ty -> bool

@@ -17,10 +17,11 @@ let is_lower_snake_case name =
 
 let parse_name text =
   match Path.parse_package text with
-  | Some package when List.for_all is_lower_snake_case (Path.package_parts package) -> Some package
+  | Some package when List.for_all is_lower_snake_case (Path.list_package_parts package) ->
+      Some package
   | _ -> None
 
-let valid_name text = parse_name text <> None
+let is_valid_name text = parse_name text <> None
 
 type token =
   | Open
@@ -37,7 +38,7 @@ let is_bare = function
   | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' | '.' | ':' -> true
   | _ -> false
 
-let tokens text =
+let tokenize text =
   let length = String.length text in
   let lexed = ref [] in
   let line = ref 1 in
@@ -111,26 +112,26 @@ let rec list_items line items rest =
   | (_, line) :: _ -> malformed line "A list holds strings in quotes, with `,` between them."
   | [] -> malformed line "This list is not closed with `]`."
 
-let rec after_brace line = function
+let rec skip_past_brace line = function
   | (Close_brace, _) :: rest -> rest
   | (Line_break, _) :: _ | [] -> malformed line "This table is not closed with `}`."
-  | _ :: rest -> after_brace line rest
+  | _ :: rest -> skip_past_brace line rest
 
-let value line = function
+let parse_value line = function
   | (Quoted text, _) :: rest -> (Text text, rest)
   | (Bare text, _) :: rest when int_of_string_opt text <> None -> (Number (int_of_string text), rest)
   | (Open, _) :: rest ->
       let items, rest = list_items line [] rest in
       (List items, rest)
-  | (Open_brace, _) :: rest -> (Inline_table, after_brace line rest)
+  | (Open_brace, _) :: rest -> (Inline_table, skip_past_brace line rest)
   | _ -> malformed line "Expected a value after `=`: %s." value_expected
 
-let end_of_line line = function
+let expect_end_of_line line = function
   | (Line_break, _) :: rest -> rest
   | [] -> []
   | _ -> malformed line "Expected the line to end here."
 
-let tables text =
+let parse_tables text =
   let final_line = List.length (String.split_on_char '\n' text) in
   let rec statements tables current = function
     | [] -> List.rev (close tables current)
@@ -138,9 +139,9 @@ let tables text =
     | (Open, line) :: ((Bare name | Quoted name), _) :: (Close, _) :: rest ->
         statements (close tables current)
           (Some { name; line; entries = [] })
-          (end_of_line line rest)
+          (expect_end_of_line line rest)
     | (((Bare key | Quoted key) as token), line) :: (Equals, _) :: rest -> (
-        let parsed, rest = value line rest in
+        let parsed, rest = parse_value line rest in
         let quoted = match token with Quoted _ -> true | _ -> false in
         let last_line = match rest with (_, last) :: _ -> last | [] -> final_line in
         match current with
@@ -151,7 +152,7 @@ let tables text =
                    table with
                    entries = { key; quoted; value = parsed; line; last_line } :: table.entries;
                  })
-              (end_of_line line rest)
+              (expect_end_of_line line rest)
         | None ->
             malformed line
               "`%s` is in no table. A manifest starts with a table, such as `[package]`." key)
@@ -161,23 +162,23 @@ let tables text =
     | Some table -> { table with entries = List.rev table.entries } :: tables
     | None -> tables
   in
-  statements [] None (tokens text)
+  statements [] None (tokenize text)
 
 let name_expected =
   "a `lower_snake_case` name, or an owner and a name joined by `::`, such as `weather` or \
    `acme::geometry`"
 
-let text_of (entry : entry) =
+let read_text (entry : entry) =
   match entry.value with
   | Text text -> text
   | _ -> malformed entry.line "`%s` is a string in quotes." entry.key
 
-let number_of (entry : entry) =
+let read_number (entry : entry) =
   match entry.value with
   | Number number -> number
   | _ -> malformed entry.line "`%s` is a whole number." entry.key
 
-let version_of text =
+let parse_version text =
   match List.map int_of_string_opt (String.split_on_char '.' text) with
   | [ Some major; Some minor ]
     when String.for_all (function '0' .. '9' | '.' -> true | _ -> false) text ->
@@ -187,11 +188,11 @@ let version_of text =
 let truss_version = "0.1"
 
 let toolchain_builds version =
-  match (version_of version, version_of truss_version) with
+  match (parse_version version, parse_version truss_version) with
   | Some wanted, Some toolchain -> compare wanted toolchain <= 0
   | _ -> false
 
-let dependency (entry : entry) : dependency =
+let parse_dependency (entry : entry) : dependency =
   let package =
     match parse_name entry.key with
     | Some package -> package
@@ -216,7 +217,7 @@ let dependency (entry : entry) : dependency =
       malformed entry.line "A dependency's entry is the list of capabilities it is granted."
 
 let parse text =
-  let tables = tables text in
+  let tables = parse_tables text in
   let seen = Hashtbl.create 4 in
   List.iter
     (fun (table : table) ->
@@ -246,15 +247,15 @@ let parse text =
     (fun (entry : entry) ->
       match entry.key with
       | "name" ->
-          let text = text_of entry in
+          let text = read_text entry in
           name :=
             Some
               (match parse_name text with
               | Some package -> package
               | None -> malformed entry.line "A package's name is %s." name_expected)
       | "truss" ->
-          let text = text_of entry in
-          if version_of text = None then
+          let text = read_text entry in
+          if parse_version text = None then
             malformed entry.line
               "`truss` is the version of Truss the package is written for, as two numbers, such as \
                `\"%s\"`."
@@ -272,7 +273,7 @@ let parse text =
     (fun (entry : entry) ->
       match entry.key with
       | "time_limit" ->
-          let seconds = number_of entry in
+          let seconds = read_number entry in
           if seconds <= 0 then
             malformed entry.line "`time_limit` is a whole number of seconds, more than 0.";
           time_limit_seconds := Some seconds
@@ -284,7 +285,12 @@ let parse text =
   let package =
     match (table "package", !name) with
     | Some _, Some name ->
-        Some { name; truss = !truss; dependencies = List.map dependency (entries "dependencies") }
+        Some
+          {
+            name;
+            truss = !truss;
+            dependencies = List.map parse_dependency (entries "dependencies");
+          }
     | Some table, None ->
         malformed table.line "`[package]` names its package, with `name = \"...\"` under it."
     | None, _ -> (
@@ -307,10 +313,10 @@ let has_project_table text =
       String.trim line = "[project]")
     (String.split_on_char '\n' text)
 
-let without_dependency text package =
+let remove_dependency text package =
   let entry =
     Option.bind
-      (List.find_opt (fun (table : table) -> table.name = "dependencies") (tables text))
+      (List.find_opt (fun (table : table) -> table.name = "dependencies") (parse_tables text))
       (fun table ->
         List.find_opt (fun (entry : entry) -> parse_name entry.key = Some package) table.entries)
   in
@@ -321,12 +327,12 @@ let without_dependency text package =
       |> List.filteri (fun index _ -> index + 1 < entry.line || index + 1 > entry.last_line)
       |> String.concat "\n"
 
-let with_dependency text (package : Path.package) =
+let add_dependency text (package : Path.package) =
   let name = Path.show_package package in
   let entry =
     Printf.sprintf "%s = []" (if package.owner <> None then Printf.sprintf "%S" name else name)
   in
-  match List.find_opt (fun (table : table) -> table.name = "dependencies") (tables text) with
+  match List.find_opt (fun (table : table) -> table.name = "dependencies") (parse_tables text) with
   | Some table
     when List.exists (fun (entry : entry) -> parse_name entry.key = Some package) table.entries ->
       text

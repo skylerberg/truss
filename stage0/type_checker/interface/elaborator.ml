@@ -1,8 +1,12 @@
+module Parameter_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Types.parameter
+end))
+
 type t = {
   lookups : Lookups.t;
   resolved : Resolve.resolved;
-  bounds : (Types.parameter, Types.trait_reference list) Hashtbl.t;
-  broken_parameters : (Types.parameter, Diagnostic.reported) Hashtbl.t;
+  bounds : Types.trait_reference list Parameter_table.t;
+  broken_parameters : Diagnostic.reported Parameter_table.t;
   self_type : Types.ty option;
   self_trait : Types.trait_reference option;
   self_associated : (string * Types.ty) list;
@@ -13,11 +17,13 @@ type t = {
 }
 
 let create lookups resolved ~spans (scope : Environment.scope) =
-  let bounds = Hashtbl.create 8 in
-  List.iter (fun (parameter, traits) -> Hashtbl.replace bounds parameter traits) scope.bounds;
-  let broken_parameters = Hashtbl.create 1 in
+  let bounds = Parameter_table.create 8 in
   List.iter
-    (fun (parameter, report) -> Hashtbl.replace broken_parameters parameter report)
+    (fun (parameter, traits) -> Parameter_table.replace bounds parameter traits)
+    scope.bounds;
+  let broken_parameters = Parameter_table.create 1 in
+  List.iter
+    (fun (parameter, report) -> Parameter_table.replace broken_parameters parameter report)
     scope.broken_parameters;
   {
     lookups;
@@ -33,6 +39,15 @@ let create lookups resolved ~spans (scope : Environment.scope) =
     spans;
   }
 
+let read_span context id = context.spans.(id)
+
+let list_bounds context parameter =
+  Option.value ~default:[] (Parameter_table.find_opt context.bounds parameter)
+
+let find_self_type context = context.self_type
+let list_diagnostics context = !(context.diagnostics)
+let list_named_types context = !(context.named)
+
 let make_scope context : Environment.scope =
   {
     self_type = context.self_type;
@@ -41,12 +56,12 @@ let make_scope context : Environment.scope =
     self_capabilities = context.self_capabilities;
     bounds =
       List.sort compare
-        (Hashtbl.fold
+        (Parameter_table.fold
            (fun parameter bounds bounds_by_parameter -> (parameter, bounds) :: bounds_by_parameter)
            context.bounds []);
     broken_parameters =
       List.sort compare
-        (Hashtbl.fold
+        (Parameter_table.fold
            (fun parameter report broken -> (parameter, report) :: broken)
            context.broken_parameters []);
   }
@@ -77,7 +92,7 @@ let list_trait_closure (lookups : Lookups.t) path =
 let record_diagnostic diagnostics ?fixes code (span : Source.Definition_span.t) message =
   let diagnostic = Diagnostic.make ?fixes ~code:(Types code) span message in
   diagnostics := diagnostic :: !diagnostics;
-  Diagnostic.reported diagnostic
+  Diagnostic.make_reported diagnostic
 
 let report_error_type context code span message =
   Types.Error (record_diagnostic context.diagnostics code span message)
@@ -91,7 +106,7 @@ let find_target context (name : Syntax.name) = context.resolved.names.(name.id)
 let find_parameter context (name : Syntax.name) =
   match find_target context name with
   | Some (Type_parameter parameter) -> (
-      match Hashtbl.find_opt context.broken_parameters parameter with
+      match Parameter_table.find_opt context.broken_parameters parameter with
       | Some report -> Error report
       | None -> Ok parameter)
   | Some (Capability_parameter _) ->
@@ -108,10 +123,10 @@ let show_path (path : Syntax.path) =
     (List.map (fun (name : Syntax.name) -> name.text) (path.modules @ [ path.last ]))
 
 let is_uint64 (lookups : Lookups.t) path =
-  match Resolve.Names.definition_of_path lookups.names path with
+  match Resolve.Names.find_definition lookups.names path with
   | Some (key, { kind = Constant { type_ = { kind = Path_type written; _ }; _ }; _ }) ->
       (lookups.resolved Interface key).names.(written.path.last.id)
-      = Some (Definition (Type, Intrinsic.builtin_path UInt64))
+      = Some (Definition (Type, Intrinsic.make_builtin_path UInt64))
   | _ -> false
 
 let rec elaborate_type context (written : Syntax.type_expression) : Types.ty =
@@ -152,7 +167,7 @@ let rec elaborate_type context (written : Syntax.type_expression) : Types.ty =
       match elaborate_function_type context function_type with
       | Ok function_type -> Types.Function function_type
       | Error report -> Types.Error report)
-  | Type_error -> Types.Error (Resolve.Parts.recovery_report context.spans.(written.id))
+  | Type_error -> Types.Error (Diagnostic.make_recovered context.spans.(written.id))
 
 and elaborate_self context (span : Source.Definition_span.t) =
   match context.self_type with
@@ -194,7 +209,7 @@ and find_declaring_trait ?(capability = false) context trait name =
     (list_trait_closure context.lookups trait)
 
 and elaborate_associated context base parameter (key : Syntax.name) =
-  let bounds = Option.value ~default:[] (Hashtbl.find_opt context.bounds parameter) in
+  let bounds = list_bounds context parameter in
   let associated_type =
     List.find_map
       (fun (bound : Types.trait_reference) ->
@@ -293,7 +308,7 @@ and elaborate_path_type context (path : Syntax.path_type) : Types.ty =
       report_error_type context Arity context.spans.(path.id)
         (Printf.sprintf "`%s` is a generic parameter, which takes no arguments." shown)
   | Some (Type_parameter parameter) -> (
-      match Hashtbl.find_opt context.broken_parameters parameter with
+      match Parameter_table.find_opt context.broken_parameters parameter with
       | Some report -> Types.Error report
       | None -> Types.Parameter parameter)
   | Some (Capability_parameter _) ->
@@ -307,7 +322,7 @@ and elaborate_path_type context (path : Syntax.path_type) : Types.ty =
           let arguments = elaborate_arguments context path in
           match
             check_arity context path shown
-              (Resolve.Names.generics_of context.lookups.names definition_path)
+              (Resolve.Names.find_generics context.lookups.names definition_path)
           with
           | Error report -> Types.Error report
           | Ok () ->
@@ -338,7 +353,7 @@ and elaborate_trait_reference ?(capability = false) context (path : Syntax.path_
     in
     let trait_arguments = elaborate_arguments context path in
     match
-      check_arity context path shown (Resolve.Names.generics_of context.lookups.names trait)
+      check_arity context path shown (Resolve.Names.find_generics context.lookups.names trait)
     with
     | Error report -> Error report
     | Ok () -> Ok { trait; trait_arguments; associated }
@@ -415,7 +430,7 @@ and elaborate_capability context (written : Syntax.capability_reference) : Types
       match find_parameter context base with
       | Error report -> [ Types.Capability_error report ]
       | Ok parameter -> (
-          let bounds = Option.value ~default:[] (Hashtbl.find_opt context.bounds parameter) in
+          let bounds = list_bounds context parameter in
           match find_capability_projection context (Types.Parameter parameter) bounds key with
           | Some projection -> [ projection ]
           | None ->
@@ -537,8 +552,8 @@ let elaborate_generics context owner (written : Syntax.generic_parameter list) :
       match kind with
       | `Type bounds ->
           let bounds, broken = elaborate_trait_bounds context bounds in
-          Hashtbl.replace context.bounds parameter bounds;
-          Option.iter (Hashtbl.replace context.broken_parameters parameter) broken;
+          Parameter_table.replace context.bounds parameter bounds;
+          Option.iter (Parameter_table.replace context.broken_parameters parameter) broken;
           { Types.generic = parameter; kind = Type_generic bounds }
       | `Value _ -> { Types.generic = parameter; kind = Value_generic }
       | `Capability -> { Types.generic = parameter; kind = Capability_generic })
@@ -617,7 +632,7 @@ let elaborate_type_head context owner (head : Syntax.type_head) =
   match find_target context head.path.last with
   | Some (Definition (Type, type_path)) ->
       let type_ =
-        match Resolve.Names.generics_of context.lookups.names type_path with
+        match Resolve.Names.find_generics context.lookups.names type_path with
         | Some expected when List.length expected <> List.length generics ->
             report_error_type context Arity context.spans.(head.id)
               (Printf.sprintf "`%s` takes %d generic %s, and this head names %d."
@@ -637,7 +652,7 @@ let elaborate_type_head context owner (head : Syntax.type_head) =
         report_error_type context Not_a_type context.spans.(head.id)
           (Printf.sprintf "`%s` is %s, not a type, so it has no methods, constants, or `impl`s."
              (show_path head.path)
-             (Resolve.Names.kind_name (Resolve.Names.kind_of_named kind))) )
+             (Resolve.Names.show_kind (Resolve.Names.kind_of_named kind))) )
   | Some (Unknown report) -> (generics, Types.Error report)
   | _ -> bug "the type head `%s` is not resolved" (show_path head.path)
 
@@ -682,7 +697,7 @@ let elaborate_container (context : t) (path : Path.t) (definition : Syntax.defin
           associated = [];
         }
       in
-      Hashtbl.replace context.bounds self_parameter [ self_trait ];
+      Parameter_table.replace context.bounds self_parameter [ self_trait ];
       let context =
         {
           context with
@@ -928,9 +943,15 @@ let elaborate_member (lookups : Lookups.t) ~path ~spans resolved (definition : S
       let inherits_termination =
         match (path, header.container_scope.self_trait) with
         | Method { name; receiver; _ }, Some (implements : Types.trait_reference) -> (
+            let declared_receiver =
+              match Option.bind (lookups.names.key implements.trait) lookups.header with
+              | Some { container = Capability_parts; _ } -> Path.Static
+              | Some { container = Trait_parts _ | Impl_parts _; _ } | None -> receiver
+            in
             match
               Option.map lookups.names.definition
-                (lookups.names.key (Method { owner = implements.trait; name; receiver }))
+                (lookups.names.key
+                   (Method { owner = implements.trait; name; receiver = declared_receiver }))
             with
             | Some { kind = Function { signature = declared; _ } | Method_declaration declared; _ }
               ->
@@ -943,7 +964,7 @@ let elaborate_member (lookups : Lookups.t) ~path ~spans resolved (definition : S
            { elaborated with terminates = elaborated.terminates || inherits_termination })
   | _ ->
       make_elaborated_interface context
-        (Error_interface (Resolve.Parts.recovery_report spans.(definition.id)))
+        (Error_interface (Diagnostic.make_recovered spans.(definition.id)))
 
 let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
   let resolved = lookups.resolved Interface key in
@@ -954,10 +975,10 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
       let context = create lookups resolved ~spans empty_scope in
       let recovered () =
         make_elaborated_interface context
-          (Error_interface (Resolve.Parts.recovery_report spans.(definition.id)))
+          (Error_interface (Diagnostic.make_recovered spans.(definition.id)))
       in
       match
-        ( Resolve.Names.recovery_report lookups.names key Header,
+        ( Resolve.Names.find_recovery_report lookups.names key Header,
           Option.map lookups.header (lookups.names.container key) )
       with
       | Some report, _ -> make_elaborated_interface context (Error_interface report)

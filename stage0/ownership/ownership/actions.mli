@@ -1,6 +1,6 @@
 type view = Borrow_of of Place.t | Copy_of_view_in of Place.t
 
-val viewed_place : view -> Place.t
+val extract_viewed_place : view -> Place.t
 
 type loan = { borrowed : Place.t; mode : Types.mode; duration : Mir.loan_duration }
 

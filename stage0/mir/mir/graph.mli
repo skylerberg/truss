@@ -3,19 +3,21 @@ type early_exit = { resume : block; returned : Tree.local option }
 type branch = { entry : block; blocks : block list }
 type statement = { kind : Tree.basic; origin : Core.origin }
 
+type loop_head = {
+  iteration : Tree.iteration;
+  part : Tree.local;
+  lent : Tree.lent_element option;
+  body : block;
+  binding_count : int;
+  blocks : block list;
+  after : block;
+  loop : Tree.loop;
+}
+
 type terminator =
   | Goto of block
   | Branch of { condition : Tree.operand; yes : block; no : block; is_if_condition : bool }
-  | For of {
-      iteration : Tree.iteration;
-      part : Tree.local;
-      lent : Tree.lent_element option;
-      body : block;
-      binding_count : int;
-      blocks : block list;
-      after : block;
-      loop : Tree.loop;
-    }
+  | For of loop_head
   | Fork of { fork : Core.origin; concurrent : bool; branches : branch list; join : block option }
   | Join of { fork : Core.origin; next : block }
   | Iteration_end of { loop : block }
@@ -48,9 +50,10 @@ type body = {
 
 type t = { body : body; lambdas : body array }
 
-val canonical : basic_block array -> basic_block array
-val iteration_loop : terminator -> block option
-val block_successors : body -> block -> block list
+val canonicalize : basic_block array -> basic_block array
+val find_iteration_loop : terminator -> block option
+val read_loop_head : body -> block -> loop_head
+val list_block_successors : body -> block -> block list
 
 module For_testing : sig
   val successors : terminator -> block list

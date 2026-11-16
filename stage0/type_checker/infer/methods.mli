@@ -1,4 +1,4 @@
-val call :
+val check_call :
   State.state ->
   State.env ->
   ?expected:Types.ty ->

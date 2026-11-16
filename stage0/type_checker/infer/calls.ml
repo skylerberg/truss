@@ -1,21 +1,21 @@
-let arguments_alone state env (arguments : Syntax.argument list) (type_ : Types.ty) =
+let check_arguments_alone state env (arguments : Syntax.argument list) (type_ : Types.ty) =
   List.iter
-    (fun (argument : Syntax.argument) -> ignore (Hooks.expression state env argument.value))
+    (fun (argument : Syntax.argument) -> ignore (Hooks.check_expression state env argument.value))
     arguments;
   type_
 
-let mode_keyword_of (value : Syntax.expression) : Core.mode_keyword option =
+let find_mode_keyword (value : Syntax.expression) : Core.mode_keyword option =
   match value.kind with
   | Mode (_, operand) -> Some { written = value.id; operand = operand.id }
   | _ -> None
 
-let rec function_value_call state env (value : Syntax.expression) (callee : Syntax.expression)
+let rec check_function_value_call state env (value : Syntax.expression) (callee : Syntax.expression)
     arguments =
-  let callee_type = State.normalize state (Hooks.expression state env callee) in
+  let callee_type = State.normalize state (Hooks.check_expression state env callee) in
   match callee_type with
   | Types.Function function_type when List.length function_type.inputs <> List.length arguments ->
-      arguments_alone state env arguments
-        (State.error state Too_many_arguments (State.read_span state value.id)
+      check_arguments_alone state env arguments
+        (State.make_error_type state Too_many_arguments (State.read_span state value.id)
            (Printf.sprintf "This function takes %d arguments, and %d are given."
               (List.length function_type.inputs)
               (List.length arguments)))
@@ -47,7 +47,7 @@ let rec function_value_call state env (value : Syntax.expression) (callee : Synt
               Tables.expression = argument.value.id;
               core_argument_index = index;
               mode;
-              mode_keyword = mode_keyword_of argument.value;
+              mode_keyword = find_mode_keyword argument.value;
             })
           arguments
       in
@@ -63,26 +63,26 @@ let rec function_value_call state env (value : Syntax.expression) (callee : Synt
           };
       Form.register_call ~function_value:callee state value;
       result
-  | Types.Error _ | Types.Hole -> arguments_alone state env arguments callee_type
+  | Types.Error _ | Types.Hole -> check_arguments_alone state env arguments callee_type
   | _ ->
-      arguments_alone state env arguments
-        (State.error state Not_callable (State.read_span state callee.id)
+      check_arguments_alone state env arguments
+        (State.make_error_type state Not_callable (State.read_span state callee.id)
            (Printf.sprintf "`%s` is not a function, so it cannot be called."
               (State.show state callee_type)))
 
 and check_argument state env (value : Syntax.expression) (parameter : Types.parameter_info) =
   let inner =
     match value.kind with
-    | Mode (_, inner) when Option.is_none (State.call_with_mode_keyword state inner) -> inner
+    | Mode (_, inner) when Option.is_none (State.find_call_with_mode_keyword state inner) -> inner
     | _ -> value
   in
-  let actual = Hooks.expression state env ~expected:parameter.type_ inner in
+  let actual = Hooks.check_expression state env ~expected:parameter.type_ inner in
   if inner != value then begin
     State.record state value actual;
     State.alias_expression state value inner
   end;
   let parameter =
-    match Modes.lent_field state value actual with
+    match Modes.find_lent_field_mode state value actual with
     | Some mode -> { parameter with mode }
     | None -> parameter
   in
@@ -116,7 +116,7 @@ and match_arguments state (value : Syntax.expression) (parameters : Types.parame
               | None ->
                   State.report state Unknown_label (State.read_span state label.id)
                     ~fixes:
-                      (match Diagnostic.closest label.text (List.map fst named) with
+                      (match Diagnostic.find_closest label.text (List.map fst named) with
                       | Some candidate ->
                           [
                             State.fix
@@ -218,7 +218,7 @@ and match_arguments state (value : Syntax.expression) (parameters : Types.parame
                | Some label -> (State.read_span state label.id).start
                | None -> (State.read_span state argument.value.id).start
              in
-             State.source state
+             State.quote_span state
                (Source.Definition_span.make start (State.read_span state argument.value.id).stop)
            in
            let start =
@@ -275,7 +275,7 @@ and check_arguments state env (parameters : Types.parameter_info list) matched ~
       Tables.expression = argument.value.id;
       core_argument_index = index + offset;
       mode;
-      mode_keyword = mode_keyword_of argument.value;
+      mode_keyword = find_mode_keyword argument.value;
     }
   in
   let first = List.map check (List.filter (fun pair -> not (is_lambda pair)) matched) in
@@ -286,11 +286,11 @@ and check_arguments state env (parameters : Types.parameter_info list) matched ~
       List.find_opt (fun (checked : Tables.argument) -> checked.expression = id) (first @ lambdas))
     order
 
-and named_call state env ?expected (value : Syntax.expression) path (signature : Types.signature)
-    ~type_arguments arguments =
+and check_named_call state env ?expected (value : Syntax.expression) path
+    (signature : Types.signature) ~type_arguments arguments =
   let instance = Instantiation.instantiate state (State.read_span state value.id) signature in
-  match Name_lookup.explicit_type_arguments state value instance type_arguments with
-  | Error error -> arguments_alone state env arguments error
+  match Name_lookup.check_explicit_type_arguments state value instance type_arguments with
+  | Error error -> check_arguments_alone state env arguments error
   | Ok () ->
       (match (expected, instance.signature.output) with
       | Some expected, Returns output -> State.unify_as_hint state output expected
@@ -317,21 +317,21 @@ and construct state env ?expected ?type_arguments (value : Syntax.expression) ty
   (match expected with Some expected -> State.unify_as_hint state type_ expected | None -> ());
   let unknown_variant variant =
     Error
-      (State.error state Unknown_variant (State.read_span state value.id)
+      (State.make_error_type state Unknown_variant (State.read_span state value.id)
          (Printf.sprintf "`%s` has no variant `%s`." (State.show state type_) variant))
   in
   let fields =
     match variant with
     | None -> (
-        match Members.fields state.lookups type_path type_arguments with
+        match Members.find_fields state.lookups type_path type_arguments with
         | Some fields -> Ok fields
         | None ->
             Error
-              (State.error state Not_a_record (State.read_span state value.id)
+              (State.make_error_type state Not_a_record (State.read_span state value.id)
                  (Printf.sprintf "`%s` is not a record, so it cannot be built this way."
                     (State.show state type_))))
     | Some variant -> (
-        match Members.variants state.lookups type_path type_arguments with
+        match Members.find_variants state.lookups type_path type_arguments with
         | Some variants -> (
             match
               List.find_opt
@@ -341,17 +341,17 @@ and construct state env ?expected ?type_arguments (value : Syntax.expression) ty
             | Some { fields = Some fields; _ } -> Ok fields
             | Some { fields = None; _ } ->
                 Error
-                  (State.error state Too_many_arguments (State.read_span state value.id)
+                  (State.make_error_type state Too_many_arguments (State.read_span state value.id)
                      (Printf.sprintf "`%s` has no fields." variant))
             | None -> unknown_variant variant)
         | None -> unknown_variant variant)
   in
-  if not (Members.fields_visible state.lookups ~package:state.package type_path) then
+  if not (Members.are_fields_visible state.lookups ~package:state.package type_path) then
     State.report state Private_field (State.read_span state value.id)
       (Printf.sprintf "`%s` is opaque, so only its own package can build it."
          (State.show state type_));
   match fields with
-  | Error error -> arguments_alone state env arguments error
+  | Error error -> check_arguments_alone state env arguments error
   | Ok fields ->
       let parameters =
         List.map

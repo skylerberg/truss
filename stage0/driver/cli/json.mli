@@ -8,11 +8,11 @@ type t =
   | Raw of string
 
 val to_string : t -> string
-val option : ('a -> t) -> 'a option -> t
-val document : diagnostics:t list -> (string * t) list -> t
+val encode_option : ('a -> t) -> 'a option -> t
+val make_document : diagnostics:t list -> (string * t) list -> t
 val print : t -> unit
 
 exception Malformed
 
 val parse : string -> t
-val field : string -> t -> t
+val lookup_field : string -> t -> t

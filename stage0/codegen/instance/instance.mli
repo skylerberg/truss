@@ -42,7 +42,7 @@ val make_method_path : impl_method -> Path.t
 val compare : key -> key -> int
 val equal : key -> key -> bool
 val hash : key -> int
-val symbol : key -> string
-val path_symbol : Path.t -> string
-val type_symbol : Ground.ty -> string
+val make_symbol : key -> string
+val mangle_path : Path.t -> string
+val make_type_symbol : Ground.ty -> string
 val to_string : key -> string

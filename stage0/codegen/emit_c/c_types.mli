@@ -7,7 +7,7 @@ type key =
 
 module Keys : Map.S with type key = key
 
-val key_name : key -> string
+val render_key_name : key -> string
 
 type definition =
   | Typedef of string
@@ -34,14 +34,17 @@ type context = {
   mutable failures : (C_runtime.failure * Lowered.site) list;
 }
 
-val new_context : Memory_layout.env -> string -> context
+val make_context : Memory_layout.env -> string -> context
 val refer : context -> Instance.key -> unit
 val use_helper : context -> string -> string
 val register : context -> Keys.key -> unit
-val layout : context -> Ground.ty -> Memory_layout.t
+val compute_layout : context -> Ground.ty -> Memory_layout.t
 val is_struct : context -> Ground.ty -> bool
-val value_c : context -> Ground.ty -> string
-val scalar_c : context -> Memory_layout.scalar -> string
-val c_ty : context -> string -> Lowered.ty -> string
-val signature_parameters : context -> string -> Lowered.ty list -> string list option -> string
+val render_value_type : context -> Ground.ty -> string
+val render_scalar_type : context -> Memory_layout.scalar -> string
+val render_type : context -> string -> Lowered.ty -> string
+
+val render_signature_parameters :
+  context -> string -> Lowered.ty list -> string list option -> string
+
 val define : context -> Keys.key -> defined

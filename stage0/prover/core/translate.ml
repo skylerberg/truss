@@ -14,39 +14,39 @@ let make_context (lookups : Lookups.t) ~home ~current ~terminates ~measures =
       terminates;
       measures;
       declarations = [];
-      declared = Hashtbl.create 64;
-      datatypes = Hashtbl.create 16;
-      stated = Hashtbl.create 64;
+      declared = Tables.Symbol_table.create 64;
+      datatypes = Tables.Type_table.create 16;
+      stated = Tables.Stated_table.create 64;
       facts = [];
       scopes = [];
-      quantifier_facts = Hashtbl.create 16;
+      quantifier_facts = Tables.Term_table.create 16;
       quantifier_symbols = [];
       obligations = [];
       fresh = 0;
       values = [];
-      local_names = Hashtbl.create 16;
+      local_names = Tables.Local_table.create 16;
       returns = [];
       lent_back = [];
       instantiating = [];
       axiomatizing = [];
       open_axioms = [];
-      axioms_of = Hashtbl.create 16;
-      axiom_clauses = Hashtbl.create 16;
+      axioms_of = Tables.Symbol_table.create 16;
+      axiom_clauses = Tables.Axiom_clause_table.create 16;
       yielded_part = None;
       yield_ensures = None;
       callbacks = [];
       counters = [];
       own_bounds = [];
-      fresh_order = Hashtbl.create 64;
+      fresh_order = Tables.Symbol_table.create 64;
       logs = [];
       powers = [];
       lambda_times = [];
       lambda_captures = [];
-      lambda_definitions = Hashtbl.create 8;
+      lambda_definitions = Tables.Symbol_table.create 8;
       potentials = [];
-      models = Hashtbl.create 16;
-      holds_potential = Hashtbl.create 16;
-      buffers = Hashtbl.create 16;
+      models = Tables.Model_table.create 16;
+      holds_potential = Tables.Type_table.create 16;
+      buffers = Tables.Type_table.create 16;
       equalities = [];
       decisions = [];
       entry = [];
@@ -77,6 +77,7 @@ let make_empty_frame source =
     result = None;
     condition = Logic.Boolean true;
     makes_obligations = true;
+    panic = Undeclarable;
     bound = [];
     binders = [];
     substitution = [];
@@ -125,7 +126,7 @@ let list_promises context (source : State.source) locals (costs : Mir.cost list)
 let show_promiser_kind (lookups : Lookups.t) (source : State.source) =
   match source.key with
   | Some { path = Method { owner; _ }; _ }
-    when Resolve.Names.kind_of lookups.interface.names owner = Some Resolve.Names.Capability ->
+    when Resolve.Names.find_kind lookups.interface.names owner = Some Resolve.Names.Capability ->
       "capability"
   | _ -> "trait"
 
@@ -162,7 +163,7 @@ let keep_promise context (frame : State.frame) (promise : promise) ~(at : State.
 let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
     ?(substitution = []) (lookups : Lookups.t) (source : State.source) ~path =
   let contract =
-    match Mir.contract_of_path lookups.mir path with
+    match Mir.read_contract lookups.mir path with
     | Some { form; _ } -> form
     | None -> Facts.bug "`%s` has no MIR of its contract" source.name
   in
@@ -217,7 +218,14 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
             | _ -> ());
             Validity.assume_valid context frame ty term;
             Facts.bind frame (Core_local local) ty term)
-      { (make_empty_frame source) with substitution }
+      {
+        (make_empty_frame source) with
+        substitution;
+        panic =
+          (match signature with
+          | Some { uses; _ } when not proof -> if Types.may_panic uses then Declared else Undeclared
+          | Some _ | None -> Undeclarable);
+      }
       parameters
   in
   let start = { start with old_locals = start.locals; old_self = start.self } in
@@ -297,7 +305,7 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
     | None -> Logic.Boolean true
   in
   let mir =
-    match Mir.code_of_path lookups.mir path with
+    match Mir.read_code lookups.mir path with
     | Some { form; _ } -> form
     | None -> Facts.bug "`%s` has a body and no MIR" source.name
   in
@@ -536,7 +544,8 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
             (fun (start : State.frame) ((proof_source : State.source), renaming) ->
               let proof =
                 match
-                  Option.bind proof_source.key (fun key -> Mir.code (lookups.mir.body_part key))
+                  Option.bind proof_source.key (fun key ->
+                      Mir.find_code (lookups.mir.body_part key))
                 with
                 | Some proof -> proof
                 | None -> Facts.bug "the proof `%s` has no MIR" proof_source.name
@@ -590,7 +599,7 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
 let translate_type (lookups : Lookups.t) (source : State.source) ~path =
   let home = require_home source in
   let context = make_context lookups ~home ~current:path ~terminates:false ~measures:[] in
-  (match Mir.type_clauses_of_path lookups.mir path with
+  (match Mir.read_type_clauses lookups.mir path with
   | Some { form = { invariants; potential }; _ } ->
       let ty =
         match Interface.Definition.read_interface lookups.interface path with
@@ -599,7 +608,7 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
         | _ -> Types.Named { path; arguments = [] }
       in
       let start = { (make_empty_frame source) with self_type = Some ty } in
-      (match Mir.defaults_of_path lookups.mir path with
+      (match Mir.read_defaults lookups.mir path with
       | Some { form = Field_defaults defaults; _ } ->
           List.iter
             (fun (default : Mir.t Mir.field_default) ->
@@ -636,7 +645,7 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
 let test (lookups : Lookups.t) (source : State.source) ~path =
   let home = require_home source in
   let context = make_context lookups ~home ~current:path ~terminates:false ~measures:[] in
-  (match Mir.code (lookups.mir.body_part home) with
+  (match Mir.find_code (lookups.mir.body_part home) with
   | Some (mir : Mir.t) ->
       Reader.read_body context (make_empty_frame source) ~lambdas:mir.lambdas mir.body
   | None -> Facts.bug "the test `%s` has no MIR" source.name);
@@ -645,7 +654,7 @@ let test (lookups : Lookups.t) (source : State.source) ~path =
 let translate_constant (lookups : Lookups.t) (source : State.source) ~path =
   let home = require_home source in
   let context = make_context lookups ~home ~current:path ~terminates:false ~measures:[] in
-  (match Mir.initializer_of_path lookups.mir path with
+  (match Mir.read_initializer lookups.mir path with
   | Some { form = code; _ } ->
       ignore
         (Amounts.run_code context (make_empty_frame source) code

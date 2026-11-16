@@ -1,4 +1,4 @@
 type t = Cursor.t
 
 val create : Source.t -> Diagnostic.Collector.t -> Cursor.t
-val next : Cursor.t -> Layout.input
+val lex_next : Cursor.t -> Layout.input

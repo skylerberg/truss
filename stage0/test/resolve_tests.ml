@@ -38,12 +38,11 @@ let one_diagnostic = Support.one_diagnostic ~setup:(fun files -> setup files) ~c
 let name_at packages name text occurrence =
   let file = file_of name in
   let source = Source.text (Support.source packages file) in
-  let offset = Option.get (Substring.For_testing.find ~occurrence source text) in
-  if offset < 0 then failwith (Printf.sprintf "no occurrence %d of %S" occurrence text);
+  let offset = Support.find_occurrence ~sub:text ~occurrence source in
   let located =
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
-        let key = Resolve.Names.key_of declaration in
+        let key = Resolve.Names.make_key declaration in
         match
           ( (Support.names packages key.module_.package).definition key,
             (Support.names packages key.module_.package).spans key,
@@ -93,10 +92,7 @@ let refers ?(others = []) text ~name:(written, occurrence) expected =
 
 let refers_to_binding text ~use ~binding =
   let packages = setup [ ("app::main", text) ] in
-  let source = text in
-  let binding_offset =
-    Option.get (Substring.For_testing.find ~occurrence:(snd binding) source (fst binding))
-  in
+  let binding_offset = Support.find_occurrence ~sub:(fst binding) ~occurrence:(snd binding) text in
   let name, spans, base, resolved = name_at packages "app::main" (fst use) (snd use) in
   let actual = describe spans base resolved.names.(name.id) in
   let expected = Printf.sprintf "local at %d" binding_offset in
@@ -248,11 +244,11 @@ let () =
 
 let bracket_of text written occurrence =
   let packages = setup [ ("app::main", text) ] in
-  let offset = Option.get (Substring.For_testing.find ~occurrence text written) in
+  let offset = Support.find_occurrence ~sub:written ~occurrence text in
   let declarations = Support.declarations packages (Support.module_of "app::main") in
   List.find_map
     (fun (declaration : Resolve.Names.declaration) ->
-      let key = Resolve.Names.key_of declaration in
+      let key = Resolve.Names.make_key declaration in
       match
         ( (Support.names packages key.module_.package).definition key,
           (Support.names packages key.module_.package).spans key,
@@ -261,13 +257,13 @@ let bracket_of text written occurrence =
       with
       | definition, spans, { base; _ }, Some resolved ->
           let bracket = ref None in
-          Syntax_walk.definition
+          Syntax_walk.visit_definition
             (let rec visit (value : Syntax.expression) =
                (match value.kind with
                | Bracket _ when base + spans.(value.id).start = offset ->
                    bracket := resolved.brackets.(value.id)
                | _ -> ());
-               Syntax_walk.children visit value
+               Syntax_walk.visit_children visit value
              in
              visit)
             definition;

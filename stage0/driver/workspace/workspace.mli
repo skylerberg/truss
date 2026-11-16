@@ -2,17 +2,17 @@ type snapshot
 
 val take_snapshot : string -> (snapshot * (string * Path.package) list, string) result
 val retake : snapshot -> (snapshot, string) result
-val root : snapshot -> string
+val locate_root : snapshot -> string
 val open_database : ?checks:bool -> snapshot -> Database.t
 val problems : snapshot -> Project.problem list
-val packages : snapshot -> (string * Path.package) list
+val list_packages : snapshot -> (string * Path.package) list
 val time_limit_ms : snapshot -> int
-val registry_packages : snapshot -> (Path.package * Registry.Version.t * string) list
+val list_registry_packages : snapshot -> (Path.package * Registry.Version.t * string) list
 val lock_fix : snapshot -> string option
-val package_files : snapshot -> Path.package -> Path.file list
-val dependency_names : snapshot -> Path.package -> Path.package list
-val source : snapshot -> Path.file -> Source.t
-val file_path : snapshot -> Path.file -> string
+val list_package_files : snapshot -> Path.package -> Path.file list
+val list_dependency_names : snapshot -> Path.package -> Path.package list
+val read_source : snapshot -> Path.file -> Source.t
+val locate_file : snapshot -> Path.file -> string
 val list_package_databases : unit -> string list
 val make_trial : snapshot -> (string * string option) list -> snapshot
 val fetch_published : Path.package -> Registry.Version.t -> (snapshot, string) result
@@ -39,6 +39,9 @@ val call :
 val list_servers : unit -> string list
 val stop : unit -> unit
 val wait_until_ended : key:string -> unit
+
+exception Unusable_cache of string
+
 val open_cache : unit -> Cache.t
 val reset : unit -> unit
 

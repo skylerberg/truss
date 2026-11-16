@@ -1023,6 +1023,21 @@ division by zero, an index out of bounds, a shift that is too large, and
 the fact locally, requires the fact of its caller, calls a checked variant
 that returns an `Option` or a `Result`, or declares `uses Panic`.
 
+**`uses Panic` turns a proof into a check.** In a function that declares
+it, an operation that is not proven safe is checked when it runs, and the
+proof goes on as though it held, since a failed check ends the program. The
+check is in every build, so a release build panics where a test build does.
+An index runs the precondition of the `impl`'s `at` at the call, since `at`
+is compiled once for every caller and holds no check of its own. An index
+through a bound is proven: the prover reads the trait's precondition there,
+and the call would run the `impl`'s, so a check would not be the fact the
+proof assumed.
+
+**A lambda proves its operations.** Its capabilities are inferred before the
+prover runs. A lambda that could panic where its type allows no `Panic` would
+end a program that relies on the type, such as a server whose handler type
+has no `Panic`.
+
 **A panic cannot be caught.** Code that caught a panic could hold a value
 whose invariant was broken partway through an update. A program that must
 keep running proves that it cannot panic instead: a server requires a
@@ -2086,6 +2101,16 @@ slower. Every worktree and CI share the caches. The database itself caches
 nothing, so a revert or a branch switch is a change to the files like any
 other. The database computes the cheap stages again, and the solver, the C
 compiler, and the tests are cache hits.
+
+Only the cache's user can write its directory. The compiler trusts what the
+cache holds: it links the cached object files, takes the cached solver
+answers as proofs, and loads the cached databases as they were written. A
+user who could write another user's cache could run code as that user, or
+make a false contract pass. The compiler makes the directory with mode 0700,
+and it refuses a directory that belongs to another user or that its group or
+other users can write. Without `$HOME`, the home directory is the one that
+the user's account names, never the temporary directory, which every user
+can write.
 
 The cache's directory also holds two kinds of file that are not results.
 The background process and its clients both use them. The two processes can

@@ -3,10 +3,11 @@ let types =
     (fun (builtin : Intrinsic.builtin) ->
       match builtin with
       | Storage | View | Handle | Shared -> None
-      | _ -> Some (Intrinsic.builtin_name builtin, Intrinsic.module_))
+      | _ -> Some (Intrinsic.show_builtin builtin, Intrinsic.module_))
     Intrinsic.builtins
   @ List.concat_map
-      (fun (modules, names) -> List.map (fun name -> (name, Path.standard_module modules)) names)
+      (fun (modules, names) ->
+        List.map (fun name -> (name, Path.make_standard_module modules)) names)
       [
         ([ "option" ], [ "Option" ]);
         ([ "result" ], [ "Result" ]);

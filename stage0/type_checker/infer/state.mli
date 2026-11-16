@@ -99,7 +99,7 @@ val reject_in_formula : state -> env -> Source.Definition_span.t -> string -> un
 val read_span : state -> Syntax.id -> Source.Definition_span.t
 val bug : ('a, unit, string, 'b) format4 -> 'a
 
-val error :
+val make_error_type :
   state ->
   ?fixes:Source.Definition_span.t Diagnostic.fix list ->
   Diagnostic.Code.types ->
@@ -107,9 +107,12 @@ val error :
   string ->
   Types.ty
 
-val source : state -> Source.Definition_span.t -> string
-val fresh_node_id : state -> int
-val synthetic_expression : state -> origin:Core.origin -> Types.ty -> Core.kind -> Core.expression
+val quote_span : state -> Source.Definition_span.t -> string
+val allocate_node_id : state -> int
+
+val make_synthetic_expression :
+  state -> origin:Core.origin -> Types.ty -> Core.kind -> Core.expression
+
 val register_expression : state -> Syntax.expression -> (unit -> Core.kind) -> unit
 val was_hole : state -> (Tables.t -> Types.ty option array) -> Syntax.id -> bool
 val build_expression : state -> Syntax.expression -> Core.expression
@@ -119,41 +122,41 @@ val register_pattern : state -> Syntax.pattern -> (unit -> Core.pattern_kind) ->
 val build_pattern : state -> Syntax.pattern -> Core.pattern
 val alias_expression : state -> Syntax.expression -> Syntax.expression -> unit
 val mark_lent_tails : state -> Syntax.expression -> unit
-val place_of : Core.expression -> Core.place
-val fresh_synthetic_local : state -> Core.local
+val make_place : Core.expression -> Core.place
+val allocate_synthetic_local : state -> Core.local
 
 val fix :
   string -> Source.Definition_span.t Diagnostic.edit list -> Source.Definition_span.t Diagnostic.fix
 
 val replace : Source.Definition_span.t -> string -> Source.Definition_span.t Diagnostic.edit
 val insert : int -> string -> Source.Definition_span.t Diagnostic.edit
-val current_frame : state -> frame option
+val find_current_frame : state -> frame option
 val record : state -> Syntax.expression -> Types.ty -> unit
 val note_compiled_expression : state -> env -> Syntax.expression -> unit
 val report_specification_only : state -> Source.Definition_span.t -> string -> Diagnostic.reported
 val defer : state -> (unit -> bool) -> unit
 val resolve : state -> Types.ty -> Types.ty
 val zonk : state -> Types.ty -> Types.ty
-val fresh : state -> Types.ty
-val integer_type : state -> Types.ty -> bool
-val signed_type : state -> Types.ty -> bool
-val bounds : state -> Types.parameter -> Types.trait_reference list
+val make_fresh_type : state -> Types.ty
+val is_integer_type : state -> Types.ty -> bool
+val is_signed_type : state -> Types.ty -> bool
+val lookup_bounds : state -> Types.parameter -> Types.trait_reference list
 val normalize : state -> Types.ty -> Types.ty
-val final_type : state -> Types.ty -> Types.ty
-val final_capabilities : state -> Types.capability_set -> Types.capability_set
-val final_argument : state -> Types.argument -> Types.argument
+val finalize_type : state -> Types.ty -> Types.ty
+val finalize_capabilities : state -> Types.capability_set -> Types.capability_set
+val finalize_argument : state -> Types.argument -> Types.argument
 val unify : state -> Types.ty -> Types.ty -> bool
 val unify_as_hint : state -> Types.ty -> Types.ty -> unit
 val implements : state -> Types.ty -> Types.trait_reference -> Interface.Impls.evidence option
-val plain : state -> Types.ty -> bool
+val is_plain : state -> Types.ty -> bool
 val is_view : state -> Types.ty -> bool
-val copyable : state -> Types.ty -> bool
+val is_copyable : state -> Types.ty -> bool
 
-val associated :
+val resolve_associated_type :
   state -> Types.ty -> Types.trait_reference -> string -> at:Source.Definition_span.t -> Types.ty
 
-val evidence_of : Interface.Impls.evidence -> Tables.evidence
-val trait_reference : ?arguments:Types.argument list -> Path.t -> Types.trait_reference
+val convert_evidence : Interface.Impls.evidence -> Tables.evidence
+val make_trait_reference : arguments:Types.argument list -> Path.t -> Types.trait_reference
 val string_type : Types.ty
 val in_statement : state -> env -> Source.Definition_span.t -> (unit -> 'a) -> 'a
 val diverges : is_never:(Syntax.expression -> bool) -> Syntax.statement -> bool
@@ -164,14 +167,14 @@ val declare : state -> Syntax.name -> Types.ty -> is_var:bool -> mode:Types.mode
 val declare_compiled :
   state -> env -> Syntax.name -> Types.ty -> is_var:bool -> mode:Types.mode -> unit
 
-val target : state -> Syntax.name -> Resolve.target option
-val default_literal : state -> at:Source.Definition_span.t -> Types.ty -> Types.ty
-val head : state -> Syntax.expression -> Resolve.head option
-val names_variant : Syntax.name -> bool
+val find_target : state -> Syntax.name -> Resolve.target option
+val decide_default_literal : state -> at:Source.Definition_span.t -> Types.ty -> Types.ty
+val find_head : state -> Syntax.expression -> Resolve.head option
+val is_variant_name : Syntax.name -> bool
 val is_member_constant : state -> Syntax.expression -> bool
 val show : state -> Types.ty -> string
 
-val reported_mismatch :
+val add_mismatch_diagnostic :
   state ->
   ?fixes:Source.Definition_span.t Diagnostic.fix list ->
   Diagnostic.Code.types ->
@@ -180,15 +183,17 @@ val reported_mismatch :
   string ->
   Diagnostic.reported
 
-val mismatched :
+val add_mismatch :
   state -> Source.Definition_span.t -> expected:Types.ty -> actual:Types.ty -> Diagnostic.reported
 
-val mismatch : state -> Source.Definition_span.t -> expected:Types.ty -> actual:Types.ty -> unit
+val report_mismatch :
+  state -> Source.Definition_span.t -> expected:Types.ty -> actual:Types.ty -> unit
+
 val is_place : state -> Syntax.expression -> bool
-val call_with_mode_keyword : state -> Syntax.expression -> Syntax.id option
+val find_call_with_mode_keyword : state -> Syntax.expression -> Syntax.id option
 val check_resource : state -> Syntax.resource -> unit
 
-val slice :
+val make_slice :
   state ->
   origin:Core.origin ->
   Core.place ->

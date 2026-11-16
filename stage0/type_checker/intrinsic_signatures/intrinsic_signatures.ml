@@ -1,27 +1,28 @@
-let parameter operation name : Types.parameter =
-  { owner = Intrinsic.operation_path operation; name }
+let make_parameter operation name : Types.parameter =
+  { owner = Intrinsic.make_operation_path operation; name }
 
-let storage element =
-  Types.Named { path = Intrinsic.builtin_path Storage; arguments = [ Types.Type element ] }
+let make_storage_type element =
+  Types.Named { path = Intrinsic.make_builtin_path Storage; arguments = [ Types.Type element ] }
 
-let view element =
-  Types.Named { path = Intrinsic.builtin_path View; arguments = [ Types.Type element ] }
+let make_view_type element =
+  Types.Named { path = Intrinsic.make_builtin_path View; arguments = [ Types.Type element ] }
 
-let libc_scalar scalar = Types.make_builtin (Intrinsic.libc_builtin scalar)
+let make_libc_scalar_type scalar = Types.make_builtin (Intrinsic.builtin_of_libc scalar)
 
-let sequence element =
-  Types.Named { path = Well_known.path Sequence; arguments = [ Types.Type element ] }
+let make_sequence_type element =
+  Types.Named { path = Well_known.make_path Sequence; arguments = [ Types.Type element ] }
 
-let signature (operation : Intrinsic.operation) : Types.signature =
-  let generic name = { Types.generic = parameter operation name; kind = Type_generic [] } in
+let make_signature (operation : Intrinsic.operation) : Types.signature =
+  let generic name = { Types.generic = make_parameter operation name; kind = Type_generic [] } in
   let bounded known name =
     {
-      Types.generic = parameter operation name;
+      Types.generic = make_parameter operation name;
       kind =
-        Type_generic [ { trait = Well_known.path known; trait_arguments = []; associated = [] } ];
+        Type_generic
+          [ { trait = Well_known.make_path known; trait_arguments = []; associated = [] } ];
     }
   in
-  let parameter_type name = Types.Parameter (parameter operation name) in
+  let parameter_type name = Types.Parameter (make_parameter operation name) in
   let input ?(mode = Types.Read) name type_ = { Types.name; mode; type_; has_default = false } in
   let make ?(generics = []) ?(output = Types.Returns Types.unit) parameters : Types.signature =
     {
@@ -42,11 +43,11 @@ let signature (operation : Intrinsic.operation) : Types.signature =
   in
   let unary output = make ~generics:[ "Value" ] ~output:(Returns output) [ input "value" value ] in
   let over_array ~output parameters =
-    let count = parameter operation "count" in
+    let count = make_parameter operation "count" in
     let array =
       Types.Named
         {
-          path = Intrinsic.builtin_path Array;
+          path = Intrinsic.make_builtin_path Array;
           arguments = [ Types.Type element; Types.Value (Value_parameter count) ];
         }
     in
@@ -66,7 +67,7 @@ let signature (operation : Intrinsic.operation) : Types.signature =
       }
   in
   let with_storage ?(mode = Types.Read) ?(output = Types.Returns Types.unit) rest =
-    make ~generics:[ "Element" ] ~output (input ~mode "storage" (storage element) :: rest)
+    make ~generics:[ "Element" ] ~output (input ~mode "storage" (make_storage_type element) :: rest)
   in
   let with_plain_storage rest =
     { (with_storage ~mode:Mut rest) with generics = [ bounded Plain "Element" ] }
@@ -109,12 +110,14 @@ let signature (operation : Intrinsic.operation) : Types.signature =
       make
         ~output:(Returns (Types.make_builtin Int8))
         [
-          input "left" (view (Types.make_builtin UInt8));
-          input "right" (view (Types.make_builtin UInt8));
+          input "left" (make_view_type (Types.make_builtin UInt8));
+          input "right" (make_view_type (Types.make_builtin UInt8));
         ]
-  | Storage_empty -> make ~generics:[ "Element" ] ~output:(Returns (storage element)) []
+  | Storage_empty -> make ~generics:[ "Element" ] ~output:(Returns (make_storage_type element)) []
   | Storage_with_capacity ->
-      make ~generics:[ "Element" ] ~output:(Returns (storage element)) [ input "capacity" uint64 ]
+      make ~generics:[ "Element" ]
+        ~output:(Returns (make_storage_type element))
+        [ input "capacity" uint64 ]
   | Storage_length | Storage_capacity -> with_storage ~output:(Returns uint64) []
   | Storage_set_capacity -> with_storage ~mode:Mut [ input "capacity" uint64 ]
   | Storage_lengthen -> with_plain_storage [ input "by" uint64 ]
@@ -127,44 +130,54 @@ let signature (operation : Intrinsic.operation) : Types.signature =
   | Storage_swap -> with_storage ~mode:Mut [ input "first" uint64; input "second" uint64 ]
   | Storage_from_array ->
       over_array
-        ~output:(fun _ -> Returns (storage element))
+        ~output:(fun _ -> Returns (make_storage_type element))
         (fun array -> [ input ~mode:Own "array" array ])
   | Array_from_storage ->
       over_array
         ~output:(fun array -> Returns array)
-        (fun _ -> [ input ~mode:Own "storage" (storage element) ])
+        (fun _ -> [ input ~mode:Own "storage" (make_storage_type element) ])
   | Array_view ->
-      over_array ~output:(fun _ -> Returns (view element)) (fun array -> [ input "array" array ])
+      over_array
+        ~output:(fun _ -> Returns (make_view_type element))
+        (fun array -> [ input "array" array ])
   | Array_at_mut ->
       over_array
         ~output:(fun _ -> Lends (Mut, element))
         (fun array -> [ input ~mode:Mut "array" array; input "index" uint64 ])
   | Storage_at -> with_storage ~output:(Lends (Read, element)) [ input "index" uint64 ]
   | Storage_at_mut -> with_storage ~mode:Mut ~output:(Lends (Mut, element)) [ input "index" uint64 ]
-  | Storage_view -> with_storage ~output:(Returns (view element)) []
+  | Storage_view -> with_storage ~output:(Returns (make_view_type element)) []
   | View_length ->
-      make ~generics:[ "Element" ] ~output:(Returns uint64) [ input "view" (view element) ]
+      make ~generics:[ "Element" ] ~output:(Returns uint64)
+        [ input "view" (make_view_type element) ]
   | View_at ->
       make ~generics:[ "Element" ]
         ~output:(Lends (Read, element))
-        [ input "view" (view element); input "index" uint64 ]
+        [ input "view" (make_view_type element); input "index" uint64 ]
   | View_at_mut ->
       make ~generics:[ "Element" ]
         ~output:(Lends (Mut, element))
-        [ input ~mode:Mut "view" (view element); input "index" uint64 ]
+        [ input ~mode:Mut "view" (make_view_type element); input "index" uint64 ]
   | View_swap ->
       make ~generics:[ "Element" ]
-        [ input ~mode:Mut "view" (view element); input "first" uint64; input "second" uint64 ]
+        [
+          input ~mode:Mut "view" (make_view_type element);
+          input "first" uint64;
+          input "second" uint64;
+        ]
   | View_slice ->
       make ~generics:[ "Element" ]
-        ~output:(Returns (view element))
-        [ input "view" (view element); input "start" uint64; input "stop" uint64 ]
+        ~output:(Returns (make_view_type element))
+        [ input "view" (make_view_type element); input "start" uint64; input "stop" uint64 ]
   | Storage_model ->
-      { (with_storage ~output:(Returns (sequence element)) []) with specification_only = true }
+      {
+        (with_storage ~output:(Returns (make_sequence_type element)) []) with
+        specification_only = true;
+      }
   | Array_model ->
       {
         (over_array
-           ~output:(fun _ -> Returns (sequence element))
+           ~output:(fun _ -> Returns (make_sequence_type element))
            (fun array -> [ input "array" array ]))
         with
         specification_only = true;
@@ -172,16 +185,19 @@ let signature (operation : Intrinsic.operation) : Types.signature =
   | View_model ->
       {
         (make ~generics:[ "Element" ]
-           ~output:(Returns (sequence element))
-           [ input "view" (view element) ])
+           ~output:(Returns (make_sequence_type element))
+           [ input "view" (make_view_type element) ])
         with
         specification_only = true;
       }
   | View_address ->
-      make ~generics:[ "Element" ] ~output:(Returns uint64) [ input "view" (view element) ]
+      make ~generics:[ "Element" ] ~output:(Returns uint64)
+        [ input "view" (make_view_type element) ]
   | Crash ->
       make ~output:(Returns Types.Never)
-        [ input "message" (Types.Named { path = Well_known.path String_slice; arguments = [] }) ]
+        [
+          input "message" (Types.Named { path = Well_known.make_path String_slice; arguments = [] });
+        ]
   | Handle_from ->
       make
         ~output:(Returns (Types.make_builtin Handle))
@@ -212,7 +228,7 @@ let signature (operation : Intrinsic.operation) : Types.signature =
         [ input "value" value; input "clause" uint64 ]
   | Shared_new | Shared_update | Shared_key -> (
       let shared =
-        Types.Named { path = Intrinsic.builtin_path Shared; arguments = [ Types.Type value ] }
+        Types.Named { path = Intrinsic.make_builtin_path Shared; arguments = [ Types.Type value ] }
       in
       match operation with
       | Shared_new ->
@@ -251,39 +267,41 @@ let signature (operation : Intrinsic.operation) : Types.signature =
   | Live_blocks -> make ~output:(Returns uint64) []
   | Environment_entry ->
       make
-        ~output:(Returns (view (Types.make_builtin UInt8)))
+        ~output:(Returns (make_view_type (Types.make_builtin UInt8)))
         [ input "index" uint64; input ~mode:Mut "is_present" bool ]
   | System_is_os _ | System_is_architecture _ -> make ~output:(Returns bool) []
   | Libc function_ ->
-      let { Libc.parameters; result; _ } = Libc.signature function_ in
+      let { Libc.parameters; result; _ } = Libc.make_signature function_ in
       let presence = match result with Text -> [ input ~mode:Mut "is_present" bool ] | _ -> [] in
       make
         ~output:
           (Returns
              (match result with
-             | Returns scalar | Points_at scalar -> libc_scalar scalar
-             | Text -> view (Types.make_builtin UInt8)
+             | Returns scalar | Points_at scalar -> make_libc_scalar_type scalar
+             | Text -> make_view_type (Types.make_builtin UInt8)
              | Never -> Types.Never))
         (List.concat_map
            (fun (name, (passes : Libc.passes)) ->
              match passes with
-             | Value scalar -> [ input name (libc_scalar scalar) ]
-             | Elements (scalar, _) -> [ input name (view (libc_scalar scalar)) ]
+             | Value scalar -> [ input name (make_libc_scalar_type scalar) ]
+             | Elements (scalar, _) ->
+                 [ input name (make_view_type (make_libc_scalar_type scalar)) ]
              | Room (scalar, _) | Elements_to_change (scalar, _) ->
-                 [ input ~mode:Mut name (storage (libc_scalar scalar)) ]
+                 [ input ~mode:Mut name (make_storage_type (make_libc_scalar_type scalar)) ]
              | Written (scalar, names) ->
-                 List.map (fun name -> input ~mode:Mut name (libc_scalar scalar)) names
+                 List.map (fun name -> input ~mode:Mut name (make_libc_scalar_type scalar)) names
              | Always _ | Fixed _ -> [])
            parameters
         @ presence)
-  | Libc_number number -> make ~output:(Returns (libc_scalar (Libc.number_type number))) []
+  | Libc_number number ->
+      make ~output:(Returns (make_libc_scalar_type (Libc.classify_number number))) []
 
 type time = Constant_time | Linear_in of int | Unbounded_time
 type amount = Argument of int | Generic of string
 type allocations = No_allocations | One_if_positive of amount | Unknown_allocations
 type cost = { time : time; allocations : allocations }
 
-let cost (operation : Intrinsic.operation) =
+let classify_cost (operation : Intrinsic.operation) =
   match operation with
   | Add | Subtract | Multiply | Divide | Remainder | Negate | Wrapping_add | Wrapping_subtract
   | Wrapping_multiply | Add_overflows | Subtract_overflows | Multiply_overflows | Equal | Less

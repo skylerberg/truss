@@ -1,3 +1,3 @@
 (library
  (name path)
- (libraries zarith))
+ (libraries structural_key zarith))

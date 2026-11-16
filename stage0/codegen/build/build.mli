@@ -1,10 +1,10 @@
 type cache
 
-val cache : string -> cache
+val make_cache : string -> cache
 
 type settings = { build : Emit_c.build; optimization : Toolchain.optimization; extra : string list }
 
-val program :
+val build_program :
   ?progress:(int -> int -> unit) ->
   ?tests:bool ->
   ?copied:(Emit_c.fragment -> Emit_c.fragment list) ->

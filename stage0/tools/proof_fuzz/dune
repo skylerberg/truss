@@ -1,6 +1,7 @@
 (executable
  (name proof_fuzz)
  (libraries
+  structural_key
   zarith
   path
   source
@@ -9,7 +10,6 @@
   lexer
   documents
   file_system
-  substring
   workspace
   resolve
   types

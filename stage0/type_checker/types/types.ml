@@ -72,7 +72,7 @@ let list_missing_capabilities ~(required : capability_set) ~(available : capabil
   else subtract_capabilities required available
 
 let flat_map_capabilities f (set : capability_set) = make_capability_set (List.concat_map f set)
-let make_builtin builtin = Named { path = Intrinsic.builtin_path builtin; arguments = [] }
+let make_builtin builtin = Named { path = Intrinsic.make_builtin_path builtin; arguments = [] }
 let unit = make_builtin Unit
 let bool = make_builtin Bool
 let make_self_parameter trait = { owner = trait; name = "Self" }
@@ -276,6 +276,9 @@ let find_specification_only_type type_ =
 
 let has_capability_variable capabilities =
   List.exists (function Capability_variable _ -> true | _ -> false) capabilities
+
+let may_panic capabilities =
+  List.exists (function Capability path -> Well_known.is Panic path | _ -> false) capabilities
 
 let equal left right = left = right
 let is_error = function Error _ -> true | _ -> false

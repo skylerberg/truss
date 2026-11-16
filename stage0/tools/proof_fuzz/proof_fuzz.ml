@@ -1,3 +1,7 @@
+module Arguments_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Z.t list
+end))
+
 let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [] }
 let example_file : Path.file = { module_ = example; name = "main" }
 let standard_package_database = lazy (Workspace.For_testing.load_standard_package_database ())
@@ -14,7 +18,9 @@ let compiler =
   lazy
     (match Toolchain.find () with Ok toolchain -> toolchain | Error message -> failwith message)
 
-let cache = lazy (Build.cache (Filename.concat (Filename.get_temp_dir_name ()) "truss-proof-fuzz"))
+let cache =
+  lazy (Build.make_cache (Filename.concat (Filename.get_temp_dir_name ()) "truss-proof-fuzz"))
+
 let settings : Build.settings = { build = Development; optimization = O1; extra = [] }
 
 let load text =
@@ -56,10 +62,10 @@ let runnable database =
   let lookups = Database.make_proof_lookups database in
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
-      let key = Resolve.Names.key_of declaration in
+      let key = Resolve.Names.make_key declaration in
       match
         ( Interface.Definition.read_declared_signature interface declaration.path,
-          Mir.contract_of_path mir declaration.path )
+          Mir.read_contract mir declaration.path )
       with
       | ( Some ({ generics = []; receiver = None; uses; output = Returns output; _ } as signature),
           Some { form = { requires; _ }; _ } )
@@ -88,7 +94,7 @@ let runnable database =
           match List.filter_map Fun.id ranges with
           | ranges_written
             when List.length ranges_written = List.length ranges
-                 && not (List.exists (fun admit -> Substring.contains admit "==>") admits) ->
+                 && not (List.exists (fun admit -> String.includes ~affix:"==>" admit) admits) ->
               Some { path = declaration.path; key; signature; admits; ranges = ranges_written }
           | _ -> None)
       | _ -> None)
@@ -165,11 +171,11 @@ let run_mutant ~samples text =
                 | Ok (Ran (Static_scalar (Bool true))) -> true
                 | _ -> false
               in
-              let tried = Hashtbl.create 16 in
+              let tried = Arguments_table.create 16 in
               List.iter
                 (fun arguments ->
-                  if (not (Hashtbl.mem tried arguments)) && admitted arguments then begin
-                    Hashtbl.replace tried arguments ();
+                  if (not (Arguments_table.mem tried arguments)) && admitted arguments then begin
+                    Arguments_table.replace tried arguments ();
                     incr runs;
                     match call candidate.path arguments with
                     | Ok (Stopped report) ->
@@ -212,7 +218,7 @@ let mutants text =
             | _ -> None
           in
           match swapped with
-          | Some other -> [ replace token.span (Token.punctuation_spelling other) ]
+          | Some other -> [ replace token.span (Token.spell_punctuation other) ]
           | None -> [])
       | _ -> [])
 

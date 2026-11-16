@@ -2,6 +2,7 @@
  (name package_checks)
  (modules_without_implementation lookups)
  (libraries
+  structural_key
   source
   compiler_bug
   path

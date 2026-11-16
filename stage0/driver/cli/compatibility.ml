@@ -2,12 +2,12 @@ type change = Breaks of string | Grows of string
 type public_change = { path : Path.t; change : change }
 type side = { database : Database.t; lookups : Interface.Lookups.t }
 
-let public (side : side) (declaration : Resolve.Names.declaration) =
+let is_public (side : side) (declaration : Resolve.Names.declaration) =
   declaration.ordinal = 0
-  && side.lookups.names.container (Resolve.Names.key_of declaration) = None
+  && side.lookups.names.container (Resolve.Names.make_key declaration) = None
   && Resolve.Names.is_public declaration.visibility
 
-let declarations (side : side) package = side.lookups.names.package_declarations package
+let list_declarations (side : side) package = side.lookups.names.package_declarations package
 
 let read_form (side : side) key =
   Option.map
@@ -27,7 +27,7 @@ let loses ~equal ~before ~after =
 let gains ~equal ~before ~after =
   List.exists (fun now -> not (List.exists (fun was -> equal was now) before)) after
 
-let contract ~before:(before_parameters, (before : Core.contract))
+let compare_contracts ~before:(before_parameters, (before : Core.contract))
     ~after:(after_parameters, (after : Core.contract)) =
   let parameters = (before_parameters, after_parameters) in
   let differ equal before after = (loses ~equal ~before ~after, gains ~equal ~before ~after) in
@@ -60,7 +60,7 @@ let uses_more : Types.capability -> change = function
   | Capability_error _ ->
       Compiler_bug.bug ~stage:"Compatibility" "a signature holds a capability with an error"
 
-let signature ~(before : Types.signature) ~(after : Types.signature) =
+let compare_signatures ~(before : Types.signature) ~(after : Types.signature) =
   let same_parameters =
     List.length before.parameters = List.length after.parameters
     && List.for_all2
@@ -103,8 +103,8 @@ let has_changed_invariant ~before ~after =
   let equal = Core_equivalence.equal_condition ~parameters:([], []) in
   loses ~equal ~before ~after || gains ~equal ~before ~after
 
-let type_ ~(before : Types.type_interface) ~(after : Types.type_interface) ~before_invariants
-    ~after_invariants =
+let compare_types ~(before : Types.type_interface) ~(after : Types.type_interface)
+    ~before_invariants ~after_invariants =
   List.concat
     [
       (if before.type_generics <> after.type_generics then
@@ -138,7 +138,7 @@ let has_changed_laws ~before ~after =
   List.length before <> List.length after
   || not (List.for_all (fun was -> List.exists (Core_equivalence.equal_law was) after) before)
 
-let trait ~(before : Types.trait_interface) ~(after : Types.trait_interface) ~before_laws
+let compare_traits ~(before : Types.trait_interface) ~(after : Types.trait_interface) ~before_laws
     ~after_laws ~signature_before ~signature_after ~contract_before ~contract_after =
   let same (was : Types.trait_method) (now : Types.trait_method) =
     was.method_name = now.method_name && was.method_receiver = now.method_receiver
@@ -157,8 +157,8 @@ let trait ~(before : Types.trait_interface) ~(after : Types.trait_interface) ~be
         | None -> [ Breaks (Printf.sprintf "no longer has the method `%s`" was.method_name) ]
         | Some now ->
             List.map named
-              (signature ~before:(signature_before was) ~after:(signature_after now)
-              @ contract
+              (compare_signatures ~before:(signature_before was) ~after:(signature_after now)
+              @ compare_contracts
                   ~before:(contract_before was.method_name was.method_receiver)
                   ~after:(contract_after now.method_name now.method_receiver)
               @ if was.provided && not now.provided then [ Breaks "lost its default body" ] else []
@@ -220,7 +220,7 @@ let is_same_impl (before : Path.t) (after : Path.t) =
       before.trait = after.trait && Path.equal before.for_type after.for_type
   | _ -> Path.equal before after
 
-let impls (side : side) package =
+let list_impls (side : side) package =
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
       if declaration.kind = Impl && declaration.ordinal = 0 then
@@ -234,13 +234,13 @@ let impls (side : side) package =
                 impl.capability_sets )
         | _ -> None
       else None)
-    (declarations side package)
+    (list_declarations side package)
 
 let compare ~before ~after package =
   let before = { database = before; lookups = Database.make_interface_lookups before [ package ] }
   and after = { database = after; lookups = Database.make_interface_lookups after [ package ] } in
-  let old = List.filter (public before) (declarations before package) in
-  let now = List.filter (public after) (declarations after package) in
+  let old = List.filter (is_public before) (list_declarations before package) in
+  let now = List.filter (is_public after) (list_declarations after package) in
   let public_change path change = { path; change } in
   let definitions =
     List.concat_map
@@ -253,7 +253,7 @@ let compare ~before ~after package =
         | Some is when is.kind <> was.kind ->
             [ public_change path (Breaks "became another kind of definition") ]
         | Some is ->
-            let before_key = Resolve.Names.key_of was and after_key = Resolve.Names.key_of is in
+            let before_key = Resolve.Names.make_key was and after_key = Resolve.Names.make_key is in
             List.map (public_change path)
               (match
                  ( Interface.Definition.read_interface before.lookups path,
@@ -261,15 +261,15 @@ let compare ~before ~after package =
                with
               | ( Some (Function_interface old_signature | Theorem_interface old_signature),
                   Some (Function_interface new_signature | Theorem_interface new_signature) ) ->
-                  signature ~before:old_signature ~after:new_signature
-                  @ contract ~before:(read_contract before before_key)
+                  compare_signatures ~before:old_signature ~after:new_signature
+                  @ compare_contracts ~before:(read_contract before before_key)
                       ~after:(read_contract after after_key)
               | Some (Type_interface old_type), Some (Type_interface new_type) ->
-                  type_ ~before:old_type ~after:new_type
+                  compare_types ~before:old_type ~after:new_type
                     ~before_invariants:(read_invariants before before_key)
                     ~after_invariants:(read_invariants after after_key)
               | Some (Trait_interface old_trait), Some (Trait_interface new_trait) ->
-                  trait ~before:old_trait ~after:new_trait
+                  compare_traits ~before:old_trait ~after:new_trait
                     ~before_laws:(read_laws before before_key)
                     ~after_laws:(read_laws after after_key)
                     ~signature_before:
@@ -297,7 +297,7 @@ let compare ~before ~after package =
         else Some (public_change is.path (Grows "is new")))
       now
   in
-  let old_impls = impls before package and new_impls = impls after package in
+  let old_impls = list_impls before package and new_impls = list_impls after package in
   let impl_changes =
     List.concat_map
       (fun (path, shown, old_sets) ->
@@ -335,13 +335,13 @@ let compare ~before ~after package =
   in
   definitions @ added @ impl_changes
 
-let breaks changes =
+let list_breaking_changes changes =
   List.filter_map
     (fun { path; change } ->
       match change with Breaks description -> Some (path, description) | Grows _ -> None)
     changes
 
-let grows changes =
+let list_growing_changes changes =
   List.filter_map
     (fun { path; change } ->
       match change with Grows description -> Some (path, description) | Breaks _ -> None)

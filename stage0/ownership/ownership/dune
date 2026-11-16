@@ -2,6 +2,7 @@
  (name ownership)
  (modules_without_implementation lookups)
  (libraries
+  structural_key
   source
   path
   well_known

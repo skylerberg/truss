@@ -1,0 +1,7 @@
+fn inspect[Value](value: Value) {}
+
+fn look[Collection: Index](collection: Collection, key: Collection.Key)
+  uses Panic
+{
+  inspect(collection[key])
+}

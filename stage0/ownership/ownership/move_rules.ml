@@ -1,5 +1,9 @@
+module Place_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Moves.path
+end))
+
 let copy_fix context title type_ (at : Source.Definition_span.t) =
-  if Context.copyable context type_ then
+  if Context.is_copyable context type_ then
     [
       Diagnostic.fix title
         [ Diagnostic.insert (Source.Definition_span.zero_width at.stop) ".copy()" ];
@@ -11,7 +15,7 @@ type verdict =
   | Reads
   | Refused of (Context.context -> Source.Definition_span.t -> Types.ty -> unit)
 
-let verdict context (place : Place.t) ~type_ ~is_returned ~is_captured : verdict =
+let decide_move context (place : Place.t) ~type_ ~is_returned ~is_captured : verdict =
   let shown = Context.show context place in
   let refuse message =
     Refused
@@ -21,7 +25,7 @@ let verdict context (place : Place.t) ~type_ ~is_returned ~is_captured : verdict
           message)
   in
   let root_mode : Types.mode =
-    if is_captured then Read else Context.binding_mode context place.root
+    if is_captured then Read else Context.classify_binding_mode context place.root
   in
   if is_returned && root_mode <> Own then
     if Context.is_view context type_ then Reads
@@ -65,25 +69,27 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
     | Source { name = None; _ } | Temporary | Lent _ -> None
   in
   let first_move state (path : Moves.path) =
-    match List.sort compare (Moves.moved_at moves state path) with
+    match List.sort compare (Moves.list_moved_at moves state path) with
     | origin :: _ -> Some origin
     | [] -> None
   in
-  let reported_use_after_move = Hashtbl.create 8 in
+  let reported_use_after_move = Place_table.create 8 in
   let check_use_after_move state (place : Mir.place) origin =
     match Moves.path_of_place place with
     | None -> ()
     | Some path -> (
         match Moves.may_be_empty moves state path with
-        | Some moved when not (Hashtbl.mem reported_use_after_move moved) -> (
+        | Some moved when not (Place_table.mem reported_use_after_move moved) -> (
             match (place_of moved, first_move state moved) with
             | Some shown, Some moved_origin ->
-                Hashtbl.replace reported_use_after_move moved ();
+                Place_table.replace reported_use_after_move moved ();
                 let shown = Context.show context shown in
-                Context.report context Use_after_move (Context.span context origin)
+                Context.report context Use_after_move
+                  (Context.locate_origin context origin)
                   ~notes:
                     [
-                      (Context.span context moved_origin, Printf.sprintf "`%s` is moved here." shown);
+                      ( Context.locate_origin context moved_origin,
+                        Printf.sprintf "`%s` is moved here." shown );
                     ]
                   ~fixes:
                     [
@@ -94,17 +100,17 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
             | _ -> ())
         | _ -> ())
   in
-  let reported_not_reinitialized = Hashtbl.create 8 in
+  let reported_not_reinitialized = Place_table.create 8 in
   let check_reinitialized state ~locals ?(moved_in_scope = fun _ -> true) ~at message =
     List.iter
       (fun local ->
-        if Moves.lent_mut moves local then
+        if Moves.is_lent_mut moves local then
           match Moves.may_be_empty moves state { local; projections = [] } with
-          | Some moved when not (Hashtbl.mem reported_not_reinitialized moved) -> (
+          | Some moved when not (Place_table.mem reported_not_reinitialized moved) -> (
               match (place_of moved, first_move state moved) with
               | Some shown, Some moved_origin when moved_in_scope moved ->
-                  Hashtbl.replace reported_not_reinitialized moved ();
-                  let moved_span = Context.span context moved_origin in
+                  Place_table.replace reported_not_reinitialized moved ();
+                  let moved_span = Context.locate_origin context moved_origin in
                   let root = Context.show context { shown with steps = [] } in
                   Context.report context Not_reinitialized
                     (Option.value ~default:moved_span at)
@@ -148,10 +154,10 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
   in
   Array.iteri
     (fun block (basic : Mir.Graph.basic_block) ->
-      let state = Moves.entry moves block in
+      let state = Moves.copy_entry_state moves block in
       List.iter
         (fun (statement : Mir.Graph.statement) ->
-          check_uses state (Moves.statement_uses moves statement);
+          check_uses state (Moves.list_statement_uses moves statement);
           List.iter
             (fun (initialized : Moves.path) ->
               match Moves.may_be_empty moves state initialized with
@@ -160,24 +166,24 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
                     { root = Local moved.local; projections = [] }
                     statement.origin
               | _ -> ())
-            (Moves.given_by statement);
+            (Moves.list_given_by statement);
           List.iter
             (fun local -> check_reinitialized state ~locals:[ local ] ~at:None scope_end)
-            (Moves.ended_by statement);
+            (Moves.list_ended statement);
           Moves.apply moves state statement)
         basic.statements;
-      let at = Context.span context basic.terminator_origin in
-      check_uses state (Moves.terminator_uses moves basic);
+      let at = Context.locate_origin context basic.terminator_origin in
+      check_uses state (Moves.list_terminator_uses moves basic);
       match basic.terminator with
       | Return _ -> check_at_return at state
-      | Iteration_end { loop } -> (
-          match body.blocks.(loop).terminator with
-          | For { part; _ } -> check_reinitialized state ~locals:[ part ] ~at:None scope_end
-          | _ -> ())
+      | Iteration_end { loop } ->
+          check_reinitialized state
+            ~locals:[ (Mir.Graph.read_loop_head body loop).part ]
+            ~at:None scope_end
       | Join _ ->
           List.iter
             (fun (blocks, entry) ->
-              let branch_entry = Moves.entry moves entry in
+              let branch_entry = Moves.copy_entry_state moves entry in
               if List.mem block blocks then
                 check_reinitialized state ~locals:all_locals
                   ~moved_in_scope:(fun moved -> Moves.may_be_empty moves branch_entry moved = None)
@@ -190,12 +196,14 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
                        `mut` borrow."
                       moved))
             concurrent_branches
-      | _ -> ())
+      | Goto _ | Branch _ | For _ | Fork _ | Yield _ | Cancel _ | Resume _ | Unreachable
+      | Written_unreachable | Todo ->
+          ())
     body.blocks
 
 let analyse context body =
   Moves.analyse
-    ~moving:(fun type_ -> not (Context.plain context type_))
+    ~moving:(fun type_ -> not (Context.is_plain context type_))
     ~tracks:(fun _ -> true)
     body
 

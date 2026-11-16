@@ -1,6 +1,6 @@
-let bit_vector_names state (value : Core.expression) =
-  Core_walk.expression
-    (Core_walk.deep
+let check_bit_vector_names state (value : Core.expression) =
+  Core_walk.walk_expression
+    (Core_walk.make_deep_visitor
        {
          Core_walk.ignore_all with
          place =
@@ -16,29 +16,29 @@ let bit_vector_names state (value : Core.expression) =
        })
     value
 
-let rec block_value state env ?expected (written : Syntax.block) =
+let rec check_block_value state env ?expected (written : Syntax.block) =
   let rec statements_value = function
     | [] -> Types.unit
     | [ (last : Syntax.statement) ] -> (
         match last.kind with
-        | Expression value -> Hooks.expression state env ?expected value
+        | Expression value -> Hooks.check_expression state env ?expected value
         | _ ->
-            ignore (statement state env last ~last:true);
+            ignore (check_statement state env last ~last:true);
             if State.statement_diverges state last then Types.Never else Types.unit)
     | (first : Syntax.statement) :: rest ->
         ignore
           (State.in_statement state env (State.read_span state first.id) (fun () ->
-               statement state env first ~last:false));
+               check_statement state env first ~last:false));
         statements_value rest
   in
   statements_value written.statements
 
-and statement state env (written : Syntax.statement) ~last : unit =
+and check_statement state env (written : Syntax.statement) ~last : unit =
   match written.kind with
   | Expression value ->
       State.register_statement state written (fun () ->
           Evaluate (State.build_expression state value));
-      let type_ = Hooks.expression state env value in
+      let type_ = Hooks.check_expression state env value in
       if not last then
         State.defer state (fun () ->
             match State.normalize state type_ with
@@ -66,7 +66,7 @@ and statement state env (written : Syntax.statement) ~last : unit =
             let annotated = Interface.Elaborator.elaborate_type state.context annotation in
             Hooks.check state env value annotated;
             annotated
-        | None -> Hooks.expression state env value
+        | None -> Hooks.check_expression state env value
       in
       if is_var then begin
         State.reject_in_formula state env (State.read_span state written.id) "A `var`";
@@ -74,7 +74,7 @@ and statement state env (written : Syntax.statement) ~last : unit =
       end;
       (match else_ with
       | Some block -> (
-          let else_type = block_value state env block in
+          let else_type = check_block_value state env block in
           match State.resolve state else_type with
           | Types.Never -> ()
           | _ ->
@@ -83,7 +83,9 @@ and statement state env (written : Syntax.statement) ~last : unit =
                  or `unreachable`.")
       | None -> ());
       let mode =
-        if is_var then Types.Own else if Modes.borrowed state value then Types.Read else Types.Own
+        if is_var then Types.Own
+        else if Modes.is_borrowed state value then Types.Read
+        else Types.Own
       in
       State.register_statement state written (fun () ->
           let value = Operands.build mode (State.build_expression state value) in
@@ -92,23 +94,23 @@ and statement state env (written : Syntax.statement) ~last : unit =
       (match (annotation, written_pattern.kind) with
       | None, Binding name -> Hashtbl.replace state.annotatable name.id ()
       | _ -> ());
-      Pattern_typing.binding_pattern state env written_pattern type_ ~is_var ~mode
+      Pattern_typing.check_binding_pattern state env written_pattern type_ ~is_var ~mode
   | Assignment { target; operator = Assign; value }
     when assigns_through_index state env written target value ->
       ()
   | Assignment { target = written_target; operator; value } -> (
-      let target_type = Hooks.expression state env written_target in
+      let target_type = Hooks.check_expression state env written_target in
       Modes.mutate state env ~by:Assignment written_target;
       match operator with
       | Assign ->
           State.register_statement state written (fun () ->
-              let target = State.place_of (State.build_expression state written_target) in
+              let target = State.make_place (State.build_expression state written_target) in
               Assign { target; value = State.build_expression state value });
           Hooks.check state env value target_type;
           Modes.check_owned state env value target_type
       | Compound operation -> (
-          let right_type = Hooks.expression state env ~expected:target_type value in
-          Operators.literal_operands state ~left:target_type ~right:right_type;
+          let right_type = Hooks.check_expression state env ~expected:target_type value in
+          Operators.check_literal_operands state ~left:target_type ~right:right_type;
           State.register_statement state written (fun () ->
               Form.build_compound_assign state written written_target value operation);
           match operation with
@@ -116,7 +118,7 @@ and statement state env (written : Syntax.statement) ~last : unit =
               let trait, method_ = Operators.select_arithmetic_trait arithmetic in
               let call_site : Syntax.expression = { kind = Expression_error; id = written.id } in
               let result =
-                Operators.operator_call
+                Operators.check_operator_call
                   ~operands:
                     [
                       {
@@ -135,7 +137,7 @@ and statement state env (written : Syntax.statement) ~last : unit =
                   state call_site ~trait ~method_ ~left:target_type ~right:(Some right_type)
               in
               if not (State.unify state result target_type) then
-                State.mismatch state (State.read_span state value.id) ~expected:target_type
+                State.report_mismatch state (State.read_span state value.id) ~expected:target_type
                   ~actual:result
           | Shift _ ->
               ignore
@@ -144,7 +146,7 @@ and statement state env (written : Syntax.statement) ~last : unit =
                    ~right:(State.read_span state value.id, right_type))
           | Bitwise _ ->
               if not (State.unify state target_type right_type) then
-                State.mismatch state (State.read_span state value.id) ~expected:target_type
+                State.report_mismatch state (State.read_span state value.id) ~expected:target_type
                   ~actual:right_type;
               ignore
                 (Operators.infer_bitwise_result state
@@ -154,15 +156,15 @@ and statement state env (written : Syntax.statement) ~last : unit =
       State.reject_in_formula state env (State.read_span state written.id) "A `for` loop";
       let mode, inner =
         match iterable.kind with
-        | Mode (Mut, inner) when Option.is_none (State.call_with_mode_keyword state inner) ->
+        | Mode (Mut, inner) when Option.is_none (State.find_call_with_mode_keyword state inner) ->
             (Types.Mut, inner)
-        | Mode (Own, inner) when Option.is_none (State.call_with_mode_keyword state inner) ->
+        | Mode (Own, inner) when Option.is_none (State.find_call_with_mode_keyword state inner) ->
             (Types.Own, inner)
         | _ -> (Types.Read, iterable)
       in
       let loop_element = ref None in
       State.in_statement state env (State.read_span state iterable.id) (fun () ->
-          let element, variable_mode = loop_iterable state env written ~mode inner in
+          let element, variable_mode = check_loop_iterable state env written ~mode inner in
           (match annotation with
           | Some written_annotation ->
               let annotated =
@@ -170,7 +172,7 @@ and statement state env (written : Syntax.statement) ~last : unit =
               in
               if not (State.unify state element annotated) then
                 ignore
-                  (State.reported_mismatch state Mismatch
+                  (State.add_mismatch_diagnostic state Mismatch
                      (State.read_span state written_annotation.id)
                      ~sides:[ (element, annotated) ]
                      (Printf.sprintf "The elements of this loop are `%s`, not `%s`."
@@ -185,10 +187,10 @@ and statement state env (written : Syntax.statement) ~last : unit =
              | Some type_ -> State.record state iterable type_
              | None -> ());
           if mode = Types.Mut then Modes.mutate state env ~by:Passed_mut inner;
-          Pattern_typing.binding_pattern state env written_pattern element ~is_var:false
+          Pattern_typing.check_binding_pattern state env written_pattern element ~is_var:false
             ~mode:variable_mode);
       List.iter
-        (loop_clause state
+        (check_loop_clause state
            { env with loop_element = Option.map (State.resolve state) !loop_element })
         clauses;
       State.register_statement state written (fun () ->
@@ -201,12 +203,12 @@ and statement state env (written : Syntax.statement) ~last : unit =
               | Sequential -> Sequential
               | Parallel_loop -> Parallel_loop
               | Concurrent_loop -> Concurrent_loop));
-      loop_body state env body
+      check_loop_body state env body
   | While { condition = test; clauses; body } ->
       State.reject_in_formula state env (State.read_span state written.id) "A `while` loop";
       State.in_statement state env (State.read_span state test.id) (fun () ->
           Hooks.check state env test Types.bool);
-      List.iter (loop_clause state env) clauses;
+      List.iter (check_loop_clause state env) clauses;
       State.register_statement state written (fun () ->
           let condition = State.build_expression state test in
           let clauses = List.map (Form.build_loop_clause state) clauses in
@@ -217,7 +219,7 @@ and statement state env (written : Syntax.statement) ~last : unit =
               body = State.build_block state body;
               binds_lent_part = Form.binds_lent_part state condition;
             });
-      loop_body state env body
+      check_loop_body state env body
   | Parallel body | Concurrent body ->
       let concurrent = match written.kind with Concurrent _ -> true | _ -> false in
       State.reject_in_formula state env
@@ -229,15 +231,15 @@ and statement state env (written : Syntax.statement) ~last : unit =
       List.iter
         (fun (branch : Syntax.statement) ->
           State.in_statement state env (State.read_span state branch.id) (fun () ->
-              statement state env branch ~last:false))
+              check_statement state env branch ~last:false))
         body.statements
   | Proof body ->
       State.register_statement state written (fun () -> Proof (State.build_block state body));
-      loop_body state { env with specification = true } body
+      check_loop_body state { env with specification = true } body
   | Assert { value; by_bit_vector } ->
       State.register_statement state written (fun () ->
           let value = State.build_expression state value in
-          if by_bit_vector then bit_vector_names state value;
+          if by_bit_vector then check_bit_vector_names state value;
           Assert
             { condition = { value; executable = Form.is_executable state value }; by_bit_vector });
       Hooks.check state env value Types.bool
@@ -248,15 +250,15 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
   match (target.kind, state.resolved.brackets.(target.id)) with
   | Bracket (_, [ Item { kind = Range _; _ } ]), _ -> false
   | Bracket (base, [ Item key ]), (Some Index | None) -> (
-      let base_type = State.normalize state (Hooks.expression state env base) in
-      let trait = State.trait_reference (Well_known.path Index_assign) in
+      let base_type = State.normalize state (Hooks.check_expression state env base) in
+      let trait = State.make_trait_reference ~arguments:[] (Well_known.make_path Index_assign) in
       match
         ( State.implements state base_type trait,
-          Members.trait_method state.lookups trait.trait "assign" Mut )
+          Members.find_trait_method state.lookups trait.trait "assign" Mut )
       with
       | ( Some ((Interface.Impls.From_impl _ | From_bound | From_any) as evidence_source),
           Some method_ ) ->
-          let index = State.trait_reference (Well_known.path Index) in
+          let index = State.make_trait_reference ~arguments:[] (Well_known.make_path Index) in
           let parameter name type_ : Types.parameter_info =
             { name; mode = Own; type_; has_default = false }
           in
@@ -264,11 +266,12 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
           ignore
             (Calls.check_argument state env key
                (parameter "key"
-                  (State.associated state base_type index "Key" ~at:(State.read_span state key.id))));
+                  (State.resolve_associated_type state base_type index "Key"
+                     ~at:(State.read_span state key.id))));
           ignore
             (Calls.check_argument state env value
                (parameter "value"
-                  (State.associated state base_type index "Output"
+                  (State.resolve_associated_type state base_type index "Output"
                      ~at:(State.read_span state value.id))));
           let call : Syntax.expression = { kind = Expression_error; id = written.id } in
           State.record state call Types.unit;
@@ -291,11 +294,11 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
                       receiver = Mut;
                       self_type = base_type;
                       type_arguments = [];
-                      evidence = State.evidence_of evidence_source;
+                      evidence = State.convert_evidence evidence_source;
                     };
                 arguments = [ argument base 0 Mut; argument key 1 Own; argument value 2 Own ];
                 omitted_defaults = [];
-                uses = (Members.method_signature state.lookups trait.trait method_).uses;
+                uses = (Members.read_method_signature state.lookups trait.trait method_).uses;
                 callee_result = Types.unit;
               };
           Form.register_call state call;
@@ -305,36 +308,38 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
       | _ -> false)
   | _ -> false
 
-and loop_body state env (body : Syntax.block) =
+and check_loop_body state env (body : Syntax.block) =
   List.iter
     (fun (written : Syntax.statement) ->
       State.in_statement state env (State.read_span state written.id) (fun () ->
-          statement state env written ~last:false))
+          check_statement state env written ~last:false))
     body.statements
 
-and loop_clause state env (clause : Syntax.loop_clause) =
+and check_loop_clause state env (clause : Syntax.loop_clause) =
   let env = { env with specification = true } in
   match clause.kind with
   | Invariant value -> Hooks.check state env value Types.bool
   | Loop_decreases measures ->
-      List.iter (fun measure -> ignore (Hooks.expression state env measure)) measures
+      List.iter (fun measure -> ignore (Hooks.check_expression state env measure)) measures
   | Loop_cost { resource; bound; _ } -> (
       State.check_resource state resource;
       match bound with
-      | Big_o value | At_most value | Exactly value -> ignore (Hooks.expression state env value)
+      | Big_o value | At_most value | Exactly value ->
+          ignore (Hooks.check_expression state env value)
       | Finite -> ())
 
-and loop_iterable state env (written : Syntax.statement) ~mode (iterable : Syntax.expression) =
+and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable : Syntax.expression)
+    =
   match iterable.kind with
   | Range { start = Some _; stop = Some _; inclusive; _ } -> (
-      let range_type = State.normalize state (Hooks.expression state env iterable) in
+      let range_type = State.normalize state (Hooks.check_expression state env iterable) in
       match range_type with
       | Types.Named { arguments = [ Types.Type element ]; _ } ->
           State.defer state (fun () ->
               let element = State.normalize state element in
               if Types.contains_unsolved element then false
               else begin
-                if State.integer_type state element || Types.is_builtin Character element then
+                if State.is_integer_type state element || Types.is_builtin Character element then
                   state.tables.loops.(written.id) <- Some (Integer_range { element; inclusive })
                 else if not (Types.is_error element) then
                   State.report state Not_indexable
@@ -346,17 +351,18 @@ and loop_iterable state env (written : Syntax.statement) ~mode (iterable : Synta
           (element, mode)
       | _ -> State.bug "a range is not of the range type")
   | _ -> (
-      let type_ = State.normalize state (Hooks.expression state env iterable) in
+      let type_ = State.normalize state (Hooks.check_expression state env iterable) in
       match type_ with
       | Types.Error _ | Types.Hole -> (type_, mode)
       | _ -> (
-          let cursor = State.trait_reference (Well_known.path Cursor) in
+          let cursor = State.make_trait_reference ~arguments:[] (Well_known.make_path Cursor) in
           let by_position =
             if mode = Types.Own then None
-            else Name_lookup.elements_calls state (State.read_span state iterable.id) type_ mode
+            else
+              Name_lookup.find_elements_calls state (State.read_span state iterable.id) type_ mode
           and consumed =
             if mode = Types.Own then
-              Name_lookup.consuming_cursor state (State.read_span state iterable.id) type_
+              Name_lookup.find_consuming_cursor state (State.read_span state iterable.id) type_
             else None
           in
           match (by_position, consumed, State.implements state type_ cursor) with
@@ -374,12 +380,15 @@ and loop_iterable state env (written : Syntax.statement) ~mode (iterable : Synta
                        cursor = type_;
                        cursor_call = None;
                        remaining =
-                         Name_lookup.remaining_call state (State.read_span state iterable.id) type_;
+                         Name_lookup.find_remaining_call state
+                           (State.read_span state iterable.id)
+                           type_;
                      });
-              ( State.associated state type_ cursor "Element" ~at:(State.read_span state iterable.id),
+              ( State.resolve_associated_type state type_ cursor "Element"
+                  ~at:(State.read_span state iterable.id),
                 Types.Own )
           | None, None, None ->
-              ( State.error state Not_indexable
+              ( State.make_error_type state Not_indexable
                   (State.read_span state iterable.id)
                   (match mode with
                   | Types.Read ->

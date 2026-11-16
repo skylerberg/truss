@@ -20,7 +20,7 @@ let of_code_points values =
   List.iter (encode buffer) values;
   Buffer.contents buffer
 
-let in_ranges ranges value =
+let is_in_ranges ranges value =
   let rec search low high =
     low <= high
     &&
@@ -44,24 +44,24 @@ let find_key keys value =
 
 type property = { ascii : Bytes.t; ranges : int array }
 
-let property ranges =
-  let ascii = Bytes.init 128 (fun value -> if in_ranges ranges value then '\001' else '\000') in
+let make_property ranges =
+  let ascii = Bytes.init 128 (fun value -> if is_in_ranges ranges value then '\001' else '\000') in
   { ascii; ranges }
 
 let has property value =
   if value < 128 then Bytes.unsafe_get property.ascii value <> '\000'
-  else in_ranges property.ranges value
+  else is_in_ranges property.ranges value
 
-let xid_start = property Unicode_tables.xid_start
-let xid_continue = property Unicode_tables.xid_continue
-let forbidden = property Unicode_tables.forbidden
+let xid_start = make_property Unicode_tables.xid_start
+let xid_continue = make_property Unicode_tables.xid_continue
+let forbidden = make_property Unicode_tables.forbidden
 let is_xid_start = has xid_start
 let is_xid_continue = has xid_continue
 let is_forbidden = has forbidden
-let is_bidi_control = in_ranges Unicode_tables.bidi_control
-let is_control = in_ranges Unicode_tables.control
+let is_bidi_control = is_in_ranges Unicode_tables.bidi_control
+let is_control = is_in_ranges Unicode_tables.control
 
-let forbidden_name value =
+let find_forbidden_name value =
   Option.map
     (Array.get Unicode_tables.forbidden_name_values)
     (find_key Unicode_tables.forbidden_name_keys value)

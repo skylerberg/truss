@@ -1,6 +1,7 @@
 (library
  (name mir)
  (libraries
+  structural_key
   compiler_bug
   path
   types

@@ -302,6 +302,10 @@ test "a decimal is read and written with the scale it was given" {
   assert math::Decimal.parse(".") is Err(InvalidCharacter(offset)) && offset == 1
   assert math::Decimal.parse("1e+") is Err(InvalidCharacter(offset)) && offset == 3
   assert math::Decimal.parse("1 ") is Err(InvalidCharacter(offset)) && offset == 1
+  assert math::Decimal.parse("1e99999999999999999999") is Err(InvalidCharacter(offset)) && offset == 22
+  assert math::Decimal.parse("1e-99999999999999999999") is Err(InvalidCharacter(offset)) && offset == 23
+  assert math::Decimal.parse("1e-2147483647") is Ok(_)
+  assert math::Decimal.parse("1e-2147483648") is Err(InvalidCharacter(offset)) && offset == 13
   assert decimal("1.50").scale() == 2 && decimal("1.50").coefficient() == big("150")
   assert decimal("1e3").scale() == -3 && decimal("0").is_zero() && !decimal("0.01").is_zero()
   assert decimal("-0.5").is_negative() && reads(decimal("-0.5").absolute(), expected: "0.5")

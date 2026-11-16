@@ -51,10 +51,10 @@ val system : env -> Libc.system
 val shape : env -> Ground.ty -> shape
 val of_type : env -> Ground.ty -> t
 val has_zero_size : env -> Ground.ty -> bool
-val block : env -> Ground.ty -> string -> t
-val scalar_size : scalar -> int
-val integer_size : integer -> int
-val integer_range : integer -> Z.t * Z.t
+val lay_out_block : env -> Ground.ty -> string -> t
+val compute_scalar_size : scalar -> int
+val compute_integer_size : integer -> int
+val compute_integer_range : integer -> Z.t * Z.t
 
 type tag = { at : step list; integer : integer }
 
@@ -68,7 +68,7 @@ type 'case dispatch =
   | Switch of { tag : tag; cases : (Z.t * 'case) list }
   | Tests of (discriminant * 'case) list
 
-val discriminant : t -> string -> discriminant
+val compute_discriminant : t -> string -> discriminant
 val dispatch : t -> (string * 'case) list -> 'case dispatch
 
 module For_testing : sig

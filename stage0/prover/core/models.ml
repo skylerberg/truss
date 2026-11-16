@@ -30,12 +30,12 @@ let under_binder :
       (fun () -> read body_frame)
   in
   let with_facts term =
-    if !facts <> [] then Hashtbl.replace context.quantifier_facts term (List.rev !facts);
+    if !facts <> [] then Tables.Term_table.replace context.quantifier_facts term (List.rev !facts);
     term
   in
   (body_frame, body, with_facts)
 
-let sequence_path : Path.t = Well_known.path Sequence
+let sequence_path : Path.t = Well_known.make_path Sequence
 
 let make_sequence_type element =
   Types.Named { path = sequence_path; arguments = [ Types.Type element ] }
@@ -49,9 +49,9 @@ let make_sequence_length context element term =
 
 let rec index_sequence (context : State.context) element term index =
   let sequence = make_sequence_type element in
-  let index_trait = Well_known.path Index in
+  let index_trait = Well_known.make_path Index in
   match
-    Mir.Call_edges.impls_for context.lookups.interface Path.standard_package [ index_trait ]
+    Mir.Call_edges.list_impls_for context.lookups.interface Path.standard_package [ index_trait ]
       sequence
   with
   | impl :: _ ->
@@ -104,7 +104,7 @@ let make_finite_function context (ty : Types.ty) name output inputs =
       fun term -> Logic.Apply (symbol, term :: List.map fst inputs)
   | _ -> fun term -> term
 
-let finite_set_path : Path.t = Well_known.path Finite_set
+let finite_set_path : Path.t = Well_known.make_path Finite_set
 
 let substitute_value_term context (value : Types.value) =
   match value with
@@ -135,9 +135,9 @@ let rank_model (context : State.context) (ty : Types.ty) ~(model : Types.ty) sym
         Facts.add_fact context fact)
 
 let compute_model_function (context : State.context) (ty : Types.ty) ~(model : Types.ty) =
-  let model_trait = Well_known.path Model in
+  let model_trait = Well_known.make_path Model in
   match
-    Mir.Call_edges.impls_for context.lookups.interface Path.standard_package [ model_trait ] ty
+    Mir.Call_edges.list_impls_for context.lookups.interface Path.standard_package [ model_trait ] ty
   with
   | impl :: _ ->
       let path = Path.Method { owner = impl; name = "model"; receiver = Read } in
@@ -163,11 +163,11 @@ let compute_model_function (context : State.context) (ty : Types.ty) ~(model : T
 
 let find_model_function (context : State.context) (ty : Types.ty) ~(model : Types.ty) =
   let key = (ty, model) in
-  match Hashtbl.find_opt context.models key with
+  match Tables.Model_table.find_opt context.models key with
   | Some model_fn -> model_fn
   | None ->
       let model_fn = compute_model_function context ty ~model in
-      Hashtbl.replace context.models key model_fn;
+      Tables.Model_table.replace context.models key model_fn;
       model_fn
 
 let rec find_model context (ty : Types.ty) term ~element =
@@ -240,7 +240,7 @@ let quantified_over (context : State.context) (frame : State.frame) (quantifier 
       in
       make ~count symbol Int premise inner each
   | Range_of_collection { collection_type; collected; element; location } -> (
-      let set_path = Well_known.path Set in
+      let set_path = Well_known.make_path Set in
       match collection_type with
       | Types.Named { path; _ } when Path.equal path set_path || Path.equal path finite_set_path ->
           let finite = Types.Named { path = finite_set_path; arguments = [ Types.Type element ] } in

@@ -199,10 +199,13 @@ static void t_install_signal_dispositions(void) {
 let allocation =
   {|
 #ifdef T_TESTS
-static uint64_t t_live_blocks = 0;
-#define t_block_allocated() (t_live_blocks += 1)
-#define t_block_freed() (t_live_blocks -= 1)
-uint64_t t_runtime_live_blocks(void) { return t_live_blocks; }
+static _Atomic uint64_t t_live_blocks;
+#define t_block_allocated() \
+  ((void)atomic_fetch_add_explicit(&t_live_blocks, 1, memory_order_relaxed))
+#define t_block_freed() ((void)atomic_fetch_sub_explicit(&t_live_blocks, 1, memory_order_relaxed))
+uint64_t t_runtime_live_blocks(void) {
+  return atomic_load_explicit(&t_live_blocks, memory_order_relaxed);
+}
 #else
 #define t_block_allocated() ((void)0)
 #define t_block_freed() ((void)0)
@@ -292,6 +295,10 @@ void *__tsan_get_current_fiber(void);
 void *__tsan_create_fiber(unsigned flags);
 void __tsan_destroy_fiber(void *fiber);
 void __tsan_switch_to_fiber(void *fiber, unsigned flags);
+const char *__tsan_default_options(void);
+__attribute__((visibility("default"), used)) const char *__tsan_default_options(void) {
+  return "halt_on_error=1";
+}
 #endif
 
 #define T_STACK_CACHE 64
@@ -2001,7 +2008,7 @@ const t_test *t_runtime_tests;
 void t_runtime_run_test(uint32_t index) { t_runtime_tests[index](); }
 |}
 
-let runtime ~tests =
+let render_runtime ~tests =
   String.concat ""
     [
       (if tests then "#define T_TESTS 1\n" else "");
@@ -2014,7 +2021,7 @@ let runtime ~tests =
       (if tests then tests_table else "");
     ]
 
-let starting ?(before_start = "") ~declarations ~requested_workers root_call =
+let render_start ?(before_start = "") ~declarations ~requested_workers root_call =
   Printf.sprintf
     "typedef __INT32_TYPE__ int32_t;\n\
      typedef __UINT32_TYPE__ uint32_t;\n\
@@ -2038,17 +2045,17 @@ let starting ?(before_start = "") ~declarations ~requested_workers root_call =
      }\n"
     declarations root_call before_start requested_workers
 
-let main_calling entry =
-  starting
+let render_main_start entry =
+  render_start
     ~declarations:(Printf.sprintf "int32_t %s(void);\n" entry)
     ~requested_workers:0
     (Printf.sprintf "program->status = %s()" entry)
 
-let tests_calling ~time_limit_ms ~runner tests =
+let render_tests_start ~time_limit_ms ~runner tests =
   let test_declarations =
     String.concat "" (List.map (fun symbol -> Printf.sprintf "void %s(void);\n" symbol) tests)
   in
-  starting
+  render_start
     ~declarations:
       (Printf.sprintf
          "typedef void (*t_test)(void);\n\
@@ -2060,18 +2067,18 @@ let tests_calling ~time_limit_ms ~runner tests =
     ~before_start:"  t_runtime_tests = t_tests;\n" ~requested_workers:1
     (Printf.sprintf "program->status = %s(%d, %d)" runner (List.length tests) time_limit_ms)
 
-let evaluator_calling entry =
-  starting
+let render_evaluator_start entry =
+  render_start
     ~declarations:(Printf.sprintf "void %s(void);\n" entry)
     ~requested_workers:1
     (Printf.sprintf "(void)program;\n  %s()" entry)
 
-let program_calling entry =
-  starting
+let render_program_start entry =
+  render_start
     ~declarations:(Printf.sprintf "int32_t %s(int32_t count, void *arguments);\n" entry)
     ~requested_workers:0
     (Printf.sprintf "program->status = %s(program->count, program->arguments)" entry)
 
 module For_testing = struct
-  let main_calling = main_calling
+  let main_calling = render_main_start
 end

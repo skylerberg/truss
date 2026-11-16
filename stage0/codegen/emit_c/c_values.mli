@@ -1,31 +1,33 @@
 type function_context = { symbol : string; local : Lowered.local -> string * Lowered.ty }
 
-val local_name : Lowered.local -> string option -> string
-val erased : C_types.context -> Lowered.ty -> bool
+val render_local_name : Lowered.local -> string option -> string
+val is_erased : C_types.context -> Lowered.ty -> bool
 val declare_prototype : C_types.context -> string -> string -> unit
-val site_c : C_types.context -> Lowered.site -> string
-val bytes_symbol : C_types.context -> int -> string
-val bytes_name : C_types.context -> string -> string
-val function_ref_symbol : function_context -> Lowered.function_ref -> string
-val block_pointer : C_types.context -> string -> Ground.ty -> string -> string
-val place_c : C_types.context -> function_context -> Lowered.place -> (string * Lowered.ty) option
+val render_site : C_types.context -> Lowered.site -> string
+val render_bytes_symbol : C_types.context -> int -> string
+val render_bytes_name : C_types.context -> string -> string
+val render_function_ref_symbol : function_context -> Lowered.function_ref -> string
+val render_block_pointer : C_types.context -> string -> Ground.ty -> string -> string
 
-val operand_c :
+val render_place :
+  C_types.context -> function_context -> Lowered.place -> (string * Lowered.ty) option
+
+val render_operand :
   C_types.context -> function_context -> Lowered.operand -> (string * Lowered.ty) option
 
-val constant_c : C_types.context -> Lowered.constant -> string * Lowered.ty
-val scalar_of : C_types.context -> Lowered.ty -> Memory_layout.scalar
-val bit_width : Memory_layout.scalar -> int
-val unsigned_of : C_types.context -> Memory_layout.scalar -> string
-val niche_value : C_types.context -> Memory_layout.niche -> Z.t -> string
-val path_c : string -> Memory_layout.step list -> string
-val discriminant_test_c : C_types.context -> string -> Memory_layout.discriminant -> string
+val render_constant : C_types.context -> Lowered.constant -> string * Lowered.ty
+val classify_scalar : C_types.context -> Lowered.ty -> Memory_layout.scalar
+val compute_bit_width : Memory_layout.scalar -> int
+val render_unsigned_type : C_types.context -> Memory_layout.scalar -> string
+val render_niche_value : C_types.context -> Memory_layout.niche -> Z.t -> string
+val render_path : string -> Memory_layout.step list -> string
+val render_discriminant_test : C_types.context -> string -> Memory_layout.discriminant -> string
 
 type built =
   | Expression of string
   | Allocating of { block : C_types.key; fill : string; value : string -> string }
 
-val prototype :
+val render_prototype :
   C_types.context ->
   string ->
   string ->
@@ -34,4 +36,5 @@ val prototype :
   Lowered.signature ->
   string
 
-val rvalue_c : C_types.context -> function_context -> Lowered.ty -> Lowered.rvalue -> built option
+val render_rvalue :
+  C_types.context -> function_context -> Lowered.ty -> Lowered.rvalue -> built option

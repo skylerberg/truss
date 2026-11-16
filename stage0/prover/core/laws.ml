@@ -120,7 +120,7 @@ let assume_laws (context : State.context) frame ~at (trait : Types.trait_referen
       (Interface.Properties.list_bound_closure context.lookups.interface ~self:ty trait)
   end
 
-let template_trait : Path.t = Well_known.path From_template
+let template_trait : Path.t = Well_known.make_path From_template
 
 let signature_terminates (context : State.context) path =
   match Interface.Impls.read_signature context.lookups.interface path with

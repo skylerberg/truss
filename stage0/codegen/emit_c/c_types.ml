@@ -11,10 +11,10 @@ module Keys = Map.Make (struct
   let compare = Stdlib.compare
 end)
 
-let key_name = function
-  | Type ty -> Instance.type_symbol ty
-  | Block (ty, variant) -> Instance.type_symbol ty ^ "_Block_" ^ variant
-  | Code function_type -> Instance.type_symbol (Function function_type) ^ "_Code"
+let render_key_name = function
+  | Type ty -> Instance.make_type_symbol ty
+  | Block (ty, variant) -> Instance.make_type_symbol ty ^ "_Block_" ^ variant
+  | Code function_type -> Instance.make_type_symbol (Function function_type) ^ "_Code"
   | Environment (symbol, nested_index) -> Printf.sprintf "%s_Environment_%d" symbol nested_index
   | Evidence nested_index -> Printf.sprintf "t_Evidence_%d" nested_index
 
@@ -43,7 +43,7 @@ type context = {
   mutable failures : (C_runtime.failure * Lowered.site) list;
 }
 
-let new_context env prefix =
+let make_context env prefix =
   {
     env;
     prefix;
@@ -80,81 +80,81 @@ let register context key =
     context.order <- key :: context.order
   end
 
-let layout context ty = Memory_layout.of_type context.env ty
+let compute_layout context ty = Memory_layout.of_type context.env ty
 
 let is_struct context (ty : Ground.ty) =
-  match (layout context ty).form with
+  match (compute_layout context ty).form with
   | Struct _ | Array _ | Tagged _ -> true
   | Niche_encoded { dataful; _ } -> (
       match dataful.payload.form with Struct _ -> true | _ -> false)
   | Zero_size | Scalar _ | Tag_only _ -> false
 
-let rec value_c context (ty : Ground.ty) =
-  match (layout context ty).form with
+let rec render_value_type context (ty : Ground.ty) =
+  match (compute_layout context ty).form with
   | Zero_size -> "void"
-  | Scalar scalar -> scalar_c context scalar
+  | Scalar scalar -> render_scalar_type context scalar
   | _ ->
       register context (Type ty);
-      Instance.type_symbol ty
+      Instance.make_type_symbol ty
 
-and scalar_c context : Memory_layout.scalar -> string = function
-  | Integer integer -> C_runtime.integer_c integer
+and render_scalar_type context : Memory_layout.scalar -> string = function
+  | Integer integer -> C_runtime.render_integer_type integer
   | Float32 -> "float"
   | Float64 -> "double"
   | Bool -> "uint8_t"
   | Character -> "uint32_t"
-  | Pointer pointee | Nullable_pointer pointee -> pointee_c context pointee
+  | Pointer pointee | Nullable_pointer pointee -> render_pointee_type context pointee
 
-and pointee_c context : Memory_layout.pointee -> string = function
-  | Data ty -> value_c context ty ^ " *"
+and render_pointee_type context : Memory_layout.pointee -> string = function
+  | Data ty -> render_value_type context ty ^ " *"
   | Block (ty, variant) ->
       register context (Block (ty, variant));
-      key_name (Block (ty, variant)) ^ " *"
+      render_key_name (Block (ty, variant)) ^ " *"
   | Code function_type ->
       register context (Code function_type);
-      key_name (Code function_type)
+      render_key_name (Code function_type)
   | Opaque -> "void *"
 
-let rec c_ty context symbol : Lowered.ty -> string = function
-  | Value ty -> value_c context ty
+let rec render_type context symbol : Lowered.ty -> string = function
+  | Value ty -> render_value_type context ty
   | Pointer { target; writable } ->
-      (if writable then "" else "const ") ^ c_ty context symbol target ^ " *"
-  | Raw scalar -> scalar_c context scalar
+      (if writable then "" else "const ") ^ render_type context symbol target ^ " *"
+  | Raw scalar -> render_scalar_type context scalar
   | Environment nested_index ->
       register context (Environment (symbol, nested_index));
-      key_name (Environment (symbol, nested_index))
+      render_key_name (Environment (symbol, nested_index))
   | Evidence nested_index ->
       let key = Evidence (max nested_index 1) in
       register context key;
-      key_name key
+      render_key_name key
   | Lend -> "struct " ^ use_helper context "t_lend"
   | Lend_mark -> "struct " ^ use_helper context "t_lend" ^ "_mark"
 
-let member_c context : Memory_layout.member -> string = function
-  | Typed ty -> value_c context ty
-  | Raw scalar -> scalar_c context scalar
+let render_member_type context : Memory_layout.member -> string = function
+  | Typed ty -> render_value_type context ty
+  | Raw scalar -> render_scalar_type context scalar
 
 let holds_member context : Memory_layout.member -> key list = function
   | Typed ty when is_struct context ty -> [ Type ty ]
   | Typed _ | Raw _ -> []
 
-let field_declarations context (fields : Memory_layout.field list) =
+let render_field_declarations context (fields : Memory_layout.field list) =
   ( String.concat ""
       (List.map
          (fun (field : Memory_layout.field) ->
-           Printf.sprintf "  %s f_%s;\n" (member_c context field.member) field.name)
+           Printf.sprintf "  %s f_%s;\n" (render_member_type context field.member) field.name)
          fields),
     List.concat_map (fun (field : Memory_layout.field) -> holds_member context field.member) fields
   )
 
-let signature_parameters context symbol (parameters : Lowered.ty list) names =
+let render_signature_parameters context symbol (parameters : Lowered.ty list) names =
   match parameters with
   | [] -> "void"
   | _ ->
       String.concat ", "
         (List.mapi
            (fun position ty ->
-             let order = c_ty context symbol ty in
+             let order = render_type context symbol ty in
              let qualified = match ty with Lowered.Pointer _ -> order ^ "restrict" | _ -> order in
              match names with
              | None -> qualified
@@ -173,18 +173,18 @@ let rec define context key =
 and define_text context key =
   match key with
   | Type ty -> (
-      match (layout context ty).form with
-      | Tag_only { tag; _ } -> Typedef (C_runtime.integer_c tag)
+      match (compute_layout context ty).form with
+      | Tag_only { tag; _ } -> Typedef (C_runtime.render_integer_type tag)
       | Niche_encoded { dataful = { payload = { form = Scalar scalar; _ }; _ }; _ } ->
-          Typedef (scalar_c context scalar)
+          Typedef (render_scalar_type context scalar)
       | Niche_encoded { dataful = { payload = { form = Struct fields; _ }; _ }; _ } | Struct fields
         ->
-          let body, holds = field_declarations context fields in
+          let body, holds = render_field_declarations context fields in
           Struct { body; holds }
       | Array { element; count; _ } ->
           Struct
             {
-              body = Printf.sprintf "  %s items[%d];\n" (value_c context element) count;
+              body = Printf.sprintf "  %s items[%d];\n" (render_value_type context element) count;
               holds = (if is_struct context element then [ Type element ] else []);
             }
       | Tagged { tag; variants; _ } ->
@@ -195,7 +195,7 @@ and define_text context key =
                    match variant.payload.form with
                    | Zero_size -> None
                    | Struct fields ->
-                       let body, holds = field_declarations context fields in
+                       let body, holds = render_field_declarations context fields in
                        let body =
                          String.concat ""
                            (List.map
@@ -205,31 +205,37 @@ and define_text context key =
                        Some (Printf.sprintf "    struct {\n%s    } v_%s;\n" body variant.name, holds)
                    | Scalar scalar ->
                        Some
-                         (Printf.sprintf "    %s v_%s;\n" (scalar_c context scalar) variant.name, [])
+                         ( Printf.sprintf "    %s v_%s;\n"
+                             (render_scalar_type context scalar)
+                             variant.name,
+                           [] )
                    | _ -> C_runtime.bug "a variant's payload is a struct, a pointer, or nothing")
                  variants)
           in
           Struct
             {
               body =
-                Printf.sprintf "  %s tag;\n  union {\n%s  } payload;\n" (C_runtime.integer_c tag)
+                Printf.sprintf "  %s tag;\n  union {\n%s  } payload;\n"
+                  (C_runtime.render_integer_type tag)
                   (String.concat "" members);
               holds = List.concat holds;
             }
       | Niche_encoded _ -> C_runtime.bug "a niche-encoded payload is a struct or a pointer"
       | Zero_size | Scalar _ -> C_runtime.bug "%s needs no definition" (Ground.to_string ty))
   | Block (ty, variant) -> (
-      match (Memory_layout.block context.env ty variant).form with
+      match (Memory_layout.lay_out_block context.env ty variant).form with
       | Struct fields ->
-          let body, holds = field_declarations context fields in
+          let body, holds = render_field_declarations context fields in
           Struct { body; holds }
       | _ -> C_runtime.bug "the block of %s.%s has no fields" (Ground.to_string ty) variant)
   | Code function_type ->
-      let signature = Convention.function_value context.env function_type in
-      let result = match signature.result with None -> "void" | Some ty -> c_ty context "" ty in
+      let signature = Convention.make_function_value_signature context.env function_type in
+      let result =
+        match signature.result with None -> "void" | Some ty -> render_type context "" ty
+      in
       Code_typedef
-        (Printf.sprintf "typedef %s (*%s)(%s);\n" result (key_name key)
-           (signature_parameters context "" signature.parameters None))
+        (Printf.sprintf "typedef %s (*%s)(%s);\n" result (render_key_name key)
+           (render_signature_parameters context "" signature.parameters None))
   | Evidence nested_index ->
       Struct
         {
@@ -250,7 +256,8 @@ and define_text context key =
           body =
             String.concat ""
               (List.map
-                 (fun (name, ty) -> Printf.sprintf "  %s f_%s;\n" (c_ty context symbol ty) name)
+                 (fun (name, ty) ->
+                   Printf.sprintf "  %s f_%s;\n" (render_type context symbol ty) name)
                  fields);
           holds =
             List.concat_map

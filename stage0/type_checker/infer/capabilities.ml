@@ -1,5 +1,5 @@
-let panic : Types.capability = Capability (Well_known.path Panic)
-let tasks : Types.capability = Capability (Well_known.path Tasks)
+let panic : Types.capability = Capability (Well_known.make_path Panic)
+let tasks : Types.capability = Capability (Well_known.make_path Tasks)
 
 type checking = {
   state : State.state;
@@ -19,14 +19,14 @@ type scope = {
   implemented_capability : Types.capability option;
 }
 
-let panic_only description =
+let make_panic_only_scope description =
   {
     available = Types.make_capability_set [ panic ];
     kind = Restricted description;
     implemented_capability = None;
   }
 
-let no_capabilities description =
+let make_no_capabilities_scope description =
   {
     available = Types.no_capabilities;
     kind = Restricted description;
@@ -49,14 +49,14 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.callee) =
         (fun (signature : Types.signature) ->
           check_grant checking origin
             ~subject:(Printf.sprintf "`%s`" (Path.show path))
-            (Path.package path) signature.uses)
+            (Path.locate_package path) signature.uses)
         (Interface.Impls.read_signature state.lookups.interface path)
   | Trait_method { trait; name; receiver; evidence; _ } -> (
-      (match Members.trait_method state.lookups trait.trait name receiver with
+      (match Members.find_trait_method state.lookups trait.trait name receiver with
       | Some method_ ->
           check_grant checking origin
             ~subject:(Printf.sprintf "`%s.%s`" (Path.show trait.trait) name)
-            (Path.package trait.trait)
+            (Path.locate_package trait.trait)
             (Interface.Definition.read_method_signature state.lookups.interface ~owner:trait.trait
                method_)
               .uses
@@ -72,7 +72,7 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.callee) =
                       (Printf.sprintf "The `impl` of `%s` for `%s`"
                          (Types.show_trait interface.implements)
                          (Types.show interface.for_type))
-                    (Path.package impl) signature.uses)
+                    (Path.locate_package impl) signature.uses)
                 (Interface.Impls.read_signature state.lookups.interface
                    (Method { owner = impl; name; receiver }))
           | Some _ | None -> ())
@@ -151,7 +151,7 @@ let require_callee_uses checking scope (origin : Core.origin) (callee : Core.cal
   | Trait_method { trait; name; receiver; self_type; type_arguments; _ } ->
       require_available checking scope origin
         (match
-           ( Members.trait_method state.lookups trait.trait name receiver,
+           ( Members.find_trait_method state.lookups trait.trait name receiver,
              Interface.Definition.read_trait_interface state.lookups.interface trait.trait )
          with
         | Some method_, Some interface ->
@@ -160,7 +160,7 @@ let require_callee_uses checking scope (origin : Core.origin) (callee : Core.cal
                 method_
             in
             Interface.Impls.normalize_capabilities state.lookups.interface
-              ~bounds:(State.bounds state)
+              ~bounds:(State.lookup_bounds state)
               (Types.substitute_capabilities
                  (Interface.Properties.make_trait_substitution interface ~self:self_type trait
                  @ Types.make_substitution signature.generics type_arguments)
@@ -183,7 +183,7 @@ let rec check_expression checking scope (node : Core.expression) =
         body
   | Provide { implementations; body } -> check_provide checking scope implementations body
   | Quantified _ ->
-      check_children checking (no_capabilities "a quantifier's body") (`Expression node)
+      check_children checking (make_no_capabilities_scope "a quantifier's body") (`Expression node)
   | Function_value { path; _ } ->
       check_callee_grants checking node.origin (Function { path; type_arguments = [] })
   | Call call -> (
@@ -214,9 +214,9 @@ and check_children checking scope node =
     }
   in
   match node with
-  | `Expression inner -> Core_walk.expression_children visit inner
-  | `Statement inner -> Core_walk.statement_children visit inner
-  | `Pattern inner -> Core_walk.pattern_children visit inner
+  | `Expression inner -> Core_walk.walk_expression_children visit inner
+  | `Statement inner -> Core_walk.walk_statement_children visit inner
+  | `Pattern inner -> Core_walk.walk_pattern_children visit inner
 
 and check_block checking scope (body : Core.block) =
   List.iter (check_statement checking scope) body.statements;
@@ -225,7 +225,7 @@ and check_block checking scope (body : Core.block) =
 and check_statement checking scope (statement : Core.statement) =
   match statement.kind with
   | Parallel branches ->
-      List.iter (check_statement checking (panic_only "a `parallel` branch")) branches
+      List.iter (check_statement checking (make_panic_only_scope "a `parallel` branch")) branches
   | Concurrent branches ->
       require_available checking scope statement.origin (Types.make_capability_set [ tasks ]);
       List.iter (check_statement checking scope) branches
@@ -236,11 +236,11 @@ and check_statement checking scope (statement : Core.statement) =
           check_expression checking scope stop
       | Elements { count; element; _ } ->
           check_expression checking scope count;
-          Core_walk.place
+          Core_walk.walk_place
             { Core_walk.ignore_all with expression = check_expression checking scope }
             element
       | Cursor { cursor; next } ->
-          Core_walk.place
+          Core_walk.walk_place
             { Core_walk.ignore_all with expression = check_expression checking scope }
             cursor;
           require_callee_uses checking scope statement.origin next);
@@ -248,7 +248,7 @@ and check_statement checking scope (statement : Core.statement) =
       check_loop_clauses checking clauses;
       check_block checking
         (match mode with
-        | Parallel_loop -> panic_only "a `parallel for`"
+        | Parallel_loop -> make_panic_only_scope "a `parallel for`"
         | Sequential -> scope
         | Concurrent_loop ->
             require_available checking scope statement.origin (Types.make_capability_set [ tasks ]);
@@ -258,15 +258,16 @@ and check_statement checking scope (statement : Core.statement) =
       check_expression checking scope condition;
       check_loop_clauses checking clauses;
       check_block checking scope body
-  | Proof body -> check_block checking (no_capabilities "a proof") body
-  | _ -> check_children checking scope (`Statement statement)
+  | Proof body -> check_block checking (make_no_capabilities_scope "a proof") body
+  | Let _ | Evaluate _ | Assign _ | Compound_assign _ | Assert _ | Yield _ ->
+      check_children checking scope (`Statement statement)
 
 and check_loop_clauses checking (clauses : Core.loop_clause list) =
   List.iter
-    (Core_walk.loop_clause
+    (Core_walk.walk_loop_clause
        {
          Core_walk.ignore_all with
-         expression = check_expression checking (no_capabilities "a specification");
+         expression = check_expression checking (make_no_capabilities_scope "a specification");
        })
     clauses
 
@@ -275,7 +276,7 @@ and check_provide checking scope implementations body =
   let provided = ref Types.no_capabilities in
   List.iter
     (fun (implementation : Core.implementation) ->
-      Core_walk.operand
+      Core_walk.walk_operand
         { Core_walk.ignore_all with expression = check_expression checking scope }
         implementation.value;
       let impls = Form.find_capability_impls state implementation.type_ in
@@ -314,7 +315,8 @@ and check_provide checking scope implementations body =
             ~subject:
               (Printf.sprintf "The `impl` of `%s` for `%s`" (Path.show provided.capability)
                  (Types.show interface.for_type))
-            (Path.package provided.impl) interface.impl_uses;
+            (Path.locate_package provided.impl)
+            interface.impl_uses;
           require_available checking scope implementation.origin ~for_implementation:true
             interface.impl_uses)
         impls;
@@ -336,8 +338,8 @@ let solve (state : State.state) =
       (fun (constraint_ : State.subset_constraint) ->
         {
           constraint_ with
-          subset = State.final_capabilities state constraint_.subset;
-          superset = State.final_capabilities state constraint_.superset;
+          subset = State.finalize_capabilities state constraint_.subset;
+          superset = State.finalize_capabilities state constraint_.superset;
         })
       state.capability_constraints;
   let solution = Hashtbl.create 8 in
@@ -425,11 +427,11 @@ let rec can_call_capability_code (state : State.state) ~bounds ?(seen = []) (typ
          &&
          let inside = can_call_capability_code state ~bounds ~seen:(path :: seen) in
          let fields = List.exists (fun (field : Types.field) -> inside field.field_type) in
-         (match Members.fields state.lookups path type_arguments with
+         (match Members.find_fields state.lookups path type_arguments with
            | Some named_fields -> fields named_fields
            | None -> false)
          ||
-         match Members.variants state.lookups path type_arguments with
+         match Members.find_variants state.lookups path type_arguments with
          | Some variants ->
              List.exists
                (fun (variant : Types.variant) -> fields (Option.value ~default:[] variant.fields))
@@ -444,7 +446,7 @@ let check_monitor_lock checking ~(solved : int -> Types.capability_set) availabl
   let provides_tasks (implementation : Core.implementation) =
     List.exists
       (fun ((provided : Core.provided), (_ : Types.impl_interface)) ->
-        Path.equal provided.capability (Well_known.path Tasks))
+        Path.equal provided.capability (Well_known.make_path Tasks))
       (Form.find_capability_impls state implementation.type_)
   in
   let available =
@@ -521,7 +523,9 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
   let function_body ?implemented_capability available =
     { available; kind = Function_body; implemented_capability }
   in
-  let check_specification = check_expression checking (no_capabilities "a specification") in
+  let check_specification =
+    check_expression checking (make_no_capabilities_scope "a specification")
+  in
   (match form.definition with
   | Function { parameters; contract; _ } ->
       List.iter
@@ -549,7 +553,7 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
       List.iter
         (fun (law : Core.law) ->
           List.iter check_specification law.requires;
-          check_block checking (no_capabilities "a law") law.body)
+          check_block checking (make_no_capabilities_scope "a law") law.body)
         laws
   | Constant _ | Test _ | Law_proof _ | Empty -> ());
   (match (form.definition, state.definition.kind, elaborated.interface) with
@@ -558,7 +562,7 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
         Option.bind (state.lookups.interface.names.container state.key) (fun container ->
             match (state.lookups.interface.elaborated_interface container).interface with
             | Impl_interface impl
-              when Resolve.Names.kind_of state.lookups.interface.names impl.implements.trait
+              when Resolve.Names.find_kind state.lookups.interface.names impl.implements.trait
                    = Some Capability ->
                 Some (Types.Capability impl.implements.trait)
             | _ -> None)
@@ -567,14 +571,14 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
         (check_block checking
            (function_body ?implemented_capability
               (Interface.Impls.normalize_capabilities state.lookups.interface
-                 ~bounds:(State.bounds state) signature.uses)))
+                 ~bounds:(State.lookup_bounds state) signature.uses)))
         body
   | Test (Some body), _, Test_interface uses ->
       check_block checking
         (function_body (Types.union_capabilities uses (Types.make_capability_set [ panic ])))
         body
   | Function { body = Some body; _ }, Theorem _, _ | Law_proof { body = Some body; _ }, _, _ ->
-      check_block checking (no_capabilities "a proof") body
+      check_block checking (make_no_capabilities_scope "a proof") body
   | _ -> ());
   solve state;
   let solved variable =
@@ -585,7 +589,7 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
   in
   List.iter
     (fun (available, implementations, body) ->
-      match Core_walk.tasks_use ~solved body with
+      match Core_walk.compute_tasks_use ~solved body with
       | No_tasks -> ()
       | Through_parameter -> check_monitor_callbacks checking implementations
       | Uses_tasks ->

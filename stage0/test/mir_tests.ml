@@ -2,8 +2,8 @@ let mir_parts packages package =
   Database.For_testing.make_mir_lookups (Support.database packages) package
 
 let app_parts packages = mir_parts packages (Support.module_of "app::main").package
-let graph_of (parts : Mir.lookups) key = Mir.graph (parts.body_part key)
-let code_of (parts : Mir.lookups) key = Mir.code (parts.body_part key)
+let graph_of (parts : Mir.lookups) key = Mir.find_graph (parts.body_part key)
+let code_of (parts : Mir.lookups) key = Mir.find_code (parts.body_part key)
 
 let place_locals (place : Mir.place) =
   match place.root with Local local -> [ local ] | Constant _ | Literal _ -> []
@@ -233,7 +233,7 @@ let validate definition (body : Mir.Graph.body) =
   let parts = ref [] in
   Array.iteri
     (fun index (basic : Mir.Graph.basic_block) ->
-      (match Mir.Graph.iteration_loop basic.terminator with
+      (match Mir.Graph.find_iteration_loop basic.terminator with
       | Some loop -> (
           match body.blocks.(loop).terminator with
           | For { blocks; _ } when List.mem index blocks -> ()
@@ -358,7 +358,7 @@ let validate definition (body : Mir.Graph.body) =
       end
     in
     let iteration_end at =
-      match Mir.Graph.iteration_loop body.blocks.(at).terminator with
+      match Mir.Graph.find_iteration_loop body.blocks.(at).terminator with
       | Some loop ->
           (if report then
              match Hashtbl.find_opt entered loop with
@@ -416,7 +416,7 @@ let () =
         (fun () ->
           List.iter
             (fun (declaration : Resolve.Names.declaration) ->
-              let key = Resolve.Names.key_of declaration in
+              let key = Resolve.Names.make_key declaration in
               let definition = Resolve.Names.show_key key in
               match
                 try graph_of (Lazy.force parts) key
@@ -439,7 +439,7 @@ let both_of_g text =
   match
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
-        let key = Resolve.Names.key_of declaration in
+        let key = Resolve.Names.make_key declaration in
         if key.path = Path.Top { module_ = Support.module_of "app::main"; name = "g" } then Some key
         else None)
       (Support.declarations packages (Support.module_of "app::main"))
@@ -586,7 +586,7 @@ let () =
             not
               (List.exists
                  (fun block ->
-                   Mir.Graph.iteration_loop body.blocks.(block).terminator = None
+                   Mir.Graph.find_iteration_loop body.blocks.(block).terminator = None
                    && List.mem after
                         (Mir.Graph.For_testing.successors body.blocks.(block).terminator))
                  blocks)
@@ -870,7 +870,7 @@ let () =
       in
       let parts = app_parts packages in
       let by_path path =
-        match Mir.graph_of_path parts path with
+        match Mir.read_graph parts path with
         | Some { form; _ } -> form
         | None -> failwith (Path.show path ^ " has no MIR")
       in
@@ -878,7 +878,7 @@ let () =
       let default_mir =
         match
           Option.bind
-            ((Support.names packages (Path.package default_method)).key default_method)
+            ((Support.names packages (Path.locate_package default_method)).key default_method)
             (graph_of parts)
         with
         | Some mir -> mir
@@ -904,7 +904,7 @@ let () =
       let top name : Path.t = Top { module_; name } in
       let parts = app_parts packages in
       let defaults_of path =
-        match Mir.default_graphs_of_path parts path with
+        match Mir.read_default_graphs parts path with
         | Some { form; _ } -> form
         | None -> failwith (Path.show path ^ " has no defaults")
       in
@@ -923,7 +923,7 @@ let () =
         | Field_defaults _ -> failwith "a function with field defaults"
       in
       let add : Path.t = Method { owner = top "Tally"; name = "add"; receiver = Static } in
-      if Mir.code_of_path parts add <> None then Harness.fail "`Tally.add` has a body's MIR";
+      if Mir.read_code parts add <> None then Harness.fail "`Tally.add` has a body's MIR";
       if positions (defaults_of add) <> [ (0, Some 5) ] then
         Harness.fail "`Tally.add` does not have its default at position 0";
       let advance : Path.t = Method { owner = top "Counter"; name = "advance"; receiver = Mut } in
@@ -974,7 +974,7 @@ let () =
             match statement.kind with Basic (Assign { value = Compare _; _ }) -> true | _ -> false)
           block.statements
       in
-      match Mir.contract_of_path (app_parts packages) g with
+      match Mir.read_contract (app_parts packages) g with
       | Some
           { form = { requires = [ quantified; connected; chosen ]; ensures = [ ensured ]; _ }; _ }
         -> (
@@ -985,7 +985,7 @@ let () =
             [ quantified.clause; connected.clause; chosen.clause; ensured ];
           if quantified.is_executable then Harness.fail "the quantified clause can run";
           if connected.is_executable then
-            validate "a clause that runs" (Mir.code_of_formula connected.clause).body
+            validate "a clause that runs" (Mir.expand_formula connected.clause).body
           else Harness.fail "the clause of comparisons cannot run";
           (match specifications ensured with
           | [ Result; Entry count ] | [ Entry count; Result ] ->
@@ -1024,7 +1024,7 @@ let () =
       let module_ = Support.module_of "app::main" in
       let g : Path.t = Top { module_; name = "g" } in
       let key =
-        match (Support.names packages (Path.package g)).key g with
+        match (Support.names packages (Path.locate_package g)).key g with
         | Some key -> key
         | None -> failwith "the program has no g"
       in
@@ -1052,7 +1052,7 @@ let () =
           | None -> Harness.fail "the loop's condition is no comparison")
       | loops -> Harness.fail "%d `while` loops with one invariant" (List.length loops));
       match !proofs with
-      | [ proof ] -> validate "the proof block" (Mir.For_testing.expanded proof).body
+      | [ proof ] -> validate "the proof block" (Mir.For_testing.expand proof).body
       | proofs -> Harness.fail "%d proof blocks" (List.length proofs));
   Harness.test "an early exit from concurrent code ends the tasks it leaves" (fun () ->
       let mir = mir_of_g Fixtures.Mir.early_return_from_a_concurrent_loop in
@@ -1127,12 +1127,12 @@ let status_where_ended (body : Mir.Graph.body) moves (path : Moves.path) =
   Array.iteri
     (fun block (basic : Mir.Graph.basic_block) ->
       if !found = None then begin
-        let state = Moves.entry moves block in
+        let state = Moves.copy_entry_state moves block in
         List.iter
           (fun (statement : Mir.Graph.statement) ->
             match statement.kind with
             | Dead locals when !found = None && List.mem path.local locals ->
-                found := Some (Moves.status moves state path)
+                found := Some (Moves.find_status moves state path)
             | _ -> if !found = None then Moves.apply moves state statement)
           basic.statements
       end)
@@ -1177,7 +1177,7 @@ let () =
       in
       let path : Moves.path = { local = named body "kept"; projections = [] } in
       Harness.expect_string ~expected:"maybe" (show_status (status_where_ended body moves path));
-      if not (List.mem path (Moves.flagged moves)) then Harness.fail "the local has no flag");
+      if not (List.mem path (Moves.list_flagged moves)) then Harness.fail "the local has no flag");
   Harness.test "a record a field of which was moved out still holds its other fields" (fun () ->
       let body, moves =
         moves_of_g (moves_program ^ "fn g() {\n  let both = pair()\n  take(own both.first)\n}\n")

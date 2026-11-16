@@ -13,7 +13,7 @@ let parse text =
 let show (major, minor, patch) = Printf.sprintf "%d.%d.%d" major minor patch
 let compare : t -> t -> int = Stdlib.compare
 
-let major_of_name (package : Path.package) =
+let parse_major (package : Path.package) =
   let last = package.name in
   let rec suffix index =
     if index < 0 then None
@@ -26,4 +26,4 @@ let major_of_name (package : Path.package) =
   in
   match suffix (String.length last - 1) with Some number when number >= 1 -> number | _ -> 1
 
-let first name = (major_of_name name, 0, 0)
+let make_first_version name = (parse_major name, 0, 0)

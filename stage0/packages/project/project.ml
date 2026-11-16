@@ -1,5 +1,13 @@
 type root = Project | Registry of string
 
+module Root_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = root
+end))
+
+module Package_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Path.package
+end))
+
 type files = {
   tree : root -> string list option;
   text : root -> string -> string option;
@@ -7,17 +15,19 @@ type files = {
 }
 
 let lock_file = "truss.lock"
-let manifest_file directory = if directory = "" then "truss.toml" else directory ^ "/truss.toml"
 
-let parent path =
+let make_manifest_path directory =
+  if directory = "" then "truss.toml" else directory ^ "/truss.toml"
+
+let compute_parent path =
   match String.rindex_opt path '/' with Some separator -> String.sub path 0 separator | None -> ""
 
-let segments path = if path = "" then [] else String.split_on_char '/' path
+let split_segments path = if path = "" then [] else String.split_on_char '/' path
 
-let rec package_directory ~is_package directory =
+let rec find_package_directory ~is_package directory =
   if is_package directory then Some directory
   else if directory = "" then None
-  else package_directory ~is_package (parent directory)
+  else find_package_directory ~is_package (compute_parent directory)
 
 let file_of_path ~package ~directory path : Path.file =
   let inside =
@@ -28,12 +38,12 @@ let file_of_path ~package ~directory path : Path.file =
         (String.length path - String.length directory - 1)
   in
   {
-    module_ = { package; modules = segments (parent inside) };
+    module_ = { package; modules = split_segments (compute_parent inside) };
     name = Filename.chop_suffix (Filename.basename inside) ".truss";
   }
 
-let file_path ~directory (file : Path.file) =
-  let path = String.concat "/" (Path.file_names file) in
+let make_file_path ~directory (file : Path.file) =
+  let path = String.concat "/" (Path.list_file_names file) in
   if directory = "" then path else directory ^ "/" ^ path
 
 type package = {
@@ -57,23 +67,23 @@ type layout = {
   time_limit_ms : int;
 }
 
-let files_of (files : files) root = Option.value (files.tree root) ~default:[]
+let list_files (files : files) root = Option.value (files.tree root) ~default:[]
 
-let manifest_problem problems directory format =
+let report_manifest_problem problems directory format =
   Printf.ksprintf
     (fun message ->
-      problems := { file = manifest_file directory; line = None; message } :: !problems)
+      problems := { file = make_manifest_path directory; line = None; message } :: !problems)
     format
 
-let layout (files_in : files) root =
-  let files = files_of files_in root in
+let lay_out (files_in : files) root =
+  let files = list_files files_in root in
   let problems = ref [] in
-  let problem directory = manifest_problem problems directory in
+  let problem directory = report_manifest_problem problems directory in
   let manifests =
     List.filter_map
       (fun path ->
         if Filename.basename path <> "truss.toml" then None
-        else Option.map (fun text -> (parent path, text)) (files_in.text root path))
+        else Option.map (fun text -> (compute_parent path, text)) (files_in.text root path))
       files
   in
   let directories = Hashtbl.create 8 in
@@ -87,7 +97,7 @@ let layout (files_in : files) root =
   let rec in_another_project directory =
     directory <> ""
     && ((Hashtbl.mem directories directory && ((not root_is_project) || is_project directory))
-       || in_another_project (parent directory))
+       || in_another_project (compute_parent directory))
   in
   let parsed =
     List.filter_map
@@ -97,7 +107,8 @@ let layout (files_in : files) root =
           match Manifest.parse text with
           | manifest -> Some (directory, manifest)
           | exception Manifest.Malformed { line; message } ->
-              problems := { file = manifest_file directory; line = Some line; message } :: !problems;
+              problems :=
+                { file = make_manifest_path directory; line = Some line; message } :: !problems;
               None)
       manifests
   in
@@ -114,7 +125,7 @@ let layout (files_in : files) root =
         | None -> limit)
       Manifest.default_time_limit_seconds parsed
   in
-  let seen = Hashtbl.create 8 in
+  let seen = Package_table.create 8 in
   let packages =
     List.filter_map
       (fun (directory, (manifest : Manifest.t)) ->
@@ -124,13 +135,13 @@ let layout (files_in : files) root =
             problem directory "The package name `standard` is the standard library's.";
             None
         | Some package -> (
-            match Hashtbl.find_opt seen package.name with
+            match Package_table.find_opt seen package.name with
             | Some other ->
                 problem directory "The package name `%s` is already used by %s."
-                  (Path.show_package package.name) (manifest_file other);
+                  (Path.show_package package.name) (make_manifest_path other);
                 None
             | None ->
-                Hashtbl.replace seen package.name directory;
+                Package_table.replace seen package.name directory;
                 Some (directory, package)))
       parsed
   in
@@ -140,7 +151,7 @@ let layout (files_in : files) root =
         if not (Filename.check_suffix path ".truss") then None
         else
           Option.bind
-            (package_directory ~is_package:(Hashtbl.mem directories) (parent path))
+            (find_package_directory ~is_package:(Hashtbl.mem directories) (compute_parent path))
             (fun directory ->
               Option.map
                 (fun (package : Manifest.package) ->
@@ -158,7 +169,7 @@ type selection = {
   lock_fix : string option;
 }
 
-let selection (files : files) (own : layout) =
+let select_packages (files : files) (own : layout) =
   let packages = List.map snd own.packages in
   let named name = List.exists (fun (package : Manifest.package) -> package.name = name) packages in
   let problems = ref [] in
@@ -187,7 +198,7 @@ let selection (files : files) (own : layout) =
         | None ->
             missing := (name, version, hash) :: !missing;
             Error "its files are not fetched yet")
-    | Some _ -> Registry.Selection.manifest_and_record ~read:(files.text root) name
+    | Some _ -> Registry.Selection.read_manifest_and_record ~read:(files.text root) name
   in
   let selected, selection_problems =
     Registry.Selection.choose
@@ -209,7 +220,7 @@ let selection (files : files) (own : layout) =
   let lock_fix = ref None in
   if is_build_fetched then begin
     List.iter
-      (fun problem -> lock_problem "%s" (Registry.Selection.sentence problem))
+      (fun problem -> lock_problem "%s" (Registry.Selection.describe_problem problem))
       selection_problems;
     List.iter
       (fun (selected : Registry.Selection.package) ->
@@ -237,7 +248,7 @@ let selection (files : files) (own : layout) =
             (String.concat ""
                (List.map
                   (fun difference -> difference ^ " ")
-                  (Registry.Selection.differences ~written ~current)))
+                  (Registry.Selection.list_differences ~written ~current)))
         end
     | _ -> ()
   end;
@@ -251,13 +262,13 @@ let selection (files : files) (own : layout) =
 
 type place = { root : root; directory : string; manifest : Manifest.package }
 
-let places ~layout ~(selection : selection) =
-  let by_name = Hashtbl.create 16 in
+let place_packages ~layout ~(selection : selection) =
+  let by_name = Package_table.create 16 in
   let add root =
     List.iter
       (fun (directory, (manifest : Manifest.package)) ->
-        if not (Hashtbl.mem by_name manifest.name) then
-          Hashtbl.replace by_name manifest.name { root; directory; manifest })
+        if not (Package_table.mem by_name manifest.name) then
+          Package_table.replace by_name manifest.name { root; directory; manifest })
       (layout root).packages
   in
   add Project;
@@ -266,9 +277,9 @@ let places ~layout ~(selection : selection) =
     selection.selected;
   List.sort
     (fun (left, _) (right, _) -> Path.compare_package left right)
-    (Hashtbl.fold (fun name place packages -> (name, place) :: packages) by_name [])
+    (Package_table.fold (fun name place packages -> (name, place) :: packages) by_name [])
 
-let package (files : files) ~(layout : root -> layout) { root; directory; manifest } =
+let make_package (files : files) ~(layout : root -> layout) { root; directory; manifest } =
   {
     name = manifest.name;
     dependencies = manifest.dependencies;
@@ -281,7 +292,7 @@ let package (files : files) ~(layout : root -> layout) { root; directory; manife
         (layout root).files;
   }
 
-let dependency_cycle (places : (Path.package * place) list) =
+let find_dependency_cycle (places : (Path.package * place) list) =
   let dependencies name =
     match List.assoc_opt name places with
     | Some place ->
@@ -290,11 +301,11 @@ let dependency_cycle (places : (Path.package * place) list) =
           place.manifest.dependencies
     | None -> []
   in
-  let visited = Hashtbl.create 8 in
+  let visited = Package_table.create 8 in
   let rec reaches target name =
-    if Hashtbl.mem visited name then None
+    if Package_table.mem visited name then None
     else begin
-      Hashtbl.replace visited name ();
+      Package_table.replace visited name ();
       List.find_map
         (fun next ->
           if next = target then Some [ name; target ]
@@ -305,14 +316,16 @@ let dependency_cycle (places : (Path.package * place) list) =
   let own, registry = List.partition (fun (_, place) -> place.root = Project) places in
   List.find_map
     (fun (name, place) ->
-      Hashtbl.reset visited;
+      Package_table.reset visited;
       Option.map (fun cycle -> (place, cycle)) (reaches name name))
     (own @ registry)
 
-let cycle_problem ((place : place), cycle) =
+let make_cycle_problem ((place : place), cycle) =
   {
     file =
-      (match place.root with Project -> manifest_file place.directory | Registry _ -> lock_file);
+      (match place.root with
+      | Project -> make_manifest_path place.directory
+      | Registry _ -> lock_file);
     line = None;
     message =
       (match cycle with
@@ -323,10 +336,10 @@ let cycle_problem ((place : place), cycle) =
                (List.map (fun package -> Printf.sprintf "`%s`" (Path.show_package package)) cycle)));
   }
 
-let problems (own : layout) (chosen : selection) =
+let list_problems (own : layout) (chosen : selection) =
   let packages = own.packages in
   let problems = ref [] in
-  let problem directory = manifest_problem problems directory in
+  let problem directory = report_manifest_problem problems directory in
   let named name =
     List.find_opt (fun (_, (package : Manifest.package)) -> package.name = name) packages
   in
@@ -377,24 +390,24 @@ type t = {
 }
 
 let of_files files =
-  let layouts = Hashtbl.create 4 in
+  let layouts = Root_table.create 4 in
   let layout root =
-    match Hashtbl.find_opt layouts root with
+    match Root_table.find_opt layouts root with
     | Some layout -> layout
     | None ->
-        let computed = layout files root in
-        Hashtbl.replace layouts root computed;
+        let computed = lay_out files root in
+        Root_table.replace layouts root computed;
         computed
   in
   let own = layout Project in
-  let selection = selection files own in
-  let places = places ~layout ~selection in
-  let cycle = Option.map cycle_problem (dependency_cycle places) in
+  let selection = select_packages files own in
+  let places = place_packages ~layout ~selection in
+  let cycle = Option.map make_cycle_problem (find_dependency_cycle places) in
   let places = if Option.is_some cycle then [] else places in
   {
     own;
     selection;
     places;
-    packages = List.map (fun (_, place) -> package files ~layout place) places;
-    problems = problems own selection @ Option.to_list cycle;
+    packages = List.map (fun (_, place) -> make_package files ~layout place) places;
+    problems = list_problems own selection @ Option.to_list cycle;
   }

@@ -1,10 +1,10 @@
 (library
  (name cli)
  (libraries
+  structural_key
   unix
   compiler_bug
   cmdliner
-  substring
   source
   diagnostic
   syntax

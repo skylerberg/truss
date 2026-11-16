@@ -30,22 +30,35 @@ let fail format =
 let wanted =
   match Sys.getenv_opt "TRUSS_TEST" with
   | None | Some "" -> fun _ -> true
-  | Some part ->
-      fun name ->
-        let length = String.length part in
-        let rec from start =
-          start + length <= String.length name
-          && (String.sub name start length = part || from (start + 1))
-        in
-        from 0
+  | Some affix -> String.includes ~affix
+
+let read_environment () =
+  List.filter_map
+    (fun entry ->
+      match String.index_opt entry '=' with
+      | Some equals ->
+          Some
+            ( String.sub entry 0 equals,
+              String.sub entry (equals + 1) (String.length entry - equals - 1) )
+      | None -> None)
+    (Array.to_list (Unix.environment ()))
+
+let restore_environment saved =
+  let current = read_environment () in
+  List.iter (fun (name, _) -> if not (List.mem_assoc name saved) then Unix.unsetenv name) current;
+  List.iter
+    (fun (name, value) -> if List.assoc_opt name current <> Some value then Unix.putenv name value)
+    saved
 
 let always name body =
   incr count;
   current_test := name;
-  match body () with
+  let environment = read_environment () in
+  (match body () with
   | () -> ()
   | exception exception_ ->
-      fail "raised %s%s" (Printexc.to_string exception_) (Printexc.get_backtrace ())
+      fail "raised %s%s" (Printexc.to_string exception_) (Printexc.get_backtrace ()));
+  restore_environment environment
 
 let ordinal = ref 0
 

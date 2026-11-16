@@ -3,13 +3,13 @@ let core_of packages key =
     (fun (checked : Infer.checked) -> checked.form)
     (Database.read_checked_body (Support.database packages) key)
 
-type form = { core : Core.t; names : (Core.local, string) Hashtbl.t }
+type form = { core : Core.t; names : string Core_walk.For_testing.Local_table.t }
 
 let form_of (core : Core.t) = { core; names = Core_walk.For_testing.local_names core.definition }
 
 let expressions form =
   let found = ref [] in
-  Core_walk.definition
+  Core_walk.walk_definition
     { Core_walk.ignore_all with expression = (fun node -> found := node :: !found) }
     form.core.definition;
   List.rev !found
@@ -22,7 +22,8 @@ let calls form =
 let name form (local : Core.local) =
   match local with
   | Self -> "self"
-  | Named _ | Synthetic _ -> Option.value ~default:"" (Hashtbl.find_opt form.names local)
+  | Named _ | Synthetic _ ->
+      Option.value ~default:"" (Core_walk.For_testing.Local_table.find_opt form.names local)
 
 let rec access_path form (place : Core.place) =
   match place with
@@ -43,7 +44,7 @@ and expression form (node : Core.expression) =
            (Passed { mode = Read; value = Place base; mode_keyword = None } :: bounds))
   | Operator { operation; arguments } ->
       Printf.sprintf "%s(%s)"
-        (Intrinsic.operation_name operation)
+        (Intrinsic.show_operation operation)
         (list (expression form) arguments)
   | Call { callee; arguments; _ } ->
       let dispatch =
@@ -75,7 +76,7 @@ let definition_form text (path : Path.t) =
   let file = Support.file_of "app::main" in
   (match
      List.map
-       (fun message -> Diagnostic.make ~code:(Types Mismatch) (Source.span 0 0) message)
+       (fun message -> Diagnostic.make ~code:(Types Mismatch) (Source.make_span 0 0) message)
        (Support.parse_errors packages file)
      @ Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ]
          (Support.database packages) file
@@ -88,7 +89,7 @@ let definition_form text (path : Path.t) =
   let definition =
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
-        let key = Resolve.Names.key_of declaration in
+        let key = Resolve.Names.make_key declaration in
         if Path.equal key.path path then Option.map (fun core -> (key, core)) (core_of packages key)
         else None)
       ((Support.names packages file.module_.package).declarations_in file)
@@ -233,11 +234,11 @@ let () =
       let actual = ref [] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
-          let key = Resolve.Names.key_of declaration in
+          let key = Resolve.Names.make_key declaration in
           if Path.equal key.path (Support.top "app::main" "g") then
             match core_of packages key with
             | Some form ->
-                Core_walk.definition
+                Core_walk.walk_definition
                   {
                     Core_walk.ignore_all with
                     expression =
@@ -262,11 +263,11 @@ let () =
       let actual = ref [] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
-          let key = Resolve.Names.key_of declaration in
+          let key = Resolve.Names.make_key declaration in
           if Path.equal key.path (Support.top "app::main" "g") then
             match core_of packages key with
             | Some form ->
-                Core_walk.definition
+                Core_walk.walk_definition
                   {
                     Core_walk.ignore_all with
                     pattern =
@@ -288,7 +289,7 @@ let () =
       let packages = Support.setup [ ("app::main", text) ] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
-          let key = Resolve.Names.key_of declaration in
+          let key = Resolve.Names.make_key declaration in
           match
             ( core_of packages key,
               (Support.names packages key.module_.package).spans key,
@@ -296,7 +297,7 @@ let () =
           with
           | Some form, spans, written ->
               let actual = ref [] in
-              Core_walk.definition
+              Core_walk.walk_definition
                 {
                   Core_walk.ignore_all with
                   statement =
@@ -392,7 +393,7 @@ let () =
       let packages = Support.setup [ ("app::main", text) ] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
-          let key = Resolve.Names.key_of declaration in
+          let key = Resolve.Names.make_key declaration in
           match
             ( core_of packages key,
               (Support.names packages key.module_.package).spans key,
@@ -435,7 +436,7 @@ let () =
               Derived
                 {
                   type_ = Top { module_ = Support.module_of "app::main"; name = "Later" };
-                  trait = Well_known.path Equal;
+                  trait = Well_known.make_path Equal;
                 };
             name = "equal";
             receiver = Read;
@@ -499,7 +500,7 @@ let () =
   in
   let core_of_method name =
     let packages = Support.setup [ ("app::main", text) ] in
-    let both_package = Path.package both in
+    let both_package = Path.locate_package both in
     let parameter : Types.parameter = { owner = both; name = "Value" } in
     let bounds (actual : Types.parameter) = if actual = parameter then [ described ] else [] in
     let owner =
@@ -542,7 +543,7 @@ let () =
         (observed "twice"));
   Harness.test "a method of a derived impl has the generated core form" (fun () ->
       let packages = Support.setup [ ("app::main", text) ] in
-      let owner : Path.t = Derived { type_ = both; trait = Well_known.path Equal } in
+      let owner : Path.t = Derived { type_ = both; trait = Well_known.make_path Equal } in
       match
         ( Database.For_testing.read_core (Support.database packages)
             (Method { owner; name = "equal"; receiver = Read }),

@@ -216,7 +216,7 @@ let callee_amount ?ends_in (context : State.context) after ~path ~(parts : State
       | _ -> Operations.declare_unknown_amount context after counter)
 
 let find_generic_argument context frame (operation : Intrinsic.operation) type_arguments name =
-  let generics = (Intrinsic_signatures.signature operation).generics in
+  let generics = (Intrinsic_signatures.make_signature operation).generics in
   List.find_map
     (fun ((parameter : Types.parameter), argument) ->
       match argument with
@@ -229,7 +229,7 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
     (counter : Costs.counter) =
   match invocation.callee with
   | Intrinsic { operation; type_arguments } -> (
-      let cost = Intrinsic_signatures.cost operation in
+      let cost = Intrinsic_signatures.classify_cost operation in
       match counter.resource with
       | Time -> (
           match (cost.time, counter.counting) with
@@ -273,17 +273,13 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
           | Unknown_allocations, _, _ -> Operations.declare_unknown_amount context frame counter)
       | Calls _ -> Costs.zero)
   | Capability_method { capability; name } -> (
-      let direct =
-        match counter.resource with
-        | Calls (Capability path) when Path.equal path capability -> Logic.int 1
-        | Calls (Capability_method (path, method_))
-          when Path.equal path capability && method_ = name ->
-            Logic.int 1
-        | _ -> Costs.zero
-      in
       match counter.resource with
-      | Calls _ -> direct
-      | _ -> (
+      | Calls (Capability path) when Path.equal path capability -> Logic.int 1
+      | Calls (Capability_method (path, method_)) when Path.equal path capability && method_ = name
+        ->
+          Logic.int 1
+      | Calls (Capability _ | Capability_method _ | Through _) -> Costs.zero
+      | Time | Allocations | Allocated_bytes -> (
           match Contracts.find_capability_part context.lookups capability name with
           | Some part ->
               let inside =
@@ -309,7 +305,8 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
                (invocation.uses :> Types.capability list)
                values target)
             (Operations.declare_unknown_amount context frame counter)
-      | _ -> Operations.declare_unknown_amount context frame counter)
+      | Time | Allocations | Allocated_bytes ->
+          Operations.declare_unknown_amount context frame counter)
 
 let declare_held_symbol context ty term =
   let symbol = Logic.Symbol.Potential ty in
@@ -347,11 +344,11 @@ let compute_buffer_elements context (ty : Types.ty) =
 
 let find_buffer_elements (context : State.context) (ty : Types.ty) =
   let key = ty in
-  match Hashtbl.find_opt context.buffers key with
+  match Tables.Type_table.find_opt context.buffers key with
   | Some elements -> elements
   | None ->
       let elements = compute_buffer_elements context ty in
-      Hashtbl.replace context.buffers key elements;
+      Tables.Type_table.replace context.buffers key elements;
       elements
 
 let declare_buffer_slack context (ty : Types.ty) term =
@@ -386,11 +383,11 @@ and has_potential (context : State.context) ?(seen = []) (ty : Types.ty) =
   if seen <> [] then holds_potential_type context ~seen ty
   else
     let key = ty in
-    match Hashtbl.find_opt context.holds_potential key with
+    match Tables.Type_table.find_opt context.holds_potential key with
     | Some holds -> holds
     | None ->
         let holds = holds_potential_type context ~seen ty in
-        Hashtbl.replace context.holds_potential key holds;
+        Tables.Type_table.replace context.holds_potential key holds;
         holds
 
 and holds_potential_type context ~seen (ty : Types.ty) =

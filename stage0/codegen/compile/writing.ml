@@ -1,20 +1,20 @@
 let bug format = Compiler_bug.bug ~stage:"Writing" format
-let output_ty = Storage.make_storage_type (Ground.builtin UInt8)
-let bytes_ty = Storage.make_view_type (Ground.builtin UInt8)
+let output_ty = Storage.make_storage_type (Ground.make_builtin UInt8)
+let bytes_ty = Storage.make_view_type (Ground.make_builtin UInt8)
 
-let output_parameter env =
-  match Convention.parameter env Mut output_ty with
+let make_output_parameter env =
+  match Convention.classify_parameter env Mut output_ty with
   | Some parameter -> parameter
   | None -> bug "storage of no size"
 
-let value_parameter ty = Lowered.Pointer { target = Value ty; writable = false }
+let make_value_parameter ty = Lowered.Pointer { target = Value ty; writable = false }
 
-let signature env parameters : Lowered.signature =
-  { parameters = parameters @ [ output_parameter env ]; result = None; returns = true }
+let make_signature env parameters : Lowered.signature =
+  { parameters = parameters @ [ make_output_parameter env ]; result = None; returns = true }
 
-let call env builder ~output (writer : Well_known.t) ty (place : Lowered.place) =
+let emit_write_call env builder ~output (writer : Well_known.t) ty (place : Lowered.place) =
   let parameter, argument =
-    match Convention.parameter env Read ty with
+    match Convention.classify_parameter env Read ty with
     | Some (Pointer _ as parameter) -> (parameter, Lowered.Address { place; writable = false })
     | Some parameter -> (parameter, Copy place)
     | None -> bug "%s is written, and has no size" (Ground.to_string ty)
@@ -25,15 +25,17 @@ let call env builder ~output (writer : Well_known.t) ty (place : Lowered.place) 
          target =
            Direct
              {
-               function_ = Instance (Code { path = Well_known.path writer; type_arguments = [] });
-               signature = Convention.signature [ output_parameter env; parameter ] Nothing;
+               function_ =
+                 Instance (Code { path = Well_known.make_path writer; type_arguments = [] });
+               signature =
+                 Convention.make_signature [ make_output_parameter env; parameter ] Nothing;
              };
          arguments = [ output; argument ];
          result = Discarded;
        })
 
-let call_with_bytes env builder ~output writer ~elements ~length =
-  let view = Emit_c.Builder.local builder (Value bytes_ty) in
+let emit_write_bytes_call env builder ~output writer ~elements ~length =
+  let view = Emit_c.Builder.allocate_local builder (Value bytes_ty) in
   Emit_c.Builder.emit builder
     (Assign (Lowered.make_local_place view, Storage.build_view bytes_ty ~elements ~length));
-  call env builder ~output writer bytes_ty (Lowered.make_local_place view)
+  emit_write_call env builder ~output writer bytes_ty (Lowered.make_local_place view)
