@@ -4,11 +4,11 @@ open Support
 let core_of packages key =
   Option.map
     (fun (checked : Infer.checked) -> checked.form)
-    (Database.For_testing.read_checked_body (database packages) key)
+    (Database.read_checked_body (database packages) key)
 
 type form = { core : Core.t; names : (Core.local, string) Hashtbl.t }
 
-let form_of (core : Core.t) = { core; names = Core_walk.local_names core.definition }
+let form_of (core : Core.t) = { core; names = Core_walk.For_testing.local_names core.definition }
 
 let expressions form =
   let found = ref [] in
@@ -550,7 +550,7 @@ let () =
           fail "expected the derived method with no substitution and the inherited method with one")
 
 let () =
-  expect ~definition:"proof Ordered.agrees_with_equal for Pair"
+  expect ~definition:"proof standard::core::Ordered.agrees_with_equal for app::main::Pair"
     "a law's proof has the law's parameters, with the proof's type for Self"
     (Fixtures.Core.pair_ordering
    ^ "proof Ordered.agrees_with_equal for Pair {\n  only_equal(first, second: second)\n}\n")

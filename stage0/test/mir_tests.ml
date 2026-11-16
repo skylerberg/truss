@@ -214,7 +214,7 @@ let validate definition (body : Mir.Graph.body) =
           List.iter local (read @ given @ ends))
         basic.statements;
       List.iter local (terminator_reads basic.terminator);
-      List.iter block (Mir.Graph.successors basic.terminator);
+      List.iter block (Mir.Graph.For_testing.successors basic.terminator);
       match basic.terminator with
       | For { part; body = inside; blocks; after; _ } ->
           local part;
@@ -250,7 +250,7 @@ let validate definition (body : Mir.Graph.body) =
                     (fun target ->
                       if target <> after && not (List.mem target blocks) then
                         problem "block %d of the loop at %d jumps out to %d" inner index target)
-                    (Mir.Graph.successors terminator))
+                    (Mir.Graph.For_testing.successors terminator))
             blocks
       | Fork { fork; branches; join; _ } ->
           let entries = List.map (fun (branch : Mir.Graph.branch) -> branch.entry) branches in
@@ -273,7 +273,7 @@ let validate definition (body : Mir.Graph.body) =
                           if not (List.mem target branch.blocks) then
                             problem "branch %d of the block at %d jumps out to %d" position index
                               target)
-                        (Mir.Graph.successors terminator))
+                        (Mir.Graph.For_testing.successors terminator))
                 branch.blocks)
             branches
       | _ -> ())
@@ -394,7 +394,7 @@ let validate definition (body : Mir.Graph.body) =
       | terminator ->
           List.iter
             (fun target -> flow target (state, open_loans))
-            (Mir.Graph.successors terminator)
+            (Mir.Graph.For_testing.successors terminator)
   in
   while not (Queue.is_empty pending) do
     run ~report:false (Queue.pop pending)
@@ -467,7 +467,7 @@ let reachable (body : Mir.Graph.body) ~from ?(avoid = []) () =
   let rec visit block =
     if (not seen.(block)) && not (List.mem block avoid) then begin
       seen.(block) <- true;
-      List.iter visit (Mir.Graph.successors body.blocks.(block).terminator)
+      List.iter visit (Mir.Graph.For_testing.successors body.blocks.(block).terminator)
     end
   in
   List.iter visit from;
@@ -579,7 +579,8 @@ let () =
               (List.exists
                  (fun block ->
                    Mir.Graph.iteration_loop body.blocks.(block).terminator = None
-                   && List.mem after (Mir.Graph.successors body.blocks.(block).terminator))
+                   && List.mem after
+                        (Mir.Graph.For_testing.successors body.blocks.(block).terminator))
                  blocks)
           then fail "the break does not leave the loop");
   let slice_base_ends body name compare =
@@ -725,7 +726,10 @@ let () =
             if not (List.mem block visited) then
               let basic = body.blocks.(block) in
               let rec go = function
-                | [] -> List.iter (walk (block :: visited)) (Mir.Graph.successors basic.terminator)
+                | [] ->
+                    List.iter
+                      (walk (block :: visited))
+                      (Mir.Graph.For_testing.successors basic.terminator)
                 | (statement : Mir.Graph.statement) :: rest -> (
                     match statement.kind with
                     | Dead locals when List.mem x locals -> ()
@@ -797,7 +801,9 @@ let () =
         not
           (List.exists
              (fun (index, terminator) ->
-               List.exists (fun target -> target <= index) (Mir.Graph.successors terminator))
+               List.exists
+                 (fun target -> target <= index)
+                 (Mir.Graph.For_testing.successors terminator))
              (terminators graph.body))
       then fail "no block of the graph jumps back");
   test "a name that the alternatives of a pattern bind to a part says so" (fun () ->
@@ -849,7 +855,12 @@ let () =
       let module_ = module_of "app::main" in
       let method_of owner name : Path.t = Method { owner; name; receiver = Read } in
       let impl_for type_name : Path.t =
-        Impl { module_; trait = "Shape"; for_type = { type_name; generics = [] } }
+        Impl
+          {
+            module_;
+            trait = { path = Top { module_; name = "Shape" }; arguments = []; associated = [] };
+            for_type = Top { module_; name = type_name };
+          }
       in
       let parts = app_parts packages in
       let by_path path =

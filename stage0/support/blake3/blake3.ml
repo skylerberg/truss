@@ -223,3 +223,7 @@ let to_hex digest =
 let hex_digest ?digits text =
   let hex = to_hex (hash text) in
   match digits with Some digits -> String.sub hex 0 digits | None -> hex
+
+module For_testing = struct
+  let hash = hash
+end

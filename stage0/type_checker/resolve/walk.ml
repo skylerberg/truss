@@ -180,24 +180,21 @@ let module_of_names state (first : name) (rest : name list) =
   end
 
 let in_module state module_ (name : name) ~types =
-  match state.lookups.find module_ name.text with
-  | Some item when if types then Names.is_type_kind item.kind else Names.is_value_kind item.kind ->
-      if Names.visible ~from:state.key.module_ module_ item.visibility then begin
-        let path : Path.t = Top { module_; name = name.text } in
-        set state name (Definition (item.kind, path));
-        Some (path, item)
-      end
-      else begin
-        set state name
-          (Unknown
-             (reported state Not_visible (read_span state name.id)
-                (Printf.sprintf "`%s::%s` is %s." (Path.show_module module_) name.text
-                   (match item.visibility with
-                   | Private -> "private to its module, so it cannot be used here"
-                   | _ -> "internal to its package, so it cannot be used here"))));
-        None
-      end
-  | _ ->
+  let is_kind = if types then Names.is_type_kind else Names.is_value_kind in
+  match Names.find_in state.lookups ~from:state.key.module_ module_ name.text ~is_kind with
+  | Found_name (item, path) ->
+      set state name (Definition (item.kind, path));
+      Some (path, item)
+  | Hidden_name item ->
+      set state name
+        (Unknown
+           (reported state Not_visible (read_span state name.id)
+              (Printf.sprintf "`%s::%s` is %s." (Path.show_module module_) name.text
+                 (match item.visibility with
+                 | Private -> "private to its module, so it cannot be used here"
+                 | _ -> "internal to its package, so it cannot be used here"))));
+      None
+  | No_name ->
       let candidates =
         List.filter_map
           (fun (item : Names.entry) ->
@@ -210,14 +207,6 @@ let in_module state module_ (name : name) ~types =
       in
       unknown state name ~expected:("in `" ^ Path.show_module module_ ^ "`") candidates;
       None
-
-let prelude_type state text =
-  match Prelude.find_type text with
-  | Some module_ -> (
-      match state.lookups.find module_ text with
-      | Some item when Names.is_type_kind item.kind -> Some (Path.Top { module_; name = text }, item)
-      | _ -> None)
-  | None -> None
 
 let type_candidates state scope =
   List.map fst (String_map.bindings scope.types)
@@ -237,20 +226,15 @@ let type_name state scope ?(variants = false) (path : path) =
       match String_map.find_opt text scope.types with
       | Some parameter -> set state path.last parameter
       | None -> (
-          match module_item state text with
-          | Some item when Names.is_type_kind item.kind ->
-              set state path.last
-                (Definition (item.kind, Top { module_ = state.key.module_; name = text }))
-          | _ -> (
-              match prelude_type state text with
-              | Some (path_, item) -> set state path.last (Definition (item.kind, path_))
-              | None -> (
-                  match if variants then Prelude.find_variant text else None with
-                  | Some (type_, variant) -> set state path.last (Variant (type_, variant))
-                  | None ->
-                      unknown state path.last ~expected:"a type here"
-                        (type_candidates state scope
-                        @ if variants then List.map fst Prelude.variants else [])))))
+          match Names.find_bare_type state.lookups ~from:state.key.module_ text with
+          | Some (item, found) -> set state path.last (Definition (item.kind, found))
+          | None -> (
+              match if variants then Prelude.find_variant text else None with
+              | Some (type_, variant) -> set state path.last (Variant (type_, variant))
+              | None ->
+                  unknown state path.last ~expected:"a type here"
+                    (type_candidates state scope
+                    @ if variants then List.map fst Prelude.variants else []))))
 
 let target_of state (name : name) = (current state).names.(name.id)
 

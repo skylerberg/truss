@@ -39,7 +39,11 @@ let run ~position =
                   (names.definition key, names.spans key, Database.read_resolved database key)
                 with
                 | Some definition, Some spans, Some resolved ->
-                    let tables = Database.read_tables database key in
+                    let tables =
+                      Option.map
+                        (fun (checked : Infer.checked) -> checked.tables)
+                        (Database.read_checked_body database key)
+                    in
                     Inspect.explain_at ~path:key.path spans definition resolved tables ~text
                       (offset - base)
                 | _ -> None)

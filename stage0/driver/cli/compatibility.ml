@@ -1,49 +1,56 @@
-open Syntax
 module Names = Resolve.Names
 module Environment = Interface.Environment
 
 type change = Breaks of string | Grows of string
 type public_change = { path : Path.t; change : change }
+type side = { database : Database.t; lookups : Interface.Lookups.t }
 
-let public (side : Interface.Lookups.t) (declaration : Names.declaration) =
+let public (side : side) (declaration : Names.declaration) =
   declaration.ordinal = 0
-  && side.names.container (Names.key_of declaration) = None
+  && side.lookups.names.container (Names.key_of declaration) = None
   && Names.is_public declaration.visibility
 
-let declarations (side : Interface.Lookups.t) package = side.names.package_declarations package
+let declarations (side : side) package = side.lookups.names.package_declarations package
 
-let definition (side : Interface.Lookups.t) declaration =
-  side.names.definition (Names.key_of declaration)
+let read_form (side : side) key =
+  Option.map
+    (fun (checked : Infer.checked) -> checked.form.definition)
+    (Database.read_checked_body side.database key)
 
-let written kind (clauses : clause list) =
-  List.filter_map
-    (fun (clause : clause) ->
-      match (kind, clause.kind) with
-      | `Requires, Requires _ | `Ensures, Ensures _ | `Cost, Cost _ ->
-          Some (Syntax_print.clause clause)
-      | _ -> None)
-    clauses
+let no_contract : Core.contract = { requires = []; ensures = []; decreases = []; costs = [] }
 
-let missing_from present wanted = List.filter (fun clause -> not (List.mem clause present)) wanted
+let read_contract side key =
+  match read_form side key with
+  | Some (Function { parameters; contract; _ }) -> (parameters, contract)
+  | _ -> ([], no_contract)
 
-let contract ~(before : clause list) ~(after : clause list) =
-  let pair kind = (written kind before, written kind after) in
-  let requires_before, requires_after = pair `Requires in
-  let ensures_before, ensures_after = pair `Ensures in
-  let cost_before, cost_after = pair `Cost in
+let loses ~equal ~before ~after =
+  List.exists (fun was -> not (List.exists (fun now -> equal was now) after)) before
+
+let gains ~equal ~before ~after =
+  List.exists (fun now -> not (List.exists (fun was -> equal was now) before)) after
+
+let contract ~before:(before_parameters, (before : Core.contract))
+    ~after:(after_parameters, (after : Core.contract)) =
+  let parameters = (before_parameters, after_parameters) in
+  let differ equal before after = (loses ~equal ~before ~after, gains ~equal ~before ~after) in
+  let lost_requires, gained_requires =
+    differ (Core_equivalence.equal_condition ~parameters) before.requires after.requires
+  and lost_ensures, gained_ensures =
+    differ (Core_equivalence.equal_expression ~parameters) before.ensures after.ensures
+  and lost_costs, gained_costs =
+    differ (Core_equivalence.equal_cost ~parameters) before.costs after.costs
+  in
   List.concat
     [
-      (if missing_from requires_before requires_after <> [] then
-         [ Breaks "has a `requires` clause it did not have" ]
-       else if missing_from requires_after requires_before <> [] then
-         [ Grows "has fewer `requires` clauses" ]
+      (if gained_requires then [ Breaks "has a `requires` clause it did not have" ]
+       else if lost_requires then [ Grows "has fewer `requires` clauses" ]
        else []);
-      (if missing_from ensures_after ensures_before <> [] then [ Breaks "lost an `ensures` clause" ]
-       else if missing_from ensures_before ensures_after <> [] then
-         [ Grows "has more `ensures` clauses" ]
+      (if lost_ensures then [ Breaks "lost an `ensures` clause" ]
+       else if gained_ensures then [ Grows "has more `ensures` clauses" ]
        else []);
-      (if missing_from cost_after cost_before <> [] then [ Breaks "lost a `cost` clause" ]
-       else if missing_from cost_before cost_after <> [] then [ Grows "has more `cost` clauses" ]
+      (if lost_costs then [ Breaks "lost a `cost` clause" ]
+       else if gained_costs then [ Grows "has more `cost` clauses" ]
        else []);
     ]
 
@@ -90,25 +97,15 @@ let signature ~(before : Types.signature) ~(after : Types.signature) =
       (if gained_default then [ Grows "gained a default" ] else []);
     ]
 
-let clauses_of (definition : definition option) =
-  match definition with
-  | Some { kind = Function { signature; _ }; _ } -> signature.clauses
-  | Some { kind = Theorem { clauses; _ }; _ } -> clauses
-  | _ -> []
+let read_invariants side key =
+  match read_form side key with Some (Type { invariants; _ }) -> invariants | _ -> []
 
-let type_clauses (definition : definition option) select =
-  match definition with
-  | Some { kind = Type_definition { clauses; _ }; _ } ->
-      List.filter_map (fun (clause : type_clause) -> select clause.kind) clauses
-  | _ -> []
+let has_changed_invariant ~before ~after =
+  let equal = Core_equivalence.equal_condition ~parameters:([], []) in
+  loses ~equal ~before ~after || gains ~equal ~before ~after
 
-let invariants definition =
-  type_clauses definition (function
-    | Type_invariant value -> Some (Syntax_print.expression value)
-    | _ -> None)
-
-let type_ ~(before : Types.type_interface) ~(after : Types.type_interface) ~before_definition
-    ~after_definition =
+let type_ ~(before : Types.type_interface) ~(after : Types.type_interface) ~before_invariants
+    ~after_invariants =
   List.concat
     [
       (if before.type_generics <> after.type_generics then
@@ -121,34 +118,29 @@ let type_ ~(before : Types.type_interface) ~(after : Types.type_interface) ~befo
       | false, false ->
           (if before.shape <> after.shape then [ Breaks "changed its fields or variants" ] else [])
           @
-          if invariants before_definition <> invariants after_definition then
+          if has_changed_invariant ~before:before_invariants ~after:after_invariants then
             [ Breaks "changed its invariant" ]
           else []);
-      (if missing_from after.derives before.derives <> [] then
+      (if loses ~equal:Path.equal ~before:before.derives ~after:after.derives then
          [ Breaks "no longer derives a trait" ]
-       else if missing_from before.derives after.derives <> [] then
+       else if gains ~equal:Path.equal ~before:before.derives ~after:after.derives then
          [ Grows "derives another trait" ]
        else []);
     ]
 
-let member_clauses (side : Interface.Lookups.t) (owner : Path.t) name receiver =
-  match Option.bind (side.names.key (Method { owner; name; receiver })) side.names.definition with
-  | Some { kind = Function { signature; _ } | Method_declaration signature; _ } ->
-      Some signature.clauses
-  | _ -> None
+let read_method_contract (side : side) (owner : Path.t) name receiver =
+  match side.lookups.names.key (Method { owner; name; receiver }) with
+  | Some key -> read_contract side key
+  | None -> ([], no_contract)
 
-let laws (definition : definition option) =
-  match definition with
-  | Some { kind = Trait { members; _ }; _ } ->
-      List.sort String.compare
-        (List.filter_map
-           (fun (member : trait_member node) ->
-             match member.kind with Law law -> Some (Syntax_print.law law) | _ -> None)
-           members)
-  | _ -> []
+let read_laws side key = match read_form side key with Some (Trait laws) -> laws | _ -> []
 
-let trait ~(before : Types.trait_interface) ~(after : Types.trait_interface) ~before_definition
-    ~after_definition ~signature_before ~signature_after ~clauses_before ~clauses_after =
+let has_changed_laws ~before ~after =
+  List.length before <> List.length after
+  || not (List.for_all (fun was -> List.exists (Core_equivalence.equal_law was) after) before)
+
+let trait ~(before : Types.trait_interface) ~(after : Types.trait_interface) ~before_laws
+    ~after_laws ~signature_before ~signature_after ~contract_before ~contract_after =
   let same (was : Types.trait_method) (now : Types.trait_method) =
     was.method_name = now.method_name && was.method_receiver = now.method_receiver
   in
@@ -168,10 +160,8 @@ let trait ~(before : Types.trait_interface) ~(after : Types.trait_interface) ~be
             List.map named
               (signature ~before:(signature_before was) ~after:(signature_after now)
               @ contract
-                  ~before:
-                    (Option.value ~default:[] (clauses_before was.method_name was.method_receiver))
-                  ~after:
-                    (Option.value ~default:[] (clauses_after now.method_name now.method_receiver))
+                  ~before:(contract_before was.method_name was.method_receiver)
+                  ~after:(contract_after now.method_name now.method_receiver)
               @ if was.provided && not now.provided then [ Breaks "lost its default body" ] else []
               ))
       before.methods
@@ -200,29 +190,42 @@ let trait ~(before : Types.trait_interface) ~(after : Types.trait_interface) ~be
       (if before.associated_types <> after.associated_types then
          [ Breaks "changed its associated types" ]
        else []);
-      (if missing_from after.associated_capabilities before.associated_capabilities <> [] then
-         [ Breaks "lost an associated capability set" ]
-       else if missing_from before.associated_capabilities after.associated_capabilities <> [] then
-         [ Grows "gained an associated capability set" ]
+      (if
+         loses ~equal:String.equal ~before:before.associated_capabilities
+           ~after:after.associated_capabilities
+       then [ Breaks "lost an associated capability set" ]
+       else if
+         gains ~equal:String.equal ~before:before.associated_capabilities
+           ~after:after.associated_capabilities
+       then [ Grows "gained an associated capability set" ]
        else []);
-      (if laws before_definition <> laws after_definition then [ Breaks "changed its laws" ] else []);
+      (if has_changed_laws ~before:before_laws ~after:after_laws then [ Breaks "changed its laws" ]
+       else []);
       methods;
       gained;
     ]
 
-let constant_value (side : Interface.Lookups.t) path (definition : definition option) =
-  match side.constant_value path with
-  | Some _ as value -> `Value value
-  | None -> (
-      match definition with
-      | Some { kind = Constant { value; _ }; _ } -> `Written (Syntax_print.expression value)
-      | _ -> `Value None)
+let has_changed_value (before : side) (after : side) path ~before_key ~after_key =
+  match (before.lookups.constant_value path, after.lookups.constant_value path) with
+  | Some before, Some after -> before <> after
+  | Some _, None | None, Some _ -> true
+  | None, None -> (
+      match (read_form before before_key, read_form after after_key) with
+      | Some (Constant (Some before)), Some (Constant (Some after)) ->
+          not (Core_equivalence.equal_expression ~parameters:([], []) before after)
+      | _ -> false)
 
-let impls (side : Interface.Lookups.t) package =
+let is_same_impl (before : Path.t) (after : Path.t) =
+  match (before, after) with
+  | Impl before, Impl after ->
+      before.trait = after.trait && Path.equal before.for_type after.for_type
+  | _ -> Path.equal before after
+
+let impls (side : side) package =
   List.filter_map
     (fun (declaration : Names.declaration) ->
       if declaration.kind = Impl && declaration.ordinal = 0 then
-        match Interface.Definition.impl_interface side declaration.path with
+        match Interface.Definition.impl_interface side.lookups declaration.path with
         | Some (impl : Types.impl_interface) ->
             Some
               ( declaration.path,
@@ -235,6 +238,8 @@ let impls (side : Interface.Lookups.t) package =
     (declarations side package)
 
 let compare ~before ~after package =
+  let before = { database = before; lookups = Database.make_interface_lookups before [ package ] }
+  and after = { database = after; lookups = Database.make_interface_lookups after [ package ] } in
   let old = List.filter (public before) (declarations before package) in
   let now = List.filter (public after) (declarations after package) in
   let public_change path change = { path; change } in
@@ -247,35 +252,38 @@ let compare ~before ~after package =
         | Some is when is.kind <> was.kind ->
             [ public_change path (Breaks "became another kind of definition") ]
         | Some is ->
-            let before_definition = definition before was
-            and after_definition = definition after is in
+            let before_key = Names.key_of was and after_key = Names.key_of is in
             List.map (public_change path)
               (match
-                 ( Interface.Definition.interface before path,
-                   Interface.Definition.interface after path )
+                 ( Interface.Definition.interface before.lookups path,
+                   Interface.Definition.interface after.lookups path )
                with
               | ( Some (Function_interface old_signature | Theorem_interface old_signature),
                   Some (Function_interface new_signature | Theorem_interface new_signature) ) ->
                   signature ~before:old_signature ~after:new_signature
-                  @ contract ~before:(clauses_of before_definition)
-                      ~after:(clauses_of after_definition)
+                  @ contract ~before:(read_contract before before_key)
+                      ~after:(read_contract after after_key)
               | Some (Type_interface old_type), Some (Type_interface new_type) ->
-                  type_ ~before:old_type ~after:new_type ~before_definition ~after_definition
+                  type_ ~before:old_type ~after:new_type
+                    ~before_invariants:(read_invariants before before_key)
+                    ~after_invariants:(read_invariants after after_key)
               | Some (Trait_interface old_trait), Some (Trait_interface new_trait) ->
-                  trait ~before:old_trait ~after:new_trait ~before_definition ~after_definition
-                    ~signature_before:(Interface.Definition.method_signature before ~owner:path)
-                    ~signature_after:(Interface.Definition.method_signature after ~owner:path)
-                    ~clauses_before:(member_clauses before path)
-                    ~clauses_after:(member_clauses after path)
+                  trait ~before:old_trait ~after:new_trait
+                    ~before_laws:(read_laws before before_key)
+                    ~after_laws:(read_laws after after_key)
+                    ~signature_before:
+                      (Interface.Definition.method_signature before.lookups ~owner:path)
+                    ~signature_after:
+                      (Interface.Definition.method_signature after.lookups ~owner:path)
+                    ~contract_before:(read_method_contract before path)
+                    ~contract_after:(read_method_contract after path)
               | Some (Constant_interface old_constant), Some (Constant_interface new_constant) ->
                   (if old_constant.constant_type <> new_constant.constant_type then
                      [ Breaks "changed its type" ]
                    else [])
                   @
-                  if
-                    constant_value before path before_definition
-                    <> constant_value after path after_definition
-                  then [ Breaks "changed its value" ]
+                  if has_changed_value before after path ~before_key ~after_key then
+                    [ Breaks "changed its value" ]
                   else []
               | _ -> []))
       old
@@ -291,7 +299,7 @@ let compare ~before ~after package =
   let impl_changes =
     List.concat_map
       (fun (path, shown, old_sets) ->
-        match List.find_opt (fun (_, other, _) -> other = shown) new_impls with
+        match List.find_opt (fun (other, _, _) -> is_same_impl path other) new_impls with
         | None -> [ public_change path (Breaks (Printf.sprintf "was removed: %s" shown)) ]
         | Some (_, _, new_sets) ->
             let set name sets =
@@ -319,7 +327,7 @@ let compare ~before ~after package =
       old_impls
     @ List.filter_map
         (fun (path, shown, _) ->
-          if List.exists (fun (_, other, _) -> other = shown) old_impls then None
+          if List.exists (fun (other, _, _) -> is_same_impl other path) old_impls then None
           else Some (public_change path (Grows (Printf.sprintf "is new: %s" shown))))
         new_impls
   in

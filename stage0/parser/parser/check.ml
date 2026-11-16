@@ -217,6 +217,33 @@ and trait_argument cursor ~is_law_proof (type_ : type_expression) =
   | Self_type (Some name) -> report_associated_type ("Self." ^ name.text)
   | Self_type None | Type_error -> ()
 
+let header_trait cursor ~is_law_proof (trait_ : path_type) =
+  List.iter
+    (function
+      | Constraint (name, type_) ->
+          let span =
+            Cursor.file_span cursor
+              (Source.Definition_span.make (Cursor.read_span cursor name.id).start
+                 (Cursor.read_span cursor type_.id).stop)
+          in
+          let written = Option.value ~default:name.text (Cursor.spelling cursor span) in
+          Cursor.report cursor Misplaced_constraint span
+            (if is_law_proof then
+               Printf.sprintf
+                 "A law proof's trait takes no constraint such as `%s`: the `impl` it proves \
+                  chooses `%s` in its body."
+                 written name.text
+             else
+               Printf.sprintf
+                 "An `impl` chooses its associated types in its body, so `%s` on its trait would \
+                  have no effect. Write `type %s = %s` in the `impl` instead."
+                 written name.text
+                 (Option.value ~default:"..."
+                    (Cursor.spelling cursor (Cursor.read_file_span cursor type_.id))))
+      | Type_argument _ | Count _ | Count_name _ -> ())
+    trait_.arguments;
+  trait_arguments cursor ~is_law_proof trait_
+
 let clauses cursor clauses =
   List.iter (Syntax_walk.clause (expression cursor (specification plain))) clauses
 
@@ -291,7 +318,7 @@ let definition cursor (definition : definition) =
           | Associated_type _ | Associated_capability _ | Trait_member_error -> ())
         members
   | Impl { trait_; type_; members; _ } ->
-      trait_arguments cursor ~is_law_proof:false trait_;
+      header_trait cursor ~is_law_proof:false trait_;
       generic_parameters cursor type_.generics;
       List.iter
         (fun (member : impl_member node) ->
@@ -310,7 +337,7 @@ let definition cursor (definition : definition) =
       clauses cursor theorem_clauses;
       block cursor (proof plain) body
   | Law_proof { trait_; type_; body; _ } ->
-      trait_arguments cursor ~is_law_proof:true trait_;
+      header_trait cursor ~is_law_proof:true trait_;
       generic_parameters cursor type_.generics;
       block cursor (proof plain) body
   | Definition_error _ -> ()

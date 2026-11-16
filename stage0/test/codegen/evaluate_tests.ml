@@ -77,7 +77,7 @@ let () =
       let use = Fixtures.Evaluate.use in
       let refuses = "        quiet = false" in
       let accepts_all =
-        match Substring.find shout refuses with
+        match Substring.For_testing.find shout refuses with
         | Some at ->
             String.sub shout 0 at ^ "        quiet = true"
             ^ String.sub shout

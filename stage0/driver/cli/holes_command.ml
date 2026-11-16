@@ -30,7 +30,10 @@ let of_declaration snapshot packages database (names : Names.lookups)
             in_scope = hole.scope;
             blocks = [];
           })
-        (Inspect.holes spans definition resolved (Database.read_tables database key))
+        (Inspect.holes spans definition resolved
+           (Option.map
+              (fun (checked : Infer.checked) -> checked.tables)
+              (Database.read_checked_body database key)))
   | _ -> []
 
 let gather snapshot packages database paths =

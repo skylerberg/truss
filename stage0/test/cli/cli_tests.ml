@@ -481,7 +481,10 @@ let () =
       in
       let status, output = truss [ "check"; "-C"; root ] in
       if status <> 1 then fail "status %d" status;
-      match (Substring.find output "b.truss", Substring.find output "prover.overflow") with
+      match
+        ( Substring.For_testing.find output "b.truss",
+          Substring.For_testing.find output "prover.overflow" )
+      with
       | Some type_error, Some overflow when type_error < overflow -> ()
       | _ -> fail "%s" output);
   test "build refuses a program that can reach a hole in a proof" (fun () ->

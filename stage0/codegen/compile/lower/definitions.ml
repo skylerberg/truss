@@ -172,7 +172,8 @@ let code_of context (path : Path.t) type_arguments : code =
                 ~substitution:(of_trait @ bind own_generics own @ substitution)
           | None -> bug "%s neither writes nor is given %s" (Path.show impl) name)
       | None, _ -> bug "%s is not a function" (Path.show path))
-  | Member_constant _ | Impl _ | Derived _ | Law_proof _ -> bug "%s is not code" (Path.show path)
+  | Member_constant _ | Impl _ | Derived _ | Law_proof _ | Unresolved _ ->
+      bug "%s is not code" (Path.show path)
 
 let panic_path = Monomorphic.panic_capability
 let evidence_for context = Monomorphic.evidence_for context.monomorphic

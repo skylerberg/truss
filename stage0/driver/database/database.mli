@@ -19,7 +19,7 @@ val check : t -> Path.package list -> unit
 val list_file_diagnostics : t -> Path.file -> Diagnostic.t list
 val list_manifest_problems : t -> Path.package -> Package_checks.manifest_problem list
 val list_code_packages : t -> Path.package -> Path.package list option
-val read_tables : t -> Resolve.Names.key -> Infer.tables option
+val read_checked_body : t -> Resolve.Names.key -> Infer.checked option
 val read_parsed : t -> Path.file -> Parsed.t
 val make_name_lookups : t -> Path.package list -> Resolve.Names.lookups
 val read_resolved : t -> Resolve.Names.key -> Resolve.resolved option
@@ -38,7 +38,6 @@ type 'a part = Value of 'a | Failed of Diagnostic.in_definition list | Blocked
 type proofs
 
 val prove : t -> Path.file list -> proofs
-val read_proof : proofs -> Resolve.Names.key -> Prover.proof part option
 val list_holes : proofs -> Path.t -> (Path.file * int) list
 val list_template_checks : proofs -> Prover.State.template_check list
 val list_proofs : proofs -> (Resolve.Names.key * Prover.proof) list
@@ -48,11 +47,11 @@ module For_testing : sig
   type checker = Resolve | Interface | Infer | Patterns | Usage | Ownership | Package_checks
 
   val list_diagnostics : checker list -> t -> Path.file -> Diagnostic.t list
-  val read_checked_body : t -> Resolve.Names.key -> Infer.checked option
   val read_derived_form : t -> Path.t -> Core.t option
   val read_core : t -> Path.t -> (Core.t * Types.substitution) option
   val make_mir_lookups : t -> Path.package -> Mir.lookups
   val read_ownership : t -> Resolve.Names.key -> (Core.origin * Core.origin) list part
+  val read_proof : proofs -> Resolve.Names.key -> Prover.proof part option
   val list_reads : t -> string -> string list
   val list_differences : t -> t -> string list
 

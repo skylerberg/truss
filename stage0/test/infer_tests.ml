@@ -11,7 +11,7 @@ let fine text = no_diagnostics [ ("app::main", text) ]
 let expression_at text written occurrence =
   let packages = setup [ ("app::main", text) ] in
   let file = file_of "app::main" in
-  let offset = Option.get (Substring.find ~occurrence text written) in
+  let offset = Option.get (Substring.For_testing.find ~occurrence text written) in
   let actual =
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
@@ -20,7 +20,7 @@ let expression_at text written occurrence =
           ( (Support.names packages key.module_.package).definition key,
             (Support.names packages key.module_.package).spans key,
             (Support.names packages key.module_.package).place key,
-            Database.For_testing.read_checked_body (database packages) key )
+            Database.read_checked_body (database packages) key )
         with
         | Some definition, Some spans, Some { base; _ }, Some result ->
             let best = ref None in
@@ -188,9 +188,12 @@ let () =
   test "an operator chooses the impl by both operands" (fun () ->
       let text = Fixtures.Infer.operator_chooses_the_impl_by_both_operands in
       match core_call_at text "length + extra" 1 with
-      | { callee = Trait_method { evidence = Impl { impl; _ }; name = "add"; _ }; _ }, _ ->
-          let shown = Path.show impl in
-          if not (Substring.contains shown "Add[Int64]") then fail "the impl chosen is %s" shown
+      | { callee = Trait_method { evidence = Impl { impl; _ }; name = "add"; _ }; _ }, _ -> (
+          match impl with
+          | Impl { trait = { arguments = [ Named { path = Top { name = "Int64"; _ }; _ } ]; _ }; _ }
+            ->
+              ()
+          | _ -> fail "the impl chosen is %s" (Path.show impl))
       | _ -> fail "no impl recorded");
   test "an ordering on Self in a trait's law is its compare" (fun () ->
       let text = Fixtures.Infer.ordering_on_self_in_a_traits_law_is_its_compare in
@@ -527,7 +530,7 @@ let () =
           Resolve.Names.key_of
             (List.hd (Support.declarations packages (Support.module_of "app::main")))
         in
-        Database.For_testing.read_checked_body (database packages) key
+        Database.read_checked_body (database packages) key
       in
       if type_check_result () <> type_check_result () then fail "different")
 
@@ -539,8 +542,7 @@ let () =
           List.iter
             (fun (declaration : Resolve.Names.declaration) ->
               match
-                Database.For_testing.read_checked_body (database packages)
-                  (Resolve.Names.key_of declaration)
+                Database.read_checked_body (database packages) (Resolve.Names.key_of declaration)
               with
               | Some { tables; _ } ->
                   List.iter

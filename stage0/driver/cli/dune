@@ -29,5 +29,7 @@
   cache
   project
   types
-  syntax_print
+  infer
+  core
+  core_equivalence
   file_system))

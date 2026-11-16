@@ -1918,6 +1918,9 @@ trait Ordered: Equal {
   associated type may stand for any type, so an `impl` with one would overlap
   every other `impl` of the trait for its type. A record that holds a
   function can be the argument instead of the function's type.
+- The trait of an `impl` or a law proof takes no constraint, such as
+  `Element = Int64`. An `impl` chooses its associated types in its body, so a
+  constraint on its trait could only repeat or contradict that choice.
 - An `impl` applies wherever its trait and the types it names are visible.
 - With a trait that takes type parameters, the `impl` is chosen by the types
   of the arguments, inferred first without looking at which `impl`s exist,

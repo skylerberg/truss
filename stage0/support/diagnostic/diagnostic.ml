@@ -61,6 +61,7 @@ module Code = struct
     | Misplaced_requires
     | Misplaced_function_type
     | Misplaced_associated_type
+    | Misplaced_constraint
     | Misplaced_potential
     | Increment
     | Double_negation
@@ -311,6 +312,7 @@ module Code = struct
     | Misplaced_requires -> "misplaced_requires"
     | Misplaced_function_type -> "misplaced_function_type"
     | Misplaced_associated_type -> "misplaced_associated_type"
+    | Misplaced_constraint -> "misplaced_constraint"
     | Misplaced_potential -> "misplaced_potential"
     | Increment -> "increment"
     | Double_negation -> "double_negation"

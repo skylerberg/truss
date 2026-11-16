@@ -160,7 +160,7 @@ let () =
           (Support.declarations packages (Support.module_of "app::main"))
       in
       match
-        Database.read_proof
+        Database.For_testing.read_proof
           (Support.proven (Support.database packages) main)
           (Resolve.Names.key_of caller)
       with
@@ -189,7 +189,7 @@ let () =
           (Support.declarations packages (Support.module_of "app::main"))
       in
       match
-        Database.read_proof
+        Database.For_testing.read_proof
           (Support.proven (Support.database packages) main)
           (Resolve.Names.key_of caller)
       with
@@ -217,7 +217,7 @@ let () =
           (Support.declarations packages (Support.module_of "app::main"))
       in
       match
-        Database.read_proof
+        Database.For_testing.read_proof
           (Support.proven (Support.database packages) main)
           (Resolve.Names.key_of caller)
       with
@@ -251,7 +251,7 @@ let () =
       let proofs = Support.proven database main in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
-          match Database.read_proof proofs (Resolve.Names.key_of declaration) with
+          match Database.For_testing.read_proof proofs (Resolve.Names.key_of declaration) with
           | Some (Value (Obligations _)) -> ()
           | Some (Value (Unsupported _ | Not_proven_here)) ->
               fail "%s has no obligations" (Path.show declaration.path)
@@ -1568,7 +1568,7 @@ let () =
         ":pattern ((x0 b0) (x2 b1))");
   let patterns text =
     let rec count occurrence =
-      match Substring.find ~occurrence text ":pattern" with
+      match Substring.For_testing.find ~occurrence text ":pattern" with
       | Some _ -> count (occurrence + 1)
       | None -> occurrence - 1
     in

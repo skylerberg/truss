@@ -143,15 +143,15 @@ let decide database snapshot registry (package : Path.package) =
           match Workspace.fetch_published name version with
           | Error message -> Refused [ message ]
           | Ok published ->
-              let before =
-                Database.make_interface_lookups (Workspace.open_database published) [ name ]
-              and after = Database.make_interface_lookups database [ name ] in
-              let changes = Compatibility.compare ~before ~after name in
+              let published_database = Workspace.open_database published in
+              let changes = Compatibility.compare ~before:published_database ~after:database name in
+              let before = Database.make_name_lookups published_database [ name ]
+              and after = Database.make_name_lookups database [ name ] in
               let breaks =
                 List.map
                   (fun (path, description) ->
-                    let was = Signatures.of_path before.names path
-                    and now = Signatures.of_path after.names path in
+                    let was = Signatures.of_path before path
+                    and now = Signatures.of_path after path in
                     String.concat ""
                       (Printf.sprintf "%s %s." (Path.show path) description
                       ::

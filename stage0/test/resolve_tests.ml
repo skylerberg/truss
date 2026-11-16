@@ -40,7 +40,7 @@ let one_diagnostic = Support.one_diagnostic ~setup:(fun files -> setup files) ~c
 let name_at packages name text occurrence =
   let file = file_of name in
   let source = Source.text (Support.source packages file) in
-  let offset = Option.get (Substring.find ~occurrence source text) in
+  let offset = Option.get (Substring.For_testing.find ~occurrence source text) in
   if offset < 0 then failwith (Printf.sprintf "no occurrence %d of %S" occurrence text);
   let located =
     List.find_map
@@ -95,7 +95,9 @@ let refers ?(others = []) text ~name:(written, occurrence) expected =
 let refers_to_binding text ~use ~binding =
   let packages = setup [ ("app::main", text) ] in
   let source = text in
-  let binding_offset = Option.get (Substring.find ~occurrence:(snd binding) source (fst binding)) in
+  let binding_offset =
+    Option.get (Substring.For_testing.find ~occurrence:(snd binding) source (fst binding))
+  in
   let name, spans, base, resolved = name_at packages "app::main" (fst use) (snd use) in
   let actual = describe spans base resolved.names.(name.id) in
   let expected = Printf.sprintf "local at %d" binding_offset in
@@ -186,6 +188,29 @@ let () =
       one_diagnostic "fn size() -> Int64 { 9 }\n"
         ~others:[ ("app::main/grid", "fn size() -> Int64 { 3 }\n") ]
         ~says:"already defined in app/main/grid.truss" "resolve.duplicate_definition");
+  test "impls in two files that spell one trait the same but import different modules are two"
+    (fun () ->
+      no_diagnostics
+        [
+          ("app::one::codec", "public trait Marker {\n}\n");
+          ("app::two::codec", "public trait Marker {\n}\n");
+          ( "app::main",
+            "use app::one::codec\n\n\
+             public type Point(x: Int64)\n\n\
+             impl codec::Marker for Point {\n\
+             }\n" );
+          ("app::main/second", "use app::two::codec\n\nimpl codec::Marker for Point {\n}\n");
+        ]);
+  test "one impl written with two spellings of its trait is a duplicate" (fun () ->
+      one_diagnostic
+        "use app::one::codec\n\n\
+         public type Point(x: Int64)\n\n\
+         impl codec::Marker for Point {\n\
+         }\n\n\
+         impl app::one::codec::Marker for Point {\n\
+         }\n"
+        ~others:[ ("app::one::codec", "public trait Marker {\n}\n") ]
+        ~says:"already defined in this file" "resolve.duplicate_definition");
   test "a file names a module only through its own imports" (fun () ->
       one_diagnostic Fixtures.Resolve.file_without_the_use_cannot_name_the_module
         ~others:
@@ -231,7 +256,7 @@ let () =
 
 let bracket_of text written occurrence =
   let packages = setup [ ("app::main", text) ] in
-  let offset = Option.get (Substring.find ~occurrence text written) in
+  let offset = Option.get (Substring.For_testing.find ~occurrence text written) in
   let declarations = Support.declarations packages (Support.module_of "app::main") in
   List.find_map
     (fun (declaration : Resolve.Names.declaration) ->

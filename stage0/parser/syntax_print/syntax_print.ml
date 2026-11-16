@@ -488,6 +488,7 @@ let file (file : file) =
     @ definitions file.definitions)
 
 module For_testing = struct
+  let statement = statement
   let definition = definition
   let definitions = definitions
 end

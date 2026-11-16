@@ -78,7 +78,7 @@ type core_nodes = {
 }
 
 let core_nodes packages (key : Resolve.Names.key) : core_nodes =
-  match Database.For_testing.read_checked_body (database packages) key with
+  match Database.read_checked_body (database packages) key with
   | None -> failwith (Printf.sprintf "%s has no core form" (Resolve.Names.show_key key))
   | Some { form; _ } ->
       let expressions = ref [] and statements = ref [] and patterns = ref [] in
@@ -127,7 +127,7 @@ let no_diagnostics ~check files =
            ~core:(fun key ->
              Option.map
                (fun (checked : Infer.checked) -> checked.form)
-               (Database.For_testing.read_checked_body database key))
+               (Database.read_checked_body database key))
            (file_of name)))
     files
 
@@ -184,7 +184,7 @@ let proof_states database file = Prover.list_states (verdicts database file) fil
 let proofs database file =
   let proofs = proven database file in
   fun key ->
-    match Database.read_proof proofs key with
+    match Database.For_testing.read_proof proofs key with
     | Some (Value proof) -> proof
     | Some (Failed _ | Blocked) ->
         failwith ("the proof of " ^ Resolve.Names.show_key key ^ " is blocked")

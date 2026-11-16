@@ -538,7 +538,7 @@ let recording (names : Names.lookups) (note : Part.t -> unit) : Names.lookups =
             note (Declaration { module_; path; ordinal = 0 })
         | Method { owner; name; _ } | Member_constant { owner; name } ->
             note (Members (owner, name))
-        | Derived _ -> ());
+        | Derived _ | Unresolved _ -> ());
         names.key path);
     declaration = (fun key -> noting (Declaration key) (names.declaration key));
     declarations =
@@ -2405,10 +2405,10 @@ let list_checker_diagnostics database (file : Path.file) checker =
 let checkers = [ Resolve; Interface; Infer; Patterns; Usage; Ownership; Package_checks ]
 let check database packages = drain database ~through:Package_checks packages
 
-let read_tables database (key : Names.key) =
+let read_checked_body database (key : Names.key) =
   drain database ~through:Checked_bodies [ key.module_.package ];
   match Hashtbl.find_opt (owner database key.module_.package).checked_bodies key with
-  | Some (Value checked) -> Some checked.tables
+  | Some (Value checked) -> Some checked
   | Some (Failed _ | Blocked) | None -> None
 
 let list_file_diagnostics database (file : Path.file) =
@@ -2676,12 +2676,6 @@ module For_testing = struct
     drain database ~through [ file.module_.package ];
     List.concat_map (list_checker_diagnostics database file) checkers
 
-  let read_checked_body database (key : Names.key) =
-    drain database ~through:Checked_bodies [ key.module_.package ];
-    match Hashtbl.find_opt (owner database key.module_.package).checked_bodies key with
-    | Some (Value checked) -> Some checked
-    | Some (Failed _ | Blocked) | None -> None
-
   let read_derived_form database path =
     drain database ~through:Derived_forms [ Path.package path ];
     match Path_table.find_opt (owner database (Path.package path)).derived_forms path with
@@ -2753,6 +2747,8 @@ module For_testing = struct
   let root database key =
     own_roots database Packages
       (key :: Option.value (Part_table.find_opt database.owned Packages) ~default:[])
+
+  let read_proof = read_proof
 
   let read_ownership database (key : Names.key) =
     match Hashtbl.find_opt (owner database key.module_.package).ownership key with

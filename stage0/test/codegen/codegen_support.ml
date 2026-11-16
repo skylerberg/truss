@@ -244,7 +244,7 @@ let load_files ?results ?(roots = []) files =
                ~core:(fun key ->
                  Option.map
                    (fun (checked : Infer.checked) -> checked.form)
-                   (Database.For_testing.read_checked_body database key))
+                   (Database.read_checked_body database key))
                file)
       | diagnostics ->
           fail "the source has diagnostics:\n%s"

@@ -97,7 +97,11 @@ let occurrences database snapshot packages =
               Database.read_resolved database key )
           with
           | Some { file; base }, Some definition, Some spans, Some resolved ->
-              let tables = Database.read_tables database key in
+              let tables =
+                Option.map
+                  (fun (checked : Infer.checked) -> checked.tables)
+                  (Database.read_checked_body database key)
+              in
               List.map
                 (fun ({ span; target } : References.occurrence) ->
                   (file, Source.Definition_span.to_file ~base span, target))
