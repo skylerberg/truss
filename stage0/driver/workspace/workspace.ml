@@ -165,7 +165,7 @@ let index_files (files : (string * string) list) =
 let project_of files =
   let own = index_files files in
   let registry = Hashtbl.create 4 and unavailable = Hashtbl.create 4 in
-  let find_root = function
+  let find_indexed_files = function
     | Project.Project -> Some own
     | Registry hash -> Hashtbl.find_opt registry hash
   in
@@ -173,10 +173,10 @@ let project_of files =
     let project =
       Project.of_files
         {
-          find_tree = (fun name -> Option.map fst (find_root name));
+          find_tree = (fun root -> Option.map fst (find_indexed_files root));
           find_text =
-            (fun name path ->
-              Option.bind (find_root name) (fun (_, texts) -> Hashtbl.find_opt texts path));
+            (fun root path ->
+              Option.bind (find_indexed_files root) (fun (_, texts) -> Hashtbl.find_opt texts path));
           find_unavailable_reason = Hashtbl.find_opt unavailable;
         }
     in
