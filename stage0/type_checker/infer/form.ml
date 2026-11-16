@@ -39,7 +39,6 @@ let build_arguments state (call : Tables.call) : Core.argument list =
               mode = argument.mode;
               value =
                 Operands.build argument.mode (build_expression_by_id state argument.expression);
-              mode_keyword = argument.mode_keyword;
             }
       | None -> Default)
 
@@ -371,7 +370,7 @@ let build_untagged_string state ~origin (literal : Syntax.string_literal) : Core
                     (make_call
                        (build_text_builder_callee "write" Mut)
                        [
-                         Passed { mode = Mut; value = Place builder_place; mode_keyword = None };
+                         Passed { mode = Mut; value = Place builder_place };
                          Passed
                            {
                              mode = Read;
@@ -380,7 +379,6 @@ let build_untagged_string state ~origin (literal : Syntax.string_literal) : Core
                                  (make
                                     (Types.make_named (Well_known.make_path String_slice) [])
                                     (String written.value));
-                             mode_keyword = None;
                            };
                        ])));
           ]
@@ -397,7 +395,7 @@ let build_untagged_string state ~origin (literal : Syntax.string_literal) : Core
                          arguments =
                            [
                              Operands.build_argument Read (State.build_expression state part);
-                             Passed { mode = Mut; value = Place builder_place; mode_keyword = None };
+                             Passed { mode = Mut; value = Place builder_place };
                            ];
                          lends = None;
                          uses = recorded.uses;
@@ -468,7 +466,6 @@ let build_list_literal state ~origin (element : Types.ty) (elements : Core.expre
                     {
                       mode = Mut;
                       value = Place (Local { local = storage; type_ = storage_type; origin });
-                      mode_keyword = None;
                     };
                   Operands.build_argument Own element;
                 ])))
@@ -504,7 +501,6 @@ let build_list_literal state ~origin (element : Types.ty) (elements : Core.expre
                             Value
                               (make storage_type
                                  (Use (Local { local = storage; type_ = storage_type; origin })));
-                          mode_keyword = None;
                         };
                     ];
                   lends = None;
@@ -904,9 +900,7 @@ let build_elements state ~origin (collection : Core.place) ~(count : Tables.call
     ~(element : Tables.call) ~(lends : Types.mode) : Core.elements =
   let uint64 = Types.make_builtin UInt64 in
   let local = State.allocate_synthetic_local state in
-  let make_receiver mode : Core.argument =
-    Passed { mode; value = Place collection; mode_keyword = None }
-  in
+  let make_receiver mode : Core.argument = Passed { mode; value = Place collection } in
   let position =
     State.make_synthetic_expression state ~origin uint64
       (Use (Local { local; type_ = uint64; origin }))
@@ -937,8 +931,7 @@ let build_elements state ~origin (collection : Core.place) ~(count : Tables.call
                 arguments =
                   [
                     make_receiver lends;
-                    Passed
-                      { mode = Read; value = Operands.build Read position; mode_keyword = None };
+                    Passed { mode = Read; value = Operands.build Read position };
                   ];
                 lends = Some lends;
                 uses = element.uses;
@@ -1008,11 +1001,7 @@ let build_for_loop (state : State.state) (written : Syntax.statement) (iterable 
               (Call
                  {
                    callee = convert_callee cursor_call.callee;
-                   arguments =
-                     [
-                       Passed
-                         { mode = Own; value = Operands.build Own collection; mode_keyword = None };
-                     ];
+                   arguments = [ Passed { mode = Own; value = Operands.build Own collection } ];
                    lends = None;
                    uses = cursor_call.uses;
                  })
@@ -1030,8 +1019,7 @@ let build_for_loop (state : State.state) (written : Syntax.statement) (iterable 
                     (Call
                        {
                          callee = convert_callee remaining.callee;
-                         arguments =
-                           [ Passed { mode = Read; value = Place place; mode_keyword = None } ];
+                         arguments = [ Passed { mode = Read; value = Place place } ];
                          lends = None;
                          uses = remaining.uses;
                        });
@@ -1252,7 +1240,7 @@ let build_inserted_literal state ~origin (type_ : Types.ty) ~name ~insert
             make_statement
               (Evaluate
                  (make_call insert Mut
-                    (Passed { mode = Mut; value = Place collection; mode_keyword = None }
+                    (Passed { mode = Mut; value = Place collection }
                     :: List.map
                          (fun argument : Core.argument -> Operands.build_argument Own argument)
                          entry)

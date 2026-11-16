@@ -275,9 +275,7 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
         let call =
           {
             Tree.callee;
-            arguments =
-              Passed { mode = Read; value = receiver; mode_keyword = None; function_ = None }
-              :: bounds;
+            arguments = Passed { mode = Read; value = receiver; function_ = None } :: bounds;
             uses = Types.no_capabilities;
             node = node.id;
             origin = node.origin;
@@ -659,9 +657,9 @@ and lower_call builder (called : Core.call) ~node ~origin : Tree.call option =
 and plan_argument builder (argument : Core.argument) =
   match argument with
   | Default -> In_order.pure Tree.Default
-  | Passed { mode; value; mode_keyword } ->
+  | Passed { mode; value } ->
       In_order.map
-        (fun (value, function_) -> Tree.Passed { mode; value; mode_keyword; function_ })
+        (fun (value, function_) -> Tree.Passed { mode; value; function_ })
         (In_order.evaluate_operand_with builder
            (fun () ->
              match value with
@@ -885,6 +883,15 @@ and lower_block builder (body : Core.block) : Tree.operand option =
   | Some value -> lower_expression builder value
   | None -> if Emitter.reaches builder then Some Emitter.unit_value else None
 
+and lower_body builder (body : Core.block) ~returns =
+  let return_ value = Emitter.return_ builder (if returns then Some value else None) 0 in
+  List.iter (lower_statement builder) body.statements;
+  match body.value with
+  | Some value ->
+      Emitter.run_in_statement builder value.origin (fun () ->
+          Option.iter return_ (lower_expression builder value))
+  | None -> if Emitter.reaches builder then return_ Emitter.unit_value
+
 and lower_scrutinee builder (matched : Core.operand) : Tree.place option =
   match matched with
   | Place written -> lower_place builder written
@@ -969,14 +976,12 @@ and test builder (pattern : Core.pattern) (scrutinee : Tree.place) ~branch_on =
                                       mode = Read;
                                       origin = pattern.origin;
                                     };
-                                mode_keyword = None;
                                 function_ = None;
                               };
                             Passed
                               {
                                 mode = Read;
                                 value = lower_pattern_constant pattern value;
-                                mode_keyword = None;
                                 function_ = None;
                               };
                           ];
@@ -1450,19 +1455,17 @@ and lower_quantified builder (node : Core.expression) (quantifier : Core.quantif
             (fun (start, stop) -> Tree.Over_range { start; stop; inclusive })
             (evaluate_pair builder start stop),
           pattern.type_ )
-    | Over_collection { pattern; collection } ->
+    | Over_elements { elements; _ } ->
         ( Option.map
-            (fun collection -> Tree.Over_collection collection)
-            (lower_expression builder collection),
-          pattern.type_ )
-    | Over_elements { pattern; elements } -> (
-        match elements.count.kind with
-        | Call { arguments = [ Passed { value = collection; _ } ]; _ } ->
-            ( Option.map
-                (fun collection -> Tree.Over_collection collection)
-                (lower_operand builder Read collection),
-              pattern.type_ )
-        | _ -> raise_bug "a quantifier over elements whose count takes no collection")
+            (fun stop ->
+              Tree.Over_range
+                {
+                  start = Constant { value = Integer Z.zero; type_ = elements.count.type_ };
+                  stop;
+                  inclusive = false;
+                })
+            (lower_expression builder elements.count),
+          elements.count.type_ )
   in
   let* range = range in
   let parameter, matches =
@@ -1473,13 +1476,25 @@ and lower_quantified builder (node : Core.expression) (quantifier : Core.quantif
             Tree.statements = [];
             value = Some (Constant { value = Boolean true; type_ = Types.bool });
           } )
-    | Over_range { pattern; _ } | Over_collection { pattern; _ } | Over_elements { pattern; _ } ->
+    | Over_range { pattern; _ } ->
         let parameter = Emitter.allocate_local builder Temporary value_type origin in
         ( parameter,
           Emitter.build_block builder (fun () ->
               match_patterns builder [ pattern ]
                 [ (Emitter.make_local_place parameter, pattern.origin) ]
                 origin) )
+    | Over_elements { pattern; elements = { position; element; _ } } ->
+        let parameter = Emitter.allocate_local builder Temporary value_type origin in
+        ( parameter,
+          Emitter.build_block builder (fun () ->
+              bind ~owned:true builder position
+                (Emitter.make_local_place parameter)
+                ~scrutinee_origin:position.origin;
+              match element with
+              | Lent lending ->
+                  let* part = lower_lent builder lending ~duration:Operand_evaluation in
+                  match_patterns builder [ pattern ] [ (part, pattern.origin) ] origin
+              | _ -> raise_bug "a quantifier over elements that no call lends") )
   in
   let body = Emitter.build_block builder (fun () -> lower_expression builder body) in
   Emitter.hold builder node.type_ origin
@@ -1527,7 +1542,7 @@ and lower_lambda builder (parameters : Core.pattern list) (captures : Core.captu
             | _ ->
                 bind inner pattern (Emitter.make_local_place local) ~scrutinee_origin:pattern.origin)
           parameters locals;
-        Option.iter (fun value -> Emitter.return_ inner (Some value) 0) (lower_block inner body);
+        lower_body inner body ~returns:true;
         locals)
   in
   let rec compute_unconverted_type (value : Core.expression) =
@@ -1547,10 +1562,7 @@ and compute_block_type (body : Core.block) =
 
 and of_proof ~entry_locals (written : Core.block) =
   let builder = Emitter.create ~is_specification:true ~entry_locals ~takes_free_locals:true () in
-  Emitter.run_in_scope builder 0 (fun () ->
-      Option.iter
-        (fun value -> Emitter.return_ builder (Some value) 0)
-        (lower_block builder written));
+  Emitter.run_in_scope builder 0 (fun () -> lower_body builder written ~returns:true);
   let body = Emitter.finish builder ~parameters:(Emitter.free_locals builder) in
   { body; lambdas = Emitter.lambdas builder }
 
@@ -1639,9 +1651,6 @@ let of_definition ~is_specification (definition : Core.definition) =
               parameter.type_ 0)
           parameters
       in
-      Emitter.run_in_scope builder 0 (fun () ->
-          Option.iter
-            (fun value -> Emitter.return_ builder (if returns then Some value else None) 0)
-            (lower_block builder body));
+      Emitter.run_in_scope builder 0 (fun () -> lower_body builder body ~returns);
       { Tree.body = Emitter.finish builder ~parameters:locals; lambdas = Emitter.lambdas builder })
     code

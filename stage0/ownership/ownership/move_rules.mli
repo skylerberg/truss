@@ -16,7 +16,7 @@ val copy_fix :
   Context.context ->
   string ->
   Types.ty ->
-  Source.Definition_span.t ->
+  Core.origin ->
   Source.Definition_span.t Diagnostic.fix list
 
 val analyse : Context.context -> Mir.Graph.body -> Moves.t

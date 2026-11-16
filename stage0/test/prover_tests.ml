@@ -224,7 +224,7 @@ let () =
           (Support.list_declarations packages (Support.parse_module "app::main"))
       in
       match
-        Database.For_testing.read_proof
+        Database.For_testing.find_proof
           (Support.prove (Support.make_database packages) main)
           (Resolve.Names.make_key caller)
       with
@@ -254,7 +254,7 @@ let () =
           (Support.list_declarations packages (Support.parse_module "app::main"))
       in
       match
-        Database.For_testing.read_proof
+        Database.For_testing.find_proof
           (Support.prove (Support.make_database packages) main)
           (Resolve.Names.make_key caller)
       with
@@ -284,7 +284,7 @@ let () =
           (Support.list_declarations packages (Support.parse_module "app::main"))
       in
       match
-        Database.For_testing.read_proof
+        Database.For_testing.find_proof
           (Support.prove (Support.make_database packages) main)
           (Resolve.Names.make_key caller)
       with
@@ -320,7 +320,7 @@ let () =
       let proofs = Support.prove database main in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
-          match Database.For_testing.read_proof proofs (Resolve.Names.make_key declaration) with
+          match Database.For_testing.find_proof proofs (Resolve.Names.make_key declaration) with
           | Some (Value (Obligations _)) -> ()
           | Some (Value (Unsupported _ | Not_proven_here)) ->
               Harness.fail "%s has no obligations" (Path.show declaration.path)
@@ -781,7 +781,15 @@ let () =
       expect_not_proven Fixtures.Prover.quantifier_over_items_in_a_body_ensured_true
         "prover.ensures");
   Harness.test "a quantifier in a body reads the collection's `count` and `element`" (fun () ->
-      expect_proven Fixtures.Prover.quantifier_over_counted_elements_in_a_body)
+      expect_proven Fixtures.Prover.quantifier_over_counted_elements_in_a_body);
+  Harness.test "a quantifier in a specification reads the collection's `count` and `element`"
+    (fun () -> expect_proven Fixtures.Prover.specification_quantifier_over_counted_elements);
+  Harness.test "a quantifier's pattern leaves out the elements it does not match" (fun () ->
+      expect_proven Fixtures.Prover.specification_quantifier_with_a_refutable_pattern);
+  Harness.test "a quantifier over a range value reads the range's `count` and `element`" (fun () ->
+      expect_proven Fixtures.Prover.quantifier_over_a_range_value);
+  Harness.test "a quantifier in a body over a set reaches every member of the set" (fun () ->
+      expect_proven Fixtures.Prover.quantifier_over_set_members_in_a_body)
 
 let swap = Fixtures.Prover.exchange
 

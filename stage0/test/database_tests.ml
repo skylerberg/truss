@@ -667,7 +667,7 @@ let () =
         (list_propagated ~before:(make_signup "age >= 13") ~after:(make_signup "age  >=\t13"))
         ~exactly:
           [
-            "derived form derived standard::serialization::Deserialize for \
+            "generated mir derived standard::serialization::Deserialize for \
              app::main::Signup.deserialize";
             "import check app/main/main.truss";
             "namespace app";
@@ -934,3 +934,69 @@ let () =
       in
       let checked_bodies = extract_counts counts "checked body" in
       if checked_bodies.computed <> 1 then Harness.fail "counted %s" (show_counts checked_bodies))
+
+let () =
+  Harness.test "a namespace whose names come out unchanged is counted as unchanged, not written"
+    (fun () ->
+      let before = [ ("app::main", callee_and_caller) ] in
+      let after = [ ("app::main", callee_and_caller ^ "\n") ] in
+      let namespaces =
+        extract_counts (count_propagation (build before) ~before ~after) "namespace"
+      in
+      if (namespaces.computed, namespaces.unchanged, namespaces.writes) <> (1, 1, 0) then
+        Harness.fail "counted %s" (show_counts namespaces));
+  Harness.test "a new version of a loaded package counts a write of each part that differs"
+    (fun () ->
+      let make_version second =
+        load_package
+          [
+            ( "lib::tools",
+              "public fn first() -> Int64 { 1 }\npublic fn second() -> " ^ second ^ " { 2 }\n" );
+          ]
+      in
+      let app =
+        Support.setup
+          ~dependencies:[ ("app", "lib") ]
+          [ ("app::main", "use lib::tools\nfn calls_second() { tools::second() }\n") ]
+      in
+      let hot = settle [ make_version "Int64" ] app in
+      let newer = make_version "Int32" in
+      let _, counts =
+        Database.count (fun () ->
+            Database.relayout hot ~loaded:[ Lazy.force standard; newer ] app;
+            Database.propagate hot)
+      in
+      let interfaces = extract_counts counts "interface" in
+      if (interfaces.computed, interfaces.writes) <> (0, 1) then
+        Harness.fail "counted %s" (show_counts interfaces))
+
+let () =
+  Harness.test "adding a file to a module recomputes the namespace, which reads the files"
+    (fun () ->
+      expect_included
+        (list_propagated
+           ~before:[ ("app::main", "fn first() -> Int64 { 1 }\n") ]
+           ~after:
+             [
+               ("app::main", "fn first() -> Int64 { 1 }\n");
+               ("app::main/second", "fn second() -> Int64 { first() }\n");
+             ])
+        ~parts:[ "namespace app"; "checked body app::main::second" ]);
+  Harness.test "a request that reads a name whose namespace is stale is a compiler bug" (fun () ->
+      let database = build [ ("app::main", callee_and_caller) ] in
+      Database.update database
+        [ (Support.parse_file "app::main/extra", Some "fn extra() -> Int64 { 3 }\n") ];
+      let names = Database.make_name_lookups database [] in
+      match names.list_declarations (Support.parse_module "app::main") with
+      | _ -> Harness.fail "the stale namespace was read"
+      | exception Compiler_bug.Bug _ -> ());
+  Harness.test "a request's reads are counted as untracked, and the request computes nothing"
+    (fun () ->
+      let database = build [ ("app::main", callee_and_caller) ] in
+      match
+        snd
+          (Database.count (fun () ->
+               ignore (Database.list_file_diagnostics database (Support.parse_file "app::main"))))
+      with
+      | [ { kind = "untracked"; computed = 0; writes = 0; reads; _ } ] when reads > 0 -> ()
+      | counts -> Harness.fail "counted %s" (String.concat "; " (List.map show_counts counts)))

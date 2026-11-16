@@ -290,7 +290,9 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                   | receiver :: rest, Some (Type_overload method_path) ->
                       let inner =
                         match receiver.value.kind with
-                        | Mode (_, inner) -> inner
+                        | Mode (mode, inner) ->
+                            State.note_mode_keyword state receiver.value mode inner;
+                            inner
                         | _ -> receiver.value
                       in
                       let receiver_type = Hooks.check_expression state env inner in
@@ -407,15 +409,7 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
             let mode = Calls.check_argument state env first.value parameter in
             ignore
               (State.decide_default_literal state ~at:(State.read_span state value.id) self_type);
-            ( [
-                {
-                  Tables.expression = first.value.id;
-                  core_argument_index = 0;
-                  mode;
-                  mode_keyword = None;
-                };
-              ],
-              rest )
+            ([ { Tables.expression = first.value.id; core_argument_index = 0; mode } ], rest)
         | [] -> ([], []))
     | None -> ([], arguments)
   in
@@ -685,7 +679,6 @@ and check_method_with_receiver state env ?expected ?(type_arguments = [])
                     | Some (Mut, _) -> Mut
                     | Some (Own, _) -> Own
                     | _ -> Read);
-                  mode_keyword = None;
                 }
               in
               Name_lookup.finish_call state env value method_path
@@ -751,7 +744,6 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
                   Tables.expression = receiver.id;
                   core_argument_index = 0;
                   mode = (match method_.method_receiver with Mut -> Mut | Own -> Own | _ -> Read);
-                  mode_keyword = None;
                 }
               in
               let evidence =

@@ -201,7 +201,7 @@ let check_body context (actions : Actions.t) moves =
           | Refused refuse -> refuse context at type_)
       | Move_out_of_lent type_ ->
           Context.report context Not_owned at
-            ~fixes:(Move_rules.copy_fix context "Copy it." type_ at)
+            ~fixes:(Move_rules.copy_fix context "Copy it." type_ here.origin)
             "This part is lent, so it cannot be moved: the loan ends when the statement ends. Copy \
              it instead."
       | Arguments { borrowed_arguments; view_arguments; is_yielded } ->
@@ -295,9 +295,7 @@ let check_body context (actions : Actions.t) moves =
             dropped
       | Bind_lent_part { scrutinee; lent_part_type } ->
           Context.report context Lent_part_escapes at
-            ~fixes:
-              (Move_rules.copy_fix context "Copy the scrutinee." lent_part_type
-                 (Context.locate_origin context scrutinee))
+            ~fixes:(Move_rules.copy_fix context "Copy the scrutinee." lent_part_type scrutinee)
             "This part is lent only until the statement ends, so it cannot be bound to a name. Use \
              it in this statement, or copy it."
       | Pass_owned_function views -> (
