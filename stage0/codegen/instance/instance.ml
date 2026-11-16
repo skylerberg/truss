@@ -219,7 +219,7 @@ let make_symbol key = shorten ("t_" ^ mangle key)
 let make_type_symbol ty = shorten ("t_" ^ mangle_ty ty)
 
 let rec to_string = function
-  | Code { path; type_arguments; _ } -> Path.show path ^ arguments_to_string type_arguments
+  | Code { path; type_arguments; _ } -> Path.show path ^ show_arguments type_arguments
   | Constant path -> Path.show path
   | Drop ty -> "drop " ^ Ground.to_string ty
   | Copy ty -> "copy " ^ Ground.to_string ty
@@ -245,11 +245,11 @@ let rec to_string = function
   | Generated (Entry impl_method) -> "entry " ^ to_string (make_method_code impl_method)
   | Generated (Program_main main) -> "program " ^ Path.show main
   | Table (Any_table { impl; type_arguments }) ->
-      "any table " ^ Path.show impl ^ arguments_to_string type_arguments
+      "any table " ^ Path.show impl ^ show_arguments type_arguments
   | Table (Locked_table capability) -> "locked table " ^ Path.show capability
   | Table (Impl_table { impl; type_arguments }) ->
-      "table " ^ Path.show impl ^ arguments_to_string type_arguments
+      "table " ^ Path.show impl ^ show_arguments type_arguments
 
-and arguments_to_string = function
+and show_arguments = function
   | [] -> ""
-  | arguments -> "[" ^ String.concat ", " (List.map Ground.argument_to_string arguments) ^ "]"
+  | arguments -> "[" ^ String.concat ", " (List.map Ground.show_argument arguments) ^ "]"

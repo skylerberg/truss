@@ -29,7 +29,7 @@ let rec find_package_directory ~is_package directory =
   else if directory = "" then None
   else find_package_directory ~is_package (compute_parent directory)
 
-let file_of_path ~package ~directory path : Path.file =
+let make_file ~package ~directory path : Path.file =
   let inside =
     if directory = "" then path
     else
@@ -155,7 +155,7 @@ let lay_out (files_in : files) root =
             (fun directory ->
               Option.map
                 (fun (package : Manifest.package) ->
-                  { path; directory; file = file_of_path ~package:package.name ~directory path })
+                  { path; directory; file = make_file ~package:package.name ~directory path })
                 (List.assoc_opt directory packages)))
       files
   in
@@ -391,7 +391,7 @@ type t = {
   problems : problem list;
 }
 
-let of_files files =
+let lay_out_project files =
   let layouts = Root_table.create 4 in
   let lay_out_root root =
     match Root_table.find_opt layouts root with

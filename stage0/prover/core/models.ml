@@ -141,7 +141,7 @@ let compute_model_function (context : State.context) (ty : Types.ty) ~(model : T
       rank_model context ty ~model symbol;
       (match ty with
       | Types.Named { path; arguments = [ Types.Type element; Types.Value count ] }
-        when Intrinsic.builtin_of_path path = Some Array ->
+        when Intrinsic.find_builtin path = Some Array ->
           Facts.run_once context (Array_length symbol) (fun () ->
               let each = Logic.Symbol.Variable { label = "array.value"; numbers = [] } in
               let elements = Logic.Apply (symbol, [ Logic.Symbol each ]) in

@@ -25,7 +25,7 @@ let show_mode_prefix = function Read -> "" | Mut -> "mut " | Own -> "own "
 
 let rec to_string = function
   | Named { path; arguments = [] } -> show_path_name path
-  | Named { path; arguments } -> show_path_name path ^ arguments_to_string arguments
+  | Named { path; arguments } -> show_path_name path ^ show_arguments arguments
   | Function function_type ->
       let parameters =
         List.map (fun (mode, ty) -> show_mode_prefix mode ^ to_string ty) function_type.parameters
@@ -43,17 +43,16 @@ let rec to_string = function
         ^ ")"
   | Any { trait; arguments; associated } ->
       let items =
-        List.map argument_to_string arguments
+        List.map show_argument arguments
         @ List.map (fun (name, ty) -> name ^ " = " ^ to_string ty) associated
       in
       "any " ^ show_path_name trait
       ^ if items = [] then "" else "[" ^ String.concat ", " items ^ "]"
   | Never -> "Never"
 
-and argument_to_string = function
+and show_argument = function
   | Type ty -> to_string ty
   | Value value -> Z.to_string value
   | Capabilities set -> "{" ^ String.concat ", " (List.map show_path_name set) ^ "}"
 
-and arguments_to_string arguments =
-  "[" ^ String.concat ", " (List.map argument_to_string arguments) ^ "]"
+and show_arguments arguments = "[" ^ String.concat ", " (List.map show_argument arguments) ^ "]"

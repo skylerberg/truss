@@ -716,8 +716,8 @@ let render source (diagnostic : t) =
     (show_location source diagnostic.span.start)
     (Code.name diagnostic.code) diagnostic.message;
   let start = diagnostic.span.start in
-  let line_start = Source.line_start source start in
-  let line_end = Source.line_end source start in
+  let line_start = Source.compute_line_start source start in
+  let line_end = Source.compute_line_end source start in
   let line = String.sub text line_start (line_end - line_start) in
   let _, start_column = Source.compute_position source start in
   let _, stop_column = Source.compute_position source (min diagnostic.span.stop line_end) in

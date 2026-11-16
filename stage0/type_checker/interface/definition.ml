@@ -59,7 +59,7 @@ let make_builtin_shape builtin : Types.type_interface =
   { type_generics; shape = Builtin_type builtin; opaque = true; derives = [] }
 
 let find_type_interface lookups (path : Path.t) =
-  match Intrinsic.builtin_of_path path with
+  match Intrinsic.find_builtin path with
   | Some builtin -> Some (make_builtin_shape builtin)
   | None -> (
       match find_interface lookups path with Some (Type_interface type_) -> Some type_ | _ -> None)

@@ -4,7 +4,7 @@ let list_package_parts package = Option.to_list package.owner @ [ package.name ]
 let show_package package = String.concat "::" (list_package_parts package)
 let compare_package left right = String.compare (show_package left) (show_package right)
 
-let package_of_parts = function
+let parse_package_parts = function
   | [ name ] -> Some { owner = None; name }
   | [ owner; name ] -> Some { owner = Some owner; name }
   | _ -> None
@@ -17,7 +17,7 @@ let parse_names text =
   in
   split_names (String.split_on_char ':' text)
 
-let parse_package text = Option.bind (parse_names text) package_of_parts
+let parse_package text = Option.bind (parse_names text) parse_package_parts
 
 type module_ = { package : package; modules : string list }
 

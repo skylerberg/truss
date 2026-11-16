@@ -1261,7 +1261,7 @@ let build_collection_literal state (value : Syntax.expression) (elements : Core.
   | Types.Named { path; _ } as type_ when Well_known.is Set path ->
       build_inserted_literal state ~origin:value.id type_ ~insert:"insert"
         (List.map (fun element -> [ element ]) elements)
-  | Types.Named { path; _ } when Intrinsic.builtin_of_path path = Some Array ->
+  | Types.Named { path; _ } when Intrinsic.find_builtin path = Some Array ->
       Collection_literal { elements; construction = Array }
   | Types.Named { path; _ } when Well_known.is Sequence path || Well_known.is Finite_set path ->
       Collection_literal { elements; construction = Specification_only }

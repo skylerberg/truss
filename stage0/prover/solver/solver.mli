@@ -7,7 +7,7 @@ type sexp = Atom of string | List of sexp list
 type answer = Proven | Counterexample of (Logic.symbol * sexp) list | Unknown
 type request
 
-val request :
+val make_request :
   ?symbols:Logic.symbol list -> ?terms:(Logic.symbol * Logic.term) list -> Logic.query -> request
 
 val solve_all : t -> (request * Logic.query) list -> answer list

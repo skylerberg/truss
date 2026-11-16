@@ -1538,7 +1538,7 @@ let () =
   in
   Harness.test "an answer in the cache is read, and the solver is not run" (fun () ->
       let query = make_self_comparison ">=" in
-      let request = Solver.request query in
+      let request = Solver.make_request query in
       let cache =
         {
           Solver.find =
@@ -1556,7 +1556,9 @@ let () =
     (fun () ->
       let query = make_self_comparison ">=" in
       let request =
-        Solver.request ~symbols:[ Logic.Symbol.Variable { label = "compared"; numbers = [] } ] query
+        Solver.make_request
+          ~symbols:[ Logic.Symbol.Variable { label = "compared"; numbers = [] } ]
+          query
       in
       let cache =
         {
@@ -1573,7 +1575,7 @@ let () =
           if Solver.count_queries_run solver <> 0 then Harness.fail "ran the solver");
   Harness.test "each solver keeps its own answers" (fun () ->
       let query = make_self_comparison "<" in
-      let request = Solver.request query in
+      let request = Solver.make_request query in
       match (Solver.find (), Solver.find ()) with
       | Ok first, Ok second ->
           ignore (Solver.solve_all first [ (request, query) ]);
@@ -1583,7 +1585,7 @@ let () =
       | Error message, _ | _, Error message -> Harness.fail "%s" message);
   Harness.test "a solved answer is added to the cache under its query's key" (fun () ->
       let query = make_self_comparison "<=" in
-      let request = Solver.request query in
+      let request = Solver.make_request query in
       let cached_answers = Hashtbl.create 1 in
       let cache =
         { Solver.find = Hashtbl.find_opt cached_answers; add = Hashtbl.replace cached_answers }
@@ -1615,7 +1617,7 @@ let () =
       | None, _ -> Harness.fail "no obligation of the `ensures`"
       | _, Error message -> Harness.fail "%s" message
       | Some query, Ok solver ->
-          let request = Solver.request query in
+          let request = Solver.make_request query in
           if List.hd (Solver.solve_all solver [ (request, query) ]) <> Unknown then
             Harness.fail "expected an unknown answer";
           if Solver.count_queries_run solver <> 1 then
@@ -1628,8 +1630,8 @@ let () =
       | None, _ -> Harness.fail "no obligation of the addition"
       | _, Error message -> Harness.fail "%s" message
       | Some query, Ok solver -> (
-          let first = Solver.request query
-          and second = Solver.request ~terms:[ (Logic.Symbol.Reached 0, Logic.int 1) ] query in
+          let first = Solver.make_request query
+          and second = Solver.make_request ~terms:[ (Logic.Symbol.Reached 0, Logic.int 1) ] query in
           match List.hd (Solver.solve_all solver [ (first, query) ]) with
           | Proven | Unknown -> Harness.fail "expected a counterexample"
           | Counterexample _ ->

@@ -174,7 +174,7 @@ and check_list_literal state env ?expected (value : Syntax.expression) items =
            || Well_known.is Finite_set path ->
         (element, fun element -> Types.Named { path; arguments = Types.Type element :: rest })
     | Some (Types.Named { path; arguments = [ Types.Type element; count ] })
-      when Intrinsic.builtin_of_path path = Some Array ->
+      when Intrinsic.find_builtin path = Some Array ->
         (match count with
         | Types.Value (Known count)
           when (not (Z.fits_int count)) || Z.to_int count <> List.length items ->

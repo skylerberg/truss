@@ -1,6 +1,6 @@
 type path = { local : Mir.local; projections : Mir.projection list }
 
-val path_of_place : Mir.place -> path option
+val find_place_path : Mir.place -> path option
 val is_inside : outer:path -> path -> bool
 
 type t

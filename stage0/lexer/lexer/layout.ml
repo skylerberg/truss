@@ -50,7 +50,7 @@ let starts_definition source offset =
 
 let extract_indentation source offset =
   let text = Source.text source in
-  let start = Source.line_start source offset in
+  let start = Source.compute_line_start source offset in
   let stop =
     Option.value ~default:(String.length text)
       (String.find_first_index (Fun.negate Char.Ascii.is_blank) ~start text)
@@ -70,12 +70,12 @@ let compute_closer_position first_line_break position =
 type opener = { bracket : Token.bracket; span : Source.span; index : int }
 
 let find_closing_position source tokens ~closers ~is_unterminated_string (opener : opener) =
-  let opener_line = Source.line_start source opener.span.start in
+  let opener_line = Source.compute_line_start source opener.span.start in
   let indentation = String.length (extract_indentation source opener.span.start) in
   let last_on_opener_line = ref (Some opener.span.stop) and last_indented = ref None in
   let note_element ~start ~stop ~contains_closer =
     let place = if contains_closer then None else Some stop in
-    let line = Source.line_start source start in
+    let line = Source.compute_line_start source start in
     if line = opener_line then last_on_opener_line := place
     else if String.length (extract_indentation source start) > indentation then
       last_indented := Some place

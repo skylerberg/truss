@@ -45,7 +45,7 @@ let find_parameter_spelling (context : State.context) (frame : State.frame) term
     match Logic.list_free_constants term with
     | _ :: _ as names -> List.for_all (fun name -> List.mem name context.entry) names
     | [] -> false
-  then Facts.truss_of_value context term
+  then Facts.show_truss_value context term
   else None
 
 let find_integer_limits ty =

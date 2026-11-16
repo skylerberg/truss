@@ -741,7 +741,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
       let integer =
         match
           classify_scalar env
-            (Ground.make_builtin (Intrinsic.builtin_of_libc (Libc.classify_number number)))
+            (Ground.make_builtin (Intrinsic.convert_libc_scalar (Libc.classify_number number)))
         with
         | Integer integer -> integer
         | _ -> raise_bug "a number of the C library that is not an integer"
@@ -905,7 +905,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
         let ground scalar =
           Ground.Named
             {
-              path = Intrinsic.make_builtin_path (Intrinsic.builtin_of_libc scalar);
+              path = Intrinsic.make_builtin_path (Intrinsic.convert_libc_scalar scalar);
               arguments = [];
             }
         in

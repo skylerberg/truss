@@ -12,7 +12,7 @@ let remove_trivia cursor ~start ~stop ~line_break =
   | true, false -> Diagnostic.delete (Source.make_span before after)
   | false, true -> Diagnostic.delete (Source.make_span start after)
   | false, false ->
-      let line_start = Source.line_start cursor.source start in
+      let line_start = Source.compute_line_start cursor.source start in
       let stop =
         if Cursor.is_at_end cursor after then after
         else after + Cursor.measure_line_break cursor after

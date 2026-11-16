@@ -535,7 +535,7 @@ and compute_common_indentation lines =
   |> Option.value ~default:""
 
 and guess_raw_string_end cursor ~literal_start ~line_end =
-  let opener_line = Source.line_start cursor.source literal_start in
+  let opener_line = Source.compute_line_start cursor.source literal_start in
   let opener_indentation = Cursor.skip_spaces cursor opener_line - opener_line in
   let rec search position =
     if position >= cursor.length then None

@@ -360,7 +360,7 @@ and check_named_call state env ?expected (value : Syntax.expression) path
       | Error error -> error
       | Ok (checked, left_out) ->
           let callee =
-            match Intrinsic.operation_of_path path with
+            match Intrinsic.find_operation path with
             | Some operation ->
                 Tables.Intrinsic { operation; type_arguments = instance.type_arguments }
             | None -> Tables.Function { path; type_arguments = instance.type_arguments }

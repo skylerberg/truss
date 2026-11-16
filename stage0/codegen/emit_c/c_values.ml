@@ -309,7 +309,7 @@ let build_laid_out_c context fc ty variant (values : (string * Lowered.operand) 
   let layout = C_types.compute_layout context ty in
   (if layout.size > 0 then
      let names =
-       match (Memory_layout.shape context.env ty, variant) with
+       match (Memory_layout.compute_shape context.env ty, variant) with
        | Record members, None -> Some (List.map fst members)
        | Sum variants, Some name ->
            Option.map
