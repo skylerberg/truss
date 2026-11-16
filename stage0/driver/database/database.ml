@@ -56,6 +56,7 @@ type package_database = {
   mutable files : Path.file list;
   sources : Source.t File_table.t;
   values : binding Stored_table.t;
+  diagnostics : (Source.t * Diagnostic.t list) list;
 }
 
 type t = {
@@ -91,6 +92,7 @@ let make_empty_package_database name ~dependencies =
     files = [];
     sources = File_table.create 64;
     values = Stored_table.create 4096;
+    diagnostics = [];
   }
 
 let make_absent_package_database name =
@@ -215,6 +217,7 @@ let copy_package_database (package_database : package_database) =
     files = package_database.files;
     sources = File_table.copy package_database.sources;
     values = Stored_table.copy package_database.values;
+    diagnostics = package_database.diagnostics;
   }
 
 let copy database =
@@ -1956,14 +1959,15 @@ let list_package_outcomes database package =
         (Package_checks.list_checks
            ((make_untracked_name_lookups database).list_package_declarations package))
 
+let place_diagnostics (names : Resolve.Names.lookups) file key diagnostics =
+  let ({ file = home; base } : Resolve.Names.place) = names.read_place key in
+  if home = file then
+    List.map (Diagnostic.map_spans (Source.Definition_span.to_file ~base)) diagnostics
+  else []
+
 let list_checker_diagnostics database (file : Path.file) checker =
   let names = make_untracked_name_lookups database in
-  let place_diagnostics key diagnostics =
-    let ({ file = home; base } : Resolve.Names.place) = names.read_place key in
-    if home = file then
-      List.map (Diagnostic.map_spans (Source.Definition_span.to_file ~base)) diagnostics
-    else []
-  in
+  let place_diagnostics = place_diagnostics names file in
   let of_definitions () =
     List.concat_map
       (fun key -> place_diagnostics key (list_definition_diagnostics database key checker))
@@ -2001,6 +2005,37 @@ let list_file_diagnostics database (file : Path.file) =
   remove_duplicates
     ((read_value database (note_untracked_read database) (Parsed file)).diagnostics
     @ List.concat_map (list_checker_diagnostics database file) checkers)
+
+let list_blocking_diagnostics database (file : Path.file) =
+  let names = make_untracked_name_lookups database in
+  remove_duplicates
+    ((read_value database (note_untracked_read database) (Parsed file)).diagnostics
+    @ List.concat_map
+        (fun (key : Resolve.Names.key) ->
+          match key.path with
+          | Test _ -> []
+          | _ ->
+              place_diagnostics names file key
+                (List.concat_map
+                   (list_definition_diagnostics database key)
+                   [ Resolve; Interface; Infer; Patterns; Usage; Ownership ]))
+        (list_file_keys names file))
+
+let list_dependency_diagnostics database package =
+  match find_package database package with
+  | Some package_database when not (List.mem package database.project) ->
+      package_database.diagnostics
+  | Some package_database ->
+      drain database ~through:Body_checks [ package ];
+      List.filter_map
+        (fun file ->
+          match list_blocking_diagnostics database file with
+          | [] -> None
+          | diagnostics -> Some (read_source database file, diagnostics))
+        package_database.files
+  | None ->
+      Compiler_bug.raise_bug ~stage:"Database" "%s is not a package of the build"
+        (Path.show_package package)
 
 type manifest_problem =
   | Not_a_capability of { dependency : Path.package; name : string }
@@ -2043,10 +2078,13 @@ let find_code_packages database package =
 let read_package_database database package =
   drain database ~through:Recursion_groups [ package ];
   match Package_table.find_opt database.package_databases package with
-  | Some package_database -> package_database
+  | Some package_database ->
+      { package_database with diagnostics = list_dependency_diagnostics database package }
   | None ->
       Compiler_bug.raise_bug ~stage:"Database" "%s is not a package of the build"
         (Path.show_package package)
+
+let list_package_diagnostics (package_database : package_database) = package_database.diagnostics
 
 type proofs = { database : t; keys : Resolve.Names.key list }
 

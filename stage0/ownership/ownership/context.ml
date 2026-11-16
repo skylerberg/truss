@@ -136,6 +136,9 @@ let copy_edits context (moved : Core.origin) =
         ".copy()";
     ]
 
+let copy_fix context title type_ (moved : Core.origin) =
+  if is_copyable context type_ then [ Diagnostic.fix title (copy_edits context moved) ] else []
+
 let locate_with_mode_keyword context (place : Core.origin) : Source.Definition_span.t =
   match Hashtbl.find_opt context.mode_keywords place with
   | Some { written; _ } ->

@@ -36,9 +36,19 @@ let () =
       let actual = read_message Fixtures.Prover.increment_of_a_matched_count in
       if not (String.includes ~affix:"`count` is 255" actual) then Harness.fail "message %S" actual);
   Harness.test "a counterexample the solver misses is found in a model of few elements" (fun () ->
+      let actual = read_message Fixtures.Prover.addition_under_an_exists_in_a_forall in
+      if not (String.includes ~affix:"`value` is 9223372036854775807" actual) then
+        Harness.fail "message %S" actual);
+  Harness.test "a word count's counterexample names the count" (fun () ->
       let actual = read_message Fixtures.Prover.increment_of_a_word_count in
       if not (String.includes ~affix:"`count` is 9223372036854775807" actual) then
         Harness.fail "message %S" actual);
+  Harness.test "a counterexample leaves out the local that a `for` loop introduces" (fun () ->
+      let actual = read_message Fixtures.Prover.increment_of_a_word_count in
+      if String.includes ~affix:"`position` is" actual then Harness.fail "message %S" actual);
+  Harness.test "a counterexample names a local that the code declares" (fun () ->
+      let actual = read_message Fixtures.Prover.addition_to_a_local_named_position in
+      if not (String.includes ~affix:"`position` is" actual) then Harness.fail "message %S" actual);
   Harness.test "a counterexample leaves out a value that nothing constrains" (fun () ->
       let actual = read_message Fixtures.Prover.increment_under_a_long_name in
       if
@@ -744,7 +754,13 @@ let () =
   Harness.test "a map holds an inserted value under its key" (fun () ->
       expect_proven Fixtures.Prover.map_insert);
   Harness.test "a map keeps its other keys' values" (fun () ->
-      expect_proven Fixtures.Prover.map_insert_keeping_another_key)
+      expect_proven Fixtures.Prover.map_insert_keeping_another_key);
+  Harness.test "a value read from a map is the value assigned to an equal key" (fun () ->
+      expect_proven Fixtures.Prover.value_read_after_assign);
+  Harness.test "a value indexed in a map is the value inserted under an equal key" (fun () ->
+      expect_proven Fixtures.Prover.value_indexed_after_insert);
+  Harness.test "a loop invariant bounds every value of a map" (fun () ->
+      expect_proven Fixtures.Prover.word_count_bounded_by_its_index)
 
 let () =
   Harness.test "a map literal holds each key's value" (fun () ->
@@ -1554,6 +1570,16 @@ let () =
           if List.hd (Solver.solve_all solver [ (request, query) ]) <> Solver.Proven then
             Harness.fail "expected the cached answer";
           if Solver.count_queries_run solver <> 0 then Harness.fail "ran the solver");
+  Harness.test "each solver keeps its own answers" (fun () ->
+      let query = make_self_comparison "<" in
+      let request = Solver.request query in
+      match (Solver.find (), Solver.find ()) with
+      | Ok first, Ok second ->
+          ignore (Solver.solve_all first [ (request, query) ]);
+          ignore (Solver.solve_all second [ (request, query) ]);
+          if Solver.count_queries_run second <> 1 then
+            Harness.fail "the second solver ran %d queries" (Solver.count_queries_run second)
+      | Error message, _ | _, Error message -> Harness.fail "%s" message);
   Harness.test "a solved answer is added to the cache under its query's key" (fun () ->
       let query = make_self_comparison "<=" in
       let request = Solver.request query in
@@ -1584,29 +1610,10 @@ let () =
     | Unsupported _ | Not_proven_here -> None
   in
   Harness.test "an unknown answer without an uninterpreted sort is not searched further" (fun () ->
-      let make_variable label = Logic.Symbol.Variable { label; numbers = [] } in
-      let first = make_variable "first"
-      and second = make_variable "second"
-      and sum = make_variable "sum" in
-      let cube variable =
-        Logic.Operation
-          ("*", [ Logic.Symbol variable; Logic.Symbol variable; Logic.Symbol variable ])
-      in
-      let query =
-        {
-          Logic.declarations =
-            List.map (fun variable -> Logic.Constant (variable, Logic.Int)) [ first; second; sum ];
-          facts =
-            List.map
-              (fun variable -> Logic.Operation (">", [ Logic.Symbol variable; Logic.int 0 ]))
-              [ first; second; sum ];
-          goal =
-            Logic.not_ (Logic.equal (Logic.Operation ("+", [ cube first; cube second ])) (cube sum));
-        }
-      in
-      match Solver.find () with
-      | Error message -> Harness.fail "%s" message
-      | Ok solver ->
+      match (find_obligation_query Fixtures.Prover.sum_of_two_cubes Ensures, Solver.find ()) with
+      | None, _ -> Harness.fail "no obligation of the `ensures`"
+      | _, Error message -> Harness.fail "%s" message
+      | Some query, Ok solver ->
           let request = Solver.request query in
           if List.hd (Solver.solve_all solver [ (request, query) ]) <> Unknown then
             Harness.fail "expected an unknown answer";
@@ -1614,7 +1621,8 @@ let () =
             Harness.fail "ran %d queries" (Solver.count_queries_run solver));
   Harness.test "a second request for a query solved in a small model runs one query" (fun () ->
       match
-        (find_obligation_query Fixtures.Prover.increment_of_a_word_count Overflow, Solver.find ())
+        ( find_obligation_query Fixtures.Prover.addition_under_an_exists_in_a_forall Overflow,
+          Solver.find () )
       with
       | None, _ -> Harness.fail "no obligation of the addition"
       | _, Error message -> Harness.fail "%s" message
@@ -1628,6 +1636,13 @@ let () =
               ignore (Solver.solve_all solver [ (second, query) ]);
               let queries_run = Solver.count_queries_run solver - queries_before in
               if queries_run <> 1 then Harness.fail "ran %d queries" queries_run));
+  Harness.test "a function defined by a quantified formula reaches the solver as a definition"
+    (fun () ->
+      match find_obligation_query Fixtures.Prover.increment_of_a_word_count Overflow with
+      | None -> Harness.fail "no obligation of the addition"
+      | Some query ->
+          let text = Logic.show_query query in
+          if not (String.includes ~affix:"(define-fun " text) then Harness.fail "query %s" text);
   Harness.test "a query's text names nothing by its Truss name" (fun () ->
       let packages = Support.setup [ ("app::main", Fixtures.Prover.addition_that_can_overflow) ] in
       let key = List.hd (Support.list_declarations packages (Support.parse_module "app::main")) in

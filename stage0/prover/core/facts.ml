@@ -40,6 +40,11 @@ let declare (context : State.context) (declaration : Logic.declaration) =
         Tables.Symbol_table.replace context.declared name ();
         context.declarations <- declaration :: context.declarations
       end
+  | Definition { symbol; _ } ->
+      if not (Tables.Symbol_table.mem context.definitions symbol) then begin
+        Tables.Symbol_table.replace context.definitions symbol ();
+        context.declarations <- declaration :: context.declarations
+      end
   | Datatype _ -> invalid_arg "Translate.declare: a datatype is declared by its sort"
 
 let add_fact (context : State.context) fact = context.facts <- fact :: context.facts
@@ -306,8 +311,9 @@ and make_obligation ?template_clause (context : State.context) (frame : State.fr
        in
        Locals.fold
          (fun local term shown ->
-           match Tables.Local_table.find_opt context.local_names local with
-           | Some name when not (is_parameter term || List.mem_assoc term shown) ->
+           match (local, Tables.Local_table.find_opt context.local_names local) with
+           | Core_local (Named _), Some name
+             when not (is_parameter term || List.mem_assoc term shown) ->
                (term, name) :: shown
            | _ -> shown)
          frame.locals

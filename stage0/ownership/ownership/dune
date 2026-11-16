@@ -12,4 +12,5 @@
   moves
   interface
   resolve
+  compiler_bug
   diagnostic))

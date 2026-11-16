@@ -1407,6 +1407,23 @@ let () =
              (List.map (Workspace.locate_file (fst project)) (list_files project)))
       then fail "the project's package is not the one in the build")
 
+let () =
+  test "a registry package that does not check with this toolchain is a problem that names it"
+    (fun () ->
+      let registry = make_registry () in
+      publish registry "acme::broken" (1, 0, 0)
+        [ ("lengths/lengths.truss", "public fn meter() -> Int64 {\n  \"one\"\n}\n") ];
+      let root =
+        make_package
+          [
+            ( "main.truss",
+              "use acme::broken::lengths\n\nfn length() -> Int64 {\n  lengths::meter()\n}\n" );
+          ]
+      in
+      ignore (add root [ "acme::broken" ]);
+      expect_problem_in root
+        "`acme::broken` 1.0.0 does not check with this toolchain. It has 1 error; the first is at")
+
 let upgrade root names = run_truss ([ "upgrade"; "-C"; root ] @ names)
 
 let () =
