@@ -18,6 +18,7 @@ val create :
   Environment.scope ->
   context
 
+val show_path : Syntax.path -> string
 val scope : context -> Environment.scope
 val report : context -> Diagnostic.Code.types -> Source.Definition_span.t -> string -> unit
 val error : context -> Diagnostic.Code.types -> Source.Definition_span.t -> string -> Types.ty

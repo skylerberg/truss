@@ -81,31 +81,21 @@ let () =
           then fail "no recovery in the signature"
       | _ -> fail "wrong definitions");
   test "a definition whose header did not parse keeps its keyword and name" (fun () ->
-      let file, _ = parse "fn List[Element].sort[](mut self) {}\ntype Point = 1\nfn f() {}" in
-      let printed = Syntax_print.For_testing.definitions file.definitions in
-      if printed <> [ "(error fn List[Element].sort)"; "(error type Point)"; "(fn f () (block))" ]
-      then fail "got [%s]" (String.concat "; " printed));
+      recovered_definitions "fn List[Element].sort[](mut self) {}\ntype Point = 1\nfn f() {}"
+        [ "(error fn List[Element].sort)"; "(error type Point)"; "(fn f () (block))" ]);
   test "a failed const keeps its name" (fun () ->
       let tokens, _ = Lexer.lex (source "const pi: Float64 = 1 +") in
       let top_level, _ =
         Parser.For_testing.parse_definition tokens (List.hd (Parser.For_testing.split tokens))
       in
-      let printed = Syntax_print.For_testing.definition top_level.definition.value in
+      let printed = Syntax_print.definition top_level.definition.value in
       if printed <> "(error let pi)" then fail "got %s" printed);
   test "a failed definition keeps its visibility" (fun () ->
-      let file, _ = parse "public fn f() -> {\n}\nfn g() {}" in
-      match Syntax_print.For_testing.definitions file.definitions with
-      | "(public (error fn f))" :: _ -> ()
-      | printed -> fail "got [%s]" (String.concat "; " printed));
+      recovered_definitions "public fn f() -> {\n}\nfn g() {}"
+        [ "(public (error fn f))"; "(fn g () (block))" ]);
   test "a function without a body keeps its signature" (fun () ->
-      let file, _ = parse "fn f(x: Int64) -> Int64\nfn g() {}" in
-      match items file with
-      | first :: _ ->
-          if
-            Syntax_print.For_testing.definition first.value
-            <> "(fn f ((x: Int64)) -> Int64 (block todo))"
-          then fail "got %s" (Syntax_print.For_testing.definition first.value)
-      | [] -> fail "no definitions");
+      recovered_definitions "fn f(x: Int64) -> Int64\nfn g() {}"
+        [ "(fn f ((x: Int64)) -> Int64 (block todo))"; "(fn g () (block))" ]);
   test "the definition after a broken one parses" (fun () ->
       let file, diagnostics = parse "fn f() -> {\n}\nfn g() {}" in
       if List.length diagnostics <> 1 then
@@ -536,15 +526,8 @@ let () =
       body_error "let x = [1, \"a\": 2]" ~code:Unexpected_token ~at:"\"a\"";
       body_error "let x = [\"a\": 1, 2]" ~code:Unexpected_token ~at:"2]");
   test "a field and an update that do not parse are errors in the tree" (fun () ->
-      let file, _ = parse "type T(x: Int64, 1)" in
-      (match items file with
-      | [ { value; _ } ] ->
-          if Syntax_print.For_testing.definition value <> "(type T ((x: Int64) error))" then
-            fail "got %s" (Syntax_print.For_testing.definition value)
-      | _ -> fail "wrong definitions");
-      let statements, _ = body_of "let y = x with (1)" in
-      if List.map Syntax_print.statement statements <> [ "(let y (with x error))" ] then
-        fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
+      recovered_definitions "type T(x: Int64, 1)" [ "(type T ((x: Int64) error))" ];
+      recovered_statements "let y = x with (1)" [ "(let y (with x error))" ]);
   test "lists and maps" (fun () ->
       expression "[1, 2,]" "(list 1 2)";
       expression "[]" "(list)";

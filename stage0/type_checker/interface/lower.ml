@@ -79,7 +79,8 @@ let parameter_of context (name : name) =
   | Some (Unknown report) -> Error report
   | _ -> bug "`%s` is not resolved as a generic parameter" name.text
 
-let show_path (path : path) = Resolve.Names.spell_path path
+let show_path (path : path) =
+  String.concat "::" (List.map (fun (name : name) -> name.text) (path.modules @ [ path.last ]))
 
 let rec type_ context (written : type_expression) : Types.ty =
   match written.kind with

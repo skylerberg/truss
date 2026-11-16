@@ -56,8 +56,6 @@ let show_key key =
   if key.ordinal = 0 then Path.show key.path
   else Printf.sprintf "%s#%d" (Path.show key.path) key.ordinal
 
-let spell_path = Syntax_print.path
-
 let signature_name (signature : signature) =
   match signature.name with Plain_name name | Member_name (_, name) -> name
 

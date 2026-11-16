@@ -307,32 +307,17 @@ let () =
 
 let () =
   test "an error in a statement leaves the next one parsed" (fun () ->
-      let statements, diagnostics = body_of "let x = 1 2 3\nlet y = 2" in
-      if codes diagnostics <> [ "parser.unexpected_token" ] then
-        fail "got [%s]" (String.concat "; " (codes diagnostics));
-      if List.map Syntax_print.statement statements <> [ "error"; "(let y 2)" ] then
-        fail "wrong statements");
+      recovered_statements ~codes:[ "parser.unexpected_token" ] "let x = 1 2 3\nlet y = 2"
+        [ "error"; "(let y 2)" ]);
   test "each bad item in brackets gets its own error" (fun () ->
-      let statements, diagnostics = body_of "f(1 +, x, 2 3, g(a b))\nlet y = 2" in
-      if
-        codes diagnostics
-        <> [ "parser.unexpected_token"; "parser.unexpected_token"; "parser.unexpected_token" ]
-      then fail "got [%s]" (String.concat "; " (codes diagnostics));
-      if
-        List.map Syntax_print.statement statements
-        <> [ "(call f error x error (call g error))"; "(let y 2)" ]
-      then fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
+      recovered_statements
+        ~codes:[ "parser.unexpected_token"; "parser.unexpected_token"; "parser.unexpected_token" ]
+        "f(1 +, x, 2 3, g(a b))\nlet y = 2"
+        [ "(call f error x error (call g error))"; "(let y 2)" ]);
   test "an error in a clause leaves the body parsed" (fun () ->
-      let file, diagnostics =
-        parse Fixtures.Parser_rules.error_in_a_clause_leaves_the_body_parsed
-      in
-      if codes diagnostics <> [ "parser.unexpected_token" ] then
-        fail "got [%s]" (String.concat "; " (codes diagnostics));
-      match file.definitions with
-      | [ { definition = { value; _ }; _ } ] ->
-          if Syntax_print.For_testing.definition value <> "(fn f () error (ensures true) (block x))"
-          then fail "got %s" (Syntax_print.For_testing.definition value)
-      | _ -> fail "wrong definitions");
+      recovered_definitions ~codes:[ "parser.unexpected_token" ]
+        Fixtures.Parser_rules.error_in_a_clause_leaves_the_body_parsed
+        [ "(fn f () error (ensures true) (block x))" ]);
   test "an error in a member leaves the next member parsed" (fun () ->
       let file, diagnostics =
         parse Fixtures.Parser_rules.error_in_a_member_leaves_the_next_member_parsed
@@ -414,11 +399,8 @@ let () =
       error "type Box<Item>(item: Item)" ~code:Angle_brackets ~at:"<"
         ~fixed:"type Box[Item](item: Item)");
   test "List<String> is parsed as the brackets it means" (fun () ->
-      let statements, _ = body_of "let table: Map<String, List<Int64>> = [:]" in
-      if
-        List.map Syntax_print.statement statements
-        <> [ "(let table : Map[String, List[Int64]] (map))" ]
-      then fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
+      recovered_statements "let table: Map<String, List<Int64>> = [:]"
+        [ "(let table : Map[String, List[Int64]] (map))" ]);
   test "a comparison after a type is not angle brackets" (fun () ->
       let _, diagnostics = body_of "let small = count as Int64 < limit" in
       if codes diagnostics <> [ "parser.as_conversion" ] then
@@ -435,9 +417,8 @@ let () =
       body_error "let items = List::new()" ~code:Path_separator ~at:"::"
         ~fixed:"let items = List.new()");
   test "Shape::Circle is parsed as the member it means" (fun () ->
-      let statements, _ = body_of "let shape = geometry::Shape::Circle" in
-      if List.map Syntax_print.statement statements <> [ "(let shape (. geometry::Shape Circle))" ]
-      then fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
+      recovered_statements "let shape = geometry::Shape::Circle"
+        [ "(let shape (. geometry::Shape Circle))" ]);
   test "a variant with its type in a pattern" (fun () ->
       body_error Fixtures.Parser_rules.variant_with_its_type_in_a_pattern ~code:Qualified_variant
         ~at:"Shape." ~fixed:Fixtures.Parser_rules.variant_with_its_type_in_a_pattern_fixed;
@@ -468,24 +449,18 @@ let () =
       body_error "let pair: (Int64, String) = make()" ~code:Tuple ~at:"(" ~occurrence:2);
   test "a ** b" (fun () ->
       body_error "let square = x ** 2" ~code:Power_operator ~at:"**";
-      let statements, _ = body_of "let y = a + x ** 2" in
-      if List.map Syntax_print.statement statements <> [ "(let y (+ a error))" ] then
-        fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
+      recovered_statements "let y = a + x ** 2" [ "(let y (+ a error))" ]);
   test "name := value" (fun () ->
       body_error "count := 0" ~code:Short_declaration ~at:":=" ~fixed:"let count = 0";
       body_error "point.x := 0" ~code:Short_declaration ~at:":=";
-      let statements, _ = body_of "count := 0" in
-      if List.map Syntax_print.statement statements <> [ "(let count 0)" ] then
-        fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
+      recovered_statements "count := 0" [ "(let count 0)" ]);
   test "value |> function" (fun () ->
       body_error "let total = items |> sum" ~code:Pipe_operator ~at:"|>"
         ~fixed:"let total = sum(items)";
       body_error "let total = items\n  |> list::sum" ~code:Pipe_operator ~at:"|>"
         ~fixed:"let total = list::sum(items)";
       body_error "let total = items |> take(3)" ~code:Pipe_operator ~at:"|>";
-      let statements, _ = body_of "let total = items |> sum" in
-      if List.map Syntax_print.statement statements <> [ "(let total (call sum items))" ] then
-        fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
+      recovered_statements "let total = items |> sum" [ "(let total (call sum items))" ]);
   test "a lambda with annotations" (fun () ->
       body_error "let double = fn(x: Int64) { x * 2 }" ~code:Lambda_annotation ~at:": Int64"
         ~fixed:"let double = fn(x) { x * 2 }";
@@ -494,11 +469,8 @@ let () =
   test "List<String>.new() in an expression" (fun () ->
       body_error "let names = List<String>.new()" ~code:Angle_brackets ~at:"<"
         ~fixed:"let names = List[String].new()";
-      let statements, _ = body_of "let names = List<String>.new()" in
-      if
-        List.map Syntax_print.statement statements
-        <> [ "(let names (call (. ([] List String) new)))" ]
-      then fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
+      recovered_statements "let names = List<String>.new()"
+        [ "(let names (call (. ([] List String) new)))" ]);
   test "a comparison of uppercase names is not angle brackets" (fun () ->
       let _, diagnostics = body_of "let between = Low < value && value > High" in
       if codes diagnostics <> [] then fail "got [%s]" (String.concat "; " (codes diagnostics)));
@@ -525,11 +497,8 @@ let () =
         ~fixed:"let port = settings.port.unwrap_or(80)";
       body_error "let total = a + b ?? 0" ~code:Null_coalescing ~at:"?"
         ~fixed:"let total = (a + b).unwrap_or(0)";
-      let statements, _ = body_of "let port = settings.port ?? 80" in
-      if
-        List.map Syntax_print.statement statements
-        <> [ "(let port (call (. (. settings port) unwrap_or) 80))" ]
-      then fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
+      recovered_statements "let port = settings.port ?? 80"
+        [ "(let port (call (. (. settings port) unwrap_or) 80))" ]);
   test "a ? after a call is still a try" (fun () ->
       let _, diagnostics = body_of Fixtures.Parser_rules.after_a_call_is_still_a_try in
       if codes diagnostics <> [] then fail "got [%s]" (String.concat "; " (codes diagnostics)));
@@ -545,17 +514,11 @@ let () =
       body_error "let x = statuses.map { it.code }" ~code:Trailing_lambda ~at:"{ it"
         ~fixed:"let x = statuses.map(fn(element) { element.code })");
   test "items.map { it.name } is parsed as the call its fix writes" (fun () ->
-      let statements, _ = body_of "let names = items.map { it.name }" in
-      if
-        List.map Syntax_print.statement statements
-        <> [ "(let names (call (. items map) (fn (item) (block (. item name)))))" ]
-      then fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
+      recovered_statements "let names = items.map { it.name }"
+        [ "(let names (call (. items map) (fn (item) (block (. item name)))))" ]);
   test "parse::<List[Int64]> is parsed as the brackets it means" (fun () ->
-      let statements, _ = body_of "let n = parse::<List[Int64]>(text)" in
-      if
-        List.map Syntax_print.statement statements
-        <> [ "(let n (call ([] parse ([] List Int64)) text))" ]
-      then fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
+      recovered_statements "let n = parse::<List[Int64]>(text)"
+        [ "(let n (call ([] parse ([] List Int64)) text))" ]);
   test "x as Int64" (fun () ->
       body_error "let n = size as Int64" ~code:As_conversion ~at:"as"
         ~fixed:"let n = Int64.from(size)"

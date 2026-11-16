@@ -765,7 +765,7 @@ let rec call_with_mode_keyword state (value : expression) =
 
 let check_resource state (resource : Syntax.resource) =
   let capability (path : path_type) (method_ : name option) =
-    let shown = Names.spell_path path.path in
+    let shown = Interface.Lower.show_path path.path in
     match target state path.path.last with
     | Some (Definition (Capability, capability)) -> (
         match method_ with

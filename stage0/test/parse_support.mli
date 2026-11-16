@@ -9,6 +9,8 @@ val definition : string -> string -> unit
 val body_of : string -> Syntax.statement list * Diagnostic.t list
 val statements : string -> string list -> unit
 val statement : string -> string -> unit
+val recovered_definitions : ?codes:string list -> string -> string list -> unit
+val recovered_statements : ?codes:string list -> string -> string list -> unit
 
 val error :
   ?fixed:string ->

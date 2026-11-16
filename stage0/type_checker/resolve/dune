@@ -9,5 +9,4 @@
   source
   diagnostic
   syntax
-  syntax_walk
-  syntax_print))
+  syntax_walk))
