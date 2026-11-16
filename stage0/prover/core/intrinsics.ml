@@ -369,14 +369,16 @@ let buffer_operation context frame ~(site : Invocation.site) (operation : Intrin
     sequence
   in
   let needs ?(requirement = "have the room it writes into") condition =
-    Facts.oblige context frame Requires
-      (Facts.locate context frame.source site.origin)
-      [
-        Text "`";
-        Facts.quote frame.source site.origin;
-        Text (Printf.sprintf "` may not %s." requirement);
-      ]
-      condition
+    if frame.makes_obligations then
+      Facts.oblige context frame Requires
+        (Facts.locate context frame.source site.origin)
+        [
+          Text "`";
+          Facts.quote frame.source site.origin;
+          Text (Printf.sprintf "` may not %s." requirement);
+        ]
+        condition
+    else Facts.assume context frame condition
   in
   let keeps_capacity () =
     Facts.assume context frame
@@ -391,6 +393,9 @@ let buffer_operation context frame ~(site : Invocation.site) (operation : Intrin
     Logic.forall ([ (name, Logic.Int) ], Logic.(in_interval (Symbol name) low high ==> body))
   in
   let in_bounds index sequence = in_interval index (Logic.int 0) (length sequence) in
+  let needs_element index sequence =
+    needs ~requirement:"have an element at its index" (in_bounds index sequence)
+  in
   let each_sum relation =
     let measure = Facts.make_fresh_name context "measure" in
     Logic.forall
@@ -451,21 +456,23 @@ let buffer_operation context frame ~(site : Invocation.site) (operation : Intrin
       let longer = append_part context frame element (storage buffer) value in
       Facts.assume context frame (Logic.equal (changed_storage ()) longer);
       known
-  | Storage_pop, [ _ ] ->
+  | Storage_pop, [ buffer ] ->
+      needs ~requirement:"have an element to pop"
+        (Logic.Operation (">", [ length (storage buffer); Logic.int 0 ]));
       keeps_capacity ();
       let longer = append_part context frame element (changed_storage ()) known in
-      Facts.assume context frame (Logic.equal (storage (List.hd operands)) longer);
+      Facts.assume context frame (Logic.equal (storage buffer) longer);
       known
   | Storage_insert, [ buffer; index; value ] ->
       let before = storage buffer and after = changed_storage () in
+      needs ~requirement:"be given an index at most the storage's length"
+        Logic.(Operation ("<=", [ int 0; index ]) &&& Operation ("<=", [ index; length before ]));
       needs (Logic.Operation ("<", [ length before; capacity buffer ]));
       keeps_capacity ();
       let limit = bound () in
       Facts.assume context frame
         (Logic.conjunction
            [
-             Logic.Operation ("<=", [ Logic.int 0; index ]);
-             Logic.Operation ("<=", [ index; length before ]);
              Logic.equal (length after) (Logic.Operation ("+", [ length before; Logic.int 1 ]));
              Logic.equal (at after index) value;
            ]);
@@ -492,11 +499,11 @@ let buffer_operation context frame ~(site : Invocation.site) (operation : Intrin
   | Storage_remove, [ buffer; index ] ->
       keeps_capacity ();
       let before = storage buffer and after = changed_storage () in
+      needs_element index before;
       let limit = bound () in
       Facts.assume context frame
         (Logic.conjunction
            [
-             in_bounds index before;
              Logic.equal (length after) (Logic.Operation ("-", [ length before; Logic.int 1 ]));
              Logic.equal known (at before index);
            ]);
@@ -520,12 +527,12 @@ let buffer_operation context frame ~(site : Invocation.site) (operation : Intrin
           (storage buffer, changed_storage ())
         end
       in
+      needs ~requirement:"have elements at both of its indexes"
+        Logic.(in_bounds first before &&& in_bounds second before);
       let limit = bound () in
       Facts.assume context frame
         (Logic.conjunction
            [
-             in_bounds first before;
-             in_bounds second before;
              Logic.equal (length after) (length before);
              Logic.equal (at after first) (at before second);
              Logic.equal (at after second) (at before first);
@@ -539,13 +546,10 @@ let buffer_operation context frame ~(site : Invocation.site) (operation : Intrin
       Facts.assume context frame (each_sum (fun sum _ -> Logic.equal (sum after) (sum before)));
       known
   | (Storage_at | Storage_at_mut), [ buffer; index ] ->
-      Facts.assume context frame (in_bounds index (storage buffer));
+      needs_element index (storage buffer);
       at (storage buffer) index
-  | View_at_mut, [ buffer; index ] ->
-      Facts.assume context frame (in_bounds index (view buffer));
-      at (view buffer) index
-  | View_at, [ buffer; index ] ->
-      Facts.assume context frame (in_bounds index (view buffer));
+  | (View_at | View_at_mut), [ buffer; index ] ->
+      needs_element index (view buffer);
       at (view buffer) index
   | Storage_view, [ buffer ] ->
       Facts.assume context frame (Logic.equal (view known) (storage buffer));
@@ -553,15 +557,14 @@ let buffer_operation context frame ~(site : Invocation.site) (operation : Intrin
   | Compare_bytes, [ left; right ] -> make_byte_order context (view left) (view right)
   | View_slice, [ buffer; start; stop ] ->
       let whole = view buffer and part = view known in
+      needs ~requirement:"be given a range within the view"
+        Logic.(
+          Operation ("<=", [ int 0; start ])
+          &&& Operation ("<=", [ start; stop ])
+          &&& Operation ("<=", [ stop; length whole ]));
       let limit = bound () in
       Facts.assume context frame
-        (Logic.conjunction
-           [
-             Logic.Operation ("<=", [ Logic.int 0; start ]);
-             Logic.Operation ("<=", [ start; stop ]);
-             Logic.Operation ("<=", [ stop; length whole ]);
-             Logic.equal (length part) (Logic.Operation ("-", [ stop; start ]));
-           ]);
+        (Logic.equal (length part) (Logic.Operation ("-", [ stop; start ])));
       Facts.assume context frame
         (all limit (Logic.int 0) (length part)
            (Logic.equal (at part (Logic.Symbol limit))

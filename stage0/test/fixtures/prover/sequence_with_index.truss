@@ -1,0 +1,26 @@
+public opaque type Sequence[Element] = todo
+
+public fn Sequence[Element].length(self) -> Integer
+  cost time finite
+{
+  todo
+}
+
+impl Index for Sequence[Element] {
+  type Key = Integer
+  type Output = Element
+
+  fn contains_key(self, key: Integer) -> Bool
+    ensures result == (0 <= key && key < self.length())
+    cost time finite
+  {
+    0 <= key && key < self.length()
+  }
+
+  fn at(self, key: Integer) lends Element
+    requires 0 <= key && key < self.length()
+    cost time finite
+  {
+    todo
+  }
+}

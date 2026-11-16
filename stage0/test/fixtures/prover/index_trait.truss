@@ -1,0 +1,10 @@
+public trait Index {
+  type Key
+  type Output
+
+  fn contains_key(self, key: Self.Key) -> Bool
+    cost time finite
+
+  fn at(self, key: Self.Key) lends Self.Output
+    requires self.contains_key(key)
+}
