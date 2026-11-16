@@ -580,7 +580,8 @@ let () =
       let declared =
         List.map
           (fun (declaration : Resolve.Names.declaration) -> declaration.path)
-          ((Support.names packages Path.standard_package).package_declarations Path.standard_package)
+          ((Support.names packages Path.standard_package).list_package_declarations
+             Path.standard_package)
       in
       List.iter
         (fun known ->

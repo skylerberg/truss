@@ -172,7 +172,7 @@ type context = {
   mutable quantifier_symbols : Logic.symbol list;
   mutable validating : Types.ty list;
   run_body : frame -> lambdas:Mir.body array -> Mir.body -> unit;
-  formula_term : frame -> Mir.formula -> arguments:Logic.term list -> frame * Logic.term;
+  read_formula : frame -> Mir.formula -> arguments:Logic.term list -> frame * Logic.term;
 }
 
 and open_axiom = {

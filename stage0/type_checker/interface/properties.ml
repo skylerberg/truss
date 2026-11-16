@@ -98,7 +98,9 @@ let to_requirement = function None -> Never | Some types -> Requires types
 let to_exposure = function None -> Always | Some types -> If_any types
 let of_requirement = function Never -> None | Requires types -> Some types
 let of_exposure = function Always -> None | If_any types -> Some types
-let read_facts (lookups : Lookups.t) path = Option.value ~default:empty (lookups.type_facts path)
+
+let read_facts (lookups : Lookups.t) path =
+  Option.value ~default:empty (lookups.find_type_facts path)
 
 let find_stored_conditions (facts : Environment.type_facts) = function
   | Copyable -> of_requirement facts.copyable

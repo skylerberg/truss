@@ -2,13 +2,13 @@ let list_own_methods (lookups : Lookups.t) owner name =
   List.filter_map
     (fun (key : Resolve.Names.key) ->
       match key.path with Method { receiver; _ } -> Some (receiver, key.path) | _ -> None)
-    (lookups.interface.names.members owner name)
+    (lookups.interface.names.list_members owner name)
 
 let find_own_constant (lookups : Lookups.t) owner name =
   List.find_map
     (fun (key : Resolve.Names.key) ->
       match key.path with Member_constant _ -> Some key.path | _ -> None)
-    (lookups.interface.names.members owner name)
+    (lookups.interface.names.list_members owner name)
 
 let list_trait_methods (lookups : Lookups.t) trait name =
   match Interface.Definition.read_trait_interface lookups.interface trait with

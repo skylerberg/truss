@@ -1,5 +1,7 @@
 let read_interface (lookups : Lookups.t) path =
-  Option.map (fun key -> (lookups.elaborated_interface key).interface) (lookups.names.key path)
+  Option.map
+    (fun key -> (lookups.read_elaborated_interface key).interface)
+    (lookups.names.find_key path)
 
 let list_declared_fields (lookups : Lookups.t) path =
   let list_names (written : Syntax.field list) =
@@ -10,7 +12,7 @@ let list_declared_fields (lookups : Lookups.t) path =
         | Field_error -> None)
       written
   in
-  match Option.map lookups.names.definition (lookups.names.key path) with
+  match Option.map lookups.names.read_definition (lookups.names.find_key path) with
   | Some { kind = Type_definition { body = Fields written; _ }; _ } ->
       [ (None, list_names written) ]
   | Some { kind = Type_definition { body = Variants variants; _ }; _ } ->
@@ -70,7 +72,7 @@ let read_trait_interface lookups (path : Path.t) =
 
 let read_impl_interface (lookups : Lookups.t) (path : Path.t) =
   match path with
-  | Derived { type_; trait } -> lookups.derived_interface ~type_ ~trait
+  | Derived { type_; trait } -> lookups.find_derived_interface ~type_ ~trait
   | _ -> (
       match read_interface lookups path with Some (Impl_interface impl) -> Some impl | _ -> None)
 

@@ -12,7 +12,7 @@ type context = {
 
 let make_monomorphic_context (interface : Interface.Lookups.t) : Monomorphic.context =
   {
-    type_interface = Interface.Definition.read_type_interface interface;
+    find_type_interface = Interface.Definition.read_type_interface interface;
     normalize = Interface.Impls.normalize interface ~bounds:Interface.Impls.no_bounds;
     normalize_capabilities =
       Interface.Impls.normalize_capabilities interface ~bounds:Interface.Impls.no_bounds;
@@ -60,8 +60,8 @@ let make_unwritten_code ~definition ~substitution ~result =
 
 let read_written context key =
   {
-    spans = context.lookups.interface.names.spans key;
-    text = context.lookups.interface.names.text key;
+    spans = context.lookups.interface.names.read_spans key;
+    text = context.lookups.interface.names.read_text key;
   }
 
 let bind = Monomorphic.make_substitution
@@ -122,7 +122,7 @@ let make_code context (path : Path.t) type_arguments : code =
         | Method { owner = (Impl _ | Derived _) as impl; _ } -> Some impl
         | _ -> None
       in
-      match (context.lookups.mir.form_origin path, path) with
+      match (context.lookups.mir.find_form_origin path, path) with
       | Some (Written key, _), _ -> function_code ~enclosing_impl key ~interface ~substitution
       | Some (Derived type_key, _), _ ->
           {

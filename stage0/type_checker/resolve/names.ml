@@ -101,42 +101,44 @@ type law_proof_name = { trait : Path.t; law : string; type_head : Path.t }
 
 type lookups = {
   find : Path.module_ -> string -> entry option;
-  entries : Path.module_ -> entry list;
-  imports : key -> (string * Path.module_) list;
+  list_entries : Path.module_ -> entry list;
+  list_imports : key -> (string * Path.module_) list;
   module_exists : Path.module_ -> bool;
   split_module : string list -> Path.module_ option;
-  dependency_names : Path.package -> Path.package list;
-  key : Path.t -> key option;
-  declaration : key -> declaration;
-  declarations : Path.module_ -> declaration list;
-  declarations_in : Path.file -> declaration list;
-  package_declarations : Path.package -> declaration list;
-  definition : key -> Syntax.definition;
-  text : key -> string;
-  spans : key -> Source.Definition_span.t array;
-  recovered : key -> Source.Definition_span.t list;
-  place : key -> place;
-  container : key -> key option;
-  contained : key -> key list;
-  members : Path.t -> string -> key list;
-  traits_declaring : Path.package -> string -> Path.t list;
-  impls : Path.package -> ((Path.t * Path.t) * Path.t) list;
-  impls_of_type : Path.package -> Path.t -> (Path.t * Path.t) list;
-  impls_of_trait : Path.package -> Path.t -> Path.t list;
-  law_proofs : Path.package -> law_proof_name -> key list;
+  list_dependency_names : Path.package -> Path.package list;
+  find_key : Path.t -> key option;
+  read_declaration : key -> declaration;
+  list_declarations : Path.module_ -> declaration list;
+  list_declarations_in : Path.file -> declaration list;
+  list_package_declarations : Path.package -> declaration list;
+  read_definition : key -> Syntax.definition;
+  read_text : key -> string;
+  read_spans : key -> Source.Definition_span.t array;
+  list_recovered : key -> Source.Definition_span.t list;
+  read_place : key -> place;
+  find_container : key -> key option;
+  list_contained : key -> key list;
+  list_members : Path.t -> string -> key list;
+  list_traits_declaring : Path.package -> string -> Path.t list;
+  list_impls : Path.package -> ((Path.t * Path.t) * Path.t) list;
+  list_impls_of_type : Path.package -> Path.t -> (Path.t * Path.t) list;
+  list_impls_of_trait : Path.package -> Path.t -> Path.t list;
+  list_law_proofs : Path.package -> law_proof_name -> key list;
 }
 
 let list_visible_packages lookups package =
-  List.sort_uniq compare (package :: Path.standard_package :: lookups.dependency_names package)
+  List.sort_uniq compare (package :: Path.standard_package :: lookups.list_dependency_names package)
 
 let list_transitive_dependencies lookups package =
   let rec close seen = function
     | [] -> seen
     | name :: rest when List.mem name seen -> close seen rest
-    | name :: rest -> close (name :: seen) (lookups.dependency_names name @ rest)
+    | name :: rest -> close (name :: seen) (lookups.list_dependency_names name @ rest)
   in
   let standard = if package = Path.standard_package then [] else [ Path.standard_package ] in
-  List.filter (fun name -> name <> package) (close [] (standard @ lookups.dependency_names package))
+  List.filter
+    (fun name -> name <> package)
+    (close [] (standard @ lookups.list_dependency_names package))
 
 let resolve_full_module lookups ~(from : Path.module_) first rest : Path.module_ =
   let known = list_visible_packages lookups from.package in
@@ -179,13 +181,13 @@ let lookup_module lookups ~(from : Path.module_) ~imports first rest =
 let make_top_path module_ name : Path.t = Top { module_; name }
 
 let find_recovery_report (lookups : lookups) key part =
-  Parts.find_recovered_report ~spans:(lookups.spans key) ~recovered:(lookups.recovered key)
-    (lookups.definition key) part
+  Parts.find_recovered_report ~spans:(lookups.read_spans key)
+    ~recovered:(lookups.list_recovered key) (lookups.read_definition key) part
 
 let is_broken lookups key part = Option.is_some (find_recovery_report lookups key part)
 
 let find_definition lookups path =
-  Option.map (fun key -> (key, lookups.definition key)) (lookups.key path)
+  Option.map (fun key -> (key, lookups.read_definition key)) (lookups.find_key path)
 
 let find_law_parameters lookups (trait : Path.t) law =
   match find_definition lookups trait with
@@ -996,7 +998,7 @@ let list_changes before after =
   @ law_proofs
 
 let of_namespaces ~(namespace : Path.package -> namespace) ~module_exists ~split_module
-    ~dependency_names : lookups =
+    ~list_dependency_names : lookups =
   let of_module (module_ : Path.module_) =
     Module_map.find_opt module_ (namespace module_.package).modules
   in
@@ -1015,13 +1017,13 @@ let of_namespaces ~(namespace : Path.package -> namespace) ~module_exists ~split
     find =
       (fun module_ name ->
         Option.bind (of_module module_) (fun names -> String_map.find_opt name names.index));
-    entries =
+    list_entries =
       (fun module_ -> match of_module module_ with Some names -> names.entries | None -> []);
-    imports = (fun key -> (read_declared key).imports);
+    list_imports = (fun key -> (read_declared key).imports);
     module_exists;
     split_module;
-    dependency_names;
-    key =
+    list_dependency_names;
+    find_key =
       (fun (path : Path.t) ->
         match path with
         | Top { module_; _ } | Impl { module_; _ } | Test { module_; _ } | Law_proof { module_; _ }
@@ -1034,31 +1036,31 @@ let of_namespaces ~(namespace : Path.package -> namespace) ~module_exists ~split
         | Method { owner; name; _ } | Member_constant { owner; name } ->
             List.find_opt (fun (key : key) -> Path.equal key.path path) (members owner name)
         | Derived _ | Unresolved _ -> None);
-    declaration = (fun key -> (read_declared key).declaration);
-    declarations =
+    read_declaration = (fun key -> (read_declared key).declaration);
+    list_declarations =
       (fun module_ ->
         match of_module module_ with Some names -> names.module_declarations | None -> []);
-    declarations_in = (fun file -> Option.value ~default:[] (of_file file));
-    package_declarations = (fun package -> (namespace package).declarations);
-    definition = (fun key -> (read_declared key).item.value);
-    text = (fun key -> (read_declared key).text);
-    spans = (fun key -> (read_declared key).item.positions.spans);
-    recovered = (fun key -> (read_declared key).item.positions.recovered);
-    place = (fun key -> (read_declared key).place);
-    container = (fun key -> (read_declared key).container);
-    contained = (fun key -> (read_declared key).contained);
-    members;
-    traits_declaring =
+    list_declarations_in = (fun file -> Option.value ~default:[] (of_file file));
+    list_package_declarations = (fun package -> (namespace package).declarations);
+    read_definition = (fun key -> (read_declared key).item.value);
+    read_text = (fun key -> (read_declared key).text);
+    read_spans = (fun key -> (read_declared key).item.positions.spans);
+    list_recovered = (fun key -> (read_declared key).item.positions.recovered);
+    read_place = (fun key -> (read_declared key).place);
+    find_container = (fun key -> (read_declared key).container);
+    list_contained = (fun key -> (read_declared key).contained);
+    list_members = members;
+    list_traits_declaring =
       (fun package name ->
         Option.value ~default:[] (String_map.find_opt name (namespace package).traits));
-    impls = (fun package -> (namespace package).impls.impls);
-    impls_of_type =
+    list_impls = (fun package -> (namespace package).impls.impls);
+    list_impls_of_type =
       (fun package type_ ->
         Option.value ~default:[] (Path.Map.find_opt type_ (namespace package).impls.by_type));
-    impls_of_trait =
+    list_impls_of_trait =
       (fun package trait ->
         Option.value ~default:[] (Path.Map.find_opt trait (namespace package).impls.by_trait));
-    law_proofs =
+    list_law_proofs =
       (fun package name ->
         Option.value ~default:[] (Law_proof_map.find_opt name (namespace package).law_proofs));
   }

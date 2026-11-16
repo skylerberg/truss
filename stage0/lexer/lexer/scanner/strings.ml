@@ -285,7 +285,7 @@ and scan_escape cursor buffer =
     | 'u' ->
         let form = "A Unicode escape is written `\\u{...}`, with 1 to 6 hexadecimal digits." in
         if not (Cursor.is_at cursor (start + 2) '{') then
-          if cursor.foreign_escape cursor buffer then `Continue else problem (start + 2) form
+          if cursor.scan_foreign_escape cursor buffer then `Continue else problem (start + 2) form
         else
           let digits_start = start + 3 in
           let rec digits_end position =
@@ -311,7 +311,7 @@ and scan_escape cursor buffer =
               cursor.position <- stop + 1;
               `Continue
             end
-    | _ -> if cursor.foreign_escape cursor buffer then `Continue else unknown ()
+    | _ -> if cursor.scan_foreign_escape cursor buffer then `Continue else unknown ()
 
 and scan_raw cursor ~scan ~tag ~nesting ~dollars ~quotes =
   let delimiter_start = cursor.position in

@@ -100,7 +100,7 @@ let () =
       if checked linux then Codegen_support.fail "the check for Linux looks for proc_pidpath");
   Codegen_support.test "a call of a function the system lacks stops the program, and calls nothing"
     (fun () ->
-      let env = Memory_layout.create linux ~shape_of:(Codegen_support.shapes extra) in
+      let env = Memory_layout.create linux ~compute_shape:(Codegen_support.shapes extra) in
       let builder = Emit_c.Builder.create env ~key:(Codegen_support.key "entry") in
       Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
       let length =
@@ -643,7 +643,7 @@ let () =
       Out_channel.with_open_text path (fun channel -> output_string channel "held");
       let env =
         Memory_layout.create Codegen_support.host
-          ~shape_of:(Monomorphic.compute_shape Codegen_support.standard_context)
+          ~compute_shape:(Monomorphic.compute_shape Codegen_support.standard_context)
       in
       let drop_and_copy = Compile.For_testing.drop_and_copy env in
       let int32 = Ground.make_builtin Int32 in

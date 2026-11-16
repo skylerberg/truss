@@ -25,10 +25,10 @@ type t = {
   mutable previous : token option;
   mutable held : item list;
   mutable semicolons : int list;
-  foreign_escape : t -> Buffer.t -> bool;
+  scan_foreign_escape : t -> Buffer.t -> bool;
 }
 
-val create : foreign_escape:(t -> Buffer.t -> bool) -> Source.t -> Diagnostic.Collector.t -> t
+val create : scan_foreign_escape:(t -> Buffer.t -> bool) -> Source.t -> Diagnostic.Collector.t -> t
 val is_at_end : t -> int -> bool
 val lookup_char : t -> int -> char
 val is_at : t -> int -> char -> bool

@@ -10,7 +10,7 @@ external close : handle -> unit = "truss_watcher_close"
 type t = {
   root : string;
   handle : handle;
-  skipped : string -> bool;
+  is_skipped_name : string -> bool;
   cookie_directory : string;
   mutable cookies : int;
 }
@@ -30,14 +30,16 @@ let rec watch_tree watcher directory =
   Array.iter
     (fun entry ->
       let path = Filename.concat directory entry in
-      if (not (watcher.skipped entry)) && is_directory path then watch_tree watcher path)
+      if (not (watcher.is_skipped_name entry)) && is_directory path then watch_tree watcher path)
     (try Sys.readdir directory with Sys_error _ -> [||])
 
-let start ~skipped ~cookie_directory root =
+let start ~is_skipped_name ~cookie_directory root =
   let root = Unix.realpath root in
   let cookies = Filename.concat root cookie_directory in
   (try Unix.mkdir cookies 0o755 with Unix.Unix_error (EEXIST, _, _) -> ());
-  let watcher = { root; handle = open_handle root; skipped; cookie_directory; cookies = 0 } in
+  let watcher =
+    { root; handle = open_handle root; is_skipped_name; cookie_directory; cookies = 0 }
+  in
   if not (is_recursive ()) then begin
     watch_tree watcher root;
     add watcher.handle cookies
@@ -53,7 +55,8 @@ let find_relative_path watcher path =
     if String.starts_with ~prefix path then Some (String.drop_first (String.length prefix) path)
     else None
 
-let is_skipped watcher relative = List.exists watcher.skipped (String.split_on_char '/' relative)
+let is_skipped watcher relative =
+  List.exists watcher.is_skipped_name (String.split_on_char '/' relative)
 
 let drain watcher =
   let paths, is_overflowed = take watcher.handle in

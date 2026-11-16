@@ -125,13 +125,15 @@ let translate_derived_default (lookups : Lookups.t) (key : Resolve.Names.key)
   else []
 
 let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
-  match (lookups.interface.names.declaration key, Contracts.read_source_at_key lookups key) with
+  match
+    (lookups.interface.names.read_declaration key, Contracts.read_source_at_key lookups key)
+  with
   | _ when is_specification_module key -> Not_proven_here
   | declaration, source -> (
-      lookups.patterns key;
+      lookups.read_patterns key;
       try
         match declaration.kind with
-        | (Function | Method) when Mir.find_code (lookups.mir.body_part key) = None ->
+        | (Function | Method) when Mir.find_code (lookups.mir.read_body_part key) = None ->
             Not_proven_here
         | Theorem -> Obligations (Translate.translate_theorem lookups source ~path:key.path)
         | Function | Method -> (
@@ -353,8 +355,10 @@ let make_diagnostic code span message =
 
 let resolve_location (names : Resolve.Names.lookups) (key : Resolve.Names.key)
     (location : State.location) =
-  Source.Definition_span.locate (names.spans key)
-    (match location with Node origin -> origin | Whole_definition -> (names.definition key).id)
+  Source.Definition_span.locate (names.read_spans key)
+    (match location with
+    | Node origin -> origin
+    | Whole_definition -> (names.read_definition key).id)
 
 let substitute_clause text spans clause replacements =
   let clause_span = Source.Definition_span.locate spans clause in
@@ -386,12 +390,12 @@ let render (lookups : Lookups.t) (message : State.message) =
          | State.Text text -> text
          | Quote (key, origin) ->
              Facts.quote_span
-               (lookups.interface.names.text key)
-               (Source.Definition_span.locate (lookups.interface.names.spans key) origin)
+               (lookups.interface.names.read_text key)
+               (Source.Definition_span.locate (lookups.interface.names.read_spans key) origin)
          | Substituted { key; clause; replacements } ->
              substitute_clause
-               (lookups.interface.names.text key)
-               (lookups.interface.names.spans key)
+               (lookups.interface.names.read_text key)
+               (lookups.interface.names.read_spans key)
                clause replacements)
        message)
 
@@ -403,10 +407,10 @@ let render_fix lookups ({ title; edits } : State.fix) =
        edits)
 
 let locate_citation (lookups : Lookups.t) ((key : Resolve.Names.key), origin) =
-  let place = lookups.interface.names.place key in
+  let place = lookups.interface.names.read_place key in
   ( place,
     Source.Definition_span.to_file ~base:place.base
-      (Source.Definition_span.locate (lookups.interface.names.spans key) origin) )
+      (Source.Definition_span.locate (lookups.interface.names.read_spans key) origin) )
 
 type answer = Solved of Solver.answer | Ran of bool | Run_failed of string
 
@@ -612,7 +616,7 @@ let file_states { lookups; verdicts } file =
   List.map
     (fun declaration ->
       let key = Resolve.Names.make_key declaration in
-      let ({ base; _ } : Resolve.Names.place) = lookups.interface.names.place key in
+      let ({ base; _ } : Resolve.Names.place) = lookups.interface.names.read_place key in
       List.map
         (fun (state, cited) ->
           let cited = Option.map (locate_citation lookups) cited in
@@ -625,7 +629,7 @@ let file_states { lookups; verdicts } file =
           let elsewhere =
             match cited with
             | Some ((place : Resolve.Names.place), span) when place.file <> file -> (
-                match lookups.source place.file with
+                match lookups.read_source place.file with
                 | source ->
                     let line, _ = Source.compute_position source span.start in
                     Printf.sprintf " The clause that must hold is at `%s:%d`." (Source.path source)
@@ -649,7 +653,7 @@ let file_states { lookups; verdicts } file =
                 state.failure;
           })
         (verdict key))
-    (lookups.interface.names.declarations_in file)
+    (lookups.interface.names.list_declarations_in file)
 
 let sort_diagnostics list =
   List.sort

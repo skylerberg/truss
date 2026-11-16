@@ -5,12 +5,12 @@ type lowered
 
 type requests = {
   settings : Lookups.settings;
-  source : Path.file -> Source.t;
+  read_source : Path.file -> Source.t;
   interface : Interface.Lookups.t;
   mir : Mir.lookups;
-  lowered : Instance.key -> (lowered, unsupported) result option;
-  test_key : Instance.key -> (string, unsupported) result;
-  reached_todo_types : Instance.key -> Path.t list;
+  find_lowered : Instance.key -> (lowered, unsupported) result option;
+  read_test_key : Instance.key -> (string, unsupported) result;
+  list_reached_todo_types : Instance.key -> Path.t list;
 }
 
 exception Todo_type of Ground.ty
@@ -21,11 +21,11 @@ type results = { find : string -> string option; add : string -> string -> unit 
 type 'a ran = Ran of 'a | Ran_too_long | Stopped of string
 
 val create :
-  ?file_name:(Path.file -> string) ->
+  ?show_file:(Path.file -> string) ->
   ?results:results ->
   ?evaluation_time_limit_ms:int ->
   ?programs:string ->
-  ?worked_on:(Path.package -> bool) ->
+  ?is_worked_on:(Path.package -> bool) ->
   requests ->
   Toolchain.t ->
   Build.cache ->

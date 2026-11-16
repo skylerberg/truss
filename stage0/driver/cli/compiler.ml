@@ -41,16 +41,16 @@ let create database snapshot packages build =
           extra = Toolchain.link_time_optimization toolchain @ read_c_flags ();
         }
   in
-  let file_name (file : Path.file) =
+  let show_file (file : Path.file) =
     match build with
     | Development when List.mem file.module_.package packages ->
         Shown_path.show_path (Command_packages.locate_file snapshot file)
     | _ -> Path.show_file file
   in
   let own = List.map snd (Workspace.list_packages snapshot) in
-  Compile.create ~file_name ~results:(make_results ())
+  Compile.create ~show_file ~results:(make_results ())
     ~programs:(Cache.make_programs_directory (Workspace.open_cache ()))
-    ~worked_on:(fun package -> List.mem package own)
+    ~is_worked_on:(fun package -> List.mem package own)
     (make_requests database packages) toolchain
     (Build.make_cache (Cache.make_objects_directory (Workspace.open_cache ())))
     settings

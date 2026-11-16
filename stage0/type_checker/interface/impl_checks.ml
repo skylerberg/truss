@@ -44,7 +44,7 @@ type conformance = {
   trait : Types.trait_interface;
   shown_trait : string;
   substitution : Types.substitution;
-  impl_bounds : Types.parameter -> Types.trait_reference list;
+  list_impl_bounds : Types.parameter -> Types.trait_reference list;
   normalize : Types.ty -> Types.ty;
   normalize_capabilities : Types.capability_set -> Types.capability_set;
   missing_associated : (string * Diagnostic.in_definition) list;
@@ -129,7 +129,7 @@ let make_conformance lookups ~bounds ~(trait_span : Source.Definition_span.t)
           trait;
           shown_trait;
           substitution;
-          impl_bounds;
+          list_impl_bounds = impl_bounds;
           normalize;
           normalize_capabilities;
           missing_associated;
@@ -153,7 +153,16 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
         ~trait_span:state.spans.(trait_path.id) impl trait_path
     with
     | None -> ()
-    | Some { trait; shown_trait; substitution; impl_bounds; normalize; missing_associated; _ } ->
+    | Some
+        {
+          trait;
+          shown_trait;
+          substitution;
+          list_impl_bounds = impl_bounds;
+          normalize;
+          missing_associated;
+          _;
+        } ->
         let check_evidence_grants (span : Source.Definition_span.t) evidence =
           state.diagnostics :=
             List.map
@@ -169,7 +178,7 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
               match member.path with
               | Method { name; receiver; _ } -> Some (name, receiver)
               | _ -> None)
-            (lookups.names.contained state.key)
+            (lookups.names.list_contained state.key)
         in
         List.iter
           (fun (method_ : Types.trait_method) ->

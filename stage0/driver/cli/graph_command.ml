@@ -33,7 +33,7 @@ let find_definitions snapshot database argument =
              if declaration.ordinal = 0 && matches argument declaration.path then
                Some declaration.path
              else None)
-           (names.package_declarations package))
+           (names.list_package_declarations package))
        packages)
 
 type line = { reader : Path.t; read_kinds : string list; read : Path.t; reader_kinds : string list }

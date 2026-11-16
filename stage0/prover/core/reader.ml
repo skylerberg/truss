@@ -1225,8 +1225,8 @@ and read_statement context frame run (statement : Mir.statement) =
                             read_place context (lend at after_bindings) run
                               { root = Local lent.element; projections = [] })));
           bind_element;
-          changed_in = (fun frame -> compute_changes ~also:iterated run frame [ body ]);
-          changed_by_body = (fun frame -> compute_changes run frame [ body ]);
+          compute_changed_in = (fun frame -> compute_changes ~also:iterated run frame [ body ]);
+          compute_changed_by_body = (fun frame -> compute_changes run frame [ body ]);
           run_body;
           bind_parts = (fun frame -> bind_parts context frame run);
         }
@@ -1347,7 +1347,7 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
           (if by_bit_vector then
              Some
                ( named (),
-                 fun isolated -> snd (context.formula_term isolated condition ~arguments:[]) )
+                 fun isolated -> snd (context.read_formula isolated condition ~arguments:[]) )
            else None)
         term;
       Some frame

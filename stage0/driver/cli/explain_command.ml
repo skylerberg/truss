@@ -30,8 +30,8 @@ let run ~position =
         List.find_map
           (fun (declaration : Resolve.Names.declaration) ->
             let key = Resolve.Names.make_key declaration in
-            let ({ base; _ } : Resolve.Names.place) = names.place key in
-            let text = names.text key in
+            let ({ base; _ } : Resolve.Names.place) = names.read_place key in
+            let text = names.read_text key in
             if base <= offset && offset <= base + String.length text then
               match Database.read_resolved database key with
               | Some resolved ->
@@ -40,11 +40,11 @@ let run ~position =
                       (fun (checked : Infer.checked) -> checked.tables)
                       (Database.read_checked_body database key)
                   in
-                  Inspect.explain_at ~path:key.path (names.spans key) (names.definition key)
-                    resolved tables ~text (offset - base)
+                  Inspect.explain_at ~path:key.path (names.read_spans key)
+                    (names.read_definition key) resolved tables ~text (offset - base)
               | None -> None
             else None)
-          (names.declarations_in written)
+          (names.list_declarations_in written)
       in
       match symbol_at with
       | None ->

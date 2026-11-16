@@ -42,7 +42,7 @@ let list_missing (lookups : Lookups.t) ~package ~of_ (uses : Types.capability_se
   if of_ = package || of_ = Path.standard_package then []
   else
     let granted =
-      match lookups.granted package of_ with Some grant -> grant.capabilities | None -> []
+      match lookups.find_grant package of_ with Some grant -> grant.capabilities | None -> []
     in
     List.filter_map
       (function

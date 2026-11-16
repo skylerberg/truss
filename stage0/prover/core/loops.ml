@@ -52,8 +52,8 @@ type for_loop = {
   collection : (State.frame -> Types.ty * Logic.term) option;
   element_call : (State.frame -> Logic.term) option;
   bind_element : State.frame -> Logic.term -> State.frame;
-  changed_in : State.frame -> State.changed;
-  changed_by_body : State.frame -> State.changed;
+  compute_changed_in : State.frame -> State.changed;
+  compute_changed_by_body : State.frame -> State.changed;
   run_body : State.frame -> Logic.term -> State.frame list * State.frame list;
   bind_parts : State.frame -> State.frame;
 }
@@ -673,9 +673,13 @@ let own_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
       (fun (part : State.part) -> List.exists (fun (cost : Mir.cost) -> cost.amortized) part.costs)
       contract.parts
   in
-  let holds = if is_amortized then for_loop.changed_in frame else for_loop.changed_by_body frame in
-  receiving_loop ~for_loop context frame ~element_type ~changed:(for_loop.changed_in frame) ~holds
-    ~most:(Option.to_list entry_measure)
+  let holds =
+    if is_amortized then for_loop.compute_changed_in frame
+    else for_loop.compute_changed_by_body frame
+  in
+  receiving_loop ~for_loop context frame ~element_type
+    ~changed:(for_loop.compute_changed_in frame)
+    ~holds ~most:(Option.to_list entry_measure)
     ~each_iteration:(fun ~head ~ends ->
       if context.terminates then
         match measured head with
@@ -766,7 +770,9 @@ let run_for_loop context frame (for_loop : for_loop) =
         at_index { frame with yielded = Some (Amounts.make_empty_parts context frame element) } low
       in
       check_invariants context entry clauses ~when_:"on entry to the loop";
-      let start = enter_loop context frame ~entry clauses ~changed:(for_loop.changed_in frame) in
+      let start =
+        enter_loop context frame ~entry clauses ~changed:(for_loop.compute_changed_in frame)
+      in
       let costs = start.loop_costs and head = for_loop.bind_parts start.havocked in
       let count =
         Costs.normalize

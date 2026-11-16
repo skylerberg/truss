@@ -86,18 +86,18 @@ let find_declared_name (definition : Syntax.definition) : Syntax.name option =
   | Impl _ | Test _ | Definition_error _ -> None
 
 let resolve (lookups : Names.lookups) (key : Names.key) section =
-  let definition = lookups.definition key and spans = lookups.spans key in
+  let definition = lookups.read_definition key and spans = lookups.read_spans key in
   let module_ = key.module_ in
   let state = Walk.create lookups key ~spans ~walked:section in
   let container =
     Option.map
-      (fun (container : Names.key) -> (container.path, lookups.definition container))
-      (lookups.container key)
+      (fun (container : Names.key) -> (container.path, lookups.read_definition container))
+      (lookups.find_container key)
   in
   let is_walked =
     (not (Names.is_broken lookups key Header))
     &&
-    match lookups.container key with
+    match lookups.find_container key with
     | Some container -> not (Names.is_broken lookups container Header)
     | None -> true
   in
@@ -124,9 +124,9 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
       | Some name -> spans.(name.id)
       | None -> Source.Definition_span.zero_width spans.(definition.id).start
     in
-    let first = lookups.place { key with ordinal = 0 } in
+    let first = lookups.read_place { key with ordinal = 0 } in
     let first =
-      if first.file <> (lookups.place key).file then Path.show_file first.file else "this file"
+      if first.file <> (lookups.read_place key).file then Path.show_file first.file else "this file"
     in
     Walk.report state Duplicate_definition span
       (Printf.sprintf "%s is already defined in %s, so this definition is never used."
