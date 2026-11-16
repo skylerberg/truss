@@ -81,12 +81,20 @@ let lookup_method_slot (context : Definitions.context) ~owner ~handle_missing
           (List.nth methods index) )
   | None -> handle_missing ()
 
+let raise_lending_capability_method capability name =
+  Lowering.raise_unsupported "`%s.%s`, a capability method that lends" (Path.show capability) name
+
 let lookup_capability_method (context : Definitions.context) capability name =
-  lookup_method_slot context ~owner:capability
-    (Definitions.read_trait_interface context capability).methods
-    ~is_wanted:(fun (declared : Types.trait_method) -> declared.method_name = name)
-    ~handle_missing:(fun () ->
-      Definitions.raise_bug "%s has no method %s" (Path.show capability) name)
+  let slot, signature =
+    lookup_method_slot context ~owner:capability
+      (Definitions.read_trait_interface context capability).methods
+      ~is_wanted:(fun (declared : Types.trait_method) -> declared.method_name = name)
+      ~handle_missing:(fun () ->
+        Definitions.raise_bug "%s has no method %s" (Path.show capability) name)
+  in
+  match signature.output with
+  | Returns _ -> (slot, signature)
+  | Lends _ -> raise_lending_capability_method capability name
 
 let make_entry_signature context (signature : Types.signature) =
   let entry, result =
