@@ -234,6 +234,41 @@ let () =
           Harness.fail "listened"
       | Error message ->
           if not (String.includes ~affix:cache message) then Harness.fail "refused with: %s" message);
+  Harness.test
+    "the files of a background process that ended without removing them are removed, and a running \
+     process keeps its own" (fun () ->
+      let cache = Harness.make_scratch_directory "ended-servers-cache" in
+      Unix.putenv "TRUSS_CACHE" cache;
+      let key = Harness.make_scratch_directory "still-served" in
+      let program = Unix.realpath Sys.executable_name in
+      let measure_served request =
+        match Workspace.For_testing.call_starting ~program ~key ~report_progress:ignore request with
+        | Ok (length : int) -> length
+        | Error message ->
+            Harness.fail "%s" message;
+            -1
+      in
+      Fun.protect
+        ~finally:(fun () -> ignore (Workspace.stop_servers ()))
+        (fun () ->
+          ignore (measure_served "one");
+          let servers = Filename.concat cache "servers" in
+          let list_files () =
+            List.sort compare
+              (List.filter (( <> ) "server.log") (Array.to_list (Sys.readdir servers)))
+          in
+          let running = list_files () in
+          let ended = "0123456789abcdef-0123456789abcdef" in
+          List.iter
+            (fun suffix ->
+              Out_channel.with_open_bin (Filename.concat servers (ended ^ suffix)) ignore)
+            [ ".key"; ".lock"; ".start" ];
+          Workspace.For_testing.remove_ended_servers ();
+          let remaining = list_files () in
+          if remaining <> running then
+            Harness.fail "kept %s, where the running process has %s" (String.concat ", " remaining)
+              (String.concat ", " running);
+          if measure_served "three" <> 5 then Harness.fail "the running process stopped answering"));
   Harness.test "the background process answers each request and sends its progress" (fun () ->
       Unix.putenv "TRUSS_CACHE" (Harness.make_scratch_directory "served-cache");
       let key = Harness.make_scratch_directory "served" in

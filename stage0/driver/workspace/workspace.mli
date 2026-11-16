@@ -58,5 +58,6 @@ module For_testing : sig
     'request ->
     ('response, string) result
 
+  val remove_ended_servers : unit -> unit
   val interrupt_commit : string -> unit
 end

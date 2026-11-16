@@ -183,6 +183,71 @@ let listen ~key =
     (make_server_paths (compute_executable_identity ()) key)
     (fun (_, server_path, path) -> with_start_lock server_path (fun () -> bind server_path path))
 
+let connect path =
+  let socket = Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0 in
+  match Unix.connect socket (ADDR_UNIX path) with
+  | () -> Some socket
+  | exception Unix.Unix_error _ ->
+      Unix.close socket;
+      None
+
+type claim = Claimed of Unix.file_descr | Held_elsewhere
+
+let claim_without_waiting path =
+  let descriptor = Unix.openfile path [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644 in
+  match Unix.lockf descriptor F_TLOCK 0 with
+  | () when is_current descriptor path -> Claimed descriptor
+  | () | (exception Unix.Unix_error ((EAGAIN | EACCES), _, _)) ->
+      Unix.close descriptor;
+      Held_elsewhere
+
+let remove_if_present path = try Unix.unlink path with Unix.Unix_error (ENOENT, _, _) -> ()
+
+let accepts_connections path =
+  match connect path with
+  | Some socket ->
+      Unix.close socket;
+      true
+  | None -> false
+
+let list_server_paths directory =
+  Array.to_list (Sys.readdir directory)
+  |> List.filter_map (fun entry ->
+      List.find_map
+        (fun suffix ->
+          if Filename.check_suffix entry suffix then
+            Some (Filename.concat directory (Filename.chop_suffix entry suffix))
+          else None)
+        [ ".key"; ".lock"; ".start"; ".socket" ])
+  |> List.sort_uniq String.compare
+
+let remove_ended_server server_path =
+  match claim_without_waiting (server_path ^ ".start") with
+  | Held_elsewhere -> ()
+  | Claimed start ->
+      Fun.protect
+        ~finally:(fun () ->
+          remove_if_present (server_path ^ ".start");
+          Unix.close start)
+        (fun () ->
+          match claim_without_waiting (server_path ^ ".lock") with
+          | Held_elsewhere -> ()
+          | Claimed lock ->
+              Fun.protect
+                ~finally:(fun () -> Unix.close lock)
+                (fun () ->
+                  let socket = locate_socket server_path in
+                  if not (accepts_connections socket) then
+                    List.iter remove_if_present
+                      [ server_path ^ ".key"; socket; server_path ^ ".lock" ]))
+
+let remove_ended_servers directory =
+  List.iter
+    (fun server_path ->
+      if !served <> Some server_path then
+        try remove_ended_server server_path with Unix.Unix_error _ | Sys_error _ -> ())
+    (list_server_paths directory)
+
 let send channel value =
   Marshal.to_channel channel value [];
   flush channel
@@ -207,7 +272,8 @@ let serve_on ~key ~identity ~is_alive ~collect ~list_watcher_descriptors ~propag
         if now -. !last_collection > 60. then begin
           last_collection := now;
           is_replaced := compute_executable_identity () <> identity;
-          collect ()
+          collect ();
+          remove_ended_servers (Filename.dirname server_path)
         end
     | ready, _, _ when not (List.mem socket ready) -> List.iter propagate ready
     | _ -> (
@@ -272,14 +338,6 @@ let start directory program key socket =
       | _ -> Unix._exit 0)
   | child -> ignore (Unix.waitpid [] child)
 
-let connect path =
-  let socket = Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0 in
-  match Unix.connect socket (ADDR_UNIX path) with
-  | () -> Some socket
-  | exception Unix.Unix_error _ ->
-      Unix.close socket;
-      None
-
 let connect_or_start ~program ~key directory server_path path =
   match connect path with
   | Some socket -> Ok socket
@@ -333,4 +391,5 @@ let call ?start_server ~key ~report_progress request =
 
 module For_testing = struct
   let call_starting = call_starting
+  let remove_ended_servers () = Result.iter remove_ended_servers (make_servers_directory ())
 end
