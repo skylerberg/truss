@@ -16,10 +16,12 @@ val monomorphic : Interface.Lookups.t -> Monomorphic.context
 val context : Lookups.settings -> env:Memory_layout.env -> Lookups.t -> context
 val test_key : Path.t -> Instance.key
 
+type written = { spans : Source.Definition_span.t array; text : string }
+
 type code = {
-  definition_key : Names.key;
+  definition : Path.t;
+  written : written option;
   enclosing_impl : Path.t option;
-  text : string;
   result : Types.result;
   substitution : Types.substitution;
   uses : Types.capability_set;
@@ -27,9 +29,8 @@ type code = {
   has_defaults : bool;
 }
 
-val unwritten :
-  definition_key:Names.key -> substitution:Types.substitution -> result:Types.result -> code
-
+val unwritten : definition:Path.t -> substitution:Types.substitution -> result:Types.result -> code
+val read_written : context -> Names.key -> written
 val key_of : context -> Path.t -> Resolve.Names.key
 val bind : Types.generic list -> Ground.argument list -> Types.substitution
 val impl_interface : context -> Path.t -> Types.impl_interface

@@ -79,7 +79,14 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
                 true
               end))
         parts;
-      string_type
+      let is_view_expected =
+        parts = []
+        &&
+        match Option.map (normalize state) expected with
+        | Some expected -> Types.is_well_known String_slice expected
+        | None -> false
+      in
+      if is_view_expected then Types.named (Well_known.path String_slice) [] else string_type
   | Some tag -> (
       match target state tag.last with
       | Some (Definition (Type, tag_path)) ->
@@ -370,7 +377,7 @@ and match_ state env ?expected (value : expression) scrutinees arms =
       let scrutinees =
         List.map
           (fun scrutinee ->
-            Form.build_operand (scrutinee_mode state scrutinee) (build_expression state scrutinee))
+            build_operand (scrutinee_mode state scrutinee) (build_expression state scrutinee))
           scrutinees
       in
       Match

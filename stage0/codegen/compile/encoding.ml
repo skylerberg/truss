@@ -44,15 +44,15 @@ let encode env ty =
         | Raw _ -> bug "a raw field in a value written out")
       fields
   in
-  (match Storage.representation env ty with
+  (match Representation.classify env ty with
   | Handle -> bug "a handle cannot be computed while compiling"
   | Shared _ -> bug "a shared value cannot be computed while compiling"
   | Any -> bug "an any value cannot be computed while compiling"
   | Storage element ->
-      append_bytes (Storage.length value) (Memory_layout.integer_size UInt64);
+      append_bytes (Storage.project_length value) (Memory_layout.integer_size UInt64);
       loop builder
-        ~count:(Copy (Storage.length value))
-        (fun index -> encode_call element (Storage.at value (Copy (at index))))
+        ~count:(Copy (Storage.project_length value))
+        (fun index -> encode_call element (Storage.index_element value (Copy (at index))))
   | Shape (Scalar _) -> append_bytes value (Memory_layout.of_type env ty).size
   | Shape (Record members) -> fields value None members
   | Shape (Array (element, count)) ->
@@ -122,14 +122,13 @@ let decode env ty encoded : Lowered.static_value =
   let rec value ty : Lowered.static_value =
     if Memory_layout.has_zero_size env ty then empty ty
     else
-      match Storage.representation env ty with
+      match Representation.classify env ty with
       | Handle -> bug "a handle computed while compiling"
       | Shared _ -> bug "a shared value computed while compiling"
       | Any -> bug "an any value computed while compiling"
       | Storage element ->
           let count = Z.to_int (integer reader UInt64) in
-          Static_storage
-            { element; elements = List.init count (fun _ -> value element); owned = true }
+          Static_storage { element; elements = List.init count (fun _ -> value element) }
       | Shape (Scalar kind) -> Static_scalar (scalar reader kind)
       | Shape (Record members) -> Static_record (fields members)
       | Shape (Array (element, count)) -> Static_array (List.init count (fun _ -> value element))

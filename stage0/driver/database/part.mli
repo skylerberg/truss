@@ -1,10 +1,10 @@
-type t =
+type input =
   | Source of Path.file
-  | Parsed of Path.file
   | Packages
   | Modules of Path.package
   | Dependencies of Path.package
-  | Namespace of Path.package
+
+type name =
   | Entry of Path.module_ * string
   | Entries of Path.module_
   | Imports of Resolve.Names.key
@@ -23,12 +23,18 @@ type t =
   | Impls_of_type of Path.package * Path.t
   | Impls_of_trait of Path.package * Path.t
   | Law_proofs of Path.package * Resolve.Names.law_proof_name
+
+type lowering = Lowered of Instance.key | Test_key of Instance.key
+
+type computed =
+  | Parsed of Path.file
+  | Namespace of Path.package
   | Resolved of Resolve.Names.key * Resolve.section
   | Trait_header of Resolve.Names.key
   | Constant_value of Path.t
   | Header of Resolve.Names.key
   | Interface of Resolve.Names.key
-  | Derived_interface of Path.t
+  | Derived_interface of { type_ : Path.t; trait : Path.t }
   | Type_facts of Path.t
   | Grant of Path.package * Path.package
   | Signature_check of Resolve.Names.key
@@ -46,15 +52,15 @@ type t =
   | Import_check of Path.file
   | Package_check of Path.package * Package_checks.check
   | Callees of Path.t * Path.package
-  | Recursion_group of Path.t
   | Proof of Resolve.Names.key
-  | Lowered of Instance.key
-  | Test_key of Instance.key
+  | Lowering of lowering
 
-val package : t -> Path.package
-val equal : t -> t -> bool
-val hash : t -> int
-val compare : t -> t -> int
+type stored = Computed of computed | Recursion_group of Path.t
+type t = Input of input | Name of name | Stored of stored
+
+val package : computed -> Path.package
+val name_package : name -> Path.package
 val show : t -> string
+val show_computed : computed -> string
 val definition : t -> Path.t option
 val kind_name : t -> string

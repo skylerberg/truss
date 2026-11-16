@@ -117,6 +117,7 @@ let tracked builder (place : Mir.place) : Place.t option =
   let base =
     match place.root with
     | Constant path -> Some { Place.root = Constant path; steps = [] }
+    | Literal _ -> None
     | Local local -> (
         match core_local builder local with
         | Some local -> Some { Place.root = Local local; steps = [] }
@@ -138,12 +139,12 @@ let is_untracked_lent_part builder (place : Mir.place) =
       match (local_info builder local).kind with
       | Lent _ -> (held builder local).collection = None && (held builder local).place = None
       | Source _ | Temporary -> false)
-  | Constant _ -> false
+  | Constant _ | Literal _ -> false
 
 let is_temporary builder (place : Mir.place) =
   match place.root with
   | Local local -> (local_info builder local).kind = Temporary
-  | Constant _ -> false
+  | Constant _ | Literal _ -> false
 
 let rec temporary_of builder (place : Mir.place) =
   match place with
@@ -157,7 +158,10 @@ let rec temporary_of builder (place : Mir.place) =
 let views_of_copy builder (place : Mir.place) =
   match tracked builder place with
   | Some place -> [ Copy_of_view_in place ]
-  | None -> ( match place.root with Local local -> (held builder local).views | Constant _ -> [])
+  | None -> (
+      match place.root with
+      | Local local -> (held builder local).views
+      | Constant _ | Literal _ -> [])
 
 let views_of_borrow builder (place : Mir.place) type_ =
   match tracked builder place with
@@ -171,7 +175,7 @@ let views_of_borrow builder (place : Mir.place) type_ =
              && not (is_view builder.context type_) ->
           [ Borrow_of { root = Temporary temporary; steps = [] } ]
       | Local local, _ -> (held builder local).views
-      | Constant _, _ -> [])
+      | (Constant _ | Literal _), _ -> [])
 
 let operand_type : Mir.operand -> Types.ty option = function
   | Use { type_; _ } | Borrow { type_; _ } | Take { type_; _ } -> Some type_
@@ -222,7 +226,7 @@ let written_slice builder ~whole (place : Mir.place) type_ =
         match (held builder local).collection with
         | Some (collection, collection_type) when Place.is_slice_type collection_type -> collection
         | _ -> None)
-    | Constant _ -> None
+    | Constant _ | Literal _ -> None
 
 let writes_through builder ~whole (place : Mir.place) type_ origin =
   Option.iter
@@ -264,7 +268,7 @@ let borrow_mut builder (operand : Mir.operand) =
       match place.root with
       | Local local ->
           Option.iter (fun slice -> emit builder (Mutate slice) origin) (held builder local).slice
-      | Constant _ -> ())
+      | Constant _ | Literal _ -> ())
   | _ -> ()
 
 let call builder (call : Mir.call) origin =
@@ -444,7 +448,9 @@ let bound_value builder (local : Mir.local) (core : Core.local) (value : Mir.rva
   let holds_views = is_view builder.context type_ in
   let result = rvalue builder value in
   let is_loop_part (place : Mir.place) =
-    match place.root with Local part -> (held builder part).is_loop_part | Constant _ -> false
+    match place.root with
+    | Local part -> (held builder part).is_loop_part
+    | Constant _ | Literal _ -> false
   in
   (match value with
   | Operand

@@ -79,7 +79,7 @@ public fn Cookie.header(self) -> Result[String, Error] {
     Strict => "; SameSite=Strict"
     Lax => "; SameSite=Lax"
     Cross => "; SameSite=None"
-  }.slice())
+  })
   Ok(own text)
 }
 

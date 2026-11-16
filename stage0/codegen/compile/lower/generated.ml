@@ -5,15 +5,7 @@ open Emit_c.Builder
 
 let generated_state context ~key ~definition ~substitution =
   enter context ~builder:(create context.env ~key)
-    (frame_of
-       (unwritten
-          ~definition_key:
-            {
-              Names.module_ = { package = { owner = None; name = "" }; modules = [] };
-              path = definition;
-              ordinal = 0;
-            }
-          ~substitution ~result:(Returns Types.unit)))
+    (frame_of (unwritten ~definition ~substitution ~result:(Returns Types.unit)))
 
 let passed_on st result_ty =
   match result_place st with Some place -> place | None -> temporary st result_ty
@@ -296,10 +288,11 @@ let program_main context (key : Instance.key) main_path : Emit_c.Builder.instanc
       in
       call Program_argument [ Copy (at arguments_pointer); Copy (at index) ] bytes;
       call Terminated_length [ Copy (at bytes) ] length;
-      let view_ty = Storage.view_of_elements (Ground.builtin UInt8) in
+      let view_ty = Storage.make_view_type (Ground.builtin UInt8) in
       let view = temporary st view_ty in
       emit builder
-        (Assign (view, Storage.view view_ty ~elements:(Copy (at bytes)) ~length:(Copy (at length))));
+        (Assign
+           (view, Storage.build_view view_ty ~elements:(Copy (at bytes)) ~length:(Copy (at length))));
       let text = temporary st string_ty in
       call_instance st
         (Code { path = text_copied_from; type_arguments = [] })

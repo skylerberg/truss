@@ -1,5 +1,7 @@
 fn f()
   uses Console
 {
+  let kept = "kept"
+  Console.print_line(kept)
   Console.print_line("hello")
 }

@@ -1,0 +1,4 @@
+fn f() -> String {
+  let text = "abc"
+  text
+}

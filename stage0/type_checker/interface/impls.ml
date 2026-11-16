@@ -51,7 +51,7 @@ let derived_interface lookups ~type_ ~trait =
 
 let impl_interface (lookups : Lookups.t) (path : Path.t) =
   match path with
-  | Derived _ -> lookups.derived_interface path
+  | Derived { type_; trait } -> lookups.derived_interface ~type_ ~trait
   | _ -> Definition.impl_interface lookups path
 
 let trait_substitution lookups (impl : Path.t) =

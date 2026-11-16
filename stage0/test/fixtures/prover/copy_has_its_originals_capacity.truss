@@ -1,0 +1,5 @@
+fn f(items: List[Int64]) -> Bool
+  ensures result
+{
+  items.copy().capacity() == items.capacity()
+}

@@ -510,6 +510,24 @@ test "truncate and clear shorten a string and keep its room" {
   assert literal == "cone"
 }
 
+test "a copy of a string keeps its capacity" {
+  var text = String.with_capacity(16)
+  mut text.push("ab")
+  let copied = text.copy()
+  assert copied.capacity() == 16
+  assert copied == "ab"
+}
+
+test "a string literal has room for its length, and a copy of one can be changed in place" {
+  assert "h\u{e9}llo".capacity() >= 6
+  let text = "abc"
+  assert text.capacity() >= text.length()
+  var copied = "hello world"
+  mut copied.remove_range(from: 0, to: 6)
+  assert copied == "world"
+  assert copied.capacity() >= copied.length()
+}
+
 test "a string's uppercase uses the full mappings" {
   assert "hello, wörld".to_uppercase() == "HELLO, WÖRLD"
   assert "straße".to_uppercase() == "STRASSE"

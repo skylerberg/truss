@@ -1,6 +1,6 @@
 let bug format = Compiler_bug.bug ~stage:"Writing" format
-let output_ty = Storage.of_elements (Ground.builtin UInt8)
-let bytes_ty = Storage.view_of_elements (Ground.builtin UInt8)
+let output_ty = Storage.make_storage_type (Ground.builtin UInt8)
+let bytes_ty = Storage.make_view_type (Ground.builtin UInt8)
 
 open Emit_c.Builder
 
@@ -36,5 +36,5 @@ let call env builder ~output (writer : Well_known.t) ty (place : Lowered.place) 
 
 let call_with_bytes env builder ~output writer ~elements ~length =
   let view = local builder (Value bytes_ty) in
-  emit builder (Assign (at view, Storage.view bytes_ty ~elements ~length));
+  emit builder (Assign (at view, Storage.build_view bytes_ty ~elements ~length));
   call env builder ~output writer bytes_ty (at view)

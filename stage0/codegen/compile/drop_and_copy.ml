@@ -23,7 +23,7 @@ and has_trivial_representation context ty =
   let are_trivial fields =
     List.for_all (fun (_, member) -> is_trivial_member context member) fields
   in
-  match Storage.representation context.env ty with
+  match Representation.classify context.env ty with
   | Storage _ | Handle | Shared _ | Any -> false
   | Shape (Scalar _) -> true
   | Shape (Record fields) -> are_trivial fields
@@ -73,18 +73,12 @@ let condition builder rvalue =
   emit builder (Assign (at flag, rvalue));
   Lowered.Copy (at flag)
 
-let owns_buffer builder storage =
-  condition builder (Binary (Not_equal, Copy (Storage.capacity storage), constant_uint64 0))
-
-let is_empty builder storage =
-  condition builder (Binary (Equal, Copy (Storage.length storage), constant_uint64 0))
-
 let drop context ty =
   let builder = create context.env ~key:(Drop ty) in
   let pointer = local builder ~name:"value" (Pointer { target = Value ty; writable = true }) in
   let value : Lowered.place = { root = Local pointer; projections = [ Deref ] } in
   start builder (block builder);
-  (match Storage.representation context.env ty with
+  (match Representation.classify context.env ty with
   | Any ->
       emit builder
         (Call
@@ -149,14 +143,16 @@ let drop context ty =
   | Storage element ->
       if not (is_trivial context element) then
         loop builder
-          ~count:(Copy (Storage.length value))
-          (fun index -> emit builder (Drop (Storage.at value (Copy (at index)))));
-      when_ builder (owns_buffer builder value) (fun () ->
+          ~count:(Copy (Storage.project_length value))
+          (fun index -> emit builder (Drop (Storage.index_element value (Copy (at index)))));
+      when_ builder
+        (condition builder (Storage.build_is_allocated value))
+        (fun () ->
           emit builder
             (Call
                {
                  target = Intrinsic Free;
-                 arguments = [ Copy (Storage.buffer value) ];
+                 arguments = [ Copy (Storage.project_buffer value) ];
                  result = Discarded;
                }))
   | Shape (Record fields) ->
@@ -279,7 +275,7 @@ let copy context ty =
     | None, None -> bug "no place for the copy"
   in
   start builder (block builder);
-  (match Storage.representation context.env ty with
+  (match Representation.classify context.env ty with
   | Handle -> bug "a copy of a handle, which is not Copyable"
   | Any ->
       let copied = local builder (Raw (Pointer Opaque)) in
@@ -318,23 +314,20 @@ let copy context ty =
       emit builder (Assign (result, Use (Copy self)))
   | Storage element ->
       let layout = Memory_layout.of_type context.env element in
-      let share = block builder and owning = block builder and hollow = block builder in
-      let allocate = block builder and after = block builder in
-      branch builder (owns_buffer builder self) ~yes:owning ~no:share;
-      start builder share;
-      emit builder (Assign (result, Use (Copy self)));
-      finish builder (Goto after);
-      start builder owning;
-      branch builder (is_empty builder self) ~yes:hollow ~no:allocate;
-      start builder hollow;
-      emit builder (Assign (result, Storage.empty ty));
+      let unallocated = block builder and allocate = block builder and after = block builder in
+      branch builder
+        (condition builder (Storage.build_is_allocated self))
+        ~yes:allocate ~no:unallocated;
+      start builder unallocated;
+      emit builder (Assign (result, Storage.build_empty ty));
       finish builder (Goto after);
       start builder allocate;
       let bytes = local builder (Raw (Integer UInt64)) in
       let buffer = local builder ~name:"buffer" (Raw (Pointer (Data element))) in
       emit builder
         (Assign
-           (at bytes, Binary (Multiply, Copy (Storage.length self), constant_uint64 layout.size)));
+           ( at bytes,
+             Binary (Multiply, Copy (Storage.project_capacity self), constant_uint64 layout.size) ));
       emit builder
         (Call
            {
@@ -342,29 +335,35 @@ let copy context ty =
              arguments = [ Copy (at bytes); constant_uint64 layout.alignment ];
              result = Returned (at buffer);
            });
-      if is_trivial context element then
+      if is_trivial context element then begin
+        let used = local builder (Raw (Integer UInt64)) in
+        emit builder
+          (Assign
+             ( at used,
+               Binary (Multiply, Copy (Storage.project_length self), constant_uint64 layout.size) ));
         emit builder
           (Call
              {
                target = Intrinsic Copy_bytes;
-               arguments = [ Copy (at buffer); Copy (Storage.buffer self); Copy (at bytes) ];
+               arguments = [ Copy (at buffer); Copy (Storage.project_buffer self); Copy (at used) ];
                result = Discarded;
              })
+      end
       else
         loop builder
-          ~count:(Copy (Storage.length self))
+          ~count:(Copy (Storage.project_length self))
           (fun index ->
             copy_into context builder
               ~destination:(at buffer / Index (Copy (at index)))
-              ~source:(Storage.at self (Copy (at index)))
+              ~source:(Storage.index_element self (Copy (at index)))
               element);
       emit builder
         (Assign
            ( result,
-             Storage.owning ty
+             Storage.build_storage ty
                ~buffer:(Copy (at buffer))
-               ~length:(Copy (Storage.length self))
-               ~capacity:(Copy (Storage.length self)) ));
+               ~length:(Copy (Storage.project_length self))
+               ~capacity:(Copy (Storage.project_capacity self)) ));
       finish builder (Goto after);
       start builder after
   | Shape (Record fields) ->

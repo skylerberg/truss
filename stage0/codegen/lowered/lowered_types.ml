@@ -170,7 +170,7 @@ type static_value =
   | Static_record of (string * static_value) list
   | Static_variant of string * (string * static_value) list
   | Static_array of static_value list
-  | Static_storage of { element : Ground.ty; elements : static_value list; owned : bool }
+  | Static_storage of { element : Ground.ty; elements : static_value list }
 
 type data = { data_key : Instance.key; ty : Ground.ty; value : static_value }
 

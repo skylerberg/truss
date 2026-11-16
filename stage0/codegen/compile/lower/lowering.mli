@@ -93,6 +93,7 @@ type unsupported = { construct : string; at : Lowered.site option }
 exception Unsupported of unsupported
 
 val unsupported : ?at:Lowered.site -> ('a, unit, string, 'b) format4 -> 'a
+val require_written : state -> Definitions.written
 val source : state -> Source.Definition_span.t -> string
 val innermost_scope : state -> scope
 val temporary : state -> ?name:string -> Ground.ty -> Lowered.place

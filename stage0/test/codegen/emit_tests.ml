@@ -608,7 +608,7 @@ let () =
         Ground.Named { path = Intrinsic.builtin_path View; arguments = [ Type int32 ] }
       in
       let extra =
-        [ (Ground.to_string view_ty, Storage.view_shape ~uint64:(named "UInt64") int32) ]
+        [ (Ground.to_string view_ty, Storage.make_view_shape ~uint64:(named "UInt64") int32) ]
       in
       let operate builder ?destination operation arguments =
         Intrinsics.lower
@@ -645,7 +645,7 @@ let () =
         ]);
   test "an array made of a storage has its elements, and the storage's buffer is freed" (fun () ->
       let open Emit_c.Builder in
-      let storage_ty = Storage.of_elements int32 in
+      let storage_ty = Storage.make_storage_type int32 in
       let array_ty =
         Ground.Named
           { path = Intrinsic.builtin_path Array; arguments = [ Type int32; Value (Z.of_int 3) ] }
@@ -731,36 +731,30 @@ let () =
           (-1., uint8, false);
           (0., uint8, true);
         ]);
-  test "a storage is shortened in place, keeping its room, and a static one stays static" (fun () ->
+  test "a storage is shortened in place and keeps its room" (fun () ->
       let open Emit_c.Builder in
-      let storage_ty = named "Storage" ~arguments:[ Type uint8 ] in
+      let storage_ty = Storage.make_storage_type uint8 in
       let checked builder ?destination operation arguments =
         Intrinsics.lower ~checks:true (shape_env ()) builder intrinsic_types operation
           ~type_arguments:[ uint8 ] arguments ~destination
           ~site:{ definition = definition "entry"; offset = 0 }
       in
-      let shortened ~capacity ~to_ =
+      let shortened ~to_ =
         [
           built_entry (fun builder ->
               let storage = local builder (value storage_ty) in
-              emit builder
-                (Assign
-                   ( at storage,
-                     Build
-                       {
-                         ty = storage_ty;
-                         variant = None;
-                         fields =
-                           [
-                             ("buffer", Constant (Bytes "abcde"));
-                             ("length", constant_uint64 5);
-                             ("capacity", constant_uint64 0);
-                           ];
-                       } ));
-              if capacity > 0 then
-                ignore
-                  (checked builder Storage_set_capacity
-                     [ Place (at storage); Value (constant_uint64 capacity) ]);
+              ignore
+                (checked builder ~destination:(at storage) Storage_with_capacity
+                   [ Value (constant_uint64 8) ]);
+              String.iter
+                (fun byte ->
+                  ignore
+                    (checked builder Storage_push
+                       [
+                         Place (at storage);
+                         Value (Constant (Integer (UInt8, Z.of_int (Char.code byte))));
+                       ]))
+                "abcde";
               ignore
                 (checked builder Storage_shorten
                    [ Place (at storage); Value (constant_uint64 to_) ]);
@@ -777,21 +771,20 @@ let () =
               status);
         ]
       in
-      expect_status (2 + 8 + Char.code 'b') (shortened ~capacity:8 ~to_:2);
-      expect_status (3 + 0 + Char.code 'c') (shortened ~capacity:0 ~to_:3);
-      expect_status 101 (shortened ~capacity:8 ~to_:6);
+      expect_status (2 + 8 + Char.code 'b') (shortened ~to_:2);
+      expect_status 101 (shortened ~to_:6);
       match (Intrinsic_signatures.signature Storage_shorten).generics with
       | [ { kind = Type_generic [ { trait = Top { name = "Plain"; _ }; _ } ]; _ } ] -> ()
       | _ -> fail "storage_shorten takes elements that are not known to be Plain");
   test "a checked build stops a storage or view operation whose precondition does not hold"
     (fun () ->
       let open Emit_c.Builder in
-      let storage_ty = named "Storage" ~arguments:[ Type uint8 ] in
+      let storage_ty = Storage.make_storage_type uint8 in
       let view_ty =
         Ground.Named { path = Intrinsic.builtin_path View; arguments = [ Type uint8 ] }
       in
       let extra =
-        [ (Ground.to_string view_ty, Storage.view_shape ~uint64:(named "UInt64") uint8) ]
+        [ (Ground.to_string view_ty, Storage.make_view_shape ~uint64:(named "UInt64") uint8) ]
       in
       let checked builder ?destination operation arguments =
         ignore
@@ -806,22 +799,11 @@ let () =
             [
               built_entry (fun builder ->
                   let storage = local builder (value storage_ty) in
-                  emit builder
-                    (Assign
-                       ( at storage,
-                         Build
-                           {
-                             ty = storage_ty;
-                             variant = None;
-                             fields =
-                               [
-                                 ("buffer", Constant (Bytes "abc"));
-                                 ("length", constant_uint64 3);
-                                 ("capacity", constant_uint64 0);
-                               ];
-                           } ));
-                  checked builder Storage_set_capacity
-                    [ Place (at storage); Value (constant_uint64 3) ];
+                  checked builder ~destination:(at storage) Storage_with_capacity
+                    [ Value (constant_uint64 3) ];
+                  List.iter
+                    (fun _ -> checked builder Storage_push [ Place (at storage); Value byte ])
+                    [ 'a'; 'b'; 'c' ];
                   let view = local builder ~name:"view" (value view_ty) in
                   checked builder ~destination:(at view) Storage_view [ Place (at storage) ];
                   operation builder ~storage ~view;
@@ -871,41 +853,7 @@ let () =
       stops "an element popped from an empty storage" (fun builder ~storage ~view:_ ->
           checked builder Storage_shorten [ Place (at storage); Value (constant_uint64 0) ];
           let popped = local builder (value uint8) in
-          checked builder ~destination:(at popped) Storage_pop [ Place (at storage) ]));
-  test "static storage given room is copied to the heap, where it can be pushed onto" (fun () ->
-      let open Emit_c.Builder in
-      let storage_ty = named "Storage" ~arguments:[ Type uint8 ] in
-      expect_status 197
-        [
-          built_entry (fun builder ->
-              let storage = local builder (value storage_ty) in
-              emit builder
-                (Assign
-                   ( at storage,
-                     Build
-                       {
-                         ty = storage_ty;
-                         variant = None;
-                         fields =
-                           [
-                             ("buffer", Constant (Bytes "abc"));
-                             ("length", constant_uint64 3);
-                             ("capacity", constant_uint64 0);
-                           ];
-                       } ));
-              ignore
-                (operate builder ~type_arguments:[ uint8 ] Storage_set_capacity
-                   [ Place (at storage); Value (constant_uint64 4) ]);
-              ignore
-                (operate builder ~type_arguments:[ uint8 ] Storage_push
-                   [ Place (at storage); Value (Constant (Integer (UInt8, Z.of_int 100))) ]);
-              let first = local builder (value int32) and last = local builder (value int32) in
-              let element index = at storage / Field "buffer" / Index (constant_uint64 index) in
-              emit builder (Assign (at first, Convert (Copy (element 0), Integer Int32)));
-              emit builder (Assign (at last, Convert (Copy (element 3), Integer Int32)));
-              emit builder (Assign (at first, Binary (Add, Copy (at first), Copy (at last))));
-              first);
-        ])
+          checked builder ~destination:(at popped) Storage_pop [ Place (at storage) ]))
 
 let () =
   test "a small read-only value is passed by value unless it holds an array's elements" (fun () ->

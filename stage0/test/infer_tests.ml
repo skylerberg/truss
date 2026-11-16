@@ -277,12 +277,13 @@ let () =
       match core_call_at text "Console.print_line(name)" 1 with
       | { arguments = [ argument ]; _ }, _ when is_view argument -> ()
       | _ -> fail "no conversion recorded");
-  test "a string literal is a String, viewed where a StringSlice is expected" (fun () ->
-      let text = Fixtures.Infer.string_literal_is_a_string_viewed_where_a in
-      has_type text "\"hello\"" "String";
+  test "a string literal is a StringSlice where one is expected, and a String elsewhere" (fun () ->
+      let text = Fixtures.Infer.string_literal_is_a_string_slice_where_one_is in
+      has_type text "\"kept\"" "String";
+      has_type text "\"hello\"" "StringSlice";
       match core_call_at text "Console.print_line(\"hello\")" 1 with
-      | { arguments = [ argument ]; _ }, _ when is_view argument -> ()
-      | _ -> fail "no conversion recorded");
+      | { arguments = [ argument ]; _ }, _ when not (is_view argument) -> ()
+      | _ -> fail "the literal is converted to a view");
   test "an unknown label is an error with a fix to the closest" (fun () ->
       one_diagnostic
         (functions ^ Fixtures.Infer.unknown_label_is_an_error_with_a_fix_to_the)

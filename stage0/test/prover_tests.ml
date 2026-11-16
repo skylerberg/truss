@@ -572,6 +572,16 @@ let () =
       not_proven Fixtures.Prover.index_at_an_arrays_count_is_not "prover.requires");
   test "a non-empty list literal is one allocation" (fun () ->
       proven Fixtures.Prover.non_empty_list_literal_is_one_allocation);
+  test "a string literal copied for its owner is one allocation" (fun () ->
+      proven Fixtures.Prover.string_literal_copied_for_its_owner_is_one);
+  test "a string literal copied for its owner is not free" (fun () ->
+      not_proven Fixtures.Prover.string_literal_copied_for_its_owner_is_not_free "prover.cost");
+  test "an empty string literal allocates nothing" (fun () ->
+      proven Fixtures.Prover.empty_string_literal_allocates_nothing);
+  test "reading a string literal allocates nothing" (fun () ->
+      proven Fixtures.Prover.reading_a_string_literal_allocates_nothing);
+  test "a copy has its original's capacity" (fun () ->
+      proven Fixtures.Prover.copy_has_its_originals_capacity);
   test "sequences with the same elements are identical" (fun () ->
       proven Fixtures.Prover.sequences_with_the_same_elements_are_identical);
   test "sequences that differ in one element are not identical" (fun () ->

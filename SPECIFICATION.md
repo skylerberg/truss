@@ -559,6 +559,7 @@ fn Option[Value].take(mut self) -> Option[Value] {
   nothing on the heap, such as the integers, floats, `Bool`, `Character`,
   and records, sum types, and `Array`s built only from those, is `Plain`.
 - **`Copyable` types have `copy()`.** An implicit copy never allocates.
+- A copy has the original's capacity.
 - **Handles are not `Copyable`,** nor is a type that holds one.
 - `Copyable` and `Plain` are prelude traits that the compiler implements and
   no `impl` can, and `Plain` requires `Copyable`. The compiler derives them
@@ -571,9 +572,9 @@ fn Option[Value].take(mut self) -> Option[Value] {
 
 ### Views
 
-A read-only parameter, a `let` bound to a place, the variable of a
-`for x in items` loop, and a slice refer to the original value instead of a
-copy:
+A read-only parameter, a `let` bound to a place or to a string literal, the
+variable of a `for x in items` loop, and a slice refer to the original value
+instead of a copy:
 
 ```truss
 let middle = items[1..4]
@@ -1813,8 +1814,13 @@ tasks run at once, and cells that tasks update.
 
 ## Strings
 
-- A string literal is a `String` in static memory, copied to the heap the
-  first time it is mutated. Making one, and `copy()` of one, cost nothing.
+- A string literal is a `String` constant without a name. Reading it, taking
+  a view of it, and binding it with `let` cost nothing. Where an owned
+  `String` is needed, as in a `var`, an `own` argument, or a returned value,
+  the literal is copied, and a copy of a non-empty literal counts as one
+  allocation.
+- A string literal without `${...}` where a `StringSlice` is expected is a
+  `StringSlice` of the constant's bytes.
 - `StringSlice` is the view of a `String`.
 - There is no concatenation operator: `+` on strings is an error, and
   adjacent literals do not join.

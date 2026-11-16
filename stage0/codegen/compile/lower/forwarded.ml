@@ -124,7 +124,7 @@ let call ~(substitution : Types.substitution) ~(fresh : unit -> Mir.local) (mir 
   let rec forwarded (value : Mir.operand) : Mir.operand option =
     let projected (written : Mir.place) type_ ~(of_place : Mir.place -> Mir.operand) =
       match written.root with
-      | Constant _ -> Some value
+      | Constant _ | Literal _ -> Some value
       | Local local -> (
           match List.assoc_opt local renamed with
           | Some caller_local ->

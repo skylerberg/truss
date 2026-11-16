@@ -118,6 +118,12 @@ let fresh_node_id state =
   state.form.next_node_id <- id + 1;
   id
 
+let build_operand (mode : Types.mode) (node : Core.expression) : Core.operand =
+  match (mode, node.kind) with
+  | (Read | Mut), Use place -> Place place
+  | Read, String _ -> Place (Temporary node)
+  | _ -> Value node
+
 let synthetic_expression state ~origin type_ kind : Core.expression =
   { id = fresh_node_id state; origin; type_; kind }
 
@@ -983,10 +989,7 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
                                  Passed
                                    {
                                      mode = Read;
-                                     value =
-                                       (match inner.kind with
-                                       | Use place -> Place place
-                                       | _ -> Value inner);
+                                     value = build_operand Read inner;
                                      mode_keyword = None;
                                    };
                                ];

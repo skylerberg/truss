@@ -140,8 +140,8 @@ let shape context (ty : Ground.ty) : Memory_layout.shape =
       | Some Unit, [] -> Record []
       | Some Never, [] -> Sum []
       | Some Array, [ Type element; Value count ] -> Array (element, Z.to_int count)
-      | Some Storage, [ Type element ] -> Storage.shape ~uint64 element
-      | Some View, [ Type element ] -> Storage.view_shape ~uint64 element
+      | Some Storage, [ Type element ] -> Storage.make_storage_shape ~uint64 element
+      | Some View, [ Type element ] -> Storage.make_view_shape ~uint64 element
       | Some Handle, [] -> Record [ ("descriptor", Raw (Integer Int32)) ]
       | Some Shared, [ Type _ ] -> Record [ ("value", Raw (Pointer Opaque)) ]
       | Some Integer, _ -> bug "Integer exists only in specifications"

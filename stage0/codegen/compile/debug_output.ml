@@ -80,9 +80,10 @@ let debug env ty =
     text "]"
   and storage_or_view field_ty (place : Lowered.place) ~as_text =
     let element, buffer, count =
-      match (Storage.elements_of field_ty, Storage.viewed field_ty) with
-      | Some element, _ -> (element, Storage.buffer place, Storage.length place)
-      | None, Some element -> (element, Storage.view_elements place, Storage.view_length place)
+      match (Storage.match_storage_element field_ty, Storage.match_view_element field_ty) with
+      | Some element, _ -> (element, Storage.project_buffer place, Storage.project_length place)
+      | None, Some element ->
+          (element, Storage.project_view_elements place, Storage.project_view_length place)
       | None, None -> bug "%s is not storage or a view" (Ground.to_string field_ty)
     in
     if as_text then
@@ -109,14 +110,15 @@ let debug env ty =
           fields;
         text ")"
   in
-  (match (form ty, Storage.representation env ty) with
+  (match (form ty, Representation.classify env ty) with
   | (Text | Sequence), Shape (Record [ (field, Typed field_ty) ]) ->
       storage_or_view field_ty (value / Field field) ~as_text:(form ty = Text)
   | _, Handle -> text "Handle"
   | _, Shared _ -> text "Shared"
   | _, Any -> text "any"
   | _, Storage element ->
-      list_of element ~element_at:(Storage.at value) ~count:(Copy (Storage.length value))
+      list_of element ~element_at:(Storage.index_element value)
+        ~count:(Copy (Storage.project_length value))
   | _, Shape shape -> (
       match (ty, shape) with
       | Never, _ -> ()
