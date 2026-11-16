@@ -250,18 +250,18 @@ let stop =
     Cmdliner.Term.(
       const (fun all () ->
           let directory = Sys.getcwd () in
-          match (all, Workspace.make_server_key directory) with
+          match (all, Workspace.find_project_root directory) with
           | true, _ ->
               if not (Workspace.stop_servers ()) then
                 Output.eprint_line "No background process is running.";
               Outcome.Exit 0
-          | false, "" ->
+          | false, None ->
               Output.eprintf
                 "No `truss.toml` in %s or any directory above it, so it is in no project. To stop \
                  the background processes of every project, use --all.\n"
                 directory;
               Outcome.Exit 2
-          | false, root ->
+          | false, Some root ->
               if not (Workspace.stop_servers ~key:root ()) then
                 Output.eprintf "No background process serves %s.\n" root;
               Outcome.Exit 0)
@@ -516,12 +516,13 @@ let run_language_server ~no_server =
       { (request (Lsp_command.check_arguments ~root encoding buffers)) with directory = root }
     in
     let response =
-      if no_server then begin
-        let response = handle ~report_progress:ignore request in
-        Workspace.flush ();
-        Ok response
-      end
-      else Workspace.call ~key:(Workspace.make_server_key root) ~report_progress:ignore request
+      match Workspace.find_project_root root with
+      | Some project_root when not no_server ->
+          Workspace.call ~key:project_root ~report_progress:ignore request
+      | Some _ | None ->
+          let response = handle ~report_progress:ignore request in
+          Workspace.flush ();
+          Ok response
     in
     match response with Ok { output; outcome = Exit 0 } -> Some output | Ok _ | Error _ -> None
   in
@@ -562,18 +563,19 @@ let run_client argv =
                   status)
             0 keys)
   | Some _ -> (
-      match
-        (Workspace.call
-           ~key:(Workspace.make_server_key (locate_directory arguments))
-           ~report_progress:Output.eprint (request arguments)
-          : (response, string) result)
-      with
-      | Ok response ->
-          Output.print response.output;
-          finish response.outcome
-      | Error message ->
-          Output.eprint_line message;
-          2)
+      match Workspace.find_project_root (locate_directory arguments) with
+      | None -> run_locally ()
+      | Some project_root -> (
+          match
+            (Workspace.call ~key:project_root ~report_progress:Output.eprint (request arguments)
+              : (response, string) result)
+          with
+          | Ok response ->
+              Output.print response.output;
+              finish response.outcome
+          | Error message ->
+              Output.eprint_line message;
+              2))
 
 module For_testing = struct
   let run_command_line = run_command_line

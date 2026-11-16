@@ -27,7 +27,7 @@ val plan_lock :
   all:bool ->
   (lock_plan, string) result
 
-val make_server_key : string -> string
+val find_project_root : string -> string option
 val serve : key:string -> handle:(report_progress:(string -> unit) -> 'request -> 'response) -> unit
 
 val call :
