@@ -152,9 +152,27 @@ let () =
       if status <> 0 then fail "exited with %d: %s" status output);
   test "stop ends the background process of another build" (fun () ->
       let root = make_package_served_by_other_build () in
-      let status, output = capture (fun () -> Cli.Main.run_client [ "truss"; "stop" ]) in
+      let status, output =
+        capture (fun () -> Cli.Main.run_client [ "truss"; "stop"; "-C"; root ])
+      in
       if status <> 0 then fail "exited with %d: %s" status output;
-      if is_database_open_elsewhere root then fail "the background process still runs")
+      if is_database_open_elsewhere root then fail "the background process still runs");
+  test "stop leaves the background processes of other projects running, and --all ends them"
+    (fun () ->
+      let stopped = make_package_served_by_other_build () in
+      let other = make_package_served_by_other_build () in
+      ignore (capture (fun () -> Cli.Main.run_client [ "truss"; "stop"; "-C"; stopped ]));
+      if is_database_open_elsewhere stopped then fail "the project's background process still runs";
+      if not (is_database_open_elsewhere other) then fail "stopped another project's process";
+      ignore (capture (fun () -> Cli.Main.run_client [ "truss"; "stop"; "--all" ]));
+      if is_database_open_elsewhere other then fail "--all left a background process running");
+  test "stop outside any project asks for --all, and exits with 2" (fun () ->
+      let directory = Harness.make_scratch_directory "no-project" in
+      let status, output =
+        capture (fun () -> Cli.Main.run_client [ "truss"; "stop"; "-C"; directory ])
+      in
+      if status <> 2 || not (String.includes ~affix:"use --all" output) then
+        fail "exited with %d: %s" status output)
 
 let list_server_files () =
   let directory = Filename.concat (Sys.getenv "TRUSS_CACHE") "servers" in
@@ -177,8 +195,8 @@ let wait_until_deadline ~is_done =
 let () =
   test "a background process that stops leaves none of its files in the cache" (fun () ->
       let before = list_server_files () in
-      ignore (make_package_served_by_other_build ());
-      ignore (capture (fun () -> Cli.Main.run_client [ "truss"; "stop" ]));
+      let root = make_package_served_by_other_build () in
+      ignore (capture (fun () -> Cli.Main.run_client [ "truss"; "stop"; "-C"; root ]));
       match list_server_files_added ~before with
       | [] -> ()
       | added -> fail "left %s" (String.concat ", " added));
