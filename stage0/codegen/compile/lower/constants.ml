@@ -5,8 +5,6 @@ open Emit_c.Builder
 
 let ( let* ) = Option.bind
 
-module Path_table = Hashtbl.Make (Path)
-
 let all values =
   List.fold_right
     (fun value rest ->
@@ -160,7 +158,12 @@ let constant_state context path =
   let st = enter context ~builder:(create context.env ~key:(Evaluator path)) (frame_of code) in
   (st, mir, ty)
 
-let rec fold_body ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowered.static_value list) =
+let rec fold_initializer context ~visiting path =
+  let st, mir, ty = constant_state context path in
+  (ty, fold_body ~visiting:(path :: visiting) ~depth:call_depth ~steps:(ref step_limit) st mir [])
+
+and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowered.static_value list)
+    =
   let body = mir.body in
   let locals = Hashtbl.create 16 in
   let* () =
@@ -175,7 +178,9 @@ let rec fold_body ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowered.stat
     let* whole =
       match place.root with
       | Local local -> Hashtbl.find_opt locals local
-      | Constant path -> st.context.constant path
+      | Constant path ->
+          if List.exists (Path.equal path) visiting then None
+          else snd (fold_initializer st.context ~visiting path)
       | Literal { text; type_ } -> literal_value st (ground st type_) text
     in
     part whole place.projections
@@ -263,10 +268,10 @@ let rec fold_body ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowered.stat
                  | Passed { value; _ } -> operand value
                  | Default ->
                      let* default = List.assoc_opt position defaults in
-                     fold_body ~depth:(depth - 1) ~steps callee default [])
+                     fold_body ~visiting ~depth:(depth - 1) ~steps callee default [])
                arguments)
         in
-        let* value = fold_body ~depth:(depth - 1) ~steps callee callee_mir values in
+        let* value = fold_body ~visiting ~depth:(depth - 1) ~steps callee callee_mir values in
         assign destination value
     | _ -> None
   in
@@ -306,52 +311,9 @@ let rec fold_body ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowered.stat
 type constant = Folded of Lowered.data | Run of Ground.ty
 
 let constant context path =
-  let st, mir, ty = constant_state context path in
-  match fold_body ~depth:call_depth ~steps:(ref step_limit) st mir [] with
-  | Some value -> Folded { data_key = Constant path; ty; value }
-  | None -> Run ty
-
-let list_folded_constants (lookups : Mir.lookups) path =
-  let constants = ref [] in
-  let walked_depths = Path_table.create 16 in
-  let note_constant (place : Mir.place) =
-    match place.root with
-    | Constant constant -> constants := constant :: !constants
-    | Local _ | Literal _ -> ()
-  in
-  let rec walk ~depth (graph : Mir.Graph.t) =
-    Mir.iter_graph_places_read note_constant graph.body;
-    if depth > 0 then
-      Array.iter
-        (fun (basic : Mir.Graph.basic_block) ->
-          List.iter
-            (fun (statement : Mir.Graph.statement) ->
-              match statement.kind with
-              | Call { call = { callee = Function { path = callee; _ }; _ }; _ } ->
-                  walk_callee ~depth:(depth - 1) callee
-              | _ -> ())
-            basic.statements)
-        graph.body.blocks
-  and walk_callee ~depth callee =
-    let is_walked =
-      match Path_table.find_opt walked_depths callee with
-      | Some walked_depth -> walked_depth >= depth
-      | None -> false
-    in
-    if not is_walked then begin
-      Path_table.replace walked_depths callee depth;
-      match Mir.graph_of_path lookups callee with
-      | Some graph ->
-          (match Mir.default_graphs_of_path lookups callee with
-          | Some (Parameter_defaults defaults) ->
-              List.iter (fun (_, default) -> walk ~depth default) defaults
-          | Some (Field_defaults _) | None -> ());
-          walk ~depth graph
-      | None -> ()
-    end
-  in
-  Option.iter (walk ~depth:call_depth) (Mir.initializer_graph_of_path lookups path);
-  List.sort_uniq Path.compare !constants
+  match fold_initializer context ~visiting:[] path with
+  | ty, Some value -> Folded { data_key = Constant path; ty; value }
+  | ty, None -> Run ty
 
 let write_fully = Well_known.path Write_fully
 

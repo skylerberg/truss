@@ -7,15 +7,7 @@ type context
 val env : context -> Memory_layout.env
 val drop_and_copy : context -> Drop_and_copy.t
 val monomorphic : Interface.Lookups.t -> Monomorphic.context
-
-val context :
-  Lookups.settings ->
-  constant:(Path.t -> Lowered.static_value option) ->
-  env:Memory_layout.env ->
-  Lookups.t ->
-  context
-
-val list_folded_constants : Mir.lookups -> Path.t -> Path.t list
+val context : Lookups.settings -> env:Memory_layout.env -> Lookups.t -> context
 
 val lower_source_code :
   context -> path:Path.t -> type_arguments:Ground.argument list -> Emit_c.Builder.instance

@@ -47,22 +47,15 @@ let make (context : Lower.context) (key : Instance.key) : lowered =
   | Call_evaluation { function_; arguments } ->
       code (Lower.lower_call_evaluation context ~function_ ~arguments)
 
-let lower (settings : Lookups.settings) (lookups : Lookups.t) ~lowered_constant key =
+let lower (settings : Lookups.settings) (lookups : Lookups.t) key =
   let env =
     Memory_layout.create settings.system
       ~shape_of:(Monomorphic.shape (Lower.monomorphic lookups.interface))
   in
-  let constant path =
-    match lowered_constant path with
-    | Ok (Folded (data, _)) -> Some data.Lowered.value
-    | Ok (Evaluate _) -> None
-    | Ok (Compiled _) -> bug "%s is not a constant" (Path.show path)
-    | Error unsupported -> raise (Lower.Unsupported unsupported)
-  in
   match
     Compiler_bug.while_doing ~stage:"Compile"
       ("lowering " ^ Instance.to_string key)
-      (fun () -> make (Lower.context settings ~constant ~env lookups) key)
+      (fun () -> make (Lower.context settings ~env lookups) key)
   with
   | lowered -> Ok lowered
   | exception Lower.Unsupported unsupported -> Error unsupported
@@ -753,11 +746,6 @@ let create ?(file_name = Path.show_file) ?results ?(evaluation_time_limit_ms = 1
     programs;
     runs = Hashtbl.create 8;
   }
-
-let list_folded_constants lookups path =
-  Compiler_bug.while_doing ~stage:"Compile"
-    ("listing the constants that " ^ Path.show path ^ " folds")
-    (fun () -> Lower.list_folded_constants lookups path)
 
 module For_testing = struct
   let is_folded compiler path =

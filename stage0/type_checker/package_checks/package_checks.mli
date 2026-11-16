@@ -11,6 +11,7 @@ type check =
   | Sealed of Resolve.Names.key
   | Impl of Resolve.Names.key
   | Type of Resolve.Names.key
+  | Constant of Resolve.Names.key
   | Instantiations
   | Tests
   | Dependencies

@@ -21,7 +21,6 @@ type t =
   | Callees
   | Recursion_groups
   | Proofs
-  | Folded_constants
   | Lowered_code
   | Test_keys
 

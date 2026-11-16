@@ -1954,7 +1954,6 @@ before the stage runs, on a cold build as on a hot one:
 |---|---|
 | A member's interface | Its container's header, which the declarations name |
 | A type's type facts | Those of the types that its resolved fields name |
-| A constant's value | The values of the constants that its MIR names, directly or in the functions it calls. A constant computed by running code is a run, cached by its test key. |
 | A test key | The test keys of the instances that its lowered code refers to |
 
 A cycle in one of these relationships is a strongly connected component, and
@@ -1968,7 +1967,7 @@ of other definitions, so a change to one can travel further:
 | Fact | Derived from | Read by |
 |---|---|---|
 | `Plain` and `Copyable` | The same facts of the types of its fields | The type checks of the functions that use the type |
-| A value computed at compile time, by a constant or a template check | The bodies of the functions that the computation runs | The code that embeds the value, and the template check's verdict |
+| A value computed at compile time, by a constant or a template check | The initializers of the constants that the computation names, and the bodies of the functions that it runs | The code that embeds the value, and the template check's verdict |
 | A recursion group | The call edges of the functions on a cycle, as one package sees them: a trait method's edges go to every implementation the package can see, including those in its dependencies | The termination proofs of its members |
 
 Adding a field of type `Text` to `Point` makes `Point` not `Plain`.
@@ -1987,6 +1986,13 @@ already. A stored layout would also have to be computed before the lowered
 code that reads it. That takes a list, made before lowering, of the types
 that each instance lays out, and a type missing from the list is a compiler
 error.
+
+**Folding a constant inlines the constants it names.** The folder evaluates
+the initializer of each constant it reads, instead of reading that
+constant's lowered code. A constant's lowered code therefore reads only MIR,
+so constants need no order within lowering, and no part has to predict which
+constants a folding reads. A constant that does not fold is computed by a
+run, which its test key caches.
 
 ### Stages and lookups
 
