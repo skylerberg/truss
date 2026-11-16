@@ -811,6 +811,16 @@ let () =
       expect_not_proven (swap ^ Fixtures.Prover.exchange_of_two_elements) "prover.disjoint");
   Harness.test "two different elements can be lent together" (fun () ->
       expect_proven (swap ^ Fixtures.Prover.exchange_of_distinct_elements));
+  Harness.test "elements of two ranges lent together must be in ranges that do not overlap"
+    (fun () ->
+      expect_not_proven
+        (swap ^ Fixtures.Prover.exchange_of_elements_of_overlapping_ranges)
+        "prover.disjoint");
+  Harness.test "elements of two ranges that do not overlap can be lent together" (fun () ->
+      expect_proven (swap ^ Fixtures.Prover.exchange_of_elements_of_disjoint_ranges));
+  Harness.test "an element of a range lent `mut` must not be the element that an argument views"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.element_of_a_range_pushed_onto_itself "prover.disjoint");
   Harness.test "parallel branches that mutate elements must mutate different ones" (fun () ->
       expect_not_proven Fixtures.Prover.parallel_branches_assigning_two_elements "prover.disjoint")
 

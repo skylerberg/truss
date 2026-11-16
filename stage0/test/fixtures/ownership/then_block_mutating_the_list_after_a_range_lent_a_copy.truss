@@ -1,0 +1,8 @@
+fn f(counts: mut List[UInt64]) -> UInt64 {
+  if counts[..].get(0) is Some(count) {
+    mut counts.clear()
+    count
+  } else {
+    0
+  }
+}

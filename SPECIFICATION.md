@@ -1031,9 +1031,10 @@ mut grid.cell(position).visit()
   that is not a copy aliases the part, which stays lent until the then-block
   or the body ends. It is never lent into the `else` block.
 - **For that long, the receiver is lent whole:** the statement makes no other
-  use of a receiver lent `mut`, and does not mutate one lent read-only. Two
-  indexes or slices of one `List`, `Slice`, or `Array` can be lent together
-  when the prover shows that they do not overlap.
+  use of a receiver lent `mut`, and does not mutate one lent read-only. A
+  receiver that is a view lends its original too, so `names[..].first()`
+  lends `names`. Two indexes or slices of one `List`, `Slice`, or `Array` can
+  be lent together when the prover shows that they do not overlap.
 - The `mut` on the receiver selects the overload that lends `mut`, and the
   part is then mutated with no keyword of its own.
 - **A lent part is not the caller's to keep.** It is not moved, returned,

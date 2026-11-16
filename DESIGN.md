@@ -527,6 +527,7 @@ mutated. Such a type takes the new value in an ordinary method, as
 | A lent constructor owns the arguments that the method made, and lends the places. | A result often pairs a computed value with a borrowed one, such as a search hit with a formatted label and the matching record. Rust allows a struct with an owned field and a reference. |
 | A lent part that is no view is a part of the first parameter, never of another. | A caller then knows from the signature alone which argument the part is in. It can lend `self.titles[key]` in turn where `key` is a local, which a part of any argument would forbid. Rust names the argument with a lifetime. |
 | A lending call lends its whole receiver. | The method was proven on the assumption that nothing else uses `self` while the part is lent. |
+| A receiver that is a view lends its original. | The lent part is in the original's storage. Mutating the original while a name aliases the part would leave a dangling view. |
 | `List`, `Slice`, and `Array` can lend two parts at once. | Their elements at different positions are disjoint places. |
 
 ### Loops

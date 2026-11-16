@@ -545,7 +545,7 @@ and lower_lent builder (lending : Core.expression) ~duration : Tree.place option
       Emitter.add_temporary builder part;
       Emitter.emit builder (Basic (Lend { part; call })) lending.origin;
       (match call.arguments with
-      | Passed { mode; value = Borrow _ as receiver; _ } :: _ ->
+      | Passed { mode; value = (Borrow _ | Use _) as receiver; _ } :: _ ->
           ignore
             (Emitter.start_loan builder receiver
                (if mode = Mut then Mut else Read)
