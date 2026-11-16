@@ -68,7 +68,7 @@ let bind = Monomorphic.make_substitution
 
 let read_impl_interface context impl =
   match Interface.Definition.read_impl_interface context.lookups.interface impl with
-  | Some position -> position
+  | Some interface -> interface
   | None -> raise_bug "no interface for %s" (Path.show impl)
 
 let read_trait_interface context trait =
@@ -111,9 +111,8 @@ let make_code context (path : Path.t) type_arguments : code =
             (make_unwritten_code ~definition:path ~substitution:[] ~result:(Returns Types.unit)) with
             written = Some (read_written context key);
             real =
-              (match Interface.Definition.read_test_uses context.lookups.interface path with
-              | Some uses -> Monomorphic.list_evidence context.monomorphic [] uses
-              | None -> raise_bug "%s has no test interface" (Path.show path));
+              Monomorphic.list_evidence context.monomorphic []
+                (Interface.Definition.read_test_uses context.lookups.interface path);
           }
       | _ -> raise_bug "%s is not a test" (Path.show path))
   | Top _ | Method _ -> (

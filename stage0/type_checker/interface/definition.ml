@@ -79,12 +79,11 @@ let read_impl_interface (lookups : Lookups.t) (path : Path.t) =
       match read_interface lookups path with Some (Impl_interface impl) -> Some impl | _ -> None)
 
 let read_test_uses lookups path =
-  match read_interface lookups path with Some (Test_interface uses) -> Some uses | _ -> None
+  match read_interface lookups path with
+  | Some (Test_interface uses) -> uses
+  | _ -> Compiler_bug.raise_bug ~stage:"Interface" "%s has no test interface" (Path.show path)
 
-let is_external_test lookups path =
-  match read_test_uses lookups path with
-  | Some uses -> uses <> Types.no_capabilities
-  | None -> Compiler_bug.raise_bug ~stage:"Interface" "%s is not a test" (Path.show path)
+let is_external_test lookups path = read_test_uses lookups path <> Types.no_capabilities
 
 let find_real_implementation (lookups : Lookups.t) capability =
   match
