@@ -1,8 +1,9 @@
 type t
 
-val open_ : string -> t
+val default_directory : unit -> (string, string) result
+val make_root : string -> (string, string) result
+val open_ : string -> (t, string) result
 val close : t -> unit
-val default_directory : unit -> string
 val directory : t -> string
 val flush : t -> unit
 

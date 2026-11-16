@@ -1,13 +1,17 @@
 let opened_cache : Cache.t option ref = ref None
 
+exception Unusable_cache of string
+
 let open_cache () =
   match !opened_cache with
   | Some cache -> cache
-  | None ->
-      let cache = Cache.open_ (Cache.default_directory ()) in
-      Cache.compact cache;
-      opened_cache := Some cache;
-      cache
+  | None -> (
+      match Result.bind (Cache.default_directory ()) Cache.open_ with
+      | Ok cache ->
+          Cache.compact cache;
+          opened_cache := Some cache;
+          cache
+      | Error message -> raise (Unusable_cache message))
 
 let flush_cache () = Option.iter Cache.flush !opened_cache
 

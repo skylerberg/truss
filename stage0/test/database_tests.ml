@@ -208,6 +208,20 @@ let () =
       | Ok _ -> Harness.fail "answered with no background process");
       let elapsed = Unix.gettimeofday () -. started in
       if elapsed > 2. then Harness.fail "the error took %.1f s" elapsed);
+  Harness.test
+    "a background process does not listen in a cache that other users can write, where they could \
+     replace its socket" (fun () ->
+      let cache = Harness.scratch "writable-cache" in
+      Unix.chmod cache 0o777;
+      Harness.with_environment
+        [ ("TRUSS_CACHE", cache) ]
+        (fun () ->
+          match Workspace.For_testing.listen ~key:(Harness.scratch "refused") with
+          | Ok socket ->
+              Unix.close socket;
+              Harness.fail "listened"
+          | Error message ->
+              if not (Substring.contains message cache) then Harness.fail "refused with: %s" message));
   Harness.test "the background process answers each request and sends its progress" (fun () ->
       let key = Harness.scratch "served" in
       let socket =
