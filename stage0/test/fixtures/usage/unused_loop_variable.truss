@@ -1,0 +1,7 @@
+fn f(items: List[Int64]) -> Int64 {
+  var count = 0
+  for item in items {
+    count = count + 1
+  }
+  count
+}

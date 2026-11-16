@@ -1,0 +1,5 @@
+fn f(outcome: Result[Int64, Int64]) -> Int64 {
+  match outcome {
+    Ok(code) | Err(code) => 1
+  }
+}

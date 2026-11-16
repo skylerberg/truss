@@ -1,0 +1,5 @@
+fn f(items: List[Int64]) -> Int64
+  requires forall item in items => true
+{
+  0
+}
