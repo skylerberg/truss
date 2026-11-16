@@ -1,3 +1,0 @@
-(library
- (name reachable)
- (libraries compiler_bug instance emit_c cbor blake3))

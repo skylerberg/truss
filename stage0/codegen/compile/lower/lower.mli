@@ -19,7 +19,6 @@ type constant = Folded of Lowered.data | Run of Ground.ty
 val lower_constant : context -> Path.t -> constant
 val lower_evaluator : context -> Path.t -> Emit_c.Builder.instance
 val lower_table : context -> Instance.table -> Lowered.table
-val test_key : Path.t -> Instance.key
 
 val lower_template_check :
   context ->

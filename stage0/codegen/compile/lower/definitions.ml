@@ -33,8 +33,6 @@ let context (settings : Lookups.settings) ~env (lookups : Lookups.t) =
     checks = settings.checks;
   }
 
-let test_key path = Instance.Code { path; type_arguments = [] }
-
 type written = { spans : Source.Definition_span.t array; text : string }
 
 type code = {

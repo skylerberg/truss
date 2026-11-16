@@ -60,16 +60,9 @@ let lower (settings : Lookups.settings) (lookups : Lookups.t) key =
   | lowered -> Ok lowered
   | exception Lower.Unsupported unsupported -> Error unsupported
 
-let evaluated_own_hash =
-  Blake3.derive_key ~context:"truss 2026-11-12 evaluated constant own hash" ""
-
 let references = function
   | Compiled fragment | Folded (_, fragment) -> Emit_c.references fragment
   | Evaluate (path, _) -> [ Instance.Evaluator path ]
-
-let own_hash = function
-  | Compiled fragment | Folded (_, fragment) -> Reachable.own_hash fragment
-  | Evaluate _ -> evaluated_own_hash
 
 let call_node (interface : Interface.Lookups.t) (path : Path.t) =
   match path with
@@ -149,12 +142,77 @@ let check_calls (interface : Interface.Lookups.t) ~list_call_edges (key : Instan
                 (Emit_c.called fragment)))
   | _ -> ()
 
-let test_keys ~lowered ~known members =
-  Reachable.component_keys
-    ~link:(fun key ->
+module Instance_table = Hashtbl.Make (Instance)
+
+let derive_own_hash = Blake3.derive_key ~context:"truss 2026-11-12 instance own hash"
+
+let evaluated_own_hash =
+  Blake3.derive_key ~context:"truss 2026-11-12 evaluated constant own hash" ""
+
+let hash_own = function
+  | Compiled fragment | Folded (_, fragment) -> derive_own_hash (Emit_c.text fragment)
+  | Evaluate _ -> evaluated_own_hash
+
+let derive_test_key = Blake3.derive_key ~context:"truss 2026-11-12 reach key"
+let encode_test_key fields = derive_test_key (Cbor.encode (Cbor.Array fields))
+
+let derive_cycle_member_key ~known members start =
+  let visit_order = Instance_table.create 8 in
+  let rec visit visited = function
+    | [] -> List.rev visited
+    | key :: queue ->
+        if Instance_table.mem visit_order key then visit visited queue
+        else begin
+          Instance_table.replace visit_order key (Instance_table.length visit_order);
+          let own_hash, references = Instance_table.find members key in
+          visit
+            ((own_hash, references) :: visited)
+            (queue @ List.filter (Instance_table.mem members) references)
+        end
+  in
+  encode_test_key
+    [
+      Text "group";
+      Cbor.Array
+        (List.map
+           (fun (own_hash, references) ->
+             Cbor.Array
+               [
+                 Bytes own_hash;
+                 Cbor.Array
+                   (List.map
+                      (fun reference ->
+                        if Instance_table.mem members reference then
+                          Cbor.Array
+                            [ Text "in"; Cbor.int (Instance_table.find visit_order reference) ]
+                        else Cbor.Array [ Text "out"; Bytes (known reference) ])
+                      references);
+               ])
+           (visit [] [ start ]));
+    ]
+
+let derive_test_keys ~lowered ~known component =
+  match component with
+  | [ key ] ->
       let code = lowered key in
-      (own_hash code, references code))
-    ~deep:known members
+      [
+        ( key,
+          encode_test_key
+            [
+              Text "unit";
+              Bytes (hash_own code);
+              Cbor.Array
+                (List.map (fun reference -> Cbor.Bytes (known reference)) (references code));
+            ] );
+      ]
+  | component ->
+      let members = Instance_table.create 8 in
+      List.iter
+        (fun member ->
+          let code = lowered member in
+          Instance_table.replace members member (hash_own code, references code))
+        component;
+      List.map (fun member -> (member, derive_cycle_member_key ~known members member)) component
 
 type 'a ran = Ran of 'a | Ran_too_long | Stopped of string
 type results = { find : string -> string option; add : string -> string -> unit }
@@ -182,9 +240,9 @@ let lowered compiler key =
   | Ok lowered -> lowered
   | Error unsupported -> raise (Lower.Unsupported unsupported)
 
-let reach compiler root =
+let read_test_key compiler root =
   match compiler.requests.test_key root with
-  | Ok reach_key -> reach_key
+  | Ok test_key -> test_key
   | Error unsupported -> raise (Lower.Unsupported unsupported)
 
 let programs_built = Atomic.make 0
@@ -205,11 +263,9 @@ let result_key compiler root =
           [
             Cbor.int Emit_c.version;
             Cbor.Text (Libc.system_name compiler.requests.settings.system);
-            Bytes (reach compiler root);
+            Bytes (read_test_key compiler root);
             Cbor.Array (List.map (fun flag -> Cbor.Text flag) compiler.settings.extra);
           ]))
-
-let test_key compiler test = result_key compiler (Lower.test_key test)
 
 let position compiler (definition : Path.t) offset : Emit_c.position =
   let names = compiler.requests.interface.names in
@@ -246,9 +302,10 @@ let small_callees ~find ~worked_on fragment =
   | _ -> []
 
 let test_runner : Instance.key = Code { path = Well_known.path Run_tests; type_arguments = [] }
+let make_test_root path = Instance.Code { path; type_arguments = [] }
 
 let roots ~tests ~mains =
-  (if tests = [] then [] else test_runner :: List.map Lower.test_key tests)
+  (if tests = [] then [] else test_runner :: List.map make_test_root tests)
   @ List.map (fun main -> Instance.Generated (Program_main main)) mains
 
 let rec build ?progress ?tests ?(supplied = []) compiler ~roots ~startup ~output =
@@ -257,16 +314,14 @@ let rec build ?progress ?tests ?(supplied = []) compiler ~roots ~startup ~output
     | Some fragment -> fragment
     | None -> compiled compiler key
   in
-  let units = Reachable.reachable ~lookup roots in
+  let units = Emit_c.list_linked ~lookup roots in
   let units_by_key =
-    List.fold_left
-      (fun units_by_key unit -> Reachable.Keys.add (Emit_c.key unit) unit units_by_key)
-      Reachable.Keys.empty units
+    Instance_table.of_seq (List.to_seq (List.map (fun unit -> (Emit_c.key unit, unit)) units))
   in
   let sources =
     [ ("startup", startup); ("sites", Emit_c.sites_file ~position:(site_position compiler) units) ]
   in
-  let find key = Reachable.Keys.find_opt key units_by_key in
+  let find key = Instance_table.find_opt units_by_key key in
   let copied =
     match compiler.settings.build with
     | Development -> small_callees ~find ~worked_on:compiler.worked_on
@@ -512,7 +567,7 @@ let incomplete_record compiler todo_types =
 let run_tests ?(rerun = false) ?(progress = ignore) compiler ~time_limit_ms tests =
   reporting compiler @@ fun () ->
   let results = compiler.results in
-  let roots = List.map Lower.test_key tests in
+  let roots = List.map make_test_root tests in
   progress Lowering;
   let keyed test = results <> None && not (external_test compiler test) in
   let known =
@@ -521,7 +576,7 @@ let run_tests ?(rerun = false) ?(progress = ignore) compiler ~time_limit_ms test
         match compiler.requests.reached_todo_types root with
         | _ :: _ as todo_types -> (index, root, None, Some (incomplete_record compiler todo_types))
         | [] ->
-            let key = if keyed test then Some (test_key compiler test) else None in
+            let key = if keyed test then Some (result_key compiler root) else None in
             let known_record =
               match (results, key) with
               | Some results, Some key when not rerun -> stored results key
@@ -601,9 +656,10 @@ type unshippable = {
   way : Path.t list;
 }
 
-let reached compiler ~main =
+let trace_main compiler ~main =
   match compiler.requests.reached_todo_types (Generated (Program_main main)) with
-  | [] -> Reachable.running ~lookup:(compiled compiler) [ Instance.Generated (Program_main main) ]
+  | [] ->
+      Emit_c.trace_reachable ~lookup:(compiled compiler) [ Instance.Generated (Program_main main) ]
   | _ :: _ -> []
 
 let reached_definitions compiler ~main =
@@ -615,11 +671,11 @@ let reached_definitions compiler ~main =
          | (Instance.Code { path; _ } | Constant path | Generated (Program_main path)) :: _ ->
              Some path
          | _ -> None)
-       (reached compiler ~main))
+       (trace_main compiler ~main))
 
 let unshippable compiler ~main =
   reporting compiler @@ fun () ->
-  let reached = reached compiler ~main in
+  let reached = trace_main compiler ~main in
   begin
     let definitions keys =
       List.fold_left
@@ -699,7 +755,7 @@ let build_program compiler ~main ~output =
 
 let reached_todo_types compiler (root : Path.t) =
   compiler.requests.reached_todo_types
-    (match root with Test _ -> Lower.test_key root | _ -> Generated (Program_main root))
+    (match root with Test _ -> make_test_root root | _ -> Generated (Program_main root))
 
 let run_template_check compiler ~from_template ~literals ~clauses =
   let ran =
@@ -753,6 +809,8 @@ module For_testing = struct
     | Folded _ -> true
     | Evaluate _ -> false
     | Compiled _ -> bug "%s is not a constant" (Path.show path)
+
+  let make_lowered fragment = Compiled fragment
 
   module Intrinsics = Intrinsics
 

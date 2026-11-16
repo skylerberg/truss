@@ -41,8 +41,11 @@ let make_method_path { impl; name; receiver; _ } = Path.Method { owner = impl; n
 let make_method_code (impl_method : impl_method) =
   Code { path = make_method_path impl_method; type_arguments = impl_method.type_arguments }
 
+type t = key
+
 let compare = Stdlib.compare
 let equal = ( = )
+let hash key = Hashtbl.hash_param 64 256 key
 let marker word = "_" ^ word ^ "_"
 
 let module_path (module_ : Path.module_) =

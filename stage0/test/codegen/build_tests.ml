@@ -29,25 +29,21 @@ let lookup instances key =
 
 let references program key = Emit_c.references (lookup program key)
 
-module Instance_key = struct
-  type t = Instance.key
-
-  let equal = Instance.equal
-  let hash = Hashtbl.hash
-  let compare = Instance.compare
-end
-
 let find_components program root =
-  Strongly_connected.find_components (module Instance_key) ~successors:(references program) [ root ]
+  Strongly_connected.find_components (module Instance) ~successors:(references program) [ root ]
 
-let reach_key program root =
-  let link key = (Reachable.own_hash (lookup program key), references program key) in
+let derive_component_keys program ~known component =
+  Compile.derive_test_keys
+    ~lowered:(fun key -> Compile.For_testing.make_lowered (lookup program key))
+    ~known component
+
+let derive_test_key program root =
   let known = Hashtbl.create 16 in
   List.iter
-    (fun members ->
+    (fun component ->
       List.iter
-        (fun (key, reach_key) -> Hashtbl.replace known key reach_key)
-        (Reachable.component_keys ~link ~deep:(Hashtbl.find known) members))
+        (fun (key, test_key) -> Hashtbl.replace known key test_key)
+        (derive_component_keys program ~known:(Hashtbl.find known) component))
     (find_components program root);
   Hashtbl.find known root
 
@@ -82,10 +78,10 @@ let ping_pong ?(ping = "ping") ?(pong = "pong") returned =
 let () =
   Codegen_support.test "a build reaches each called instance once, in order" (fun () ->
       let program = named_program ~entry_name:"start" ~helper_name:"helper" 1 in
-      let reached = Reachable.reachable ~lookup:(lookup program) [ Codegen_support.key "start" ] in
+      let linked = Emit_c.list_linked ~lookup:(lookup program) [ Codegen_support.key "start" ] in
       Codegen_support.expect_string ~expected:"test::start test::helper"
         (String.concat " "
-           (List.map (fun fragment -> Instance.to_string (Emit_c.key fragment)) reached)));
+           (List.map (fun fragment -> Instance.to_string (Emit_c.key fragment)) linked)));
   Codegen_support.test "a drop reaches the type's drop function" (fun () ->
       let dropping_instance =
         Codegen_support.instance "f"
@@ -101,7 +97,9 @@ let () =
       Codegen_support.expect_string ~expected:"drop Text"
         (String.concat " " (List.map Instance.to_string references)));
   let test_key ~entry_name ~helper_name returned =
-    reach_key (named_program ~entry_name ~helper_name returned) (Codegen_support.key entry_name)
+    derive_test_key
+      (named_program ~entry_name ~helper_name returned)
+      (Codegen_support.key entry_name)
   in
   Codegen_support.test "renaming the definitions a test reaches keeps its key" (fun () ->
       if
@@ -113,13 +111,18 @@ let () =
         test_key ~entry_name:"start" ~helper_name:"helper" 1
         = test_key ~entry_name:"start" ~helper_name:"helper" 2
       then Codegen_support.fail "the keys are equal");
-  Codegen_support.test "changing a helper changes its own hash and not its caller's" (fun () ->
-      let own returned name =
-        let program = named_program ~entry_name:"start" ~helper_name:"helper" returned in
-        Reachable.own_hash (lookup program (Codegen_support.key name))
+  Codegen_support.test "a caller's key reads its callee's code only through the callee's key"
+    (fun () ->
+      let start = Codegen_support.key "start" in
+      let derive_start_key returned =
+        List.assoc start
+          (derive_component_keys
+             (named_program ~entry_name:"start" ~helper_name:"helper" returned)
+             ~known:(fun _ -> "the callee's key")
+             [ start ])
       in
-      if own 1 "helper" = own 2 "helper" then Codegen_support.fail "the helper's hash is the same";
-      if own 1 "start" <> own 2 "start" then Codegen_support.fail "the caller's hash changed");
+      if derive_start_key 1 <> derive_start_key 2 then
+        Codegen_support.fail "the caller's key changed");
   Codegen_support.test "instances that call each other are one component, after the ones they reach"
     (fun () ->
       Harness.expect_strings
@@ -140,14 +143,14 @@ let () =
       Harness.expect_strings ~expected:[ "test::again" ] (show_components [ again ] "again"));
   Codegen_support.test "a test that reaches instances that call each other has a key" (fun () ->
       if
-        reach_key (ping_pong 1) (Codegen_support.key "start")
-        = reach_key (ping_pong 2) (Codegen_support.key "start")
+        derive_test_key (ping_pong 1) (Codegen_support.key "start")
+        = derive_test_key (ping_pong 2) (Codegen_support.key "start")
       then Codegen_support.fail "a change inside the group left the key the same");
   Codegen_support.test "a group's key does not depend on its instances' names" (fun () ->
       let renamed = ping_pong ~ping:"alpha" ~pong:"omega" 1 in
       if
-        reach_key (ping_pong 1) (Codegen_support.key "start")
-        <> reach_key renamed (Codegen_support.key "start")
+        derive_test_key (ping_pong 1) (Codegen_support.key "start")
+        <> derive_test_key renamed (Codegen_support.key "start")
       then Codegen_support.fail "the keys differ")
 
 let () =

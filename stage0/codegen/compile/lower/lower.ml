@@ -8,7 +8,6 @@ let env (context : context) = context.env
 let drop_and_copy (context : context) = context.drop_and_copy
 let monomorphic = Definitions.monomorphic
 let context = Definitions.context
-let test_key = Definitions.test_key
 
 type constant = Constants.constant = Folded of Lowered.data | Run of Ground.ty
 
