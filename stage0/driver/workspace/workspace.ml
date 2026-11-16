@@ -254,7 +254,9 @@ let target_packages snapshot requested =
   | under_requested -> under_requested
 
 let package snapshot name =
-  List.find_opt (fun (package : Project.package) -> package.name = name) snapshot.project.packages
+  if name = Path.standard_package then Some standard_package
+  else
+    List.find_opt (fun (package : Project.package) -> package.name = name) snapshot.project.packages
 
 let package_files snapshot name =
   match package snapshot name with Some package -> List.map fst package.files | None -> []

@@ -523,6 +523,8 @@ let () =
            (fun (test : Cli.Test_command.test) -> test.name)
            (select project ~paths:[ Filename.concat root "other.truss" ] ~match_:None)))
 
+let headers texts = List.map (fun text -> List.hd (String.split_on_char '\n' text)) texts
+
 let () =
   test "a function's signature is its text without its body" (fun () ->
       let root = package [ ("main.truss", Fixtures.public_double_with_a_requires) ] in
@@ -535,7 +537,17 @@ let () =
       let root = package [ ("main.truss", Fixtures.point_with_a_sum_method) ] in
       expect_strings
         ~expected:[ "public type Point(x: Int64, y: Int64)"; "public fn Point.sum(self) -> Int64" ]
-        (shown root "demo::Point"))
+        (shown root "demo::Point"));
+  test "a definition of the standard library is shown" (fun () ->
+      let root = package [ ("main.truss", Fixtures.public_double_with_a_requires) ] in
+      expect_strings
+        ~expected:[ "public fn strip_styles(text: StringSlice) -> String" ]
+        (headers (shown root "standard::console::strip_styles")));
+  test "a prelude name is shown without its module" (fun () ->
+      let root = package [ ("main.truss", Fixtures.public_double_with_a_requires) ] in
+      expect_strings
+        ~expected:[ "public fn String.is_empty(self) -> Bool" ]
+        (headers (shown root "String.is_empty")))
 
 let two_points () =
   package
@@ -544,8 +556,6 @@ let two_points () =
       ("geometry/geometry.truss", Fixtures.geometry_point);
       ("drawing/drawing.truss", Fixtures.drawing_point);
     ]
-
-let headers texts = List.map (fun text -> List.hd (String.split_on_char '\n' text)) texts
 
 let () =
   test "a type is shown with an impl that names it by its module's path" (fun () ->
