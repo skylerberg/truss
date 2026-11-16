@@ -36,7 +36,7 @@ val list_field_type_paths : package:Path.package -> Types.type_interface -> Path
 val compute_component_facts :
   Lookups.t -> (Path.t * Types.type_interface) list -> (Path.t * Environment.type_facts) list
 
-type answer = Holds | Fails | Unknown of Types.ty
+type decision = Holds | Fails | Depends_on of Types.ty
 
 val decide_property :
   Lookups.t ->
@@ -44,14 +44,14 @@ val decide_property :
   normalize:(Types.ty -> Types.ty) ->
   property ->
   Types.ty ->
-  answer
+  decision
 
 val decide_storable :
   Lookups.t ->
   list_bounds:(Types.parameter -> Types.trait_reference list) ->
   normalize:(Types.ty -> Types.ty) ->
   Types.ty ->
-  answer
+  decision
 
 val collect_contents :
   Lookups.t -> normalize:(Types.ty -> Types.ty * Path.t list) -> Types.ty -> contents

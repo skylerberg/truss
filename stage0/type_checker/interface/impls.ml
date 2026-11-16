@@ -158,10 +158,10 @@ let list_required_bounds (generics : Types.generic list) (substitution : Types.s
       | _ -> [])
     generics
 
-let find_built_in_evidence : Properties.answer -> evidence option = function
+let find_built_in_evidence : Properties.decision -> evidence option = function
   | Holds -> Some Built_in
   | Fails -> None
-  | Unknown open_type -> Some (Accepted open_type)
+  | Depends_on open_type -> Some (Accepted open_type)
 
 let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_conditions = true)
     (type_ : Types.ty) (wanted : Types.trait_reference) : evidence option =
@@ -448,7 +448,7 @@ let has_property property lookups ~list_bounds type_ =
   match decide_property property lookups ~list_bounds type_ with
   | Holds -> true
   | Fails -> false
-  | Unknown open_type ->
+  | Depends_on open_type ->
       raise_bug "whether `%s` %s depends on the open type `%s`, so it has no bool answer"
         (Types.show type_)
         (Properties.show_property property)

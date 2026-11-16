@@ -151,7 +151,7 @@ val find_evidence : state -> Types.ty -> Types.trait_reference -> Interface.Impl
 val solve_trait_arguments : state -> Types.ty -> Types.trait_reference -> Types.trait_reference
 
 val decide_property :
-  state -> Interface.Properties.property -> Types.ty -> Interface.Properties.answer
+  state -> Interface.Properties.property -> Types.ty -> Interface.Properties.decision
 
 val is_plain : state -> Types.ty -> bool
 val is_view : state -> Types.ty -> bool
