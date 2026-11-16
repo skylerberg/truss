@@ -113,6 +113,70 @@ let read_method_signature lookups ~owner (method_ : Types.trait_method) =
   | None ->
       Compiler_bug.raise_bug ~stage:"Interface" "the method `%s` has no signature" (Path.show path)
 
+type declaring_clause =
+  | Own_uses
+  | Impl_uses of { capability : Path.t }
+  | Associated_capability_set of { name : string; is_defined : bool }
+
+type capability_declaration =
+  | Declared_by of declaring_clause
+  | Fixed_by_trait of { trait : Types.trait_reference; method_name : string }
+
+let find_self_capability_set (trait : Types.trait_interface) ~trait_path
+    (signature : Types.signature) =
+  List.find_map
+    (function
+      | Types.Capability_projection { base = Parameter parameter; name; _ }
+        when Path.equal parameter.owner trait_path
+             && Types.is_self_parameter parameter
+             && List.mem name trait.associated_capabilities ->
+          Some name
+      | _ -> None)
+    (signature.uses :> Types.capability list)
+
+let find_capability_declaration lookups (path : Path.t) =
+  let ( let* ) = Option.bind in
+  match path with
+  | Method { owner = (Impl _ | Derived _) as owner; name; receiver } ->
+      let* impl = read_impl_interface lookups owner in
+      let trait_path = impl.implements.trait in
+      let* trait = read_trait_interface lookups trait_path in
+      if trait.is_capability then Some (Declared_by (Impl_uses { capability = trait_path }))
+      else
+        let* declared =
+          List.find_opt
+            (fun declared -> Types.is_implemented_by trait declared ~name ~receiver)
+            trait.methods
+        in
+        let* signature =
+          read_declared_signature lookups
+            (Method
+               {
+                 owner = trait_path;
+                 name = declared.method_name;
+                 receiver = declared.method_receiver;
+               })
+        in
+        Some
+          (match find_self_capability_set trait ~trait_path signature with
+          | Some set ->
+              Declared_by
+                (Associated_capability_set
+                   { name = set; is_defined = List.mem_assoc set impl.capability_sets })
+          | None -> Fixed_by_trait { trait = impl.implements; method_name = name })
+  | Top _ | Method _ | Test _ -> Some (Declared_by Own_uses)
+  | Member_constant _ | Impl _ | Derived _ | Law_proof _ | Unresolved _ ->
+      Compiler_bug.raise_bug ~stage:"Interface" "%s declares no capabilities" (Path.show path)
+
+let show_declaring_clause clause capability =
+  match clause with
+  | Own_uses -> Printf.sprintf "`uses %s`" capability
+  | Impl_uses _ -> Printf.sprintf "`uses %s` on the `impl`" capability
+  | Associated_capability_set { name; is_defined = true } ->
+      Printf.sprintf "`%s` in the `impl`'s `capability %s`" capability name
+  | Associated_capability_set { name; is_defined = false } ->
+      Printf.sprintf "`capability %s = %s` in the `impl`" name capability
+
 let is_specification = function
   | Environment.Function_interface signature | Theorem_interface signature ->
       signature.specification_only

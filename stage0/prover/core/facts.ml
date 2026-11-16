@@ -164,11 +164,11 @@ let make_requires_fix (context : State.context) required =
     | _ -> None
   in
   match edit with
-  | Some edit ->
+  | Some edit when not context.inherits_precondition ->
       [
         { State.title = (State.Text "Add `requires " :: required) @ [ Text "`" ]; edits = [ edit ] };
       ]
-  | None -> []
+  | Some _ | None -> []
 
 let find_parameter_name (context : State.context) symbol =
   if List.mem symbol context.entry then
@@ -300,11 +300,11 @@ and make_obligation ?template_clause (context : State.context) (frame : State.fr
          | Some term when not (is_parameter term) -> [ (term, "result") ]
          | _ -> []));
     template_clause;
-    may_stop_with_panic = false;
+    panic_clause = None;
   }
 
-let record_obligation ?template_clause ?cited ~fixes ~may_stop_with_panic context
-    (frame : State.frame) code location message goal =
+let record_obligation ?template_clause ?cited ~fixes ~panic_clause context (frame : State.frame)
+    code location message goal =
   match
     make_closed_obligation ?template_clause context frame code location message
       (add_quantifier_facts
@@ -320,23 +320,24 @@ let record_obligation ?template_clause ?cited ~fixes ~may_stop_with_panic contex
             | None -> [])
         | fixes -> fixes
       in
-      context.obligations <-
-        { obligation with cited; fixes; may_stop_with_panic } :: context.obligations;
+      context.obligations <- { obligation with cited; fixes; panic_clause } :: context.obligations;
       assume context frame goal
   | None -> ()
 
 let oblige ?template_clause ?cited ?(fixes = []) context frame code location message goal =
-  record_obligation ?template_clause ?cited ~fixes ~may_stop_with_panic:false context frame code
-    location message goal
+  record_obligation ?template_clause ?cited ~fixes ~panic_clause:None context frame code location
+    message goal
 
 let oblige_safe_operation ?cited ?(fixes = []) (context : State.context) (frame : State.frame) code
     location message goal =
+  let record panic_clause =
+    record_obligation ?cited ~fixes ~panic_clause context frame code location message goal
+  in
   match frame.panic with
   | Declared when frame.source.key = Some context.home ->
       if frame.makes_obligations then assume context frame goal
-  | Declared | Undeclared | Undeclarable ->
-      record_obligation ?cited ~fixes ~may_stop_with_panic:(frame.panic = Undeclared) context frame
-        code location message goal
+  | Undeclared clause -> record (Some clause)
+  | Declared | Undeclarable -> record None
 
 let quote (source : State.source) origin =
   match source.key with Some key -> State.Quote (key, origin) | None -> Text "this expression"

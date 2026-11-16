@@ -1,0 +1,11 @@
+trait Describe {
+  fn describe(self) -> Instant
+}
+
+type Box(value: Int64)
+
+impl Describe for Box {
+  fn describe(self) -> Instant {
+    Clock.now()
+  }
+}
