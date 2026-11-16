@@ -40,10 +40,10 @@ let find_part ?(inherited = false) (lookups : Lookups.t) path callee =
       })
     (Option.map
        (fun ({ form; _ } : Mir.contract Mir.sourced) -> form)
-       (Mir.contract_of_path lookups.mir path))
+       (Mir.read_contract lookups.mir path))
 
 let holds_todo (lookups : Lookups.t) (key : Resolve.Names.key) =
-  match Mir.code (lookups.mir.body_part key) with
+  match Mir.find_code (lookups.mir.body_part key) with
   | Some code ->
       let holds = ref false in
       Mir.iter_code

@@ -4,12 +4,12 @@ module Call_edges = Call_edges
 include Walk
 include Parts
 
-let code_of_formula = Expansion.code_of_formula
-let code_of tree : Parts.code = { tree; graph = Expansion.expanded tree }
+let expand_formula = Expansion.expand_formula
+let make_code tree : Parts.code = { tree; graph = Expansion.expand tree }
 
-let body_part ?interface (form : Core.t) : body_part =
+let make_body_part ?interface (form : Core.t) : body_part =
   match form.definition with
-  | Constant (Some value) -> Initializer (code_of (Builder.of_expression value))
+  | Constant (Some value) -> Initializer (make_code (Builder.of_expression value))
   | definition -> (
       match
         Builder.of_definition
@@ -17,10 +17,10 @@ let body_part ?interface (form : Core.t) : body_part =
             (Option.fold ~none:false ~some:Interface.Definition.is_specification interface)
           definition
       with
-      | Some tree -> Body (code_of tree)
+      | Some tree -> Body (make_code tree)
       | None -> No_code)
 
-let defaults_of (definition : Core.definition) =
+let find_defaults (definition : Core.definition) =
   match definition with
   | Function { parameters; _ } ->
       Some
@@ -42,15 +42,15 @@ let defaults_of (definition : Core.definition) =
   | Test _ | Law_proof _ -> Some (Parameter_defaults [])
   | Trait _ | Constant _ | Empty -> None
 
-let parameter ({ local; name; mode; type_; default; _ } : Core.parameter) : parameter =
+let make_parameter ({ local; name; mode; type_; default; _ } : Core.parameter) : parameter =
   { local; name; mode; type_; has_default = default <> None }
 
-let contract_of (definition : Core.definition) =
+let find_contract (definition : Core.definition) =
   match definition with
   | Function { parameters; contract; _ } ->
       Some
         {
-          parameters = List.map parameter parameters;
+          parameters = List.map make_parameter parameters;
           requires =
             List.map
               (fun (written : Core.condition) ->
@@ -58,7 +58,7 @@ let contract_of (definition : Core.definition) =
                   clause =
                     Builder.of_clause ~is_executable:written.executable ~parameters written.value;
                   is_executable = written.executable;
-                  names = Builder.names_of written.value;
+                  names = Builder.list_names written.value;
                 })
               contract.requires;
           ensures = List.map (Builder.of_clause ~parameters) contract.ensures;
@@ -96,7 +96,7 @@ let contract_of (definition : Core.definition) =
         }
   | Type _ | Trait _ | Constant _ | Test _ | Law_proof _ | Empty -> None
 
-let laws_of (definition : Core.definition) =
+let list_laws (definition : Core.definition) =
   match definition with
   | Trait laws ->
       List.map
@@ -116,7 +116,7 @@ let laws_of (definition : Core.definition) =
         laws
   | Function _ | Type _ | Constant _ | Test _ | Law_proof _ | Empty -> []
 
-let type_clauses_of ~type_interface path (definition : Core.definition) =
+let find_type_clauses ~type_interface path (definition : Core.definition) =
   match definition with
   | Type { invariants; potential; _ } ->
       Option.map
@@ -142,7 +142,7 @@ let type_clauses_of ~type_interface path (definition : Core.definition) =
                       Builder.of_clause ~is_executable:invariant.executable ~parameters:[ self ]
                         invariant.value;
                     is_executable = invariant.executable;
-                    names = Builder.names_of invariant.value;
+                    names = Builder.list_names invariant.value;
                   })
                 invariants;
             potential = Option.map (Builder.of_specification ~entry_locals:[]) potential;
@@ -150,27 +150,27 @@ let type_clauses_of ~type_interface path (definition : Core.definition) =
         (type_interface path)
   | Function _ | Trait _ | Constant _ | Test _ | Law_proof _ | Empty -> None
 
-let expanded_defaults = function
+let expand_defaults = function
   | Parameter_defaults defaults ->
       Parameter_defaults
-        (List.map (fun (position, default) -> (position, Expansion.expanded default)) defaults)
+        (List.map (fun (position, default) -> (position, Expansion.expand default)) defaults)
   | Field_defaults defaults ->
       Field_defaults
         (List.map
            (fun (default : t field_default) ->
-             { default with value = Expansion.expanded default.value })
+             { default with value = Expansion.expand default.value })
            defaults)
 
-let contract_part ~type_interface path (form : Core.t) : contract_part =
-  let defaults = defaults_of form.definition in
+let make_contract_part ~type_interface path (form : Core.t) : contract_part =
+  let defaults = find_defaults form.definition in
   {
-    contract = contract_of form.definition;
+    contract = find_contract form.definition;
     defaults;
-    default_graphs = Option.map expanded_defaults defaults;
-    laws = laws_of form.definition;
-    type_clauses = type_clauses_of ~type_interface path form.definition;
+    default_graphs = Option.map expand_defaults defaults;
+    laws = list_laws form.definition;
+    type_clauses = find_type_clauses ~type_interface path form.definition;
   }
 
 module For_testing = struct
-  let expanded = Expansion.expanded
+  let expand = Expansion.expand
 end

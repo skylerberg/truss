@@ -18,10 +18,10 @@ type lookups = {
 
 type 'form sourced = { source : Resolve.Names.key; form : 'form }
 
-let code = function Body code -> Some code.tree | Initializer _ | No_code -> None
-let graph = function Body code -> Some code.graph | Initializer _ | No_code -> None
+let find_code = function Body code -> Some code.tree | Initializer _ | No_code -> None
+let find_graph = function Body code -> Some code.graph | Initializer _ | No_code -> None
 
-let body_part_of_path lookups path =
+let read_body_part lookups path =
   Option.map
     (fun ((origin : Infer.form_origin), _) ->
       match origin with
@@ -29,7 +29,7 @@ let body_part_of_path lookups path =
       | Derived type_key -> { source = type_key; form = fst (lookups.generated_parts path) })
     (lookups.form_origin path)
 
-let contract_part_of_path lookups path =
+let read_contract_part lookups path =
   Option.map
     (fun ((origin : Infer.form_origin), _) ->
       match origin with
@@ -38,20 +38,20 @@ let contract_part_of_path lookups path =
     (lookups.form_origin path)
 
 let select read sourced = Option.map (fun form -> { sourced with form }) (read sourced.form)
-let of_body_part read lookups path = Option.bind (body_part_of_path lookups path) (select read)
-let code_of_path = of_body_part code
-let graph_of_path = of_body_part graph
+let read_from_body_part read lookups path = Option.bind (read_body_part lookups path) (select read)
+let read_code = read_from_body_part find_code
+let read_graph = read_from_body_part find_graph
 
-let initializer_of_path =
-  of_body_part (function Initializer code -> Some code.tree | Body _ | No_code -> None)
+let read_initializer =
+  read_from_body_part (function Initializer code -> Some code.tree | Body _ | No_code -> None)
 
-let initializer_graph_of_path =
-  of_body_part (function Initializer code -> Some code.graph | Body _ | No_code -> None)
+let read_initializer_graph =
+  read_from_body_part (function Initializer code -> Some code.graph | Body _ | No_code -> None)
 
-let of_contract_part read lookups path =
-  Option.bind (contract_part_of_path lookups path) (select read)
+let read_from_contract_part read lookups path =
+  Option.bind (read_contract_part lookups path) (select read)
 
-let contract_of_path = of_contract_part (fun part -> part.contract)
-let defaults_of_path = of_contract_part (fun part -> part.defaults)
-let default_graphs_of_path = of_contract_part (fun part -> part.default_graphs)
-let type_clauses_of_path = of_contract_part (fun part -> part.type_clauses)
+let read_contract = read_from_contract_part (fun part -> part.contract)
+let read_defaults = read_from_contract_part (fun part -> part.defaults)
+let read_default_graphs = read_from_contract_part (fun part -> part.default_graphs)
+let read_type_clauses = read_from_contract_part (fun part -> part.type_clauses)

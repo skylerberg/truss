@@ -67,8 +67,9 @@ let list_references = function
 let resolve_call_node (interface : Interface.Lookups.t) (path : Path.t) =
   match path with
   | Method { owner; name; receiver }
-    when not (List.exists (Path.equal path) (Mir.Call_edges.written_methods interface.names owner))
-    -> (
+    when not
+           (List.exists (Path.equal path)
+              (Mir.Call_edges.list_written_methods interface.names owner)) -> (
       match Interface.Definition.read_impl_interface interface owner with
       | Some impl -> Path.Method { owner = impl.implements.trait; name; receiver }
       | None -> path)
@@ -98,14 +99,14 @@ let list_bound_methods (interface : Interface.Lookups.t) path type_arguments =
           let traits =
             List.concat_map
               (fun (bound : Types.trait_reference) ->
-                Mir.Call_edges.traits_with_required interface bound.trait)
+                Mir.Call_edges.list_traits_with_required interface bound.trait)
               bounds
           in
           List.concat_map
             (fun package ->
               List.concat_map
-                (Mir.Call_edges.impl_methods interface)
-                (Mir.Call_edges.impls_for interface package traits
+                (Mir.Call_edges.list_impl_methods interface)
+                (Mir.Call_edges.list_impls_for interface package traits
                    (Named { path = head; arguments = [] })))
             (List.sort_uniq Path.compare_package
                (Path.package head :: List.map Path.package traits)))

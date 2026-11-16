@@ -48,9 +48,9 @@ type body = {
 
 type t = { body : body; lambdas : body array }
 
-val canonical : basic_block array -> basic_block array
-val iteration_loop : terminator -> block option
-val block_successors : body -> block -> block list
+val canonicalize : basic_block array -> basic_block array
+val find_iteration_loop : terminator -> block option
+val list_block_successors : body -> block -> block list
 
 module For_testing : sig
   val successors : terminator -> block list

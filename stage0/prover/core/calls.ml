@@ -73,7 +73,7 @@ let name_term context ty term =
 let evaluate_default_value (context : State.context) frame (part : State.part) position =
   match
     Option.bind part.callee.key (fun (key : Resolve.Names.key) ->
-        Mir.defaults_of_path context.lookups.mir key.path)
+        Mir.read_defaults context.lookups.mir key.path)
   with
   | Some { form = Parameter_defaults defaults; _ } -> (
       match (List.assoc_opt position defaults, List.nth_opt part.parameters position) with
@@ -184,7 +184,7 @@ let contract_call context (frame : State.frame) (site : Invocation.site) (invoca
   if
     context.terminates && frame.makes_obligations
     && (match invocation.callee with
-      | Trait_method _ -> Mir.Call_edges.dispatched invocation.callee
+      | Trait_method _ -> Mir.Call_edges.is_dispatched invocation.callee
       | _ -> true)
     && Facts.is_in_recursion_group context path
   then
@@ -859,7 +859,7 @@ let apply_call ?lent_final context (frame : State.frame) (site : Invocation.site
         let reaches_here =
           List.exists
             (Facts.is_in_recursion_group context)
-            (Mir.Call_edges.written_methods context.lookups.interface.names impl)
+            (Mir.Call_edges.list_written_methods context.lookups.interface.names impl)
         in
         if reaches_here then
           Facts.oblige context frame Termination location
@@ -872,7 +872,7 @@ let apply_call ?lent_final context (frame : State.frame) (site : Invocation.site
                    (Path.show impl));
             ]
             (Logic.Boolean false))
-      (Mir.Call_edges.impls_used context.lookups.interface (Path.package context.current)
+      (Mir.Call_edges.list_impls_used context.lookups.interface (Path.package context.current)
          invocation.callee)
   end;
   let with_contract ?(substitution_of = fun _ -> []) ?(instance = []) path = function

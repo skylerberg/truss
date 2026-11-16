@@ -106,7 +106,7 @@ let translate_derived_default (lookups : Lookups.t) (key : Resolve.Names.key)
         receiver = Static;
       }
   in
-  if derives_default && Option.is_some (Mir.code_of_path lookups.mir path) then
+  if derives_default && Option.is_some (Mir.read_code lookups.mir path) then
     let outcome = Translate.translate_function lookups source ~path in
     List.map
       (fun (obligation : State.obligation) ->
@@ -131,7 +131,8 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
       lookups.patterns key;
       try
         match declaration.kind with
-        | (Function | Method) when Mir.code (lookups.mir.body_part key) = None -> Not_proven_here
+        | (Function | Method) when Mir.find_code (lookups.mir.body_part key) = None ->
+            Not_proven_here
         | Theorem -> Obligations (Translate.translate_theorem lookups source ~path:key.path)
         | Function | Method -> (
             let prove_with substitution =
@@ -180,11 +181,11 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
               }
         | Type -> (
             let has_defaults () =
-              match Mir.defaults_of_path lookups.mir key.path with
+              match Mir.read_defaults lookups.mir key.path with
               | Some { form = Field_defaults (_ :: _); _ } -> true
               | Some { form = Field_defaults [] | Parameter_defaults _; _ } | None -> false
             in
-            match Mir.type_clauses_of_path lookups.mir key.path with
+            match Mir.read_type_clauses lookups.mir key.path with
             | Some { form = { invariants = _ :: _; _ }; _ } ->
                 let outcome = Translate.translate_type lookups source ~path:key.path in
                 Obligations

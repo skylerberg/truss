@@ -288,7 +288,7 @@ let compute_changes ?(also = []) run (frame : State.frame) (blocks : Mir.block l
             note { root = Local winner; projections = [] };
             Option.iter (fun (_, local) -> note { root = Local local; projections = [] }) returned
         | _ -> ());
-        List.iter visit (Mir.nested_blocks statement))
+        List.iter visit (Mir.list_nested_blocks statement))
       block.statements
   in
   List.iter visit blocks;
@@ -330,7 +330,7 @@ let read_operand context frame run (operand : Mir.operand) =
       | Boolean truth -> Logic.Boolean truth)
 
 let compute_operand_type context frame operand =
-  Facts.substitute_type context frame (Mir.operand_type operand)
+  Facts.substitute_type context frame (Mir.extract_operand_type operand)
 
 let operand_origin : Mir.operand -> Core.origin option = function
   | Use { origin; _ } | Borrow { origin; _ } | Take { origin; _ } -> Some origin
@@ -398,7 +398,7 @@ let find_argument_place context (frame : State.frame) run (mode : Types.mode) (v
                     ~owner_type:(fun frame -> compute_place_type context frame run slice.collection)
                     ~low:slice.start ~high:slice.stop ))
               slices))
-  | Types.Mut, Some Unknown_slice when Types.is_well_known Slice (Mir.operand_type value) ->
+  | Types.Mut, Some Unknown_slice when Types.is_well_known Slice (Mir.extract_operand_type value) ->
       Facts.unsupported
         (Facts.locate context frame.source
            (match operand_origin value with
@@ -1043,7 +1043,7 @@ and read_statement context frame run (statement : Mir.statement) =
         {
           while_at = loop.origin;
           while_clauses = loop.clauses;
-          changed = compute_changes run frame (Mir.nested_blocks statement);
+          changed = compute_changes run frame (Mir.list_nested_blocks statement);
           bind_parts = (fun frame -> bind_parts context frame run);
           test = (fun head -> read_block context head run condition);
           run_body =
@@ -1487,7 +1487,7 @@ let read_body context start ~(lambdas : Mir.body array) (body : Mir.body) =
           | Resume { exits; _ } ->
               List.filter_map (fun (exit : Mir.early_exit) -> exit.returned) exits
           | _ -> [])
-        @ List.concat_map returned_locals (Mir.nested_blocks statement))
+        @ List.concat_map returned_locals (Mir.list_nested_blocks statement))
       block.statements
   in
   let start =

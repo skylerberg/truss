@@ -65,7 +65,7 @@ let runnable database =
       let key = Resolve.Names.make_key declaration in
       match
         ( Interface.Definition.read_declared_signature interface declaration.path,
-          Mir.contract_of_path mir declaration.path )
+          Mir.read_contract mir declaration.path )
       with
       | ( Some ({ generics = []; receiver = None; uses; output = Returns output; _ } as signature),
           Some { form = { requires; _ }; _ } )

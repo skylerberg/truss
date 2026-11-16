@@ -112,7 +112,7 @@ let end_body_parts (body : Mir.Graph.body) : Mir.Graph.body =
         end_on_exits blocks ~body:loop_body ~part ~origin:loop.origin
     | _ -> ()
   done;
-  { body with blocks = Mir.Graph.canonical (Dynarray.to_array blocks) }
+  { body with blocks = Mir.Graph.canonicalize (Dynarray.to_array blocks) }
 
 let end_parts (mir : Mir.Graph.t) : Mir.Graph.t =
   { body = end_body_parts mir.body; lambdas = Array.map end_body_parts mir.lambdas }

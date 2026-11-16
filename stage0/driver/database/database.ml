@@ -802,7 +802,7 @@ let make_recording_usage_lookups database note : Usage.Lookups.t =
 
 let make_recording_ownership_lookups database note : Ownership.Lookups.t =
   {
-    graph = (fun key -> Mir.graph (read_body_mir database note key));
+    graph = (fun key -> Mir.find_graph (read_body_mir database note key));
     interface = make_recording_interface_lookups database note ~is_checked:true;
   }
 
@@ -1490,7 +1490,8 @@ let compute_part database (part : Part.computed) =
             (match Key_table.find_opt package_database.checked_bodies key with
             | Some (Value checked) -> (
                 match read_elaborated_interface database note ~is_checked:true key with
-                | elaborated -> Value (Mir.body_part ~interface:elaborated.interface checked.form)
+                | elaborated ->
+                    Value (Mir.make_body_part ~interface:elaborated.interface checked.form)
                 | exception Reads_failed_part -> Blocked)
             | Some (Failed _ | Blocked) -> Blocked
             | None -> report_uncomputed (Checked_body key)))
@@ -1501,7 +1502,7 @@ let compute_part database (part : Part.computed) =
             (match Key_table.find_opt package_database.contracts key with
             | Some (Value form) ->
                 Value
-                  (Mir.contract_part
+                  (Mir.make_contract_part
                      ~type_interface:
                        (Interface.Definition.read_type_interface
                           (make_recording_interface_lookups database note ~is_checked:true))
@@ -1515,8 +1516,8 @@ let compute_part database (part : Part.computed) =
             (function
               | Value form ->
                   Value
-                    ( Mir.body_part form,
-                      Mir.contract_part
+                    ( Mir.make_body_part form,
+                      Mir.make_contract_part
                         ~type_interface:
                           (Interface.Definition.read_type_interface
                              (make_recording_interface_lookups database note ~is_checked:true))
@@ -1527,7 +1528,7 @@ let compute_part database (part : Part.computed) =
       into (Path_table.make_slot package_database.mir_call_edges path) (fun note ->
           Some
             (make_part
-               (Mir.Call_edges.of_path (make_recording_call_edge_lookups database note))
+               (Mir.Call_edges.list_path_edges (make_recording_call_edge_lookups database note))
                path))
   | Patterns key ->
       into (Key_table.make_slot package_database.patterns key) (fun note ->

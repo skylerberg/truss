@@ -17,10 +17,10 @@ type context = {
   mutable must_be_disjoint : (Core.origin * Core.origin) list;
 }
 
-let plain context type_ =
+let is_plain context type_ =
   Interface.Impls.is_plain context.lookups.interface ~bounds:context.bounds type_
 
-let copyable context type_ =
+let is_copyable context type_ =
   Interface.Impls.is_copyable context.lookups.interface ~bounds:context.bounds type_
 
 let is_view context type_ =
@@ -29,7 +29,7 @@ let is_view context type_ =
 let holds_function context type_ =
   Interface.Impls.holds_function context.lookups.interface ~bounds:context.bounds type_
 
-let callee_signatures context (callee : Mir.callee) : Types.signature list =
+let list_callee_signatures context (callee : Mir.callee) : Types.signature list =
   let signature path =
     Option.to_list (Interface.Impls.read_signature context.lookups.interface path)
   in
@@ -55,9 +55,9 @@ let stores_function context (callee : Mir.callee) position =
   in
   match callee with
   | Indirect _ -> true
-  | _ -> List.exists declared (callee_signatures context callee)
+  | _ -> List.exists declared (list_callee_signatures context callee)
 
-let span context (origin : Core.origin) : Source.Definition_span.t =
+let locate_origin context (origin : Core.origin) : Source.Definition_span.t =
   Source.Definition_span.locate (Lazy.force context.spans) origin
 
 let report context ?(fixes = []) ?(notes = []) code (at : Source.Definition_span.t) message =
@@ -70,7 +70,7 @@ let report context ?(fixes = []) ?(notes = []) code (at : Source.Definition_span
     context.diagnostics <-
       Diagnostic.make ~fixes ~notes ~code:(Ownership code) at message :: context.diagnostics
 
-let binding_mode context (root : Place.root) : Types.mode =
+let classify_binding_mode context (root : Place.root) : Types.mode =
   match root with
   | Constant _ -> Read
   | Environment | Temporary _ -> Own
@@ -144,12 +144,17 @@ let copy_edits context (moved : Core.origin) =
     | Some (Own, { written; operand }) ->
         [
           Diagnostic.delete
-            (Source.Definition_span.make (span context written).start (span context operand).start);
+            (Source.Definition_span.make (locate_origin context written).start
+               (locate_origin context operand).start);
         ]
     | Some ((Read | Mut), _) | None -> [])
-  @ [ Diagnostic.insert (Source.Definition_span.zero_width (span context moved).stop) ".copy()" ]
+  @ [
+      Diagnostic.insert
+        (Source.Definition_span.zero_width (locate_origin context moved).stop)
+        ".copy()";
+    ]
 
-let span_with_mode_keyword context (place : Core.origin) : Source.Definition_span.t =
+let locate_with_mode_keyword context (place : Core.origin) : Source.Definition_span.t =
   match Hashtbl.find_opt context.mode_keywords place with
-  | Some (_, { written; _ }) -> span context written
-  | None -> span context place
+  | Some (_, { written; _ }) -> locate_origin context written
+  | None -> locate_origin context place

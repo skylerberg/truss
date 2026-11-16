@@ -51,7 +51,7 @@ let rec index_sequence (context : State.context) element term index =
   let sequence = make_sequence_type element in
   let index_trait = Well_known.path Index in
   match
-    Mir.Call_edges.impls_for context.lookups.interface Path.standard_package [ index_trait ]
+    Mir.Call_edges.list_impls_for context.lookups.interface Path.standard_package [ index_trait ]
       sequence
   with
   | impl :: _ ->
@@ -137,7 +137,7 @@ let rank_model (context : State.context) (ty : Types.ty) ~(model : Types.ty) sym
 let compute_model_function (context : State.context) (ty : Types.ty) ~(model : Types.ty) =
   let model_trait = Well_known.path Model in
   match
-    Mir.Call_edges.impls_for context.lookups.interface Path.standard_package [ model_trait ] ty
+    Mir.Call_edges.list_impls_for context.lookups.interface Path.standard_package [ model_trait ] ty
   with
   | impl :: _ ->
       let path = Path.Method { owner = impl; name = "model"; receiver = Read } in
