@@ -106,8 +106,7 @@ let () =
       let ready, signal = Unix.pipe ~cloexec:true () in
       match Unix.fork () with
       | 0 ->
-          let lock = Unix.openfile (Filename.concat root ".truss/lock") [ O_RDWR ] 0 in
-          Unix.lockf lock F_LOCK 0;
+          ignore (Lock_file.acquire (Filename.concat root ".truss/lock"));
           ignore (Unix.write_substring signal "x" 0 1);
           Unix.sleep 60;
           Unix._exit 0
@@ -127,12 +126,7 @@ let other_build =
     (Unix.realpath
        (Filename.concat (Filename.dirname Sys.executable_name) "../../driver/truss/truss.exe"))
 
-let is_database_open_elsewhere root =
-  let descriptor = Unix.openfile (Filename.concat root ".truss/lock") [ O_RDWR; O_CLOEXEC ] 0 in
-  Fun.protect
-    ~finally:(fun () -> Unix.close descriptor)
-    (fun () ->
-      match Unix.lockf descriptor F_TEST 0 with () -> false | exception Unix.Unix_error _ -> true)
+let is_database_open_elsewhere root = Lock_file.is_held (Filename.concat root ".truss/lock")
 
 let make_package_served_by_other_build () =
   let root = make_package [ ("one.truss", "fn one() -> Int64 { 1 }\n") ] in

@@ -35,17 +35,12 @@ let read_cache_budget () =
 let collect () =
   let cache = open_cache () in
   Cache.compact cache;
-  let lock =
-    Unix.openfile
-      (Filename.concat (Cache.directory cache) "collect.lock")
-      [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644
-  in
-  Fun.protect
-    ~finally:(fun () -> Unix.close lock)
-    (fun () ->
-      match Unix.lockf lock F_TLOCK 0 with
-      | () -> Cache.collect cache ~budget:(read_cache_budget ())
-      | exception Unix.Unix_error _ -> ())
+  match Lock_file.acquire_if_free (Filename.concat (Cache.directory cache) "collect.lock") with
+  | None -> ()
+  | Some lock ->
+      Fun.protect
+        ~finally:(fun () -> Lock_file.release lock)
+        (fun () -> Cache.collect cache ~budget:(read_cache_budget ()))
 
 type loaded = {
   package : Path.package;
@@ -70,16 +65,7 @@ let make_package_database_key ~hash ~visible =
        ])
 
 let run_exclusively name work =
-  let lock =
-    Unix.openfile
-      (Filename.concat (Cache.directory (open_cache ())) name)
-      [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644
-  in
-  Fun.protect
-    ~finally:(fun () -> Unix.close lock)
-    (fun () ->
-      Unix.lockf lock F_LOCK 0;
-      work ())
+  Lock_file.with_lock (Filename.concat (Cache.directory (open_cache ())) name) work
 
 let load_package_database (package : Project.package) ~hash ~visible =
   let key = make_package_database_key ~hash ~visible in
