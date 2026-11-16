@@ -333,7 +333,7 @@ let compute_buffer_elements context (ty : Types.ty) =
     when Intrinsic.builtin_of_path path = Some View ->
       Some (element, fun term -> Intrinsics.make_buffer_model context View element term)
   | Types.Named { path; arguments } when Types.find_builtin ty = None -> (
-      match Interface.Definition.read_interface context.lookups.interface path with
+      match Interface.Definition.find_interface context.lookups.interface path with
       | Some (Interface.Environment.Type_interface { shape = Record [ field ]; type_generics; _ })
         -> (
           let substitution = Types.make_substitution type_generics arguments in
@@ -405,7 +405,7 @@ and holds_potential_type context ~seen (ty : Types.ty) =
     | Types.Named { path; arguments } when Types.find_builtin ty = None -> (
         find_potential_clause context ty <> None
         ||
-        match Interface.Definition.read_interface context.lookups.interface path with
+        match Interface.Definition.find_interface context.lookups.interface path with
         | Some (Interface.Environment.Type_interface interface) ->
             let substitution = Types.make_substitution interface.type_generics arguments in
             let fields =

@@ -59,7 +59,7 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.callee) =
       | None -> ());
       match evidence with
       | Impl { impl; _ } -> (
-          match Interface.Definition.read_impl_interface state.lookups.interface impl with
+          match Interface.Definition.find_impl_interface state.lookups.interface impl with
           | Some interface when List.mem (name, receiver) interface.impl_methods ->
               Option.iter
                 (fun (signature : Types.signature) ->
@@ -152,7 +152,7 @@ let require_callee_uses checking scope (origin : Core.origin) (callee : Core.cal
       require_available checking scope origin
         (match
            ( Members.find_trait_method state.lookups trait.trait name receiver,
-             Interface.Definition.read_trait_interface state.lookups.interface trait.trait )
+             Interface.Definition.find_trait_interface state.lookups.interface trait.trait )
          with
         | Some method_, Some interface ->
             let signature =
@@ -395,7 +395,7 @@ let rec can_call_capability_code (state : State.state) ~list_bounds ?(seen = [])
     in
     List.exists
       (fun (bound : Types.trait_reference) ->
-        match Interface.Definition.read_trait_interface state.lookups.interface bound.trait with
+        match Interface.Definition.find_trait_interface state.lookups.interface bound.trait with
         | Some interface ->
             List.exists
               (fun (method_ : Types.trait_method) ->
@@ -486,7 +486,7 @@ let check_monitor_callbacks checking implementations =
         List.iter
           (fun ((provided : Core.provided), (_ : Types.impl_interface)) ->
             match
-              Interface.Definition.read_trait_interface state.lookups.interface provided.capability
+              Interface.Definition.find_trait_interface state.lookups.interface provided.capability
             with
             | Some capability ->
                 List.iter

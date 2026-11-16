@@ -43,17 +43,17 @@ let compute_integer_range type_ =
   | _ -> None
 
 let read_fields context path arguments =
-  Option.bind (Interface.Definition.read_type_interface context.lookups.interface path)
+  Option.bind (Interface.Definition.find_type_interface context.lookups.interface path)
     (fun interface -> Types.instantiate_fields interface arguments)
 
 let read_variants context path arguments =
-  Option.bind (Interface.Definition.read_type_interface context.lookups.interface path)
+  Option.bind (Interface.Definition.find_type_interface context.lookups.interface path)
     (fun interface -> Types.instantiate_variants interface arguments)
 
 let read_shape context path =
   Option.map
     (fun (interface : Types.type_interface) -> interface.shape)
-    (Interface.Definition.read_type_interface context.lookups.interface path)
+    (Interface.Definition.find_type_interface context.lookups.interface path)
 
 let read_constructor_fields context type_ constructor =
   match (type_, constructor) with

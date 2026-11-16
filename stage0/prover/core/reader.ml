@@ -52,7 +52,7 @@ let rec compute_place_type context frame run (place : Mir.place) =
   | [] -> (
       match place.Mir.root with
       | Local local -> Facts.substitute_type context frame run.infos.(local).type_
-      | Constant path -> Values.compute_constant_type context path
+      | Constant path -> Interface.Definition.read_constant_type context.lookups.interface path
       | Literal { type_; _ } -> Facts.substitute_type context frame type_)
   | _ -> (
       let base =

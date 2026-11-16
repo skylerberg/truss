@@ -519,7 +519,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                 });
         if not (is_broken Body) then check_body state env written
     | Law_proof { body = written; _ }, Law_proof_interface { trait; law; for_type; _ } ->
-        (match Interface.Definition.read_trait_interface state.lookups.interface trait.trait with
+        (match Interface.Definition.find_trait_interface state.lookups.interface trait.trait with
         | Some interface ->
             let substitution =
               Interface.Properties.make_trait_substitution interface ~self:for_type trait

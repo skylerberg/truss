@@ -461,12 +461,12 @@ let () =
       if derived = [] then Harness.fail "the standard library derives nothing";
       List.iter
         (fun impl ->
-          match Interface.Definition.read_impl_interface interface impl with
+          match Interface.Definition.find_impl_interface interface impl with
           | None -> Harness.fail "`%s` has no interface" (Path.show impl)
           | Some impl_interface ->
               let provided =
                 match
-                  Interface.Definition.read_trait_interface interface
+                  Interface.Definition.find_trait_interface interface
                     impl_interface.implements.trait
                 with
                 | Some trait ->
