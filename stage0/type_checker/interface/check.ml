@@ -312,16 +312,19 @@ let check_no_capability_parameter state definition_kind (name : name)
     generics
 
 let check_trait_cycle state (requires : path_type list) =
-  let rec reaches seen path =
+  let visited = Hashtbl.create 16 in
+  let rec reaches path =
     if Path.equal path state.key.path then true
-    else if List.exists (Path.equal path) seen then false
-    else
+    else if Hashtbl.mem visited path then false
+    else begin
+      Hashtbl.replace visited path ();
       match state.lookups.trait_header path with
-      | Some header -> List.exists (reaches (path :: seen)) header.required
+      | Some header -> List.exists reaches header.required
       | None -> false
+    end
   in
   match state.lookups.trait_header state.key.path with
-  | Some header when List.exists (reaches []) header.required -> (
+  | Some header when List.exists reaches header.required -> (
       match requires with
       | first :: _ ->
           report state Trait_cycle state.spans.(first.id)

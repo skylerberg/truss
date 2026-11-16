@@ -56,6 +56,7 @@ type t =
 val package : t -> Path.package
 val equal : t -> t -> bool
 val hash : t -> int
+val compare : t -> t -> int
 val show : t -> string
 val definition : t -> Path.t option
 val kind_name : t -> string

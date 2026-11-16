@@ -1,12 +1,4 @@
-module type Node = sig
-  type t
-
-  val equal : t -> t -> bool
-  val hash : t -> int
-  val compare : t -> t -> int
-end
-
-module Make (Node : Node) : sig
+module Make (Node : Strongly_connected.Node) : sig
   type t
   type group = Blocked | Members of Node.t list
   type update = { touched : Node.t list; removed : Node.t list }

@@ -110,6 +110,7 @@ and show_argument = function
 
 let compare = Stdlib.compare
 let equal left right = compare left right = 0
+let hash path = Hashtbl.hash_param 64 256 path
 
 module Ordered = struct
   type nonrec t = t

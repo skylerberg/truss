@@ -161,6 +161,19 @@ let () =
       match codes (check packages (file_of "app::main")) with
       | [ "types.trait_cycle"; "types.trait_cycle" ] -> ()
       | reported -> fail "found [%s]" (String.concat "; " reported));
+  test "a trait hierarchy of many diamonds is checked quickly" (fun () ->
+      let levels = 24 in
+      let text =
+        String.concat ""
+          (List.init levels (fun index ->
+               Printf.sprintf
+                 "trait T%d: A%d + B%d {}\n\ntrait A%d: T%d {}\n\ntrait B%d: T%d {}\n\n" index index
+                 index index (index + 1) index (index + 1))
+          @ [ Printf.sprintf "trait T%d {}\n" levels ])
+      in
+      let started = Sys.time () in
+      no_diagnostics [ ("app::main", text) ];
+      if Sys.time () -. started > 5.0 then fail "took %.1f seconds" (Sys.time () -. started));
   test "a trait cannot redeclare a method of a trait it requires" (fun () ->
       one_diagnostic Fixtures.Interface.trait_cannot_redeclare_a_method_of_a_trait_it
         "types.redeclared_method");

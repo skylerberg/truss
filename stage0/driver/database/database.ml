@@ -1,29 +1,14 @@
 module Part = Part
 module Names = Resolve.Names
 module Environment = Interface.Environment
-
-module Path_key = struct
-  type t = Path.t
-
-  let equal = Path.equal
-  let hash path = Hashtbl.hash_param 64 256 path
-  let compare = Path.compare
-end
-
-module Path_table = Hashtbl.Make (Path_key)
-module Call_graph = Graph.Make (Path_key)
+module Path_table = Hashtbl.Make (Path)
+module Call_graph = Graph.Make (Path)
 
 type 'a part = Value of 'a | Failed of Diagnostic.in_definition list | Blocked
 
 exception Reads_failed_part
 
 module Part_table = Hashtbl.Make (Part)
-
-module Part_components = Components.Make (struct
-  include Part
-
-  let compare = compare
-end)
 
 module Instance_key = struct
   type t = Instance.key
@@ -45,7 +30,6 @@ module Ground_key = struct
 end
 
 module Type_table = Hashtbl.Make (Ground_key)
-module Type_components = Components.Make (Ground_key)
 
 module Entry = struct
   type t =
@@ -665,14 +649,6 @@ let interface_part = function
       | [], _ -> Value lowered
       | diagnostics, _ -> Failed diagnostics)
   | None -> Blocked
-
-module Path_components = Components.Make (struct
-  type t = Path.t
-
-  let equal = Path.equal
-  let hash path = Hashtbl.hash_param 64 256 path
-  let compare = Path.compare
-end)
 
 let type_interface lookups path =
   match computed (Interface.Definition.type_interface lookups) path with
@@ -1729,7 +1705,8 @@ let units database (stage : Stage.t) package parts =
       let lookups = interface_lookups database ignore ~is_checked:false in
       List.map
         (List.map (fun path -> Part.Type_facts path))
-        (Path_components.of_graph
+        (Strongly_connected.find_components
+           (module Path)
            ~successors:(fun path ->
              match type_interface lookups path with
              | Some interface ->
@@ -1756,7 +1733,7 @@ let layout_units database parts =
           Compiler_bug.bug ~stage:"Database"
             "%s contains itself in place, which the type checker rejects"
             (String.concat ", " (List.map Ground.to_string cycle)))
-    (Type_components.of_graph ~successors types)
+    (Strongly_connected.find_components (module Ground_key) ~successors types)
 
 let constant_units database parts =
   let in_closure = Part_table.create 64 in
@@ -1777,12 +1754,13 @@ let constant_units database parts =
       | cycle ->
           Compiler_bug.bug ~stage:"Database" "constants that read one another: %s"
             (String.concat ", " (List.map Part.show cycle)))
-    (Part_components.of_graph ~successors parts)
+    (Strongly_connected.find_components (module Part) ~successors parts)
 
 let test_key_units database parts =
   let in_closure = Part_table.create 64 in
   List.iter (fun part -> Part_table.replace in_closure part ()) parts;
-  Part_components.of_graph
+  Strongly_connected.find_components
+    (module Part)
     ~successors:(fun (part : Part.t) ->
       match part with
       | Test_key key -> (
