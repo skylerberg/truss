@@ -19,7 +19,6 @@ let visible_to_other_packages (lookups : Lookups.t) (path : Path.t) =
       | Some (_, definition) -> Names.is_public definition.visibility
       | None -> true)
   | Method _ | Member_constant _ | Impl _ | Derived _ | Test _ | Law_proof _ -> true
-  | Unresolved _ -> false
 
 let called_from_other_packages (state : state) =
   match state.lookups.interface.names.container state.key with

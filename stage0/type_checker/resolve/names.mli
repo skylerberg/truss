@@ -44,6 +44,13 @@ val is_public : Syntax.visibility -> bool
 val visible : from:Path.module_ -> Path.module_ -> Syntax.visibility -> bool
 
 type law_proof_name = { trait : Path.t; law : string; type_head : Path.t }
+type unresolved_name = Type_path of Syntax.path | Count_name of Syntax.name
+
+type unresolved_header = {
+  item : Syntax.definition Syntax.item;
+  imports : (string * Path.module_) list;
+  names : unresolved_name list;
+}
 
 val derivable : Path.t -> bool
 
@@ -58,6 +65,7 @@ type lookups = {
   declaration : key -> declaration option;
   declarations : Path.module_ -> declaration list;
   declarations_in : Path.file -> declaration list;
+  unresolved_headers : Path.file -> unresolved_header list;
   package_declarations : Path.package -> declaration list;
   definition : key -> Syntax.definition option;
   text : key -> string option;

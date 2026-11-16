@@ -46,7 +46,6 @@ type t =
   | Derived of { type_ : t; trait : t }
   | Test of { module_ : module_; name : string }
   | Law_proof of { module_ : module_; trait : reference; law : string; for_type : t }
-  | Unresolved of { file : file; names : string list }
 
 and reference = { path : t; arguments : argument list; associated : (string * argument) list }
 
@@ -66,7 +65,6 @@ let rec package = function
       module_.package
   | Method { owner; _ } | Member_constant { owner; _ } -> package owner
   | Derived { type_; _ } -> package type_
-  | Unresolved { file; _ } -> file.module_.package
 
 let show_receiver = function
   | Static -> "no `self`"
@@ -91,7 +89,6 @@ let rec show = function
   | Law_proof { module_; trait; law; for_type } ->
       Printf.sprintf "%s::proof %s.%s for %s" (show_module module_) (show_reference trait) law
         (show for_type)
-  | Unresolved { names; _ } -> String.concat "::" names
 
 and show_reference { path; arguments; associated } =
   match

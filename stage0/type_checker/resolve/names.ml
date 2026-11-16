@@ -90,6 +90,13 @@ type impl_index = {
 }
 
 type law_proof_name = { trait : Path.t; law : string; type_head : Path.t }
+type unresolved_name = Type_path of path | Count_name of name
+
+type unresolved_header = {
+  item : definition Syntax.item;
+  imports : (string * Path.module_) list;
+  names : unresolved_name list;
+}
 
 type lookups = {
   find : Path.module_ -> string -> entry option;
@@ -102,6 +109,7 @@ type lookups = {
   declaration : key -> declaration option;
   declarations : Path.module_ -> declaration list;
   declarations_in : Path.file -> declaration list;
+  unresolved_headers : Path.file -> unresolved_header list;
   package_declarations : Path.package -> declaration list;
   definition : key -> definition option;
   text : key -> string option;
@@ -315,14 +323,16 @@ let head_type lookups ~(from : Path.module_) ~imports (path : path) =
           | Hidden_name _ | No_name -> None)
       | Ambiguous_module _ | No_module _ -> None)
 
-let unresolved (file : Path.file) names : Path.t = Unresolved { file; names }
+let list_unresolved = function Ok _ -> [] | Error names -> names
 
-let resolve_type_path lookups ~(file : Path.file) ~imports (path : path) : Path.t =
+let join_resolutions resolutions =
+  if List.for_all Result.is_ok resolutions then Ok (List.map Result.get_ok resolutions)
+  else Error (List.concat_map list_unresolved resolutions)
+
+let resolve_type_path lookups ~(file : Path.file) ~imports (path : path) =
   match head_type lookups ~from:file.module_ ~imports path with
-  | Some (_, resolved) -> resolved
-  | None ->
-      unresolved file
-        (List.map (fun (name : Syntax.name) -> name.text) (path.modules @ [ path.last ]))
+  | Some (_, resolved) -> Ok resolved
+  | None -> Error [ Type_path path ]
 
 let head_parameters (head : type_head) =
   List.filter_map
@@ -333,62 +343,74 @@ let head_parameters (head : type_head) =
       | Generic_error -> None)
     head.generics
 
-let resolve_count lookups ~(file : Path.file) ~parameters (name : name) : Path.argument =
-  if List.mem name.text parameters then Parameter name.text
+let resolve_count lookups ~(file : Path.file) ~parameters (name : name) =
+  if List.mem name.text parameters then Ok (Path.Parameter name.text)
   else
     match lookups.find file.module_ name.text with
-    | Some { kind = Constant; _ } -> Constant (top file.module_ name.text)
-    | _ -> Constant (unresolved file [ name.text ])
+    | Some { kind = Constant; _ } -> Ok (Path.Constant (top file.module_ name.text))
+    | _ -> Error [ Count_name name ]
 
-let rec resolve_reference lookups ~file ~imports ~parameters ~self (written : path_type) :
-    Path.reference =
+let rec resolve_reference lookups ~file ~imports ~parameters ~self (written : path_type) =
   let argument = resolve_argument lookups ~file ~imports ~parameters ~self in
-  {
-    path = resolve_type_path lookups ~file ~imports written.path;
-    arguments =
-      List.filter_map
-        (function
-          | Type_argument type_ -> Some (argument type_)
-          | Count (value, _) -> Some (Path.Count value)
-          | Count_name name -> Some (resolve_count lookups ~file ~parameters name)
-          | Constraint _ -> None)
-        written.arguments;
-    associated =
-      List.sort compare
-        (List.filter_map
-           (function
-             | Constraint (name, type_) -> Some (name.text, argument type_)
-             | Type_argument _ | Count _ | Count_name _ -> None)
-           written.arguments);
-  }
-
-and resolve_argument lookups ~file ~imports ~parameters ~self (type_ : type_expression) :
-    Path.argument =
-  let rejected names : Path.argument =
-    Named { path = unresolved file names; arguments = []; associated = [] }
+  let path = resolve_type_path lookups ~file ~imports written.path in
+  let arguments =
+    join_resolutions
+      (List.filter_map
+         (function
+           | Type_argument type_ -> Some (argument type_)
+           | Count (value, _) -> Some (Ok (Path.Count value))
+           | Count_name name -> Some (resolve_count lookups ~file ~parameters name)
+           | Constraint _ -> None)
+         written.arguments)
   in
+  let associated =
+    join_resolutions
+      (List.filter_map
+         (function
+           | Constraint (name, type_) ->
+               Some (Result.map (fun argument -> (name.text, argument)) (argument type_))
+           | Type_argument _ | Count _ | Count_name _ -> None)
+         written.arguments)
+  in
+  match (path, arguments, associated) with
+  | Ok path, Ok arguments, Ok associated ->
+      Ok ({ path; arguments; associated = List.sort compare associated } : Path.reference)
+  | _ -> Error (list_unresolved path @ list_unresolved arguments @ list_unresolved associated)
+
+and resolve_argument lookups ~file ~imports ~parameters ~self (type_ : type_expression) =
   match type_.kind with
-  | Path_type { path = { modules = []; last }; arguments = []; _ }
-    when List.mem last.text parameters ->
-      Parameter last.text
-  | Path_type written -> Named (resolve_reference lookups ~file ~imports ~parameters ~self written)
-  | Any_type written -> Any (resolve_reference lookups ~file ~imports ~parameters ~self written)
-  | Self_type None ->
-      Named
-        {
-          path = self;
-          arguments = List.map (fun name -> Path.Parameter name) parameters;
-          associated = [];
-        }
-  | Self_type (Some name) -> rejected [ "Self"; name.text ]
-  | Associated (base, name) -> rejected [ base.text; name.text ]
-  | Function_type _ -> rejected [ "fn" ]
-  | Type_error -> rejected []
+  | Path_type { path = { modules = []; last }; _ } when List.mem last.text parameters ->
+      Ok (Path.Parameter last.text)
+  | Path_type written ->
+      Result.map
+        (fun reference -> Path.Named reference)
+        (resolve_reference lookups ~file ~imports ~parameters ~self written)
+  | Any_type written ->
+      Result.map
+        (fun reference -> Path.Any reference)
+        (resolve_reference lookups ~file ~imports ~parameters ~self written)
+  | Self_type None -> (
+      match self with
+      | Some self ->
+          Ok
+            (Path.Named
+               {
+                 path = self;
+                 arguments = List.map (fun name -> Path.Parameter name) parameters;
+                 associated = [];
+               })
+      | None -> Error [])
+  | Self_type (Some _) | Associated _ | Function_type _ | Type_error -> Error []
 
 let resolve_header lookups ~file ~imports (trait_ : path_type) (head : type_head) =
   let for_type = resolve_type_path lookups ~file ~imports head.path in
-  ( resolve_reference lookups ~file ~imports ~parameters:(head_parameters head) ~self:for_type trait_,
-    for_type )
+  match
+    ( resolve_reference lookups ~file ~imports ~parameters:(head_parameters head)
+        ~self:(Result.to_option for_type) trait_,
+      for_type )
+  with
+  | Ok trait, Ok for_type -> Ok (trait, for_type)
+  | trait, for_type -> Error (list_unresolved for_type @ list_unresolved trait)
 
 type written = {
   declaration : declaration;
@@ -405,19 +427,18 @@ let file_declarations lookups (file : Path.file) ~imports ~text (top_levels : Sy
   let owner (head : type_head) = resolve_type_path lookups ~file ~imports head.path in
   let header = resolve_header lookups ~file ~imports in
   let written index ?container (item : definition Syntax.item) path kind generic =
-    Some
-      {
-        declaration =
-          { module_; path; ordinal = 0; kind; visibility = item.value.visibility; generic };
-        file;
-        index;
-        container;
-        item;
-        text = String.sub text item.base (item.stop - item.base);
-      }
+    {
+      declaration =
+        { module_; path; ordinal = 0; kind; visibility = item.value.visibility; generic };
+      file;
+      index;
+      container;
+      item;
+      text = String.sub text item.base (item.stop - item.base);
+    }
   in
   let method_declaration index ~container ~owner:(owner, static) (item : definition Syntax.item) =
-    let declare = written index ~container item in
+    let declare path kind generic = Some (written index ~container item path kind generic) in
     match item.value.kind with
     | Function { signature; _ } | Method_declaration signature ->
         declare
@@ -433,24 +454,30 @@ let file_declarations lookups (file : Path.file) ~imports ~text (top_levels : Sy
     | _ -> None
   in
   let top_level_declaration index (item : definition Syntax.item) =
-    let declare = written index item in
+    let declare path kind generic = Some (Ok (written index item path kind generic)) in
+    let declare_resolved resolution path kind generic =
+      Some (Result.map (fun resolved -> written index item (path resolved) kind generic) resolution)
+    in
     match item.value.kind with
     | Function { signature = { name = Plain_name name; generics; _ }; _ } ->
         declare (top module_ name.text) Function (generics <> [])
     | Function { signature = { name = Member_name (head, name); generics; parameters; _ }; _ } ->
-        declare
-          (Method { owner = owner head; name = name.text; receiver = receiver parameters })
+        declare_resolved (owner head)
+          (fun owner : Path.t -> Method { owner; name = name.text; receiver = receiver parameters })
           Method (generics <> [])
     | Type_definition { name; generics; _ } -> declare (top module_ name.text) Type (generics <> [])
     | Trait { name; generics; _ } -> declare (top module_ name.text) Trait (generics <> [])
     | Capability { name; _ } -> declare (top module_ name.text) Capability false
     | Constant { name = Plain_name name; _ } -> declare (top module_ name.text) Constant false
     | Constant { name = Member_name (head, name); _ } ->
-        declare (Member_constant { owner = owner head; name = name.text }) Member_constant false
+        declare_resolved (owner head)
+          (fun owner : Path.t -> Member_constant { owner; name = name.text })
+          Member_constant false
     | Theorem { name; generics; _ } -> declare (top module_ name.text) Theorem (generics <> [])
     | Impl { trait_; type_; _ } ->
-        let trait, for_type = header trait_ type_ in
-        declare (Impl { module_; trait; for_type }) Impl (type_.generics <> [])
+        declare_resolved (header trait_ type_)
+          (fun (trait, for_type) : Path.t -> Impl { module_; trait; for_type })
+          Impl (type_.generics <> [])
     | Test { name; _ } ->
         let text =
           name.first.value
@@ -458,43 +485,58 @@ let file_declarations lookups (file : Path.file) ~imports ~text (top_levels : Sy
         in
         declare (Test { module_; name = text }) Test false
     | Law_proof { trait_; law; type_; _ } ->
-        let trait, for_type = header trait_ type_ in
-        declare (Law_proof { module_; trait; law = law.text; for_type }) Law_proof false
+        declare_resolved (header trait_ type_)
+          (fun (trait, for_type) : Path.t -> Law_proof { module_; trait; law = law.text; for_type })
+          Law_proof false
     | Definition_error { name = Some (Plain_name name); intended = Some intended } ->
         declare (top module_ name.text) (kind_of_named (named_of_intended intended)) false
-    | Definition_error { name = Some (Member_name (head, name)); intended } ->
-        let owner = owner head in
-        if intended = Some Intended_constant then
-          declare (Member_constant { owner; name = name.text }) Member_constant false
-        else declare (Method { owner; name = name.text; receiver = Static }) Method false
+    | Definition_error { name = Some (Member_name (head, name)); intended } -> (
+        match owner head with
+        | Ok owner when intended = Some Intended_constant ->
+            declare (Member_constant { owner; name = name.text }) Member_constant false
+        | Ok owner -> declare (Method { owner; name = name.text; receiver = Static }) Method false
+        | Error _ -> None)
     | Method_declaration _
     | Definition_error { name = None; _ }
     | Definition_error { intended = None; _ } ->
         None
   in
-  let _, declared =
-    List.fold_left
-      (fun (index, declared) (top_level : Syntax.top_level) ->
-        let container = top_level_declaration index top_level.definition in
-        let owner =
-          match (top_level.definition.value.kind, container) with
-          | (Trait _ | Impl _), Some container -> Some (container.declaration.path, false)
-          | Capability _, Some container -> Some (container.declaration.path, true)
-          | _ -> None
-        in
-        let methods =
-          match owner with
-          | Some owner ->
-              List.mapi
-                (fun offset method_item ->
-                  method_declaration (index + 1 + offset) ~container:index ~owner method_item)
-                top_level.methods
-          | None -> []
-        in
-        (index + 1 + List.length top_level.methods, List.rev_append methods (container :: declared)))
-      (0, []) top_levels
+  let is_header_broken (item : definition Syntax.item) =
+    Option.is_some
+      (Parts.reported ~spans:item.positions.spans ~recovered:item.positions.recovered item.value
+         Header)
   in
-  List.filter_map Fun.id (List.rev declared)
+  let _, declared, unresolved_headers =
+    List.fold_left
+      (fun (index, declared, unresolved_headers) (top_level : Syntax.top_level) ->
+        let item = top_level.definition in
+        let next = index + 1 + List.length top_level.methods in
+        match top_level_declaration index item with
+        | None -> (next, declared, unresolved_headers)
+        | Some (Error _) when is_header_broken item -> (next, declared, unresolved_headers)
+        | Some (Error names) ->
+            (next, declared, ({ item; imports; names } : unresolved_header) :: unresolved_headers)
+        | Some (Ok container) ->
+            let owner =
+              match item.value.kind with
+              | Trait _ | Impl _ -> Some (container.declaration.path, false)
+              | Capability _ -> Some (container.declaration.path, true)
+              | _ -> None
+            in
+            let methods =
+              match owner with
+              | Some owner ->
+                  List.filter_map Fun.id
+                    (List.mapi
+                       (fun offset method_item ->
+                         method_declaration (index + 1 + offset) ~container:index ~owner method_item)
+                       top_level.methods)
+              | None -> []
+            in
+            (next, List.rev_append methods (container :: declared), unresolved_headers))
+      (0, [], []) top_levels
+  in
+  (List.rev declared, List.rev unresolved_headers)
 
 module Module_map = Map.Make (struct
   type t = Path.module_
@@ -559,9 +601,11 @@ type module_names = {
   module_declarations : declaration list;
 }
 
+type file_names = { declarations : declaration list; unresolved_headers : unresolved_header list }
+
 type namespace = {
   modules : module_names Module_map.t;
-  files : declaration list File_map.t;
+  files : file_names File_map.t;
   declarations : declaration list;
   declared : declared Key_map.t;
   members : key list Member_map.t;
@@ -686,17 +730,31 @@ let namespace lookups package
   in
   let file_imports file = Option.value ~default:[] (File_map.find_opt file imports) in
   let pass_lookups = { lookups with find = own_find; module_exists = own_module_exists } in
-  let module_declarations =
+  let declared_files =
     List.map
       (fun (module_, files) ->
         ( module_,
-          numbered
-            (List.concat_map
-               (fun ((file : Path.file), (parsed : Syntax.file), text) ->
-                 file_declarations pass_lookups file ~imports:(file_imports file) ~text
-                   parsed.definitions)
-               files) ))
+          List.map
+            (fun ((file : Path.file), (parsed : Syntax.file), text) ->
+              ( file,
+                file_declarations pass_lookups file ~imports:(file_imports file) ~text
+                  parsed.definitions ))
+            files ))
       modules
+  in
+  let module_declarations =
+    List.map
+      (fun (module_, files) ->
+        (module_, numbered (List.concat_map (fun (_, (written, _)) -> written) files)))
+      declared_files
+  in
+  let unresolved_headers =
+    List.fold_left
+      (fun map (_, files) ->
+        List.fold_left
+          (fun map (file, (_, unresolved_headers)) -> File_map.add file unresolved_headers map)
+          map files)
+      File_map.empty declared_files
   in
   let written = List.concat_map snd module_declarations in
   let by_key declarations =
@@ -801,7 +859,12 @@ let namespace lookups package
         modules_map module_declarations;
     files =
       File_map.mapi
-        (fun file _ -> List.map (fun (written : written) -> written.declaration) (in_file file))
+        (fun file _ ->
+          {
+            declarations = List.map (fun (written : written) -> written.declaration) (in_file file);
+            unresolved_headers =
+              Option.value ~default:[] (File_map.find_opt file unresolved_headers);
+          })
         imports;
     declarations;
     declared;
@@ -1009,12 +1072,15 @@ let of_namespaces ~(namespace : Path.package -> namespace) ~module_exists ~split
                 (declared { module_; path; ordinal = 0 })
         | Method { owner; name; _ } | Member_constant { owner; name } ->
             List.find_opt (fun (key : key) -> Path.equal key.path path) (members owner name)
-        | Derived _ | Unresolved _ -> None);
+        | Derived _ -> None);
     declaration = (fun key -> Option.map (fun declared -> declared.declaration) (declared key));
     declarations =
       (fun module_ ->
         match of_module module_ with Some names -> names.module_declarations | None -> []);
-    declarations_in = (fun file -> Option.value ~default:[] (of_file file));
+    declarations_in =
+      (fun file -> match of_file file with Some names -> names.declarations | None -> []);
+    unresolved_headers =
+      (fun file -> match of_file file with Some names -> names.unresolved_headers | None -> []);
     package_declarations = (fun package -> (namespace package).declarations);
     definition = (fun key -> Option.map (fun declared -> declared.item.value) (declared key));
     text = (fun key -> Option.map (fun (declared : declared) -> declared.text) (declared key));

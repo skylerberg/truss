@@ -2247,7 +2247,9 @@ let settings = json::parse(text)?
   importing two modules with the same last name is an error.
 - An unused `use` is an error. A `use` is used when a module path in the
   file begins with its last name. A file with a syntax error reports no
-  unused `use`, since the code that did not parse may use it.
+  unused `use`, since the code that did not parse may use it. Neither does
+  a file with a definition whose type head or trait does not resolve, since
+  the rest of that definition is not checked.
 
 ### Module paths
 

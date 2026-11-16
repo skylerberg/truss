@@ -110,7 +110,7 @@ let is_signature : Database.Part.t -> bool = function
   | Module_declarations _ | File_declarations _ | Package_declarations _ | Members _
   | Traits_declaring _ | Impl_index _ | Impls_of_type _ | Impls_of_trait _ | Law_proofs _
   | Resolved _ | Grant _ | Checked_body _ | Derived_form _ | Body_mir _ | Generated_mir _
-  | Call_edges _ | Patterns _ | Usage _ | Ownership _ | Used_packages _ | Import_check _
+  | Call_edges _ | Patterns _ | Usage _ | Ownership _ | Used_packages _ | File_check _
   | Package_check _ | Successors _ | Recursion_group _ | Proof _ | Folded_constants _ | Lowered _
   | Test_key _ ->
       false

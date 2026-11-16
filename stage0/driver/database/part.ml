@@ -43,7 +43,7 @@ type t =
   | Usage of Resolve.Names.key
   | Ownership of Resolve.Names.key
   | Used_packages of Resolve.Names.key
-  | Import_check of Path.file
+  | File_check of Path.file
   | Package_check of Path.package * Package_checks.check
   | Successors of Path.t * Path.package
   | Recursion_group of Path.t
@@ -53,7 +53,7 @@ type t =
   | Test_key of Instance.key
 
 let package_of_definition = function
-  | Source file | Parsed file | File_declarations file | Import_check file -> file.module_.package
+  | Source file | Parsed file | File_declarations file | File_check file -> file.module_.package
   | Packages -> Compiler_bug.bug ~stage:"Database" "the set of packages belongs to no package"
   | Modules package
   | Dependencies package
@@ -189,7 +189,7 @@ let show part =
   | Usage declared -> "usage " ^ key declared
   | Ownership declared -> "ownership " ^ key declared
   | Used_packages declared -> "used packages " ^ key declared
-  | Import_check file -> "import check " ^ Path.show_file file
+  | File_check file -> "file check " ^ Path.show_file file
   | Package_check (package, check) ->
       Printf.sprintf "package check %s %s" (Path.show_package package)
         (match check with
@@ -229,7 +229,7 @@ let instance_definition : Instance.key -> Path.t option = function
 let definition = function
   | Source _ | Parsed _ | Packages | Modules _ | Dependencies _ | Namespace _ | Entries _
   | Module_declarations _ | File_declarations _ | Package_declarations _ | Traits_declaring _
-  | Impl_index _ | Grant _ | Import_check _
+  | Impl_index _ | Grant _ | File_check _
   | Package_check (_, (Instantiations | Tests | Dependencies)) ->
       None
   | Entry (module_, name) -> Some (Path.Top { module_; name })
@@ -317,7 +317,7 @@ let kind_name = function
   | Usage _ -> "usage check"
   | Ownership _ -> "ownership check"
   | Used_packages _ -> "used packages"
-  | Import_check _ -> "import check"
+  | File_check _ -> "file check"
   | Package_check _ -> "package check"
   | Successors _ -> "successors"
   | Recursion_group _ -> "recursion group"

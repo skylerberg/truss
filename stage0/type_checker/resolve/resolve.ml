@@ -94,7 +94,9 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
   match (lookups.definition key, lookups.spans key) with
   | Some definition, Some spans ->
       let module_ = key.module_ in
-      let state = Walk.create lookups key ~spans ~walked:section in
+      let state =
+        Walk.create lookups ~module_ ~imports:(lookups.imports key) ~spans ~walked:section
+      in
       let container =
         Option.bind (lookups.container key) (fun (container : Names.key) ->
             Option.map
@@ -108,7 +110,7 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
         | Some container -> not (Names.is_broken lookups container Header)
         | None -> true
       in
-      if is_walked then Walk.definition state ~path:key.path ?container definition;
+      if is_walked then Walk.definition state ~key ?container definition;
       (match key.path with
       | Top { name; _ } when List.mem name Prelude.names -> (
           let defines_it =
@@ -168,18 +170,30 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
       else None
   | _ -> None
 
+let diagnose_unresolved_header lookups ~module_ (header : Names.unresolved_header) =
+  let state =
+    Walk.create lookups ~module_ ~imports:header.imports ~spans:header.item.positions.spans
+      ~walked:Interface
+  in
+  List.iter (Walk.report_unresolved state) header.names;
+  List.rev_map
+    (Diagnostic.map_spans (Source.Definition_span.to_file ~base:header.item.base))
+    (Walk.names_of state Interface).diagnostics
+
 let file_diagnostics (lookups : Names.lookups) (path : Path.file) (file : Syntax.file) ~text
     ~(used : string list option) =
   let module_ = path.module_ in
+  let unresolved_headers = lookups.unresolved_headers path in
   let is_recovered (item : Syntax.definition Syntax.item) =
     match item.value.kind with Definition_error _ -> true | _ -> item.positions.recovered <> []
   in
   let used =
     if
-      List.exists
-        (fun (top_level : Syntax.top_level) ->
-          is_recovered top_level.definition || List.exists is_recovered top_level.methods)
-        file.definitions
+      unresolved_headers <> []
+      || List.exists
+           (fun (top_level : Syntax.top_level) ->
+             is_recovered top_level.definition || List.exists is_recovered top_level.methods)
+           file.definitions
     then None
     else used
   in
@@ -223,6 +237,7 @@ let file_diagnostics (lookups : Names.lookups) (path : Path.file) (file : Syntax
          last :: seen)
        [] file.uses);
   List.rev !diagnostics
+  @ List.concat_map (diagnose_unresolved_header lookups ~module_) unresolved_headers
 
 type trait_header = {
   associated : string list;

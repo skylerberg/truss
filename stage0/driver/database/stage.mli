@@ -3,7 +3,7 @@ type t =
   | Parse
   | Namespaces
   | Resolution
-  | Import_checks
+  | File_checks
   | Trait_headers
   | Constant_values
   | Headers

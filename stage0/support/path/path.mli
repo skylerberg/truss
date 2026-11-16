@@ -29,7 +29,6 @@ type t =
   | Derived of { type_ : t; trait : t }
   | Test of { module_ : module_; name : string }
   | Law_proof of { module_ : module_; trait : reference; law : string; for_type : t }
-  | Unresolved of { file : file; names : string list }
 
 and reference = { path : t; arguments : argument list; associated : (string * argument) list }
 

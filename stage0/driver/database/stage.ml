@@ -3,7 +3,7 @@ type t =
   | Parse
   | Namespaces
   | Resolution
-  | Import_checks
+  | File_checks
   | Trait_headers
   | Constant_values
   | Headers
@@ -32,7 +32,7 @@ let all =
     Parse;
     Namespaces;
     Resolution;
-    Import_checks;
+    File_checks;
     Trait_headers;
     Constant_values;
     Headers;
@@ -65,7 +65,7 @@ let precedes earlier later = position earlier <= position later
 
 let is_lowering = function
   | Folded_constants | Lowered_code | Test_keys -> true
-  | Input | Parse | Namespaces | Resolution | Import_checks | Trait_headers | Constant_values
+  | Input | Parse | Namespaces | Resolution | File_checks | Trait_headers | Constant_values
   | Headers | Interfaces | Derived_interfaces | Type_facts | Grants | Signature_checks | Contracts
   | Checked_bodies | Derived_forms | Mir | Call_edges | Body_checks | Package_checks | Successors
   | Recursion_groups | Proofs ->
@@ -85,7 +85,7 @@ let of_part : Part.t -> t = function
   | Law_proofs _ ->
       Namespaces
   | Resolved _ -> Resolution
-  | Import_check _ -> Import_checks
+  | File_check _ -> File_checks
   | Trait_header _ -> Trait_headers
   | Constant_value _ -> Constant_values
   | Header _ -> Headers

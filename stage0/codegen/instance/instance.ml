@@ -82,8 +82,6 @@ let rec path : Path.t -> string = function
   | Law_proof { module_; trait; law; for_type } ->
       module_path module_ ^ marker "Proof" ^ reference trait ^ marker "Law" ^ text law
       ^ marker "For" ^ path for_type ^ marker "End"
-  | Unresolved { names; _ } ->
-      marker "Unresolved" ^ String.concat (marker "In") (List.map text names) ^ marker "End"
 
 and reference ({ path = trait; arguments; associated } : Path.reference) =
   match (arguments, associated) with

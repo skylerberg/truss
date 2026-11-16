@@ -70,7 +70,8 @@ type section_names = {
 
 type state = {
   lookups : Names.lookups;
-  key : Names.key;
+  module_ : Path.module_;
+  imports : (string * Path.module_) list;
   spans : Source.Definition_span.t array;
   interface : section_names;
   contract : section_names;
@@ -88,11 +89,12 @@ let section_names size =
     used_imports = [];
   }
 
-let create lookups key ~spans ~walked =
+let create lookups ~module_ ~imports ~spans ~walked =
   let size = Array.length spans in
   {
     lookups;
-    key;
+    module_;
+    imports;
     spans;
     interface = section_names size;
     contract = section_names size;
@@ -142,7 +144,7 @@ let unknown state (name : name) ~expected candidates =
        (reported state ~fixes Unknown_name (read_span state name.id)
           (Printf.sprintf "Nothing named `%s` is %s." name.text expected)))
 
-let module_item state text = state.lookups.find state.key.module_ text
+let module_item state text = state.lookups.find state.module_ text
 
 let module_of_names state (first : name) (rest : name list) =
   let failed report =
@@ -150,16 +152,15 @@ let module_of_names state (first : name) (rest : name list) =
     Error report
   in
   if
-    List.mem_assoc first.text (state.lookups.imports state.key)
+    List.mem_assoc first.text state.imports
     && not (List.mem first.text (current state).used_imports)
   then (current state).used_imports <- first.text :: (current state).used_imports;
   begin match
-    Names.lookup_module state.lookups ~from:state.key.module_
-      ~imports:(state.lookups.imports state.key)
+    Names.lookup_module state.lookups ~from:state.module_ ~imports:state.imports
       (List.map (fun (name : Syntax.name) -> name.text) (first :: rest))
   with
   | Found_module (module_, `Package)
-    when module_ = Intrinsic.module_ && state.key.module_.package <> Path.standard_package ->
+    when module_ = Intrinsic.module_ && state.module_.package <> Path.standard_package ->
       failed
         (reported state Intrinsic_import (read_span state first.id)
            "Only the `standard` package can use `standard::intrinsic`.")
@@ -181,7 +182,7 @@ let module_of_names state (first : name) (rest : name list) =
 
 let in_module state module_ (name : name) ~types =
   let is_kind = if types then Names.is_type_kind else Names.is_value_kind in
-  match Names.find_in state.lookups ~from:state.key.module_ module_ name.text ~is_kind with
+  match Names.find_in state.lookups ~from:state.module_ module_ name.text ~is_kind with
   | Found_name (item, path) ->
       set state name (Definition (item.kind, path));
       Some (path, item)
@@ -200,7 +201,7 @@ let in_module state module_ (name : name) ~types =
           (fun (item : Names.entry) ->
             if
               (if types then Names.is_type_kind item.kind else Names.is_value_kind item.kind)
-              && Names.visible ~from:state.key.module_ module_ item.visibility
+              && Names.visible ~from:state.module_ module_ item.visibility
             then Some item.name
             else None)
           (state.lookups.entries module_)
@@ -212,7 +213,7 @@ let type_candidates state scope =
   List.map fst (String_map.bindings scope.types)
   @ List.filter_map
       (fun (item : Names.entry) -> if Names.is_type_kind item.kind then Some item.name else None)
-      (state.lookups.entries state.key.module_)
+      (state.lookups.entries state.module_)
   @ List.map fst Prelude.types
 
 let type_name state scope ?(variants = false) (path : path) =
@@ -226,7 +227,7 @@ let type_name state scope ?(variants = false) (path : path) =
       match String_map.find_opt text scope.types with
       | Some parameter -> set state path.last parameter
       | None -> (
-          match Names.find_bare_type state.lookups ~from:state.key.module_ text with
+          match Names.find_bare_type state.lookups ~from:state.module_ text with
           | Some (item, found) -> set state path.last (Definition (item.kind, found))
           | None -> (
               match if variants then Prelude.find_variant text else None with
@@ -290,8 +291,7 @@ and count_name state scope (name : name) =
   | shadowing -> (
       match module_item state name.text with
       | Some item when item.kind = Constant && shadowing = None ->
-          set state name
-            (Definition (Constant, Top { module_ = state.key.module_; name = name.text }))
+          set state name (Definition (Constant, Top { module_ = state.module_; name = name.text }))
       | _ ->
           set state name
             (Unknown
@@ -357,8 +357,7 @@ and local_value state scope (name : name) =
       else
         begin match module_item state text with
         | Some item when Names.is_value_kind item.kind ->
-            set state name
-              (Definition (item.kind, Top { module_ = state.key.module_; name = text }))
+            set state name (Definition (item.kind, Top { module_ = state.module_; name = text }))
         | _ ->
             if text = "null" || text = "nil" then begin
               set state name
@@ -380,7 +379,7 @@ and local_value state scope (name : name) =
                 @ List.filter_map
                     (fun (item : Names.entry) ->
                       if Names.is_value_kind item.kind then Some item.name else None)
-                    (state.lookups.entries state.key.module_))
+                    (state.lookups.entries state.module_))
         end
 
 and name_expression state scope (path : path) =
@@ -906,9 +905,14 @@ let inherited scope ~(owner : Path.t) (generics : generic_parameter list) =
       | Generic_error -> scope)
     scope generics
 
-let definition state ~(path : Path.t) ?(container : (Path.t * definition) option)
+let report_unresolved state : Names.unresolved_name -> unit = function
+  | Type_path path -> type_name state empty_scope path
+  | Count_name name -> count_name state empty_scope name
+
+let definition state ~(key : Names.key) ?(container : (Path.t * definition) option)
     (definition_ : definition) =
-  let broken part = Names.is_broken state.lookups state.key part in
+  let path = key.path in
+  let broken part = Names.is_broken state.lookups key part in
   let header_broken = broken Header and body_broken = broken Body in
   let scope =
     match container with

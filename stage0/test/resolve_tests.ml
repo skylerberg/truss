@@ -211,6 +211,92 @@ let () =
          }\n"
         ~others:[ ("app::one::codec", "public trait Marker {\n}\n") ]
         ~says:"already defined in this file" "resolve.duplicate_definition");
+  test "an impl whose type does not resolve is an error with a fix to the closest" (fun () ->
+      one_diagnostic
+        "public trait Marker {\n}\n\npublic type Point(x: Int64)\n\nimpl Marker for Pont {\n}\n"
+        ~says:"`Pont`" "resolve.unknown_name"
+        ~fixed:
+          "public trait Marker {\n}\n\npublic type Point(x: Int64)\n\nimpl Marker for Point {\n}\n");
+  test "an impl whose trait does not resolve is an error" (fun () ->
+      one_diagnostic "public type Point(x: Int64)\n\nimpl Markr for Point {\n}\n" ~says:"`Markr`"
+        "resolve.unknown_name");
+  test "an unknown name in an impl's trait arguments is an error" (fun () ->
+      one_diagnostic
+        "public trait Convert[Target] {\n\
+         }\n\n\
+         public type Point(x: Int64)\n\n\
+         impl Convert[Strng] for Point {\n\
+         }\n"
+        ~says:"`Strng`" "resolve.unknown_name");
+  test "an unknown count in an impl's trait arguments is an error" (fun () ->
+      one_diagnostic
+        "public trait Sized[count: UInt64] {\n\
+         }\n\n\
+         public type Point(x: Int64)\n\n\
+         impl Sized[width] for Point {\n\
+         }\n"
+        ~says:"`width`" "resolve.not_a_constant");
+  test "a method whose type does not resolve is an error" (fun () ->
+      one_diagnostic "fn Pont.area(self) -> Int64 {\n  1\n}\n" ~says:"`Pont`" "resolve.unknown_name");
+  test "a law proof whose type does not resolve is an error" (fun () ->
+      one_diagnostic
+        "public trait Marker {\n\
+        \  law stable(value: Self) {\n\
+        \    true\n\
+        \  }\n\
+         }\n\n\
+         proof Marker.stable for Pont {\n\
+         }\n"
+        ~says:"`Pont`" "resolve.unknown_name");
+  test "the body of an impl whose type does not resolve is not checked" (fun () ->
+      one_diagnostic
+        "public trait Marker {\n\
+        \  fn mark(self) -> Int64\n\
+         }\n\n\
+         impl Marker for Pont {\n\
+        \  fn mark(self) -> Int64 {\n\
+        \    missing\n\
+        \  }\n\
+         }\n"
+        ~says:"`Pont`" "resolve.unknown_name");
+  test "a file with an impl whose type does not resolve reports no unused use" (fun () ->
+      one_diagnostic
+        "use app::one::codec\n\n\
+         public trait Marker {\n\
+        \  fn mark(self) -> Int64\n\
+         }\n\n\
+         impl Marker for Pont {\n\
+        \  fn mark(self) -> Int64 {\n\
+        \    codec::value()\n\
+        \  }\n\
+         }\n"
+        ~others:[ ("app::one::codec", "public fn value() -> Int64 {\n  1\n}\n") ]
+        ~says:"`Pont`" "resolve.unknown_name");
+  test "impls in two files with one unresolved type each report the type, not a duplicate"
+    (fun () ->
+      let packages =
+        setup
+          [
+            ("app::main", "public trait Marker {\n}\n\nimpl Marker for Pont {\n}\n");
+            ("app::main/second", "impl Marker for Pont {\n}\n");
+          ]
+      in
+      List.iter
+        (fun name ->
+          match codes (diagnostics packages name) with
+          | [ "resolve.unknown_name" ] -> ()
+          | reported -> fail "%s: [%s]" name (String.concat "; " reported))
+        [ "app::main"; "app::main/second" ]);
+  test "a generic parameter given arguments in an impl's trait is no unknown name" (fun () ->
+      no_diagnostics
+        [
+          ( "app::main",
+            "public trait Convert[Target] {\n\
+             }\n\n\
+             public type Box[Element](value: Element)\n\n\
+             impl Convert[Element[Int64]] for Box[Element] {\n\
+             }\n" );
+        ]);
   test "a file names a module only through its own imports" (fun () ->
       one_diagnostic Fixtures.Resolve.file_without_the_use_cannot_name_the_module
         ~others:

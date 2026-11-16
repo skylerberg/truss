@@ -39,7 +39,12 @@ type section_names = {
 type state
 
 val create :
-  Names.lookups -> Names.key -> spans:Source.Definition_span.t array -> walked:section -> state
+  Names.lookups ->
+  module_:Path.module_ ->
+  imports:(string * Path.module_) list ->
+  spans:Source.Definition_span.t array ->
+  walked:section ->
+  state
 
 val names_of : state -> section -> section_names
 
@@ -51,5 +56,7 @@ val report :
   string ->
   unit
 
+val report_unresolved : state -> Names.unresolved_name -> unit
+
 val definition :
-  state -> path:Path.t -> ?container:Path.t * Syntax.definition -> Syntax.definition -> unit
+  state -> key:Names.key -> ?container:Path.t * Syntax.definition -> Syntax.definition -> unit

@@ -17,7 +17,6 @@ let rec path_name : Path.t -> string = function
   | Impl { trait; for_type; _ } -> path_name trait.path ^ " for " ^ path_name for_type
   | Law_proof { trait; law; for_type; _ } ->
       path_name trait.path ^ "." ^ law ^ " for " ^ path_name for_type
-  | Unresolved { names; _ } -> String.concat "::" names
   | Method { name; _ } | Member_constant { name; _ } -> name
   | Derived { trait; _ } -> path_name trait
 

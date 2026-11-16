@@ -47,7 +47,7 @@ type package_database = {
   parsed : (Path.file, parsed) Hashtbl.t;
   mutable namespace : Names.namespace option;
   resolved_names : (Names.key * Resolve.section, Resolve.resolved part) Hashtbl.t;
-  import_checks : (Path.file, Diagnostic.t list) Hashtbl.t;
+  file_checks : (Path.file, Diagnostic.t list) Hashtbl.t;
   trait_headers : (Names.key, Resolve.trait_header part) Hashtbl.t;
   constant_values : Z.t option part Path_table.t;
   headers : (Names.key, Environment.header part) Hashtbl.t;
@@ -104,7 +104,7 @@ let make_empty_package_database name ~dependencies =
     parsed = Hashtbl.create 64;
     namespace = None;
     resolved_names = Hashtbl.create 1024;
-    import_checks = Hashtbl.create 64;
+    file_checks = Hashtbl.create 64;
     trait_headers = Hashtbl.create 64;
     constant_values = Path_table.create 64;
     headers = Hashtbl.create 64;
@@ -237,7 +237,7 @@ let copy_package_database (package_database : package_database) =
     parsed = Hashtbl.copy package_database.parsed;
     namespace = package_database.namespace;
     resolved_names = Hashtbl.copy package_database.resolved_names;
-    import_checks = Hashtbl.copy package_database.import_checks;
+    file_checks = Hashtbl.copy package_database.file_checks;
     trait_headers = Hashtbl.copy package_database.trait_headers;
     constant_values = Path_table.copy package_database.constant_values;
     headers = Hashtbl.copy package_database.headers;
@@ -506,12 +506,14 @@ let recording (names : Names.lookups) (note : Part.t -> unit) : Names.lookups =
             note (Declaration { module_; path; ordinal = 0 })
         | Method { owner; name; _ } | Member_constant { owner; name } ->
             note (Members (owner, name))
-        | Derived _ | Unresolved _ -> ());
+        | Derived _ -> ());
         names.key path);
     declaration = (fun key -> noting (Declaration key) (names.declaration key));
     declarations =
       (fun module_ -> noting (Module_declarations module_) (names.declarations module_));
     declarations_in = (fun file -> noting (File_declarations file) (names.declarations_in file));
+    unresolved_headers =
+      (fun file -> noting (File_declarations file) (names.unresolved_headers file));
     package_declarations =
       (fun package -> noting (Package_declarations package) (names.package_declarations package));
     definition = (fun key -> noting (Tree key) (names.definition key));
@@ -706,7 +708,7 @@ let package_parts database (names : Names.lookups) package : Part.t list =
   @ List.map
       (fun dependency -> Part.Grant (package, dependency))
       (List.sort_uniq Path.compare_package (names.dependency_names package))
-  @ List.map (fun file -> Part.Import_check file) package_database.files
+  @ List.map (fun file -> Part.File_check file) package_database.files
   @ List.map
       (fun check -> Part.Package_check (package, check))
       (Package_checks.list_checks declarations)
@@ -816,7 +818,7 @@ let used_imports database note file =
   in
   if List.for_all Option.is_some used then Some (List.concat_map Option.get used) else None
 
-let import_diagnostics database note (file : Path.file) =
+let check_file database note (file : Path.file) =
   read database note (Parsed file);
   note (Source file);
   Resolve.file_diagnostics (recording_names database note) file (parsed_file database file).tree
@@ -1005,8 +1007,8 @@ let stored database (part : Part.t) =
       keyed ~is_failed:failed
         (fun package_database -> package_database.resolved_names)
         (key, section)
-  | Import_check file ->
-      keyed ~is_failed:never (fun package_database -> package_database.import_checks) file
+  | File_check file ->
+      keyed ~is_failed:never (fun package_database -> package_database.file_checks) file
   | Trait_header key ->
       keyed ~is_failed:failed (fun package_database -> package_database.trait_headers) key
   | Constant_value path ->
@@ -1397,9 +1399,9 @@ let compute_part database (part : Part.t) =
             | Some (Ok resolved) -> Value resolved
             | Some (Error diagnostics) -> Failed diagnostics
             | None -> Blocked))
-  | Import_check file ->
-      into (keyed package_database.import_checks file) (fun note ->
-          Some (import_diagnostics database note file))
+  | File_check file ->
+      into (keyed package_database.file_checks file) (fun note ->
+          Some (check_file database note file))
   | Trait_header key ->
       into (keyed package_database.trait_headers key) (fun note ->
           Some
@@ -1926,7 +1928,7 @@ let list_stored_parts (package_database : package_database) : Part.t list =
     [
       keyed package_database.parsed (fun file -> Part.Parsed file);
       keyed package_database.resolved_names (fun (key, section) -> Part.Resolved (key, section));
-      keyed package_database.import_checks (fun file -> Part.Import_check file);
+      keyed package_database.file_checks (fun file -> Part.File_check file);
       keyed package_database.trait_headers (fun key -> Part.Trait_header key);
       at_paths package_database.constant_values (fun path -> Part.Constant_value path);
       keyed package_database.headers (fun key -> Part.Header key);
@@ -2278,7 +2280,7 @@ let list_checker_diagnostics database (file : Path.file) checker =
   by_span_and_code
     (match checker with
     | Resolve ->
-        Option.value ~default:[] (Hashtbl.find_opt package_database.import_checks file)
+        Option.value ~default:[] (Hashtbl.find_opt package_database.file_checks file)
         @ of_definitions ()
     | Package_checks ->
         List.concat_map
@@ -2570,7 +2572,7 @@ module For_testing = struct
       then Body_checks
       else if List.mem Infer checkers then Checked_bodies
       else if List.mem Interface checkers then Signature_checks
-      else Import_checks
+      else File_checks
     in
     drain database ~through [ file.module_.package ];
     List.concat_map (list_checker_diagnostics database file) checkers

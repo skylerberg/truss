@@ -299,7 +299,7 @@ let () =
              ])
         ~exactly:
           [
-            "import check app/main/main.truss";
+            "file check app/main/main.truss";
             "namespace app";
             "parsed app/main/main.truss";
             "proof app::main::callee";
@@ -316,8 +316,8 @@ let () =
              ])
         ~exactly:
           [
-            "import check app/main/main.truss";
-            "import check app/main/other.truss";
+            "file check app/main/main.truss";
+            "file check app/main/other.truss";
             "namespace app";
             "parsed app/main/main.truss";
             "parsed app/main/other.truss";
@@ -452,7 +452,7 @@ let () =
              ])
         ~exactly:
           [
-            "import check app/main/main.truss";
+            "file check app/main/main.truss";
             "namespace app";
             "parsed app/main/main.truss";
             "proof app::main::callee";
@@ -595,7 +595,7 @@ let () =
           [
             "derived form derived standard::serialization::Deserialize for \
              app::main::Signup.deserialize";
-            "import check app/main/main.truss";
+            "file check app/main/main.truss";
             "namespace app";
             "package check app type app::main::Signup";
             "parsed app/main/main.truss";
