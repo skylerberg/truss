@@ -258,6 +258,21 @@ let () =
       expect_one_diagnostic
         (functions ^ Fixtures.Infer.copy_file_with_one_argument)
         "types.missing_argument");
+  Harness.test "a call with more arguments than parameters is one error" (fun () ->
+      expect_one_diagnostic
+        (functions ^ Fixtures.Infer.copy_file_with_three_arguments)
+        "types.too_many_arguments" ~says:"This function takes 2 arguments, and 3 are given.");
+  Harness.test "a method called through its type counts its arguments besides `self`" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.counter_read_through_its_type_with_an_extra_argument
+        "types.too_many_arguments"
+        ~says:"This method takes 0 arguments besides `self`, and 1 is given.");
+  Harness.test "the first argument of a record with several fields needs a label too" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.point_with_an_unlabeled_first_argument
+        "types.missing_label" ~says:"`Point` has 2 fields"
+        ~fixed:Fixtures.Infer.point_with_labeled_arguments);
+  Harness.test "a variant with one field given two arguments is one error" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.circle_built_with_two_arguments
+        "types.too_many_arguments" ~says:"`Circle` has 1 field, and 2 arguments are given.");
   Harness.test "an argument for a parameter with a default can be omitted" (fun () ->
       let text = Fixtures.Infer.connect_without_its_port in
       match locate_core_call text "connect(1)" 1 with
@@ -890,6 +905,9 @@ let () =
   Harness.test "a function value given too many arguments is one error" (fun () ->
       expect_one_diagnostic Fixtures.Infer.function_value_called_with_two_arguments
         "types.too_many_arguments");
+  Harness.test "a function value given too few arguments is a missing argument" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.function_value_called_with_no_arguments
+        "types.missing_argument" ~says:"This function takes 1 argument, and 0 are given.");
   Harness.test "a member of a generic parameter that it does not have is an error" (fun () ->
       expect_one_diagnostic Fixtures.Infer.member_of_an_unbounded_generic "types.unknown_member");
   Harness.test "a type with no fields is not its own value" (fun () ->
