@@ -10,6 +10,9 @@ let touches_word_before cursor index =
       | _ -> false)
   | _ -> false
 
+let quote_joins_before cursor index =
+  touches_word_before cursor index || (index > 0 && is_at cursor (index - 1) '"')
+
 let is_name_character cursor position =
   let decoded = decode cursor position in
   Unicode.Decoded.is_valid decoded
@@ -194,7 +197,7 @@ let prefixed_string cursor ~scan ~prefix ~start ~nesting =
           [] )
   in
   report cursor ~code:String_prefix
-    ~fixes:(if touches_word_before cursor start then [] else fixes)
+    ~fixes:(if quote_joins_before cursor start then [] else fixes)
     (span start quote_start) message;
   (kind, ending)
 
@@ -233,7 +236,7 @@ let hash_raw_string cursor ~start =
         report cursor ~code:String_prefix
           ~fixes:
             (if
-               interpolates
+               interpolates || quote_joins_before cursor start
                || String.starts_with ~prefix:"\"" value
                || String.ends_with ~suffix:"\"" value
              then []
@@ -291,7 +294,7 @@ let quoted_string cursor ~scan ~nesting ~delimiter =
   let template = delimiter = '`' in
   report cursor ~code:String_delimiter
     ~fixes:
-      (if ending = Closed && not (touches_word_before cursor start) then
+      (if ending = Closed && not (quote_joins_before cursor start) then
          [
            Diagnostic.fix "Write the string between `\"`s"
              ((Diagnostic.replace (span start (start + 1)) "\"" :: quote_edits (start + 1) [])
@@ -323,7 +326,7 @@ let curly_quoted_string cursor ~opening_length ~closing =
         String.exists
           (fun character -> character = '\\' || character = '$' || character = '"')
           value
-        || touches_word_before cursor start
+        || quote_joins_before cursor start
       in
       report cursor ~code:Confusable_character
         ~fixes:
