@@ -943,6 +943,10 @@ let () =
       if count_holes text <> 0 then Harness.fail "%d holes" (count_holes text));
   Harness.test "the code before a todo is still proven" (fun () ->
       expect_not_proven Fixtures.Prover.element_read_before_a_todo "prover.requires");
+  Harness.test "a constant, a field default, or a parameter default left todo is read" (fun () ->
+      expect_proven Fixtures.Prover.values_left_todo);
+  Harness.test "a constant left todo has an unknown value" (fun () ->
+      expect_not_proven Fixtures.Prover.increment_of_a_todo_constant "prover.overflow");
   Harness.test "an impl's laws wait while one of its methods is not written" (fun () ->
       expect_proven Fixtures.Prover.meters_equal_left_todo);
   Harness.test "a type that contains itself through a map's values is read" (fun () ->

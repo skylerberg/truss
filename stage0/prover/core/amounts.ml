@@ -1,7 +1,7 @@
 let run_code context frame (code : Mir.t) ~type_ =
   match Lambdas.run_lambda_body context frame ~lambdas:code.lambdas code.body ~type_ with
   | Some returned -> returned
-  | None -> raise (Facts.Foreign_unsupported "code that returns no value")
+  | None -> (frame, Facts.arrive context frame "unfinished" type_)
 
 let make_empty_parts context frame element =
   let parts =

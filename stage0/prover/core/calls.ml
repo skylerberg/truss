@@ -1017,7 +1017,8 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
             match (passed.mode, passed.passed_place) with
             | Types.Mut, Some place -> (
                 try place.read frame
-                with Facts.Unsupported _ | Facts.Foreign_unsupported _ -> passed.term)
+                with Facts.Unsupported _ | Facts.Foreign_unsupported _ ->
+                  Facts.arrive context frame "changed" passed.type_)
             | _ -> passed.term)
           values
       in

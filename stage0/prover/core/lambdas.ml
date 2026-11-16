@@ -326,10 +326,10 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   let function_type =
     match ty with
     | Types.Function function_type -> function_type
-    | _ -> Facts.raise_unsupported location "a lambda"
+    | _ -> Facts.raise_bug "a lambda of type %s" (Types.show ty)
   in
   if List.length written.code.parameters <> List.length function_type.inputs then
-    Facts.raise_unsupported location "a lambda with a different number of parameters";
+    Facts.raise_bug "a lambda whose parameters do not match %s" (Types.show ty);
   let called = Facts.declare_fresh context frame "called" Logic.Bool in
   let inside = { (Facts.restrict frame called) with result = None } in
   let start_fresh = context.fresh
