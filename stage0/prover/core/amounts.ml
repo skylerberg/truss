@@ -1,5 +1,3 @@
-module Symbol = Logic.Symbol
-
 let code_value context frame (code : Mir.t) ~type_ =
   match Lambdas.body_run context frame ~lambdas:code.lambdas code.body ~type_ with
   | Some returned -> returned
@@ -307,7 +305,7 @@ let step_amount context frame (invocation : Invocation.t) (values : State.passed
       | _ -> Operations.unknown_amount context frame counter)
 
 let held_symbol context ty term =
-  let symbol = Symbol.Potential ty in
+  let symbol = Logic.Symbol.Potential ty in
   Facts.declare context (Logic.Function (symbol, [ Facts.sort_of context ty ], Logic.Int));
   Logic.Apply (symbol, [ term ])
 
@@ -356,18 +354,18 @@ let buffer_elements (context : State.context) (ty : Types.ty) =
       elements
 
 let buffer_slack context (ty : Types.ty) term =
-  let symbol = Symbol.Slack ty in
+  let symbol = Logic.Symbol.Slack ty in
   Facts.declare context (Logic.Function (symbol, [ Facts.sort_of context ty ], Logic.Int));
   Logic.Apply (symbol, [ term ])
 
 let potential_measure context element =
-  let symbol = Symbol.Potential_measure element in
+  let symbol = Logic.Symbol.Potential_measure element in
   let measure = Intrinsics.measure_type element in
   Facts.declare context (Logic.Constant (symbol, Facts.sort_of context (Types.Function measure)));
   let term = Logic.Symbol symbol in
   if not (List.mem term context.potentials) then begin
     context.potentials <- term :: context.potentials;
-    let each = Symbol.Variable { label = "potential.element"; numbers = [] } in
+    let each = Logic.Symbol.Variable { label = "potential.element"; numbers = [] } in
     Facts.add_fact context
       (Logic.forall
          ( [ (each, Facts.sort_of context element) ],
@@ -584,7 +582,7 @@ let method_time_bound context (method_ : Path.t) self_type =
   | _ -> None
 
 let trait_method_time context frame (method_ : Path.t) self_type =
-  let symbol = Symbol.Method_time { method_; self_type } in
+  let symbol = Logic.Symbol.Method_time { method_; self_type } in
   Facts.declare context (Logic.Constant (symbol, Logic.Int));
   Facts.fact context frame (Logic.Operation ("<=", [ Logic.int 1; Logic.Symbol symbol ]));
   (match method_time_bound context method_ self_type with

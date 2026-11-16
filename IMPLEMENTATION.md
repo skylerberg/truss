@@ -126,18 +126,22 @@ file with `stage0/tools/comments`. The tool also rejects a file type that it
 has no comment syntax for, so a new type of file cannot add comments
 unchecked.
 
-### Opens
+### Module names
 
-Code has no `open`. A qualified name, such as `Facts.visible_type`, names
-the module that defines it, so a reader finds the definition without
-searching every opened module. No `open` can shadow a name in scope. A
-file that names a module often gives it an alias, as in
-`module Names = Resolve.Names`.
+Code names each module by its path, such as `Resolve.Names` or
+`Emit_c.Builder`, so a reader finds a definition without searching for the
+module a short name stands for. Code has no `open`: a name from another
+module is qualified, as in `Facts.visible_type`, and no `open` can shadow a
+name in scope. Code has no module alias either. Many modules share a name,
+such as the scanner's `Names` and `Resolve.Names`, so an alias's short name
+does not say which module it is. A library's main module exposes a
+submodule with `module Names = Names`; that line is the library's
+interface, not an alias.
 
 An expression may open a module for its infix operators: `Logic`, or
 Cmdliner's `Arg` or `Term`, as in `Logic.(a &&& b)`. Warnings 44 and 45
 reject such an open when it shadows a name in scope. CI rejects every other
-open with `stage0/tools/opens`.
+open, and every alias, with `stage0/tools/qualified_names`.
 
 ### Testing
 

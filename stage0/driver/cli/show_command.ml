@@ -1,27 +1,25 @@
-module Names = Resolve.Names
-
 type shown_definition = {
-  declaration : Names.declaration;
+  declaration : Resolve.Names.declaration;
   file : string;
   line : int;
   text : string;
 }
 
-let find_module (names : Names.lookups) written : Path.module_ option =
+let find_module (names : Resolve.Names.lookups) written : Path.module_ option =
   match names.split_module written with
   | Some module_ when names.module_exists module_ -> Some module_
   | Some _ | None -> None
 
 let list_module_declarations database (module_ : Path.module_) =
   (Database.make_name_lookups database [ module_.package ]).declarations module_
-  |> List.filter (fun (declaration : Names.declaration) -> declaration.ordinal = 0)
+  |> List.filter (fun (declaration : Resolve.Names.declaration) -> declaration.ordinal = 0)
 
 let list_package_declarations database package =
   (Database.make_name_lookups database [ package ]).package_declarations package
-  |> List.filter (fun (declaration : Names.declaration) -> declaration.ordinal = 0)
+  |> List.filter (fun (declaration : Resolve.Names.declaration) -> declaration.ordinal = 0)
 
-let is_visible packages (declaration : Names.declaration) =
-  List.mem declaration.module_.package packages || Names.is_public declaration.visibility
+let is_visible packages (declaration : Resolve.Names.declaration) =
+  List.mem declaration.module_.package packages || Resolve.Names.is_public declaration.visibility
 
 let resolve database packages text =
   let names = Database.make_name_lookups database packages in
@@ -31,7 +29,8 @@ let resolve database packages text =
   match (names.split_module written, module_, argument.member) with
   | Some { package; modules = [] }, _, None ->
       List.filter
-        (fun (declaration : Names.declaration) -> Names.is_public declaration.visibility)
+        (fun (declaration : Resolve.Names.declaration) ->
+          Resolve.Names.is_public declaration.visibility)
         (list_package_declarations database package)
   | _, Some module_, _ ->
       List.filter (is_visible packages) (list_module_declarations database module_)
@@ -44,7 +43,8 @@ let resolve database packages text =
               let path : Path.t = Top { module_; name = argument.last } in
               match
                 List.filter
-                  (fun (declaration : Names.declaration) -> Path.equal declaration.path path)
+                  (fun (declaration : Resolve.Names.declaration) ->
+                    Path.equal declaration.path path)
                   (list_module_declarations database module_)
               with
               | [ declaration ] when declaration.kind = Type ->
@@ -56,14 +56,14 @@ let resolve database packages text =
                   in
                   declaration
                   :: List.filter
-                       (fun (declaration : Names.declaration) ->
+                       (fun (declaration : Resolve.Names.declaration) ->
                          match declaration.path with
                          | Method { owner; _ } | Member_constant { owner; _ } ->
                              Path.equal owner path
                          | _ -> false)
                        package_declarations
                   @ List.filter
-                      (fun (declaration : Names.declaration) ->
+                      (fun (declaration : Resolve.Names.declaration) ->
                         List.exists (Path.equal declaration.path) impls)
                       package_declarations
                   |> List.filter (is_visible packages)
@@ -71,7 +71,7 @@ let resolve database packages text =
           | Some member ->
               let owner : Path.t = Top { module_; name = argument.last } in
               list_package_declarations database module_.package
-              |> List.filter (fun (declaration : Names.declaration) ->
+              |> List.filter (fun (declaration : Resolve.Names.declaration) ->
                   match declaration.path with
                   | Method { owner = owning_path; name; _ }
                   | Member_constant { owner = owning_path; name } ->
@@ -81,14 +81,14 @@ let resolve database packages text =
 
 let find snapshot database packages ~body text =
   List.map
-    (fun (declaration : Names.declaration) ->
-      let key = Names.key_of declaration in
+    (fun (declaration : Resolve.Names.declaration) ->
+      let key = Resolve.Names.key_of declaration in
       let opaque =
         declaration.visibility = Public_opaque
         && not (List.mem declaration.module_.package packages)
       in
       let names = Database.make_name_lookups database [ key.module_.package ] in
-      let ({ file = written; base } : Names.place) = names.place key in
+      let ({ file = written; base } : Resolve.Names.place) = names.place key in
       let source = Command_packages.source snapshot packages written in
       {
         declaration;

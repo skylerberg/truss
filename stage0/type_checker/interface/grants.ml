@@ -1,12 +1,11 @@
-module Names = Resolve.Names
-
 let resolve_capability (lookups : Lookups.t) ~package written : Path.t option =
   let find_visible_capability (module_ : Path.module_) name =
-    if not (Names.is_visible_module lookups.names ~from:{ package; modules = [] } module_) then None
+    if not (Resolve.Names.is_visible_module lookups.names ~from:{ package; modules = [] } module_)
+    then None
     else
       match lookups.names.find module_ name with
       | Some { kind = Capability; visibility; _ }
-        when module_.package = package || Names.is_public visibility ->
+        when module_.package = package || Resolve.Names.is_public visibility ->
           Some (Path.Top { module_; name })
       | _ -> None
   in

@@ -1,13 +1,11 @@
-module Compatibility = Cli.Compatibility
-
 let changes ?(modules = []) before after =
   let package : Path.package = { owner = None; name = "lib" } in
   let state text = Support.database (Support.setup (("lib::shapes", text) :: modules)) in
-  Compatibility.compare ~before:(state before) ~after:(state after) package
+  Cli.Compatibility.compare ~before:(state before) ~after:(state after) package
 
 let show actual =
   List.map
-    (fun ({ path; change } : Compatibility.public_change) ->
+    (fun ({ path; change } : Cli.Compatibility.public_change) ->
       match change with
       | Breaks reason -> Printf.sprintf "breaks: %s %s" (Path.show path) reason
       | Grows addition -> Printf.sprintf "grows: %s %s" (Path.show path) addition)
@@ -237,7 +235,7 @@ let () =
       let state files = Support.database (Support.setup files) in
       match
         show
-          (Compatibility.compare
+          (Cli.Compatibility.compare
              ~before:
                (state
                   [

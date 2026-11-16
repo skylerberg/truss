@@ -1,5 +1,3 @@
-module Builder = Emit_c.Builder
-
 type cleanup =
   | Drop_value of Lowered.place
   | Drop_flagged of { place : Lowered.place; flag : Lowered.place }
@@ -98,7 +96,9 @@ let enter context ?(nested = ref 0) ~builder frame =
   }
 
 let may_fork st = st.frame.exit = None
-let held st ?name ty : Lowered.place = Builder.at (Builder.local st.builder ?name ty)
+
+let held st ?name ty : Lowered.place =
+  Lowered.make_local_place (Emit_c.Builder.local st.builder ?name ty)
 
 let outlined st ~parts body =
   let nested = !(st.nested) in
@@ -107,7 +107,7 @@ let outlined st ~parts body =
   st.lend_record <- None;
   let holder = Emit_c.Builder.outline st.builder ~index:nested ~parts body in
   st.lend_record <- enclosing;
-  (nested, Lowered.Address { place = Builder.at holder; writable = false })
+  (nested, Lowered.Address { place = Lowered.make_local_place holder; writable = false })
 
 let ground st ty = Monomorphic.ground st.context.monomorphic st.frame.code.substitution ty
 let is_trivial st ty = Drop_and_copy.is_trivial st.context.drop_and_copy ty
@@ -149,7 +149,7 @@ let own_in_scope st place =
   scope.owned <- Drop_value place :: scope.owned
 
 let owned_local st ?name (scope : scope) ty =
-  let place = Builder.at (Builder.local st.builder ?name (Value ty)) in
+  let place = Lowered.make_local_place (Emit_c.Builder.local st.builder ?name (Value ty)) in
   if not (is_trivial st ty) then scope.owned <- Drop_value place :: scope.owned;
   place
 
@@ -157,7 +157,7 @@ let temporary st ?name ty = owned_local st ?name (innermost_scope st) ty
 let binding st ?name ty = owned_local st ?name (binding_scope st.scopes) ty
 
 let flagged_binding st ty ~flag =
-  let place = Builder.at (Builder.local st.builder (Value ty)) in
+  let place = Lowered.make_local_place (Emit_c.Builder.local st.builder (Value ty)) in
   if not (is_trivial st ty) then begin
     let scope = binding_scope st.scopes in
     scope.owned <- Drop_flagged { place; flag } :: scope.owned
@@ -170,56 +170,61 @@ let parameter st ?how ?(in_scope = true) ~owned (mode : Ground.mode) ty =
   match how mode ty with
   | None -> (None, temporary st ty)
   | Some (Lowered.Pointer _ as pointer) ->
-      let arrives = Builder.local st.builder pointer in
+      let arrives = Emit_c.Builder.local st.builder pointer in
       let place : Lowered.place = { root = Local arrives; projections = [ Deref ] } in
       own place;
       (Some arrives, place)
   | Some passed ->
-      let arrives = Builder.local st.builder passed in
-      own (Builder.at arrives);
-      (Some arrives, Builder.at arrives)
+      let arrives = Emit_c.Builder.local st.builder passed in
+      own (Lowered.make_local_place arrives);
+      (Some arrives, Lowered.make_local_place arrives)
 
 let evidence_parameters st capabilities =
   let arriving =
     List.map
       (fun capability ->
-        (capability, Builder.local st.builder ~name:"evidence" Convention.evidence))
+        (capability, Emit_c.Builder.local st.builder ~name:"evidence" Convention.evidence))
       capabilities
   in
   st.evidence <-
     List.map
-      (fun (capability, evidence_local) -> (capability, Lowered.Copy (Builder.at evidence_local)))
+      (fun (capability, evidence_local) ->
+        (capability, Lowered.Copy (Lowered.make_local_place evidence_local)))
       arriving;
   List.map snd arriving
 
 let result_slot st (convention : Convention.result) =
   st.result <-
     (match convention with
-    | Through_pointer pointer -> Through (Builder.local st.builder ~name:"result" pointer)
-    | Returned ty -> Returned_in (Builder.local st.builder ~name:"result" ty)
+    | Through_pointer pointer -> Through (Emit_c.Builder.local st.builder ~name:"result" pointer)
+    | Returned ty -> Returned_in (Emit_c.Builder.local st.builder ~name:"result" ty)
     | Nothing -> No_result)
 
 let result_place st : Lowered.place option =
   match st.result with
   | Through pointer -> Some { root = Local pointer; projections = [ Deref ] }
-  | Returned_in local -> Some (Builder.at local)
+  | Returned_in local -> Some (Lowered.make_local_place local)
   | No_result -> None
 
 let return_result st : Lowered.terminator =
-  Return (match st.result with Returned_in local -> Some (Move (Builder.at local)) | _ -> None)
+  Return
+    (match st.result with
+    | Returned_in local -> Some (Move (Lowered.make_local_place local))
+    | _ -> None)
 
 let drop_scope st (scope : scope) =
   List.iter
     (function
       | Drop_value place ->
-          if not (List.mem place st.moved) then Builder.emit st.builder (Drop place)
+          if not (List.mem place st.moved) then Emit_c.Builder.emit st.builder (Drop place)
       | Drop_flagged { place; flag } ->
           if not (List.mem place st.moved) then
-            Builder.when_ st.builder (Copy flag) (fun () -> Builder.emit st.builder (Drop place))
+            Emit_c.Builder.when_ st.builder (Copy flag) (fun () ->
+                Emit_c.Builder.emit st.builder (Drop place))
       | Free_pointed pointer ->
-          Builder.emit st.builder
+          Emit_c.Builder.emit st.builder
             (Call { target = Intrinsic Free; arguments = [ Copy pointer ]; result = Discarded })
-      | Join_group join -> Builder.emit st.builder join)
+      | Join_group join -> Emit_c.Builder.emit st.builder join)
     scope.owned
 
 let leave_to st depth =
@@ -254,21 +259,21 @@ let finish_function st ?(returns = true) ~first ~rest () : Emit_c.Builder.protot
   (match st.scopes with
   | [ scope ] -> drop_scope st scope
   | _ -> Definitions.bug "a function ended in a scope");
-  Builder.finish st.builder (if returns then return_result st else Unreachable);
+  Emit_c.Builder.finish st.builder (if returns then return_result st else Unreachable);
   let pointer = match st.result with Through pointer -> Some pointer | _ -> None in
   let result =
     match st.result with
-    | Returned_in local -> Some (Builder.local_type st.builder local)
+    | Returned_in local -> Some (Emit_c.Builder.local_type st.builder local)
     | _ -> None
   in
   { parameters = first @ Option.to_list pointer @ rest; result; returns }
 
 let finish_instance st ?returns ~rest () =
-  Builder.build st.builder (finish_function st ?returns ~first:[] ~rest ())
+  Emit_c.Builder.build st.builder (finish_function st ?returns ~first:[] ~rest ())
 
 let unreachable_block st =
-  Builder.finish st.builder Unreachable;
-  Builder.start st.builder (Builder.block st.builder)
+  Emit_c.Builder.finish st.builder Unreachable;
+  Emit_c.Builder.start st.builder (Emit_c.Builder.block st.builder)
 
 let owned st place ty = if is_trivial st ty then Lowered.Copy place else moved st place
 
@@ -276,7 +281,8 @@ let take st (place : Lowered.place) ty ~destination =
   match place.root with
   | Static _ when not (is_trivial st ty) ->
       Drop_and_copy.copy_into st.context.drop_and_copy st.builder ~destination ~source:place ty
-  | Static _ | Local _ -> Builder.emit st.builder (Assign (destination, Use (owned st place ty)))
+  | Static _ | Local _ ->
+      Emit_c.Builder.emit st.builder (Assign (destination, Use (owned st place ty)))
 
 let snapshot st (place : Lowered.place) =
   {
@@ -286,7 +292,7 @@ let snapshot st (place : Lowered.place) =
         (function
           | Lowered.Index (Copy index_place) ->
               let fixed = binding st st.context.types.uint64 in
-              Builder.emit st.builder (Assign (fixed, Use (Copy index_place)));
+              Emit_c.Builder.emit st.builder (Assign (fixed, Use (Copy index_place)));
               Lowered.Index (Copy fixed)
           | projection -> projection)
         place.projections;
@@ -305,17 +311,17 @@ let place_type st (place : Lowered.place) =
     | [] -> Some ty
     | _ :: _ when match ty with Environment _ | Evidence _ -> true | _ -> false -> None
     | projection :: rest ->
-        Option.bind (Lowered.projection_type st.context.env ~environment ty projection) (fun ty ->
-            projected ty rest)
+        Option.bind (Lowered.find_projection_type st.context.env ~environment ty projection)
+          (fun ty -> projected ty rest)
   in
   match place with
   | _ ->
       let root : Lowered.ty =
         match place.root with
-        | Local local -> Builder.local_type st.builder local
+        | Local local -> Emit_c.Builder.local_type st.builder local
         | Static { ty; _ } -> Value ty
       in
-      if Lowered.erased st.context.env root then None else projected root place.projections
+      if Lowered.is_erased st.context.env root then None else projected root place.projections
 
 let constant_int integer value = Lowered.Constant (Integer (integer, value))
 

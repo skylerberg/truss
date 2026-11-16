@@ -1,7 +1,3 @@
-module Lock = Registry.Lock
-module Version = Registry.Version
-module Part = Database.Part
-
 let wanted text =
   let written, version =
     match String.index_opt text '@' with
@@ -21,7 +17,7 @@ let wanted text =
   ( name,
     Option.map
       (fun version ->
-        match Version.parse version with
+        match Registry.Version.parse version with
         | Some version -> version
         | None ->
             Outcome.cannot_run "`%s` is not a version, which is three numbers, such as 1.4.2."
@@ -29,18 +25,18 @@ let wanted text =
       version )
 
 type change =
-  | Entered of Lock.entry
-  | Left of Lock.entry
-  | Moved of { name : Path.package; from : Version.t; to_ : Version.t }
+  | Entered of Registry.Lock.entry
+  | Left of Registry.Lock.entry
+  | Moved of { name : Path.package; from : Registry.Version.t; to_ : Registry.Version.t }
   | Holds of { name : Path.package; gained : string list }
 
-let lock_changes ~(before : Lock.t) ~(after : Lock.t) =
+let lock_changes ~(before : Registry.Lock.t) ~(after : Registry.Lock.t) =
   List.concat_map
-    (fun (entry : Lock.entry) ->
-      match Lock.find before entry.name with
+    (fun (entry : Registry.Lock.entry) ->
+      match Registry.Lock.find before entry.name with
       | None -> [ Entered entry ]
       | Some was ->
-          (if Version.compare was.version entry.version <> 0 then
+          (if Registry.Version.compare was.version entry.version <> 0 then
              [ Moved { name = entry.name; from = was.version; to_ = entry.version } ]
            else [])
           @
@@ -48,8 +44,8 @@ let lock_changes ~(before : Lock.t) ~(after : Lock.t) =
           if gained <> [] then [ Holds { name = entry.name; gained } ] else [])
     after
   @ List.filter_map
-      (fun (entry : Lock.entry) ->
-        if Lock.find after entry.name = None then Some (Left entry) else None)
+      (fun (entry : Registry.Lock.entry) ->
+        if Registry.Lock.find after entry.name = None then Some (Left entry) else None)
       before
 
 let holds = function [] -> "" | held -> ", which holds " ^ String.concat ", " held
@@ -57,13 +53,14 @@ let holds = function [] -> "" | held -> ", which holds " ^ String.concat ", " he
 let change_sentence = function
   | Entered entry ->
       Printf.sprintf "`%s` %s enters the build%s." (Path.show_package entry.name)
-        (Version.show entry.version) (holds entry.holds)
+        (Registry.Version.show entry.version)
+        (holds entry.holds)
   | Left entry ->
       Printf.sprintf "`%s` %s leaves the build." (Path.show_package entry.name)
-        (Version.show entry.version)
+        (Registry.Version.show entry.version)
   | Moved { name; from; to_ } ->
-      Printf.sprintf "`%s` goes from %s to %s." (Path.show_package name) (Version.show from)
-        (Version.show to_)
+      Printf.sprintf "`%s` goes from %s to %s." (Path.show_package name)
+        (Registry.Version.show from) (Registry.Version.show to_)
   | Holds { name; gained } ->
       Printf.sprintf "`%s` would hold %s, which it did not." (Path.show_package name)
         (String.concat ", " gained)
@@ -74,7 +71,7 @@ let change_json = function
         [
           ("kind", Json.String "entered");
           ("package", Json.String (Path.show_package entry.name));
-          ("version", Json.String (Version.show entry.version));
+          ("version", Json.String (Registry.Version.show entry.version));
           ("holds", Json.List (List.map (fun held -> Json.String held) entry.holds));
         ]
   | Left entry ->
@@ -82,15 +79,15 @@ let change_json = function
         [
           ("kind", Json.String "left");
           ("package", Json.String (Path.show_package entry.name));
-          ("version", Json.String (Version.show entry.version));
+          ("version", Json.String (Registry.Version.show entry.version));
         ]
   | Moved { name; from; to_ } ->
       Json.Object
         [
           ("kind", Json.String "moved");
           ("package", Json.String (Path.show_package name));
-          ("from", Json.String (Version.show from));
-          ("to", Json.String (Version.show to_));
+          ("from", Json.String (Registry.Version.show from));
+          ("to", Json.String (Registry.Version.show to_));
         ]
   | Holds { name; gained } ->
       Json.Object
@@ -115,19 +112,19 @@ let signatures snapshot trial =
     List.filter
       (fun part ->
         Signatures.is_signature part
-        && match Part.definition part with Some path -> not (is_own path) | None -> false)
+        && match Database.Part.definition part with Some path -> not (is_own path) | None -> false)
       (Database.list_changes database upgraded)
   in
   let dependents = Hashtbl.create 16 in
   List.iter
     (fun ({ dependent; dependency } : Database.read) ->
-      match (Part.definition dependent, Part.definition dependency) with
+      match (Database.Part.definition dependent, Database.Part.definition dependency) with
       | Some reader, Some path when is_own reader && List.mem dependency changed ->
           Hashtbl.replace dependents path
             (reader :: Option.value (Hashtbl.find_opt dependents path) ~default:[])
       | _ -> ())
     (Database.list_dependents database
-       (List.sort_uniq Path.compare (List.filter_map Part.definition changed)));
+       (List.sort_uniq Path.compare (List.filter_map Database.Part.definition changed)));
   let text database path =
     Signatures.of_path (Database.make_name_lookups database [ Path.package path ]) path
   in

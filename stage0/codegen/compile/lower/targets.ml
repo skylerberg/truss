@@ -1,6 +1,3 @@
-module Builder = Emit_c.Builder
-module Names = Resolve.Names
-
 let resolve_impl (context : Definitions.context) substitution ~(trait : Types.trait_reference)
     ~self_type ~(evidence : Core.evidence) =
   let substitute = Types.substitute substitution in
@@ -159,19 +156,19 @@ let implementation_evidence (st : Lowering.state) ~impl ~type_arguments ~impleme
         | None -> Definitions.bug "no evidence for %s here" (Path.show captured))
       (Definitions.evidence_for st.context [] (Definitions.impl_interface st.context impl).impl_uses)
   in
-  let slot = Builder.local st.builder (Evidence (List.length outer)) in
-  Builder.emit st.builder
+  let slot = Emit_c.Builder.local st.builder (Evidence (List.length outer)) in
+  Emit_c.Builder.emit st.builder
     (Call
        {
          target = Intrinsic Evidence_fill;
          arguments =
-           Address { place = Builder.at slot; writable = true }
+           Address { place = Lowered.make_local_place slot; writable = true }
            :: implementation
            :: Constant (Symbol_address (Table (Impl_table { impl; type_arguments })))
            :: outer;
          result = Discarded;
        });
-  Lowered.Address { place = Builder.at slot; writable = false }
+  Lowered.Address { place = Lowered.make_local_place slot; writable = false }
 
 let evidence_of (st : Lowering.state) capability =
   match List.find_opt (fun (path, _) -> Path.equal path capability) st.evidence with
@@ -222,15 +219,17 @@ let nested_function (st : Lowering.state) ~(function_type : Ground.function_type
       captured
   in
   Emit_c.Builder.build_nested st.builder ~index ~environment (fun builder ->
-      let environment_local = Builder.at (Builder.local st.builder (Environment index)) in
+      let environment_local =
+        Lowered.make_local_place (Emit_c.Builder.local st.builder (Environment index))
+      in
       List.iter
         (fun (name, place, _) ->
-          Builder.emit st.builder
+          Emit_c.Builder.emit st.builder
             (Assign
                ( Lowered.project environment_local (Field name),
                  Use (Address { place; writable = false }) )))
         captured;
-      Builder.emit st.builder
+      Emit_c.Builder.emit st.builder
         (Assign
            ( destination,
              Function_value
@@ -250,7 +249,7 @@ let nested_function (st : Lowering.state) ~(function_type : Ground.function_type
           }
       in
       let environment_parameter =
-        Builder.local builder ~name:"environment" (Raw (Nullable_pointer Opaque))
+        Emit_c.Builder.local builder ~name:"environment" (Raw (Nullable_pointer Opaque))
       in
       Lowering.result_slot inner (Convention.result st.context.env function_type.result);
       let parameter_places =
@@ -261,11 +260,13 @@ let nested_function (st : Lowering.state) ~(function_type : Ground.function_type
       in
       let evidence = Lowering.evidence_parameters inner function_type.uses in
       let environment_pointer =
-        Builder.local builder (Pointer { target = Environment index; writable = false })
+        Emit_c.Builder.local builder (Pointer { target = Environment index; writable = false })
       in
-      Builder.start builder (Builder.block builder);
-      Builder.emit builder
-        (Assign (Builder.at environment_pointer, Use (Copy (Builder.at environment_parameter))));
+      Emit_c.Builder.start builder (Emit_c.Builder.block builder);
+      Emit_c.Builder.emit builder
+        (Assign
+           ( Lowered.make_local_place environment_pointer,
+             Use (Copy (Lowered.make_local_place environment_parameter)) ));
       body inner
         ~captures:
           (List.map
@@ -295,7 +296,7 @@ let call_indirect st ~(function_type : Ground.function_type) ~(value : Lowered.p
     Lowered.Indirect
       { value = Copy value; signature = Convention.function_value st.context.env function_type }
   in
-  Builder.emit st.builder
+  Emit_c.Builder.emit st.builder
     (Call
        {
          target;
@@ -328,7 +329,7 @@ let call_through_any (st : Lowering.state) ~(any_type : Types.trait_reference) ~
         signature = c_signature;
       }
   in
-  Builder.emit st.builder
+  Emit_c.Builder.emit st.builder
     (Call
        {
          target;
@@ -337,8 +338,8 @@ let call_through_any (st : Lowering.state) ~(any_type : Types.trait_reference) ~
        });
   if not c_signature.returns then Lowering.unreachable_block st
 
-let in_type_definition (st : Lowering.state) ~(source : Names.key) (ty : Ground.ty) nested_function
-    =
+let in_type_definition (st : Lowering.state) ~(source : Resolve.Names.key) (ty : Ground.ty)
+    nested_function =
   let path, arguments =
     match ty with
     | Named { path; arguments } -> (path, arguments)
@@ -369,7 +370,7 @@ let in_type_definition (st : Lowering.state) ~(source : Names.key) (ty : Ground.
 
 let begin_output st =
   let output = Lowering.temporary st Writing.output_ty in
-  Builder.emit st.builder (Assign (output, Storage.build_empty Writing.output_ty));
+  Emit_c.Builder.emit st.builder (Assign (output, Storage.build_empty Writing.output_ty));
   output
 
 let echo st place ty ~site =
@@ -377,7 +378,7 @@ let echo st place ty ~site =
   Debug_output.debug_call st.context.env st.builder
     ~output:(Address { place = output; writable = true })
     ty place;
-  Builder.emit st.builder
+  Emit_c.Builder.emit st.builder
     (Echo
        {
          text = Copy (Storage.project_buffer output);
@@ -389,13 +390,16 @@ let any_into (st : Lowering.state) ~any_ty ~inner_ty ~impl ~type_arguments ~(val
     destination =
   let box = Drop_and_copy.box st.context.drop_and_copy st.builder inner_ty in
   if not (Lowering.is_zero_size st inner_ty) then begin
-    let typed = Builder.local st.builder (Pointer { target = Value inner_ty; writable = true }) in
-    Builder.emit st.builder (Assign (Builder.at typed, Use (Copy (Builder.at box))));
-    Builder.emit st.builder
+    let typed =
+      Emit_c.Builder.local st.builder (Pointer { target = Value inner_ty; writable = true })
+    in
+    Emit_c.Builder.emit st.builder
+      (Assign (Lowered.make_local_place typed, Use (Copy (Lowered.make_local_place box))));
+    Emit_c.Builder.emit st.builder
       (Assign
          ({ root = Local typed; projections = [ Deref ] }, Use (Lowering.owned st value inner_ty)))
   end;
-  Builder.emit st.builder
+  Emit_c.Builder.emit st.builder
     (Assign
        ( destination,
          Build
@@ -404,7 +408,7 @@ let any_into (st : Lowering.state) ~any_ty ~inner_ty ~impl ~type_arguments ~(val
              variant = None;
              fields =
                [
-                 ("value", Copy (Builder.at box));
+                 ("value", Copy (Lowered.make_local_place box));
                  ("vtable", Constant (Symbol_address (Table (Any_table { impl; type_arguments }))));
                ];
            } ))
@@ -451,7 +455,7 @@ let call_instance (st : Lowering.state) key ~(signature : Types.signature) ~subs
     @ List.map (evidence_of st) (Definitions.evidence_for st.context substitution signature.uses)
   in
   let target = Lowered.Direct { function_ = Instance key; signature = c_signature } in
-  Builder.emit st.builder
+  Emit_c.Builder.emit st.builder
     (Call
        {
          target;
@@ -472,10 +476,10 @@ let constant_of st ty (literal : literal) : Lowered.operand =
 
 let literal_place st (ty : Ground.ty) text =
   let bytes : Lowered.operand = Constant (Bytes text) in
-  let length = Builder.constant_uint64 (String.length text) in
+  let length = Lowered.make_uint64_constant (String.length text) in
   let build part_ty value =
     let built = Lowering.held st (Value part_ty) in
-    Builder.emit st.builder (Assign (built, value));
+    Emit_c.Builder.emit st.builder (Assign (built, value));
     built
   in
   let field, part =
@@ -511,7 +515,7 @@ let list_of (st : Lowering.state) ty destination ~site fills =
          operation ~type_arguments:[ element ] arguments ~destination ~site)
   in
   lower Storage_with_capacity
-    [ Value (Builder.constant_uint64 (List.length fills)) ]
+    [ Value (Lowered.make_uint64_constant (List.length fills)) ]
     (Some storage_place);
   List.iter
     (fun fill ->
@@ -543,7 +547,7 @@ let template_value (st : Lowering.state) template_ty literals ~site ~parts =
     ~site
     (List.map
        (fun text value ->
-         Builder.emit st.builder
+         Emit_c.Builder.emit st.builder
            (Assign
               ( value,
                 Build
@@ -561,18 +565,19 @@ let pull_loop st ~(option : Ground.ty) ~(call_next : Lowered.place -> unit)
   Lowering.in_scope st (fun () ->
       let next = Lowering.held st (Value option) in
       let depth = List.length st.scopes in
-      let test = Builder.block st.builder
-      and inside = Builder.block st.builder
-      and after = Builder.block st.builder in
-      Builder.finish st.builder (Goto test);
-      Builder.start st.builder test;
+      let test = Emit_c.Builder.block st.builder
+      and inside = Emit_c.Builder.block st.builder
+      and after = Emit_c.Builder.block st.builder in
+      Emit_c.Builder.finish st.builder (Goto test);
+      Emit_c.Builder.start st.builder test;
       call_next next;
-      let more = Builder.local st.builder (Raw Bool) in
-      Builder.emit st.builder (Assign (Builder.at more, Is_variant (next, "Some")));
-      Builder.branch st.builder (Copy (Builder.at more)) ~yes:inside ~no:after;
-      Builder.start st.builder inside;
+      let more = Emit_c.Builder.local st.builder (Raw Bool) in
+      Emit_c.Builder.emit st.builder
+        (Assign (Lowered.make_local_place more, Is_variant (next, "Some")));
+      Emit_c.Builder.branch st.builder (Copy (Lowered.make_local_place more)) ~yes:inside ~no:after;
+      Emit_c.Builder.start st.builder inside;
       Lowering.in_scope st (fun () ->
           Lowering.looping st ~continue_:test ~break_:after ~depth (fun () ->
               body (Lowered.project next (Variant_field { variant = "Some"; field = "value" }))));
-      Builder.finish st.builder (Goto test);
-      Builder.start st.builder after)
+      Emit_c.Builder.finish st.builder (Goto test);
+      Emit_c.Builder.start st.builder after)

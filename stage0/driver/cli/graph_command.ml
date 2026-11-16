@@ -1,6 +1,3 @@
-module Names = Resolve.Names
-module Part = Database.Part
-
 type direction = Dependents | Dependencies
 
 let has_suffix names ~suffix =
@@ -32,7 +29,7 @@ let find_definitions snapshot database argument =
     (List.concat_map
        (fun package ->
          List.filter_map
-           (fun (declaration : Names.declaration) ->
+           (fun (declaration : Resolve.Names.declaration) ->
              if declaration.ordinal = 0 && matches argument declaration.path then
                Some declaration.path
              else None)
@@ -60,9 +57,13 @@ let lines (reads : Database.read list) =
       (fun (_, _, _, reader_kind) -> reader_kind)
       (List.filter_map
          (fun ({ dependent; dependency } : Database.read) ->
-           match (Part.definition dependent, Part.definition dependency) with
+           match (Database.Part.definition dependent, Database.Part.definition dependency) with
            | Some reader, Some read ->
-               Some (reader, Part.kind_name dependency, read, Part.kind_name dependent)
+               Some
+                 ( reader,
+                   Database.Part.kind_name dependency,
+                   read,
+                   Database.Part.kind_name dependent )
            | Some _, None | None, _ -> None)
          reads)
   in

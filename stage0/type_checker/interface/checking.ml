@@ -1,8 +1,6 @@
-module Names = Resolve.Names
-
 type state = {
   lookups : Lookups.t;
-  key : Names.key;
+  key : Resolve.Names.key;
   definition : Syntax.definition;
   elaborated : Environment.elaborated_interface;
   spans : Source.Definition_span.t array;

@@ -1,10 +1,11 @@
 include Lowered_types
 
-let local_place local = { root = Local local; projections = [] }
+let make_local_place local = { root = Local local; projections = [] }
 let project place projection = { place with projections = place.projections @ [ projection ] }
+let make_uint64_constant number = Constant (Integer (UInt64, Z.of_int number))
 let bug format = Compiler_bug.bug ~stage:"Lowered" format
 
-let erased env = function
+let is_erased env = function
   | Value ty -> Memory_layout.has_zero_size env ty
   | Pointer _ | Raw _ | Environment _ | Evidence _ | Lend | Lend_mark -> false
 
@@ -42,7 +43,7 @@ let variant_field_type env sum variant field =
   | Niche_encoded _ | Tag_only _ | Zero_size -> None
   | _ -> bug "a variant of %s, which is not a sum type" (Ground.to_string sum)
 
-let projection_type env ~environment ty projection =
+let find_projection_type env ~environment ty projection =
   let result =
     match (projection, ty) with
     | Deref, Pointer { target; _ } -> Some target
@@ -67,9 +68,9 @@ let projection_type env ~environment ty projection =
         Some (Value element)
     | _ -> bug "a projection that does not fit its place"
   in
-  match result with Some ty when erased env ty -> None | other -> other
+  match result with Some ty when is_erased env ty -> None | other -> other
 
-let successors = function
+let list_successors = function
   | Goto block -> [ block ]
   | Switch { cases; default; _ } -> List.map snd cases @ [ default ]
   | Switch_variant { cases; default; _ } -> List.map snd cases @ Option.to_list default

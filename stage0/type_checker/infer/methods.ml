@@ -1,5 +1,3 @@
-module Impls = Interface.Impls
-
 let rec call state env ?expected (value : Syntax.expression) (callee : Syntax.expression)
     (arguments : Syntax.argument list) : Types.ty =
   match callee.kind with
@@ -685,7 +683,9 @@ and trait_method_call state env (value : Syntax.expression) ~(receiver : Syntax.
   in
   (match receiver_type with
   | Types.Any _ -> (
-      match Impls.classify_through_any state.lookups.interface ~trait:trait.trait method_ with
+      match
+        Interface.Impls.classify_through_any state.lookups.interface ~trait:trait.trait method_
+      with
       | Callable -> ()
       | Has_generics ->
           State.report state Not_callable (State.read_span state value.id)

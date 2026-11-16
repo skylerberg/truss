@@ -1,5 +1,3 @@
-module Builder = Emit_c.Builder
-
 let ( let* ) = Option.bind
 
 let all values =
@@ -153,7 +151,7 @@ let constant_state (context : Definitions.context) path =
   in
   let st =
     Lowering.enter context
-      ~builder:(Builder.create context.env ~key:(Evaluator path))
+      ~builder:(Emit_c.Builder.create context.env ~key:(Evaluator path))
       (Lowering.frame_of code)
   in
   (st, mir, ty)
@@ -324,8 +322,8 @@ let write_output (st : Lowering.state) output =
   let int32 = Ground.builtin Int32 in
   let view_ty = Storage.make_view_type (Ground.builtin UInt8) in
   let descriptor = Lowering.temporary st int32 and view = Lowering.temporary st view_ty in
-  Builder.emit builder (Assign (descriptor, Use (Constant (Integer (Int32, Z.one)))));
-  Builder.emit builder
+  Emit_c.Builder.emit builder (Assign (descriptor, Use (Constant (Integer (Int32, Z.one)))));
+  Emit_c.Builder.emit builder
     (Assign
        ( view,
          Storage.build_view view_ty
@@ -345,7 +343,7 @@ let write_output (st : Lowering.state) output =
 
 let evaluator context path : Emit_c.Builder.instance =
   let st, mir, ty = constant_state context path in
-  Builder.start st.builder (Builder.block st.builder);
+  Emit_c.Builder.start st.builder (Emit_c.Builder.block st.builder);
   Lowering.in_scope st (fun () ->
       let place = Lowering.temporary st ty in
       Mir_form.mir_into st mir place;

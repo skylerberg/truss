@@ -1,5 +1,3 @@
-module Builder = Emit_c.Builder
-
 let mir (st : Lowering.state) =
   match st.frame.mir with
   | Some mir -> mir
@@ -186,7 +184,9 @@ let frame_of_body (st : Lowering.state) ?owner ?returns_into ?lending
     flags =
       List.map
         (fun (path : Moves.path) ->
-          (path, Builder.at (Builder.local st.builder ~name:"owned" ~is_zeroed:true (Raw Bool))))
+          ( path,
+            Lowered.make_local_place
+              (Emit_c.Builder.local st.builder ~name:"owned" ~is_zeroed:true (Raw Bool)) ))
         (Moves.flagged moves);
     state = Moves.entry moves 0;
     lending;
@@ -344,7 +344,7 @@ let operand_place st (operand : Mir.operand) : Lowered.place =
   | Constant { value = Unit; _ } -> Lowering.temporary st ty
   | Constant { value; _ } ->
       let held = Lowering.temporary st ty in
-      Builder.emit st.builder (Assign (held, Use (constant st ty value)));
+      Emit_c.Builder.emit st.builder (Assign (held, Use (constant st ty value)));
       held
 
 let write_operand st (operand : Mir.operand) (destination : Lowered.place) =
@@ -352,11 +352,11 @@ let write_operand st (operand : Mir.operand) (destination : Lowered.place) =
   match operand with
   | Constant { value = Unit; _ } -> ()
   | Constant { value; _ } ->
-      Builder.emit st.builder (Assign (destination, Use (constant st ty value)))
+      Emit_c.Builder.emit st.builder (Assign (destination, Use (constant st ty value)))
   | Use { place = written; _ } -> Lowering.take st (owned_place st written) ty ~destination
   | Take { place = written; _ } -> Lowering.take st (taken st written) ty ~destination
   | Borrow { place = written; _ } ->
-      Builder.emit st.builder (Assign (destination, Use (Copy (place st written))))
+      Emit_c.Builder.emit st.builder (Assign (destination, Use (Copy (place st written))))
 
 let discarded st = Lowering.temporary st (Ground.builtin Unit)
 
@@ -402,14 +402,14 @@ let jump ?entry (st : Lowering.state) region target : Lowered.block =
   match owner_of region region.region_body target with
   | Some owner when owner == region -> Hashtbl.find region.lowered target
   | Some owner ->
-      let pad = Builder.block st.builder in
+      let pad = Emit_c.Builder.block st.builder in
       let lowered = Hashtbl.find owner.lowered target in
-      Builder.in_block st.builder pad (fun () ->
+      Emit_c.Builder.in_block st.builder pad (fun () ->
           Lowering.leave_to st owner.depth;
-          Builder.finish st.builder (Goto lowered));
+          Emit_c.Builder.finish st.builder (Goto lowered));
       pad
   | None ->
-      let lowered = Builder.block st.builder in
+      let lowered = Emit_c.Builder.block st.builder in
       Hashtbl.replace region.lowered target lowered;
       region.pending <- (target, lowered, Option.value entry ~default:(save st)) :: region.pending;
       lowered
@@ -417,23 +417,23 @@ let jump ?entry (st : Lowering.state) region target : Lowered.block =
 let claim st region target = ignore (jump st region target)
 
 let goto (st : Lowering.state) region target =
-  Builder.finish st.builder (Goto (jump st region target));
-  Builder.start st.builder (Builder.block st.builder)
+  Emit_c.Builder.finish st.builder (Goto (jump st region target));
+  Emit_c.Builder.start st.builder (Emit_c.Builder.block st.builder)
 
 let continue_loop (st : Lowering.state) =
   match st.loops with
   | loop :: _ ->
       Lowering.leave_to st loop.continue_depth;
-      Builder.finish st.builder (Goto loop.continue_);
-      Builder.start st.builder (Builder.block st.builder)
+      Emit_c.Builder.finish st.builder (Goto loop.continue_);
+      Emit_c.Builder.start st.builder (Emit_c.Builder.block st.builder)
   | [] -> Definitions.bug "the end of an iteration outside a loop"
 
 let break_loop (st : Lowering.state) =
   match st.loops with
   | loop :: _ ->
       Lowering.leave_to st loop.break_depth;
-      Builder.finish st.builder (Goto loop.break_);
-      Builder.start st.builder (Builder.block st.builder)
+      Emit_c.Builder.finish st.builder (Goto loop.break_);
+      Emit_c.Builder.start st.builder (Emit_c.Builder.block st.builder)
   | [] -> Definitions.bug "a break outside a loop"
 
 let path_place st (path : Moves.path) =
@@ -445,7 +445,8 @@ let rec drop_path st (path : Moves.path) =
   | None -> (
       let place = path_place st path in
       match Lowering.place_type st place with
-      | Some (Value ty) when not (Lowering.is_trivial st ty) -> Builder.emit st.builder (Drop place)
+      | Some (Value ty) when not (Lowering.is_trivial st ty) ->
+          Emit_c.Builder.emit st.builder (Drop place)
       | _ -> ())
   | Some Empty -> ()
   | Some Holds -> drop_held st path
@@ -462,7 +463,7 @@ let rec drop_path st (path : Moves.path) =
                       | Variant_field { variant; field } -> Printf.sprintf ".(%s).%s" variant field)
                     path.projections))
       in
-      Builder.when_ st.builder (Copy flag) (fun () -> drop_held st path)
+      Emit_c.Builder.when_ st.builder (Copy flag) (fun () -> drop_held st path)
 
 and drop_held st (path : Moves.path) =
   let frame = mir st in
@@ -470,7 +471,7 @@ and drop_held st (path : Moves.path) =
     List.for_all
       (fun inner -> Moves.status frame.moves frame.state inner = Some Holds)
       (Moves.inside frame.moves path)
-  then Builder.emit st.builder (Drop (path_place st path))
+  then Emit_c.Builder.emit st.builder (Drop (path_place st path))
   else drop_parts st path
 
 and drop_parts st (path : Moves.path) =
@@ -510,7 +511,7 @@ and drop_parts st (path : Moves.path) =
           List.exists
             (fun (shape : Memory_layout.variant_shape) -> shape.name = variant && shape.indirect)
             (match Memory_layout.shape st.context.env ty with Sum shapes -> shapes | _ -> [])
-        then Builder.emit st.builder (Free_block { place; variant })
+        then Emit_c.Builder.emit st.builder (Free_block { place; variant })
       in
       let certain variant =
         List.exists
@@ -522,27 +523,27 @@ and drop_parts st (path : Moves.path) =
           inside
       in
       match variants with
-      | [] -> Builder.emit st.builder (Drop place)
+      | [] -> Emit_c.Builder.emit st.builder (Drop place)
       | [ only ] when certain only -> open_variant only
       | variants ->
-          let after = Builder.block st.builder in
+          let after = Emit_c.Builder.block st.builder in
           let cases =
             List.map
               (fun variant ->
-                let case = Builder.block st.builder in
-                Builder.in_block st.builder case (fun () ->
+                let case = Emit_c.Builder.block st.builder in
+                Emit_c.Builder.in_block st.builder case (fun () ->
                     open_variant variant;
-                    Builder.finish st.builder (Goto after));
+                    Emit_c.Builder.finish st.builder (Goto after));
                 (variant, case))
               variants
           in
-          let other = Builder.block st.builder in
-          Builder.in_block st.builder other (fun () ->
-              Builder.emit st.builder (Drop place);
-              Builder.finish st.builder (Goto after));
-          Builder.finish st.builder (Switch_variant { place; cases; default = Some other });
-          Builder.start st.builder after)
-  | _ -> Builder.emit st.builder (Drop place)
+          let other = Emit_c.Builder.block st.builder in
+          Emit_c.Builder.in_block st.builder other (fun () ->
+              Emit_c.Builder.emit st.builder (Drop place);
+              Emit_c.Builder.finish st.builder (Goto after));
+          Emit_c.Builder.finish st.builder (Switch_variant { place; cases; default = Some other });
+          Emit_c.Builder.start st.builder after)
+  | _ -> Emit_c.Builder.emit st.builder (Drop place)
 
 let drop_local st local =
   let path : Moves.path = { local; projections = [] } in
@@ -553,7 +554,8 @@ let update_flags st ~before =
   let frame = mir st in
   List.iter
     (fun ((path : Moves.path), holds) ->
-      Builder.emit st.builder (Assign (List.assoc path frame.flags, Use (Constant (Bool holds)))))
+      Emit_c.Builder.emit st.builder
+        (Assign (List.assoc path frame.flags, Use (Constant (Bool holds)))))
     (Moves.changed frame.moves ~before ~after:frame.state)
 
 let drop_parameters st = List.iter (drop_local st) (mir st).body.parameters
@@ -563,18 +565,18 @@ let overwritten st (target : Mir.place) (destination : Lowered.place) ty =
   | Some path when Moves.status (mir st).moves (mir st).state { path with projections = [] } <> None
     ->
       drop_path st path
-  | _ -> if not (Lowering.is_trivial st ty) then Builder.emit st.builder (Drop destination)
+  | _ -> if not (Lowering.is_trivial st ty) then Emit_c.Builder.emit st.builder (Drop destination)
 
 let return_from_frame (st : Lowering.state) =
   (match st.frame.exit with
   | Some (exit, depth) ->
       Lowering.leave_to st depth;
-      Builder.finish st.builder (Goto exit)
+      Emit_c.Builder.finish st.builder (Goto exit)
   | None ->
       drop_parameters st;
       Lowering.leave_to st 0;
-      Builder.finish st.builder (Lowering.return_result st));
-  Builder.start st.builder (Builder.block st.builder)
+      Emit_c.Builder.finish st.builder (Lowering.return_result st));
+  Emit_c.Builder.start st.builder (Emit_c.Builder.block st.builder)
 
 let resolve_callee st (callee : Mir.callee) : (Path.t * Ground.argument list) option =
   match callee with
@@ -636,7 +638,11 @@ let evaluate_arguments (st : Lowering.state) (signature : Types.signature) subst
           else None
         in
         match argument with
-        | Default -> (mode, ty, Builder.at (Builder.local st.builder ~is_zeroed:true (Value ty)))
+        | Default ->
+            ( mode,
+              ty,
+              Lowered.make_local_place (Emit_c.Builder.local st.builder ~is_zeroed:true (Value ty))
+            )
         | Passed { value; _ } ->
             Option.iter (fun bit -> mask := !mask lor (1 lsl bit)) bit;
             (mode, ty, operand_place st value))
@@ -666,10 +672,12 @@ let shared_update st ~shared ~input ~change ~destination =
     | [] -> Definitions.bug "shared_update with a function that takes no value"
   in
   let pointer = Lowered.Copy (Lowered.project shared (Field "value")) in
-  Builder.emit st.builder
+  Emit_c.Builder.emit st.builder
     (Call { target = Intrinsic Shared_lock; arguments = [ pointer ]; result = Discarded });
-  let typed = Builder.local st.builder (Pointer { target = Value value_ty; writable = true }) in
-  Builder.emit st.builder (Assign (Builder.at typed, Use pointer));
+  let typed =
+    Emit_c.Builder.local st.builder (Pointer { target = Value value_ty; writable = true })
+  in
+  Emit_c.Builder.emit st.builder (Assign (Lowered.make_local_place typed, Use pointer));
   let result =
     match destination with
     | Some destination -> destination
@@ -678,7 +686,7 @@ let shared_update st ~shared ~input ~change ~destination =
   Targets.call_indirect st ~function_type ~value:change
     [ { root = Local typed; projections = [ Deref ] }; input ]
     result;
-  Builder.emit st.builder
+  Emit_c.Builder.emit st.builder
     (Call { target = Intrinsic Shared_unlock; arguments = [ pointer ]; result = Discarded })
 
 let intrinsic st ?reported (operation : Intrinsic.operation) ~type_arguments
@@ -761,19 +769,22 @@ let tasks_call (st : Lowering.state) name ?result (places : Lowered.place list) 
     }
 
 let tasks_bool (st : Lowering.state) name places : Lowered.operand =
-  let result = Builder.at (Builder.local st.builder (Value st.context.bool)) in
-  Builder.emit st.builder (tasks_call st name ~result places);
+  let result = Lowered.make_local_place (Emit_c.Builder.local st.builder (Value st.context.bool)) in
+  Emit_c.Builder.emit st.builder (tasks_call st name ~result places);
   Copy result
 
 let with_group st (f : Lowered.place -> unit) =
   let scope = Lowering.open_scope st Statement in
-  let group = Builder.at (Builder.local st.builder ~name:"group" (Value (Ground.builtin UInt64))) in
-  Builder.emit st.builder (tasks_call st "open" ~result:group []);
+  let group =
+    Lowered.make_local_place
+      (Emit_c.Builder.local st.builder ~name:"group" (Value (Ground.builtin UInt64)))
+  in
+  Emit_c.Builder.emit st.builder (tasks_call st "open" ~result:group []);
   let join = tasks_call st "join" [ group ] in
   let cleanup = Lowering.Join_group join in
   scope.owned <- [ cleanup ];
   f group;
-  Builder.emit st.builder join;
+  Emit_c.Builder.emit st.builder join;
   scope.owned <- List.filter (fun owned -> owned != cleanup) scope.owned;
   Lowering.close_scope st scope
 
@@ -790,33 +801,36 @@ let task_body st ~(id : Mir.task) ~group ~parts (f : Lowering.task -> unit) : Lo
           {
             Lowering.id;
             group;
-            end_block = Builder.block st.builder;
+            end_block = Emit_c.Builder.block st.builder;
             scope_depth = List.length st.scopes;
           }
         in
         st.tasks <- task :: st.tasks;
         f task;
         st.tasks <- List.tl st.tasks;
-        Builder.finish st.builder (Goto task.end_block);
-        Builder.start st.builder task.end_block;
-        Builder.finish st.builder (Return None))
+        Emit_c.Builder.finish st.builder (Goto task.end_block);
+        Emit_c.Builder.start st.builder task.end_block;
+        Emit_c.Builder.finish st.builder (Return None))
   in
   Function_value { code = Nested nested; environment = Some environment }
 
 let locked_evidence (st : Lowering.state) ~(tasks : Lowered.operand)
     (evidence : (Path.t * Lowered.operand) list) =
-  let mutex = Builder.at (Builder.local st.builder ~name:"mutex" (Value (Ground.builtin UInt64))) in
-  Builder.emit st.builder (Assign (mutex, Use (Lowering.constant_int UInt64 Z.zero)));
+  let mutex =
+    Lowered.make_local_place
+      (Emit_c.Builder.local st.builder ~name:"mutex" (Value (Ground.builtin UInt64)))
+  in
+  Emit_c.Builder.emit st.builder (Assign (mutex, Use (Lowering.constant_int UInt64 Z.zero)));
   List.map
     (fun (capability, implementation) ->
-      let slot = Builder.local st.builder (Evidence 2) in
-      Builder.emit st.builder
+      let slot = Emit_c.Builder.local st.builder (Evidence 2) in
+      Emit_c.Builder.emit st.builder
         (Call
            {
              target = Intrinsic Evidence_fill;
              arguments =
                [
-                 Address { place = Builder.at slot; writable = true };
+                 Address { place = Lowered.make_local_place slot; writable = true };
                  Address { place = mutex; writable = true };
                  Constant (Symbol_address (Table (Locked_table capability)));
                  implementation;
@@ -824,42 +838,43 @@ let locked_evidence (st : Lowering.state) ~(tasks : Lowered.operand)
                ];
              result = Discarded;
            });
-      (capability, Lowered.Address { place = Builder.at slot; writable = false }))
+      (capability, Lowered.Address { place = Lowered.make_local_place slot; writable = false }))
     evidence
 
 let cancel (st : Lowering.state) ~(task : Mir.task) ~winner ~number ~value =
   match st.tasks with
   | current :: _ when current.id = task ->
-      let won = Builder.block st.builder
-      and lost = Builder.block st.builder
-      and after = Builder.block st.builder in
+      let won = Emit_c.Builder.block st.builder
+      and lost = Emit_c.Builder.block st.builder
+      and after = Emit_c.Builder.block st.builder in
       Emit_c.Builder.branch st.builder (tasks_bool st "cancel" [ current.group ]) ~yes:won ~no:lost;
-      Builder.start st.builder won;
-      Builder.emit st.builder
+      Emit_c.Builder.start st.builder won;
+      Emit_c.Builder.emit st.builder
         (Assign (local_place st winner, Use (Lowering.constant_int UInt32 (Z.of_int number))));
       Option.iter
         (fun (value, ty, slot) ->
-          Builder.emit st.builder (Assign (local_place st slot, Use (Lowering.owned st value ty))))
+          Emit_c.Builder.emit st.builder
+            (Assign (local_place st slot, Use (Lowering.owned st value ty))))
         value;
-      Builder.finish st.builder (Goto after);
-      Builder.start st.builder lost;
+      Emit_c.Builder.finish st.builder (Goto after);
+      Emit_c.Builder.start st.builder lost;
       Option.iter
         (fun (value, ty, _) ->
-          if not (Lowering.is_trivial st ty) then Builder.emit st.builder (Drop value))
+          if not (Lowering.is_trivial st ty) then Emit_c.Builder.emit st.builder (Drop value))
         value;
-      Builder.finish st.builder (Goto after);
-      Builder.start st.builder after;
+      Emit_c.Builder.finish st.builder (Goto after);
+      Emit_c.Builder.start st.builder after;
       Lowering.leave_to st current.scope_depth;
-      Builder.finish st.builder (Goto current.end_block);
-      Builder.start st.builder (Builder.block st.builder)
+      Emit_c.Builder.finish st.builder (Goto current.end_block);
+      Emit_c.Builder.start st.builder (Emit_c.Builder.block st.builder)
   | _ -> Definitions.bug "an early exit leaves a task that is not the innermost enclosing task"
 
 let spawn_iteration (st : Lowering.state) (loop : Lowering.spawn_loop) ~(not_spawned : unit -> unit)
     (f : unit -> unit) =
-  let function_value = Builder.local st.builder ~name:"task" (task_function_type st) in
-  Builder.emit st.builder
+  let function_value = Emit_c.Builder.local st.builder ~name:"task" (task_function_type st) in
+  Emit_c.Builder.emit st.builder
     (Assign
-       ( Builder.at function_value,
+       ( Lowered.make_local_place function_value,
          task_body st
            ~id:(Iteration { loop = loop.origin })
            ~group:loop.group ~parts:[ loop.item ]
@@ -867,62 +882,66 @@ let spawn_iteration (st : Lowering.state) (loop : Lowering.spawn_loop) ~(not_spa
              Lowering.looping st ~continue_:task.end_block ~break_:task.end_block
                ~depth:task.scope_depth f) ));
   let spawned =
-    tasks_bool st "spawn" [ loop.group; Builder.at function_value; Builder.at loop.item ]
+    tasks_bool st "spawn"
+      [ loop.group; Lowered.make_local_place function_value; Lowered.make_local_place loop.item ]
   in
-  let next = Builder.block st.builder and cancelled = Builder.block st.builder in
+  let next = Emit_c.Builder.block st.builder and cancelled = Emit_c.Builder.block st.builder in
   Emit_c.Builder.branch st.builder spawned ~yes:next ~no:cancelled;
-  Builder.start st.builder cancelled;
+  Emit_c.Builder.start st.builder cancelled;
   not_spawned ();
   break_loop st;
-  Builder.start st.builder next
+  Emit_c.Builder.start st.builder next
 
 let spawn_with_item st (loop : Lowering.spawn_loop) (value : Lowered.place) ~owned:is_owned
     ~(each : Lowered.place -> unit) =
   let ty = loop.element in
-  let item = Builder.at loop.item in
+  let item = Lowered.make_local_place loop.item in
   let boxed = not (Lowering.is_zero_size st ty) in
   let move_or_copy place : Lowered.operand =
     if is_owned then Lowering.owned st place ty else Copy place
   in
   let block_of () : Lowered.local * Lowered.place =
-    let pointer = Builder.local st.builder (Raw (Pointer Opaque)) in
-    Builder.emit st.builder (Assign (Builder.at pointer, Convert (Copy item, Pointer Opaque)));
-    let typed = Builder.local st.builder (Pointer { target = Value ty; writable = true }) in
-    Builder.emit st.builder (Assign (Builder.at typed, Use (Copy (Builder.at pointer))));
+    let pointer = Emit_c.Builder.local st.builder (Raw (Pointer Opaque)) in
+    Emit_c.Builder.emit st.builder
+      (Assign (Lowered.make_local_place pointer, Convert (Copy item, Pointer Opaque)));
+    let typed = Emit_c.Builder.local st.builder (Pointer { target = Value ty; writable = true }) in
+    Emit_c.Builder.emit st.builder
+      (Assign (Lowered.make_local_place typed, Use (Copy (Lowered.make_local_place pointer))));
     (pointer, { root = Local typed; projections = [ Deref ] })
   in
   let unbox ~dropped_here : Lowered.place =
     if boxed then begin
       let unboxed =
         if is_owned && dropped_here then Lowering.binding st ty
-        else Builder.at (Builder.local st.builder (Value ty))
+        else Lowered.make_local_place (Emit_c.Builder.local st.builder (Value ty))
       in
       let pointer, inside = block_of () in
-      Builder.emit st.builder (Assign (unboxed, Use (move_or_copy inside)));
-      Builder.emit st.builder
+      Emit_c.Builder.emit st.builder (Assign (unboxed, Use (move_or_copy inside)));
+      Emit_c.Builder.emit st.builder
         (Call
            {
              target = Intrinsic Free;
-             arguments = [ Copy (Builder.at pointer) ];
+             arguments = [ Copy (Lowered.make_local_place pointer) ];
              result = Discarded;
            });
       unboxed
     end
-    else Builder.at (Builder.local st.builder (Value ty))
+    else Lowered.make_local_place (Emit_c.Builder.local st.builder (Value ty))
   in
   if boxed then begin
-    let pointer = Builder.local st.builder (Raw (Pointer Opaque)) in
-    Builder.emit st.builder
+    let pointer = Emit_c.Builder.local st.builder (Raw (Pointer Opaque)) in
+    Emit_c.Builder.emit st.builder
       (Call
          {
            target = Intrinsic Allocate;
            arguments = [ Constant (Size_of ty); Constant (Alignment_of ty) ];
-           result = Returned (Builder.at pointer);
+           result = Returned (Lowered.make_local_place pointer);
          });
-    Builder.emit st.builder (Assign (item, Convert (Copy (Builder.at pointer), Integer UInt64)));
-    Builder.emit st.builder (Assign (snd (block_of ()), Use (move_or_copy value)))
+    Emit_c.Builder.emit st.builder
+      (Assign (item, Convert (Copy (Lowered.make_local_place pointer), Integer UInt64)));
+    Emit_c.Builder.emit st.builder (Assign (snd (block_of ()), Use (move_or_copy value)))
   end
-  else Builder.emit st.builder (Assign (item, Use (Lowering.constant_int UInt64 Z.zero)));
+  else Emit_c.Builder.emit st.builder (Assign (item, Use (Lowering.constant_int UInt64 Z.zero)));
   spawn_iteration st loop
     ~not_spawned:(fun () -> Lowering.in_scope st (fun () -> ignore (unbox ~dropped_here:true)))
     (fun () -> Lowering.in_scope st (fun () -> each (unbox ~dropped_here:false)))
@@ -934,7 +953,9 @@ let lend_record (st : Lowering.state) : Lowered.operand =
       let record : Lowered.operand =
         Address
           {
-            place = Builder.at (Builder.local st.builder ~name:"lend" ~is_zeroed:true Lend);
+            place =
+              Lowered.make_local_place
+                (Emit_c.Builder.local st.builder ~name:"lend" ~is_zeroed:true Lend);
             writable = true;
           }
       in
@@ -949,7 +970,8 @@ let lent_call st part : Lowering.lent_call =
       let call =
         {
           Lowering.mark =
-            Builder.at (Builder.local st.builder ~name:"lent" ~is_zeroed:true Lend_mark);
+            Lowered.make_local_place
+              (Emit_c.Builder.local st.builder ~name:"lent" ~is_zeroed:true Lend_mark);
           record = lend_record st;
         }
       in
@@ -957,7 +979,7 @@ let lent_call st part : Lowering.lent_call =
       call
 
 let emit_mark (st : Lowering.state) (intrinsic : Lowered.intrinsic) (call : Lowering.lent_call) =
-  Builder.emit st.builder
+  Emit_c.Builder.emit st.builder
     (Call
        {
          target = Intrinsic intrinsic;
@@ -1017,7 +1039,8 @@ let rec lower_body ?enclosing (st : Lowering.state) (frame : Lowering.mir_frame)
   st.frame <- { st.frame with mir = Some frame };
   List.iter
     (fun path ->
-      Builder.emit st.builder (Assign (List.assoc path frame.flags, Use (Constant (Bool true)))))
+      Emit_c.Builder.emit st.builder
+        (Assign (List.assoc path frame.flags, Use (Constant (Bool true)))))
     (Moves.held_at_entry frame.moves);
   run_region st (new_region ?enclosing st) ~entry:(0, 0)
 
@@ -1036,9 +1059,9 @@ and run_region st region ~entry:(block, index) =
     | Some (next, lowered, entry) ->
         region.pending <- List.filter (fun (block, _, _) -> block <> next) region.pending;
         restore st entry;
-        Builder.in_block st.builder lowered (fun () ->
+        Emit_c.Builder.in_block st.builder lowered (fun () ->
             lower_from st region next 0;
-            Builder.finish st.builder Unreachable);
+            Emit_c.Builder.finish st.builder Unreachable);
         drain ()
   in
   drain ();
@@ -1053,7 +1076,8 @@ and lower_from st region block index =
   if index = 0 then
     List.iter
       (fun path ->
-        Builder.emit st.builder (Assign (List.assoc path frame.flags, Use (Constant (Bool true)))))
+        Emit_c.Builder.emit st.builder
+          (Assign (List.assoc path frame.flags, Use (Constant (Bool true)))))
       (Moves.given_on_entry frame.moves block);
   List.iteri
     (fun position (statement : Mir.Graph.statement) ->
@@ -1073,8 +1097,9 @@ and lower_from st region block index =
 
 and concurrent_block st region ~fork ~(branches : Mir.Graph.branch list) ~join =
   let function_type = task_function_type st in
-  let item = Builder.local st.builder (Value (Ground.builtin UInt64)) in
-  Builder.emit st.builder (Assign (Builder.at item, Use (Lowering.constant_int UInt64 Z.zero)));
+  let item = Emit_c.Builder.local st.builder (Value (Ground.builtin UInt64)) in
+  Emit_c.Builder.emit st.builder
+    (Assign (Lowered.make_local_place item, Use (Lowering.constant_int UInt64 Z.zero)));
   with_group st (fun group ->
       let functions =
         List.mapi
@@ -1089,9 +1114,11 @@ and concurrent_block st region ~fork ~(branches : Mir.Graph.branch list) ~join =
       in
       List.iter
         (fun code ->
-          let function_value = Builder.at (Builder.local st.builder ~name:"task" function_type) in
-          Builder.emit st.builder (Assign (function_value, code));
-          ignore (tasks_bool st "spawn" [ group; function_value; Builder.at item ]))
+          let function_value =
+            Lowered.make_local_place (Emit_c.Builder.local st.builder ~name:"task" function_type)
+          in
+          Emit_c.Builder.emit st.builder (Assign (function_value, code));
+          ignore (tasks_bool st "spawn" [ group; function_value; Lowered.make_local_place item ]))
         functions);
   match join with Some join -> goto st region join | None -> Lowering.unreachable_block st
 
@@ -1118,9 +1145,9 @@ and lower_statement st (statement : Mir.Graph.statement) =
   | Dead locals -> List.iter (dead st) locals
   | Assert condition ->
       let holds = value st condition in
-      let failed = Builder.block st.builder and after = Builder.block st.builder in
+      let failed = Emit_c.Builder.block st.builder and after = Emit_c.Builder.block st.builder in
       Emit_c.Builder.branch st.builder holds ~yes:after ~no:failed;
-      Builder.start st.builder failed;
+      Emit_c.Builder.start st.builder failed;
       let text =
         match condition with
         | Constant { value = Boolean truth; _ } -> string_of_bool truth
@@ -1129,16 +1156,16 @@ and lower_statement st (statement : Mir.Graph.statement) =
         | Constant _ -> Lowering.source st (spans st).(origin)
       in
       let message = "assert " ^ text in
-      Builder.finish st.builder
+      Emit_c.Builder.finish st.builder
         (Fail
            {
              failure = Assertion;
              message = Constant (Bytes message);
-             length = Builder.constant_uint64 (String.length message);
+             length = Lowered.make_uint64_constant (String.length message);
              site = site_of st origin;
              reported = None;
            });
-      Builder.start st.builder after
+      Emit_c.Builder.start st.builder after
   | Echo echoed ->
       Targets.echo st (operand_place st echoed) (operand_type st echoed) ~site:(site_of st origin)
   | Provide { provided; can_use_tasks } -> provide st provided ~can_use_tasks
@@ -1242,7 +1269,7 @@ and assign st (target : Mir.place) (value : Mir.rvalue) ~origin =
       else overwritten st target destination ty;
       match evaluated with
       | Some fresh ->
-          Builder.emit st.builder (Assign (destination, Use (Lowering.owned st fresh ty)))
+          Emit_c.Builder.emit st.builder (Assign (destination, Use (Lowering.owned st fresh ty)))
       | None -> into ?types_ty st value destination ty ~origin)
 
 and reads (value : Mir.rvalue) local =
@@ -1268,7 +1295,7 @@ and alias st local (source : Lowered.place) ~writable =
     let frame = mir st in
     let pointer =
       match Hashtbl.find_opt frame.places local with
-      | Some { root = Local pointer; projections = [ Deref ] } -> Builder.at pointer
+      | Some { root = Local pointer; projections = [ Deref ] } -> Lowered.make_local_place pointer
       | Some { root = Local pointer; projections = [ Deref; Field field; Deref ] } ->
           { root = Local pointer; projections = [ Deref; Field field ] }
       | _ ->
@@ -1278,7 +1305,7 @@ and alias st local (source : Lowered.place) ~writable =
           bind_local st local (Lowered.project pointer Deref);
           pointer
     in
-    Builder.emit st.builder (Assign (pointer, Use (Address { place = source; writable })))
+    Emit_c.Builder.emit st.builder (Assign (pointer, Use (Address { place = source; writable })))
   end
   else if
     (not writable)
@@ -1286,13 +1313,13 @@ and alias st local (source : Lowered.place) ~writable =
     && match (info st local).kind with Source _ -> true | Temporary | Lent _ -> false
   then begin
     let copy = Lowering.held st ~name:"binding" (Value ty) in
-    Builder.emit st.builder (Assign (copy, Use (Copy source)));
+    Emit_c.Builder.emit st.builder (Assign (copy, Use (Copy source)));
     bind_local st local copy
   end
   else bind_local st local (Lowering.snapshot st source)
 
 and into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.place) ty ~origin =
-  let assign built = Builder.emit st.builder (Assign (destination, built)) in
+  let assign built = Emit_c.Builder.emit st.builder (Assign (destination, built)) in
   match rvalue with
   | Operand operand -> write_operand st operand destination
   | Operation { operation; type_arguments; operands } ->
@@ -1328,9 +1355,9 @@ and into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.place) ty ~or
   | Array elements ->
       List.iteri
         (fun index element ->
-          Builder.emit st.builder
+          Emit_c.Builder.emit st.builder
             (Assign
-               ( Lowered.project destination (Index (Builder.constant_uint64 index)),
+               ( Lowered.project destination (Index (Lowered.make_uint64_constant index)),
                  Use (value st element) )))
         elements
   | Is_variant { place = tested; variant } -> assign (Is_variant (place st tested, variant))
@@ -1412,15 +1439,15 @@ and field_default_place st ty ~variant ~field =
 and mir_into ?(arguments = []) st (expression_mir : Mir.Graph.t) (destination : Lowered.place) =
   let expression_mir = Loop_parts.ended expression_mir in
   let caller = st.frame in
-  let exit = Builder.block st.builder in
+  let exit = Emit_c.Builder.block st.builder in
   let frame =
     frame_of_body st ~returns_into:destination ~lambdas:expression_mir.lambdas expression_mir.body
   in
   st.frame <- { caller with exit = Some (exit, List.length st.scopes); mir = Some frame };
   List.iter2 (bind_local st) expression_mir.body.parameters arguments;
   lower_body st frame;
-  Builder.finish st.builder Unreachable;
-  Builder.start st.builder exit;
+  Emit_c.Builder.finish st.builder Unreachable;
+  Emit_c.Builder.start st.builder exit;
   st.frame <- caller
 
 and call_into st (call : Mir.call) destination ~origin =
@@ -1471,7 +1498,7 @@ and call_into st (call : Mir.call) destination ~origin =
               signature = c_signature;
             }
         in
-        Builder.emit st.builder
+        Emit_c.Builder.emit st.builder
           (Call
              {
                target;
@@ -1707,7 +1734,7 @@ and lend_part st ~(mode : Types.mode) (part : Mir.yielded) =
             Lowering.take st (place st written) ty ~destination;
             made ()
         | Borrow { place = written; _ } -> (
-            Builder.emit st.builder (Assign (destination, Use (Copy (place st written))));
+            Emit_c.Builder.emit st.builder (Assign (destination, Use (Copy (place st written))));
             match (lent_in_place written, mode) with
             | Some source, Mut -> [ ([], Deferred_write_back { source; ty }) ]
             | Some _, (Read | Own) -> []
@@ -1743,7 +1770,7 @@ and lend_part st ~(mode : Types.mode) (part : Mir.yielded) =
                   deferred ))
             fields
         in
-        Builder.emit st.builder
+        Emit_c.Builder.emit st.builder
           (Assign (destination, Build { ty; variant; fields = List.map fst built }));
         let is_indirect variant =
           List.exists
@@ -1756,7 +1783,7 @@ and lend_part st ~(mode : Types.mode) (part : Mir.yielded) =
         @ List.concat_map snd built
   in
   let defer_call intrinsic arguments =
-    Builder.emit st.builder
+    Emit_c.Builder.emit st.builder
       (Call
          {
            target = Intrinsic intrinsic;
@@ -1773,7 +1800,7 @@ and lend_part st ~(mode : Types.mode) (part : Mir.yielded) =
     | Deferred_write_back { source; ty } ->
         defer_call Lend_defer_write_back [ address source; address target; Constant (Size_of ty) ]
     | Deferred_free variant ->
-        Builder.emit st.builder
+        Emit_c.Builder.emit st.builder
           (Defer_free_block { lend = lending.record; place = target; variant })
   in
   match lending.slot with
@@ -1785,10 +1812,10 @@ and lend_part st ~(mode : Types.mode) (part : Mir.yielded) =
             Address { place = Option.get (lent_in_place written); writable = mode = Mut }
         | _ ->
             let has_no_slot = Lowering.held st (Raw Bool) in
-            Builder.emit st.builder
+            Emit_c.Builder.emit st.builder
               (Assign (has_no_slot, Binary (Equal, Copy slot_pointer, Constant Null)));
-            Builder.when_ st.builder (Copy has_no_slot) (fun () ->
-                Builder.emit st.builder
+            Emit_c.Builder.when_ st.builder (Copy has_no_slot) (fun () ->
+                Emit_c.Builder.emit st.builder
                   (Call
                      {
                        target = Intrinsic Lend_allocate;
@@ -1805,7 +1832,7 @@ and lend_part st ~(mode : Types.mode) (part : Mir.yielded) =
             Address { place = slot; writable = mode = Mut }
       in
       match Lowering.result_place st with
-      | Some result -> Builder.emit st.builder (Assign (result, Use pointer))
+      | Some result -> Emit_c.Builder.emit st.builder (Assign (result, Use pointer))
       | None -> Definitions.bug "a lending method with no result")
 
 and terminator st region (ending : Mir.Graph.terminator) ~origin =
@@ -1815,20 +1842,20 @@ and terminator st region (ending : Mir.Graph.terminator) ~origin =
       let condition = Lowering.in_statement st (fun () -> value st condition) in
       let yes = jump st region yes and no = jump st region no in
       Emit_c.Builder.branch st.builder condition ~yes ~no;
-      Builder.start st.builder (Builder.block st.builder)
+      Emit_c.Builder.start st.builder (Emit_c.Builder.block st.builder)
   | Unreachable | Written_unreachable -> Lowering.unreachable_block st
   | Todo ->
       let message = "todo reached" in
-      Builder.finish st.builder
+      Emit_c.Builder.finish st.builder
         (Fail
            {
              failure = Todo;
              message = Constant (Bytes message);
-             length = Builder.constant_uint64 (String.length message);
+             length = Lowered.make_uint64_constant (String.length message);
              site = site_of st origin;
              reported = None;
            });
-      Builder.start st.builder (Builder.block st.builder)
+      Emit_c.Builder.start st.builder (Emit_c.Builder.block st.builder)
   | Return returned ->
       (match (result_slot st, returned) with
       | Some _, Some (Use { place = { root = Local local; projections = [] }; _ })
@@ -1855,7 +1882,9 @@ and terminator st region (ending : Mir.Graph.terminator) ~origin =
         Option.map
           (fun (returned, slot) ->
             let ty = Lowering.ground st (info st slot).type_ in
-            let value = Builder.at (Builder.local st.builder ~name:"returned" (Value ty)) in
+            let value =
+              Lowered.make_local_place (Emit_c.Builder.local st.builder ~name:"returned" (Value ty))
+            in
             write_operand st returned value;
             (value, ty, slot))
           returned
@@ -1868,9 +1897,9 @@ and terminator st region (ending : Mir.Graph.terminator) ~origin =
             (Z.of_int (index + 1), jump st region exit.resume))
           exits
       in
-      Builder.finish st.builder
+      Emit_c.Builder.finish st.builder
         (Switch { value = Copy (local_place st winner); cases; default = jump st region next });
-      Builder.start st.builder (Builder.block st.builder)
+      Emit_c.Builder.start st.builder (Emit_c.Builder.block st.builder)
   | Yield { mode; part; resume } ->
       Lowering.in_statement st (fun () -> lend_part st ~mode part);
       goto st region resume
@@ -1889,22 +1918,22 @@ and terminator st region (ending : Mir.Graph.terminator) ~origin =
             List.map
               (fun (branch : Mir.Graph.branch) ->
                 Lowering.outlined st ~parts:[] (fun () ->
-                    let end_block = Builder.block st.builder in
+                    let end_block = Emit_c.Builder.block st.builder in
                     run_region st
                       (new_region st ~enclosing:region ~ending:(fork, end_block))
                       ~entry:(branch.entry, 0);
-                    Builder.finish st.builder (Goto end_block);
-                    Builder.start st.builder end_block;
-                    Builder.finish st.builder (Return None)))
+                    Emit_c.Builder.finish st.builder (Goto end_block);
+                    Emit_c.Builder.start st.builder end_block;
+                    Emit_c.Builder.finish st.builder (Return None)))
               branches
           in
-          Builder.emit st.builder (Fork { branches = forked });
+          Emit_c.Builder.emit st.builder (Fork { branches = forked });
           match join with Some join -> goto st region join | None -> Lowering.unreachable_block st))
   | Join { fork; next } -> (
       match region.ending with
       | Some (ending, end_block) when ending = fork ->
-          Builder.finish st.builder (Goto end_block);
-          Builder.start st.builder (Builder.block st.builder)
+          Emit_c.Builder.finish st.builder (Goto end_block);
+          Emit_c.Builder.start st.builder (Emit_c.Builder.block st.builder)
       | _ -> goto st region next)
 
 and loop_body (st : Lowering.state) region ~part ~body (value : Lowered.place) =
@@ -1925,7 +1954,7 @@ and for_loop st region ~(iteration : Mir.iteration) ~part ~body ~(loop : Mir.loo
             {
               Lowering.origin;
               group;
-              item = Builder.local st.builder ~name:"item" (Value (Ground.builtin UInt64));
+              item = Emit_c.Builder.local st.builder ~name:"item" (Value (Ground.builtin UInt64));
               element = Lowering.ground st (info st part).type_;
             }
           in
@@ -1965,14 +1994,16 @@ and range_loop st ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~inclusiv
   in
   let characters = scalar = Character in
   let both first second =
-    let answer = Builder.local st.builder (Raw Bool) in
-    Builder.emit st.builder (Assign (Builder.at answer, Binary (Bit_and, first, second)));
-    Lowered.Copy (Builder.at answer)
+    let answer = Emit_c.Builder.local st.builder (Raw Bool) in
+    Emit_c.Builder.emit st.builder
+      (Assign (Lowered.make_local_place answer, Binary (Bit_and, first, second)));
+    Lowered.Copy (Lowered.make_local_place answer)
   in
   let compare op left right =
-    let answer = Builder.local st.builder (Raw Bool) in
-    Builder.emit st.builder (Assign (Builder.at answer, Binary (op, left, right)));
-    Lowered.Copy (Builder.at answer)
+    let answer = Emit_c.Builder.local st.builder (Raw Bool) in
+    Emit_c.Builder.emit st.builder
+      (Assign (Lowered.make_local_place answer, Binary (op, left, right)));
+    Lowered.Copy (Lowered.make_local_place answer)
   in
   match schedule with
   | Chunked ->
@@ -1980,139 +2011,162 @@ and range_loop st ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~inclusiv
       let one = Lowering.constant_int UInt64 Z.one in
       let first_value = Lowering.binding st ~name:"start" element in
       let last_value = Lowering.binding st element in
-      Builder.emit st.builder (Assign (first_value, Use (value st low)));
-      Builder.emit st.builder (Assign (last_value, Use (value st high)));
-      let going = Builder.local st.builder (Raw Bool) in
-      Builder.emit st.builder
+      Emit_c.Builder.emit st.builder (Assign (first_value, Use (value st low)));
+      Emit_c.Builder.emit st.builder (Assign (last_value, Use (value st high)));
+      let going = Emit_c.Builder.local st.builder (Raw Bool) in
+      Emit_c.Builder.emit st.builder
         (Assign
-           ( Builder.at going,
+           ( Lowered.make_local_place going,
              Binary ((if inclusive then Less_equal else Less), Copy first_value, Copy last_value) ));
-      let inside = Builder.block st.builder and after = Builder.block st.builder in
+      let inside = Emit_c.Builder.block st.builder and after = Emit_c.Builder.block st.builder in
       let depth = List.length st.scopes in
-      Emit_c.Builder.branch st.builder (Copy (Builder.at going)) ~yes:inside ~no:after;
-      Builder.start st.builder inside;
-      let first = Builder.local st.builder ~name:"first" wide
-      and last = Builder.local st.builder ~name:"last" wide in
-      let low_wide = Builder.local st.builder wide and high_wide = Builder.local st.builder wide in
-      Builder.emit st.builder (Assign (Builder.at first, Use (Lowering.constant_int UInt64 Z.zero)));
-      Builder.emit st.builder
-        (Assign (Builder.at low_wide, Convert (Copy first_value, Integer UInt64)));
-      Builder.emit st.builder
-        (Assign (Builder.at high_wide, Convert (Copy last_value, Integer UInt64)));
-      Builder.emit st.builder
+      Emit_c.Builder.branch st.builder (Copy (Lowered.make_local_place going)) ~yes:inside ~no:after;
+      Emit_c.Builder.start st.builder inside;
+      let first = Emit_c.Builder.local st.builder ~name:"first" wide
+      and last = Emit_c.Builder.local st.builder ~name:"last" wide in
+      let low_wide = Emit_c.Builder.local st.builder wide
+      and high_wide = Emit_c.Builder.local st.builder wide in
+      Emit_c.Builder.emit st.builder
+        (Assign (Lowered.make_local_place first, Use (Lowering.constant_int UInt64 Z.zero)));
+      Emit_c.Builder.emit st.builder
+        (Assign (Lowered.make_local_place low_wide, Convert (Copy first_value, Integer UInt64)));
+      Emit_c.Builder.emit st.builder
+        (Assign (Lowered.make_local_place high_wide, Convert (Copy last_value, Integer UInt64)));
+      Emit_c.Builder.emit st.builder
         (Assign
-           ( Builder.at last,
-             Binary (Subtract, Copy (Builder.at high_wide), Copy (Builder.at low_wide)) ));
+           ( Lowered.make_local_place last,
+             Binary
+               ( Subtract,
+                 Copy (Lowered.make_local_place high_wide),
+                 Copy (Lowered.make_local_place low_wide) ) ));
       if not inclusive then
-        Builder.emit st.builder
-          (Assign (Builder.at last, Binary (Subtract, Copy (Builder.at last), one)));
+        Emit_c.Builder.emit st.builder
+          (Assign
+             ( Lowered.make_local_place last,
+               Binary (Subtract, Copy (Lowered.make_local_place last), one) ));
       if characters then
-        Builder.when_ st.builder
+        Emit_c.Builder.when_ st.builder
           (both
              (compare Less (Copy first_value) (constant 0xD800))
              (compare Greater (Copy last_value) (constant 0xDFFF)))
           (fun () ->
-            Builder.emit st.builder
+            Emit_c.Builder.emit st.builder
               (Assign
-                 ( Builder.at last,
+                 ( Lowered.make_local_place last,
                    Binary
                      ( Subtract,
-                       Copy (Builder.at last),
+                       Copy (Lowered.make_local_place last),
                        Lowering.constant_int UInt64 (Z.of_int 0x800) ) )));
       let body, environment =
         Lowering.outlined st ~parts:[ first; last ] (fun () ->
-            let index = Builder.local st.builder ~name:"index" wide in
-            Builder.emit st.builder (Assign (Builder.at index, Use (Copy (Builder.at first))));
-            let again = Builder.block st.builder
-            and step = Builder.block st.builder
-            and done_ = Builder.block st.builder in
-            Builder.finish st.builder (Goto again);
-            Builder.start st.builder again;
+            let index = Emit_c.Builder.local st.builder ~name:"index" wide in
+            Emit_c.Builder.emit st.builder
+              (Assign (Lowered.make_local_place index, Use (Copy (Lowered.make_local_place first))));
+            let again = Emit_c.Builder.block st.builder
+            and step = Emit_c.Builder.block st.builder
+            and done_ = Emit_c.Builder.block st.builder in
+            Emit_c.Builder.finish st.builder (Goto again);
+            Emit_c.Builder.start st.builder again;
             Lowering.in_scope st (fun () ->
                 let offset = Lowering.binding st element in
                 let bound = Lowering.binding st element in
-                Builder.emit st.builder (Assign (offset, Convert (Copy (Builder.at index), scalar)));
-                Builder.emit st.builder
+                Emit_c.Builder.emit st.builder
+                  (Assign (offset, Convert (Copy (Lowered.make_local_place index), scalar)));
+                Emit_c.Builder.emit st.builder
                   (Assign (bound, Binary (Add, Copy first_value, Copy offset)));
                 if characters then
-                  Builder.when_ st.builder
+                  Emit_c.Builder.when_ st.builder
                     (both
                        (compare Less (Copy first_value) (constant 0xD800))
                        (compare Greater_equal (Copy bound) (constant 0xD800)))
                     (fun () ->
-                      Builder.emit st.builder
+                      Emit_c.Builder.emit st.builder
                         (Assign (bound, Binary (Add, Copy bound, constant 0x800))));
                 Lowering.looping st ~continue_:step ~break_:done_ ~depth (fun () -> each bound));
-            Builder.finish st.builder (Goto step);
-            Builder.start st.builder step;
-            let ended = Builder.local st.builder (Raw Bool) in
-            Builder.emit st.builder
+            Emit_c.Builder.finish st.builder (Goto step);
+            Emit_c.Builder.start st.builder step;
+            let ended = Emit_c.Builder.local st.builder (Raw Bool) in
+            Emit_c.Builder.emit st.builder
               (Assign
-                 (Builder.at ended, Binary (Equal, Copy (Builder.at index), Copy (Builder.at last))));
-            let next = Builder.block st.builder in
-            Emit_c.Builder.branch st.builder (Copy (Builder.at ended)) ~yes:done_ ~no:next;
-            Builder.start st.builder next;
-            Builder.emit st.builder
-              (Assign (Builder.at index, Binary (Add, Copy (Builder.at index), one)));
-            Builder.finish st.builder (Goto again);
-            Builder.start st.builder done_;
-            Builder.finish st.builder (Return None))
+                 ( Lowered.make_local_place ended,
+                   Binary
+                     ( Equal,
+                       Copy (Lowered.make_local_place index),
+                       Copy (Lowered.make_local_place last) ) ));
+            let next = Emit_c.Builder.block st.builder in
+            Emit_c.Builder.branch st.builder
+              (Copy (Lowered.make_local_place ended))
+              ~yes:done_ ~no:next;
+            Emit_c.Builder.start st.builder next;
+            Emit_c.Builder.emit st.builder
+              (Assign
+                 ( Lowered.make_local_place index,
+                   Binary (Add, Copy (Lowered.make_local_place index), one) ));
+            Emit_c.Builder.finish st.builder (Goto again);
+            Emit_c.Builder.start st.builder done_;
+            Emit_c.Builder.finish st.builder (Return None))
       in
-      Builder.emit st.builder
+      Emit_c.Builder.emit st.builder
         (Fork_range
-           { body; environment; first = Copy (Builder.at first); last = Copy (Builder.at last) });
-      Builder.finish st.builder (Goto after);
-      Builder.start st.builder after
+           {
+             body;
+             environment;
+             first = Copy (Lowered.make_local_place first);
+             last = Copy (Lowered.make_local_place last);
+           });
+      Emit_c.Builder.finish st.builder (Goto after);
+      Emit_c.Builder.start st.builder after
   | Sequential | Spawned _ ->
       let loop_value ?name () = Lowering.binding st ?name element in
       let index = loop_value ~name:"index" () in
       let stop = loop_value () in
-      Builder.emit st.builder (Assign (index, Use (value st low)));
-      Builder.emit st.builder (Assign (stop, Use (value st high)));
-      let test = Builder.block st.builder
-      and inside = Builder.block st.builder
-      and step = Builder.block st.builder
-      and after = Builder.block st.builder in
+      Emit_c.Builder.emit st.builder (Assign (index, Use (value st low)));
+      Emit_c.Builder.emit st.builder (Assign (stop, Use (value st high)));
+      let test = Emit_c.Builder.block st.builder
+      and inside = Emit_c.Builder.block st.builder
+      and step = Emit_c.Builder.block st.builder
+      and after = Emit_c.Builder.block st.builder in
       let depth = List.length st.scopes in
-      Builder.finish st.builder (Goto test);
-      Builder.start st.builder test;
-      let going = Builder.local st.builder (Raw Bool) in
-      Builder.emit st.builder
+      Emit_c.Builder.finish st.builder (Goto test);
+      Emit_c.Builder.start st.builder test;
+      let going = Emit_c.Builder.local st.builder (Raw Bool) in
+      Emit_c.Builder.emit st.builder
         (Assign
-           ( Builder.at going,
+           ( Lowered.make_local_place going,
              Binary ((if inclusive then Less_equal else Less), Copy index, Copy stop) ));
-      Emit_c.Builder.branch st.builder (Copy (Builder.at going)) ~yes:inside ~no:after;
-      Builder.start st.builder inside;
+      Emit_c.Builder.branch st.builder (Copy (Lowered.make_local_place going)) ~yes:inside ~no:after;
+      Emit_c.Builder.start st.builder inside;
       Lowering.looping st ~continue_:step ~break_:after ~depth (fun () ->
           let run value =
             Lowering.in_scope st (fun () ->
                 let bound = loop_value () in
-                Builder.emit st.builder (Assign (bound, value));
+                Emit_c.Builder.emit st.builder (Assign (bound, value));
                 each bound)
           in
           match schedule with
           | Spawned loop ->
-              let item = Builder.at loop.item in
-              Builder.emit st.builder (Assign (item, Convert (Copy index, Integer UInt64)));
+              let item = Lowered.make_local_place loop.item in
+              Emit_c.Builder.emit st.builder (Assign (item, Convert (Copy index, Integer UInt64)));
               spawn_iteration st loop ~not_spawned:ignore (fun () ->
                   run (Convert (Copy item, scalar)))
           | Sequential | Chunked -> run (Use (Copy index)));
-      Builder.finish st.builder (Goto step);
-      Builder.start st.builder step;
+      Emit_c.Builder.finish st.builder (Goto step);
+      Emit_c.Builder.start st.builder step;
       if inclusive then begin
-        let last = Builder.local st.builder (Raw Bool) in
-        Builder.emit st.builder (Assign (Builder.at last, Binary (Equal, Copy index, Copy stop)));
-        let next = Builder.block st.builder in
-        Emit_c.Builder.branch st.builder (Copy (Builder.at last)) ~yes:after ~no:next;
-        Builder.start st.builder next
+        let last = Emit_c.Builder.local st.builder (Raw Bool) in
+        Emit_c.Builder.emit st.builder
+          (Assign (Lowered.make_local_place last, Binary (Equal, Copy index, Copy stop)));
+        let next = Emit_c.Builder.block st.builder in
+        Emit_c.Builder.branch st.builder (Copy (Lowered.make_local_place last)) ~yes:after ~no:next;
+        Emit_c.Builder.start st.builder next
       end;
-      Builder.emit st.builder (Assign (index, Binary (Add, Copy index, constant 1)));
+      Emit_c.Builder.emit st.builder (Assign (index, Binary (Add, Copy index, constant 1)));
       if characters then
-        Builder.when_ st.builder
+        Emit_c.Builder.when_ st.builder
           (compare Equal (Copy index) (constant 0xD800))
-          (fun () -> Builder.emit st.builder (Assign (index, Use (constant 0xE000))));
-      Builder.finish st.builder (Goto test);
-      Builder.start st.builder after
+          (fun () -> Emit_c.Builder.emit st.builder (Assign (index, Use (constant 0xE000))));
+      Emit_c.Builder.finish st.builder (Goto test);
+      Emit_c.Builder.start st.builder after
 
 let fill_defaults (st : Lowering.state) (mask : Lowered.place) (body : Mir.Graph.body)
     ~(defaults : (int * Mir.Graph.t) list) (places : Lowered.place list) =
@@ -2127,56 +2181,65 @@ let fill_defaults (st : Lowering.state) (mask : Lowered.place) (body : Mir.Graph
           incr bit;
           let bit = !bit in
           let ty = Lowering.ground st type_ in
-          let passed_bit = Builder.local builder (Raw (Integer UInt64))
-          and is_omitted = Builder.local builder (Raw Bool) in
-          Builder.emit builder
+          let passed_bit = Emit_c.Builder.local builder (Raw (Integer UInt64))
+          and is_omitted = Emit_c.Builder.local builder (Raw Bool) in
+          Emit_c.Builder.emit builder
             (Assign
-               ( Builder.at passed_bit,
+               ( Lowered.make_local_place passed_bit,
                  Binary (Bit_and, Copy mask, Lowering.constant_int UInt64 (Z.shift_left Z.one bit))
                ));
-          Builder.emit builder
+          Emit_c.Builder.emit builder
             (Assign
-               ( Builder.at is_omitted,
-                 Binary (Equal, Copy (Builder.at passed_bit), Lowering.constant_int UInt64 Z.zero)
-               ));
-          let fill = Builder.block builder and after = Builder.block builder in
+               ( Lowered.make_local_place is_omitted,
+                 Binary
+                   ( Equal,
+                     Copy (Lowered.make_local_place passed_bit),
+                     Lowering.constant_int UInt64 Z.zero ) ));
+          let fill = Emit_c.Builder.block builder and after = Emit_c.Builder.block builder in
           let unless_passed other =
-            Emit_c.Builder.branch builder (Copy (Builder.at is_omitted)) ~yes:fill ~no:other
+            Emit_c.Builder.branch builder
+              (Copy (Lowered.make_local_place is_omitted))
+              ~yes:fill ~no:other
           in
           let place =
             if mode = Own && not (Lowering.is_trivial st ty) then begin
-              let owned_here = Builder.at (Builder.local builder ?name (Value ty)) in
-              let passed_block = Builder.block builder in
+              let owned_here =
+                Lowered.make_local_place (Emit_c.Builder.local builder ?name (Value ty))
+              in
+              let passed_block = Emit_c.Builder.block builder in
               unless_passed passed_block;
-              Builder.start builder passed_block;
-              Builder.emit builder (Assign (owned_here, Use (Move arrived)));
-              Builder.finish builder (Goto after);
-              Builder.start builder fill;
+              Emit_c.Builder.start builder passed_block;
+              Emit_c.Builder.emit builder (Assign (owned_here, Use (Move arrived)));
+              Emit_c.Builder.finish builder (Goto after);
+              Emit_c.Builder.start builder fill;
               Lowering.in_statement st (fun () -> mir_into st default owned_here);
               owned_here
             end
             else begin
-              let default_value () = Lowering.flagged_binding st ty ~flag:(Builder.at is_omitted) in
+              let default_value () =
+                Lowering.flagged_binding st ty ~flag:(Lowered.make_local_place is_omitted)
+              in
               unless_passed after;
-              Builder.start builder fill;
+              Emit_c.Builder.start builder fill;
               Lowering.in_statement st (fun () ->
                   match arrived with
                   | { projections = [ Deref ]; root = Local pointer } ->
                       let value = default_value () in
                       mir_into st default value;
-                      Builder.emit builder
+                      Emit_c.Builder.emit builder
                         (Assign
-                           (Builder.at pointer, Use (Address { place = value; writable = true })))
+                           ( Lowered.make_local_place pointer,
+                             Use (Address { place = value; writable = true }) ))
                   | place when mode = Own || Lowering.is_trivial st ty -> mir_into st default place
                   | place ->
                       let value = default_value () in
                       mir_into st default value;
-                      Builder.emit builder (Assign (place, Use (Copy value))));
+                      Emit_c.Builder.emit builder (Assign (place, Use (Copy value))));
               arrived
             end
           in
-          Builder.finish builder (Goto after);
-          Builder.start builder after;
+          Emit_c.Builder.finish builder (Goto after);
+          Emit_c.Builder.start builder after;
           place)
     (List.combine body.parameters places)
 
