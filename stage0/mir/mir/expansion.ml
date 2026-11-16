@@ -68,7 +68,7 @@ let expanded_body (body : body) : Graph.body =
         let origin = statement.origin in
         let go_on current = emit targets (current, []) [] rest in
         match statement.kind with
-        | Choose { target; choice = Connective { connective; left; right }; _ } ->
+        | Choose { target; choice = Connective { connective; left; right } } ->
             let pending = Undecided_connective { target; connective; left; right; origin } in
             if reads_undecided left then emit targets current (undecided @ [ pending ]) rest
             else emit targets (decided ()) [ pending ] rest
@@ -83,7 +83,7 @@ let expanded_body (body : body) : Graph.body =
             emit targets current
               (undecided @ [ Undecided_not { target; negated; node; origin } ])
               rest
-        | Choose { target; choice = Conditional { condition; then_; else_; _ }; _ } ->
+        | Choose { target; choice = Conditional { condition; then_; else_; _ } } ->
             let yes = fresh () and no = fresh () and joined = fresh () in
             if reads_undecided condition then
               branch_undecided targets current undecided condition ~yes ~no origin
@@ -91,7 +91,7 @@ let expanded_body (body : body) : Graph.body =
             let reaches_then = arm targets yes then_ ~target ~joined origin in
             let reaches_else = arm targets no else_ ~target ~joined origin in
             if reaches_then || reaches_else then go_on joined else None
-        | Choose { target; choice = Cases cases; _ } ->
+        | Choose { target; choice = Cases cases } ->
             let joined = fresh () in
             let unmatched, reaches =
               List.fold_left
@@ -114,17 +114,9 @@ let expanded_body (body : body) : Graph.body =
             in
             close unmatched Unreachable origin;
             if reaches then go_on joined else None
-        | Basic (Assert { condition; bit_vector = Some { names; code } }) ->
+        | Assert_by_bit_vector { condition; code; _ } ->
             let index, emitted = block targets (decided ()) code.statements in
-            let assert_ : Graph.statement =
-              {
-                kind =
-                  Assert
-                    { condition; bit_vector = Some { names; code = { code with statements = [] } } };
-                origin;
-              }
-            in
-            emit targets (index, assert_ :: emitted) [] rest
+            emit targets (index, { kind = Assert condition; origin } :: emitted) [] rest
         | While { condition; body; failed; _ } ->
             let header = fresh () and inside = fresh () and failing = fresh () in
             let after = fresh () in
@@ -281,8 +273,7 @@ let expanded_body (body : body) : Graph.body =
         | Some _ -> bug "statements with no value, whose end control reaches")
     | Some value -> (
         match List.rev statements with
-        | { kind = Choose { target; choice = Connective { connective; left; right }; _ }; _ }
-          :: before
+        | { kind = Choose { target; choice = Connective { connective; left; right } }; _ } :: before
           when is_use_of target value ->
             branch_connective targets connective right ~yes ~no origin ~left:(fun ~yes ~no ->
                 branch targets current (List.rev before) (Some left) ~yes ~no origin)

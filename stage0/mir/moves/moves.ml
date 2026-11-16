@@ -75,7 +75,7 @@ let uses ~moving (statement : Mir.Graph.statement) =
   | Assign { value; _ } -> rvalue_uses ~moving ~origin value
   | Call { call; _ } | Lend { call; _ } | Slice { call; _ } | Template { call; _ } ->
       call_uses ~moving call
-  | Assert { condition = operand; _ } | Echo operand -> operand_use ~moving ~by_value:false operand
+  | Assert operand | Echo operand -> operand_use ~moving ~by_value:false operand
   | Provide { provided; _ } ->
       List.concat_map
         (fun (provided : Mir.provided) -> operand_use ~moving ~by_value:false provided.value)

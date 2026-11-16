@@ -79,9 +79,10 @@ and block_locals (block : Mir.block) =
 
 and tree_effects : Mir.statement_kind -> Mir.local list * Mir.local list * Mir.local list = function
   | Basic basic -> effects basic
-  | Choose { target; choice; _ } ->
+  | Choose { target; choice } ->
       let read, given = written target in
       (choice_locals choice @ read, given, [])
+  | Assert_by_bit_vector { condition; _ } -> (operand_locals condition, [], [])
   | While _ | For _ | Fork _ | Resume _ | Yield _ | Jump _ ->
       failwith "a statement that holds blocks or jumps, where a formula holds none"
 
@@ -101,7 +102,7 @@ and effects : Mir.basic -> Mir.local list * Mir.local list * Mir.local list = fu
       (call_locals call @ read, given, [])
   | Live locals -> ([], locals, [])
   | Dead locals -> ([], [], locals)
-  | Assert { condition = value; _ } | Echo value -> (operand_locals value, [], [])
+  | Assert value | Echo value -> (operand_locals value, [], [])
   | Provide { provided; _ } ->
       ( List.concat_map (fun (provided : Mir.provided) -> operand_locals provided.value) provided,
         [],

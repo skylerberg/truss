@@ -12,7 +12,7 @@ let nested_blocks_of (kind : statement_kind) : block list =
   match kind with
   | Basic (Assign { value = Specification (Quantified { matches; body; _ }); _ }) ->
       [ matches; body ]
-  | Basic (Assert { bit_vector = Some { code; _ }; _ }) -> [ code ]
+  | Assert_by_bit_vector { code; _ } -> [ code ]
   | Choose { choice; _ } -> choice_blocks choice
   | While { condition; body; failed; _ } ->
       [ condition; body; { statements = failed; value = None } ]
@@ -99,7 +99,8 @@ and statement_places visit (kind : statement_kind) =
   | Basic (Slice { base; call; _ }) ->
       visit base;
       call_places visit call
-  | Basic (Assert { condition = value; _ } | Echo value | Loan_start { borrowed = value; _ })
+  | Basic (Assert value | Echo value | Loan_start { borrowed = value; _ })
+  | Assert_by_bit_vector { condition = value; _ }
   | Choose { choice = Conditional { condition = value; _ } | Connective { left = value; _ }; _ } ->
       operand_place visit value
   | Basic (Provide { provided; _ }) ->

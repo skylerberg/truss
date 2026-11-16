@@ -277,7 +277,7 @@ let rec fold_body ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowered.stat
         let* value = rvalue local value in
         assign (Some target) value
     | Call { destination; call = called } -> call destination called
-    | Assert { condition; _ } -> (
+    | Assert condition -> (
         match operand condition with Some (Static_scalar (Bool true)) -> Some () | _ -> None)
     | Live _ | Dead _ | Loan_start _ | Loan_end _ | Matched _ | Ghost_assert _ | Proof _ -> Some ()
     | Assign _ | Lend _ | Slice _ | Template _ | Echo _ | Provide _ | Provide_end -> None

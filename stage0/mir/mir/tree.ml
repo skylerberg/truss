@@ -168,7 +168,6 @@ and loop = {
 
 and lent_element = { element : local; collection : place; count : block }
 and compared = { comparison : Core.comparison; left : operand; right : operand }
-and asserted = { names : local list; code : block }
 and early_exit = { resumed : block; returned : local option }
 and statement = { kind : statement_kind; origin : Core.origin }
 
@@ -180,7 +179,7 @@ and basic =
   | Template of { destination : place; literals : string list; call : call }
   | Live of local list
   | Dead of local list
-  | Assert of { condition : operand; bit_vector : asserted option }
+  | Assert of operand
   | Echo of operand
   | Provide of { provided : provided list; can_use_tasks : bool }
   | Provide_end
@@ -192,7 +191,8 @@ and basic =
 
 and statement_kind =
   | Basic of basic
-  | Choose of { target : place; choice : choice; node : Core.id option }
+  | Choose of { target : place; choice : choice }
+  | Assert_by_bit_vector of { condition : operand; names : local list; code : block }
   | While of {
       loop : loop;
       condition : block;

@@ -1084,7 +1084,7 @@ and lower_statement st (statement : Mir.Graph.statement) =
       call_into st call (place st destination) ~origin
   | Live _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ -> ()
   | Dead locals -> List.iter (dead st) locals
-  | Assert { condition; _ } ->
+  | Assert condition ->
       let holds = value st condition in
       let failed = block st.builder and after = block st.builder in
       Emit_c.Builder.branch st.builder holds ~yes:after ~no:failed;

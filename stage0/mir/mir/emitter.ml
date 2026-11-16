@@ -108,9 +108,9 @@ let hold_in_temporary builder type_ origin write =
 let hold ?node builder type_ origin value =
   hold_in_temporary builder type_ origin (fun target -> assign ?node builder target value origin)
 
-let hold_choice ?node builder type_ origin choice =
+let hold_choice builder type_ origin choice =
   hold_in_temporary builder type_ origin (fun target ->
-      emit builder (Choose { target; choice; node }) origin)
+      emit builder (Choose { target; choice }) origin)
 
 let block_of builder (build : unit -> operand option) : block =
   let enclosing = builder.statements in

@@ -889,7 +889,22 @@ and read_statement context frame run (statement : Mir.statement) =
   let span = span_of frame.source statement.origin in
   match statement.kind with
   | Basic basic -> read_basic context frame run statement ~span basic
-  | Choose { target; choice; _ } ->
+  | Assert_by_bit_vector { condition; names; code } ->
+      let named =
+        List.map
+          (fun local ->
+            match run.infos.(local) with
+            | { kind = Source { local; _ }; type_; _ } -> (local, type_)
+            | { kind = Temporary | Lent _; _ } -> bug "an assertion that names a temporary")
+          names
+      in
+      let frame, term = read_value context frame run code in
+      assertion context frame
+        ~origin:(Option.value (operand_origin condition) ~default:statement.origin)
+        ~bit_vector:(Some (named, fun isolated -> snd (read_value context isolated run code)))
+        term;
+      Some frame
+  | Choose { target; choice } ->
       let copied =
         match choice with
         | Conditional { then_; else_; _ } -> List.filter_map Fun.id [ then_.value; else_.value ]
@@ -1245,26 +1260,11 @@ and read_basic context frame run (statement : Mir.statement) ~span (basic : Mir.
           lends = without frame.lends;
         }
   | Lend { part; call } -> read_lend context frame run part call
-  | Assert { condition; bit_vector = None } ->
+  | Assert condition ->
       assertion context frame
         ~origin:(Option.value (operand_origin condition) ~default:statement.origin)
         ~bit_vector:None
         (read_operand context frame run condition);
-      Some frame
-  | Assert { condition; bit_vector = Some { names; code } } ->
-      let named =
-        List.map
-          (fun local ->
-            match run.infos.(local) with
-            | { kind = Source { local; _ }; type_; _ } -> (local, type_)
-            | { kind = Temporary | Lent _; _ } -> bug "an assertion that names a temporary")
-          names
-      in
-      let frame, term = read_value context frame run code in
-      assertion context frame
-        ~origin:(Option.value (operand_origin condition) ~default:statement.origin)
-        ~bit_vector:(Some (named, fun isolated -> snd (read_value context isolated run code)))
-        term;
       Some frame
   | Ghost_assert { condition; by_bit_vector } ->
       let frame, term = specification_value context frame condition in

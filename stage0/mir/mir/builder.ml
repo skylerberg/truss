@@ -632,7 +632,7 @@ and call_value builder (node : Core.expression) (called : Core.call) =
 
 and chosen builder (node : Core.expression) (blocks : block list) choice =
   let type_ = if diverges node.type_ then Types.unit else node.type_ in
-  let held = hold_choice ~node:node.id builder type_ node.origin choice in
+  let held = hold_choice builder type_ node.origin choice in
   if List.exists (fun (block : block) -> block.value <> None) blocks then held
   else begin
     mark_unreachable builder;
@@ -643,8 +643,7 @@ and truth builder (node : Core.expression) : operand option =
   let connective connective (left : Core.expression) (right : Core.expression) =
     let* left = expression builder left in
     let right = block_of builder (fun () -> expression builder right) in
-    hold_choice ~node:node.id builder node.type_ node.origin
-      (Connective { connective; left; right })
+    hold_choice builder node.type_ node.origin (Connective { connective; left; right })
   in
   match node.kind with
   | And (left, right) -> connective And left right
@@ -1138,7 +1137,7 @@ and statement builder (node : Core.statement) =
           emit builder (Basic (Proof (of_proof ~entry_locals:(entry_locals builder) proof))) origin
       | Assert { condition = { value; executable = true }; by_bit_vector = false } -> (
           match expression builder value with
-          | Some condition -> emit builder (Basic (Assert { condition; bit_vector = None })) origin
+          | Some condition -> emit builder (Basic (Assert condition)) origin
           | None -> ())
       | Assert { condition = { value; executable = true }; by_bit_vector = true } -> (
           let code = block_of builder (fun () -> expression builder value) in
@@ -1148,7 +1147,7 @@ and statement builder (node : Core.statement) =
                 List.sort_uniq compare
                   (List.filter_map (fun (local, _) -> source builder local) (names_of value))
               in
-              emit builder (Basic (Assert { condition; bit_vector = Some { names; code } })) origin
+              emit builder (Assert_by_bit_vector { condition; names; code }) origin
           | None -> ())
       | Assert { condition = { value; executable = false }; by_bit_vector } ->
           emit builder

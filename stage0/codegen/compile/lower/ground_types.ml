@@ -121,7 +121,7 @@ and walk_statement walk substitution body (basic : Mir.basic) =
   | Lend { call; _ } ->
       walk_call walk substitution call;
       walk_forwarded walk substitution call
-  | Assert { condition; _ } | Echo condition -> walk_operand walk substitution condition
+  | Assert condition | Echo condition -> walk_operand walk substitution condition
   | Provide { provided; _ } ->
       List.iter
         (fun (provided : Mir.provided) ->
