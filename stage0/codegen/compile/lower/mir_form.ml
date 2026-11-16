@@ -1211,14 +1211,7 @@ and lower_statement st (statement : Mir.Graph.statement) =
       and after = Emit_c.Builder.allocate_block st.builder in
       Emit_c.Builder.branch st.builder holds ~yes:after ~no:failed;
       Emit_c.Builder.start st.builder failed;
-      let text =
-        match condition with
-        | Constant { value = Boolean truth; _ } -> string_of_bool truth
-        | Use { origin; _ } | Borrow { origin; _ } | Take { origin; _ } ->
-            Lowering.quote_span st (read_spans st).(origin)
-        | Constant _ -> Lowering.quote_span st (read_spans st).(origin)
-      in
-      let message = "assert " ^ text in
+      let message = "assert " ^ Lowering.quote_span st (read_spans st).(origin) in
       Emit_c.Builder.finish st.builder
         (Fail
            {
